@@ -4,6 +4,12 @@ import { createClient } from '@/lib/supabase/server';
 
 // Mock dependencies
 jest.mock('@/lib/supabase/server');
+jest.mock('next/headers', () => ({
+  cookies: jest.fn().mockResolvedValue({
+    getAll: jest.fn().mockReturnValue([]),
+    set: jest.fn(),
+  }),
+}));
 
 const mockSupabaseAuth = {
   signInWithPassword: jest.fn(),

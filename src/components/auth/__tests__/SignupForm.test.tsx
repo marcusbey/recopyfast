@@ -233,7 +233,7 @@ describe('SignupForm', () => {
 
     // Check loading state
     expect(screen.getByText('Creating account...')).toBeInTheDocument();
-    expect(screen.getByRole('button')).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Creating account/i })).toBeDisabled();
 
     // Resolve the signup
     resolveSignup!();
@@ -394,10 +394,17 @@ describe('SignupForm', () => {
     await user.type(screen.getByLabelText('Password'), 'password123');
     await user.type(screen.getByLabelText('Confirm Password'), 'password123');
 
-    // Submit form multiple times quickly
-    await user.click(screen.getByRole('button', { name: 'Create Account' }));
-    await user.click(screen.getByRole('button'));
-    await user.click(screen.getByRole('button'));
+    // Submit form multiple times quickly - the button should be disabled after first click
+    const submitButton = screen.getByRole('button', { name: 'Create Account' });
+    await user.click(submitButton);
+    
+    // Try to click the button again (it should be disabled now)
+    const disabledButton = screen.getByRole('button', { name: /Creating account/i });
+    expect(disabledButton).toBeDisabled();
+    
+    // Attempt additional clicks on the disabled button
+    await user.click(disabledButton);
+    await user.click(disabledButton);
 
     // Should only be called once
     expect(mockAuthContext.signUp).toHaveBeenCalledTimes(1);

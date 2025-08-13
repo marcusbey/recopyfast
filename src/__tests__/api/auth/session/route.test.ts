@@ -20,7 +20,7 @@ const mockCreateClient = createClient as jest.MockedFunction<typeof createClient
 describe('/api/auth/session - GET', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as any);
+    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
   });
 
   describe('Successful session retrieval', () => {
@@ -225,9 +225,9 @@ describe('/api/auth/session - GET', () => {
 
     it('should handle when getUser returns unexpected format', async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
-        data: null,
+        data: null as unknown as { user: null },
         error: null,
-      } as any);
+      });
 
       const request = new NextRequest('http://localhost/api/auth/session', {
         method: 'GET',

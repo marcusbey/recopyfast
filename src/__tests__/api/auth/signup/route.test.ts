@@ -18,7 +18,7 @@ const mockCreateClient = createClient as jest.MockedFunction<typeof createClient
 describe('/api/auth/signup - POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as any);
+    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
     process.env.NEXT_PUBLIC_APP_URL = 'https://recopyfast.com';
   });
 

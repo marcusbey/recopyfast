@@ -20,7 +20,7 @@ const mockCreateClient = createClient as jest.MockedFunction<typeof createClient
 describe('/api/auth/logout - POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as any);
+    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
   });
 
   describe('Successful logout scenarios', () => {
@@ -331,10 +331,10 @@ describe('/api/auth/logout - POST', () => {
     it('should handle logout when Supabase returns unexpected error format', async () => {
       mockSupabaseAuth.signOut.mockResolvedValueOnce({
         error: { 
-          message: undefined,
+          message: undefined as unknown as string,
           code: 'UNKNOWN_ERROR',
           details: 'Some error details',
-        } as any,
+        },
       });
 
       const request = new NextRequest('http://localhost/api/auth/logout', {
@@ -351,7 +351,7 @@ describe('/api/auth/logout - POST', () => {
     });
 
     it('should handle logout when signOut returns null response', async () => {
-      mockSupabaseAuth.signOut.mockResolvedValueOnce(null as any);
+      mockSupabaseAuth.signOut.mockResolvedValueOnce(null as unknown as { error: null });
 
       const request = new NextRequest('http://localhost/api/auth/logout', {
         method: 'POST',
