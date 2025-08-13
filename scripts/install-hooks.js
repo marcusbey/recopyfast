@@ -35,6 +35,14 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
+# Run tests
+echo "Running tests..."
+npm run test
+if [ $? -ne 0 ]; then
+  echo "❌ Tests failed. Please fix the issues before committing."
+  exit 1
+fi
+
 echo "✅ Pre-commit checks passed!"
 `;
 
@@ -52,9 +60,9 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Run tests
-echo "Running tests..."
-npm run test
+# Run tests with coverage
+echo "Running tests with coverage..."
+npm run test:coverage
 if [ $? -ne 0 ]; then
   echo "❌ Tests failed. Please fix the issues before pushing."
   exit 1
@@ -84,8 +92,8 @@ try {
 
   console.log('\n🎉 Git hooks have been successfully installed!');
   console.log('\nThe following hooks are now active:');
-  console.log('• Pre-commit: Runs linting, type checking, and format checking');
-  console.log('• Pre-push: Runs build and tests');
+  console.log('• Pre-commit: Runs linting, type checking, format checking, and tests');
+  console.log('• Pre-push: Runs build and tests with coverage');
   console.log('\nTo bypass hooks temporarily, use:');
   console.log('• git commit --no-verify');
   console.log('• git push --no-verify');
