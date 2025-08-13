@@ -76,7 +76,7 @@ export const handlers = [
   }),
 
   http.post('/api/content/:siteId', async ({ params, request }) => {
-    const contentMap = await request.json();
+    const _contentMap = await request.json();
     
     // Simulate site not found
     if (params.siteId === 'nonexistent-site') {
@@ -239,7 +239,9 @@ export const mockFetch = (url: string, options: RequestInit = {}) => {
   });
 };
 
-export const createMockSite = (overrides: Partial<any> = {}) => ({
+import { Site, ContentElement } from '@/types';
+
+export const createMockSite = (overrides: Partial<Site> = {}) => ({
   id: 'test-site-id',
   domain: 'test.com',
   name: 'Test Site',
@@ -249,7 +251,7 @@ export const createMockSite = (overrides: Partial<any> = {}) => ({
   ...overrides,
 });
 
-export const createMockContentElement = (overrides: Partial<any> = {}) => ({
+export const createMockContentElement = (overrides: Partial<ContentElement> = {}) => ({
   id: 'test-content-1',
   site_id: 'test-site-id',
   element_id: 'test-element',
@@ -322,7 +324,7 @@ export class MockWebSocket {
   }
 
   static mockImplementation() {
-    global.WebSocket = MockWebSocket as any;
+    global.WebSocket = MockWebSocket as unknown as typeof WebSocket;
   }
 
   static cleanup() {

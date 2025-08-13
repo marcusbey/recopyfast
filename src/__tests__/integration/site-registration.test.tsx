@@ -127,7 +127,7 @@ describe('Site Registration Integration', () => {
       const [domain, setDomain] = React.useState('');
       const [name, setName] = React.useState('');
       const [isLoading, setIsLoading] = React.useState(false);
-      const [result, setResult] = React.useState<any>(null);
+      const [result, setResult] = React.useState<{ site: unknown; apiKey: string; embedScript: string } | null>(null);
       const [error, setError] = React.useState<string | null>(null);
 
       const handleSubmit = async (e: React.FormEvent) => {

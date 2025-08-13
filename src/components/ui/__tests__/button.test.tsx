@@ -224,7 +224,7 @@ describe('Button Component', () => {
       const ref = React.createRef<HTMLAnchorElement>();
       
       render(
-        <Button asChild ref={ref as any}>
+        <Button asChild ref={ref as React.RefObject<HTMLAnchorElement>}>
           <a href="/test">Ref Link</a>
         </Button>
       );
