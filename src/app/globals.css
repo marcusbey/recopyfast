@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Infinite scroll animation for logo carousel */
+@keyframes scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-100% / 3));
+  }
+}
+
+.animate-scroll {
+  animation: scroll 45s linear infinite;
+  will-change: transform;
+}
+
+/* Pause animation on hover with smooth transition */
+.animate-scroll:hover {
+  animation-play-state: paused;
+}
+
+/* Ensure smooth scrolling and prevent layout shifts */
+.animate-scroll * {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+/* Responsive animation speed */
+@media (max-width: 768px) {
+  .animate-scroll {
+    animation-duration: 35s;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .animate-scroll {
+    animation-duration: 120s;
+  }
+  
+  .animate-scroll:hover {
+    animation-play-state: running;
+  }
+}

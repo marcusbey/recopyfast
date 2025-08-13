@@ -90,14 +90,66 @@ const metrics = [
 ];
 
 const companies = [
-  { name: "TechFlow", logo: "TF" },
-  { name: "BuildFast", logo: "BF" },
-  { name: "Creative Co", logo: "CC" },
-  { name: "StartupXYZ", logo: "SX" },
-  { name: "GrowthLab", logo: "GL" },
-  { name: "WebCraft", logo: "WC" },
-  { name: "DesignForward", logo: "DF" },
-  { name: "InnovateNow", logo: "IN" }
+  {
+    name: "Shopify",
+    logo: "https://cdn.worldvectorlogo.com/logos/shopify.svg",
+    alt: "Shopify logo"
+  },
+  {
+    name: "Stripe",
+    logo: "https://cdn.worldvectorlogo.com/logos/stripe-4.svg",
+    alt: "Stripe logo"
+  },
+  {
+    name: "Notion",
+    logo: "https://cdn.worldvectorlogo.com/logos/notion-logo-1.svg",
+    alt: "Notion logo"
+  },
+  {
+    name: "Figma",
+    logo: "https://cdn.worldvectorlogo.com/logos/figma-5.svg",
+    alt: "Figma logo"
+  },
+  {
+    name: "Slack",
+    logo: "https://cdn.worldvectorlogo.com/logos/slack-new-logo.svg",
+    alt: "Slack logo"
+  },
+  {
+    name: "MongoDB",
+    logo: "https://cdn.worldvectorlogo.com/logos/mongodb-icon-1.svg",
+    alt: "MongoDB logo"
+  },
+  {
+    name: "Vercel",
+    logo: "https://cdn.worldvectorlogo.com/logos/vercel.svg",
+    alt: "Vercel logo"
+  },
+  {
+    name: "GitHub",
+    logo: "https://cdn.worldvectorlogo.com/logos/github-icon-1.svg",
+    alt: "GitHub logo"
+  },
+  {
+    name: "Discord",
+    logo: "https://cdn.worldvectorlogo.com/logos/discord-6.svg",
+    alt: "Discord logo"
+  },
+  {
+    name: "Dropbox",
+    logo: "https://cdn.worldvectorlogo.com/logos/dropbox-1.svg",
+    alt: "Dropbox logo"
+  },
+  {
+    name: "Spotify",
+    logo: "https://cdn.worldvectorlogo.com/logos/spotify-2.svg",
+    alt: "Spotify logo"
+  },
+  {
+    name: "Airbnb",
+    logo: "https://cdn.worldvectorlogo.com/logos/airbnb-2.svg",
+    alt: "Airbnb logo"
+  }
 ];
 
 export default function EnhancedSocialProof() {
@@ -120,22 +172,109 @@ export default function EnhancedSocialProof() {
   return (
     <section className="py-20 bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Company Logos */}
-        <div className="text-center mb-16">
-          <p className="text-lg font-medium text-gray-500 mb-8">
+        {/* Animated Company Logos Carousel */}
+        <div className="text-center mb-20">
+          <p className="text-xl font-semibold text-gray-600 mb-12">
             Trusted by innovative companies worldwide
           </p>
           
-          <div className="flex flex-wrap justify-center items-center gap-6">
-            {companies.map((company, index) => (
-              <div
-                key={index}
-                className="w-16 h-16 bg-white rounded-xl shadow-lg flex items-center justify-center border border-gray-200 hover:shadow-xl transition-all duration-300 hover:scale-105"
-              >
-                <span className="text-lg font-bold text-gray-700">{company.logo}</span>
-              </div>
-            ))}
+          {/* Infinite Scrolling Logo Carousel */}
+          <div className="relative overflow-hidden py-8 bg-white/50 rounded-3xl backdrop-blur-sm">
+            {/* Gradient Overlays for smooth fade */}
+            <div className="absolute left-0 top-0 bottom-0 w-24 md:w-32 bg-gradient-to-r from-white/80 to-transparent z-10 pointer-events-none"></div>
+            <div className="absolute right-0 top-0 bottom-0 w-24 md:w-32 bg-gradient-to-l from-white/80 to-transparent z-10 pointer-events-none"></div>
+            
+            {/* Scrolling Container */}
+            <div className="flex space-x-8 md:space-x-12 animate-scroll">
+              {/* First set of logos */}
+              {companies.map((company, index) => (
+                <div
+                  key={`first-${index}`}
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  title={`Trusted by ${company.name}`}
+                >
+                  <img
+                    src={company.logo}
+                    alt={company.alt}
+                    className="h-8 md:h-12 w-auto max-w-20 md:max-w-28 filter grayscale group-hover:grayscale-0 transition-all duration-500 object-contain opacity-70 group-hover:opacity-100"
+                    loading="lazy"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) {
+                        fallback.style.display = 'flex';
+                        fallback.textContent = company.name.substring(0, 2);
+                      }
+                    }}
+                  />
+                  <div className="hidden items-center justify-center text-lg font-bold text-gray-600 h-full w-full">
+                    {company.name.substring(0, 2)}
+                  </div>
+                </div>
+              ))}
+              
+              {/* Duplicate set for seamless infinite scroll */}
+              {companies.map((company, index) => (
+                <div
+                  key={`second-${index}`}
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  title={`Trusted by ${company.name}`}
+                >
+                  <img
+                    src={company.logo}
+                    alt={company.alt}
+                    className="h-8 md:h-12 w-auto max-w-20 md:max-w-28 filter grayscale group-hover:grayscale-0 transition-all duration-500 object-contain opacity-70 group-hover:opacity-100"
+                    loading="lazy"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) {
+                        fallback.style.display = 'flex';
+                        fallback.textContent = company.name.substring(0, 2);
+                      }
+                    }}
+                  />
+                  <div className="hidden items-center justify-center text-lg font-bold text-gray-600 h-full w-full">
+                    {company.name.substring(0, 2)}
+                  </div>
+                </div>
+              ))}
+              
+              {/* Third set for extra smooth scrolling on slower devices */}
+              {companies.slice(0, 6).map((company, index) => (
+                <div
+                  key={`third-${index}`}
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  title={`Trusted by ${company.name}`}
+                >
+                  <img
+                    src={company.logo}
+                    alt={company.alt}
+                    className="h-8 md:h-12 w-auto max-w-20 md:max-w-28 filter grayscale group-hover:grayscale-0 transition-all duration-500 object-contain opacity-70 group-hover:opacity-100"
+                    loading="lazy"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none';
+                      const fallback = target.nextElementSibling as HTMLElement;
+                      if (fallback) {
+                        fallback.style.display = 'flex';
+                        fallback.textContent = company.name.substring(0, 2);
+                      }
+                    }}
+                  />
+                  <div className="hidden items-center justify-center text-lg font-bold text-gray-600 h-full w-full">
+                    {company.name.substring(0, 2)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+          
+          <p className="text-sm text-gray-500 mt-6 italic">
+            Join 15,000+ websites already transforming their content workflow
+          </p>
         </div>
 
         {/* Metrics */}
@@ -143,9 +282,9 @@ export default function EnhancedSocialProof() {
           {metrics.map((metric, index) => (
             <div
               key={index}
-              className="bg-white rounded-2xl p-8 shadow-lg border border-gray-200 text-center hover:shadow-xl transition-all duration-300 hover:-translate-y-1"
+              className="bg-white rounded-2xl p-8 border border-gray-200 border border-gray-200 text-center hover:border-gray-300 transition-all duration-300 hover:-translate-y-1"
             >
-              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-500 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-gray-200">
                 <metric.icon className="h-8 w-8 text-white" />
               </div>
               <div className="text-4xl font-bold text-gray-900 mb-2">{metric.value}</div>
@@ -178,7 +317,7 @@ export default function EnhancedSocialProof() {
                   <img
                     src={featuredTestimonial.avatar}
                     alt={featuredTestimonial.name}
-                    className="w-20 h-20 rounded-full mr-0 md:mr-6 mb-4 md:mb-0 object-cover shadow-lg"
+                    className="w-20 h-20 rounded-full mr-0 md:mr-6 mb-4 md:mb-0 object-cover border border-gray-200"
                   />
                   <div className="text-center md:text-left">
                     <div className="font-bold text-xl text-gray-900">{featuredTestimonial.name}</div>
@@ -222,7 +361,7 @@ export default function EnhancedSocialProof() {
                     key={index}
                     className="w-full md:w-1/3 flex-shrink-0 px-4"
                   >
-                    <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 h-full">
+                    <div className="bg-white rounded-2xl p-8 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 h-full">
                       <div className="flex items-center mb-4">
                         {[...Array(testimonial.rating)].map((_, i) => (
                           <Star key={i} className="h-5 w-5 text-yellow-400 fill-current" />
@@ -255,14 +394,14 @@ export default function EnhancedSocialProof() {
             {/* Navigation Buttons */}
             <button
               onClick={prevTestimonial}
-              className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-6 bg-white rounded-full p-3 shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 hover:scale-105"
+              className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-6 bg-white rounded-full p-3 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 hover:scale-105"
             >
               <ChevronLeft className="h-6 w-6 text-gray-600" />
             </button>
             
             <button
               onClick={nextTestimonial}
-              className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-6 bg-white rounded-full p-3 shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300 hover:scale-105"
+              className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-6 bg-white rounded-full p-3 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 hover:scale-105"
             >
               <ChevronRight className="h-6 w-6 text-gray-600" />
             </button>

@@ -32,7 +32,7 @@ export default function EnhancedHero() {
   };
 
   return (
-    <section className="pt-24 pb-20 bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <section className="pt-24 pb-20 bg-gradient-to-br from-white via-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-4xl mx-auto">
           {/* Badge */}
@@ -55,15 +55,11 @@ export default function EnhancedHero() {
             No backend changes required. Perfect for quick prototypes and instant content management.
           </p>
 
-          {/* CTAs */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-            <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg px-8 py-4">
-              Start Free Trial
-              <ChevronRight className="ml-2 h-5 w-5" />
-            </Button>
-            <Button variant="outline" size="lg" className="text-lg px-8 py-4 border-gray-300 hover:bg-gray-50">
-              <Play className="mr-2 h-5 w-5" />
-              View Live Demo
+          {/* Single CTA */}
+          <div className="flex justify-center mb-20">
+            <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-xl px-12 py-5 font-semibold">
+              Try ReCopyFast Now
+              <ChevronRight className="ml-2 h-6 w-6" />
             </Button>
           </div>
 
@@ -72,30 +68,26 @@ export default function EnhancedHero() {
       </div>
       
       {/* Full Width Interactive Demo with Gradient Background */}
-      <div className="relative py-16 mb-16 overflow-hidden">
+      <div className="relative py-16 mb-16 overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800">
         {/* Gradient Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 opacity-10"></div>
-        <div className="absolute inset-0 bg-gradient-to-t from-white/50 via-transparent to-white/50"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 opacity-20"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/30 via-transparent to-slate-900/30"></div>
         
-        {/* Decorative Elements */}
-        <div className="absolute top-10 left-10 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-10 right-10 w-40 h-40 bg-purple-500/20 rounded-full blur-3xl"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-full blur-3xl"></div>
+        {/* Enhanced Decorative Elements */}
+        <div className="absolute top-20 left-20 w-64 h-64 bg-gradient-to-r from-blue-400/30 to-purple-400/30 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-20 right-20 w-80 h-80 bg-gradient-to-r from-purple-400/25 to-pink-400/25 rounded-full blur-3xl"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-gradient-to-r from-cyan-400/20 to-blue-400/20 rounded-full blur-3xl"></div>
+        <div className="absolute top-10 right-1/3 w-48 h-48 bg-gradient-to-r from-emerald-400/25 to-teal-400/25 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-10 left-1/3 w-56 h-56 bg-gradient-to-r from-rose-400/20 to-orange-400/20 rounded-full blur-3xl"></div>
         
-        <div className="relative z-10 max-w-[140%] mx-auto px-4 sm:px-6 lg:px-8 transform scale-110">
-          <div className="bg-white/80 backdrop-blur-sm rounded-3xl p-16 shadow-2xl border border-white/50">
-            <div className="flex items-center justify-between mb-16">
-              <div className="flex items-center space-x-4">
+        <div className="relative z-10 max-w-[calc(80rem+10%)] mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="rounded-3xl p-12 transform scale-[1.15]">
+            <div className="text-center mb-12">
+              <div className="flex items-center justify-center space-x-4 mb-6">
                 <div className="w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
                   <Sparkles className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-3xl font-bold text-gray-900">Try it yourself - Click any text below!</h3>
-              </div>
-              <div className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white text-base font-medium rounded-full shadow-lg">
-                <span className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-                  Live Demo
-                </span>
+                <h3 className="text-3xl font-bold text-white mt-4">Try it yourself - Click any text below!</h3>
               </div>
             </div>
             

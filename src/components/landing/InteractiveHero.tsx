@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wand2, Sparkles, CheckCircle, ArrowRight, ChevronLeft, ChevronRight, Utensils, Car, Coffee } from 'lucide-react';
+import { Wand2, Sparkles, CheckCircle, ArrowRight, ChevronLeft, ChevronRight, Utensils, Car, Coffee, Edit3, Save, X, Image, Code, Zap } from 'lucide-react';
+import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES } from '@/lib/editingRules';
 
 interface EditableText {
   id: string;
@@ -79,6 +80,36 @@ const demoSites: DemoSite[] = [
         text: 'Osso Buco alla Milanese - $32',
         isEditing: false,
         originalText: 'Osso Buco alla Milanese - $32'
+      },
+      {
+        id: 'feature-1-title',
+        text: 'Fresh Pasta',
+        isEditing: false,
+        originalText: 'Fresh Pasta'
+      },
+      {
+        id: 'feature-1-desc',
+        text: 'Made daily with authentic Italian recipes',
+        isEditing: false,
+        originalText: 'Made daily with authentic Italian recipes'
+      },
+      {
+        id: 'feature-2-title',
+        text: 'Fine Wine',
+        isEditing: false,
+        originalText: 'Fine Wine'
+      },
+      {
+        id: 'feature-2-desc',
+        text: 'Curated selection from Italian vineyards',
+        isEditing: false,
+        originalText: 'Curated selection from Italian vineyards'
+      },
+      {
+        id: 'learn-more-btn',
+        text: 'Learn More',
+        isEditing: false,
+        originalText: 'Learn More'
       }
     ]
   },
@@ -138,6 +169,61 @@ const demoSites: DemoSite[] = [
         text: 'Premium Detail - Full detail, wax, tire shine - $85',
         isEditing: false,
         originalText: 'Premium Detail - Full detail, wax, tire shine - $85'
+      },
+      // Additional Car Wash Service Cards
+      {
+        id: 'basic-wash-title',
+        text: 'Basic Wash',
+        isEditing: false,
+        originalText: 'Basic Wash'
+      },
+      {
+        id: 'basic-wash-desc',
+        text: 'Quick exterior wash with tire shine',
+        isEditing: false,
+        originalText: 'Quick exterior wash with tire shine'
+      },
+      {
+        id: 'premium-detail-title',
+        text: 'Premium Detail',
+        isEditing: false,
+        originalText: 'Premium Detail'
+      },
+      {
+        id: 'premium-detail-desc',
+        text: 'Full interior & exterior detailing',
+        isEditing: false,
+        originalText: 'Full interior & exterior detailing'
+      },
+      {
+        id: 'ceramic-coating-title',
+        text: 'Ceramic Coating',
+        isEditing: false,
+        originalText: 'Ceramic Coating'
+      },
+      {
+        id: 'ceramic-coating-desc',
+        text: 'Long-lasting paint protection',
+        isEditing: false,
+        originalText: 'Long-lasting paint protection'
+      },
+      {
+        id: 'satisfaction-title',
+        text: '100% Satisfaction',
+        isEditing: false,
+        originalText: '100% Satisfaction'
+      },
+      {
+        id: 'satisfaction-subtitle',
+        text: 'Guaranteed',
+        isEditing: false,
+        originalText: 'Guaranteed'
+      },
+      {
+        id: 'view-pricing-btn',
+        text: 'View Pricing',
+        isEditing: false,
+        originalText: 'View Pricing'
       }
     ]
   },
@@ -197,6 +283,19 @@ const demoSites: DemoSite[] = [
         text: 'Saturday - Sunday: 7:00 AM - 6:00 PM',
         isEditing: false,
         originalText: 'Saturday - Sunday: 7:00 AM - 6:00 PM'
+      },
+      // Contact Information
+      {
+        id: 'contact-address',
+        text: '📍 123 Main Street, Downtown',
+        isEditing: false,
+        originalText: '📍 123 Main Street, Downtown'
+      },
+      {
+        id: 'contact-phone',
+        text: '📞 (555) 123-4567',
+        isEditing: false,
+        originalText: '📞 (555) 123-4567'
       }
     ]
   }
@@ -208,8 +307,47 @@ export default function InteractiveHero() {
 
   const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const [showDemoWidget, setShowDemoWidget] = useState(false);
 
   const currentSiteData = demoSites[currentSite];
+
+  // Function to determine text color based on theme and context
+  const getTextColor = (elementId: string) => {
+    const theme = currentSiteData.theme;
+    
+    // Hero section elements (headline, subheading on hero backgrounds)
+    if (elementId === 'headline' || elementId === 'subheading') {
+      if (theme === 'restaurant') {
+        return 'text-white'; // White text on dark restaurant hero
+      } else if (theme === 'carwash') {
+        return 'text-white'; // White text on blue gradient hero
+      } else if (theme === 'bakery') {
+        return 'text-rose-900'; // Dark text on light pink background
+      }
+    }
+    
+    // Title elements in content sections
+    if (elementId.includes('title')) {
+      if (theme === 'restaurant') {
+        return 'text-amber-900'; // Dark amber on light backgrounds
+      } else if (theme === 'carwash') {
+        return 'text-gray-900'; // Dark text on light backgrounds
+      } else if (theme === 'bakery') {
+        return 'text-rose-900'; // Dark rose on light backgrounds
+      }
+    }
+    
+    // Body text elements
+    if (theme === 'restaurant') {
+      return 'text-amber-800';
+    } else if (theme === 'carwash') {
+      return 'text-gray-700';
+    } else if (theme === 'bakery') {
+      return 'text-rose-800';
+    }
+    
+    return 'text-gray-800'; // Default fallback
+  };
 
   const nextSite = () => {
     const newSiteIndex = (currentSite + 1) % demoSites.length;
@@ -298,66 +436,373 @@ export default function InteractiveHero() {
     setTimeout(() => setIsAutoDemo(false), 5000);
   };
 
+  const EditableImageComponent = ({ src, alt, className, imageType }: { src: string, alt: string, className: string, imageType: string }) => {
+    const [isHovering, setIsHovering] = useState(false);
+    const [showImageModal, setShowImageModal] = useState(false);
+    const [imagePrompt, setImagePrompt] = useState('');
+    const [isGenerating, setIsGenerating] = useState(false);
+    
+    const handleImageReplace = (newSrc: string) => {
+      // Find and update the image element
+      const imgElement = document.querySelector(`img[src="${src}"]`) as HTMLImageElement;
+      if (imgElement) {
+        imgElement.src = newSrc;
+      }
+      
+      setShowImageModal(false);
+      setImagePrompt('');
+      setShowSuccessAnimation(true);
+      setTimeout(() => setShowSuccessAnimation(false), 2000);
+    };
+
+    const generateRandomImage = () => {
+      const newImage = generateUnsplashUrl(imageType as any, 400, 300);
+      handleImageReplace(newImage);
+    };
+
+    const generateFromPrompt = async () => {
+      if (!imagePrompt.trim()) return;
+      
+      setIsGenerating(true);
+      try {
+        // For demo purposes, generate a themed Unsplash URL based on prompt keywords
+        const keywords = imagePrompt.toLowerCase();
+        let category = imageType;
+        
+        if (keywords.includes('food') || keywords.includes('dish') || keywords.includes('meal')) {
+          category = 'food';
+        } else if (keywords.includes('car') || keywords.includes('vehicle') || keywords.includes('auto')) {
+          category = 'car';  
+        } else if (keywords.includes('bakery') || keywords.includes('bread') || keywords.includes('cake')) {
+          category = 'bakery';
+        }
+        
+        // Create a more specific URL with prompt keywords
+        const promptFormatted = imagePrompt.replace(/\s+/g, ',');
+        const newImage = `https://source.unsplash.com/400x300/?${promptFormatted}&${Date.now()}`;
+        
+        handleImageReplace(newImage);
+      } catch (error) {
+        console.error('Error generating image:', error);
+        // Fallback to random image
+        generateRandomImage();
+      } finally {
+        setIsGenerating(false);
+      }
+    };
+    
+    return (
+      <>
+        <div 
+          className="relative group"
+          onMouseEnter={() => setIsHovering(true)}
+          onMouseLeave={() => setIsHovering(false)}
+        >
+          <img src={src} alt={alt} className={className} />
+          
+          {isHovering && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg cursor-pointer"
+              onClick={() => setShowImageModal(true)}
+            >
+              <div className="bg-white text-gray-900 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-100 transition-colors">
+                <Image className="w-4 h-4" />
+                Edit Image
+              </div>
+            </motion.div>
+          )}
+        </div>
+
+        {/* Image Editing Modal */}
+        <AnimatePresence>
+          {showImageModal && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+              onClick={() => setShowImageModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">Edit Image</h3>
+                  <button
+                    onClick={() => setShowImageModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Current Image Preview */}
+                <div className="mb-6">
+                  <img 
+                    src={src} 
+                    alt={alt} 
+                    className="w-full h-32 object-cover rounded-lg border border-gray-200" 
+                  />
+                </div>
+
+                {/* Prompt Input */}
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Describe the image you want:
+                  </label>
+                  <textarea
+                    value={imagePrompt}
+                    onChange={(e) => setImagePrompt(e.target.value)}
+                    placeholder={`e.g., "modern luxury car", "fresh pasta dish", "artisan bread"`}
+                    className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    rows={3}
+                  />
+                </div>
+
+                {/* Action Buttons */}
+                <div className="space-y-3">
+                  <button
+                    onClick={generateFromPrompt}
+                    disabled={!imagePrompt.trim() || isGenerating}
+                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Generate from Description
+                      </>
+                    )}
+                  </button>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={generateRandomImage}
+                      className="py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                    >
+                      🎲 Random Image
+                    </button>
+                    
+                    <button
+                      onClick={() => setShowImageModal(false)}
+                      className="py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 mt-4 text-center">
+                  Images are generated using Unsplash for demo purposes
+                </p>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </>
+    );
+  };
+
   const EditableTextComponent = ({ item }: { item: EditableText }) => {
+    const elementRef = useRef<HTMLDivElement>(null);
+    
     if (item.isEditing) {
+      // Determine if this should be a textarea (for longer content) or input (for short content)
+      const useTextarea = item.text.length > 50 || item.text.includes('\n') || item.id === 'subheading' || item.id.includes('text') || item.id.includes('desc');
+      
+      // Get the original element's computed styles to preserve them exactly
+      useEffect(() => {
+        if (elementRef.current) {
+          // Find the original element that was clicked to get its exact styles
+          const originalElement = document.querySelector(`[data-editable-id="${item.id}"]`) as HTMLElement;
+          if (originalElement) {
+            const preservedStyles = getTextEditingStyles(originalElement);
+            Object.assign(elementRef.current.style, preservedStyles);
+          }
+        }
+      }, [item.id]);
+      
       return (
         <motion.div
-          initial={{ scale: 1.02, boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.5)' }}
-          animate={{ scale: 1.02, boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.5)' }}
+          initial={{ scale: 1 }}
+          animate={{ scale: 1 }}
           className="relative"
+          ref={elementRef}
+          data-editing-mode="true"
         >
+        {useTextarea ? (
+          <textarea
+            value={item.text}
+            onChange={(e) => handleTextChange(item.id, e.target.value)}
+            onBlur={() => handleTextSave(item.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setEditableTexts(prev =>
+                  prev.map(textItem =>
+                    textItem.id === item.id 
+                      ? { ...textItem, text: textItem.originalText, isEditing: false }
+                      : textItem
+                  )
+                );
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                handleTextSave(item.id);
+              }
+            }}
+            className="w-full outline-none resize-none"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: '0',
+              margin: '0',
+              fontSize: 'inherit',
+              fontFamily: 'inherit',
+              fontWeight: 'inherit',
+              fontStyle: 'inherit',
+              lineHeight: 'inherit',
+              letterSpacing: 'inherit',
+              textAlign: 'inherit',
+              textDecoration: 'inherit',
+              textTransform: 'inherit',
+              color: 'inherit',
+              width: '100%',
+              minHeight: 'auto',
+              height: 'auto',
+              overflow: 'visible',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word',
+              whiteSpace: 'pre-wrap'
+            }}
+            rows={Math.max(1, item.text.split('\n').length)}
+            autoFocus
+          />
+        ) : (
           <input
             type="text"
             value={item.text}
             onChange={(e) => handleTextChange(item.id, e.target.value)}
             onBlur={() => handleTextSave(item.id)}
             onKeyDown={(e) => handleKeyPress(e, item.id)}
-            className={`bg-white/90 border-2 border-blue-500 rounded-xl px-4 py-3 outline-none shadow-lg w-full ${
-              item.id === 'headline' 
-                ? `text-4xl md:text-5xl lg:text-6xl font-bold ${currentSiteData.textColor} text-center`
-                : item.id === 'subheading'
-                ? `text-lg md:text-xl ${currentSiteData.textColor} text-center`
-                : item.id === 'cta'
-                ? `text-lg font-semibold ${currentSiteData.textColor} text-center`
-                : item.id.includes('title')
-                ? `text-2xl md:text-3xl font-bold ${currentSiteData.textColor}`
-                : `text-base md:text-lg ${currentSiteData.textColor}`
-            }`}
+            className="w-full outline-none"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              padding: '0',
+              margin: '0',
+              fontSize: 'inherit',
+              fontFamily: 'inherit',
+              fontWeight: 'inherit',
+              fontStyle: 'inherit',
+              lineHeight: 'inherit',
+              letterSpacing: 'inherit',
+              textAlign: 'inherit',
+              textDecoration: 'inherit',
+              textTransform: 'inherit',
+              color: 'inherit',
+              width: '100%',
+              wordWrap: 'break-word',
+              overflowWrap: 'break-word'
+            }}
             autoFocus
           />
-          <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white text-xs px-3 py-1 rounded-lg shadow-lg">
-            Press Enter to save, Esc to cancel
+        )}
+      </div>
+          
+          {/* Action buttons */}
+          <div className="absolute -top-16 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
+            <button
+              onClick={() => handleTextSave(item.id)}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded transition-colors"
+            >
+              <Save className="w-3 h-3" />
+              Save
+            </button>
+            <div className="w-px h-4 bg-gray-200" />
+            <button
+              onClick={() => {
+                // AI suggestion placeholder - could integrate with OpenAI
+                const suggestions = {
+                  'headline': ['AI-Powered Content Management', 'Transform Websites Instantly', 'Smart Website Editing'],
+                  'subheading': ['Make any website editable with our powerful AI-driven platform.', 'Revolutionary content management that works with any website.', 'Transform static sites into dynamic, editable experiences.']
+                };
+                const suggestion = suggestions[item.id as keyof typeof suggestions]?.[0];
+                if (suggestion) {
+                  handleTextChange(item.id, suggestion);
+                }
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors"
+            >
+              <Sparkles className="w-3 h-3" />
+              AI
+            </button>
+            <div className="w-px h-4 bg-gray-200" />
+            <button
+              onClick={() => {
+                setEditableTexts(prev =>
+                  prev.map(textItem =>
+                    textItem.id === item.id 
+                      ? { ...textItem, text: textItem.originalText, isEditing: false }
+                      : textItem
+                  )
+                );
+              }}
+              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 rounded transition-colors"
+            >
+              <X className="w-3 h-3" />
+              Cancel
+            </button>
+          </div>
+          
+          <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap">
+            {useTextarea ? 'Ctrl+Enter to save, Esc to cancel' : 'Enter to save, Esc to cancel'}
           </div>
         </motion.div>
       );
     }
 
     return (
-      <motion.div
-        whileHover={{ scale: 1.02 }}
+      <div
         onClick={() => handleTextClick(item.id)}
-        className={`cursor-pointer hover:bg-white/20 rounded-xl p-3 transition-all duration-200 relative group ${
+        data-editable-id={item.id}
+        className={`cursor-pointer rounded-xl p-3 transition-all duration-200 relative group border-2 border-transparent hover:border-dashed hover:border-blue-400 ${
           item.id === 'headline' 
-            ? `text-4xl md:text-5xl lg:text-6xl font-bold ${currentSiteData.textColor}`
+            ? `text-4xl md:text-5xl lg:text-6xl font-bold ${getTextColor(item.id)}`
             : item.id === 'subheading'
-            ? `text-lg md:text-xl ${currentSiteData.textColor} opacity-90`
+            ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
             : item.id === 'cta'
-            ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold shadow-lg hover:shadow-xl`
+            ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold shadow-lg hover:shadow-xl inline-block hover:border-transparent`
             : item.id.includes('title')
-            ? `text-2xl md:text-3xl font-bold ${currentSiteData.textColor} mb-4`
-            : `text-base md:text-lg ${currentSiteData.textColor} opacity-80`
+            ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
+            : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`
         }`}
       >
-        {item.text}
-        <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-3 py-1 rounded-lg shadow-lg whitespace-nowrap z-10">
+        {/* Preserve formatting for multi-line content */}
+        {item.text.split('\n').map((line, index) => (
+          <div key={index} className={index > 0 ? 'mt-2' : ''}>
+            {line}
+          </div>
+        ))}
+        
+        {/* Hover tooltip */}
+        <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap z-10">
           Click to edit
         </div>
-        {item.id !== 'cta' && (
-          <div className="absolute -top-3 -right-3 w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-            <Wand2 className="w-3 h-3 text-white" />
-          </div>
-        )}
-      </motion.div>
+        
+        {/* Edit icon on hover */}
+        <div className="absolute -top-3 -right-3 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+          <Edit3 className="w-4 h-4 text-white" />
+        </div>
+      </div>
     );
   };
 
@@ -378,9 +823,18 @@ export default function InteractiveHero() {
         )}
       </AnimatePresence>
 
-      {/* Demo Site Navigation */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center space-x-4">
+      {/* Demo Site Navigation - Single Line */}
+      <div className="flex items-center justify-center space-x-4 mb-4">
+        {/* Left Arrow */}
+        <button
+          onClick={prevSite}
+          className="p-2 rounded-full border border-white/30 text-white/70 hover:text-white hover:border-white/50 transition-all duration-300"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        
+        {/* Tab Buttons */}
+        <div className="flex items-center space-x-3">
           {demoSites.map((site, index) => {
             const Icon = site.icon;
             return (
@@ -390,10 +844,10 @@ export default function InteractiveHero() {
                   setCurrentSite(index);
                   setEditableTexts(site.editableTexts);
                 }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all duration-300 ${
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-all duration-300 ${
                   currentSite === index 
-                    ? `bg-gradient-to-r ${site.accentColor} text-white shadow-lg scale-105` 
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    ? `border-white text-white bg-white/10` 
+                    : 'border-white/30 text-white/70 hover:text-white hover:border-white/50 hover:bg-white/5'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -403,20 +857,174 @@ export default function InteractiveHero() {
           })}
         </div>
         
-        <div className="flex items-center space-x-2">
-          <button
-            onClick={prevSite}
-            className="p-2 rounded-full bg-white shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300"
+        {/* Right Arrow */}
+        <button
+          onClick={nextSite}
+          className="p-2 rounded-full border border-white/30 text-white/70 hover:text-white hover:border-white/50 transition-all duration-300"
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* ReCopy AI Widget */}
+      <div className="mb-6 relative">
+        {showDemoWidget && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="absolute top-4 right-4 z-20 bg-white rounded-xl shadow-xl border border-gray-200 p-4 w-72"
           >
-            <ChevronLeft className="w-4 h-4 text-gray-600" />
-          </button>
-          <button
-            onClick={nextSite}
-            className="p-2 rounded-full bg-white shadow-lg border border-gray-200 hover:shadow-xl transition-all duration-300"
-          >
-            <ChevronRight className="w-4 h-4 text-gray-600" />
-          </button>
-        </div>
+            {/* AI Prompt Input */}
+            <div className="mb-4">
+              <textarea
+                placeholder="Describe how you want to improve the copy..."
+                className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
+                rows={2}
+                style={{ color: '#1f2937', backgroundColor: '#ffffff' }}
+              />
+              <button className="w-full mt-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 transition-all">
+                ✨ Improve Copy
+              </button>
+            </div>
+            
+            {/* Quick Actions */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => {
+                    const technicalTexts = {
+                      headline: currentSiteData.theme === 'restaurant' ? 'Culinary Innovation Center' : 'Advanced Automotive Care',
+                      subheading: currentSiteData.theme === 'restaurant'
+                        ? 'State-of-the-art gastronomy utilizing molecular techniques and precision-sourced ingredients.'
+                        : 'Professional-grade detailing services employing advanced ceramic coating technology.'
+                    };
+                    
+                    setEditableTexts(prev => prev.map(item => 
+                      technicalTexts[item.id as keyof typeof technicalTexts]
+                        ? { ...item, text: technicalTexts[item.id as keyof typeof technicalTexts] }
+                        : item
+                    ));
+                  }}
+                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
+                >
+                  🔬 Technical
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    const casualTexts = {
+                      headline: currentSiteData.theme === 'restaurant' ? 'Amazing Food Spot' : 'Great Car Wash',
+                      subheading: currentSiteData.theme === 'restaurant'
+                        ? 'Come grab some seriously good Italian food made fresh daily!'
+                        : 'We make your car look awesome with our friendly, professional service.'
+                    };
+                    
+                    setEditableTexts(prev => prev.map(item => 
+                      casualTexts[item.id as keyof typeof casualTexts]
+                        ? { ...item, text: casualTexts[item.id as keyof typeof casualTexts] }
+                        : item
+                    ));
+                  }}
+                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
+                >
+                  😊 Casual
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    const urgentTexts = {
+                      headline: currentSiteData.theme === 'restaurant' ? 'Limited Seating Available' : 'Book Today - Spots Filling Fast',
+                      subheading: currentSiteData.theme === 'restaurant'
+                        ? 'Reserve your table now - only a few spots left for this weekend!'
+                        : 'Don\'t wait! Schedule your premium car detail before we\'re fully booked.'
+                    };
+                    
+                    setEditableTexts(prev => prev.map(item => 
+                      urgentTexts[item.id as keyof typeof urgentTexts]
+                        ? { ...item, text: urgentTexts[item.id as keyof typeof urgentTexts] }
+                        : item
+                    ));
+                  }}
+                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
+                >
+                  ⚡ Urgent
+                </button>
+                
+                <button 
+                  onClick={() => {
+                    setEditableTexts(demoSites[currentSite].editableTexts);
+                  }}
+                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
+                >
+                  🔄 Reset
+                </button>
+              </div>
+              
+              {/* Language and Premium Row */}
+              <div className="grid grid-cols-2 gap-2">
+                <select 
+                  onChange={(e) => {
+                    if (e.target.value === 'es') {
+                      const spanishTexts = {
+                        headline: currentSiteData.theme === 'restaurant' ? 'Cocina Italiana Auténtica' : 'Detallado Premium de Autos',
+                        subheading: currentSiteData.theme === 'restaurant' 
+                          ? 'Experimenta los mejores platos italianos con ingredientes frescos y locales.'
+                          : 'Servicios profesionales de lavado y detallado que hacen brillar tu vehículo.'
+                      };
+                      
+                      setEditableTexts(prev => prev.map(item => 
+                        spanishTexts[item.id as keyof typeof spanishTexts]
+                          ? { ...item, text: spanishTexts[item.id as keyof typeof spanishTexts] }
+                          : item
+                      ));
+                    } else if (e.target.value === 'fr') {
+                      const frenchTexts = {
+                        headline: currentSiteData.theme === 'restaurant' ? 'Cuisine Italienne Authentique' : 'Détail Auto Premium',
+                        subheading: currentSiteData.theme === 'restaurant' 
+                          ? 'Découvrez les meilleurs plats italiens avec des ingrédients frais et locaux.'
+                          : 'Services professionnels de lavage et détail qui font briller votre véhicule.'
+                      };
+                      
+                      setEditableTexts(prev => prev.map(item => 
+                        frenchTexts[item.id as keyof typeof frenchTexts]
+                          ? { ...item, text: frenchTexts[item.id as keyof typeof frenchTexts] }
+                          : item
+                      ));
+                    }
+                    e.target.value = '';
+                  }}
+                  className="p-2 border border-gray-200 rounded text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">🌍 Translate</option>
+                  <option value="es">🇪🇸 Spanish</option>
+                  <option value="fr">🇫🇷 French</option>
+                  <option value="de">🇩🇪 German</option>
+                  <option value="it">🇮🇹 Italian</option>
+                </select>
+                
+                <button 
+                  onClick={() => {
+                    const premiumTexts = {
+                      headline: currentSiteData.theme === 'restaurant' ? 'Exclusive Dining Experience' : 'Luxury Automotive Care',
+                      subheading: currentSiteData.theme === 'restaurant'
+                        ? 'Indulge in an extraordinary culinary journey crafted by world-renowned chefs.'
+                        : 'Experience unparalleled automotive care with our premium detailing services.'
+                    };
+                    
+                    setEditableTexts(prev => prev.map(item => 
+                      premiumTexts[item.id as keyof typeof premiumTexts]
+                        ? { ...item, text: premiumTexts[item.id as keyof typeof premiumTexts] }
+                        : item
+                    ));
+                  }}
+                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
+                >
+                  ✨ Premium
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
       </div>
 
       {/* Demo Website Container */}
@@ -425,141 +1033,322 @@ export default function InteractiveHero() {
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.5 }}
-        className={`${currentSiteData.background} rounded-2xl shadow-2xl border border-white/50 overflow-hidden`}
+        className={`bg-white rounded-2xl border border-gray-200 overflow-hidden relative`}
       >
-        {/* Browser Chrome */}
-        <div className="bg-gray-800 px-6 py-3 flex items-center space-x-2">
-          <div className="flex space-x-2">
-            <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-            <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+        {/* Simplified Browser Chrome */}
+        <div className="bg-gray-100 px-6 py-3 flex items-center justify-between border-b border-gray-200">
+          <div className="flex items-center space-x-2">
+            <div className="flex space-x-2">
+              <div className="w-3 h-3 bg-red-400 rounded-full"></div>
+              <div className="w-3 h-3 bg-yellow-400 rounded-full"></div>
+              <div className="w-3 h-3 bg-green-400 rounded-full"></div>
+            </div>
+            <div className="bg-white rounded-lg px-4 py-1 mx-4 border border-gray-200">
+              <span className="text-gray-600 text-sm">https://{currentSiteData.name.toLowerCase().replace(/\s+/g, '')}.com</span>
+            </div>
           </div>
-          <div className="flex-1 bg-gray-700 rounded-lg px-4 py-1 mx-4">
-            <span className="text-gray-300 text-sm">https://{currentSiteData.name.toLowerCase().replace(/\s+/g, '')}.com</span>
-          </div>
-          <div className="px-3 py-1 bg-green-600 text-white text-xs font-medium rounded-lg animate-pulse">
+          <div className="px-3 py-1 bg-green-500 text-white text-xs font-medium rounded-lg animate-pulse">
             ReCopyFast Active
           </div>
         </div>
 
         {/* Demo Website Content */}
-        <div className={`p-12 min-h-[700px] max-h-[700px] overflow-y-auto ${currentSiteData.textColor}`}>
-          <div className="text-center space-y-8 max-w-4xl mx-auto">
-            {/* Main Headline */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-            >
-              <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
-            </motion.div>
-
-            {/* Subheading */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.4 }}
-              className="max-w-2xl mx-auto"
-            >
-              <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
-            </motion.div>
-
-            {/* CTA Buttons */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.6 }}
-              className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-8"
-            >
-              <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
-              
-              <button className={`border-2 border-current px-8 py-3 rounded-xl hover:bg-current hover:text-white transition-all flex items-center gap-2 text-lg font-semibold ${currentSiteData.textColor}`}>
-                Learn More
-                <ArrowRight className="w-5 h-5" />
-              </button>
-            </motion.div>
-
-            {/* Additional Content Sections */}
-            <div className="mt-16 space-y-12">
-              {/* About/Services Section */}
-              <div className="text-center space-y-6">
-                <EditableTextComponent item={editableTexts.find(item => item.id.includes('about-title') || item.id.includes('services-title') || item.id.includes('tradition-title'))!} />
-                <EditableTextComponent item={editableTexts.find(item => item.id.includes('about-text') || item.id.includes('service-desc') || item.id.includes('tradition-text'))!} />
-              </div>
-
-              {/* Menu/Pricing/Hours Section */}
-              <div className="text-center space-y-6">
-                <EditableTextComponent item={editableTexts.find(item => item.id.includes('menu-title') || item.id.includes('pricing-title') || item.id.includes('hours-title'))!} />
-                <div className="space-y-4">
-                  <EditableTextComponent item={editableTexts.find(item => item.id.includes('special-1') || item.id.includes('package-1') || item.id.includes('hours-1'))!} />
-                  <EditableTextComponent item={editableTexts.find(item => item.id.includes('special-2') || item.id.includes('package-2') || item.id.includes('hours-2'))!} />
+        <div className="min-h-[700px] max-h-[700px] overflow-y-auto">
+          {/* Restaurant Website Design */}
+          {currentSiteData.theme === 'restaurant' && (
+            <>
+              {/* Hero Section with Background Image */}
+              <div className="relative h-[400px] bg-gradient-to-br from-amber-900/90 to-orange-900/90">
+                <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1514933651103-005eec06c04b?w=1200&h=400&fit=crop')] bg-cover bg-center mix-blend-overlay opacity-50"></div>
+                <div className="relative z-10 h-full flex flex-col justify-center items-center text-white px-8">
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="text-center"
+                  >
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.4 }}
+                    className="mt-6 max-w-2xl text-center"
+                  >
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                  </motion.div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.6 }}
+                    className="mt-8"
+                  >
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                  </motion.div>
                 </div>
               </div>
-            </div>
 
-            {/* Demo Features - themed content */}
-            <div className="grid md:grid-cols-3 gap-6 pt-12 mt-16 border-t border-current/20">
-              {currentSiteData.theme === 'restaurant' && (
-                <>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🍝</div>
-                    <h4 className="font-semibold mb-2">Fresh Pasta</h4>
-                    <p className="text-sm opacity-80">Made daily with authentic Italian recipes</p>
+              {/* About Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+                  <div>
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'about-title')!} />
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'about-text')!} />
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🍷</div>
-                    <h4 className="font-semibold mb-2">Fine Wine</h4>
-                    <p className="text-sm opacity-80">Curated selection from Italian vineyards</p>
+                  <div className="rounded-lg overflow-hidden">
+                    <EditableImageComponent 
+                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=500&h=400&fit=crop" 
+                      alt="Restaurant interior" 
+                      className="w-full h-full object-cover" 
+                      imageType="restaurant"
+                    />
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">👨‍🍳</div>
-                    <h4 className="font-semibold mb-2">Expert Chefs</h4>
-                    <p className="text-sm opacity-80">Trained in traditional Italian techniques</p>
+                </div>
+              </div>
+
+              {/* Menu Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto text-center">
+                  <EditableTextComponent item={editableTexts.find(item => item.id === 'menu-title')!} />
+                  <div className="grid md:grid-cols-2 gap-8 mt-12">
+                    <div className="p-8 rounded-lg">
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=300&h=200&fit=crop" 
+                        alt="Special dish" 
+                        className="w-full h-48 object-cover rounded-lg mb-4" 
+                        imageType="food"
+                      />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'special-1')!} />
+                    </div>
+                    <div className="p-8 rounded-lg">
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=300&h=200&fit=crop" 
+                        alt="Special dish" 
+                        className="w-full h-48 object-cover rounded-lg mb-4" 
+                        imageType="food"
+                      />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'special-2')!} />
+                    </div>
                   </div>
-                </>
-              )}
-              
-              {currentSiteData.theme === 'carwash' && (
-                <>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">✨</div>
-                    <h4 className="font-semibold mb-2">Premium Wash</h4>
-                    <p className="text-sm opacity-80">Complete exterior and interior cleaning</p>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Car Wash Website Design */}
+          {currentSiteData.theme === 'carwash' && (
+            <>
+              {/* Modern Hero Section */}
+              <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white">
+                <div className="py-20 px-8">
+                  <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+                    <div>
+                      <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.2 }}
+                      >
+                        <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                      </motion.div>
+                      <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.4 }}
+                        className="mt-6"
+                      >
+                        <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                      </motion.div>
+                      <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.6 }}
+                        className="mt-8 flex gap-4"
+                      >
+                        <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                        <button className="px-6 py-3 border-2 border-white text-white rounded-lg hover:bg-white hover:text-blue-600 transition-all">
+                          <EditableTextComponent item={editableTexts.find(item => item.id === 'view-pricing-btn')!} />
+                        </button>
+                      </motion.div>
+                    </div>
+                    <div className="relative">
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=600&h=400&fit=crop" 
+                        alt="Luxury car" 
+                        className="rounded-lg" 
+                        imageType="car"
+                      />
+                      <div className="absolute -bottom-6 -left-6 bg-white p-4 rounded-lg border border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+                            <span className="text-white font-bold">✓</span>
+                          </div>
+                          <div>
+                            <EditableTextComponent item={editableTexts.find(item => item.id === 'satisfaction-title')!} />
+                            <EditableTextComponent item={editableTexts.find(item => item.id === 'satisfaction-subtitle')!} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🛡️</div>
-                    <h4 className="font-semibold mb-2">Paint Protection</h4>
-                    <p className="text-sm opacity-80">Advanced ceramic coating available</p>
+                </div>
+              </div>
+
+              {/* Services Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto">
+                  <EditableTextComponent item={editableTexts.find(item => item.id === 'services-title')!} />
+                  <EditableTextComponent item={editableTexts.find(item => item.id === 'service-desc')!} />
+                  
+                  {/* Service Cards */}
+                  <div className="grid md:grid-cols-3 gap-6 mt-12">
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
+                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+                        <span className="text-2xl">🚿</span>
+                      </div>
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'basic-wash-title')!} />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'basic-wash-desc')!} />
+                    </div>
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
+                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+                        <span className="text-2xl">✨</span>
+                      </div>
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'premium-detail-title')!} />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'premium-detail-desc')!} />
+                    </div>
+                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
+                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
+                        <span className="text-2xl">🛡️</span>
+                      </div>
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'ceramic-coating-title')!} />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'ceramic-coating-desc')!} />
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">⚡</div>
-                    <h4 className="font-semibold mb-2">Quick Service</h4>
-                    <p className="text-sm opacity-80">Professional results in 30 minutes</p>
+                </div>
+              </div>
+
+              {/* Pricing Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto text-center">
+                  <EditableTextComponent item={editableTexts.find(item => item.id === 'pricing-title')!} />
+                  <div className="grid md:grid-cols-2 gap-8 mt-12">
+                    <div className="p-8 rounded-xl">
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'package-1')!} />
+                    </div>
+                    <div className="p-8 rounded-xl">
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'package-2')!} />
+                    </div>
                   </div>
-                </>
-              )}
-              
-              {currentSiteData.theme === 'bakery' && (
-                <>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🥐</div>
-                    <h4 className="font-semibold mb-2">Artisan Breads</h4>
-                    <p className="text-sm opacity-80">Handcrafted with organic ingredients</p>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Bakery Website Design */}
+          {currentSiteData.theme === 'bakery' && (
+            <>
+              {/* Cozy Hero Section */}
+              <div className="bg-gradient-to-br from-pink-100 to-rose-100">
+                <div className="py-16 px-8">
+                  <div className="max-w-6xl mx-auto text-center">
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.2 }}
+                    >
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                    </motion.div>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.4 }}
+                      className="mt-4 max-w-2xl mx-auto"
+                    >
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                    </motion.div>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: 0.6 }}
+                      className="mt-8"
+                    >
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                    </motion.div>
+
+                    {/* Product Showcase */}
+                    <div className="grid grid-cols-3 gap-4 mt-12 max-w-4xl mx-auto">
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&h=300&fit=crop" 
+                        alt="Fresh bread" 
+                        className="rounded-lg" 
+                        imageType="bakery"
+                      />
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=300&h=300&fit=crop" 
+                        alt="Cupcakes" 
+                        className="rounded-lg" 
+                        imageType="bakery"
+                      />
+                      <EditableImageComponent 
+                        src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=300&h=300&fit=crop" 
+                        alt="Croissants" 
+                        className="rounded-lg" 
+                        imageType="bakery"
+                      />
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">🎂</div>
-                    <h4 className="font-semibold mb-2">Custom Cakes</h4>
-                    <p className="text-sm opacity-80">Perfect for any special occasion</p>
+                </div>
+              </div>
+
+              {/* Tradition Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
+                  <div className="order-2 md:order-1">
+                    <EditableImageComponent 
+                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=500&h=400&fit=crop" 
+                      alt="Baker at work" 
+                      className="rounded-lg" 
+                      imageType="bakery"
+                    />
                   </div>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">☕</div>
-                    <h4 className="font-semibold mb-2">Fresh Coffee</h4>
-                    <p className="text-sm opacity-80">Premium roasts brewed to perfection</p>
+                  <div className="order-1 md:order-2">
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'tradition-title')!} />
+                    <EditableTextComponent item={editableTexts.find(item => item.id === 'tradition-text')!} />
                   </div>
-                </>
-              )}
+                </div>
+              </div>
+
+              {/* Hours Section */}
+              <div className="py-16 px-8">
+                <div className="max-w-4xl mx-auto text-center">
+                  <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-title')!} />
+                  <div className="p-8 rounded-xl max-w-md mx-auto mt-8">
+                    <div className="space-y-4">
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-1')!} />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-2')!} />
+                    </div>
+                    <div className="mt-8 pt-8 border-t border-gray-200">
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'contact-address')!} />
+                      <EditableTextComponent item={editableTexts.find(item => item.id === 'contact-phone')!} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        
+        {/* ReCopy Button at Bottom */}
+        <div className="absolute bottom-4 right-4">
+          <button
+            onClick={() => setShowDemoWidget(!showDemoWidget)}
+            className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2 shadow-lg"
+          >
+            <div className="relative">
+              <Code className="h-4 w-4 text-blue-500" />
+              <Zap className="h-2 w-2 text-purple-400 absolute -top-1 -right-1" />
             </div>
-          </div>
+            ReCopy
+          </button>
         </div>
       </motion.div>
 

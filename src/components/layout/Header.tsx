@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { AuthModal } from '@/components/auth/AuthModal';
@@ -11,6 +11,17 @@ import Link from 'next/link';
 export function Header() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      // Consider "scrolled past hero" as scrolling more than 80vh
+      setIsScrolled(window.scrollY > window.innerHeight * 0.8);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   return (
     <>
@@ -33,17 +44,28 @@ export function Header() {
             <Link href="/demo" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
               Live Demo
             </Link>
+            <Link href="/blog" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
+              Blog
+            </Link>
             
             {loading ? (
               <div className="w-10 h-10 rounded-full bg-gray-200 animate-pulse" />
             ) : user ? (
               <UserMenu />
+            ) : isScrolled ? (
+              <Button 
+                onClick={() => setShowAuthModal(true)}
+                size="sm" 
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 shadow-md"
+              >
+                Sign In
+              </Button>
             ) : (
               <Button 
                 onClick={() => setShowAuthModal(true)}
                 variant="outline" 
                 size="sm" 
-                className="border-gray-300 text-gray-700 hover:bg-gray-50"
+                className="border-2 border-blue-600 text-blue-600 hover:bg-blue-50 hover:border-blue-700 font-medium transition-all duration-200"
               >
                 Sign In
               </Button>
