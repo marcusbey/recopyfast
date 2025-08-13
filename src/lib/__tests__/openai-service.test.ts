@@ -1,28 +1,32 @@
-import { OpenAIService, aiService } from '../ai/openai-service'
-
-// Mock OpenAI
+// Mock OpenAI before importing the service
 jest.mock('openai', () => {
+  const mockCreate = jest.fn()
   return {
     __esModule: true,
     default: jest.fn().mockImplementation(() => ({
       chat: {
         completions: {
-          create: jest.fn()
+          create: mockCreate
         }
       }
     }))
   }
 })
 
+import { OpenAIService, aiService } from '../ai/openai-service'
+
 describe('OpenAIService', () => {
-  let mockOpenAI: any
+  let mockCreate: jest.Mock
   let service: OpenAIService
 
   beforeEach(() => {
     jest.clearAllMocks()
-    service = OpenAIService.getInstance()
+    // Get the mock function from the mocked module
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const OpenAI = require('openai').default
-    mockOpenAI = new OpenAI()
+    const mockInstance = new OpenAI()
+    mockCreate = mockInstance.chat.completions.create
+    service = OpenAIService.getInstance()
   })
 
   describe('singleton pattern', () => {
@@ -43,7 +47,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: 'Hola mundo' } }],
         usage: { total_tokens: 50 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       const result = await service.translateText({
         text: 'Hello world',
@@ -61,7 +65,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: 'Translated text' } }],
         usage: { total_tokens: 60 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       await service.translateText({
         text: 'Test text',
@@ -70,12 +74,12 @@ describe('OpenAIService', () => {
         context: 'website header'
       })
 
-      const callArgs = mockOpenAI.chat.completions.create.mock.calls[0][0]
+      const callArgs = mockCreate.mock.calls[0][0]
       expect(callArgs.messages[1].content).toContain('website header')
     })
 
     it('should handle translation errors', async () => {
-      mockOpenAI.chat.completions.create.mockRejectedValueOnce(new Error('API Error'))
+      mockCreate.mockRejectedValueOnce(new Error('API Error'))
 
       const result = await service.translateText({
         text: 'Hello world',
@@ -92,7 +96,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: null } }],
         usage: { total_tokens: 10 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       const result = await service.translateText({
         text: 'Hello world',
@@ -111,7 +115,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: '1. Suggestion one\n2. Suggestion two\n3. Suggestion three' } }],
         usage: { total_tokens: 80 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       const result = await service.generateContentSuggestion({
         originalText: 'Original text',
@@ -130,7 +134,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: '1. First\n\n2. Second\n\n3. Third\n\n' } }],
         usage: { total_tokens: 60 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       const result = await service.generateContentSuggestion({
         originalText: 'Text',
@@ -141,7 +145,7 @@ describe('OpenAIService', () => {
     })
 
     it('should handle content suggestion errors', async () => {
-      mockOpenAI.chat.completions.create.mockRejectedValueOnce(new Error('Rate limit'))
+      mockCreate.mockRejectedValueOnce(new Error('Rate limit'))
 
       const result = await service.generateContentSuggestion({
         originalText: 'Text',
@@ -159,7 +163,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: 'Translated' } }],
         usage: { total_tokens: 30 }
       }
-      mockOpenAI.chat.completions.create
+      mockCreate
         .mockResolvedValueOnce(mockResponse)
         .mockResolvedValueOnce(mockResponse)
 
@@ -181,7 +185,7 @@ describe('OpenAIService', () => {
     })
 
     it('should handle partial failures in batch translation', async () => {
-      mockOpenAI.chat.completions.create
+      mockCreate
         .mockResolvedValueOnce({
           choices: [{ message: { content: 'Success' } }],
           usage: { total_tokens: 20 }
@@ -206,7 +210,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: 'es' } }],
         usage: { total_tokens: 5 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       const result = await service.detectLanguage('Hola mundo')
 
@@ -215,7 +219,7 @@ describe('OpenAIService', () => {
     })
 
     it('should handle language detection errors', async () => {
-      mockOpenAI.chat.completions.create.mockRejectedValueOnce(new Error('Detection failed'))
+      mockCreate.mockRejectedValueOnce(new Error('Detection failed'))
 
       const result = await service.detectLanguage('Text')
 
@@ -230,7 +234,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: 'Translated' } }],
         usage: { total_tokens: 30 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       await service.translateText({
         text: 'Test text',
@@ -239,7 +243,7 @@ describe('OpenAIService', () => {
         context: 'navigation menu'
       })
 
-      const callArgs = mockOpenAI.chat.completions.create.mock.calls[0][0]
+      const callArgs = mockCreate.mock.calls[0][0]
       const userMessage = callArgs.messages[1].content
 
       expect(userMessage).toContain('Test text')
@@ -253,7 +257,7 @@ describe('OpenAIService', () => {
         choices: [{ message: { content: '1. Test' } }],
         usage: { total_tokens: 30 }
       }
-      mockOpenAI.chat.completions.create.mockResolvedValueOnce(mockResponse)
+      mockCreate.mockResolvedValueOnce(mockResponse)
 
       await service.generateContentSuggestion({
         originalText: 'Original',
@@ -262,7 +266,7 @@ describe('OpenAIService', () => {
         goal: 'shorten'
       })
 
-      const callArgs = mockOpenAI.chat.completions.create.mock.calls[0][0]
+      const callArgs = mockCreate.mock.calls[0][0]
       const userMessage = callArgs.messages[1].content
 
       expect(userMessage).toContain('Original')

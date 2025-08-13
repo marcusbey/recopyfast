@@ -6,13 +6,13 @@ import { createClient } from '@/lib/supabase/server';
 jest.mock('@/lib/supabase/server');
 
 const mockSupabase = {
-  from: jest.fn().mockReturnThis(),
-  select: jest.fn().mockReturnThis(),
-  eq: jest.fn().mockReturnThis(),
+  from: jest.fn(() => mockSupabase),
+  select: jest.fn(() => mockSupabase),
+  eq: jest.fn(() => mockSupabase),
   single: jest.fn(),
-  insert: jest.fn().mockReturnThis(),
+  insert: jest.fn(() => mockSupabase),
   upsert: jest.fn(),
-  update: jest.fn().mockReturnThis(),
+  update: jest.fn(() => mockSupabase),
 };
 
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
@@ -20,7 +20,7 @@ const mockCreateClient = createClient as jest.MockedFunction<typeof createClient
 describe('/api/content/[siteId]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
+    mockCreateClient.mockResolvedValue(mockSupabase as unknown as ReturnType<typeof createClient>);
   });
 
   describe('GET', () => {
@@ -50,11 +50,13 @@ describe('/api/content/[siteId]', () => {
     ];
 
     it('should fetch content elements with default parameters', async () => {
-      // The GET route doesn't use .single(), it gets data directly from the query
-      mockSupabase.eq.mockResolvedValueOnce({ 
-        data: mockContentElements, 
-        error: null 
-      });
+      // Mock the final method in the chain to return the promise
+      
+      // The third eq() call should return the final promise
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (language)
+        .mockResolvedValueOnce({ data: mockContentElements, error: null }); // third eq (variant) returns result
 
       const request = new NextRequest('http://localhost/api/content/site-123');
       const response = await GET(request, { params: { siteId: 'site-123' } });
@@ -71,10 +73,10 @@ describe('/api/content/[siteId]', () => {
     });
 
     it('should fetch content elements with custom language and variant', async () => {
-      mockSupabase.eq.mockResolvedValueOnce({ 
-        data: mockContentElements, 
-        error: null 
-      });
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (language)
+        .mockResolvedValueOnce({ data: mockContentElements, error: null }); // third eq (variant) returns result
 
       const request = new NextRequest('http://localhost/api/content/site-123?language=es&variant=mobile');
       const response = await GET(request, { params: { siteId: 'site-123' } });
@@ -85,10 +87,10 @@ describe('/api/content/[siteId]', () => {
     });
 
     it('should return empty array when no content found', async () => {
-      mockSupabase.eq.mockResolvedValueOnce({ 
-        data: null, 
-        error: null 
-      });
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (language)
+        .mockResolvedValueOnce({ data: null, error: null }); // third eq (variant) returns result
 
       const request = new NextRequest('http://localhost/api/content/site-123');
       const response = await GET(request, { params: { siteId: 'site-123' } });
@@ -99,10 +101,10 @@ describe('/api/content/[siteId]', () => {
     });
 
     it('should return 500 on database error', async () => {
-      mockSupabase.eq.mockResolvedValueOnce({ 
-        data: null, 
-        error: { message: 'Database error' }
-      });
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (language)
+        .mockResolvedValueOnce({ data: null, error: { message: 'Database error' } }); // third eq (variant) returns error
 
       const request = new NextRequest('http://localhost/api/content/site-123');
       const response = await GET(request, { params: { siteId: 'site-123' } });
@@ -278,7 +280,12 @@ describe('/api/content/[siteId]', () => {
 
   describe('PUT', () => {
     it('should successfully update content element', async () => {
-      mockSupabase.update.mockResolvedValueOnce({ error: null });
+      // Mock the chain: update().eq().eq().eq().eq()
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
+        .mockReturnValueOnce(mockSupabase) // third eq (language)
+        .mockResolvedValueOnce({ error: null }); // fourth eq (variant) returns result
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'PUT',
@@ -307,7 +314,11 @@ describe('/api/content/[siteId]', () => {
     });
 
     it('should use default language and variant when not provided', async () => {
-      mockSupabase.update.mockResolvedValueOnce({ error: null });
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
+        .mockReturnValueOnce(mockSupabase) // third eq (language)
+        .mockResolvedValueOnce({ error: null }); // fourth eq (variant) returns result
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'PUT',
@@ -325,9 +336,11 @@ describe('/api/content/[siteId]', () => {
     });
 
     it('should return 500 on update error', async () => {
-      mockSupabase.update.mockResolvedValueOnce({ 
-        error: { message: 'Update failed' }
-      });
+      mockSupabase.eq
+        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
+        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
+        .mockReturnValueOnce(mockSupabase) // third eq (language)
+        .mockResolvedValueOnce({ error: { message: 'Update failed' } }); // fourth eq (variant) returns error
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'PUT',

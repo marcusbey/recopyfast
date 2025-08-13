@@ -1,11 +1,18 @@
+// Mock dependencies first before any imports
+jest.mock('@/lib/ai/openai-service', () => ({
+  aiService: {
+    batchTranslate: jest.fn(),
+    translateText: jest.fn(),
+    generateContentSuggestion: jest.fn(),
+    detectLanguage: jest.fn(),
+  },
+}));
+jest.mock('@/lib/supabase/server');
+
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/ai/translate/route';
 import { aiService } from '@/lib/ai/openai-service';
 import { createClient } from '@/lib/supabase/server';
-
-// Mock dependencies
-jest.mock('@/lib/ai/openai-service');
-jest.mock('@/lib/supabase/server');
 
 const mockSupabase = {
   from: jest.fn().mockReturnThis(),

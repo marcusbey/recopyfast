@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from 'react';
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InteractiveHero from '../InteractiveHero';
 
@@ -46,7 +46,7 @@ describe('InteractiveHero', () => {
       render(<InteractiveHero />);
 
       expect(screen.getByText(/Interactive Demo:/)).toBeInTheDocument();
-      expect(screen.getByText('Click any text below to edit it in real-time')).toBeInTheDocument();
+      expect(screen.getByText(/Click any text below to edit it in real-time/)).toBeInTheDocument();
       expect(screen.getByText('Auto Demo')).toBeInTheDocument();
     });
 
@@ -330,9 +330,13 @@ describe('InteractiveHero', () => {
       await user.clear(input);
       await user.type(input, 'New Text');
       
-      fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+      act(() => {
+        fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+      });
 
-      expect(screen.getByText('New Text')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('New Text')).toBeInTheDocument();
+      });
     });
 
     it('should support Escape key for canceling', async () => {
@@ -346,9 +350,13 @@ describe('InteractiveHero', () => {
       await user.clear(input);
       await user.type(input, 'New Text');
       
-      fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+      act(() => {
+        fireEvent.keyDown(input, { key: 'Escape', code: 'Escape' });
+      });
 
-      expect(screen.getByText('Transform Your Website')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('Transform Your Website')).toBeInTheDocument();
+      });
       expect(screen.queryByText('New Text')).not.toBeInTheDocument();
     });
   });
@@ -404,11 +412,18 @@ describe('InteractiveHero', () => {
 
       const input = screen.getByDisplayValue('Transform Your Website');
       await user.clear(input);
-      await user.keyboard('{Enter}');
+      
+      act(() => {
+        fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+      });
 
-      // Check that the element still exists but has empty content
-      const headlineContainer = input.closest('div');
-      expect(headlineContainer).toBeInTheDocument();
+      // After pressing Enter, the component should exit edit mode 
+      await waitFor(() => {
+        expect(screen.queryByDisplayValue('Transform Your Website')).not.toBeInTheDocument();
+      });
+      
+      // Check that the hero content container is still present
+      expect(screen.getByText('View Live Demo')).toBeInTheDocument();
     });
 
     it('should handle very long text input', async () => {

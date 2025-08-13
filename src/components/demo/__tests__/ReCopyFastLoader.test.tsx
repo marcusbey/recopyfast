@@ -5,6 +5,9 @@ import React from 'react';
 import { render, cleanup } from '@testing-library/react';
 import ReCopyFastLoader from '../ReCopyFastLoader';
 
+// Create a test container
+let container: HTMLDivElement;
+
 // Mock script element
 const mockScript = {
   src: '',
@@ -25,6 +28,11 @@ const mockConsoleError = jest.spyOn(console, 'error').mockImplementation();
 
 beforeEach(() => {
   jest.clearAllMocks();
+  
+  // Set up DOM container
+  container = document.createElement('div');
+  container.id = 'test-container';
+  document.body.appendChild(container);
   
   // Mock createElement to return our mock script
   document.createElement = jest.fn().mockImplementation((tagName: string) => {
@@ -49,6 +57,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   
+  // Clean up container
+  if (container && document.body.contains(container)) {
+    document.body.removeChild(container);
+  }
+  
   // Restore original methods
   document.createElement = originalCreateElement;
   document.body.appendChild = originalAppendChild;
@@ -60,7 +73,7 @@ afterEach(() => {
 describe('ReCopyFastLoader', () => {
   describe('Script Loading', () => {
     it('should create and configure script element correctly', () => {
-      render(<ReCopyFastLoader />);
+      render(<ReCopyFastLoader />, { container });
 
       expect(document.createElement).toHaveBeenCalledWith('script');
       expect(mockScript.setAttribute).toHaveBeenCalledWith('data-site-id', 'demo-site-123');
