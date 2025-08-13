@@ -241,7 +241,7 @@ export default function AISuggestionButton({
             <div className="text-center py-8">
               <Wand2 className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500">
-                Click "Generate AI Suggestions" to get improved versions of your content
+                Click &quot;Generate AI Suggestions&quot; to get improved versions of your content
               </p>
             </div>
           )}

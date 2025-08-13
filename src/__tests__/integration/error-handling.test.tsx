@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { server, handlers } from './setup';
+import { server } from './setup';
 import { http, HttpResponse } from 'msw';
 
 describe('Error Handling Integration', () => {
@@ -431,7 +431,7 @@ describe('Error Handling Integration', () => {
   describe('Network Error Recovery', () => {
     // Mock component with retry logic
     const MockNetworkComponent = () => {
-      const [data, setData] = React.useState<any>(null);
+      const [data, setData] = React.useState<unknown>(null);
       const [loading, setLoading] = React.useState(false);
       const [error, setError] = React.useState<string | null>(null);
       const [retryCount, setRetryCount] = React.useState(0);
@@ -593,7 +593,7 @@ describe('Error Handling Integration', () => {
     it('should handle missing browser features gracefully', () => {
       // Mock missing clipboard API
       const originalClipboard = navigator.clipboard;
-      delete (navigator as any).clipboard;
+      delete (navigator as Record<string, unknown>).clipboard;
 
       const MockClipboardComponent = () => {
         const [message, setMessage] = React.useState('');
@@ -606,7 +606,7 @@ describe('Error Handling Integration', () => {
             } else {
               setMessage('Clipboard not supported');
             }
-          } catch (error) {
+          } catch {
             setMessage('Copy failed');
           }
         };
@@ -628,7 +628,7 @@ describe('Error Handling Integration', () => {
       expect(screen.getByTestId('message')).toHaveTextContent('Clipboard not supported');
 
       // Restore clipboard API
-      (navigator as any).clipboard = originalClipboard;
+      (navigator as Record<string, unknown>).clipboard = originalClipboard;
     });
 
     it('should handle WebSocket connection failures', () => {
@@ -642,7 +642,7 @@ describe('Error Handling Integration', () => {
             ws.onopen = () => setStatus('connected');
             ws.onerror = () => setStatus('failed');
             ws.onclose = () => setStatus('disconnected');
-          } catch (error) {
+          } catch {
             setStatus('unavailable');
           }
         }, []);

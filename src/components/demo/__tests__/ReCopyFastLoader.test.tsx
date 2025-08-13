@@ -130,7 +130,6 @@ describe('ReCopyFastLoader', () => {
   describe('Server-side Rendering', () => {
     it('should handle server environment gracefully', () => {
       // Mock server environment by temporarily removing window
-      const originalWindow = global.window;
       delete (global as { window?: Window }).window;
 
       expect(() => render(<ReCopyFastLoader />)).not.toThrow();

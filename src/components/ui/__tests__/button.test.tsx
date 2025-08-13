@@ -245,13 +245,14 @@ describe('Button Component', () => {
       ];
 
       combinations.forEach(({ variant, size }, index) => {
+        const testId = `test-button-${index}`;
         const { unmount } = render(
-          <Button variant={variant} size={size} key={index}>
+          <Button variant={variant} size={size} data-testid={testId}>
             Button {index}
           </Button>
         );
         
-        const button = screen.getByText(`Button ${index}`);
+        const button = screen.getByTestId(testId);
         expect(button).toBeInTheDocument();
         
         unmount();

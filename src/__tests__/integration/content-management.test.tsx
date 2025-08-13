@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { server, mockFetch, createMockSite, createMockContentElement } from './setup';
+import { server, mockFetch } from './setup';
 
 describe('Content Management Integration', () => {
   beforeAll(() => {
@@ -29,7 +29,7 @@ describe('Content Management Integration', () => {
       expect(content).toHaveLength(2);
       
       // Verify content structure
-      content.forEach((element: any) => {
+      content.forEach((element: Record<string, unknown>) => {
         expect(element).toMatchObject({
           id: expect.any(String),
           site_id: siteId,
@@ -53,7 +53,7 @@ describe('Content Management Integration', () => {
       const spanishResponse = await mockFetch(`/api/content/${siteId}?language=es&variant=premium`);
       const spanishContent = await spanishResponse.json();
       
-      spanishContent.forEach((element: any) => {
+      spanishContent.forEach((element: Record<string, unknown>) => {
         expect(element.language).toBe('es');
         expect(element.variant).toBe('premium');
       });
@@ -62,7 +62,7 @@ describe('Content Management Integration', () => {
       const defaultResponse = await mockFetch(`/api/content/${siteId}`);
       const defaultContent = await defaultResponse.json();
       
-      defaultContent.forEach((element: any) => {
+      defaultContent.forEach((element: Record<string, unknown>) => {
         expect(element.language).toBe('en');
         expect(element.variant).toBe('default');
       });
@@ -168,7 +168,7 @@ describe('Content Management Integration', () => {
   describe('Content Management UI Integration', () => {
     // Mock ContentManager component
     const MockContentManager = ({ siteId }: { siteId: string }) => {
-      const [content, setContent] = React.useState<any[]>([]);
+      const [content, setContent] = React.useState<Record<string, unknown>[]>([]);
       const [loading, setLoading] = React.useState(false);
       const [error, setError] = React.useState<string | null>(null);
       const [selectedLanguage, setSelectedLanguage] = React.useState('en');
@@ -222,7 +222,7 @@ describe('Content Management Integration', () => {
 
       React.useEffect(() => {
         fetchContent();
-      }, [siteId, selectedLanguage]);
+      }, [siteId, selectedLanguage, fetchContent]);
 
       return (
         <div data-testid="content-manager">
@@ -245,8 +245,8 @@ describe('Content Management Integration', () => {
 
           <div data-testid="content-list">
             {content.map((element) => (
-              <div key={element.id} data-testid={`content-element-${element.element_id}`}>
-                <div data-testid="element-selector">{element.selector}</div>
+              <div key={element.id as string} data-testid={`content-element-${element.element_id}`}>
+                <div data-testid="element-selector">{element.selector as string}</div>
                 <div data-testid="element-content">
                   {editingElement === element.element_id ? (
                     <div>
@@ -256,7 +256,7 @@ describe('Content Management Integration', () => {
                         data-testid="content-editor"
                       />
                       <button
-                        onClick={() => updateContent(element.element_id, newContent)}
+                        onClick={() => updateContent(element.element_id as string, newContent)}
                         data-testid="save-button"
                       >
                         Save
@@ -273,11 +273,11 @@ describe('Content Management Integration', () => {
                     </div>
                   ) : (
                     <div>
-                      <span>{element.current_content}</span>
+                      <span>{element.current_content as string}</span>
                       <button
                         onClick={() => {
-                          setEditingElement(element.element_id);
-                          setNewContent(element.current_content);
+                          setEditingElement(element.element_id as string);
+                          setNewContent(element.current_content as string);
                         }}
                         data-testid={`edit-button-${element.element_id}`}
                       >
@@ -286,7 +286,7 @@ describe('Content Management Integration', () => {
                     </div>
                   )}
                 </div>
-                <div data-testid="element-language">{element.language}</div>
+                <div data-testid="element-language">{element.language as string}</div>
               </div>
             ))}
           </div>
@@ -446,7 +446,7 @@ describe('Content Management Integration', () => {
       const frenchResponse = await mockFetch(`/api/content/${siteId}?language=fr&variant=premium`);
       const frenchContent = await frenchResponse.json();
 
-      frenchContent.forEach((element: any) => {
+      frenchContent.forEach((element: Record<string, unknown>) => {
         expect(element.language).toBe('fr');
         expect(element.variant).toBe('premium');
       });
