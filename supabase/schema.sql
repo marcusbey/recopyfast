@@ -108,11 +108,36 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+-- Blog posts table
+CREATE TABLE blog_posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  content TEXT NOT NULL,
+  excerpt TEXT,
+  category TEXT NOT NULL,
+  status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+  published_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
+);
+
+-- Create indexes for blog posts
+CREATE INDEX idx_blog_posts_status ON blog_posts(status);
+CREATE INDEX idx_blog_posts_category ON blog_posts(category);
+CREATE INDEX idx_blog_posts_published_at ON blog_posts(published_at);
+CREATE INDEX idx_blog_posts_slug ON blog_posts(slug);
+
+-- Blog posts are public (no RLS needed for now)
+
 -- Triggers for updated_at
 CREATE TRIGGER update_sites_updated_at BEFORE UPDATE ON sites
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_content_elements_updated_at BEFORE UPDATE ON content_elements
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_blog_posts_updated_at BEFORE UPDATE ON blog_posts
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Function to log content changes

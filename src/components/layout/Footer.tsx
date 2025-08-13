@@ -4,30 +4,16 @@ import Link from "next/link";
 const footerLinks = {
   Product: [
     { name: "Features", href: "/#features" },
-    { name: "Live Demo", href: "/demo" },
-    { name: "API Reference", href: "/docs/api" },
-    { name: "Examples", href: "/docs/examples" },
-    { name: "Integration Guide", href: "/docs/integration" }
-  ],
-  Resources: [
-    { name: "Documentation", href: "/docs" },
-    { name: "Quick Start", href: "/docs/quickstart" },
-    { name: "Support", href: "/support" },
-    { name: "Community", href: "https://github.com/marcusbey/recopyfast/discussions" },
-    { name: "Changelog", href: "/changelog" }
+    { name: "Demo", href: "/demo" },
+    { name: "Documentation", href: "/docs" }
   ],
   Company: [
-    { name: "About", href: "/about" },
     { name: "Blog", href: "/blog" },
-    { name: "Open Source", href: "https://github.com/marcusbey/recopyfast" },
-    { name: "Status", href: "/status" },
-    { name: "Contact", href: "/contact" }
+    { name: "GitHub", href: "https://github.com/marcusbey/recopyfast" }
   ],
   Legal: [
     { name: "Privacy Policy", href: "/privacy" },
-    { name: "Terms of Service", href: "/terms" },
-    { name: "Security", href: "/security" },
-    { name: "Cookie Policy", href: "/cookies" }
+    { name: "Terms of Service", href: "/terms" }
   ]
 };
 
@@ -56,7 +42,7 @@ export default function Footer() {
   return (
     <footer className="bg-gray-900 text-white">
       <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid md:grid-cols-2 lg:grid-cols-6 gap-12">
+        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-12">
           {/* Brand Section */}
           <div className="md:col-span-2 lg:col-span-2">
             <div className="flex items-center space-x-3 mb-6">
