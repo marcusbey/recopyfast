@@ -2,12 +2,23 @@
 
 import { useEffect } from 'react';
 
+// Extend Window interface for ReCopyFast globals
+declare global {
+  interface Window {
+    RECOPYFAST_API?: string;
+    RECOPYFAST_WS?: string;
+    recopyfast?: {
+      destroy: () => void;
+    };
+  }
+}
+
 export default function ReCopyFastLoader() {
   useEffect(() => {
     // Set global configuration
     if (typeof window !== 'undefined') {
-      (window as any).RECOPYFAST_API = 'http://localhost:3000/api';
-      (window as any).RECOPYFAST_WS = 'http://localhost:3001';
+      window.RECOPYFAST_API = 'http://localhost:3000/api';
+      window.RECOPYFAST_WS = 'http://localhost:3001';
       
       // Load ReCopyFast script
       const script = document.createElement('script');
@@ -29,8 +40,8 @@ export default function ReCopyFastLoader() {
       // Cleanup function
       return () => {
         document.body.removeChild(script);
-        if ((window as any).recopyfast) {
-          (window as any).recopyfast.destroy();
+        if (window.recopyfast) {
+          window.recopyfast.destroy();
         }
       };
     }

@@ -153,12 +153,13 @@ export class OpenAIService {
             originalText: element.text,
             translatedText: result.success ? result.data! : element.text,
             success: result.success,
+            tokensUsed: result.tokensUsed || 0,
           };
         })
       );
 
       const successfulTranslations = translations.filter(t => t.success);
-      const totalTokens = translations.reduce((sum, t) => sum + (t as any).tokensUsed || 0, 0);
+      const totalTokens = translations.reduce((sum, t) => sum + t.tokensUsed, 0);
 
       return {
         success: true,

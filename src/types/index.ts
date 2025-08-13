@@ -7,6 +7,13 @@ export interface Site {
   updated_at: string;
 }
 
+export interface ContentElementMetadata {
+  type?: string;
+  category?: string;
+  tags?: string[];
+  [key: string]: unknown;
+}
+
 export interface ContentElement {
   id: string;
   site_id: string;
@@ -16,7 +23,7 @@ export interface ContentElement {
   current_content: string;
   language: string;
   variant: string;
-  metadata?: Record<string, any>;
+  metadata?: ContentElementMetadata;
   created_at: string;
   updated_at: string;
 }

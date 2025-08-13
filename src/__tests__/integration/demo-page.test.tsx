@@ -87,8 +87,8 @@ describe('Demo Page Integration', () => {
       render(<ReCopyFastLoader />);
 
       // Verify global variables are set
-      expect((window as any).RECOPYFAST_API).toBe('http://localhost:3000/api');
-      expect((window as any).RECOPYFAST_WS).toBe('http://localhost:3001');
+      expect(window.RECOPYFAST_API).toBe('http://localhost:3000/api');
+      expect(window.RECOPYFAST_WS).toBe('http://localhost:3001');
     });
 
     it('should handle script load success', () => {
@@ -166,7 +166,7 @@ describe('Demo Page Integration', () => {
 
     it('should cleanup ReCopyFast instance on unmount', () => {
       const mockDestroy = jest.fn();
-      (window as any).recopyfast = { destroy: mockDestroy };
+      window.recopyfast = { destroy: mockDestroy };
 
       const mockScript = {
         src: '',

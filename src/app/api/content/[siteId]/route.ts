@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
+interface ContentMapData {
+  selector: string;
+  content: string;
+  type: string;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { siteId: string } }
@@ -64,7 +70,7 @@ export async function POST(
     }
     
     // Process content map
-    const contentElements = Object.entries(contentMap).map(([elementId, data]: [string, any]) => ({
+    const contentElements = Object.entries(contentMap).map(([elementId, data]: [string, ContentMapData]) => ({
       site_id: siteId,
       element_id: elementId,
       selector: data.selector,
