@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "stop": [
+      {
+        "command": "afplay /System/Library/Sounds/Glass.aiff",
+        "description": "Play completion sound"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "npm run format",
+        "description": "Auto-format code after editing",
+        "when": "edit"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "echo 'Reminder: Verify changes work before finalizing'",
+        "description": "Always works reminder"
+      }
+    ]
+  },
+  "autoConnect": {
+    "ide": true
+  },
+  "codeQuality": {
+    "runDiagnostics": true,
+    "autoCommit": true
+  }
+}
