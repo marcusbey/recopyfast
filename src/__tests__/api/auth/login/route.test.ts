@@ -24,7 +24,7 @@ const mockCreateClient = createClient as jest.MockedFunction<typeof createClient
 describe('/api/auth/login - POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as any);
+    mockCreateClient.mockResolvedValue(mockSupabase as Awaited<ReturnType<typeof createClient>>);
   });
 
   describe('Successful login scenarios', () => {

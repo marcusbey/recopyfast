@@ -43,8 +43,8 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
       await signUp(email, password, { name });
       setSuccess(true);
       onSuccess?.();
-    } catch (err: any) {
-      setError(err.message || 'Failed to sign up');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to sign up');
     } finally {
       setIsLoading(false);
     }

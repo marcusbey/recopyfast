@@ -163,9 +163,6 @@ describe('AuthModal', () => {
       </AuthProviderWrapper>
     );
 
-    // Find the dialog content to get the overlay
-    const dialog = screen.getByRole('dialog');
-    
     // For Radix Dialog, pressing Escape should close the modal
     await user.keyboard('{Escape}');
 
