@@ -1,8 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { aiService } from '@/lib/ai/openai-service';
+import { createClient } from '@/lib/supabase/server';
+import { consumeFeatureUsage } from '@/lib/feature-gating/permissions';
 
 export async function POST(request: NextRequest) {
   try {
+    // Check authentication
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     const { 
       text,
       context,
@@ -14,6 +27,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Missing required fields: text, context' },
         { status: 400 }
+      );
+    }
+
+    // Check feature access and consume usage
+    const usageResult = await consumeFeatureUsage(user.id, 'ai_suggestion', {
+      originalText: text.substring(0, 100), // Store sample for analytics
+      context,
+      tone,
+      goal
+    });
+
+    if (!usageResult.success) {
+      return NextResponse.json(
+        { 
+          error: usageResult.error,
+          requiresUpgrade: usageResult.error?.includes('plan') || usageResult.error?.includes('tickets')
+        },
+        { status: 403 }
       );
     }
 
