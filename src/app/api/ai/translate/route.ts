@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { aiService } from '@/lib/ai/openai-service';
 import { createClient } from '@/lib/supabase/server';
+import { consumeFeatureUsage } from '@/lib/feature-gating/permissions';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,8 +20,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify site access (you can add authentication here)
+    // Check authentication and verify site access
     const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     const { data: site } = await supabase
       .from('sites')
       .select('id')
@@ -31,6 +41,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
+      );
+    }
+
+    // Check feature access and consume usage
+    const usageResult = await consumeFeatureUsage(user.id, 'translation', {
+      siteId,
+      fromLanguage,
+      toLanguage,
+      elementCount: elements.length
+    });
+
+    if (!usageResult.success) {
+      return NextResponse.json(
+        { 
+          error: usageResult.error,
+          requiresUpgrade: usageResult.error?.includes('plan') || usageResult.error?.includes('tickets')
+        },
+        { status: 403 }
       );
     }
 
