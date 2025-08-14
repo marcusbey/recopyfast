@@ -1,78 +1,101 @@
-// This file configures the initialization of Sentry on the server side.
-// The config you add here will be used whenever the server handles a request.
-// https://docs.sentry.io/platforms/javascript/guides/nextjs/
+/**
+ * Sentry Server Configuration
+ * This file configures the Sentry SDK for server-side error tracking
+ */
 
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from '@sentry/nextjs';
+
+const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dsn: SENTRY_DSN,
   
-  // Define how likely traces are sampled. Adjust this value in production.
+  // Environment configuration
+  environment: process.env.VERCEL_ENV || process.env.NODE_ENV || 'development',
+  
+  // Only enable in production
+  enabled: process.env.NODE_ENV === 'production',
+  
+  // Performance Monitoring
   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
   
-  // Set profile sample rate for performance monitoring
-  profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // Release tracking
+  release: process.env.VERCEL_GIT_COMMIT_SHA,
   
-  // Add context tags
-  initialScope: {
-    tags: {
-      component: 'server',
-      environment: process.env.NODE_ENV,
-    },
-  },
+  // Server-specific options
+  autoSessionTracking: true,
   
-  // Configure environment
-  environment: process.env.NODE_ENV || 'development',
-  
-  // Capture unhandled promise rejections
-  captureUnhandledRejections: true,
-  
-  // Configure integrations for server-side
+  // Integrations
   integrations: [
-    Sentry.nodeProfilingIntegration(),
+    // Automatically instrument Node.js libraries and frameworks
+    Sentry.prismaIntegration(),
   ],
   
-  // Configure beforeSend to add server context
+  // Filtering
+  ignoreErrors: [
+    // Ignore non-critical errors
+    'ECONNRESET',
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'EPIPE',
+    'ENOTFOUND',
+    
+    // Ignore expected errors
+    'AbortError',
+    'No user found',
+    'Invalid token',
+  ],
+  
   beforeSend(event, hint) {
-    // Add server-specific context
-    event.tags = {
-      ...event.tags,
-      runtime: 'node',
-      platform: process.platform,
-      nodeVersion: process.version,
-    };
-    
-    // Add memory usage information
-    const memUsage = process.memoryUsage();
-    event.extra = {
-      ...event.extra,
-      memoryUsage: {
-        rss: Math.round(memUsage.rss / 1024 / 1024) + ' MB',
-        heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + ' MB',
-        heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + ' MB',
-        external: Math.round(memUsage.external / 1024 / 1024) + ' MB',
-      },
-    };
-    
-    // Filter out specific errors in development
-    if (process.env.NODE_ENV === 'development') {
-      const errorMessage = event.exception?.values?.[0]?.value || '';
+    // Filter sensitive data
+    if (event.request) {
+      // Remove sensitive headers
+      if (event.request.headers) {
+        delete event.request.headers['authorization'];
+        delete event.request.headers['cookie'];
+        delete event.request.headers['x-supabase-auth'];
+      }
       
-      // Filter out common development errors
-      const developmentErrorPatterns = [
-        'EADDRINUSE',
-        'ENOTFOUND',
-        'connect ECONNREFUSED',
-      ];
+      // Remove sensitive query params
+      if (event.request.query_string) {
+        event.request.query_string = event.request.query_string
+          .split('&')
+          .filter(param => !param.includes('token') && !param.includes('key'))
+          .join('&');
+      }
       
-      if (developmentErrorPatterns.some(pattern => errorMessage.includes(pattern))) {
-        return null;
+      // Remove sensitive body data
+      if (event.request.data) {
+        const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'creditCard'];
+        sensitiveKeys.forEach(key => {
+          if (event.request.data[key]) {
+            event.request.data[key] = '[REDACTED]';
+          }
+        });
       }
     }
+    
+    // Add server context
+    event.contexts = {
+      ...event.contexts,
+      runtime: {
+        name: 'node',
+        version: process.version,
+      },
+      server: {
+        host: process.env.VERCEL_URL || 'localhost',
+        region: process.env.VERCEL_REGION || 'local',
+      },
+    };
     
     return event;
   },
   
-  // Configure release tracking
-  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  // Custom tags
+  initialScope: {
+    tags: {
+      component: 'server',
+      runtime: 'node',
+    },
+  },
 });

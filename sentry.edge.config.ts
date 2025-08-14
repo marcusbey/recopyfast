@@ -1,30 +1,60 @@
-// This file configures the initialization of Sentry for edge runtime.
-// The config you add here will be used whenever a page or API route is running in the edge runtime.
-// https://docs.sentry.io/platforms/javascript/guides/nextjs/
+/**
+ * Sentry Edge Configuration
+ * This file configures the Sentry SDK for edge runtime error tracking
+ */
 
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from '@sentry/nextjs';
+
+const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dsn: SENTRY_DSN,
   
-  // Define how likely traces are sampled. Adjust this value in production.
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // Environment configuration
+  environment: process.env.VERCEL_ENV || process.env.NODE_ENV || 'development',
   
-  // Add context tags
-  initialScope: {
-    tags: {
-      component: 'edge',
-      environment: process.env.NODE_ENV,
-      runtime: 'edge',
-    },
+  // Only enable in production
+  enabled: process.env.NODE_ENV === 'production',
+  
+  // Performance Monitoring (reduced for edge)
+  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.05 : 1.0,
+  
+  // Release tracking
+  release: process.env.VERCEL_GIT_COMMIT_SHA,
+  
+  // Edge-specific configuration
+  transportOptions: {
+    // Reduce keep-alive to work better with edge runtime
+    keepAlive: false,
   },
   
-  // Configure environment
-  environment: process.env.NODE_ENV || 'development',
+  // Filtering
+  ignoreErrors: [
+    // Network errors common in edge
+    'FetchError',
+    'NetworkError',
+    'TimeoutError',
+    
+    // Edge-specific errors
+    'EdgeRuntimeError',
+    'WorkerError',
+  ],
   
-  // Configure beforeSend for edge runtime
   beforeSend(event, hint) {
-    // Add edge-specific context
+    // Add edge context
+    event.contexts = {
+      ...event.contexts,
+      runtime: {
+        name: 'edge',
+        version: 'edge-runtime',
+      },
+      edge: {
+        region: process.env.VERCEL_REGION || 'unknown',
+        runtime: 'edge',
+      },
+    };
+    
+    // Tag edge events
     event.tags = {
       ...event.tags,
       runtime: 'edge',
@@ -33,6 +63,11 @@ Sentry.init({
     return event;
   },
   
-  // Configure release tracking
-  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  // Custom tags
+  initialScope: {
+    tags: {
+      component: 'edge',
+      runtime: 'edge',
+    },
+  },
 });

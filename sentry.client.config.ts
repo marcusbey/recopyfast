@@ -1,66 +1,105 @@
-// This file configures the initialization of Sentry on the browser side.
-// The config you add here will be used whenever a users loads a page in their browser.
-// https://docs.sentry.io/platforms/javascript/guides/nextjs/
+/**
+ * Sentry Client Configuration
+ * This file configures the Sentry SDK for client-side error tracking
+ */
 
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from '@sentry/nextjs';
+
+const SENTRY_DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
 Sentry.init({
-  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  dsn: SENTRY_DSN,
   
-  // Define how likely traces are sampled. Adjust this value in production, or use tracesSampler for greater control.
+  // Environment configuration
+  environment: process.env.NEXT_PUBLIC_VERCEL_ENV || process.env.NODE_ENV || 'development',
+  
+  // Only enable in production
+  enabled: process.env.NODE_ENV === 'production',
+  
+  // Performance Monitoring
   tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
   
-  // Set profile sample rate for performance monitoring
-  profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // Session Replay
+  replaysSessionSampleRate: 0.1, // 10% of sessions
+  replaysOnErrorSampleRate: 1.0, // 100% of sessions with errors
   
-  // Add context tags and user identification
-  initialScope: {
-    tags: {
-      component: 'client',
-      environment: process.env.NODE_ENV,
-    },
-  },
+  // Release tracking
+  release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA,
   
-  // Configure environment
-  environment: process.env.NODE_ENV || 'development',
-  
-  // Capture unhandled promise rejections
-  captureUnhandledRejections: true,
-  
-  // Configure integrations
+  // Integrations
   integrations: [
-    Sentry.browserTracingIntegration({
-      // Set up automatic route change tracking in Next.js App Router
-      routingInstrumentation: Sentry.nextRouterInstrumentation(),
-    }),
     Sentry.replayIntegration({
-      // Capture replays only for errors in production
-      sessionSampleRate: process.env.NODE_ENV === 'production' ? 0 : 0.1,
-      errorSampleRate: process.env.NODE_ENV === 'production' ? 1.0 : 1.0,
+      maskAllText: false,
+      blockAllMedia: false,
+      maskAllInputs: true,
+      maskAllSelectors: ['.sensitive-data'],
     }),
+    Sentry.browserTracingIntegration(),
   ],
   
-  // Configure beforeSend to filter out development noise
+  // Filtering
+  ignoreErrors: [
+    // Browser errors
+    'ResizeObserver loop limit exceeded',
+    'ResizeObserver loop completed with undelivered notifications',
+    'Non-Error promise rejection captured',
+    
+    // Network errors
+    'NetworkError',
+    'Network request failed',
+    'Failed to fetch',
+    
+    // User canceled actions
+    'The user aborted a request',
+    'User cancelled',
+    'Request aborted',
+    
+    // Common extension errors
+    'Extension context invalidated',
+    'Cannot access dead object',
+  ],
+  
   beforeSend(event, hint) {
-    // Filter out development-only errors
-    if (process.env.NODE_ENV === 'development') {
-      // Filter out hydration errors which are common in development
-      if (event.exception?.values?.[0]?.value?.includes('Hydration')) {
+    // Filter out non-critical errors
+    if (event.exception) {
+      const error = hint.originalException;
+      
+      // Ignore errors from browser extensions
+      if (error && error.stack && error.stack.includes('chrome-extension://')) {
+        return null;
+      }
+      
+      // Ignore errors from third-party scripts
+      if (error && error.stack && (
+        error.stack.includes('gtm.js') ||
+        error.stack.includes('analytics.js') ||
+        error.stack.includes('fbevents.js')
+      )) {
         return null;
       }
     }
     
-    // Add additional context
-    if (hint.originalException instanceof Error) {
-      event.tags = {
-        ...event.tags,
-        errorType: hint.originalException.constructor.name,
-      };
+    // Add user context if available
+    const user = typeof window !== 'undefined' ? window.localStorage.getItem('user') : null;
+    if (user) {
+      try {
+        const userData = JSON.parse(user);
+        event.user = {
+          id: userData.id,
+          email: userData.email,
+        };
+      } catch (e) {
+        // Ignore parse errors
+      }
     }
     
     return event;
   },
   
-  // Configure release tracking
-  release: process.env.NEXT_PUBLIC_SENTRY_RELEASE,
+  // Custom tags
+  initialScope: {
+    tags: {
+      component: 'client',
+    },
+  },
 });
