@@ -4,7 +4,7 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig: NextConfig = {
   // Enable experimental features for better monitoring
   experimental: {
-    instrumentationHook: true,
+    // instrumentationHook is enabled by default in Next.js 15
   },
   
   // Configure headers for security and monitoring
@@ -57,7 +57,6 @@ const nextConfig: NextConfig = {
   },
   
   // Enable build optimizations
-  swcMinify: true,
   poweredByHeader: false,
   
   // Configure output for production deployment
