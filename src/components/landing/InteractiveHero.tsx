@@ -441,22 +441,40 @@ export default function InteractiveHero() {
     const [showImageModal, setShowImageModal] = useState(false);
     const [imagePrompt, setImagePrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
+    const [currentImageSrc, setCurrentImageSrc] = useState(src);
     
     const handleImageReplace = (newSrc: string) => {
-      // Find and update the image element
-      const imgElement = document.querySelector(`img[src="${src}"]`) as HTMLImageElement;
+      // Animate image replacement with smooth transition
+      const imgElement = document.querySelector(`img[src="${currentImageSrc}"]`) as HTMLImageElement;
       if (imgElement) {
-        imgElement.src = newSrc;
+        // Create smooth fade transition
+        imgElement.style.transition = 'opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease';
+        imgElement.style.opacity = '0';
+        imgElement.style.transform = 'scale(0.95) rotateY(10deg)';
+        
+        setTimeout(() => {
+          imgElement.src = newSrc;
+          imgElement.style.opacity = '1';
+          imgElement.style.transform = 'scale(1) rotateY(0deg)';
+          
+          // Add success animation effect with green glow
+          imgElement.style.boxShadow = '0 0 40px rgba(16, 185, 129, 0.6), 0 0 80px rgba(16, 185, 129, 0.3)';
+          setTimeout(() => {
+            imgElement.style.boxShadow = '';
+          }, 1500);
+        }, 400);
       }
       
+      setCurrentImageSrc(newSrc);
       setShowImageModal(false);
       setImagePrompt('');
       setShowSuccessAnimation(true);
-      setTimeout(() => setShowSuccessAnimation(false), 2000);
+      setTimeout(() => setShowSuccessAnimation(false), 3000);
     };
 
     const generateRandomImage = () => {
-      const newImage = generateUnsplashUrl(imageType as any, 400, 300);
+      const dimensions = imageType === 'hero' ? '1200x600' : '800x600';
+      const newImage = generateUnsplashUrl(imageType as any, 800, 600);
       handleImageReplace(newImage);
     };
 
@@ -479,7 +497,8 @@ export default function InteractiveHero() {
         
         // Create a more specific URL with prompt keywords
         const promptFormatted = imagePrompt.replace(/\s+/g, ',');
-        const newImage = `https://source.unsplash.com/400x300/?${promptFormatted}&${Date.now()}`;
+        const dimensions = imageType === 'hero' ? '1200x600' : '800x600';
+        const newImage = `https://source.unsplash.com/${dimensions}/?${promptFormatted}&${Date.now()}`;
         
         handleImageReplace(newImage);
       } catch (error) {
@@ -494,23 +513,86 @@ export default function InteractiveHero() {
     return (
       <>
         <div 
-          className="relative group"
+          className="relative group overflow-visible"
           onMouseEnter={() => setIsHovering(true)}
           onMouseLeave={() => setIsHovering(false)}
         >
-          <img src={src} alt={alt} className={className} />
+          <motion.img 
+            src={currentImageSrc} 
+            alt={alt} 
+            className={`${className} transition-all duration-500 group-hover:scale-105 group-hover:shadow-2xl hover:brightness-110`}
+            whileHover={{ 
+              scale: 1.05, 
+              rotateY: 5,
+              rotateX: 2,
+              filter: "brightness(1.1)"
+            }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ 
+              type: "spring", 
+              stiffness: 400, 
+              damping: 20,
+              duration: 0.3
+            }}
+            style={{
+              transformStyle: "preserve-3d",
+              backfaceVisibility: "hidden"
+            }}
+          />
           
           {isHovering && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg cursor-pointer"
+              initial={{ opacity: 0, scale: 0.9, backdropFilter: "blur(0px)" }}
+              animate={{ 
+                opacity: 1, 
+                scale: 1, 
+                backdropFilter: "blur(4px)"
+              }}
+              exit={{ 
+                opacity: 0, 
+                scale: 0.9, 
+                backdropFilter: "blur(0px)"
+              }}
+              className="absolute inset-0 bg-gradient-to-t from-black/70 via-purple/10 to-transparent flex items-center justify-center cursor-pointer rounded-lg backdrop-blur-sm"
               onClick={() => setShowImageModal(true)}
+              whileHover={{ 
+                background: "linear-gradient(to top, rgba(0,0,0,0.8), rgba(147,51,234,0.2), transparent)"
+              }}
+              transition={{ duration: 0.3 }}
             >
-              <div className="bg-white text-gray-900 px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-gray-100 transition-colors">
-                <Image className="w-4 h-4" />
-                Edit Image
-              </div>
+              <motion.div 
+                className="bg-white/95 backdrop-blur-sm text-gray-900 px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white transition-all shadow-lg border border-white/20"
+                whileHover={{ 
+                  scale: 1.08, 
+                  y: -4,
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+                  background: "rgba(255,255,255,0.98)"
+                }}
+                whileTap={{ scale: 0.95 }}
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ 
+                  type: "spring", 
+                  stiffness: 400, 
+                  damping: 15,
+                  delay: 0.1
+                }}
+              >
+                <motion.div 
+                  className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center"
+                  whileHover={{ 
+                    rotate: 360,
+                    background: "linear-gradient(45deg, #8b5cf6, #06b6d4)"
+                  }}
+                  transition={{ duration: 0.6 }}
+                >
+                  <Image className="w-4 h-4 text-white" />
+                </motion.div>
+                <span className="font-medium">Edit Image</span>
+                <div className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                  AI Powered
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </div>
@@ -526,79 +608,102 @@ export default function InteractiveHero() {
               onClick={() => setShowImageModal(false)}
             >
               <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl"
+                initial={{ scale: 0.95, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.95, opacity: 0, y: 20 }}
+                className="bg-white rounded-3xl p-8 max-w-lg w-full mx-4 shadow-2xl backdrop-blur-sm border border-gray-100"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Edit Image</h3>
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
+                      <Image className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-gray-900">Edit Image</h3>
+                      <p className="text-sm text-gray-500">AI-powered image generation</p>
+                    </div>
+                  </div>
                   <button
                     onClick={() => setShowImageModal(false)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors"
+                    className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 {/* Current Image Preview */}
-                <div className="mb-6">
+                <div className="mb-8 relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
                   <img 
-                    src={src} 
+                    src={currentImageSrc} 
                     alt={alt} 
-                    className="w-full h-32 object-cover rounded-lg border border-gray-200" 
+                    className="w-full h-auto max-h-48 object-contain" 
                   />
+                  <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
+                    Current
+                  </div>
                 </div>
 
                 {/* Prompt Input */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Describe the image you want:
+                <div className="mb-8">
+                  <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-500" />
+                    Describe your perfect image:
                   </label>
                   <textarea
                     value={imagePrompt}
                     onChange={(e) => setImagePrompt(e.target.value)}
-                    placeholder={`e.g., "modern luxury car", "fresh pasta dish", "artisan bread"`}
-                    className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={`e.g., "modern luxury car with city lights", "fresh homemade pasta on marble counter", "rustic artisan bread with steam"`}
+                    className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-gray-50 focus:bg-white"
                     rows={3}
                   />
+                  <p className="text-xs text-gray-500 mt-2">💡 Tip: Be specific about style, mood, and details for better results</p>
                 </div>
 
                 {/* Action Buttons */}
-                <div className="space-y-3">
-                  <button
+                <div className="space-y-4">
+                  <motion.button
                     onClick={generateFromPrompt}
                     disabled={!imagePrompt.trim() || isGenerating}
-                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-4 rounded-lg font-medium hover:from-blue-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-4 px-6 rounded-xl font-semibold hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 text-sm"
+                    whileHover={{ scale: !isGenerating && imagePrompt.trim() ? 1.02 : 1 }}
+                    whileTap={{ scale: !isGenerating && imagePrompt.trim() ? 0.98 : 1 }}
                   >
                     {isGenerating ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Generating...
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <span>Creating your image...</span>
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-4 h-4" />
-                        Generate from Description
+                        <Sparkles className="w-5 h-5" />
+                        <span>✨ Generate with AI</span>
+                        <div className="ml-auto bg-white/20 px-2 py-1 rounded-full text-xs">
+                          Free
+                        </div>
                       </>
                     )}
-                  </button>
+                  </motion.button>
                   
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
+                  <div className="grid grid-cols-2 gap-4">
+                    <motion.button
                       onClick={generateRandomImage}
-                      className="py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                      className="py-3 px-4 border-2 border-gray-200 text-gray-700 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all text-sm font-medium flex items-center justify-center gap-2"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                     >
-                      🎲 Random Image
-                    </button>
+                      <span className="text-lg">🎲</span>
+                      Surprise Me
+                    </motion.button>
                     
-                    <button
+                    <motion.button
                       onClick={() => setShowImageModal(false)}
-                      className="py-2 px-4 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors text-sm font-medium"
+                      className="py-3 px-4 border-2 border-gray-200 text-gray-700 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-sm font-medium"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                     >
                       Cancel
-                    </button>
+                    </motion.button>
                   </div>
                 </div>
 
@@ -616,21 +721,21 @@ export default function InteractiveHero() {
   const EditableTextComponent = ({ item }: { item: EditableText }) => {
     const elementRef = useRef<HTMLDivElement>(null);
     
+    // Get the original element's computed styles to preserve them exactly
+    useEffect(() => {
+      if (item.isEditing && elementRef.current) {
+        // Find the original element that was clicked to get its exact styles
+        const originalElement = document.querySelector(`[data-editable-id="${item.id}"]`) as HTMLElement;
+        if (originalElement) {
+          const preservedStyles = getTextEditingStyles(originalElement);
+          Object.assign(elementRef.current.style, preservedStyles);
+        }
+      }
+    }, [item.id, item.isEditing]);
+    
     if (item.isEditing) {
       // Determine if this should be a textarea (for longer content) or input (for short content)
       const useTextarea = item.text.length > 50 || item.text.includes('\n') || item.id === 'subheading' || item.id.includes('text') || item.id.includes('desc');
-      
-      // Get the original element's computed styles to preserve them exactly
-      useEffect(() => {
-        if (elementRef.current) {
-          // Find the original element that was clicked to get its exact styles
-          const originalElement = document.querySelector(`[data-editable-id="${item.id}"]`) as HTMLElement;
-          if (originalElement) {
-            const preservedStyles = getTextEditingStyles(originalElement);
-            Object.assign(elementRef.current.style, preservedStyles);
-          }
-        }
-      }, [item.id]);
       
       return (
         <motion.div
@@ -716,8 +821,7 @@ export default function InteractiveHero() {
             autoFocus
           />
         )}
-      </div>
-          
+        
           {/* Action buttons */}
           <div className="absolute -top-16 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
             <button
@@ -1053,7 +1157,7 @@ export default function InteractiveHero() {
         </div>
 
         {/* Demo Website Content */}
-        <div className="min-h-[700px] max-h-[700px] overflow-y-auto">
+        <div className="min-h-[700px] max-h-[700px] overflow-y-auto overflow-x-visible">
           {/* Restaurant Website Design */}
           {currentSiteData.theme === 'restaurant' && (
             <>
@@ -1095,11 +1199,11 @@ export default function InteractiveHero() {
                     <EditableTextComponent item={editableTexts.find(item => item.id === 'about-title')!} />
                     <EditableTextComponent item={editableTexts.find(item => item.id === 'about-text')!} />
                   </div>
-                  <div className="rounded-lg overflow-hidden">
+                  <div className="relative group">
                     <EditableImageComponent 
-                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=500&h=400&fit=crop" 
+                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=800&h=600" 
                       alt="Restaurant interior" 
-                      className="w-full h-full object-cover" 
+                      className="w-full h-auto object-contain rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
                       imageType="restaurant"
                     />
                   </div>
@@ -1113,18 +1217,18 @@ export default function InteractiveHero() {
                   <div className="grid md:grid-cols-2 gap-8 mt-12">
                     <div className="p-8 rounded-lg">
                       <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=300&h=200&fit=crop" 
+                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600" 
                         alt="Special dish" 
-                        className="w-full h-48 object-cover rounded-lg mb-4" 
+                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105" 
                         imageType="food"
                       />
                       <EditableTextComponent item={editableTexts.find(item => item.id === 'special-1')!} />
                     </div>
                     <div className="p-8 rounded-lg">
                       <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=300&h=200&fit=crop" 
+                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=800&h=600" 
                         alt="Special dish" 
-                        className="w-full h-48 object-cover rounded-lg mb-4" 
+                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105" 
                         imageType="food"
                       />
                       <EditableTextComponent item={editableTexts.find(item => item.id === 'special-2')!} />
@@ -1170,11 +1274,11 @@ export default function InteractiveHero() {
                         </button>
                       </motion.div>
                     </div>
-                    <div className="relative">
+                    <div className="relative group overflow-visible">
                       <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=600&h=400&fit=crop" 
+                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=800&h=600" 
                         alt="Luxury car" 
-                        className="rounded-lg" 
+                        className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
                         imageType="car"
                       />
                       <div className="absolute -bottom-6 -left-6 bg-white p-4 rounded-lg border border-gray-200">
@@ -1275,25 +1379,31 @@ export default function InteractiveHero() {
                     </motion.div>
 
                     {/* Product Showcase */}
-                    <div className="grid grid-cols-3 gap-4 mt-12 max-w-4xl mx-auto">
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&h=300&fit=crop" 
-                        alt="Fresh bread" 
-                        className="rounded-lg" 
-                        imageType="bakery"
-                      />
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=300&h=300&fit=crop" 
-                        alt="Cupcakes" 
-                        className="rounded-lg" 
-                        imageType="bakery"
-                      />
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=300&h=300&fit=crop" 
-                        alt="Croissants" 
-                        className="rounded-lg" 
-                        imageType="bakery"
-                      />
+                    <div className="grid grid-cols-3 gap-6 mt-12 max-w-5xl mx-auto">
+                      <div className="group overflow-visible">
+                        <EditableImageComponent 
+                          src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&h=600" 
+                          alt="Fresh bread" 
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                          imageType="bakery"
+                        />
+                      </div>
+                      <div className="group overflow-visible">
+                        <EditableImageComponent 
+                          src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=600&h=600" 
+                          alt="Cupcakes" 
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                          imageType="bakery"
+                        />
+                      </div>
+                      <div className="group overflow-visible">
+                        <EditableImageComponent 
+                          src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&h=600" 
+                          alt="Croissants" 
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                          imageType="bakery"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1302,11 +1412,11 @@ export default function InteractiveHero() {
               {/* Tradition Section */}
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
-                  <div className="order-2 md:order-1">
+                  <div className="order-2 md:order-1 group overflow-visible">
                     <EditableImageComponent 
-                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=500&h=400&fit=crop" 
+                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=800&h=600" 
                       alt="Baker at work" 
-                      className="rounded-lg" 
+                      className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
                       imageType="bakery"
                     />
                   </div>

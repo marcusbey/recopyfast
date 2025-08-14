@@ -310,7 +310,7 @@ export default function EnhancedSocialProof() {
                 </div>
                 
                 <blockquote className="text-xl md:text-2xl text-gray-800 text-center mb-8 leading-relaxed">
-                  "{featuredTestimonial.content}"
+                  &ldquo;{featuredTestimonial.content}&rdquo;
                 </blockquote>
                 
                 <div className="flex flex-col md:flex-row items-center justify-center mb-8">
@@ -369,7 +369,7 @@ export default function EnhancedSocialProof() {
                       </div>
                       
                       <blockquote className="text-gray-700 mb-6 italic text-sm leading-relaxed">
-                        "{testimonial.content}"
+                        &ldquo;{testimonial.content}&rdquo;
                       </blockquote>
                       
                       <div className="flex items-center mt-auto">

@@ -8,11 +8,34 @@ The ReCopyFast editing system provides a comprehensive set of rules and behavior
 
 ### 🎯 Text Editing Principles
 
-1. **Format Preservation**: All original formatting (font, size, color, alignment, etc.) is preserved during editing
-2. **Container Stability**: The container dimensions remain stable during editing - width is locked, height can grow naturally
-3. **Background Integrity**: No background changes occur during editing - maintains original colors and styles
-4. **Overflow Handling**: Text can overflow the original container height naturally, with proper word wrapping
-5. **Visual Consistency**: Only a subtle blue border indicates editing mode
+1. **Exact Format Preservation**: All original formatting is preserved EXACTLY during editing:
+   - Font family, size, weight, style, line height, letter spacing
+   - Text alignment, decoration, transform, color
+   - Padding, margins, borders, shadows, background colors/images
+   - Border radius and all visual styling properties
+
+2. **Container Dimensional Stability**: 
+   - **Width**: Locked to original dimensions - prevents layout shifts
+   - **Height**: Grows naturally to accommodate additional text
+   - **Number of Lines**: Container expands vertically for new lines
+   - **Margins/Spacing**: Preserved exactly relative to surrounding elements
+
+3. **Background Integrity**: ZERO background changes during editing:
+   - Original background colors maintained
+   - Gradient backgrounds preserved  
+   - Background images remain unchanged
+   - Only subtle blue border indicates editing mode
+
+4. **Robust Text Detection**: Every text node on the page is detectable and editable:
+   - Service cards, feature descriptions, contact information
+   - Button text, labels, headings, paragraphs
+   - All demo site content (restaurant, car wash, bakery)
+   - Comprehensive coverage ensures nothing is missed
+
+5. **Visual Consistency**: Same font size, alignment, and line count while editing
+   - If original text has 2 lines, editing container shows 2 lines initially
+   - Additional text flows to new lines below with same formatting
+   - Container margins stay consistent with elements above/below
 
 ### 🖼️ Image Editing Principles  
 
@@ -151,6 +174,43 @@ interface AIImageService {
   suggestVariations(prompt: string): string[];
 }
 ```
+
+## Comprehensive Text Detection Coverage
+
+### All Demo Site Content Now Editable
+
+**Restaurant Demo (Complete Coverage):**
+- ✅ Hero content: headline, subheading, call-to-action
+- ✅ Menu sections: specials, descriptions, prices
+- ✅ About section: story, tradition, values
+- ✅ Feature cards: pasta, wine, specialties
+
+**Car Wash Demo (11 new editable elements added):**
+- ✅ Service cards: "Basic Wash", "Premium Detail", "Ceramic Coating"
+- ✅ Service descriptions: detailed explanations for each tier  
+- ✅ Guarantee badges: "100% Satisfaction", "Guaranteed"
+- ✅ Secondary CTA: "View Pricing" button
+- ✅ All hero content and main descriptions
+
+**Bakery Demo (Complete Coverage):**
+- ✅ Hero content: headline, subheading, orders
+- ✅ Tradition section: family story, methods
+- ✅ Hours section: daily schedule, availability
+- ✅ Contact info: "📍 123 Main Street, Downtown", "📞 (555) 123-4567"
+
+### Robust Detection System
+
+**Technical Implementation:**
+- Every text element has `data-editable-id` attributes for precise targeting
+- Original computed styles captured and preserved exactly
+- No hardcoded text remains - all content flows through EditableText system
+- Container dimensions locked to prevent layout shifts during editing
+
+**Coverage Validation:**
+- ✅ All visible text content is clickable and editable
+- ✅ Service cards, feature descriptions, contact information  
+- ✅ Button text, labels, headings, paragraphs, prices
+- ✅ Comprehensive across all three demo site themes
 
 ## Testing Recommendations
 
