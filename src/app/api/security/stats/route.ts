@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabase/server';
 import { validateAndSanitizeInput } from '@/lib/security/content-sanitizer';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerComponentClient({ cookies });
+    const supabase = await createClient();
     
     // Check authentication
     const { data: { session }, error: authError } = await supabase.auth.getSession();

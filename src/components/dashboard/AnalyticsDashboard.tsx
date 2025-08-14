@@ -225,7 +225,7 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
             </div>
             <Edit3 className="h-8 w-8 text-orange-600" />
           </div>
-        </div>
+        </Card>
       </div>
 
       {/* Performance Cards */}
