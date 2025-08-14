@@ -278,7 +278,7 @@
       // Add styles for edit mode
       this.injectStyles();
       
-      // Add click handlers for editing
+      // Add click handlers for inline editing
       document.addEventListener('click', (e) => {
         const element = e.target.closest('[data-rcf-id]');
         if (!element) return;
@@ -286,130 +286,472 @@
         e.preventDefault();
         e.stopPropagation();
         
-        this.openEditor(element);
+        this.startInlineEdit(element);
+      });
+      
+      // Add hover effects
+      document.addEventListener('mouseover', (e) => {
+        const element = e.target.closest('[data-rcf-id]');
+        if (element && !element.getAttribute('data-rcf-editing')) {
+          element.classList.add('rcf-hovering');
+        }
+      });
+      
+      document.addEventListener('mouseout', (e) => {
+        const element = e.target.closest('[data-rcf-id]');
+        if (element) {
+          element.classList.remove('rcf-hovering');
+        }
       });
     }
     
     injectStyles() {
       const style = document.createElement('style');
       style.textContent = `
-        .rcf-editable {
-          cursor: pointer !important;
+        /* Consistent with demo styling */
+        [data-rcf-id] {
+          position: relative;
           transition: all 0.2s ease;
         }
         
-        .rcf-editable:hover {
-          outline: 2px dashed #3b82f6 !important;
-          outline-offset: 2px;
+        .rcf-hovering {
+          cursor: pointer !important;
+          border: 2px dashed #3b82f6 !important;
+          border-radius: 12px !important;
+          padding: 12px !important;
+          box-sizing: border-box !important;
         }
         
+        .rcf-hovering::before {
+          content: 'Click to edit';
+          position: absolute;
+          top: -48px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: #1f2937;
+          color: white;
+          padding: 4px 12px;
+          border-radius: 6px;
+          font-size: 12px;
+          white-space: nowrap;
+          z-index: 10;
+          opacity: 0;
+          animation: rcf-fadeIn 0.2s ease forwards;
+        }
+        
+        .rcf-hovering::after {
+          content: '✏️';
+          position: absolute;
+          top: -12px;
+          right: -12px;
+          width: 32px;
+          height: 32px;
+          background: #3b82f6;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 14px;
+          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          opacity: 0;
+          animation: rcf-fadeIn 0.2s ease forwards;
+        }
+        
+        /* Inline editing styles - preserve exact formatting */
+        .rcf-editing {
+          border: 2px solid #3b82f6 !important;
+          border-radius: 12px !important;
+          outline: none !important;
+        }
+        
+        .rcf-editing input,
+        .rcf-editing textarea {
+          background: transparent !important;
+          border: none !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          outline: none !important;
+          resize: none !important;
+          width: 100% !important;
+          font-family: inherit !important;
+          font-size: inherit !important;
+          font-weight: inherit !important;
+          font-style: inherit !important;
+          line-height: inherit !important;
+          letter-spacing: inherit !important;
+          text-align: inherit !important;
+          text-decoration: inherit !important;
+          text-transform: inherit !important;
+          color: inherit !important;
+          word-wrap: break-word !important;
+          overflow-wrap: break-word !important;
+        }
+        
+        .rcf-editing textarea {
+          white-space: pre-wrap !important;
+          overflow: visible !important;
+          min-height: auto !important;
+          height: auto !important;
+        }
+        
+        /* Action buttons */
+        .rcf-actions {
+          position: absolute;
+          top: -64px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 8px;
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          padding: 8px 12px;
+          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+          z-index: 1000;
+        }
+        
+        .rcf-actions button {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          padding: 4px 8px;
+          font-size: 12px;
+          border: none;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        
+        .rcf-btn-save {
+          background: #10b981;
+          color: white;
+        }
+        
+        .rcf-btn-save:hover {
+          background: #059669;
+        }
+        
+        .rcf-btn-cancel {
+          background: #f3f4f6;
+          color: #6b7280;
+        }
+        
+        .rcf-btn-cancel:hover {
+          background: #e5e7eb;
+        }
+        
+        .rcf-btn-ai {
+          background: #f3f4f6;
+          color: #8b5cf6;
+        }
+        
+        .rcf-btn-ai:hover {
+          background: #ede9fe;
+        }
+        
+        /* Success animation */
         .rcf-updated {
-          animation: rcf-highlight 0.3s ease;
+          animation: rcf-highlight 0.5s ease;
+        }
+        
+        @keyframes rcf-fadeIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
         
         @keyframes rcf-highlight {
           0% { background-color: transparent; }
-          50% { background-color: #fef3c7; }
+          50% { background-color: #dcfce7; }
           100% { background-color: transparent; }
-        }
-        
-        .rcf-editor-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.5);
-          z-index: 999998;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        
-        .rcf-editor-modal {
-          background: white;
-          border-radius: 8px;
-          padding: 24px;
-          max-width: 500px;
-          width: 90%;
-          max-height: 80vh;
-          overflow-y: auto;
-          z-index: 999999;
         }
       `;
       document.head.appendChild(style);
     }
     
-    openEditor(element) {
+    startInlineEdit(element) {
       const elementId = element.getAttribute('data-rcf-id');
       const elementData = this.elements.get(elementId);
-      if (!elementData) return;
+      if (!elementData || element.getAttribute('data-rcf-editing')) return;
+
+      // Mark element as being edited
+      element.setAttribute('data-rcf-editing', 'true');
+      element.classList.add('rcf-editing');
+      element.classList.remove('rcf-hovering');
+
+      // Store original content and styles
+      const originalText = this.getElementText(element);
+      const computedStyle = window.getComputedStyle(element);
+      let originalPadding = computedStyle.padding;
+      if (originalPadding === '0px') {
+        originalPadding = '8px';
+      }
+
+      // Create input element based on content type
+      let inputElement;
+      const isMultiline = originalText.includes('\n') || originalText.length > 60;
       
-      // Create editor overlay
+      if (isMultiline) {
+        inputElement = document.createElement('textarea');
+        inputElement.style.minHeight = Math.max(element.offsetHeight, 40) + 'px';
+        inputElement.style.resize = 'vertical';
+      } else {
+        inputElement = document.createElement('input');
+        inputElement.type = 'text';
+      }
+
+      // Apply inherited styles to maintain appearance
+      inputElement.value = originalText;
+      inputElement.style.cssText = `
+        background: transparent !important;
+        border: none !important;
+        outline: none !important;
+        padding: ${originalPadding} !important;
+        margin: 0 !important;
+        width: 100% !important;
+        font-family: ${computedStyle.fontFamily} !important;
+        font-size: ${computedStyle.fontSize} !important;
+        font-weight: ${computedStyle.fontWeight} !important;
+        font-style: ${computedStyle.fontStyle} !important;
+        line-height: ${computedStyle.lineHeight} !important;
+        letter-spacing: ${computedStyle.letterSpacing} !important;
+        text-align: ${computedStyle.textAlign} !important;
+        text-decoration: ${computedStyle.textDecoration} !important;
+        text-transform: ${computedStyle.textTransform} !important;
+        color: ${computedStyle.color} !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+        box-sizing: border-box !important;
+      `;
+
+      if (inputElement.tagName === 'TEXTAREA') {
+        inputElement.style.cssText += `
+          white-space: pre-wrap !important;
+          overflow: visible !important;
+          height: auto !important;
+        `;
+      }
+
+      // Create action buttons
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'rcf-actions';
+      actionsDiv.innerHTML = `
+        <button class="rcf-btn-ai" type="button" title="AI Suggestions">
+          🪄 AI
+        </button>
+        <button class="rcf-btn-save" type="button" title="Save changes">
+          ✓ Save
+        </button>
+        <button class="rcf-btn-cancel" type="button" title="Cancel editing">
+          ✕ Cancel
+        </button>
+      `;
+
+      // Position actions relative to element
+      const rect = element.getBoundingClientRect();
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      actionsDiv.style.position = 'absolute';
+      actionsDiv.style.left = '50%';
+      actionsDiv.style.top = (rect.top + scrollTop - 64) + 'px';
+      actionsDiv.style.zIndex = '10000';
+
+      // Replace element content with input
+      const originalContent = element.innerHTML;
+      element.innerHTML = '';
+      element.appendChild(inputElement);
+      
+      // Add actions to body
+      document.body.appendChild(actionsDiv);
+
+      // Focus and select input
+      inputElement.focus();
+      inputElement.select();
+
+      // Auto-resize textarea
+      if (inputElement.tagName === 'TEXTAREA') {
+        const autoResize = () => {
+          inputElement.style.height = 'auto';
+          inputElement.style.height = (inputElement.scrollHeight) + 'px';
+        };
+        inputElement.addEventListener('input', autoResize);
+        autoResize();
+      }
+
+      // Handle save
+      const saveBtn = actionsDiv.querySelector('.rcf-btn-save');
+      const cancelBtn = actionsDiv.querySelector('.rcf-btn-cancel');
+      const aiBtn = actionsDiv.querySelector('.rcf-btn-ai');
+
+      const cleanup = () => {
+        element.removeAttribute('data-rcf-editing');
+        element.classList.remove('rcf-editing');
+        if (document.body.contains(actionsDiv)) {
+          document.body.removeChild(actionsDiv);
+        }
+      };
+
+      const save = () => {
+        const newContent = inputElement.value;
+        
+        // Update element content
+        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+          element.value = newContent;
+          element.innerHTML = originalContent; // Restore original structure
+        } else {
+          element.textContent = newContent;
+        }
+
+        // Update stored data
+        elementData.originalContent = newContent;
+
+        // Send update to server if connected
+        if (this.socket && this.socket.connected) {
+          this.socket.emit('content-update', {
+            siteId: SITE_ID,
+            elementId: elementId,
+            content: newContent
+          });
+        }
+
+        // Add success animation
+        element.classList.add('rcf-updated');
+        setTimeout(() => {
+          element.classList.remove('rcf-updated');
+        }, 500);
+
+        cleanup();
+      };
+
+      const cancel = () => {
+        // Restore original content
+        element.innerHTML = originalContent;
+        cleanup();
+      };
+
+      // Button event handlers
+      saveBtn.onclick = save;
+      cancelBtn.onclick = cancel;
+
+      // AI suggestions handler
+      aiBtn.onclick = () => {
+        this.showAISuggestions(inputElement, elementId);
+      };
+
+      // Keyboard handlers
+      inputElement.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          cancel();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          save();
+        }
+      });
+
+      // Click outside to save (optional behavior)
+      const outsideClickHandler = (e) => {
+        if (!element.contains(e.target) && !actionsDiv.contains(e.target)) {
+          save();
+          document.removeEventListener('click', outsideClickHandler);
+        }
+      };
+      
+      // Delay adding the outside click handler to prevent immediate trigger
+      setTimeout(() => {
+        document.addEventListener('click', outsideClickHandler);
+      }, 100);
+    }
+
+    showAISuggestions(inputElement, elementId) {
+      // Create AI suggestions modal
       const overlay = document.createElement('div');
-      overlay.className = 'rcf-editor-overlay';
-      
+      overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10001;
+      `;
+
       const modal = document.createElement('div');
-      modal.className = 'rcf-editor-modal';
-      
+      modal.style.cssText = `
+        background: white;
+        border-radius: 12px;
+        padding: 24px;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80%;
+        overflow-y: auto;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+      `;
+
       modal.innerHTML = `
-        <h3 style="margin-top: 0; margin-bottom: 16px;">Edit Content</h3>
-        <textarea id="rcf-editor-textarea" style="width: 100%; min-height: 100px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px;">${elementData.element.textContent}</textarea>
+        <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 16px;">
+          <h3 style="margin: 0; color: #1f2937;">✨ AI Content Suggestions</h3>
+          <button id="rcf-ai-close" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #6b7280;">×</button>
+        </div>
         
         <div style="margin-bottom: 16px;">
-          <button id="rcf-ai-suggest" style="padding: 6px 12px; border: 1px solid #8b5cf6; background: #f3f4f6; color: #8b5cf6; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-            <span style="font-size: 16px;">🪄</span> AI Suggest
+          <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">Goal:</label>
+          <select id="rcf-suggestion-goal" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
+            <option value="improve">Improve clarity and readability</option>
+            <option value="shorten">Make more concise</option>
+            <option value="expand">Add more detail</option>
+            <option value="engage">Optimize for engagement</option>
+            <option value="professional">Make more professional</option>
+            <option value="casual">Make more casual</option>
+          </select>
+        </div>
+        
+        <div style="margin-bottom: 16px;">
+          <button id="rcf-generate-suggestions" style="width: 100%; padding: 12px; background: #8b5cf6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
+            🪄 Generate Suggestions
           </button>
         </div>
         
-        <div id="rcf-ai-suggestions" style="display: none; margin-bottom: 16px; padding: 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;">
-          <div style="margin-bottom: 12px;">
-            <select id="rcf-suggestion-goal" style="padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; margin-right: 8px;">
-              <option value="improve">Improve clarity</option>
-              <option value="shorten">Make shorter</option>
-              <option value="expand">Add detail</option>
-              <option value="optimize">Optimize for engagement</option>
-            </select>
-            <button id="rcf-generate-suggestions" style="padding: 4px 12px; background: #8b5cf6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
-              Generate
-            </button>
-          </div>
-          <div id="rcf-suggestions-list"></div>
-        </div>
+        <div id="rcf-suggestions-list" style="margin-bottom: 16px;"></div>
         
         <div style="display: flex; gap: 8px; justify-content: flex-end;">
-          <button id="rcf-cancel" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">Cancel</button>
-          <button id="rcf-save" style="padding: 8px 16px; border: none; background: #3b82f6; color: white; border-radius: 4px; cursor: pointer;">Save</button>
+          <button id="rcf-ai-cancel" style="padding: 8px 16px; border: 1px solid #d1d5db; background: white; border-radius: 6px; cursor: pointer; color: #6b7280;">Close</button>
         </div>
       `;
-      
+
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
-      
-      // Focus textarea
-      const textarea = document.getElementById('rcf-editor-textarea');
-      textarea.focus();
-      textarea.select();
-      
-      // AI Suggestion functionality
-      const aiSuggestBtn = document.getElementById('rcf-ai-suggest');
-      const aiSuggestionsDiv = document.getElementById('rcf-ai-suggestions');
-      const generateBtn = document.getElementById('rcf-generate-suggestions');
-      const suggestionsList = document.getElementById('rcf-suggestions-list');
-      const goalSelect = document.getElementById('rcf-suggestion-goal');
-      
-      aiSuggestBtn.onclick = () => {
-        const isVisible = aiSuggestionsDiv.style.display !== 'none';
-        aiSuggestionsDiv.style.display = isVisible ? 'none' : 'block';
+
+      // Event handlers
+      const closeBtn = modal.querySelector('#rcf-ai-close');
+      const cancelBtn = modal.querySelector('#rcf-ai-cancel');
+      const generateBtn = modal.querySelector('#rcf-generate-suggestions');
+      const goalSelect = modal.querySelector('#rcf-suggestion-goal');
+      const suggestionsList = modal.querySelector('#rcf-suggestions-list');
+
+      const closeModal = () => {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
       };
-      
+
+      closeBtn.onclick = closeModal;
+      cancelBtn.onclick = closeModal;
+      overlay.onclick = (e) => {
+        if (e.target === overlay) closeModal();
+      };
+
       generateBtn.onclick = async () => {
-        const currentText = textarea.value;
+        const currentText = inputElement.value;
         const goal = goalSelect.value;
         
-        generateBtn.textContent = 'Generating...';
+        if (!currentText.trim()) {
+          suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Please enter some text first.</p>';
+          return;
+        }
+
+        generateBtn.textContent = '🔄 Generating...';
         generateBtn.disabled = true;
-        
+
         try {
           const response = await fetch(`${RECOPYFAST_API}/ai/suggest`, {
             method: 'POST',
@@ -423,60 +765,68 @@
               tone: 'professional'
             }),
           });
-          
+
           const data = await response.json();
-          
+
           if (response.ok && data.success) {
             suggestionsList.innerHTML = '';
             data.suggestions.forEach((suggestion, index) => {
               const suggestionDiv = document.createElement('div');
-              suggestionDiv.style.cssText = 'margin-bottom: 8px; padding: 8px; background: white; border: 1px solid #e5e7eb; border-radius: 4px;';
+              suggestionDiv.style.cssText = `
+                margin-bottom: 12px; 
+                padding: 12px; 
+                background: #f9fafb; 
+                border: 1px solid #e5e7eb; 
+                border-radius: 8px;
+                transition: all 0.2s ease;
+              `;
+              
               suggestionDiv.innerHTML = `
-                <p style="margin: 0 0 8px 0; font-size: 14px; line-height: 1.4;">${suggestion}</p>
-                <button onclick="document.getElementById('rcf-editor-textarea').value = '${suggestion.replace(/'/g, "\\'")}'" style="padding: 4px 8px; background: #8b5cf6; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">
-                  Use This
+                <p style="margin: 0 0 8px 0; font-size: 14px; line-height: 1.5; color: #374151;">${suggestion}</p>
+                <button style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">
+                  Use This Suggestion
                 </button>
               `;
+
+              const useBtn = suggestionDiv.querySelector('button');
+              useBtn.onclick = () => {
+                inputElement.value = suggestion;
+                if (inputElement.tagName === 'TEXTAREA') {
+                  inputElement.style.height = 'auto';
+                  inputElement.style.height = (inputElement.scrollHeight) + 'px';
+                }
+                inputElement.focus();
+                closeModal();
+              };
+
+              // Hover effects
+              suggestionDiv.onmouseenter = () => {
+                suggestionDiv.style.background = '#f3f4f6';
+                suggestionDiv.style.borderColor = '#d1d5db';
+              };
+              suggestionDiv.onmouseleave = () => {
+                suggestionDiv.style.background = '#f9fafb';
+                suggestionDiv.style.borderColor = '#e5e7eb';
+              };
+
               suggestionsList.appendChild(suggestionDiv);
             });
           } else {
-            suggestionsList.innerHTML = '<p style="color: #ef4444; font-size: 14px; margin: 0;">Failed to generate suggestions. Please try again.</p>';
+            suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Failed to generate suggestions. Please try again.</p>';
           }
         } catch (error) {
           console.error('AI suggestion error:', error);
-          suggestionsList.innerHTML = '<p style="color: #ef4444; font-size: 14px; margin: 0;">Error connecting to AI service.</p>';
+          suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Error connecting to AI service. Please check your connection.</p>';
         } finally {
-          generateBtn.textContent = 'Generate';
+          generateBtn.textContent = '🪄 Generate Suggestions';
           generateBtn.disabled = false;
         }
       };
-      
-      // Handle save
-      document.getElementById('rcf-save').onclick = () => {
-        const newContent = textarea.value;
-        
-        // Update locally
-        elementData.element.textContent = newContent;
-        
-        // Send update to server
-        this.socket.emit('content-update', {
-          siteId: SITE_ID,
-          elementId: elementId,
-          content: newContent
-        });
-        
-        document.body.removeChild(overlay);
-      };
-      
-      // Handle cancel
-      document.getElementById('rcf-cancel').onclick = () => {
-        document.body.removeChild(overlay);
-      };
-      
+
       // Handle escape key
       overlay.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-          document.body.removeChild(overlay);
+          closeModal();
         }
       });
     }

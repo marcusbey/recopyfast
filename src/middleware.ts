@@ -1,7 +1,37 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { securityMiddleware } from '@/lib/security/middleware';
 
 export async function middleware(request: NextRequest) {
+  // Apply security middleware first
+  const securityConfig = {
+    enableRateLimit: true,
+    enableContentSanitization: true,
+    enableDomainValidation: request.nextUrl.pathname.startsWith('/api/content') || 
+                            request.nextUrl.pathname.startsWith('/embed'),
+    enableAbuseDetection: true,
+    rateLimitConfig: {
+      windowMs: 60 * 1000, // 1 minute
+      maxRequests: request.nextUrl.pathname.startsWith('/api/auth') ? 10 : 100
+    },
+    whitelistedDomains: [], // Will be populated from database in production
+    bypassRules: {
+      paths: ['/api/health', '/api/status'],
+      methods: ['OPTIONS'],
+      userAgents: []
+    }
+  };
+
+  // Check if this is an API route that needs security middleware
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    const securityResponse = await securityMiddleware(request, securityConfig);
+    
+    // If security middleware returns a response (blocked), return it
+    if (securityResponse.status !== 200) {
+      return securityResponse;
+    }
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
@@ -15,7 +45,7 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({
             request,
           });
@@ -49,7 +79,32 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  return supabaseResponse;
+  // Add security headers to all responses
+  const response = supabaseResponse;
+  
+  // Security headers
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-XSS-Protection', '1; mode=block');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+  // Content Security Policy
+  const csp = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Note: unsafe-eval might be needed for Next.js dev
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' https:",
+    "connect-src 'self'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'self'"
+  ].join('; ');
+
+  response.headers.set('Content-Security-Policy', csp);
+
+  return response;
 }
 
 export const config = {
