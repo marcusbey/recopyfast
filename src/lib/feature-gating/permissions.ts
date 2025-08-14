@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
-import { getUserSubscription, checkFeatureAccess } from '@/lib/stripe/subscription';
+import { getUserSubscription } from '@/lib/stripe/subscription';
 import { getUserTicketBalance, consumeTickets } from '@/lib/stripe/tickets';
 import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
 
@@ -183,7 +183,7 @@ export async function canUseTranslation(userId: string): Promise<FeaturePermissi
 export async function consumeFeatureUsage(
   userId: string,
   feature: 'ai_suggestion' | 'translation' | 'collaboration',
-  metadata?: Record<string, any>
+  metadata?: Record<string, unknown>
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   

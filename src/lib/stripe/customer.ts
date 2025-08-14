@@ -9,7 +9,7 @@ export async function createOrGetCustomer(
   userId: string,
   email: string,
   name?: string
-): Promise<{ customer: Customer; stripeCustomer: any }> {
+): Promise<{ customer: Customer; stripeCustomer: import('stripe').Stripe.Customer }> {
   const supabase = await createClient();
 
   // Check if customer already exists in our database

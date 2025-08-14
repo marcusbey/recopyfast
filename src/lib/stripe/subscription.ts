@@ -38,7 +38,7 @@ export async function createSubscription(
   }
 
   // Create subscription in Stripe
-  const subscriptionParams: any = {
+  const subscriptionParams: import('stripe').Stripe.SubscriptionCreateParams = {
     customer: stripeCustomer.id,
     items: [{ price: plan.priceId }],
     metadata: {
@@ -151,12 +151,13 @@ export async function updateSubscription(
   }
 
   // Update subscription in Stripe
+  const existingSubscription = await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id);
   const stripeSubscription = await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
       items: [
         {
-          id: (await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id)).items.data[0].id,
+          id: existingSubscription.items.data[0].id,
           price: plan.priceId,
         },
       ],
@@ -259,7 +260,7 @@ export async function reactivateSubscription(userId: string): Promise<Subscripti
   }
 
   // Reactivate subscription in Stripe
-  const stripeSubscription = await stripe.subscriptions.update(
+  await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
       cancel_at_period_end: false,

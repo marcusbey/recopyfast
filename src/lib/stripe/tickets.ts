@@ -10,11 +10,11 @@ export async function purchaseTickets(
   userId: string,
   email: string,
   request: TicketPurchaseRequest
-): Promise<{ paymentIntent: any; tickets: Tickets }> {
+): Promise<{ paymentIntent: import('stripe').Stripe.PaymentIntent; tickets: Tickets }> {
   const supabase = await createClient();
 
   // Create or get customer
-  const { customer, stripeCustomer } = await createOrGetCustomer(userId, email);
+  const { customer } = await createOrGetCustomer(userId, email);
 
   // Calculate total amount
   const totalAmount = Math.round(request.quantity * TICKET_CONFIG.TICKETS_PER_PURCHASE * TICKET_CONFIG.PRICE_PER_TICKET * 100); // in cents
@@ -24,7 +24,7 @@ export async function purchaseTickets(
   const paymentIntent = await stripe.paymentIntents.create({
     amount: totalAmount,
     currency: 'usd',
-    customer: stripeCustomer.id,
+    customer: customer.stripe_customer_id,
     payment_method: request.paymentMethodId,
     confirmation_method: 'manual',
     confirm: true,

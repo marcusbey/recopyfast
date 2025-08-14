@@ -77,7 +77,7 @@ export interface TicketTransaction {
   amount: number;
   description?: string;
   stripe_payment_intent_id?: string;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -86,7 +86,7 @@ export interface UsageTracking {
   user_id: string;
   feature_type: string;
   count: number;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -95,7 +95,7 @@ export interface BillingEvent {
   user_id: string;
   event_type: string;
   stripe_event_id?: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   processed: boolean;
   created_at: string;
 }
@@ -150,7 +150,7 @@ export interface StripeWebhookEvent {
   id: string;
   type: string;
   data: {
-    object: any;
+    object: unknown;
   };
   created: number;
 }
@@ -159,7 +159,7 @@ export interface StripeWebhookEvent {
 export interface FeatureUsage {
   feature: 'ai_suggestion' | 'translation' | 'collaboration' | 'api_call';
   userId: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 // Billing alerts
