@@ -1,36 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
-import { securityMiddleware } from '@/lib/security/middleware';
 
 export async function middleware(request: NextRequest) {
-  // Apply security middleware first
-  const securityConfig = {
-    enableRateLimit: true,
-    enableContentSanitization: true,
-    enableDomainValidation: request.nextUrl.pathname.startsWith('/api/content') || 
-                            request.nextUrl.pathname.startsWith('/embed'),
-    enableAbuseDetection: true,
-    rateLimitConfig: {
-      windowMs: 60 * 1000, // 1 minute
-      maxRequests: request.nextUrl.pathname.startsWith('/api/auth') ? 10 : 100
-    },
-    whitelistedDomains: [], // Will be populated from database in production
-    bypassRules: {
-      paths: ['/api/health', '/api/status'],
-      methods: ['OPTIONS'],
-      userAgents: []
-    }
-  };
-
-  // Check if this is an API route that needs security middleware
-  if (request.nextUrl.pathname.startsWith('/api/')) {
-    const securityResponse = await securityMiddleware(request, securityConfig);
-    
-    // If security middleware returns a response (blocked), return it
-    if (securityResponse.status !== 200) {
-      return securityResponse;
-    }
-  }
+  // This middleware now focuses on auth and page-level security
+  // API-level security is handled within individual API routes
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -112,11 +85,11 @@ export const config = {
     /*
      * Match all request paths except for the ones starting with:
      * - _next/static (static files)
-     * - _next/image (image optimization files)
+     * - _next/image (image optimization files)  
      * - favicon.ico (favicon file)
      * - public folder
-     * - api routes
+     * - api routes (handled separately)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api/).*)',
   ],
 };
