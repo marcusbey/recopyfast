@@ -27,8 +27,7 @@ Sentry.init({
   
   // Integrations
   integrations: [
-    // Automatically instrument Node.js libraries and frameworks
-    Sentry.prismaIntegration(),
+    // Default Next.js integrations
   ],
   
   // Filtering
