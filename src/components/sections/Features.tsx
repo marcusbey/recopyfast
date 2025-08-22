@@ -87,10 +87,10 @@ export default function Features() {
           {features.map((feature, index) => (
             <div
               key={index}
-              className="group bg-white rounded-2xl p-8 shadow-lg border border-gray-200 hover:shadow-xl hover:border-gray-300 transition-all duration-300 hover:-translate-y-1"
+              className="group bg-white rounded-2xl p-8 border border-gray-200 hover:border-gray-300 transition-colors duration-200"
             >
               <div className="mb-6">
-                <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center group-hover:scale-110 transition-transform duration-300 shadow-lg`}>
+                <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center`}>
                   <feature.icon className="h-7 w-7 text-white" />
                 </div>
               </div>
@@ -104,7 +104,7 @@ export default function Features() {
               </p>
 
               {/* Hover effect indicator */}
-              <div className={`mt-6 h-1 rounded-full bg-gradient-to-r ${feature.gradient} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300`}></div>
+              <div className={`mt-6 h-1 rounded-full bg-gradient-to-r ${feature.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-200`}></div>
             </div>
           ))}
         </div>
@@ -144,7 +144,7 @@ export default function Features() {
               </div>
             </div>
             
-            <div className="bg-white rounded-2xl p-8 shadow-xl">
+            <div className="bg-white rounded-2xl p-8 border border-gray-200">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-500">Uptime</span>

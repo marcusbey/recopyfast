@@ -16,13 +16,13 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <Link href="/" className="flex items-center justify-center space-x-3 mb-8">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
             <Code className="w-7 h-7 text-white" />
           </div>
           <span className="font-bold text-2xl text-gray-900 tracking-tight">ReCopyFast</span>
         </Link>
 
-        <Card className="border-gray-200 shadow-lg">
+        <Card className="border-gray-200 border">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
             <CardDescription>

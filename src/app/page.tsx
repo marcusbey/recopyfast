@@ -4,6 +4,7 @@ import EnhancedHero from "@/components/sections/EnhancedHero"
 import Problem from "@/components/sections/Problem"
 import HowItWorks from "@/components/sections/HowItWorks"
 import Features from "@/components/sections/Features"
+import Pricing from "@/components/sections/Pricing"
 import EnhancedSocialProof from "@/components/sections/EnhancedSocialProof"
 
 export default function Home() {
@@ -16,6 +17,7 @@ export default function Home() {
         <Problem />
         <HowItWorks />
         <Features />
+        <Pricing />
         <EnhancedSocialProof />
 
         {/* Final CTA */}

@@ -25,10 +25,10 @@ export function Header() {
 
   return (
     <>
-      <header className="border-b border-gray-100 bg-white/95 backdrop-blur sticky top-0 z-50 shadow-sm">
+      <header className="border-b border-gray-200 bg-white/95 backdrop-blur sticky top-0 z-50">
         <div className="container mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+            <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
               <Code className="w-5 h-5 text-white" />
             </div>
             <span className="font-bold text-xl text-gray-900 tracking-tight">ReCopyFast</span>
@@ -56,7 +56,7 @@ export function Header() {
               <Button 
                 onClick={() => setShowAuthModal(true)}
                 size="sm" 
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white border-0 shadow-md"
+                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium border-0"
               >
                 Sign In
               </Button>
@@ -65,7 +65,7 @@ export function Header() {
                 onClick={() => setShowAuthModal(true)}
                 variant="outline" 
                 size="sm" 
-                className="border-2 border-blue-600 text-blue-600 hover:bg-blue-50 hover:border-blue-700 font-medium transition-all duration-200"
+                className="border-2 border-blue-600 text-blue-600 hover:bg-blue-50 hover:border-blue-700 font-medium transition-colors duration-200"
               >
                 Sign In
               </Button>

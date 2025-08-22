@@ -41,7 +41,7 @@ export default function Problem() {
           {problems.map((problem, index) => (
             <div
               key={index}
-              className="bg-white rounded-xl p-8 shadow-lg border border-gray-200 hover:shadow-xl transition-shadow"
+              className="bg-white rounded-xl p-8 border border-gray-200 hover:border-gray-300 transition-colors"
             >
               <div className="flex items-start space-x-4">
                 <div className="flex-shrink-0">

@@ -81,10 +81,10 @@ export default function EnhancedHero() {
         <div className="absolute bottom-10 left-1/3 w-56 h-56 bg-gradient-to-r from-rose-400/20 to-orange-400/20 rounded-full blur-3xl"></div>
         
         <div className="relative z-10 max-w-[calc(80rem+10%)] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="rounded-3xl p-12 transform scale-[1.15]">
+          <div className="rounded-3xl p-12">
             <div className="text-center mb-12">
               <div className="flex items-center justify-center space-x-4 mb-6">
-                <div className="w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                <div className="w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
                   <Sparkles className="w-7 h-7 text-white" />
                 </div>
                 <h3 className="text-3xl font-bold text-white mt-4">Try it yourself - Click any text below!</h3>
@@ -102,7 +102,7 @@ export default function EnhancedHero() {
 
           {/* Code Demo */}
           <div className="max-w-4xl mx-auto">
-            <div className="bg-gray-900 rounded-xl p-6 text-left shadow-2xl">
+            <div className="bg-gray-900 rounded-xl p-6 text-left">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center space-x-2">
                   <div className="w-3 h-3 bg-red-500 rounded-full"></div>
@@ -136,7 +136,7 @@ export default function EnhancedHero() {
             
             {/* Before/After Preview */}
             <div className="grid md:grid-cols-2 gap-8 mt-12">
-              <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
                 <h3 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">Before</h3>
                 <div className="space-y-3">
                   <div className="h-4 bg-gray-200 rounded"></div>
@@ -146,7 +146,7 @@ export default function EnhancedHero() {
                 <p className="text-sm text-gray-500 mt-4">Static content, developer required for changes</p>
               </div>
               
-              <div className="bg-white rounded-lg shadow-lg p-6 border-2 border-green-200">
+              <div className="bg-white rounded-lg border-2 border-green-200 p-6">
                 <h3 className="text-sm font-semibold text-green-600 mb-3 uppercase tracking-wide">After</h3>
                 <div className="space-y-3">
                   <div className="h-4 bg-gradient-to-r from-blue-200 to-purple-200 rounded cursor-pointer hover:from-blue-300 hover:to-purple-300 transition-colors"></div>

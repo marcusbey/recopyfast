@@ -190,7 +190,7 @@ export default function EnhancedSocialProof() {
               {companies.map((company, index) => (
                 <div
                   key={`first-${index}`}
-                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 transition-colors duration-200 group cursor-pointer"
                   title={`Trusted by ${company.name}`}
                 >
                   <img
@@ -218,7 +218,7 @@ export default function EnhancedSocialProof() {
               {companies.map((company, index) => (
                 <div
                   key={`second-${index}`}
-                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 transition-colors duration-200 group cursor-pointer"
                   title={`Trusted by ${company.name}`}
                 >
                   <img
@@ -246,7 +246,7 @@ export default function EnhancedSocialProof() {
               {companies.slice(0, 6).map((company, index) => (
                 <div
                   key={`third-${index}`}
-                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 hover:shadow-xl transition-all duration-500 hover:scale-110 group cursor-pointer shadow-sm"
+                  className="flex-shrink-0 w-28 h-16 md:w-36 md:h-20 bg-white rounded-2xl border border-gray-200 flex items-center justify-center hover:border-gray-300 transition-colors duration-200 group cursor-pointer"
                   title={`Trusted by ${company.name}`}
                 >
                   <img
@@ -394,14 +394,14 @@ export default function EnhancedSocialProof() {
             {/* Navigation Buttons */}
             <button
               onClick={prevTestimonial}
-              className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-6 bg-white rounded-full p-3 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 hover:scale-105"
+              className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-6 bg-white rounded-full p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200"
             >
               <ChevronLeft className="h-6 w-6 text-gray-600" />
             </button>
             
             <button
               onClick={nextTestimonial}
-              className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-6 bg-white rounded-full p-3 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 hover:scale-105"
+              className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-6 bg-white rounded-full p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200"
             >
               <ChevronRight className="h-6 w-6 text-gray-600" />
             </button>
@@ -414,7 +414,7 @@ export default function EnhancedSocialProof() {
                   onClick={() => setCurrentTestimonial(index)}
                   className={`w-3 h-3 rounded-full transition-all duration-300 ${
                     currentTestimonial === index 
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 scale-125' 
+                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 w-3 h-3' 
                       : 'bg-gray-300 hover:bg-gray-400'
                   }`}
                 />

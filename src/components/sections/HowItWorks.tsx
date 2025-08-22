@@ -54,7 +54,7 @@ export default function HowItWorks() {
               <div className="flex-1 space-y-6">
                 <div className="flex items-center space-x-4">
                   <span className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">{step.number}</span>
-                  <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
                     <step.icon className="h-6 w-6 text-white" />
                   </div>
                 </div>
@@ -62,7 +62,7 @@ export default function HowItWorks() {
                 <h3 className="text-3xl font-bold text-gray-900">{step.title}</h3>
                 <p className="text-xl text-gray-600">{step.description}</p>
                 
-                <div className="bg-gray-900 rounded-xl p-6 shadow-lg">
+                <div className="bg-gray-900 rounded-xl p-6">
                   <pre className="text-green-400 font-mono text-sm overflow-x-auto">
                     <code>{step.code}</code>
                   </pre>
@@ -71,7 +71,7 @@ export default function HowItWorks() {
 
               {/* Visual */}
               <div className="flex-1">
-                <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+                <div className="bg-white rounded-2xl border border-gray-200 p-8">
                   <div className="space-y-4">
                     {step.number === "01" && (
                       <div className="space-y-3">

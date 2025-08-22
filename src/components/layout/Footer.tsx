@@ -76,7 +76,7 @@ export default function Footer() {
                 <a
                   key={index}
                   href={social.href}
-                  className={`w-11 h-11 bg-gray-800 rounded-xl flex items-center justify-center ${social.color} transition-all duration-200 hover:scale-105`}
+                  className={`w-11 h-11 bg-gray-800 rounded-xl flex items-center justify-center ${social.color} transition-colors duration-200`}
                   aria-label={social.label}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -118,30 +118,8 @@ export default function Footer() {
           ))}
         </div>
 
-        {/* Newsletter Section */}
-        <div className="border-t border-gray-800 mt-16 pt-12">
-          <div className="grid md:grid-cols-2 gap-8 items-center">
-            <div>
-              <h3 className="text-xl font-semibold mb-3">Stay updated</h3>
-              <p className="text-gray-400 text-sm">
-                Get the latest updates, tutorials, and product announcements.
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <input
-                type="email"
-                placeholder="Enter your email"
-                className="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <button className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors duration-200 whitespace-nowrap">
-                Subscribe
-              </button>
-            </div>
-          </div>
-        </div>
-
         {/* Bottom Bar */}
-        <div className="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center">
+        <div className="border-t border-gray-800 mt-16 pt-8 flex flex-col md:flex-row justify-between items-center">
           <div className="flex flex-col md:flex-row items-center space-y-2 md:space-y-0 md:space-x-6 mb-4 md:mb-0">
             <p className="text-gray-400 text-sm">
               © 2024 ReCopyFast. All rights reserved.
