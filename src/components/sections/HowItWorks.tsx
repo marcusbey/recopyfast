@@ -1,4 +1,7 @@
-import { Code2, Search, Edit3 } from "lucide-react";
+"use client";
+
+import { Code2, Search, Edit3, Copy } from "lucide-react";
+import { useState } from "react";
 
 const steps = [
   {
@@ -29,49 +32,74 @@ const steps = [
 ];
 
 export default function HowItWorks() {
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const handleCopyCode = async (code: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedIndex(index);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy code:', err);
+    }
+  };
+
   return (
     <section className="py-20 bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-16">
-          <h2 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-6">
+        <div className="text-center mb-12 lg:mb-16">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4 lg:mb-6">
             How It Works
           </h2>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          <p className="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto">
             Transform your website into an AI-powered editable platform in three simple steps. 
             No backend changes, no complex setup, no headaches.
           </p>
         </div>
 
-        <div className="space-y-16">
+        <div className="space-y-12 lg:space-y-16">
           {steps.map((step, index) => (
             <div
               key={index}
               className={`flex flex-col ${
                 index % 2 === 0 ? "lg:flex-row" : "lg:flex-row-reverse"
-              } items-center gap-12 lg:gap-20`}
+              } items-start lg:items-center gap-8 lg:gap-20`}
             >
               {/* Content */}
-              <div className="flex-1 space-y-6">
+              <div className="flex-1 space-y-6 w-full">
                 <div className="flex items-center space-x-4">
-                  <span className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">{step.number}</span>
-                  <div className="w-12 h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                    <step.icon className="h-6 w-6 text-white" />
+                  <span className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">{step.number}</span>
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
+                    <step.icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                   </div>
                 </div>
                 
-                <h3 className="text-3xl font-bold text-gray-900">{step.title}</h3>
-                <p className="text-xl text-gray-600">{step.description}</p>
+                <h3 className="text-2xl sm:text-3xl font-bold text-gray-900">{step.title}</h3>
+                <p className="text-lg sm:text-xl text-gray-600">{step.description}</p>
                 
-                <div className="bg-gray-900 rounded-xl p-6">
-                  <pre className="text-green-400 font-mono text-sm overflow-x-auto">
+                <div className="bg-gray-900 rounded-xl p-4 sm:p-6 w-full overflow-hidden relative group">
+                  {step.number === "01" && (
+                    <button
+                      onClick={() => handleCopyCode(step.code, index)}
+                      className="absolute top-3 right-3 p-2 bg-gray-800 hover:bg-gray-700 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                      title="Copy script tag"
+                    >
+                      {copiedIndex === index ? (
+                        <span className="text-green-400 text-xs font-medium">Copied!</span>
+                      ) : (
+                        <Copy className="h-4 w-4 text-gray-400" />
+                      )}
+                    </button>
+                  )}
+                  <pre className="text-green-400 font-mono text-xs sm:text-sm overflow-x-auto whitespace-pre-wrap break-words sm:break-normal pr-12">
                     <code>{step.code}</code>
                   </pre>
                 </div>
               </div>
 
               {/* Visual */}
-              <div className="flex-1">
-                <div className="bg-white rounded-2xl border border-gray-200 p-8">
+              <div className="flex-1 w-full">
+                <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-8">
                   <div className="space-y-4">
                     {step.number === "01" && (
                       <div className="space-y-3">

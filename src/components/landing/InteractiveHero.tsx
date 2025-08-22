@@ -553,7 +553,7 @@ export default function InteractiveHero() {
                 scale: 0.9, 
                 backdropFilter: "blur(0px)"
               }}
-              className="absolute inset-0 bg-gradient-to-t from-black/70 via-purple/10 to-transparent flex items-center justify-center cursor-pointer rounded-lg backdrop-blur-sm"
+              className="absolute inset-0 bg-gradient-to-t from-black/70 via-purple-500/10 to-transparent flex items-center justify-center cursor-pointer rounded-lg backdrop-blur-sm"
               onClick={() => setShowImageModal(true)}
               whileHover={{ 
                 background: "linear-gradient(to top, rgba(0,0,0,0.8), rgba(147,51,234,0.2), transparent)"

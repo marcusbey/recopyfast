@@ -32,20 +32,22 @@ const pricingPlans = [
     name: 'Professional',
     price: 29,
     period: 'month',
-    description: 'Ideal for growing businesses and agencies',
+    description: 'Perfect for freelancers, agencies, and growing businesses',
     icon: Crown,
     popular: true,
     features: [
       '5 websites',
       '100,000 page views/month',
-      'Advanced content editing',
-      'AI-powered suggestions',
-      'Priority support',
-      'Advanced analytics',
-      'Team collaboration',
-      'Custom domains',
-      'Version history',
-      'Enhanced security'
+      'Multi-language content editing',
+      'AI-powered copy suggestions',
+      'Client collaboration dashboard',
+      'Priority support (4hr response)',
+      'Advanced analytics & reports',
+      'Team collaboration (up to 3 users)',
+      'Custom domains & white-label',
+      'Version history & rollback',
+      'Enhanced security & backups',
+      'Client presentation mode'
     ],
     cta: 'Start Free Trial',
     gradient: 'from-blue-500 to-purple-600'
@@ -54,21 +56,26 @@ const pricingPlans = [
     name: 'Enterprise',
     price: 99,
     period: 'month',
-    description: 'For large organizations with advanced needs',
+    description: 'For agencies, enterprises, and professional freelancers',
     icon: Rocket,
     popular: false,
     features: [
-      'Unlimited websites',
-      'Unlimited page views',
+      'Unlimited websites & traffic',
       'All Professional features',
+      'Expert copywriting audit service',
+      'Advanced multi-language editing',
+      'Team collaboration (5+ users)',
+      'Client CMS access & permissions',
+      'AI brand voice consistency',
+      'Conversion optimization tools',
       'White-label solution',
       'Dedicated account manager',
-      'SLA guarantee',
-      'Advanced integrations',
-      'Custom workflows',
-      'Audit logs',
+      'SLA guarantee (99.9% uptime)',
+      'Advanced integrations (Zapier, etc)',
+      'Custom workflows & automation',
+      'Audit logs & compliance',
       'SSO authentication',
-      'Advanced security'
+      'Priority feature requests'
     ],
     cta: 'Contact Sales',
     gradient: 'from-purple-500 to-pink-600'
@@ -212,7 +219,7 @@ export default function Pricing() {
           viewport={{ once: true }}
           variants={containerVariants}
         >
-          {pricingPlans.map((plan, index) => {
+          {pricingPlans.map((plan) => {
             const Icon = plan.icon;
             const displayPrice = getDisplayPrice(plan.price);
             
