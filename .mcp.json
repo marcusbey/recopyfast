@@ -1,19 +1,68 @@
 {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "stripe-secret-key",
+      "description": "Stripe Secret Key (sk_test_... or sk_live_...)",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "supabase-access-token",
+      "description": "Supabase Personal Access Token",
+      "password": true
+    },
+    {
+      "type": "promptString",
+      "id": "supabase-project-ref",
+      "description": "Supabase Project Reference ID",
+      "default": "uexwowziiigweobgpmtk"
+    },
+    {
+      "type": "promptString",
+      "id": "redis-url",
+      "description": "Redis connection URL",
+      "default": "redis://default:ejCZY3G9M11V37Q72lto1eURBgfseyT2@redis-11062.c326.us-east-1-3.ec2.redns.redis-cloud.com:11062"
+    }
+  ],
   "mcpServers": {
-    "context7": {
-      "type": "http",
-      "url": "https://mcp.context7.com/mcp"
+    "stripe": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@stripe/mcp",
+        "--tools=customers.create,customers.read,customers.update,payments.create,payments.read,subscriptions.create,subscriptions.read,subscriptions.update,products.create,products.read,prices.create,prices.read,refunds.create"
+      ],
+      "env": {
+        "STRIPE_SECRET_KEY": "${input:stripe-secret-key}"
+      }
     },
     "supabase": {
       "command": "npx",
       "args": [
         "-y",
         "@supabase/mcp-server-supabase@latest",
-        "--project-ref=uexwowziiigweobgpmtk"
+        "--read-only=false",
+        "--project-ref=${input:supabase-project-ref}"
       ],
       "env": {
-        "SUPABASE_ACCESS_TOKEN": "sbp_181e0d9ce2fc100f00a2861d67b0ce5dd816bee3"
+        "SUPABASE_ACCESS_TOKEN": "${input:supabase-access-token}"
       }
+    },
+    "redis": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-redis"],
+      "env": {
+        "REDIS_URL": "${input:redis-url}"
+      }
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
     }
   }
 }

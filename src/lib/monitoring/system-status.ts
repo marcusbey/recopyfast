@@ -125,23 +125,38 @@ class SystemStatusMonitor {
   }
 
   /**
-   * Collect current system metrics
+   * Collect current system metrics (Edge Runtime compatible)
    */
   private collectMetrics(): void {
     try {
-      const memoryUsage = process.memoryUsage();
+      // Check if we're in Node.js environment (not Edge Runtime)
+      const isNodeJs = typeof process !== 'undefined' && process.memoryUsage;
       
-      const metrics: SystemMetrics = {
-        timestamp: new Date().toISOString(),
-        uptime: Math.round((Date.now() - this.startTime) / 1000),
-        memory: {
+      let memoryInfo = {
+        used: 0,
+        total: 0,
+        percentage: 0,
+        rss: 0,
+        heapUsed: 0,
+        heapTotal: 0,
+      };
+
+      if (isNodeJs) {
+        const memoryUsage = process.memoryUsage();
+        memoryInfo = {
           used: Math.round(memoryUsage.heapUsed / 1024 / 1024),
           total: Math.round(memoryUsage.heapTotal / 1024 / 1024),
           percentage: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100),
           rss: Math.round(memoryUsage.rss / 1024 / 1024),
           heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
           heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
-        },
+        };
+      }
+      
+      const metrics: SystemMetrics = {
+        timestamp: new Date().toISOString(),
+        uptime: Math.round((Date.now() - this.startTime) / 1000),
+        memory: memoryInfo,
         requests: {
           total: this.requestCounts.total,
           active: this.requestCounts.active,

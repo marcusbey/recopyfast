@@ -2,6 +2,12 @@ import { createClient } from '@/lib/supabase/server';
 import { getUserSubscription } from '@/lib/stripe/subscription';
 import { getUserTicketBalance, consumeTickets } from '@/lib/stripe/tickets';
 import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
+import { 
+  getUserCreditBalance, 
+  hasEnoughCredits, 
+  consumeCredits,
+  CREDIT_COSTS 
+} from '@/lib/credits/system';
 
 export interface FeaturePermission {
   allowed: boolean;
@@ -110,34 +116,33 @@ export async function canAddCollaborator(userId: string, siteId: string): Promis
 /**
  * Check if user can use AI features
  */
-export async function canUseAIFeatures(userId: string, ticketsRequired: number = 1): Promise<FeaturePermission> {
+export async function canUseAIFeatures(userId: string, creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION): Promise<FeaturePermission> {
   const subscription = await getUserSubscription(userId);
   const planId = subscription?.plan_id || 'free';
   const plan = SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
   
-  // AI features not available on current plan
+  // AI features not available on free plan
   if (!plan.limits.aiFeatures) {
-    // Check if user has tickets
-    const ticketBalance = await getUserTicketBalance(userId);
-    
-    if (ticketBalance >= ticketsRequired) {
-      return {
-        allowed: true,
-        requiresTickets: true,
-        ticketsRequired,
-      };
-    }
-    
     return {
       allowed: false,
-      reason: 'AI features require a Pro or Enterprise plan, or individual tickets',
+      reason: 'AI features require a Pro or Enterprise subscription',
       upgradeRequired: true,
-      requiresTickets: true,
-      ticketsRequired,
     };
   }
   
-  // AI features included in plan
+  // Check credit balance for Pro/Enterprise users
+  const creditBalance = await getUserCreditBalance(userId);
+  
+  if (creditBalance.total < creditsRequired) {
+    return {
+      allowed: false,
+      reason: `Insufficient credits. You need ${creditsRequired} credits but only have ${creditBalance.total}.`,
+      requiresTickets: true,
+      ticketsRequired: creditsRequired,
+    };
+  }
+  
+  // AI features available with sufficient credits
   return { allowed: true };
 }
 
@@ -178,7 +183,7 @@ export async function canUseTranslation(userId: string): Promise<FeaturePermissi
 }
 
 /**
- * Consume feature usage (for ticket-based features)
+ * Consume feature usage (for credit-based features)
  */
 export async function consumeFeatureUsage(
   userId: string,
@@ -187,25 +192,34 @@ export async function consumeFeatureUsage(
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   
-  // Check if feature requires tickets
+  // Determine credits required based on feature
+  let creditsRequired = 0;
+  if (feature === 'ai_suggestion') {
+    creditsRequired = CREDIT_COSTS.AI_SUGGESTION;
+  } else if (feature === 'translation') {
+    creditsRequired = CREDIT_COSTS.AI_TRANSLATION;
+  }
+  
+  // Check if feature requires credits and user has permission
   const permission = await (feature === 'ai_suggestion' 
-    ? canUseAIFeatures(userId) 
+    ? canUseAIFeatures(userId, creditsRequired) 
     : canUseTranslation(userId));
     
   if (!permission.allowed) {
     return { success: false, error: permission.reason };
   }
   
-  // Consume tickets if required
-  if (permission.requiresTickets && permission.ticketsRequired) {
-    const success = await consumeTickets(
+  // Consume credits for AI features
+  if (feature === 'ai_suggestion' || feature === 'translation') {
+    const result = await consumeCredits(
       userId,
-      permission.ticketsRequired,
-      `${feature} usage`
+      creditsRequired,
+      feature,
+      metadata
     );
     
-    if (!success) {
-      return { success: false, error: 'Insufficient tickets' };
+    if (!result.success) {
+      return { success: false, error: result.error };
     }
   }
   
@@ -216,7 +230,10 @@ export async function consumeFeatureUsage(
       user_id: userId,
       feature_type: feature,
       count: 1,
-      metadata: metadata || {},
+      metadata: {
+        ...metadata,
+        credits_used: creditsRequired,
+      },
     });
     
   return { success: true };

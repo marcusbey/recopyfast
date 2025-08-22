@@ -10,9 +10,15 @@ export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 export const STRIPE_CONFIG = {
-  PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
-  SECRET_KEY: process.env.STRIPE_SECRET_KEY!,
-  WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET!,
+  PUBLISHABLE_KEY: process.env.NODE_ENV === 'production' 
+    ? process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE!
+    : process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
+  SECRET_KEY: process.env.NODE_ENV === 'production'
+    ? process.env.STRIPE_SECRET_KEY_LIVE!
+    : process.env.STRIPE_SECRET_KEY!,
+  WEBHOOK_SECRET: process.env.NODE_ENV === 'production'
+    ? process.env.STRIPE_WEBHOOK_SECRET_LIVE!
+    : process.env.STRIPE_WEBHOOK_SECRET!,
   CURRENCY: 'usd',
   API_VERSION: '2024-12-18.acacia' as const,
 } as const;
@@ -42,7 +48,9 @@ export const SUBSCRIPTION_PLANS = {
     name: 'Pro',
     description: 'Unlimited websites, AI features, 5 collaborators',
     price: 29,
-    priceId: process.env.STRIPE_PRO_PRICE_ID!,
+    priceId: process.env.NODE_ENV === 'production'
+      ? process.env.STRIPE_PRO_PRICE_ID_LIVE!
+      : process.env.STRIPE_PRO_PRICE_ID!,
     features: [
       'Unlimited websites',
       'AI-powered suggestions',
@@ -63,7 +71,9 @@ export const SUBSCRIPTION_PLANS = {
     name: 'Enterprise',
     description: 'Unlimited everything, white-label, priority support',
     price: 99,
-    priceId: process.env.STRIPE_ENTERPRISE_PRICE_ID!,
+    priceId: process.env.NODE_ENV === 'production'
+      ? process.env.STRIPE_ENTERPRISE_PRICE_ID_LIVE!
+      : process.env.STRIPE_ENTERPRISE_PRICE_ID!,
     features: [
       'Everything in Pro',
       'Unlimited collaborators',
@@ -85,7 +95,9 @@ export const SUBSCRIPTION_PLANS = {
 export const TICKET_CONFIG = {
   PRICE_PER_TICKET: 0.5, // $0.50 per ticket
   TICKETS_PER_PURCHASE: 10, // $5 for 10 tickets
-  PRICE_ID: process.env.STRIPE_TICKETS_PRICE_ID!,
+  PRICE_ID: process.env.NODE_ENV === 'production'
+    ? process.env.STRIPE_TICKETS_PRICE_ID_LIVE!
+    : process.env.STRIPE_TICKETS_PRICE_ID!,
 } as const;
 
 export type SubscriptionPlan = keyof typeof SUBSCRIPTION_PLANS;
