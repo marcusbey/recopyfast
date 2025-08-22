@@ -27,20 +27,30 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] bg-white border border-gray-200 rounded-2xl">
         <DialogHeader>
-          <DialogTitle className="text-2xl font-bold text-center">
+          <DialogTitle className="text-2xl font-bold text-center text-gray-900">
             Welcome to ReCopyFast
           </DialogTitle>
-          <DialogDescription className="text-center">
+          <DialogDescription className="text-center text-gray-600">
             Sign in to your account or create a new one to get started
           </DialogDescription>
         </DialogHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="login">Sign In</TabsTrigger>
-            <TabsTrigger value="signup">Sign Up</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 bg-gray-100 rounded-lg p-1">
+            <TabsTrigger 
+              value="login"
+              className="text-gray-600 data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm rounded-md font-medium"
+            >
+              Sign In
+            </TabsTrigger>
+            <TabsTrigger 
+              value="signup"
+              className="text-gray-600 data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm rounded-md font-medium"
+            >
+              Sign Up
+            </TabsTrigger>
           </TabsList>
           
           <TabsContent value="login" className="mt-6">
