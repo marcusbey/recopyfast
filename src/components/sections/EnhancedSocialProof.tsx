@@ -154,20 +154,77 @@ const companies = [
 
 export default function EnhancedSocialProof() {
   const [currentTestimonial, setCurrentTestimonial] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+
+  // Check if mobile view
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const nextTestimonial = () => {
-    setCurrentTestimonial((prev) => (prev + 1) % testimonials.length);
+    if (isMobile) {
+      setCurrentTestimonial((prev) => (prev + 1) % testimonials.length);
+    } else {
+      // Desktop: Move in groups of 3
+      setCurrentTestimonial((prev) => {
+        const nextGroup = Math.floor(prev / 3) + 1;
+        return nextGroup * 3 >= testimonials.length ? 0 : nextGroup * 3;
+      });
+    }
   };
 
   const prevTestimonial = () => {
-    setCurrentTestimonial((prev) => (prev - 1 + testimonials.length) % testimonials.length);
+    if (isMobile) {
+      setCurrentTestimonial((prev) => (prev - 1 + testimonials.length) % testimonials.length);
+    } else {
+      // Desktop: Move in groups of 3
+      setCurrentTestimonial((prev) => {
+        const currentGroup = Math.floor(prev / 3);
+        return currentGroup === 0 ? Math.floor((testimonials.length - 1) / 3) * 3 : (currentGroup - 1) * 3;
+      });
+    }
+  };
+
+  // Touch handlers for mobile swipe
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (isLeftSwipe) {
+      nextTestimonial();
+    }
+    if (isRightSwipe) {
+      prevTestimonial();
+    }
   };
 
   // Auto-advance carousel
   useEffect(() => {
     const timer = setInterval(nextTestimonial, 5000);
     return () => clearInterval(timer);
-  }, []);
+  }, [nextTestimonial]);
 
   return (
     <section className="py-20 bg-gradient-to-br from-gray-50 to-blue-50">
@@ -345,34 +402,43 @@ export default function EnhancedSocialProof() {
 
         {/* Testimonial Carousel */}
         <div className="mb-16">
-          <h4 className="text-2xl font-bold text-center text-gray-900 mb-12">
+          <h4 className="text-2xl font-bold text-center text-gray-900 mb-8 md:mb-12">
             More Customer Stories
           </h4>
           
-          <div className="relative">
+          <div className="relative px-12 md:px-0">
             {/* Carousel Container */}
-            <div className="overflow-hidden">
+            <div 
+              className="overflow-hidden"
+              onTouchStart={onTouchStart}
+              onTouchMove={onTouchMove}
+              onTouchEnd={onTouchEnd}
+            >
               <div 
                 className="flex transition-transform duration-500 ease-in-out"
-                style={{ transform: `translateX(-${currentTestimonial * (100 / 3)}%)` }}
+                style={{ 
+                  transform: isMobile 
+                    ? `translateX(-${currentTestimonial * 100}%)` 
+                    : `translateX(-${Math.floor(currentTestimonial / 3) * 100}%)`
+                }}
               >
                 {testimonials.map((testimonial, index) => (
                   <div
                     key={index}
-                    className="w-full md:w-1/3 flex-shrink-0 px-4"
+                    className="w-full md:w-1/3 flex-shrink-0 px-2 md:px-4"
                   >
-                    <div className="bg-white rounded-2xl p-8 border border-gray-200 border border-gray-200 hover:border-gray-300 transition-all duration-300 h-full">
-                      <div className="flex items-center mb-4">
+                    <div className="bg-white rounded-2xl p-6 md:p-8 border border-gray-200 hover:border-gray-300 transition-all duration-300 h-full max-w-sm mx-auto md:max-w-none">
+                      <div className="flex items-center mb-4 justify-center md:justify-start">
                         {[...Array(testimonial.rating)].map((_, i) => (
                           <Star key={i} className="h-5 w-5 text-yellow-400 fill-current" />
                         ))}
                       </div>
                       
-                      <blockquote className="text-gray-700 mb-6 italic text-sm leading-relaxed">
+                      <blockquote className="text-gray-700 mb-6 italic text-sm md:text-base leading-relaxed text-center md:text-left">
                         &ldquo;{testimonial.content}&rdquo;
                       </blockquote>
                       
-                      <div className="flex items-center mt-auto">
+                      <div className="flex items-center mt-auto justify-center md:justify-start">
                         <img
                           src={testimonial.avatar}
                           alt={testimonial.name}
@@ -394,31 +460,51 @@ export default function EnhancedSocialProof() {
             {/* Navigation Buttons */}
             <button
               onClick={prevTestimonial}
-              className="absolute left-0 top-1/2 transform -translate-y-1/2 -translate-x-6 bg-white rounded-full p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200"
+              className="absolute left-0 md:-left-6 top-1/2 transform -translate-y-1/2 bg-white rounded-full p-2 md:p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200 z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              aria-label="Previous testimonial"
             >
-              <ChevronLeft className="h-6 w-6 text-gray-600" />
+              <ChevronLeft className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
             </button>
             
             <button
               onClick={nextTestimonial}
-              className="absolute right-0 top-1/2 transform -translate-y-1/2 translate-x-6 bg-white rounded-full p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200"
+              className="absolute right-0 md:-right-6 top-1/2 transform -translate-y-1/2 bg-white rounded-full p-2 md:p-3 border border-gray-200 hover:border-gray-300 transition-colors duration-200 z-10 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              aria-label="Next testimonial"
             >
-              <ChevronRight className="h-6 w-6 text-gray-600" />
+              <ChevronRight className="h-5 w-5 md:h-6 md:w-6 text-gray-600" />
             </button>
 
             {/* Dots Indicator */}
-            <div className="flex justify-center mt-8 space-x-2">
-              {testimonials.map((_, index) => (
-                <button
-                  key={index}
-                  onClick={() => setCurrentTestimonial(index)}
-                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                    currentTestimonial === index 
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 w-3 h-3' 
-                      : 'bg-gray-300 hover:bg-gray-400'
-                  }`}
-                />
-              ))}
+            <div className="flex justify-center mt-6 md:mt-8 space-x-2">
+              {isMobile ? (
+                // Mobile: Show dots for all testimonials
+                testimonials.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => setCurrentTestimonial(index)}
+                    className={`rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      currentTestimonial === index 
+                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 w-8 h-3' 
+                        : 'bg-gray-300 hover:bg-gray-400 w-3 h-3'
+                    }`}
+                    aria-label={`Go to testimonial ${index + 1}`}
+                  />
+                ))
+              ) : (
+                // Desktop: Show dots for groups of 3
+                [...Array(Math.ceil(testimonials.length / 3))].map((_, groupIndex) => (
+                  <button
+                    key={groupIndex}
+                    onClick={() => setCurrentTestimonial(groupIndex * 3)}
+                    className={`rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                      Math.floor(currentTestimonial / 3) === groupIndex
+                        ? 'bg-gradient-to-r from-blue-600 to-purple-600 w-8 h-3' 
+                        : 'bg-gray-300 hover:bg-gray-400 w-3 h-3'
+                    }`}
+                    aria-label={`Go to testimonial group ${groupIndex + 1}`}
+                  />
+                ))
+              )}
             </div>
           </div>
         </div>
