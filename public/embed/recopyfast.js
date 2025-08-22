@@ -109,6 +109,179 @@
       // For other elements, get text content
       return element.textContent;
     }
+
+    /**
+     * Get full text content including hidden overflow text
+     */
+    getFullElementText(element) {
+      // Try different methods to get full text
+      let text = '';
+      
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+        text = element.value || element.placeholder || '';
+      } else {
+        // Get all text content, including hidden overflow
+        text = element.textContent || element.innerText || '';
+        
+        // If text seems truncated (ends with ...), try to get original
+        if (text.endsWith('...') || text.endsWith('…')) {
+          // Look for title attribute or data attributes that might contain full text
+          text = element.title || element.getAttribute('data-full-text') || text;
+        }
+      }
+      
+      return text.trim();
+    }
+
+    /**
+     * Calculate optimal text color based on background contrast
+     */
+    getOptimalTextColor(element, computedStyle) {
+      // Get background color from element and its parents
+      const backgroundColor = this.getEffectiveBackgroundColor(element);
+      
+      // Calculate luminance
+      const luminance = this.getLuminance(backgroundColor);
+      
+      // Use original color if it has good contrast, otherwise use optimal color
+      const originalColor = computedStyle.color;
+      const originalLuminance = this.getLuminance(this.parseColor(originalColor));
+      
+      // Calculate contrast ratio
+      const originalContrast = this.getContrastRatio(luminance, originalLuminance);
+      
+      // If original has good contrast (4.5:1 for normal text), keep it
+      if (originalContrast >= 4.5) {
+        return originalColor;
+      }
+      
+      // Otherwise, choose high contrast color
+      return luminance > 0.5 ? '#000000' : '#ffffff';
+    }
+
+    /**
+     * Get effective background color by traversing parent elements
+     */
+    getEffectiveBackgroundColor(element) {
+      let currentElement = element;
+      const colors = [];
+      
+      while (currentElement && currentElement !== document.body) {
+        const style = window.getComputedStyle(currentElement);
+        const bgColor = style.backgroundColor;
+        
+        if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+          colors.push(this.parseColor(bgColor));
+          
+          // If we hit an opaque background, we can stop
+          if (colors[colors.length - 1].a >= 1) {
+            break;
+          }
+        }
+        
+        currentElement = currentElement.parentElement;
+      }
+      
+      // If no background found, assume white
+      if (colors.length === 0) {
+        return { r: 255, g: 255, b: 255, a: 1 };
+      }
+      
+      // Composite colors from top to bottom
+      return colors.reduce((bottom, top) => {
+        return this.compositeColors(bottom, top);
+      });
+    }
+
+    /**
+     * Parse CSS color to RGB object
+     */
+    parseColor(color) {
+      const div = document.createElement('div');
+      div.style.color = color;
+      document.body.appendChild(div);
+      
+      const computedColor = window.getComputedStyle(div).color;
+      document.body.removeChild(div);
+      
+      const match = computedColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      
+      if (match) {
+        return {
+          r: parseInt(match[1]),
+          g: parseInt(match[2]),
+          b: parseInt(match[3]),
+          a: match[4] ? parseFloat(match[4]) : 1
+        };
+      }
+      
+      // Fallback for hex colors
+      if (color.startsWith('#')) {
+        const hex = color.slice(1);
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+          a: 1
+        };
+      }
+      
+      return { r: 0, g: 0, b: 0, a: 1 };
+    }
+
+    /**
+     * Calculate luminance of a color
+     */
+    getLuminance(color) {
+      const { r, g, b } = color;
+      
+      const rs = r / 255;
+      const gs = g / 255;
+      const bs = b / 255;
+      
+      const rLin = rs <= 0.03928 ? rs / 12.92 : Math.pow((rs + 0.055) / 1.055, 2.4);
+      const gLin = gs <= 0.03928 ? gs / 12.92 : Math.pow((gs + 0.055) / 1.055, 2.4);
+      const bLin = bs <= 0.03928 ? bs / 12.92 : Math.pow((bs + 0.055) / 1.055, 2.4);
+      
+      return 0.2126 * rLin + 0.7152 * gLin + 0.0722 * bLin;
+    }
+
+    /**
+     * Calculate contrast ratio between two luminance values
+     */
+    getContrastRatio(lum1, lum2) {
+      const brighter = Math.max(lum1, lum2);
+      const darker = Math.min(lum1, lum2);
+      return (brighter + 0.05) / (darker + 0.05);
+    }
+
+    /**
+     * Composite two colors (alpha blending)
+     */
+    compositeColors(bottom, top) {
+      const alpha = top.a;
+      const invAlpha = 1 - alpha;
+      
+      return {
+        r: Math.round(alpha * top.r + invAlpha * bottom.r),
+        g: Math.round(alpha * top.g + invAlpha * bottom.g),
+        b: Math.round(alpha * top.b + invAlpha * bottom.b),
+        a: alpha + bottom.a * invAlpha
+      };
+    }
+
+    /**
+     * Get appropriate text shadow for better visibility
+     */
+    getTextShadow(textColor) {
+      const isLight = textColor === '#ffffff' || textColor.toLowerCase() === 'white';
+      
+      if (isLight) {
+        return '1px 1px 2px rgba(0, 0, 0, 0.7)';
+      } else {
+        return '1px 1px 2px rgba(255, 255, 255, 0.7)';
+      }
+    }
     
     generateSelector(element) {
       const path = [];
@@ -478,8 +651,8 @@
       element.classList.add('rcf-editing');
       element.classList.remove('rcf-hovering');
 
-      // Store original content and styles
-      const originalText = this.getElementText(element);
+      // Store original content and styles (fix issue #2 - get full text)
+      const originalText = this.getFullElementText(element);
       const computedStyle = window.getComputedStyle(element);
       let originalPadding = computedStyle.padding;
       if (originalPadding === '0px') {
@@ -499,6 +672,9 @@
         inputElement.type = 'text';
       }
 
+      // Calculate optimal text color based on background (fix issue #1)
+      const optimalTextColor = this.getOptimalTextColor(element, computedStyle);
+
       // Apply inherited styles to maintain appearance
       inputElement.value = originalText;
       inputElement.style.cssText = `
@@ -517,10 +693,11 @@
         text-align: ${computedStyle.textAlign} !important;
         text-decoration: ${computedStyle.textDecoration} !important;
         text-transform: ${computedStyle.textTransform} !important;
-        color: ${computedStyle.color} !important;
+        color: ${optimalTextColor} !important;
         word-wrap: break-word !important;
         overflow-wrap: break-word !important;
         box-sizing: border-box !important;
+        text-shadow: ${this.getTextShadow(optimalTextColor)} !important;
       `;
 
       if (inputElement.tagName === 'TEXTAREA') {
