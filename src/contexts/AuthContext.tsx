@@ -8,8 +8,7 @@ import { useRouter } from 'next/navigation';
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, metadata?: any) => Promise<void>;
+  signInWithMagicLink: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
 }
@@ -46,34 +45,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase.auth]);
 
-  const signIn = async (email: string, password: string) => {
+  const signInWithMagicLink = async (email: string) => {
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signInWithOtp({
         email,
-        password,
-      });
-
-      if (error) throw error;
-      router.push('/dashboard');
-    } catch (error: any) {
-      throw new Error(error.message || 'An error occurred during sign in');
-    }
-  };
-
-  const signUp = async (email: string, password: string, metadata?: any) => {
-    try {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
         options: {
-          data: metadata || {},
           emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
+          data: {
+            source: 'magic-link'
+          }
+        }
       });
 
       if (error) throw error;
     } catch (error: any) {
-      throw new Error(error.message || 'An error occurred during sign up');
+      throw new Error(error.message || 'An error occurred while sending magic link');
     }
   };
 
@@ -101,8 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider value={{
       user,
       loading,
-      signIn,
-      signUp,
+      signInWithMagicLink,
       signOut,
       refreshSession,
     }}>

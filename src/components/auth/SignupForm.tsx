@@ -14,10 +14,8 @@ interface SignupFormProps {
 }
 
 export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
-  const { signUp } = useAuth();
+  const { signInWithMagicLink } = useAuth();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,25 +24,13 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
     setIsLoading(true);
 
     try {
-      await signUp(email, password, { name });
+      await signInWithMagicLink(email);
       setSuccess(true);
-      onSuccess?.();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to sign up');
+      setError(err instanceof Error ? err.message : 'Failed to send magic link');
     } finally {
       setIsLoading(false);
     }
@@ -54,15 +40,25 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
     return (
       <div className="text-center space-y-4">
         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-          <CheckCircle className="w-8 h-8 text-green-600" />
+          <Mail className="w-8 h-8 text-green-600" />
         </div>
-        <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>
-        <p className="text-gray-600">
-          We&apos;ve sent you a confirmation link to <strong>{email}</strong>
-        </p>
-        <p className="text-sm text-gray-500">
-          Please check your email and click the link to activate your account.
-        </p>
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>
+          <p className="text-gray-600 text-sm">
+            We've sent a magic link to <span className="font-medium text-gray-900">{email}</span>
+          </p>
+          <p className="text-gray-500 text-xs">
+            Click the link in your email to create your account and sign in. You can close this window.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setSuccess(false)}
+          className="mt-4"
+        >
+          Try different email
+        </Button>
       </div>
     );
   }
@@ -70,23 +66,7 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="name">Name</Label>
-        <div className="relative">
-          <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            id="name"
-            type="text"
-            placeholder="John Doe"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-            className="pl-10"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
+        <Label htmlFor="email">Email address</Label>
         <div className="relative">
           <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
@@ -97,38 +77,23 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
             onChange={(e) => setEmail(e.target.value)}
             required
             className="pl-10"
+            disabled={isLoading}
           />
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="name">Name (optional)</Label>
         <div className="relative">
-          <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
-            id="password"
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
+            id="name"
+            type="text"
+            placeholder="John Doe"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             className="pl-10"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="confirmPassword">Confirm Password</Label>
-        <div className="relative">
-          <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <Input
-            id="confirmPassword"
-            type="password"
-            placeholder="••••••••"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-            className="pl-10"
+            disabled={isLoading}
           />
         </div>
       </div>
@@ -143,17 +108,24 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
         type="submit"
         size="lg"
         className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200 border-0"
-        disabled={isLoading}
+        disabled={isLoading || !email}
       >
         {isLoading ? (
           <>
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Creating account...
+            Sending magic link...
           </>
         ) : (
-          'Create Account'
+          <>
+            <Mail className="mr-2 h-4 w-4" />
+            Send magic link
+          </>
         )}
       </Button>
+
+      <div className="text-center text-sm text-gray-500">
+        <p>We'll send you a secure link to create your account</p>
+      </div>
 
       <div className="text-center text-sm">
         <span className="text-gray-600">Already have an account? </span>

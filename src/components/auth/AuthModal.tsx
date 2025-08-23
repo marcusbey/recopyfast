@@ -33,7 +33,7 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
             Welcome to ReCopyFast
           </DialogTitle>
           <DialogDescription className="text-center text-gray-600">
-            Sign in to your account or create a new one to get started
+            Get instant access with a magic link sent to your email
           </DialogDescription>
         </DialogHeader>
 
