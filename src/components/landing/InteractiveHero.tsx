@@ -600,14 +600,13 @@ export default function InteractiveHero() {
               transition={{ duration: 0.3 }}
             >
               <motion.div 
-                className="bg-white/95 backdrop-blur-sm text-gray-900 px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white transition-all shadow-lg border border-white/20"
+                className="bg-white/95 backdrop-blur-sm text-gray-900 px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white transition-all shadow-lg border border-white/20 hover:border-blue-300"
                 whileHover={{ 
-                  scale: 1.08, 
                   y: -4,
                   boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
                   background: "rgba(255,255,255,0.98)"
                 }}
-                whileTap={{ scale: 0.95 }}
+                whileTap={{ scale: 0.98 }}
                 initial={{ y: 10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ 
@@ -693,7 +692,7 @@ export default function InteractiveHero() {
                     value={imagePrompt}
                     onChange={(e) => setImagePrompt(e.target.value)}
                     placeholder={`e.g., "modern luxury car with city lights", "fresh homemade pasta on marble counter", "rustic artisan bread with steam"`}
-                    className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-gray-50 focus:bg-white"
+                    className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-white text-gray-900 placeholder-gray-500"
                     rows={3}
                     style={{
                       direction: 'ltr',
@@ -709,26 +708,20 @@ export default function InteractiveHero() {
                 {/* Action Buttons */}
                 <div className="space-y-4">
                   <motion.button
-                    onClick={generateFromPrompt}
-                    disabled={!imagePrompt.trim() || isGenerating}
-                    className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-4 px-6 rounded-xl font-semibold hover:shadow-lg hover:scale-105 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-3 text-sm"
-                    whileHover={{ scale: !isGenerating && imagePrompt.trim() ? 1.02 : 1 }}
-                    whileTap={{ scale: !isGenerating && imagePrompt.trim() ? 0.98 : 1 }}
+                    onClick={() => {
+                      // Check if user is authenticated - for demo purposes, show login modal
+                      // In production, this would check actual auth state
+                      window.open('/auth?returnTo=' + encodeURIComponent(window.location.href), '_blank', 'width=500,height=600');
+                    }}
+                    className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-4 px-6 rounded-xl font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-3 text-sm cursor-pointer"
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
                   >
-                    {isGenerating ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        <span>Creating your image...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-5 h-5" />
-                        <span>✨ Generate with AI</span>
-                        <div className="ml-auto bg-white/20 px-2 py-1 rounded-full text-xs">
-                          Free
-                        </div>
-                      </>
-                    )}
+                    <Sparkles className="w-5 h-5" />
+                    <span>✨ Generate with AI</span>
+                    <div className="ml-auto bg-white/20 px-2 py-1 rounded-full text-xs">
+                      Login Required
+                    </div>
                   </motion.button>
                   
                   <div className="grid grid-cols-2 gap-4">
@@ -780,8 +773,8 @@ export default function InteractiveHero() {
     }, [item.id, item.isEditing]);
     
     if (item.isEditing) {
-      // Determine if this should be a textarea (for longer content) or input (for short content)
-      const useTextarea = item.text.length > 50 || item.text.includes('\n') || item.id === 'subheading' || item.id.includes('text') || item.id.includes('desc');
+      // Always use textarea to show full text content
+      const useTextarea = true;
       
       return (
         <motion.div
@@ -833,9 +826,10 @@ export default function InteractiveHero() {
               color: optimalColors[item.id] || 'inherit',
               textShadow: textShadows[item.id] || 'none',
               width: '100%',
-              minHeight: 'auto',
-              height: 'auto',
+              minHeight: '100%',
+              height: '100%',
               overflow: 'visible',
+              resize: 'none',
               wordWrap: 'break-word',
               overflowWrap: 'break-word',
               whiteSpace: 'pre-wrap',
@@ -848,42 +842,6 @@ export default function InteractiveHero() {
             rows={Math.max(1, item.text.split('\n').length)}
             autoFocus
           />
-        ) : (
-          <input
-            type="text"
-            value={item.text}
-            onChange={(e) => handleTextChange(item.id, e.target.value)}
-            onBlur={() => handleTextSave(item.id)}
-            onKeyDown={(e) => handleKeyPress(e, item.id)}
-            className="w-full outline-none"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              padding: '0',
-              margin: '0',
-              fontSize: 'inherit',
-              fontFamily: 'inherit',
-              fontWeight: 'inherit',
-              fontStyle: 'inherit',
-              lineHeight: 'inherit',
-              letterSpacing: 'inherit',
-              textAlign: 'inherit',
-              textDecoration: 'inherit',
-              textTransform: 'inherit',
-              color: optimalColors[item.id] || 'inherit',
-              textShadow: textShadows[item.id] || 'none',
-              width: '100%',
-              wordWrap: 'break-word',
-              overflowWrap: 'break-word',
-              direction: 'ltr', // Force left-to-right direction
-              unicodeBidi: 'normal', // Normal Unicode bidirectional algorithm
-              writingMode: 'horizontal-tb', // Standard horizontal writing mode
-              transform: 'none', // Ensure no transforms
-              WebkitTransform: 'none' // Safari support
-            }}
-            autoFocus
-          />
-        )}
         
           {/* Action buttons */}
           <div className="absolute -top-16 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
@@ -897,17 +855,11 @@ export default function InteractiveHero() {
             <div className="w-px h-4 bg-gray-200" />
             <button
               onClick={() => {
-                // AI suggestion placeholder - could integrate with OpenAI
-                const suggestions = {
-                  'headline': ['AI-Powered Content Management', 'Transform Websites Instantly', 'Smart Website Editing'],
-                  'subheading': ['Make any website editable with our powerful AI-driven platform.', 'Revolutionary content management that works with any website.', 'Transform static sites into dynamic, editable experiences.']
-                };
-                const suggestion = suggestions[item.id as keyof typeof suggestions]?.[0];
-                if (suggestion) {
-                  handleTextChange(item.id, suggestion);
-                }
+                // Check if user is authenticated - for demo purposes, show login modal
+                // In production, this would check actual auth state
+                window.open('/auth?returnTo=' + encodeURIComponent(window.location.href), '_blank', 'width=500,height=600');
               }}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors"
+              className="flex items-center gap-1 px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer"
             >
               <Sparkles className="w-3 h-3" />
               AI
