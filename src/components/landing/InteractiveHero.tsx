@@ -306,6 +306,7 @@ export default function InteractiveHero() {
   const [editableTexts, setEditableTexts] = useState<EditableText[]>(demoSites[0].editableTexts);
   const [optimalColors, setOptimalColors] = useState<Record<string, string>>({});
   const [textShadows, setTextShadows] = useState<Record<string, string>>({});
+  const [originalHeights, setOriginalHeights] = useState<Record<string, number>>({});
 
   const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -370,8 +371,11 @@ export default function InteractiveHero() {
       const computedStyle = window.getComputedStyle(element);
       // Store the original color to preserve it during editing
       const originalColor = computedStyle.color;
+      // Capture the original height before switching to edit mode
+      const originalHeight = element.offsetHeight;
       setOptimalColors(prev => ({ ...prev, [id]: originalColor }));
       setTextShadows(prev => ({ ...prev, [id]: 'inherit' }));
+      setOriginalHeights(prev => ({ ...prev, [id]: originalHeight }));
       
       // Get only the main text content, excluding tooltips and other UI elements
       const textDivs = element.querySelectorAll('div');
@@ -825,8 +829,8 @@ export default function InteractiveHero() {
               color: optimalColors[item.id] || 'inherit',
               textShadow: textShadows[item.id] || 'none',
               width: '100%',
-              minHeight: '100%',
-              height: '100%',
+              minHeight: originalHeights[item.id] > 0 ? `${originalHeights[item.id]}px` : 'auto',
+              height: originalHeights[item.id] > 0 ? `${originalHeights[item.id]}px` : 'auto',
               overflow: 'visible',
               resize: 'none',
               wordWrap: 'break-word',
