@@ -760,8 +760,8 @@
         inputElement.type = 'text';
       }
 
-      // Calculate optimal text color based on background (fix issue #1)
-      const optimalTextColor = this.getOptimalTextColor(element, computedStyle);
+      // CONSISTENT RULE: Always preserve original text color and formatting
+      const originalTextColor = computedStyle.color;
 
       // Apply inherited styles to maintain appearance
       inputElement.value = originalText;
@@ -781,11 +781,11 @@
         text-align: ${computedStyle.textAlign} !important;
         text-decoration: ${computedStyle.textDecoration} !important;
         text-transform: ${computedStyle.textTransform} !important;
-        color: ${optimalTextColor} !important;
+        color: ${originalTextColor} !important;
         word-wrap: break-word !important;
         overflow-wrap: break-word !important;
         box-sizing: border-box !important;
-        text-shadow: ${this.getTextShadow(optimalTextColor)} !important;
+        text-shadow: inherit !important;
       `;
 
       if (inputElement.tagName === 'TEXTAREA') {

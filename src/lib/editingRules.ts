@@ -3,6 +3,12 @@
  * 
  * This file defines the core rules and behaviors for content editing
  * to ensure consistent user experience across all demo websites.
+ * 
+ * CONSISTENT RULE FOR TEXT COLOR:
+ * - ALWAYS preserve the original text color during editing
+ * - DO NOT automatically change colors based on background detection
+ * - The editing experience should match the original design exactly
+ * - Users expect to see the same color they originally designed
  */
 
 export interface EditingRules {

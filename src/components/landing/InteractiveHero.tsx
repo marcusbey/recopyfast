@@ -364,16 +364,31 @@ export default function InteractiveHero() {
   };
 
   const handleTextClick = (id: string) => {
-    // Calculate optimal colors for the editing element
+    // CLEAR RULE: Always preserve original text color and formatting
     const element = document.querySelector(`[data-editable-id="${id}"]`) as HTMLElement;
     if (element) {
-      const color = getOptimalTextColor(element);
-      const shadow = getTextShadow(color);
-      setOptimalColors(prev => ({ ...prev, [id]: color }));
-      setTextShadows(prev => ({ ...prev, [id]: shadow }));
+      const computedStyle = window.getComputedStyle(element);
+      // Store the original color to preserve it during editing
+      const originalColor = computedStyle.color;
+      setOptimalColors(prev => ({ ...prev, [id]: originalColor }));
+      setTextShadows(prev => ({ ...prev, [id]: 'inherit' }));
       
-      // Get full text content when starting edit
-      const fullText = getFullElementText(element);
+      // Get only the main text content, excluding tooltips and other UI elements
+      const textDivs = element.querySelectorAll('div');
+      let fullText = '';
+      if (textDivs.length > 0) {
+        // Get text from the content divs, not from tooltips or UI elements
+        fullText = Array.from(textDivs)
+          .map(div => div.textContent?.trim())
+          .filter(text => text && text !== 'Click to edit')
+          .join('\n');
+      }
+      
+      // Fallback to finding the item text from state if DOM parsing fails
+      if (!fullText) {
+        const currentItem = editableTexts.find(item => item.id === id);
+        fullText = currentItem?.text || '';
+      }
       
       setEditableTexts(prev =>
         prev.map(item => {
