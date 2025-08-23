@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wand2, Sparkles, CheckCircle, ArrowRight, ChevronLeft, ChevronRight, Utensils, Car, Coffee, Edit3, Save, X, Image, Code, Zap } from 'lucide-react';
-import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES, getOptimalTextColor, getTextShadow, getFullElementText } from '@/lib/editingRules';
+import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES, getOptimalTextColor, getTextShadow, getFullElementText, UNSPLASH_CATEGORIES } from '@/lib/editingRules';
 
 interface EditableText {
   id: string;
@@ -512,7 +512,7 @@ export default function InteractiveHero() {
 
     const generateRandomImage = () => {
       const dimensions = imageType === 'hero' ? '1200x600' : '800x600';
-      const newImage = generateUnsplashUrl(imageType as any, 800, 600);
+      const newImage = generateUnsplashUrl(imageType as keyof typeof UNSPLASH_CATEGORIES, 800, 600);
       handleImageReplace(newImage);
     };
 
@@ -574,7 +574,8 @@ export default function InteractiveHero() {
             }}
             style={{
               transformStyle: "preserve-3d",
-              backfaceVisibility: "hidden"
+              backfaceVisibility: "hidden",
+              transform: "translateZ(0)" // Force GPU layer to prevent text rendering issues
             }}
           />
           
@@ -694,6 +695,13 @@ export default function InteractiveHero() {
                     placeholder={`e.g., "modern luxury car with city lights", "fresh homemade pasta on marble counter", "rustic artisan bread with steam"`}
                     className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-gray-50 focus:bg-white"
                     rows={3}
+                    style={{
+                      direction: 'ltr',
+                      unicodeBidi: 'normal',
+                      writingMode: 'horizontal-tb',
+                      transform: 'none',
+                      WebkitTransform: 'none'
+                    }}
                   />
                   <p className="text-xs text-gray-500 mt-2">💡 Tip: Be specific about style, mood, and details for better results</p>
                 </div>
@@ -782,6 +790,11 @@ export default function InteractiveHero() {
           className="relative"
           ref={elementRef}
           data-editing-mode="true"
+          style={{
+            transform: "translateZ(0)", // Create new stacking context
+            willChange: "transform", // Optimize for transforms
+            isolation: "isolate" // Isolate from parent 3D context
+          }}
         >
         {useTextarea ? (
           <textarea
@@ -825,7 +838,12 @@ export default function InteractiveHero() {
               overflow: 'visible',
               wordWrap: 'break-word',
               overflowWrap: 'break-word',
-              whiteSpace: 'pre-wrap'
+              whiteSpace: 'pre-wrap',
+              direction: 'ltr', // Force left-to-right direction
+              unicodeBidi: 'normal', // Normal Unicode bidirectional algorithm
+              writingMode: 'horizontal-tb', // Standard horizontal writing mode
+              transform: 'none', // Ensure no transforms
+              WebkitTransform: 'none' // Safari support
             }}
             rows={Math.max(1, item.text.split('\n').length)}
             autoFocus
@@ -856,7 +874,12 @@ export default function InteractiveHero() {
               textShadow: textShadows[item.id] || 'none',
               width: '100%',
               wordWrap: 'break-word',
-              overflowWrap: 'break-word'
+              overflowWrap: 'break-word',
+              direction: 'ltr', // Force left-to-right direction
+              unicodeBidi: 'normal', // Normal Unicode bidirectional algorithm
+              writingMode: 'horizontal-tb', // Standard horizontal writing mode
+              transform: 'none', // Ensure no transforms
+              WebkitTransform: 'none' // Safari support
             }}
             autoFocus
           />
@@ -1024,7 +1047,15 @@ export default function InteractiveHero() {
                 placeholder="Describe how you want to improve the copy..."
                 className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
                 rows={2}
-                style={{ color: '#1f2937', backgroundColor: '#ffffff' }}
+                style={{ 
+                  color: '#1f2937', 
+                  backgroundColor: '#ffffff',
+                  direction: 'ltr',
+                  unicodeBidi: 'normal',
+                  writingMode: 'horizontal-tb',
+                  transform: 'none',
+                  WebkitTransform: 'none'
+                }}
               />
               <button className="w-full mt-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 transition-all">
                 ✨ Improve Copy
