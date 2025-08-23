@@ -789,7 +789,6 @@ export default function InteractiveHero() {
             isolation: "isolate" // Isolate from parent 3D context
           }}
         >
-        {useTextarea ? (
           <textarea
             value={item.text}
             onChange={(e) => handleTextChange(item.id, e.target.value)}
