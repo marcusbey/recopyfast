@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wand2, Sparkles, CheckCircle, ArrowRight, ChevronLeft, ChevronRight, Utensils, Car, Coffee, Edit3, Save, X, Image, Code, Zap } from 'lucide-react';
-import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES } from '@/lib/editingRules';
+import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES, getOptimalTextColor, getTextShadow, getFullElementText } from '@/lib/editingRules';
 
 interface EditableText {
   id: string;
@@ -304,6 +304,8 @@ const demoSites: DemoSite[] = [
 export default function InteractiveHero() {
   const [currentSite, setCurrentSite] = useState(0);
   const [editableTexts, setEditableTexts] = useState<EditableText[]>(demoSites[0].editableTexts);
+  const [optimalColors, setOptimalColors] = useState<Record<string, string>>({});
+  const [textShadows, setTextShadows] = useState<Record<string, string>>({});
 
   const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -362,11 +364,32 @@ export default function InteractiveHero() {
   };
 
   const handleTextClick = (id: string) => {
-    setEditableTexts(prev =>
-      prev.map(item =>
-        item.id === id ? { ...item, isEditing: true } : { ...item, isEditing: false }
-      )
-    );
+    // Calculate optimal colors for the editing element
+    const element = document.querySelector(`[data-editable-id="${id}"]`) as HTMLElement;
+    if (element) {
+      const color = getOptimalTextColor(element);
+      const shadow = getTextShadow(color);
+      setOptimalColors(prev => ({ ...prev, [id]: color }));
+      setTextShadows(prev => ({ ...prev, [id]: shadow }));
+      
+      // Get full text content when starting edit
+      const fullText = getFullElementText(element);
+      
+      setEditableTexts(prev =>
+        prev.map(item => {
+          if (item.id === id) {
+            return { ...item, text: fullText, isEditing: true };
+          }
+          return { ...item, isEditing: false };
+        })
+      );
+    } else {
+      setEditableTexts(prev =>
+        prev.map(item =>
+          item.id === id ? { ...item, isEditing: true } : { ...item, isEditing: false }
+        )
+      );
+    }
   };
 
   const handleTextChange = (id: string, newText: string) => {
@@ -779,7 +802,8 @@ export default function InteractiveHero() {
               textAlign: 'inherit',
               textDecoration: 'inherit',
               textTransform: 'inherit',
-              color: 'inherit',
+              color: optimalColors[item.id] || 'inherit',
+              textShadow: textShadows[item.id] || 'none',
               width: '100%',
               minHeight: 'auto',
               height: 'auto',
@@ -813,7 +837,8 @@ export default function InteractiveHero() {
               textAlign: 'inherit',
               textDecoration: 'inherit',
               textTransform: 'inherit',
-              color: 'inherit',
+              color: optimalColors[item.id] || 'inherit',
+              textShadow: textShadows[item.id] || 'none',
               width: '100%',
               wordWrap: 'break-word',
               overflowWrap: 'break-word'

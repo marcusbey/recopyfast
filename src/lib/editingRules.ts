@@ -249,6 +249,170 @@ export function generateUnsplashUrl(
 }
 
 /**
+ * Universal Text Color Detection Utilities
+ * Shared between demo components and embed scripts
+ */
+
+export interface ColorRGBA {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/**
+ * Parse color string to RGBA object
+ */
+export const parseColor = (color: string): ColorRGBA => {
+  // Handle hex colors
+  if (color.startsWith('#')) {
+    const hex = color.slice(1);
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    return { r, g, b, a: 1 };
+  }
+  
+  // Handle rgb/rgba colors
+  const match = color.match(/rgba?\(([^)]+)\)/);
+  if (match) {
+    const [r, g, b, a = 1] = match[1].split(',').map(n => parseFloat(n.trim()));
+    return { r, g, b, a };
+  }
+  
+  // Handle named colors or fallback to black
+  const colorMap: Record<string, ColorRGBA> = {
+    'transparent': { r: 0, g: 0, b: 0, a: 0 },
+    'white': { r: 255, g: 255, b: 255, a: 1 },
+    'black': { r: 0, g: 0, b: 0, a: 1 },
+  };
+  
+  return colorMap[color.toLowerCase()] || { r: 0, g: 0, b: 0, a: 1 };
+};
+
+/**
+ * Calculate luminance from RGB values
+ */
+export const getLuminance = (color: ColorRGBA): number => {
+  const { r, g, b } = color;
+  const [rs, gs, bs] = [r, g, b].map(c => {
+    const normalized = c / 255;
+    return normalized <= 0.03928 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+};
+
+/**
+ * Calculate contrast ratio between two colors
+ */
+export const getContrastRatio = (luminance1: number, luminance2: number): number => {
+  const lighter = Math.max(luminance1, luminance2);
+  const darker = Math.min(luminance1, luminance2);
+  return (lighter + 0.05) / (darker + 0.05);
+};
+
+/**
+ * Get effective background color by traversing parent elements
+ */
+export const getEffectiveBackgroundColor = (element: HTMLElement): ColorRGBA => {
+  let currentElement: HTMLElement | null = element;
+  const colors: ColorRGBA[] = [];
+  
+  while (currentElement && currentElement !== document.body) {
+    const style = window.getComputedStyle(currentElement);
+    const bgColor = style.backgroundColor;
+    
+    if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+      colors.push(parseColor(bgColor));
+      
+      // If we hit an opaque background, we can stop
+      if (colors[colors.length - 1].a >= 1) {
+        break;
+      }
+    }
+    
+    currentElement = currentElement.parentElement;
+  }
+  
+  // If no background found, assume white
+  if (colors.length === 0) {
+    return { r: 255, g: 255, b: 255, a: 1 };
+  }
+  
+  // Composite colors from top to bottom
+  return colors.reduce((result, color) => {
+    if (color.a >= 1) return color;
+    
+    return {
+      r: Math.round(color.r * color.a + result.r * (1 - color.a)),
+      g: Math.round(color.g * color.a + result.g * (1 - color.a)),
+      b: Math.round(color.b * color.a + result.b * (1 - color.a)),
+      a: Math.min(1, color.a + result.a)
+    };
+  });
+};
+
+/**
+ * Calculate optimal text color based on background contrast
+ */
+export const getOptimalTextColor = (element: HTMLElement): string => {
+  // Get background color from element and its parents
+  const backgroundColor = getEffectiveBackgroundColor(element);
+  const computedStyle = window.getComputedStyle(element);
+  
+  // Calculate luminance
+  const luminance = getLuminance(backgroundColor);
+  
+  // Use original color if it has good contrast, otherwise use optimal color
+  const originalColor = computedStyle.color;
+  const originalColorRGBA = parseColor(originalColor);
+  const originalLuminance = getLuminance(originalColorRGBA);
+  
+  // Calculate contrast ratio
+  const originalContrast = getContrastRatio(luminance, originalLuminance);
+  
+  // If original has good contrast (4.5:1 for normal text), keep it
+  if (originalContrast >= 4.5) {
+    return originalColor;
+  }
+  
+  // Otherwise, choose high contrast color
+  return luminance > 0.5 ? '#000000' : '#ffffff';
+};
+
+/**
+ * Get text shadow for better visibility
+ */
+export const getTextShadow = (textColor: string): string => {
+  const isDark = textColor === '#000000' || textColor.startsWith('rgb(0') || textColor === 'black';
+  return isDark ? '0 1px 2px rgba(255, 255, 255, 0.5)' : '0 1px 2px rgba(0, 0, 0, 0.5)';
+};
+
+/**
+ * Get full text content including hidden overflow text
+ */
+export const getFullElementText = (element: HTMLElement): string => {
+  // Try different methods to get full text
+  let text = '';
+  
+  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+    const inputElement = element as HTMLInputElement | HTMLTextAreaElement;
+    text = inputElement.value || inputElement.placeholder || '';
+  } else {
+    // Get all text content, including hidden overflow
+    text = element.textContent || element.innerText || '';
+    
+    // If text seems truncated (ends with ...), try to get original
+    if (text.endsWith('...') || text.endsWith('…')) {
+      // Look for title attribute or data attributes that might contain full text
+      text = element.title || element.getAttribute('data-full-text') || text;
+    }
+  }
+  
+  return text.trim();
+};
+
+/**
  * Validation rules for editing content
  */
 export const VALIDATION_RULES = {
