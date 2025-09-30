@@ -5,13 +5,19 @@
   const RECOPYFAST_API = window.RECOPYFAST_API || 'http://localhost:3000/api';
   const RECOPYFAST_WS = window.RECOPYFAST_WS || 'http://localhost:3001';
   const SITE_ID = document.currentScript.getAttribute('data-site-id');
+  const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
   const EDIT_MODE = document.currentScript.getAttribute('data-edit-mode') === 'true';
   
   if (!SITE_ID) {
     console.error('ReCopyFast: No site ID provided');
     return;
   }
-  
+
+  if (!SITE_TOKEN) {
+    console.error('ReCopyFast: No site token provided');
+    return;
+  }
+
   class ReCopyFast {
     constructor() {
       this.elements = new Map();
@@ -328,7 +334,8 @@
         this.socket = io(RECOPYFAST_WS, {
           query: { 
             siteId: SITE_ID,
-            editMode: this.editMode 
+            editMode: this.editMode,
+            token: SITE_TOKEN
           },
           reconnection: true,
           reconnectionDelay: 1000,
@@ -389,6 +396,7 @@
       this.socket.emit('content-map', {
         siteId: SITE_ID,
         url: window.location.href,
+        token: SITE_TOKEN,
         contentMap: contentMap
       });
     }
@@ -785,7 +793,8 @@
           this.socket.emit('content-update', {
             siteId: SITE_ID,
             elementId: elementId,
-            content: newContent
+            content: newContent,
+            token: SITE_TOKEN
           });
         }
 
@@ -934,6 +943,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
+              Authorization: `Bearer ${SITE_TOKEN}`,
             },
             body: JSON.stringify({
               text: currentText,
@@ -1012,7 +1022,11 @@
     startPolling() {
       setInterval(async () => {
         try {
-          const response = await fetch(`${RECOPYFAST_API}/content/${SITE_ID}`);
+          const response = await fetch(`${RECOPYFAST_API}/content/${SITE_ID}`, {
+            headers: {
+              Authorization: `Bearer ${SITE_TOKEN}`,
+            },
+          });
           if (response.ok) {
             const updates = await response.json();
             updates.forEach(update => this.handleContentUpdate(update));

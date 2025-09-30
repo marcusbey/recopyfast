@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
   
   if (error) return NextResponse.json({ error }, { status: 400 });
   
-  const embedScript = `<script src="https://cdn.recopyfast.com/embed/recopyfast.js" data-site-id="${siteId}"></script>`;
+  const embedScript = `<script src="https://cdn.recopyfast.com/embed/recopyfast.js" data-site-id="${siteId}" data-site-token="${siteToken}"></script>`;
   
   return NextResponse.json({ site: data, embedScript });
 }
@@ -432,7 +432,7 @@ export function LanguageVariantSelector({ onLanguageChange, onVariantChange }) {
   </main>
   
   <!-- ReCopyFast Integration -->
-  <script src="http://localhost:3000/embed/recopyfast.js" data-site-id="test-site-123"></script>
+  <script src="http://localhost:3000/embed/recopyfast.js" data-site-id="test-site-123" data-site-token="demo-site-token"></script>
 </body>
 </html>
 ```

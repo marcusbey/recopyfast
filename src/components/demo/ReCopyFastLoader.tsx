@@ -24,6 +24,7 @@ export default function ReCopyFastLoader() {
       const script = document.createElement('script');
       script.src = '/embed/recopyfast.js';
       script.setAttribute('data-site-id', 'demo-site-123');
+      script.setAttribute('data-site-token', 'demo-site-token');
       script.setAttribute('data-edit-mode', 'true');
       script.async = true;
       

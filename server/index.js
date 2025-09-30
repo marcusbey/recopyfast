@@ -2,6 +2,9 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const crypto = require('crypto');
+const createDOMPurify = require('dompurify');
+const { JSDOM } = require('jsdom');
 require('dotenv').config({ path: '../.env.local' });
 
 const app = express();
@@ -38,6 +41,56 @@ function isValidUrl(string) {
 // Initialize Supabase client (with error handling)
 let supabase = null;
 let supabaseEnabled = false;
+const window = new JSDOM('').window;
+const DOMPurify = createDOMPurify(window);
+
+function sanitizeContent(content) {
+  if (!content) return '';
+  return DOMPurify.sanitize(String(content), {
+    ALLOWED_TAGS: [],
+    ALLOWED_ATTR: [],
+  });
+}
+
+function normalizeDomain(domain) {
+  if (!domain) return null;
+  try {
+    const url = new URL(domain.startsWith('http') ? domain : `https://${domain}`);
+    return url.hostname.toLowerCase();
+  } catch (error) {
+    return null;
+  }
+}
+
+function parseHost(header) {
+  if (!header) return null;
+  try {
+    return new URL(header).hostname.toLowerCase();
+  } catch (error) {
+    return null;
+  }
+}
+
+function verifySiteToken(siteId, apiKey, token) {
+  if (!token) return false;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+
+  const [tokenSiteId, issuedAt, signature] = parts;
+  if (tokenSiteId !== siteId) return false;
+  if (!/^[0-9]+$/.test(issuedAt)) return false;
+
+  const expectedSignature = crypto
+    .createHmac('sha256', apiKey)
+    .update(`${tokenSiteId}.${issuedAt}`)
+    .digest('hex');
+
+  try {
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+  } catch (error) {
+    return false;
+  }
+}
 
 if (missingVars.length === 0 && invalidUrls.length === 0) {
   try {
@@ -65,7 +118,14 @@ if (missingVars.length === 0 && invalidUrls.length === 0) {
 // Initialize Socket.io with CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow requests without origin (e.g., mobile apps) for development
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      callback(null, true);
+    },
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -93,11 +153,61 @@ const userConnections = new Map();
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
   
-  const { siteId, editMode } = socket.handshake.query;
+  const { siteId, editMode, token } = socket.handshake.query;
+  const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
   
   if (!siteId) {
     socket.disconnect();
     return;
+  }
+
+  if (!token) {
+    socket.emit('auth-error', { error: 'Missing site token' });
+    socket.disconnect();
+    return;
+  }
+
+  let siteRecord = null;
+
+  if (supabaseEnabled) {
+    try {
+      const { data: site, error } = await supabase
+        .from('sites')
+        .select('id, domain, api_key')
+        .eq('id', siteId)
+        .single();
+
+      if (error || !site) {
+        socket.emit('auth-error', { error: 'Site not found' });
+        socket.disconnect();
+        return;
+      }
+
+      if (!verifySiteToken(siteId, site.api_key, token)) {
+        socket.emit('auth-error', { error: 'Invalid site token' });
+        socket.disconnect();
+        return;
+      }
+
+      const allowedDomain = normalizeDomain(site.domain);
+      const requestHost = parseHost(originHeader);
+
+      if (allowedDomain && requestHost && requestHost !== allowedDomain) {
+        socket.emit('auth-error', { error: 'Origin not allowed' });
+        socket.disconnect();
+        return;
+      }
+
+      siteRecord = site;
+      socket.data.siteToken = token;
+    } catch (error) {
+      console.error('Site verification failed:', error);
+      socket.emit('auth-error', { error: 'Site verification failed' });
+      socket.disconnect();
+      return;
+    }
+  } else {
+    console.warn('Supabase not configured - skipping site token verification');
   }
   
   // Join site room
@@ -114,18 +224,24 @@ io.on('connection', (socket) => {
     console.log(`Received content map for site ${siteId}`);
     
     try {
-      const { url, contentMap } = data;
+      const { url, contentMap, token: messageToken } = data;
+
+      if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
+        socket.emit('auth-error', { error: 'Invalid site token' });
+        return;
+      }
       
       // Store content elements in database
       const contentElements = [];
       
       for (const [elementId, elementData] of Object.entries(contentMap)) {
+        const safeContent = sanitizeContent(elementData.content);
         contentElements.push({
           site_id: siteId,
           element_id: elementId,
           selector: elementData.selector,
-          original_content: elementData.content,
-          current_content: elementData.content,
+          original_content: safeContent,
+          current_content: safeContent,
           language: 'en',
           variant: 'default',
           metadata: { 
@@ -171,14 +287,21 @@ io.on('connection', (socket) => {
     console.log(`Content update for site ${siteId}:`, data.elementId);
     
     try {
-      const { elementId, content, language = 'en', variant = 'default' } = data;
+      const { elementId, content, language = 'en', variant = 'default', token: messageToken } = data;
+
+      if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
+        socket.emit('auth-error', { error: 'Invalid site token' });
+        return;
+      }
+
+      const sanitizedContent = sanitizeContent(content);
       
       // Update database (if Supabase is enabled)
       if (supabaseEnabled) {
         const { error } = await supabase
           .from('content_elements')
           .update({ 
-            current_content: content,
+            current_content: sanitizedContent,
             updated_at: new Date().toISOString()
           })
           .eq('site_id', siteId)
@@ -198,7 +321,7 @@ io.on('connection', (socket) => {
       // Broadcast to all connected clients for this site
       socket.to(`site:${siteId}`).emit('content-update', {
         elementId,
-        content,
+        content: sanitizedContent,
         language,
         variant
       });
@@ -206,7 +329,7 @@ io.on('connection', (socket) => {
       // Notify other dashboard users
       socket.to(`dashboard:${siteId}`).emit('content-updated', {
         elementId,
-        content,
+        content: sanitizedContent,
         updatedBy: socket.id,
         timestamp: new Date().toISOString()
       });
@@ -231,17 +354,23 @@ io.on('connection', (socket) => {
   
   // Handle bulk content updates
   socket.on('bulk-update', async (data) => {
-    const { updates } = data;
+    const { updates, token: messageToken } = data;
+
+    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
+      socket.emit('auth-error', { error: 'Invalid site token' });
+      return;
+    }
     
     try {
       for (const update of updates) {
         const { elementId, content } = update;
+        const sanitizedContent = sanitizeContent(content);
         
         // Update database (if Supabase is enabled)
         if (supabaseEnabled) {
           await supabase
             .from('content_elements')
-            .update({ current_content: content })
+            .update({ current_content: sanitizedContent })
             .eq('site_id', siteId)
             .eq('element_id', elementId);
         }
@@ -249,7 +378,7 @@ io.on('connection', (socket) => {
         // Broadcast each update
         io.to(`site:${siteId}`).emit('content-update', {
           elementId,
-          content
+          content: sanitizedContent
         });
       }
       

@@ -76,6 +76,7 @@ describe('Demo Page Integration', () => {
       // Verify script configuration
       expect(mockScript.src).toBe('/embed/recopyfast.js');
       expect(mockScript.setAttribute).toHaveBeenCalledWith('data-site-id', 'demo-site-123');
+      expect(mockScript.setAttribute).toHaveBeenCalledWith('data-site-token', 'demo-site-token');
       expect(mockScript.setAttribute).toHaveBeenCalledWith('data-edit-mode', 'true');
       expect(mockScript.async).toBe(true);
 

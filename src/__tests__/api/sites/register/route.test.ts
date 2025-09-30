@@ -1,33 +1,54 @@
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/sites/register/route';
 import { createClient } from '@/lib/supabase/server';
-import crypto from 'crypto';
+import { createServiceRoleClient } from '@/lib/supabase/service';
+import { buildSiteToken } from '@/lib/security/site-auth';
 
 // Mock dependencies
 jest.mock('@/lib/supabase/server');
-jest.mock('crypto');
+jest.mock('@/lib/supabase/service');
+jest.mock('@/lib/security/site-auth', () => {
+  const actual = jest.requireActual('@/lib/security/site-auth');
+  return {
+    ...actual,
+    buildSiteToken: jest.fn(),
+  };
+});
 
-const mockSupabase = {
+const mockServiceClient = {
   from: jest.fn().mockReturnThis(),
   select: jest.fn().mockReturnThis(),
   eq: jest.fn().mockReturnThis(),
   single: jest.fn(),
   insert: jest.fn().mockReturnThis(),
+  upsert: jest.fn().mockReturnThis(),
+};
+
+const mockAuthClient = {
+  auth: {
+    getUser: jest.fn(),
+  },
 };
 
 const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
-const mockCrypto = crypto as jest.Mocked<typeof crypto>;
+const mockCreateServiceClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
+const mockBuildSiteToken = buildSiteToken as jest.MockedFunction<typeof buildSiteToken>;
 
 describe('/api/sites/register - POST', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
-    
-    // Mock crypto.randomBytes to return a buffer that toString('hex') gives our expected string
-    const mockBuffer = {
-      toString: jest.fn().mockReturnValue('test-api-key')
-    };
-    mockCrypto.randomBytes.mockReturnValue(mockBuffer as Buffer);
+    mockCreateClient.mockResolvedValue(mockAuthClient as unknown as ReturnType<typeof createClient>);
+    mockAuthClient.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-123' } }, error: null });
+    mockCreateServiceClient.mockReturnValue(mockServiceClient as unknown as ReturnType<typeof createServiceRoleClient>);
+    mockBuildSiteToken.mockReturnValue('signed-site-token');
+
+    mockServiceClient.from.mockReturnThis();
+    mockServiceClient.select.mockReturnThis();
+    mockServiceClient.eq.mockReturnThis();
+    mockServiceClient.insert.mockReturnThis();
+    mockServiceClient.upsert.mockReturnThis();
+    mockServiceClient.single.mockReset();
+    mockServiceClient.upsert.mockResolvedValue({ error: null });
     
     // Mock environment variable
     process.env.NEXT_PUBLIC_APP_URL = 'https://recopyfast.com';
@@ -43,16 +64,15 @@ describe('/api/sites/register - POST', () => {
       domain: 'example.com',
       name: 'Example Site',
       created_at: '2024-01-01T00:00:00Z',
+      api_key: 'raw-api-key',
     };
 
     // Mock domain check (not exists)
-    mockSupabase.single.mockResolvedValueOnce({ data: null, error: null });
+    mockServiceClient.single
+      .mockResolvedValueOnce({ data: null, error: null }) // domain check
+      .mockResolvedValueOnce({ data: mockSite, error: null }); // insert result
     
-    // Mock site creation
-    mockSupabase.single.mockResolvedValueOnce({ 
-      data: mockSite, 
-      error: null 
-    });
+    mockBuildSiteToken.mockReturnValueOnce('signed-site-token');
 
     const request = new NextRequest('http://localhost/api/sites/register', {
       method: 'POST',
@@ -73,19 +93,29 @@ describe('/api/sites/register - POST', () => {
         name: 'Example Site',
         created_at: '2024-01-01T00:00:00Z',
       },
-      apiKey: 'test-api-key',
-      embedScript: '<script src="https://recopyfast.com/embed/recopyfast.js" data-site-id="site-123"></script>',
+      apiKey: 'raw-api-key',
+      siteToken: 'signed-site-token',
+      embedScript: '<script src="https://recopyfast.com/embed/recopyfast.js" data-site-id="site-123" data-site-token="signed-site-token"></script>',
     });
 
     // Verify database calls
-    expect(mockSupabase.from).toHaveBeenCalledWith('sites');
-    expect(mockSupabase.select).toHaveBeenCalledWith('id');
-    expect(mockSupabase.eq).toHaveBeenCalledWith('domain', 'example.com');
-    expect(mockSupabase.insert).toHaveBeenCalledWith({
+    expect(mockServiceClient.from).toHaveBeenNthCalledWith(1, 'sites');
+    expect(mockServiceClient.select).toHaveBeenNthCalledWith(1, 'id');
+    expect(mockServiceClient.eq).toHaveBeenNthCalledWith(1, 'domain', 'example.com');
+    expect(mockServiceClient.insert).toHaveBeenCalledWith({
       domain: 'example.com',
       name: 'Example Site',
-      api_key: 'test-api-key',
     });
+    expect(mockServiceClient.select).toHaveBeenNthCalledWith(2, 'id, domain, name, created_at, api_key');
+    expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+      {
+        site_id: 'site-123',
+        user_id: 'user-123',
+        permission: 'admin',
+      },
+      { onConflict: 'user_id,site_id' }
+    );
+    expect(mockBuildSiteToken).toHaveBeenCalledWith('site-123', 'raw-api-key');
   });
 
   it('should return 400 when domain is missing', async () => {
@@ -124,7 +154,7 @@ describe('/api/sites/register - POST', () => {
 
   it('should return 400 when domain already exists', async () => {
     // Mock domain check (exists)
-    mockSupabase.single.mockResolvedValueOnce({ 
+    mockServiceClient.single.mockResolvedValueOnce({ 
       data: { id: 'existing-site' }, 
       error: null 
     });
@@ -148,13 +178,12 @@ describe('/api/sites/register - POST', () => {
 
   it('should return 500 when database insertion fails', async () => {
     // Mock domain check (not exists)
-    mockSupabase.single.mockResolvedValueOnce({ data: null, error: null });
-    
-    // Mock site creation failure
-    mockSupabase.single.mockResolvedValueOnce({ 
+    mockServiceClient.single
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ 
       data: null, 
       error: { message: 'Database error' }
-    });
+      });
 
     const request = new NextRequest('http://localhost/api/sites/register', {
       method: 'POST',
@@ -204,55 +233,6 @@ describe('/api/sites/register - POST', () => {
     expect(data).toEqual({
       error: 'Domain and name are required',
     });
-  });
-
-  it('should generate unique API keys for each registration', async () => {
-    const mockSite = {
-      id: 'site-123',
-      domain: 'example.com',
-      name: 'Example Site',
-      created_at: '2024-01-01T00:00:00Z',
-    };
-
-    // First call
-    const mockBuffer1 = { toString: jest.fn().mockReturnValue('api-key-1') };
-    mockCrypto.randomBytes.mockReturnValueOnce(mockBuffer1 as Buffer);
-    mockSupabase.single
-      .mockResolvedValueOnce({ data: null, error: null })
-      .mockResolvedValueOnce({ data: mockSite, error: null });
-
-    const request1 = new NextRequest('http://localhost/api/sites/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        domain: 'example1.com',
-        name: 'Example Site 1',
-      }),
-    });
-
-    const response1 = await POST(request1);
-    const data1 = await response1.json();
-
-    // Second call
-    const mockBuffer2 = { toString: jest.fn().mockReturnValue('api-key-2') };
-    mockCrypto.randomBytes.mockReturnValueOnce(mockBuffer2 as Buffer);
-    mockSupabase.single
-      .mockResolvedValueOnce({ data: null, error: null })
-      .mockResolvedValueOnce({ data: { ...mockSite, domain: 'example2.com' }, error: null });
-
-    const request2 = new NextRequest('http://localhost/api/sites/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        domain: 'example2.com',
-        name: 'Example Site 2',
-      }),
-    });
-
-    const response2 = await POST(request2);
-    const data2 = await response2.json();
-
-    expect(data1.apiKey).toBe('api-key-1');
-    expect(data2.apiKey).toBe('api-key-2');
-    expect(mockCrypto.randomBytes).toHaveBeenCalledTimes(2);
   });
 
   it('should handle supabase client creation failure', async () => {

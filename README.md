@@ -65,7 +65,8 @@ Add this script tag before the closing `</body>` tag on any website:
 
 ```html
 <script src="https://your-domain.com/embed/recopyfast.js" 
-        data-site-id="your-site-id"></script>
+        data-site-id="your-site-id"
+        data-site-token="your-signed-token"></script>
 ```
 
 For edit mode (allows clicking elements to edit):
@@ -73,6 +74,7 @@ For edit mode (allows clicking elements to edit):
 ```html
 <script src="https://your-domain.com/embed/recopyfast.js" 
         data-site-id="your-site-id"
+        data-site-token="your-signed-token"
         data-edit-mode="true"></script>
 ```
 
@@ -111,7 +113,7 @@ recopyfast/
 ```
 POST /api/sites/register
 Body: { domain: string, name: string }
-Response: { site: Site, apiKey: string, embedScript: string }
+Response: { site: Site, apiKey: string, siteToken: string, embedScript: string }
 ```
 
 ### Content API

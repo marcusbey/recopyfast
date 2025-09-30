@@ -48,12 +48,14 @@ describe('Site Registration Integration', () => {
           created_at: expect.any(String),
         },
         apiKey: expect.any(String),
+        siteToken: expect.any(String),
         embedScript: expect.stringContaining('<script src='),
       });
 
       // Verify embed script contains site ID
       expect(data.embedScript).toContain(`data-site-id="${data.site.id}"`);
       expect(data.embedScript).toContain('recopyfast.js');
+      expect(data.embedScript).toContain(`data-site-token="${data.siteToken}"`);
     });
 
     it('should prevent duplicate domain registration', async () => {
@@ -117,6 +119,7 @@ describe('Site Registration Integration', () => {
       const site2Data = await site2Response.json();
 
       expect(site1Data.apiKey).not.toBe(site2Data.apiKey);
+      expect(site1Data.siteToken).not.toBe(site2Data.siteToken);
       expect(site1Data.site.id).not.toBe(site2Data.site.id);
     });
   });
@@ -127,7 +130,12 @@ describe('Site Registration Integration', () => {
       const [domain, setDomain] = React.useState('');
       const [name, setName] = React.useState('');
       const [isLoading, setIsLoading] = React.useState(false);
-      const [result, setResult] = React.useState<{ site: unknown; apiKey: string; embedScript: string } | null>(null);
+      const [result, setResult] = React.useState<{
+        site: { id: string };
+        apiKey: string;
+        siteToken: string;
+        embedScript: string;
+      } | null>(null);
       const [error, setError] = React.useState<string | null>(null);
 
       const handleSubmit = async (e: React.FormEvent) => {
@@ -287,16 +295,21 @@ describe('Site Registration Integration', () => {
 
       // Step 3: Verify API key format
       expect(registrationData.apiKey).toMatch(/^test-api-key-[a-z0-9]+$/);
+      expect(registrationData.siteToken).toMatch(/^test-site-token-[a-z0-9]+$/i);
 
       // Step 4: Verify embed script format
       const embedScript = registrationData.embedScript;
       expect(embedScript).toContain('recopyfast.js');
       expect(embedScript).toContain(`data-site-id="${registrationData.site.id}"`);
+      expect(embedScript).toContain(`data-site-token="${registrationData.siteToken}"`);
       expect(embedScript).toMatch(/<script[^>]*><\/script>/);
 
       // Step 5: Extract site ID from embed script and verify consistency
       const siteIdMatch = embedScript.match(/data-site-id="([^"]+)"/);
       expect(siteIdMatch?.[1]).toBe(registrationData.site.id);
+
+      const tokenMatch = embedScript.match(/data-site-token="([^"]+)"/);
+      expect(tokenMatch?.[1]).toBe(registrationData.siteToken);
     });
   });
 });

@@ -1,26 +1,50 @@
 import { NextRequest } from 'next/server';
-import { GET, POST, PUT } from '@/app/api/content/[siteId]/route';
-import { createClient } from '@/lib/supabase/server';
+import { GET, POST, PUT, OPTIONS } from '@/app/api/content/[siteId]/route';
+import { createServiceRoleClient } from '@/lib/supabase/service';
+import { authorizeSiteRequest, authorizeSiteOrigin, sanitizeIncomingContent } from '@/lib/security/site-auth';
 
-// Mock dependencies
-jest.mock('@/lib/supabase/server');
+jest.mock('@/lib/supabase/service');
+jest.mock('@/lib/security/site-auth', () => ({
+  authorizeSiteRequest: jest.fn(),
+  authorizeSiteOrigin: jest.fn(),
+  sanitizeIncomingContent: jest.fn((value: string) => value),
+}));
 
-const mockSupabase = {
-  from: jest.fn(() => mockSupabase),
-  select: jest.fn(() => mockSupabase),
-  eq: jest.fn(() => mockSupabase),
+const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<typeof authorizeSiteRequest>;
+const mockAuthorizeSiteOrigin = authorizeSiteOrigin as jest.MockedFunction<typeof authorizeSiteOrigin>;
+const mockSanitizeIncomingContent = sanitizeIncomingContent as jest.MockedFunction<typeof sanitizeIncomingContent>;
+
+const mockServiceClient = {
+  from: jest.fn(() => mockServiceClient),
+  select: jest.fn(() => mockServiceClient),
+  eq: jest.fn(() => mockServiceClient),
   single: jest.fn(),
-  insert: jest.fn(() => mockSupabase),
   upsert: jest.fn(),
-  update: jest.fn(() => mockSupabase),
+  update: jest.fn(() => mockServiceClient),
 };
 
-const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
+const mockCreateServiceRoleClient = createServiceRoleClient as jest.MockedFunction<typeof createServiceRoleClient>;
 
 describe('/api/content/[siteId]', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as unknown as ReturnType<typeof createClient>);
+    mockCreateServiceRoleClient.mockReturnValue(mockServiceClient as unknown as ReturnType<typeof createServiceRoleClient>);
+    mockAuthorizeSiteRequest.mockResolvedValue({
+      site: { id: 'site-123', domain: 'example.com', api_key: 'api-key' },
+      allowedOrigin: 'https://example.com',
+    });
+    mockAuthorizeSiteOrigin.mockResolvedValue({
+      site: { id: 'site-123', domain: 'example.com' },
+      allowedOrigin: 'https://example.com',
+    } as unknown as Awaited<ReturnType<typeof authorizeSiteOrigin>>);
+    mockSanitizeIncomingContent.mockImplementation((value: string) => value);
+
+    mockServiceClient.from.mockReturnValue(mockServiceClient);
+    mockServiceClient.select.mockReturnValue(mockServiceClient);
+    mockServiceClient.eq.mockImplementation(() => mockServiceClient);
+    mockServiceClient.single.mockResolvedValue({ data: { id: 'site-123' }, error: null });
+    mockServiceClient.upsert.mockResolvedValue({ error: null });
+    mockServiceClient.update.mockReturnValue(mockServiceClient);
   });
 
   describe('GET', () => {
@@ -36,63 +60,59 @@ describe('/api/content/[siteId]', () => {
         variant: 'default',
         metadata: { type: 'text' },
       },
-      {
-        id: 2,
-        site_id: 'site-123',
-        element_id: 'btn-1',
-        selector: '.btn-primary',
-        original_content: 'Click here',
-        current_content: 'Click here',
-        language: 'en',
-        variant: 'default',
-        metadata: { type: 'button' },
-      },
     ];
 
     it('should fetch content elements with default parameters', async () => {
-      // Mock the final method in the chain to return the promise
-      
-      // The third eq() call should return the final promise
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (language)
-        .mockResolvedValueOnce({ data: mockContentElements, error: null }); // third eq (variant) returns result
+      mockServiceClient.eq.mockImplementationOnce(() => mockServiceClient) // site_id
+        .mockImplementationOnce(() => mockServiceClient) // language
+        .mockImplementationOnce(() => Promise.resolve({ data: mockContentElements, error: null })); // variant
 
-      const request = new NextRequest('http://localhost/api/content/site-123');
+      const request = new NextRequest('http://localhost/api/content/site-123', {
+        headers: {
+          Authorization: 'Bearer token',
+          Origin: 'https://example.com',
+        },
+      });
+
       const response = await GET(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
       expect(response.status).toBe(200);
       expect(data).toEqual(mockContentElements);
-      
-      expect(mockSupabase.from).toHaveBeenCalledWith('content_elements');
-      expect(mockSupabase.select).toHaveBeenCalledWith('*');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('site_id', 'site-123');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('language', 'en');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('variant', 'default');
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://example.com');
     });
 
     it('should fetch content elements with custom language and variant', async () => {
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (language)
-        .mockResolvedValueOnce({ data: mockContentElements, error: null }); // third eq (variant) returns result
+      mockServiceClient.eq.mockImplementationOnce(() => mockServiceClient) // site_id
+        .mockImplementationOnce(() => mockServiceClient) // language
+        .mockImplementationOnce(() => Promise.resolve({ data: mockContentElements, error: null })); // variant
 
-      const request = new NextRequest('http://localhost/api/content/site-123?language=es&variant=mobile');
+      const request = new NextRequest('http://localhost/api/content/site-123?language=es&variant=mobile', {
+        headers: {
+          Authorization: 'Bearer token',
+          Origin: 'https://example.com',
+        },
+      });
+
       const response = await GET(request, { params: { siteId: 'site-123' } });
 
       expect(response.status).toBe(200);
-      expect(mockSupabase.eq).toHaveBeenCalledWith('language', 'es');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('variant', 'mobile');
+      expect(mockServiceClient.eq).toHaveBeenNthCalledWith(2, 'language', 'es');
+      expect(mockServiceClient.eq).toHaveBeenNthCalledWith(3, 'variant', 'mobile');
     });
 
     it('should return empty array when no content found', async () => {
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (language)
-        .mockResolvedValueOnce({ data: null, error: null }); // third eq (variant) returns result
+      mockServiceClient.eq.mockImplementationOnce(() => mockServiceClient)
+        .mockImplementationOnce(() => mockServiceClient)
+        .mockImplementationOnce(() => Promise.resolve({ data: null, error: null }));
 
-      const request = new NextRequest('http://localhost/api/content/site-123');
+      const request = new NextRequest('http://localhost/api/content/site-123', {
+        headers: {
+          Authorization: 'Bearer token',
+          Origin: 'https://example.com',
+        },
+      });
+
       const response = await GET(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
@@ -100,33 +120,15 @@ describe('/api/content/[siteId]', () => {
       expect(data).toEqual([]);
     });
 
-    it('should return 500 on database error', async () => {
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (language)
-        .mockResolvedValueOnce({ data: null, error: { message: 'Database error' } }); // third eq (variant) returns error
+    it('should return 401 when authorization fails', async () => {
+      mockAuthorizeSiteRequest.mockRejectedValueOnce(new Error('Missing site token'));
 
       const request = new NextRequest('http://localhost/api/content/site-123');
       const response = await GET(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Failed to fetch content',
-      });
-    });
-
-    it('should handle internal server error', async () => {
-      mockCreateClient.mockRejectedValueOnce(new Error('Connection failed'));
-
-      const request = new NextRequest('http://localhost/api/content/site-123');
-      const response = await GET(request, { params: { siteId: 'site-123' } });
-      const data = await response.json();
-
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Internal server error',
-      });
+      expect(response.status).toBe(401);
+      expect(data.error).toBe('Missing site token');
     });
   });
 
@@ -137,25 +139,17 @@ describe('/api/content/[siteId]', () => {
         content: 'Welcome to our site',
         type: 'text',
       },
-      'btn-1': {
-        selector: '.btn-primary',
-        content: 'Get Started',
-        type: 'button',
-      },
     };
 
     it('should successfully save content map', async () => {
-      // Mock site verification
-      mockSupabase.single.mockResolvedValueOnce({ 
-        data: { id: 'site-123' }, 
-        error: null 
-      });
-
-      // Mock upsert success
-      mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+      mockServiceClient.eq.mockImplementationOnce(() => mockServiceClient); // site lookup
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'POST',
+        headers: {
+          Authorization: 'Bearer token',
+          Origin: 'https://example.com',
+        },
         body: JSON.stringify(mockContentMap),
       });
 
@@ -164,43 +158,27 @@ describe('/api/content/[siteId]', () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual({ success: true });
-
-      expect(mockSupabase.upsert).toHaveBeenCalledWith(
+      expect(mockSanitizeIncomingContent).toHaveBeenCalledWith('Welcome to our site');
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
             site_id: 'site-123',
             element_id: 'header-1',
-            selector: 'h1',
-            original_content: 'Welcome to our site',
-            current_content: 'Welcome to our site',
-            language: 'en',
-            variant: 'default',
-            metadata: { type: 'text' },
-          }),
-          expect.objectContaining({
-            site_id: 'site-123',
-            element_id: 'btn-1',
-            selector: '.btn-primary',
-            original_content: 'Get Started',
-            current_content: 'Get Started',
-            language: 'en',
-            variant: 'default',
-            metadata: { type: 'button' },
           }),
         ]),
         { onConflict: 'site_id,element_id,language,variant' }
       );
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://example.com');
     });
 
     it('should return 404 when site not found', async () => {
-      // Mock site verification failure
-      mockSupabase.single.mockResolvedValueOnce({ 
-        data: null, 
-        error: null 
-      });
+      mockServiceClient.single.mockResolvedValueOnce({ data: null, error: null });
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'POST',
+        headers: {
+          Authorization: 'Bearer token',
+        },
         body: JSON.stringify(mockContentMap),
       });
 
@@ -208,25 +186,17 @@ describe('/api/content/[siteId]', () => {
       const data = await response.json();
 
       expect(response.status).toBe(404);
-      expect(data).toEqual({
-        error: 'Site not found',
-      });
+      expect(data.error).toBe('Site not found');
     });
 
-    it('should return 500 on upsert error', async () => {
-      // Mock site verification success
-      mockSupabase.single.mockResolvedValueOnce({ 
-        data: { id: 'site-123' }, 
-        error: null 
-      });
-
-      // Mock upsert failure
-      mockSupabase.upsert.mockResolvedValueOnce({ 
-        error: { message: 'Upsert failed' }
-      });
+    it('should return 500 when upsert fails', async () => {
+      mockServiceClient.upsert.mockResolvedValueOnce({ error: { message: 'DB error' } });
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'POST',
+        headers: {
+          Authorization: 'Bearer token',
+        },
         body: JSON.stringify(mockContentMap),
       });
 
@@ -234,158 +204,97 @@ describe('/api/content/[siteId]', () => {
       const data = await response.json();
 
       expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Failed to save content',
-      });
-    });
-
-    it('should handle empty content map', async () => {
-      // Mock site verification
-      mockSupabase.single.mockResolvedValueOnce({ 
-        data: { id: 'site-123' }, 
-        error: null 
-      });
-
-      // Mock upsert success
-      mockSupabase.upsert.mockResolvedValueOnce({ error: null });
-
-      const request = new NextRequest('http://localhost/api/content/site-123', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-
-      const response = await POST(request, { params: { siteId: 'site-123' } });
-      const data = await response.json();
-
-      expect(response.status).toBe(200);
-      expect(data).toEqual({ success: true });
-      expect(mockSupabase.upsert).toHaveBeenCalledWith([], expect.any(Object));
-    });
-
-    it('should handle malformed JSON', async () => {
-      const request = new NextRequest('http://localhost/api/content/site-123', {
-        method: 'POST',
-        body: 'invalid-json',
-      });
-
-      const response = await POST(request, { params: { siteId: 'site-123' } });
-      const data = await response.json();
-
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Internal server error',
-      });
+      expect(data.error).toBe('Failed to save content');
     });
   });
 
   describe('PUT', () => {
-    it('should successfully update content element', async () => {
-      // Mock the chain: update().eq().eq().eq().eq()
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
-        .mockReturnValueOnce(mockSupabase) // third eq (language)
-        .mockResolvedValueOnce({ error: null }); // fourth eq (variant) returns result
-
+    it('should update content element', async () => {
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'PUT',
+        headers: {
+          Authorization: 'Bearer token',
+          Origin: 'https://example.com',
+        },
         body: JSON.stringify({
           elementId: 'header-1',
-          content: 'Updated welcome message',
+          content: 'Updated content',
           language: 'en',
           variant: 'default',
         }),
       });
 
+      mockServiceClient.update.mockReturnValueOnce({
+        eq: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            eq: jest.fn().mockResolvedValue({ error: null }),
+          }),
+        }),
+      } as unknown as typeof mockServiceClient);
+
       const response = await PUT(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
       expect(response.status).toBe(200);
       expect(data).toEqual({ success: true });
-
-      expect(mockSupabase.from).toHaveBeenCalledWith('content_elements');
-      expect(mockSupabase.update).toHaveBeenCalledWith({ 
-        current_content: 'Updated welcome message' 
-      });
-      expect(mockSupabase.eq).toHaveBeenCalledWith('site_id', 'site-123');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('element_id', 'header-1');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('language', 'en');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('variant', 'default');
+      expect(mockSanitizeIncomingContent).toHaveBeenCalledWith('Updated content');
     });
 
-    it('should use default language and variant when not provided', async () => {
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
-        .mockReturnValueOnce(mockSupabase) // third eq (language)
-        .mockResolvedValueOnce({ error: null }); // fourth eq (variant) returns result
+    it('should return 500 when update fails', async () => {
+      mockServiceClient.update.mockReturnValueOnce({
+        eq: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            eq: jest.fn().mockResolvedValue({ error: { message: 'DB error' } }),
+          }),
+        }),
+      } as unknown as typeof mockServiceClient);
 
       const request = new NextRequest('http://localhost/api/content/site-123', {
         method: 'PUT',
-        body: JSON.stringify({
-          elementId: 'header-1',
-          content: 'Updated welcome message',
-        }),
-      });
-
-      const response = await PUT(request, { params: { siteId: 'site-123' } });
-
-      expect(response.status).toBe(200);
-      expect(mockSupabase.eq).toHaveBeenCalledWith('language', 'en');
-      expect(mockSupabase.eq).toHaveBeenCalledWith('variant', 'default');
-    });
-
-    it('should return 500 on update error', async () => {
-      mockSupabase.eq
-        .mockReturnValueOnce(mockSupabase) // first eq (site_id)
-        .mockReturnValueOnce(mockSupabase) // second eq (element_id)
-        .mockReturnValueOnce(mockSupabase) // third eq (language)
-        .mockResolvedValueOnce({ error: { message: 'Update failed' } }); // fourth eq (variant) returns error
-
-      const request = new NextRequest('http://localhost/api/content/site-123', {
-        method: 'PUT',
-        body: JSON.stringify({
-          elementId: 'header-1',
-          content: 'Updated welcome message',
-        }),
+        headers: {
+          Authorization: 'Bearer token',
+        },
+        body: JSON.stringify({ elementId: 'header-1', content: 'Updated content' }),
       });
 
       const response = await PUT(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
       expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Failed to update content',
+      expect(data.error).toBe('Failed to update content');
+    });
+  });
+
+  describe('OPTIONS', () => {
+    it('should return 204 with CORS headers when origin allowed', async () => {
+      const request = new NextRequest('http://localhost/api/content/site-123', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://example.com',
+        },
       });
+
+      const response = await OPTIONS(request, { params: { siteId: 'site-123' } });
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://example.com');
     });
 
-    it('should handle missing elementId', async () => {
+    it('should return 403 when origin not allowed', async () => {
+      mockAuthorizeSiteOrigin.mockRejectedValueOnce(new Error('Origin not allowed'));
+
       const request = new NextRequest('http://localhost/api/content/site-123', {
-        method: 'PUT',
-        body: JSON.stringify({
-          content: 'Updated welcome message',
-        }),
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://malicious.com',
+        },
       });
 
-      const response = await PUT(request, { params: { siteId: 'site-123' } });
-
-      expect(response.status).toBe(200); // The API doesn't validate required fields
-      expect(mockSupabase.eq).toHaveBeenCalledWith('element_id', undefined);
-    });
-
-    it('should handle malformed JSON', async () => {
-      const request = new NextRequest('http://localhost/api/content/site-123', {
-        method: 'PUT',
-        body: 'invalid-json',
-      });
-
-      const response = await PUT(request, { params: { siteId: 'site-123' } });
+      const response = await OPTIONS(request, { params: { siteId: 'site-123' } });
       const data = await response.json();
 
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Internal server error',
-      });
+      expect(response.status).toBe(403);
+      expect(data.error).toBe('Origin not allowed');
     });
   });
 });

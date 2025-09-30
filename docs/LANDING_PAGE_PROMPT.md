@@ -160,7 +160,8 @@ Create a modern, conversion-focused landing page that communicates the simplicit
 **Installation:**
 ```html
 <script src="https://cdn.recopyfast.com/embed/recopyfast.js" 
-        data-site-id="your-site-id"></script>
+        data-site-id="your-site-id"
+        data-site-token="your-signed-token"></script>
 ```
 
 **Features:**

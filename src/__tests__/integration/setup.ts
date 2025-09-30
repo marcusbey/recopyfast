@@ -188,6 +188,7 @@ export const handlers = [
 
     const siteId = `site-${Date.now()}`;
     const apiKey = 'test-api-key-' + Math.random().toString(36).substring(7);
+    const siteToken = `test-site-token-${Math.random().toString(36).substring(2, 8)}`;
     
     return HttpResponse.json({
       site: {
@@ -197,7 +198,8 @@ export const handlers = [
         created_at: new Date().toISOString()
       },
       apiKey,
-      embedScript: `<script src="http://localhost:3000/embed/recopyfast.js" data-site-id="${siteId}"></script>`
+      siteToken,
+      embedScript: `<script src="http://localhost:3000/embed/recopyfast.js" data-site-id="${siteId}" data-site-token="${siteToken}"></script>`
     });
   }),
 

@@ -1,10 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createServiceRoleClient } from '@/lib/supabase/service';
+import {
+  authorizeSiteRequest,
+  authorizeSiteOrigin,
+  sanitizeIncomingContent,
+} from '@/lib/security/site-auth';
 
 interface ContentMapData {
   selector: string;
   content: string;
   type: string;
+}
+
+function extractToken(request: NextRequest) {
+  const authHeader = request.headers.get('authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  const token = request.nextUrl.searchParams.get('token');
+  return token;
+}
+
+function withCors(response: NextResponse, allowedOrigin: string | null) {
+  const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || '*';
+  const originHeader = allowedOrigin || defaultOrigin;
+  response.headers.set('Access-Control-Allow-Origin', originHeader);
+  response.headers.set('Access-Control-Allow-Credentials', 'true');
+  response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  response.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,OPTIONS');
+  response.headers.set('Vary', 'Origin');
+  return response;
 }
 
 export async function GET(
@@ -13,7 +38,27 @@ export async function GET(
 ) {
   try {
     const { siteId } = params;
-    const supabase = await createClient();
+    const supabase = createServiceRoleClient();
+    const token = extractToken(request);
+    const origin = request.headers.get('origin');
+    const referer = request.headers.get('referer');
+
+    let allowedOrigin: string | null = null;
+
+    try {
+      ({ allowedOrigin } = await authorizeSiteRequest({
+        siteId,
+        token: token,
+        origin,
+        referer,
+      }));
+    } catch (authError) {
+      console.error('Content GET authorization failed:', authError);
+      return NextResponse.json(
+        { error: authError instanceof Error ? authError.message : 'Unauthorized' },
+        { status: authError instanceof Error && authError.message === 'Origin not allowed' ? 403 : 401 }
+      );
+    }
     
     // Get language and variant from query params
     const searchParams = request.nextUrl.searchParams;
@@ -36,7 +81,7 @@ export async function GET(
       );
     }
     
-    return NextResponse.json(contentElements || []);
+    return withCors(NextResponse.json(contentElements || []), allowedOrigin);
   } catch (error) {
     console.error('Error in content fetch:', error);
     return NextResponse.json(
@@ -53,7 +98,27 @@ export async function POST(
   try {
     const { siteId } = params;
     const contentMap = await request.json();
-    const supabase = await createClient();
+    const supabase = createServiceRoleClient();
+    const token = extractToken(request);
+    const origin = request.headers.get('origin');
+    const referer = request.headers.get('referer');
+
+    let allowedOrigin: string | null = null;
+
+    try {
+      ({ allowedOrigin } = await authorizeSiteRequest({
+        siteId,
+        token: token,
+        origin,
+        referer,
+      }));
+    } catch (authError) {
+      console.error('Content POST authorization failed:', authError);
+      return NextResponse.json(
+        { error: authError instanceof Error ? authError.message : 'Unauthorized' },
+        { status: authError instanceof Error && authError.message === 'Origin not allowed' ? 403 : 401 }
+      );
+    }
     
     // Verify site exists
     const { data: site } = await supabase
@@ -63,23 +128,30 @@ export async function POST(
       .single();
     
     if (!site) {
-      return NextResponse.json(
+      return withCors(
+        NextResponse.json(
         { error: 'Site not found' },
         { status: 404 }
+        ),
+        allowedOrigin
       );
     }
     
     // Process content map
-    const contentElements = Object.entries(contentMap).map(([elementId, data]: [string, ContentMapData]) => ({
-      site_id: siteId,
-      element_id: elementId,
-      selector: data.selector,
-      original_content: data.content,
-      current_content: data.content,
-      language: 'en',
-      variant: 'default',
-      metadata: { type: data.type }
-    }));
+    const contentElements = Object.entries(contentMap).map(([elementId, data]: [string, ContentMapData]) => {
+      const sanitizedContent = sanitizeIncomingContent(data.content);
+
+      return {
+        site_id: siteId,
+        element_id: elementId,
+        selector: data.selector,
+        original_content: sanitizedContent,
+        current_content: sanitizedContent,
+        language: 'en',
+        variant: 'default',
+        metadata: { type: data.type },
+      };
+    });
     
     // Upsert content elements
     const { error } = await supabase
@@ -90,13 +162,16 @@ export async function POST(
     
     if (error) {
       console.error('Error upserting content:', error);
-      return NextResponse.json(
+      return withCors(
+        NextResponse.json(
         { error: 'Failed to save content' },
         { status: 500 }
+        ),
+        allowedOrigin
       );
     }
     
-    return NextResponse.json({ success: true });
+    return withCors(NextResponse.json({ success: true }), allowedOrigin);
   } catch (error) {
     console.error('Error in content save:', error);
     return NextResponse.json(
@@ -113,12 +188,33 @@ export async function PUT(
   try {
     const { siteId } = params;
     const { elementId, content, language = 'en', variant = 'default' } = await request.json();
-    const supabase = await createClient();
+    const sanitizedContent = sanitizeIncomingContent(content);
+    const supabase = createServiceRoleClient();
+    const token = extractToken(request);
+    const origin = request.headers.get('origin');
+    const referer = request.headers.get('referer');
+
+    let allowedOrigin: string | null = null;
+
+    try {
+      ({ allowedOrigin } = await authorizeSiteRequest({
+        siteId,
+        token: token,
+        origin,
+        referer,
+      }));
+    } catch (authError) {
+      console.error('Content PUT authorization failed:', authError);
+      return NextResponse.json(
+        { error: authError instanceof Error ? authError.message : 'Unauthorized' },
+        { status: authError instanceof Error && authError.message === 'Origin not allowed' ? 403 : 401 }
+      );
+    }
     
     // Update content element
     const { error } = await supabase
       .from('content_elements')
-      .update({ current_content: content })
+      .update({ current_content: sanitizedContent })
       .eq('site_id', siteId)
       .eq('element_id', elementId)
       .eq('language', language)
@@ -126,18 +222,41 @@ export async function PUT(
     
     if (error) {
       console.error('Error updating content:', error);
-      return NextResponse.json(
+      return withCors(
+        NextResponse.json(
         { error: 'Failed to update content' },
         { status: 500 }
+        ),
+        allowedOrigin
       );
     }
     
-    return NextResponse.json({ success: true });
+    return withCors(NextResponse.json({ success: true }), allowedOrigin);
   } catch (error) {
     console.error('Error in content update:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
+    );
+  }
+}
+
+export async function OPTIONS(
+  request: NextRequest,
+  { params }: { params: { siteId: string } }
+) {
+  try {
+    const { allowedOrigin } = await authorizeSiteOrigin(
+      params.siteId,
+      request.headers.get('origin'),
+      request.headers.get('referer')
+    );
+
+    return withCors(NextResponse.json({}, { status: 204 }), allowedOrigin);
+  } catch (error) {
+    return NextResponse.json(
+      { error: 'Origin not allowed' },
+      { status: 403 }
     );
   }
 }
