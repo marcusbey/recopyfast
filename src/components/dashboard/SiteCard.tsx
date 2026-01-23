@@ -1,16 +1,16 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from "@/components/ui/dropdown-menu";
 import {
   Globe,
   MoreVertical,
@@ -21,11 +21,12 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-} from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import type { Site } from '@/types';
+} from "lucide-react";
+import { ShareButton } from "./ShareButton";
+import { formatDistanceToNow } from "date-fns";
+import type { Site } from "@/types";
 
-export type SiteStatus = 'active' | 'inactive' | 'verifying';
+export type SiteStatus = "active" | "inactive" | "verifying";
 
 interface SiteWithStats extends Site {
   stats?: {
@@ -45,25 +46,30 @@ interface SiteCardProps {
 
 const statusConfig = {
   active: {
-    label: 'Active',
+    label: "Active",
     icon: CheckCircle2,
-    className: 'bg-green-100 text-green-700 border-green-200',
+    className: "bg-green-100 text-green-700 border-green-200",
   },
   inactive: {
-    label: 'Inactive',
+    label: "Inactive",
     icon: AlertCircle,
-    className: 'bg-gray-100 text-gray-700 border-gray-200',
+    className: "bg-gray-100 text-gray-700 border-gray-200",
   },
   verifying: {
-    label: 'Verifying',
+    label: "Verifying",
     icon: Clock,
-    className: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+    className: "bg-yellow-100 text-yellow-700 border-yellow-200",
   },
 };
 
-export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProps) {
+export function SiteCard({
+  site,
+  onViewDetails,
+  onEdit,
+  onDelete,
+}: SiteCardProps) {
   const [copied, setCopied] = useState(false);
-  const status = site.status || 'active';
+  const status = site.status || "active";
   const StatusIcon = statusConfig[status].icon;
 
   const handleCopyDomain = async () => {
@@ -74,7 +80,7 @@ export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProp
 
   const lastEdited = site.updated_at
     ? formatDistanceToNow(new Date(site.updated_at), { addSuffix: true })
-    : 'Never';
+    : "Never";
 
   return (
     <Card className="group hover:shadow-lg transition-shadow duration-200 border-gray-200">
@@ -85,7 +91,9 @@ export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProp
               <Globe className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-gray-900 text-lg truncate">{site.name}</h3>
+              <h3 className="font-semibold text-gray-900 text-lg truncate">
+                {site.name}
+              </h3>
               <div className="flex items-center space-x-2 mt-1">
                 <p className="text-sm text-gray-600 truncate">{site.domain}</p>
                 <Button
@@ -142,7 +150,9 @@ export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProp
             <StatusIcon className="w-3 h-3 mr-1" />
             {statusConfig[status].label}
           </Badge>
-          <span className="text-xs text-gray-500">Last edited {lastEdited}</span>
+          <span className="text-xs text-gray-500">
+            Last edited {lastEdited}
+          </span>
         </div>
 
         <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-100">
@@ -154,14 +164,18 @@ export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProp
           </div>
           <div>
             <p className="text-xs text-gray-500 mb-1">Views</p>
-            <p className="text-lg font-semibold text-gray-900">{site.stats?.views || 0}</p>
+            <p className="text-lg font-semibold text-gray-900">
+              {site.stats?.views || 0}
+            </p>
           </div>
           <div>
             <p className="text-xs text-gray-500 mb-1">Activity</p>
             <p className="text-lg font-semibold text-gray-900">
               {site.stats?.last_activity
-                ? formatDistanceToNow(new Date(site.stats.last_activity), { addSuffix: false })
-                : 'None'}
+                ? formatDistanceToNow(new Date(site.stats.last_activity), {
+                    addSuffix: false,
+                  })
+                : "None"}
             </p>
           </div>
         </div>
@@ -185,6 +199,7 @@ export function SiteCard({ site, onViewDetails, onEdit, onDelete }: SiteCardProp
             <Settings className="w-4 h-4 mr-2" />
             Settings
           </Button>
+          <ShareButton site={site} variant="icon" className="flex-shrink-0" />
         </div>
       </CardContent>
     </Card>
