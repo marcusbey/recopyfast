@@ -7,7 +7,8 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "ReCopyFast - Universal CMS Layer",
-  description: "Transform any website into an editable platform with a simple script tag",
+  description:
+    "Transform any website into an editable platform with a simple script tag",
 };
 
 export default function RootLayout({
@@ -18,9 +19,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

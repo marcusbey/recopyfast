@@ -1,14 +1,20 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/contexts/AuthContext';
-import { User, Bell, Shield, Key, Palette, Save } from 'lucide-react';
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { useAuth } from "@/contexts/AuthContext";
+import { User, Bell, Shield, Key, Palette, Save } from "lucide-react";
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -26,7 +32,9 @@ export default function SettingsPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-600 mt-1">Manage your account and preferences</p>
+        <p className="text-gray-600 mt-1">
+          Manage your account and preferences
+        </p>
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
@@ -58,7 +66,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Profile Information</CardTitle>
-              <CardDescription>Update your personal information and email</CardDescription>
+              <CardDescription>
+                Update your personal information and email
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -66,7 +76,7 @@ export default function SettingsPage() {
                 <Input
                   id="name"
                   placeholder="John Doe"
-                  defaultValue={user?.user_metadata?.name || ''}
+                  defaultValue={user?.user_metadata?.name || ""}
                 />
               </div>
               <div className="space-y-2">
@@ -75,7 +85,7 @@ export default function SettingsPage() {
                   id="email"
                   type="email"
                   placeholder="john@example.com"
-                  defaultValue={user?.email || ''}
+                  defaultValue={user?.email || ""}
                 />
               </div>
               <div className="space-y-2">
@@ -88,7 +98,7 @@ export default function SettingsPage() {
               </div>
               <Button onClick={handleSave} disabled={saving}>
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? 'Saving...' : 'Save Changes'}
+                {saving ? "Saving..." : "Save Changes"}
               </Button>
             </CardContent>
           </Card>
@@ -99,40 +109,50 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>Choose how you want to be notified</CardDescription>
+              <CardDescription>
+                Choose how you want to be notified
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Email Notifications</p>
-                  <p className="text-sm text-gray-600">Receive updates via email</p>
+                  <p className="text-sm text-gray-600">
+                    Receive updates via email
+                  </p>
                 </div>
                 <input type="checkbox" defaultChecked className="w-4 h-4" />
               </div>
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Content Edit Alerts</p>
-                  <p className="text-sm text-gray-600">Get notified when content is edited</p>
+                  <p className="text-sm text-gray-600">
+                    Get notified when content is edited
+                  </p>
                 </div>
                 <input type="checkbox" defaultChecked className="w-4 h-4" />
               </div>
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Weekly Reports</p>
-                  <p className="text-sm text-gray-600">Receive weekly analytics summaries</p>
+                  <p className="text-sm text-gray-600">
+                    Receive weekly analytics summaries
+                  </p>
                 </div>
                 <input type="checkbox" className="w-4 h-4" />
               </div>
               <div className="flex items-center justify-between py-3">
                 <div>
                   <p className="font-medium">Marketing Emails</p>
-                  <p className="text-sm text-gray-600">Updates about new features and offers</p>
+                  <p className="text-sm text-gray-600">
+                    Updates about new features and offers
+                  </p>
                 </div>
                 <input type="checkbox" className="w-4 h-4" />
               </div>
               <Button onClick={handleSave} disabled={saving}>
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? 'Saving...' : 'Save Preferences'}
+                {saving ? "Saving..." : "Save Preferences"}
               </Button>
             </CardContent>
           </Card>
@@ -144,7 +164,9 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Password</CardTitle>
-                <CardDescription>Update your password to keep your account secure</CardDescription>
+                <CardDescription>
+                  Update your password to keep your account secure
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
@@ -166,7 +188,9 @@ export default function SettingsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Two-Factor Authentication</CardTitle>
-                <CardDescription>Add an extra layer of security to your account</CardDescription>
+                <CardDescription>
+                  Add an extra layer of security to your account
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex items-center justify-between">
@@ -186,7 +210,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>API Keys</CardTitle>
-              <CardDescription>Manage your API keys for programmatic access</CardDescription>
+              <CardDescription>
+                Manage your API keys for programmatic access
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="p-4 bg-gray-50 rounded-lg">
@@ -211,7 +237,9 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Appearance</CardTitle>
-              <CardDescription>Customize how ReCopyFast looks for you</CardDescription>
+              <CardDescription>
+                Customize how ReCopyFast looks for you
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -233,7 +261,7 @@ export default function SettingsPage() {
               </div>
               <Button onClick={handleSave} disabled={saving}>
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? 'Saving...' : 'Save Appearance'}
+                {saving ? "Saving..." : "Save Appearance"}
               </Button>
             </CardContent>
           </Card>

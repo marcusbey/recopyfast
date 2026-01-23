@@ -1,10 +1,10 @@
-'use client';
+"use client";
 
-import { useAuth } from '@/contexts/AuthContext';
-import { DashboardNavigation } from '@/components/dashboard/DashboardNavigation';
-import { Breadcrumbs } from '@/components/dashboard/Breadcrumbs';
-import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useAuth } from "@/contexts/AuthContext";
+import { DashboardNavigation } from "@/components/dashboard/DashboardNavigation";
+import { Breadcrumbs } from "@/components/dashboard/Breadcrumbs";
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,26 +12,32 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { User, LogOut, Settings } from 'lucide-react';
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { User, LogOut, Settings } from "lucide-react";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
-  const [userPlan, setUserPlan] = useState<'free' | 'pro' | 'enterprise'>('free');
+  const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">(
+    "free",
+  );
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push('/');
+      router.push("/");
     }
   }, [user, loading, router]);
 
   useEffect(() => {
     // Fetch user plan from API or user metadata
     if (user) {
-      const plan = user.user_metadata?.plan || 'free';
+      const plan = user.user_metadata?.plan || "free";
       setUserPlan(plan);
     }
   }, [user]);
@@ -49,7 +55,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const getUserInitials = () => {
-    const name = user.user_metadata?.name || user.email || 'User';
+    const name = user.user_metadata?.name || user.email || "User";
     return name.charAt(0).toUpperCase();
   };
 
@@ -57,7 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     try {
       await signOut();
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error("Error signing out:", error);
     }
   };
 
@@ -83,7 +89,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                <Button
+                  variant="ghost"
+                  className="relative h-10 w-10 rounded-full"
+                >
                   <Avatar className="h-10 w-10">
                     <AvatarFallback className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
                       {getUserInitials()}
@@ -95,7 +104,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
                     <p className="text-sm font-medium leading-none">
-                      {user.user_metadata?.name || 'User'}
+                      {user.user_metadata?.name || "User"}
                     </p>
                     <p className="text-xs leading-none text-muted-foreground">
                       {user.email}
@@ -116,7 +125,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer">
+                <DropdownMenuItem
+                  onClick={handleSignOut}
+                  className="cursor-pointer"
+                >
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Log out</span>
                 </DropdownMenuItem>

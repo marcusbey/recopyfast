@@ -1,50 +1,77 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
-import { Users, Plus, Mail, Crown, Shield, UserX, Lock } from 'lucide-react';
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Users, Plus, Mail, Crown, Shield, UserX, Lock } from "lucide-react";
 
 interface TeamMember {
   id: string;
   name: string;
   email: string;
-  role: 'owner' | 'admin' | 'member';
-  status: 'active' | 'pending';
+  role: "owner" | "admin" | "member";
+  status: "active" | "pending";
   joinedAt: string;
 }
 
 export default function TeamsPage() {
   const [members] = useState<TeamMember[]>([
     {
-      id: '1',
-      name: 'John Doe',
-      email: 'john@example.com',
-      role: 'owner',
-      status: 'active',
-      joinedAt: '2024-01-15',
+      id: "1",
+      name: "John Doe",
+      email: "john@example.com",
+      role: "owner",
+      status: "active",
+      joinedAt: "2024-01-15",
     },
   ]);
 
   const getRoleBadge = (role: string) => {
     switch (role) {
-      case 'owner':
-        return <Badge className="bg-purple-100 text-purple-700 border-purple-200"><Crown className="w-3 h-3 mr-1" />Owner</Badge>;
-      case 'admin':
-        return <Badge className="bg-blue-100 text-blue-700 border-blue-200"><Shield className="w-3 h-3 mr-1" />Admin</Badge>;
-      case 'member':
-        return <Badge className="bg-gray-100 text-gray-700 border-gray-200"><Users className="w-3 h-3 mr-1" />Member</Badge>;
+      case "owner":
+        return (
+          <Badge className="bg-purple-100 text-purple-700 border-purple-200">
+            <Crown className="w-3 h-3 mr-1" />
+            Owner
+          </Badge>
+        );
+      case "admin":
+        return (
+          <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+            <Shield className="w-3 h-3 mr-1" />
+            Admin
+          </Badge>
+        );
+      case "member":
+        return (
+          <Badge className="bg-gray-100 text-gray-700 border-gray-200">
+            <Users className="w-3 h-3 mr-1" />
+            Member
+          </Badge>
+        );
       default:
         return null;
     }
   };
 
   const getStatusBadge = (status: string) => {
-    return status === 'active'
-      ? <Badge className="bg-green-100 text-green-700 border-green-200">Active</Badge>
-      : <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">Pending</Badge>;
+    return status === "active" ? (
+      <Badge className="bg-green-100 text-green-700 border-green-200">
+        Active
+      </Badge>
+    ) : (
+      <Badge className="bg-yellow-100 text-yellow-700 border-yellow-200">
+        Pending
+      </Badge>
+    );
   };
 
   return (
@@ -53,7 +80,9 @@ export default function TeamsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Teams</h1>
-          <p className="text-gray-600 mt-1">Collaborate with your team members</p>
+          <p className="text-gray-600 mt-1">
+            Collaborate with your team members
+          </p>
         </div>
         <Button className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
           <Plus className="w-4 h-4 mr-2" />
@@ -71,7 +100,8 @@ export default function TeamsPage() {
             <div className="flex-1">
               <h3 className="font-semibold text-gray-900 mb-1">Pro Feature</h3>
               <p className="text-gray-600 mb-4">
-                Team collaboration is available on Pro and Enterprise plans. Upgrade to invite team members and manage permissions.
+                Team collaboration is available on Pro and Enterprise plans.
+                Upgrade to invite team members and manage permissions.
               </p>
               <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
                 Upgrade to Pro
@@ -88,7 +118,9 @@ export default function TeamsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600">Total Members</p>
-                <p className="text-2xl font-bold text-gray-900">{members.length}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {members.length}
+                </p>
               </div>
               <Users className="w-8 h-8 text-blue-600" />
             </div>
@@ -101,7 +133,7 @@ export default function TeamsPage() {
               <div>
                 <p className="text-sm text-gray-600">Active Members</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {members.filter((m) => m.status === 'active').length}
+                  {members.filter((m) => m.status === "active").length}
                 </p>
               </div>
               <Shield className="w-8 h-8 text-green-600" />
@@ -115,7 +147,7 @@ export default function TeamsPage() {
               <div>
                 <p className="text-sm text-gray-600">Pending Invites</p>
                 <p className="text-2xl font-bold text-gray-900">
-                  {members.filter((m) => m.status === 'pending').length}
+                  {members.filter((m) => m.status === "pending").length}
                 </p>
               </div>
               <Mail className="w-8 h-8 text-yellow-600" />
@@ -128,11 +160,18 @@ export default function TeamsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Invite Team Member</CardTitle>
-          <CardDescription>Send an invitation to collaborate on your sites</CardDescription>
+          <CardDescription>
+            Send an invitation to collaborate on your sites
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex gap-4">
-            <Input placeholder="email@example.com" type="email" className="flex-1" disabled />
+            <Input
+              placeholder="email@example.com"
+              type="email"
+              className="flex-1"
+              disabled
+            />
             <Button disabled className="cursor-not-allowed opacity-50">
               <Mail className="w-4 h-4 mr-2" />
               Send Invite
@@ -145,7 +184,9 @@ export default function TeamsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Team Members</CardTitle>
-          <CardDescription>Manage your team members and their roles</CardDescription>
+          <CardDescription>
+            Manage your team members and their roles
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -166,7 +207,7 @@ export default function TeamsPage() {
                 <div className="flex items-center gap-3">
                   {getRoleBadge(member.role)}
                   {getStatusBadge(member.status)}
-                  {member.role !== 'owner' && (
+                  {member.role !== "owner" && (
                     <Button variant="ghost" size="sm" disabled>
                       <UserX className="w-4 h-4" />
                     </Button>
@@ -182,7 +223,9 @@ export default function TeamsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Roles & Permissions</CardTitle>
-          <CardDescription>Understanding team member permissions</CardDescription>
+          <CardDescription>
+            Understanding team member permissions
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">

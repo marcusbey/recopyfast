@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { AnalyticsDashboard } from '@/components/dashboard/AnalyticsDashboard';
+import { useEffect, useState } from "react";
+import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
 
 interface Site {
   id: string;
@@ -18,13 +18,13 @@ export default function AnalyticsPage() {
 
   const fetchSites = async () => {
     try {
-      const response = await fetch('/api/sites');
+      const response = await fetch("/api/sites");
       if (response.ok) {
         const data = await response.json();
         setSites(data.sites || []);
       }
     } catch (error) {
-      console.error('Error fetching sites:', error);
+      console.error("Error fetching sites:", error);
     } finally {
       setLoading(false);
     }

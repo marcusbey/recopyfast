@@ -1,50 +1,64 @@
-import { Header } from "@/components/layout/Header"
-import Footer from "@/components/layout/Footer"
-import EnhancedHero from "@/components/sections/EnhancedHero"
-import Problem from "@/components/sections/Problem"
-import HowItWorks from "@/components/sections/HowItWorks"
-import Features from "@/components/sections/Features"
-import Pricing from "@/components/sections/Pricing"
-import EnhancedSocialProof from "@/components/sections/EnhancedSocialProof"
+"use client";
+
+import { useLenis } from "@/lib/hooks/useLenis";
+import dynamic from "next/dynamic";
+import { Header } from "@/components/layout/Header";
+import Footer from "@/components/layout/Footer";
+import Hero from "@/components/sections/Hero";
+import ValueProposition from "@/components/sections/ValueProposition";
+import HowItWorks from "@/components/sections/HowItWorks";
+import Benefits from "@/components/sections/Benefits";
+import Pricing from "@/components/sections/Pricing";
+import SocialProof from "@/components/sections/SocialProof";
+import FinalCTA from "@/components/sections/FinalCTA";
+import InteractiveHero from "@/components/landing/InteractiveHero";
+
+// Dynamic import for MeshBackground to avoid SSR issues with Three.js
+const MeshBackground = dynamic(
+  () => import("@/components/three/MeshBackground"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-sky-50 to-sky-100" />
+    ),
+  },
+);
 
 export default function Home() {
+  const { scrollProgress } = useLenis();
+
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen">
+      {/* 3D Mesh Background - pulses with scroll */}
+      <MeshBackground scrollProgress={scrollProgress} />
+
       <Header />
-      
-      <main>
-        <EnhancedHero />
-        <Problem />
-        <HowItWorks />
-        <Features />
-        <Pricing />
-        <EnhancedSocialProof />
+      <main className="relative z-10">
+        <Hero />
+        <ValueProposition />
 
-        {/* Final CTA */}
-        <section className="py-24 px-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white relative overflow-hidden">
-          <div className="container mx-auto max-w-4xl text-center relative z-10">
-            <h2 className="font-bold text-3xl md:text-4xl mb-4">Ready to Transform Your Website?</h2>
-            <p className="text-xl mb-8 text-blue-100">
-              Join thousands of websites using ReCopyFast for intelligent content management
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button className="px-8 py-3 text-lg bg-white text-gray-900 hover:bg-gray-100 font-semibold rounded-lg transition-colors">
-                Start Free Trial
-                <span className="ml-2">→</span>
-              </button>
-              <button className="px-8 py-3 text-lg border-white text-white hover:bg-white hover:text-blue-600 bg-transparent font-semibold border rounded-lg transition-colors">
-                <span className="mr-2">▶</span>
-                Schedule Demo
-              </button>
+        {/* Interactive Demo Websites Section */}
+        <section className="py-20 px-6 bg-white/70 backdrop-blur-xl border-y border-sky-100/50">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
+                See It In Action
+              </h2>
+              <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+                Try editing content on these demo websites. Click any text to
+                see how ReCopyFast works.
+              </p>
             </div>
+            <InteractiveHero />
           </div>
-          
-          {/* Decorative elements */}
-          <div className="absolute top-10 left-10 w-20 h-20 bg-white/10 rounded-full blur-xl"></div>
-          <div className="absolute bottom-10 right-10 w-32 h-32 bg-white/10 rounded-full blur-xl"></div>
         </section>
-      </main>
 
+        <HowItWorks />
+        <Benefits />
+        <SocialProof />
+        <Pricing />
+        <FinalCTA />
+      </main>
       <Footer />
     </div>
   );
