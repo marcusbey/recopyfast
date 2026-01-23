@@ -1,10 +1,10 @@
 /**
  * @jest-environment jsdom
  */
-import React from 'react';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import AISuggestionButton from '../AISuggestionButton';
+import React from "react";
+import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import AISuggestionButton from "../AISuggestionButton";
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -18,19 +18,19 @@ Object.assign(navigator, {
 });
 
 const mockSuggestions = [
-  'This is an improved version of your text with better clarity.',
-  'Here is another suggestion that enhances the impact.',
-  'A third option that optimizes for engagement.'
+  "This is an improved version of your text with better clarity.",
+  "Here is another suggestion that enhances the impact.",
+  "A third option that optimizes for engagement.",
 ];
 
 const mockApiResponse = {
-  suggestions: mockSuggestions
+  suggestions: mockSuggestions,
 };
 
 const defaultProps = {
-  currentText: 'This is the original text that needs improvement.',
-  context: 'website content',
-  onSuggestionSelect: jest.fn()
+  currentText: "This is the original text that needs improvement.",
+  context: "website content",
+  onSuggestionSelect: jest.fn(),
 };
 
 beforeEach(() => {
@@ -46,215 +46,236 @@ afterEach(() => {
   cleanup();
 });
 
-describe('AISuggestionButton', () => {
-  describe('Initial State', () => {
-    it('should render trigger button when closed', () => {
+describe("AISuggestionButton", () => {
+  describe("Initial State", () => {
+    it("should render trigger button when closed", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
-      const triggerButton = screen.getByRole('button', { name: /ai suggest/i });
+      const triggerButton = screen.getByRole("button", { name: /ai suggest/i });
       expect(triggerButton).toBeInTheDocument();
-      expect(triggerButton).toHaveAttribute('title', 'Get AI suggestions');
+      expect(triggerButton).toHaveAttribute("title", "Get AI suggestions");
     });
 
-    it('should not show modal initially', () => {
+    it("should not show modal initially", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
-      expect(screen.queryByText('AI Content Suggestions')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("AI Content Suggestions"),
+      ).not.toBeInTheDocument();
     });
   });
 
-  describe('Modal Opening and Closing', () => {
-    it('should open modal when trigger button is clicked', async () => {
+  describe("Modal Opening and Closing", () => {
+    it("should open modal when trigger button is clicked", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      const triggerButton = screen.getByRole('button', { name: /ai suggest/i });
+      const triggerButton = screen.getByRole("button", { name: /ai suggest/i });
       await user.click(triggerButton);
 
-      expect(screen.getByText('AI Content Suggestions')).toBeInTheDocument();
-      expect(screen.getByText('Original Text')).toBeInTheDocument();
+      expect(screen.getByText("AI Content Suggestions")).toBeInTheDocument();
+      expect(screen.getByText("Original Text")).toBeInTheDocument();
       expect(screen.getByText(defaultProps.currentText)).toBeInTheDocument();
     });
 
-    it('should close modal when X button is clicked', async () => {
+    it("should close modal when X button is clicked", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
       // Open modal
-      const triggerButton = screen.getByRole('button', { name: /ai suggest/i });
+      const triggerButton = screen.getByRole("button", { name: /ai suggest/i });
       await user.click(triggerButton);
 
       // Close modal
-      const closeButton = screen.getByRole('button', { name: '' }); // X button
+      const closeButton = screen.getByRole("button", { name: "" }); // X button
       await user.click(closeButton);
 
-      expect(screen.queryByText('AI Content Suggestions')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("AI Content Suggestions"),
+      ).not.toBeInTheDocument();
     });
 
-    it('should close modal when suggestion is selected', async () => {
+    it("should close modal when suggestion is selected", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
       // Open modal and generate suggestions
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Suggestions')).toBeInTheDocument();
+        expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Use a suggestion
-      const useButton = screen.getAllByText('Use This')[0];
+      const useButton = screen.getAllByText("Use This")[0];
       await user.click(useButton);
 
-      expect(screen.queryByText('AI Content Suggestions')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("AI Content Suggestions"),
+      ).not.toBeInTheDocument();
     });
   });
 
-  describe('Options Configuration', () => {
-    it('should have default goal and tone selected', async () => {
+  describe("Options Configuration", () => {
+    it("should have default goal and tone selected", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText('Goal') as HTMLSelectElement;
-      const toneSelect = screen.getByLabelText('Tone') as HTMLSelectElement;
+      const goalSelect = screen.getByLabelText("Goal") as HTMLSelectElement;
+      const toneSelect = screen.getByLabelText("Tone") as HTMLSelectElement;
 
-      expect(goalSelect.value).toBe('improve');
-      expect(toneSelect.value).toBe('professional');
+      expect(goalSelect.value).toBe("improve");
+      expect(toneSelect.value).toBe("professional");
     });
 
-    it('should update goal when changed', async () => {
+    it("should update goal when changed", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText('Goal');
-      await user.selectOptions(goalSelect, 'shorten');
+      const goalSelect = screen.getByLabelText("Goal");
+      await user.selectOptions(goalSelect, "shorten");
 
-      expect((goalSelect as HTMLSelectElement).value).toBe('shorten');
+      expect((goalSelect as HTMLSelectElement).value).toBe("shorten");
     });
 
-    it('should update tone when changed', async () => {
+    it("should update tone when changed", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const toneSelect = screen.getByLabelText('Tone');
-      await user.selectOptions(toneSelect, 'casual');
+      const toneSelect = screen.getByLabelText("Tone");
+      await user.selectOptions(toneSelect, "casual");
 
-      expect((toneSelect as HTMLSelectElement).value).toBe('casual');
+      expect((toneSelect as HTMLSelectElement).value).toBe("casual");
     });
 
-    it('should display all goal options', async () => {
+    it("should display all goal options", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText('Goal');
-      const options = Array.from(goalSelect.querySelectorAll('option'));
+      const goalSelect = screen.getByLabelText("Goal");
+      const options = Array.from(goalSelect.querySelectorAll("option"));
 
       expect(options).toHaveLength(4);
-      expect(options.map(opt => opt.value)).toEqual(['improve', 'shorten', 'expand', 'optimize']);
+      expect(options.map((opt) => opt.value)).toEqual([
+        "improve",
+        "shorten",
+        "expand",
+        "optimize",
+      ]);
     });
 
-    it('should display all tone options', async () => {
+    it("should display all tone options", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const toneSelect = screen.getByLabelText('Tone');
-      const options = Array.from(toneSelect.querySelectorAll('option'));
+      const toneSelect = screen.getByLabelText("Tone");
+      const options = Array.from(toneSelect.querySelectorAll("option"));
 
       expect(options).toHaveLength(4);
-      expect(options.map(opt => opt.value)).toEqual(['professional', 'casual', 'marketing', 'technical']);
+      expect(options.map((opt) => opt.value)).toEqual([
+        "professional",
+        "casual",
+        "marketing",
+        "technical",
+      ]);
     });
   });
 
-  describe('Suggestion Generation', () => {
-    it('should make correct API call when generating suggestions', async () => {
+  describe("Suggestion Generation", () => {
+    it("should make correct API call when generating suggestions", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const generateButton = screen.getByText('Generate AI Suggestions');
+      const generateButton = screen.getByText("Generate AI Suggestions");
       await user.click(generateButton);
 
       await waitFor(() => {
-        expect(fetch).toHaveBeenCalledWith('/api/ai/suggest', {
-          method: 'POST',
+        expect(fetch).toHaveBeenCalledWith("/api/ai/suggest", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             text: defaultProps.currentText,
             context: defaultProps.context,
-            tone: 'professional',
-            goal: 'improve',
+            tone: "professional",
+            goal: "improve",
           }),
         });
       });
     });
 
-    it('should show loading state during generation', async () => {
+    it("should show loading state during generation", async () => {
       const user = userEvent.setup();
-      
+
       // Mock delayed response
-      (fetch as jest.Mock).mockImplementation(() => 
-        new Promise(resolve => 
-          setTimeout(() => resolve({
-            ok: true,
-            json: () => Promise.resolve(mockApiResponse)
-          }), 100)
-        )
+      (fetch as jest.Mock).mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  ok: true,
+                  json: () => Promise.resolve(mockApiResponse),
+                }),
+              100,
+            ),
+          ),
       );
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      
-      const generateButton = screen.getByText('Generate AI Suggestions');
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+
+      const generateButton = screen.getByText("Generate AI Suggestions");
       await user.click(generateButton);
 
-      expect(screen.getByText('Generating...')).toBeInTheDocument();
+      expect(screen.getByText("Generating...")).toBeInTheDocument();
       expect(generateButton).toBeDisabled();
 
       await waitFor(() => {
-        expect(screen.getByText('Generate AI Suggestions')).toBeInTheDocument();
+        expect(screen.getByText("Generate AI Suggestions")).toBeInTheDocument();
       });
     });
 
-    it('should display suggestions after successful generation', async () => {
+    it("should display suggestions after successful generation", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Suggestions')).toBeInTheDocument();
-        mockSuggestions.forEach(suggestion => {
+        expect(screen.getByText("Suggestions")).toBeInTheDocument();
+        mockSuggestions.forEach((suggestion) => {
           expect(screen.getByText(suggestion)).toBeInTheDocument();
         });
       });
     });
 
-    it('should display action buttons for each suggestion', async () => {
+    it("should display action buttons for each suggestion", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        const useButtons = screen.getAllByText('Use This');
-        const copyButtons = screen.getAllByText('Copy');
+        const useButtons = screen.getAllByText("Use This");
+        const copyButtons = screen.getAllByText("Copy");
 
         expect(useButtons).toHaveLength(3);
         expect(copyButtons).toHaveLength(3);
@@ -262,71 +283,73 @@ describe('AISuggestionButton', () => {
     });
   });
 
-  describe('Error Handling', () => {
-    it('should display error message on API failure', async () => {
+  describe("Error Handling", () => {
+    it("should display error message on API failure", async () => {
       const user = userEvent.setup();
-      
+
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: false,
-        json: () => Promise.resolve({ error: 'AI service unavailable' }),
+        json: () => Promise.resolve({ error: "AI service unavailable" }),
       });
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('AI service unavailable')).toBeInTheDocument();
+        expect(screen.getByText("AI service unavailable")).toBeInTheDocument();
       });
     });
 
-    it('should handle network errors', async () => {
+    it("should handle network errors", async () => {
       const user = userEvent.setup();
-      
-      (fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+
+      (fetch as jest.Mock).mockRejectedValueOnce(new Error("Network error"));
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Network error')).toBeInTheDocument();
+        expect(screen.getByText("Network error")).toBeInTheDocument();
       });
     });
 
-    it('should handle unknown errors gracefully', async () => {
+    it("should handle unknown errors gracefully", async () => {
       const user = userEvent.setup();
-      
-      (fetch as jest.Mock).mockRejectedValueOnce('Unknown error');
+
+      (fetch as jest.Mock).mockRejectedValueOnce("Unknown error");
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Failed to generate suggestions')).toBeInTheDocument();
+        expect(
+          screen.getByText("Failed to generate suggestions"),
+        ).toBeInTheDocument();
       });
     });
 
-    it('should clear error when generating new suggestions', async () => {
+    it("should clear error when generating new suggestions", async () => {
       const user = userEvent.setup();
-      
+
       // First request fails
       (fetch as jest.Mock).mockResolvedValueOnce({
         ok: false,
-        json: () => Promise.resolve({ error: 'API Error' }),
+        json: () => Promise.resolve({ error: "API Error" }),
       });
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('API Error')).toBeInTheDocument();
+        expect(screen.getByText("API Error")).toBeInTheDocument();
       });
 
       // Second request succeeds
@@ -335,38 +358,40 @@ describe('AISuggestionButton', () => {
         json: () => Promise.resolve(mockApiResponse),
       });
 
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
-      expect(screen.queryByText('API Error')).not.toBeInTheDocument();
+      expect(screen.queryByText("API Error")).not.toBeInTheDocument();
     });
   });
 
-  describe('Suggestion Actions', () => {
+  describe("Suggestion Actions", () => {
     beforeEach(async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Suggestions')).toBeInTheDocument();
+        expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
     });
 
     it('should call onSuggestionSelect when "Use This" is clicked', async () => {
       const user = userEvent.setup();
-      
-      const useButton = screen.getAllByText('Use This')[0];
+
+      const useButton = screen.getAllByText("Use This")[0];
       await user.click(useButton);
 
-      expect(defaultProps.onSuggestionSelect).toHaveBeenCalledWith(mockSuggestions[0]);
+      expect(defaultProps.onSuggestionSelect).toHaveBeenCalledWith(
+        mockSuggestions[0],
+      );
     });
 
     it('should copy suggestion to clipboard when "Copy" is clicked', async () => {
       const user = userEvent.setup();
-      
-      const copyButton = screen.getAllByText('Copy')[0];
+
+      const copyButton = screen.getAllByText("Copy")[0];
       await user.click(copyButton);
 
       expect(mockWriteText).toHaveBeenCalledWith(mockSuggestions[0]);
@@ -374,136 +399,157 @@ describe('AISuggestionButton', () => {
 
     it('should show "Copied" state temporarily after copying', async () => {
       const user = userEvent.setup();
-      
-      const copyButton = screen.getAllByText('Copy')[0];
+
+      const copyButton = screen.getAllByText("Copy")[0];
       await user.click(copyButton);
 
-      expect(screen.getByText('Copied')).toBeInTheDocument();
+      expect(screen.getByText("Copied")).toBeInTheDocument();
 
       // Should revert after timeout
-      await waitFor(() => {
-        expect(screen.queryByText('Copied')).not.toBeInTheDocument();
-      }, { timeout: 3000 });
+      await waitFor(
+        () => {
+          expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+        },
+        { timeout: 3000 },
+      );
     });
 
-    it('should handle clipboard API failure gracefully', async () => {
+    it("should handle clipboard API failure gracefully", async () => {
       const user = userEvent.setup();
-      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
-      
-      mockWriteText.mockRejectedValueOnce(new Error('Clipboard error'));
-      
-      const copyButton = screen.getAllByText('Copy')[0];
+      const consoleSpy = jest.spyOn(console, "error").mockImplementation();
+
+      mockWriteText.mockRejectedValueOnce(new Error("Clipboard error"));
+
+      const copyButton = screen.getAllByText("Copy")[0];
       await user.click(copyButton);
 
-      expect(consoleSpy).toHaveBeenCalledWith('Failed to copy text:', expect.any(Error));
-      
+      expect(consoleSpy).toHaveBeenCalledWith(
+        "Failed to copy text:",
+        expect.any(Error),
+      );
+
       consoleSpy.mockRestore();
     });
   });
 
-  describe('Empty State', () => {
-    it('should show empty state when no suggestions are generated', async () => {
+  describe("Empty State", () => {
+    it("should show empty state when no suggestions are generated", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.getByText('Click "Generate AI Suggestions" to get improved versions of your content')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'Click "Generate AI Suggestions" to get improved versions of your content',
+        ),
+      ).toBeInTheDocument();
     });
 
-    it('should not show empty state while loading', async () => {
+    it("should not show empty state while loading", async () => {
       const user = userEvent.setup();
-      
+
       // Mock delayed response
-      (fetch as jest.Mock).mockImplementation(() => 
-        new Promise(resolve => 
-          setTimeout(() => resolve({
-            ok: true,
-            json: () => Promise.resolve(mockApiResponse)
-          }), 100)
-        )
+      (fetch as jest.Mock).mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  ok: true,
+                  json: () => Promise.resolve(mockApiResponse),
+                }),
+              100,
+            ),
+          ),
       );
 
       render(<AISuggestionButton {...defaultProps} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
-      expect(screen.queryByText('Click "Generate AI Suggestions"')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('Click "Generate AI Suggestions"'),
+      ).not.toBeInTheDocument();
     });
   });
 
-  describe('Props Handling', () => {
-    it('should use default context when not provided', () => {
+  describe("Props Handling", () => {
+    it("should use default context when not provided", () => {
       const propsWithoutContext = {
-        currentText: 'Test text',
-        onSuggestionSelect: jest.fn()
+        currentText: "Test text",
+        onSuggestionSelect: jest.fn(),
       };
 
       render(<AISuggestionButton {...propsWithoutContext} />);
 
-      expect(() => render(<AISuggestionButton {...propsWithoutContext} />)).not.toThrow();
+      expect(() =>
+        render(<AISuggestionButton {...propsWithoutContext} />),
+      ).not.toThrow();
     });
 
-    it('should handle empty currentText', async () => {
+    it("should handle empty currentText", async () => {
       const user = userEvent.setup();
       const propsWithEmptyText = {
         ...defaultProps,
-        currentText: ''
+        currentText: "",
       };
 
       render(<AISuggestionButton {...propsWithEmptyText} />);
 
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.getByText('')).toBeInTheDocument(); // Empty text in original text display
+      expect(screen.getByText("")).toBeInTheDocument(); // Empty text in original text display
     });
   });
 
-  describe('State Reset', () => {
-    it('should clear suggestions when modal is closed', async () => {
+  describe("State Reset", () => {
+    it("should clear suggestions when modal is closed", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
       // Generate suggestions
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Suggestions')).toBeInTheDocument();
+        expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Close modal
-      const closeButton = screen.getByRole('button', { name: '' });
+      const closeButton = screen.getByRole("button", { name: "" });
       await user.click(closeButton);
 
       // Reopen modal
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();
-      expect(screen.getByText('Click "Generate AI Suggestions"')).toBeInTheDocument();
+      expect(screen.queryByText("Suggestions")).not.toBeInTheDocument();
+      expect(
+        screen.getByText('Click "Generate AI Suggestions"'),
+      ).toBeInTheDocument();
     });
 
-    it('should clear suggestions when using a suggestion', async () => {
+    it("should clear suggestions when using a suggestion", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
       // Generate suggestions
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
-      await user.click(screen.getByText('Generate AI Suggestions'));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
+      await user.click(screen.getByText("Generate AI Suggestions"));
 
       await waitFor(() => {
-        expect(screen.getByText('Suggestions')).toBeInTheDocument();
+        expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Use a suggestion
-      const useButton = screen.getAllByText('Use This')[0];
+      const useButton = screen.getAllByText("Use This")[0];
       await user.click(useButton);
 
       // Reopen modal
-      await user.click(screen.getByRole('button', { name: /ai suggest/i }));
+      await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();
+      expect(screen.queryByText("Suggestions")).not.toBeInTheDocument();
     });
   });
 });

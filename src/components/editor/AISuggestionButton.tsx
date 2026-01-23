@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Wand2, Loader2, RefreshCw, Copy, Check } from 'lucide-react';
+import { useState } from "react";
+import { Wand2, Loader2, RefreshCw, Copy, Check } from "lucide-react";
 
 interface AISuggestion {
   text: string;
@@ -15,29 +15,33 @@ interface AISuggestionButtonProps {
 }
 
 const SUGGESTION_GOALS = [
-  { value: 'improve', label: 'Improve', description: 'Enhance clarity and impact' },
-  { value: 'shorten', label: 'Shorten', description: 'Make more concise' },
-  { value: 'expand', label: 'Expand', description: 'Add more detail' },
-  { value: 'optimize', label: 'Optimize', description: 'Boost engagement' },
+  {
+    value: "improve",
+    label: "Improve",
+    description: "Enhance clarity and impact",
+  },
+  { value: "shorten", label: "Shorten", description: "Make more concise" },
+  { value: "expand", label: "Expand", description: "Add more detail" },
+  { value: "optimize", label: "Optimize", description: "Boost engagement" },
 ];
 
 const TONE_OPTIONS = [
-  { value: 'professional', label: 'Professional' },
-  { value: 'casual', label: 'Casual' },
-  { value: 'marketing', label: 'Marketing' },
-  { value: 'technical', label: 'Technical' },
+  { value: "professional", label: "Professional" },
+  { value: "casual", label: "Casual" },
+  { value: "marketing", label: "Marketing" },
+  { value: "technical", label: "Technical" },
 ];
 
-export default function AISuggestionButton({ 
-  currentText, 
-  context = 'website content',
-  onSuggestionSelect 
+export default function AISuggestionButton({
+  currentText,
+  context = "website content",
+  onSuggestionSelect,
 }: AISuggestionButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<AISuggestion[]>([]);
-  const [selectedGoal, setSelectedGoal] = useState('improve');
-  const [selectedTone, setSelectedTone] = useState('professional');
+  const [selectedGoal, setSelectedGoal] = useState("improve");
+  const [selectedTone, setSelectedTone] = useState("professional");
   const [error, setError] = useState<string | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -46,10 +50,10 @@ export default function AISuggestionButton({
     setError(null);
 
     try {
-      const response = await fetch('/api/ai/suggest', {
-        method: 'POST',
+      const response = await fetch("/api/ai/suggest", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           text: currentText,
@@ -62,17 +66,19 @@ export default function AISuggestionButton({
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate suggestions');
+        throw new Error(data.error || "Failed to generate suggestions");
       }
 
       setSuggestions(
         data.suggestions.map((text: string) => ({
           text,
           selected: false,
-        }))
+        })),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate suggestions');
+      setError(
+        err instanceof Error ? err.message : "Failed to generate suggestions",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -84,7 +90,7 @@ export default function AISuggestionButton({
       setCopiedIndex(index);
       setTimeout(() => setCopiedIndex(null), 2000);
     } catch (err) {
-      console.error('Failed to copy text:', err);
+      console.error("Failed to copy text:", err);
     }
   };
 
@@ -120,8 +126,18 @@ export default function AISuggestionButton({
             onClick={() => setIsOpen(false)}
             className="text-gray-400 hover:text-gray-600"
           >
-            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -148,7 +164,7 @@ export default function AISuggestionButton({
                 onChange={(e) => setSelectedGoal(e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
-                {SUGGESTION_GOALS.map(goal => (
+                {SUGGESTION_GOALS.map((goal) => (
                   <option key={goal.value} value={goal.value}>
                     {goal.label} - {goal.description}
                   </option>
@@ -165,7 +181,7 @@ export default function AISuggestionButton({
                 onChange={(e) => setSelectedTone(e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
-                {TONE_OPTIONS.map(tone => (
+                {TONE_OPTIONS.map((tone) => (
                   <option key={tone.value} value={tone.value}>
                     {tone.label}
                   </option>
@@ -186,7 +202,7 @@ export default function AISuggestionButton({
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              {isLoading ? 'Generating...' : 'Generate AI Suggestions'}
+              {isLoading ? "Generating..." : "Generate AI Suggestions"}
             </button>
           </div>
 
@@ -206,7 +222,9 @@ export default function AISuggestionButton({
                   key={index}
                   className="border border-gray-200 rounded-md p-4 hover:border-purple-300 transition-colors"
                 >
-                  <p className="text-sm text-gray-900 mb-3">{suggestion.text}</p>
+                  <p className="text-sm text-gray-900 mb-3">
+                    {suggestion.text}
+                  </p>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleUseSuggestion(suggestion.text)}
@@ -215,7 +233,9 @@ export default function AISuggestionButton({
                       Use This
                     </button>
                     <button
-                      onClick={() => handleCopySuggestion(suggestion.text, index)}
+                      onClick={() =>
+                        handleCopySuggestion(suggestion.text, index)
+                      }
                       className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800"
                     >
                       {copiedIndex === index ? (
@@ -241,7 +261,8 @@ export default function AISuggestionButton({
             <div className="text-center py-8">
               <Wand2 className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <p className="text-gray-500">
-                Click &quot;Generate AI Suggestions&quot; to get improved versions of your content
+                Click &quot;Generate AI Suggestions&quot; to get improved
+                versions of your content
               </p>
             </div>
           )}
