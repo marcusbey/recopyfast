@@ -3,9 +3,9 @@
  * Tracks and reports on system health and performance metrics
  */
 
-import { logger } from './logger';
-import { performanceMonitor } from './performance';
-import { config } from '../config/production';
+import { logger } from "./logger";
+import { performanceMonitor } from "./performance";
+import { config } from "../config/production";
 
 interface SystemMetrics {
   timestamp: string;
@@ -44,7 +44,7 @@ interface SystemMetrics {
 }
 
 interface SystemAlert {
-  type: 'warning' | 'error' | 'critical';
+  type: "warning" | "error" | "critical";
   message: string;
   timestamp: string;
   metric: string;
@@ -58,7 +58,7 @@ class SystemStatusMonitor {
   private alerts: SystemAlert[] = [];
   private isMonitoring: boolean = false;
   private monitoringInterval?: NodeJS.Timeout;
-  
+
   // Request tracking
   private requestCounts = {
     total: 0,
@@ -66,14 +66,14 @@ class SystemStatusMonitor {
     errored: 0,
     totalResponseTime: 0,
   };
-  
+
   // Database tracking
   private dbCounts = {
     connections: 0,
     queries: 0,
     totalQueryTime: 0,
   };
-  
+
   // Cache tracking
   private cacheCounts = {
     hits: 0,
@@ -91,8 +91,8 @@ class SystemStatusMonitor {
     this.isMonitoring = true;
     const interval = config.monitoring.metrics.interval * 1000;
 
-    logger.info('Starting system status monitoring', undefined, {
-      component: 'system-monitor',
+    logger.info("Starting system status monitoring", undefined, {
+      component: "system-monitor",
       interval,
     });
 
@@ -119,8 +119,8 @@ class SystemStatusMonitor {
       this.monitoringInterval = undefined;
     }
 
-    logger.info('Stopped system status monitoring', undefined, {
-      component: 'system-monitor',
+    logger.info("Stopped system status monitoring", undefined, {
+      component: "system-monitor",
     });
   }
 
@@ -130,8 +130,8 @@ class SystemStatusMonitor {
   private collectMetrics(): void {
     try {
       // Check if we're in Node.js environment (not Edge Runtime)
-      const isNodeJs = typeof process !== 'undefined' && process.memoryUsage;
-      
+      const isNodeJs = typeof process !== "undefined" && process.memoryUsage;
+
       let memoryInfo = {
         used: 0,
         total: 0,
@@ -146,13 +146,15 @@ class SystemStatusMonitor {
         memoryInfo = {
           used: Math.round(memoryUsage.heapUsed / 1024 / 1024),
           total: Math.round(memoryUsage.heapTotal / 1024 / 1024),
-          percentage: Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100),
+          percentage: Math.round(
+            (memoryUsage.heapUsed / memoryUsage.heapTotal) * 100,
+          ),
           rss: Math.round(memoryUsage.rss / 1024 / 1024),
           heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
           heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
         };
       }
-      
+
       const metrics: SystemMetrics = {
         timestamp: new Date().toISOString(),
         uptime: Math.round((Date.now() - this.startTime) / 1000),
@@ -161,34 +163,46 @@ class SystemStatusMonitor {
           total: this.requestCounts.total,
           active: this.requestCounts.active,
           errored: this.requestCounts.errored,
-          averageResponseTime: this.requestCounts.total > 0 
-            ? Math.round(this.requestCounts.totalResponseTime / this.requestCounts.total)
-            : 0,
+          averageResponseTime:
+            this.requestCounts.total > 0
+              ? Math.round(
+                  this.requestCounts.totalResponseTime /
+                    this.requestCounts.total,
+                )
+              : 0,
         },
         database: {
           connections: this.dbCounts.connections,
           queries: this.dbCounts.queries,
-          averageQueryTime: this.dbCounts.queries > 0
-            ? Math.round(this.dbCounts.totalQueryTime / this.dbCounts.queries)
-            : 0,
+          averageQueryTime:
+            this.dbCounts.queries > 0
+              ? Math.round(this.dbCounts.totalQueryTime / this.dbCounts.queries)
+              : 0,
         },
         cache: {
           hits: this.cacheCounts.hits,
           misses: this.cacheCounts.misses,
-          hitRate: (this.cacheCounts.hits + this.cacheCounts.misses) > 0
-            ? Math.round((this.cacheCounts.hits / (this.cacheCounts.hits + this.cacheCounts.misses)) * 100)
-            : 0,
+          hitRate:
+            this.cacheCounts.hits + this.cacheCounts.misses > 0
+              ? Math.round(
+                  (this.cacheCounts.hits /
+                    (this.cacheCounts.hits + this.cacheCounts.misses)) *
+                    100,
+                )
+              : 0,
         },
       };
 
       // Add CPU metrics if available (Node.js specific)
-      if (typeof process.cpuUsage === 'function') {
+      if (typeof process.cpuUsage === "function") {
         try {
           const cpuUsage = process.cpuUsage();
           const loadAverage = process.loadavg?.() || [];
-          
+
           metrics.cpu = {
-            usage: Math.round((cpuUsage.user + cpuUsage.system) / 1000 / 1000 * 100),
+            usage: Math.round(
+              ((cpuUsage.user + cpuUsage.system) / 1000 / 1000) * 100,
+            ),
             loadAverage,
           };
         } catch {
@@ -207,23 +221,27 @@ class SystemStatusMonitor {
 
       // Record performance metrics
       performanceMonitor.recordMetric({
-        name: 'system.memory_usage',
+        name: "system.memory_usage",
         value: metrics.memory.percentage,
-        unit: 'count',
-        metadata: { type: 'percentage' },
+        unit: "count",
+        metadata: { type: "percentage" },
       });
 
       performanceMonitor.recordMetric({
-        name: 'system.uptime',
+        name: "system.uptime",
         value: metrics.uptime,
-        unit: 'count',
-        metadata: { type: 'seconds' },
+        unit: "count",
+        metadata: { type: "seconds" },
       });
-
     } catch (error) {
-      logger.error('Failed to collect system metrics', error as Error, undefined, {
-        component: 'system-monitor',
-      });
+      logger.error(
+        "Failed to collect system metrics",
+        error as Error,
+        undefined,
+        {
+          component: "system-monitor",
+        },
+      );
     }
   }
 
@@ -236,19 +254,19 @@ class SystemStatusMonitor {
     // Memory usage alerts
     if (metrics.memory.percentage > 90) {
       alerts.push({
-        type: 'critical',
-        message: 'Critical memory usage detected',
+        type: "critical",
+        message: "Critical memory usage detected",
         timestamp: new Date().toISOString(),
-        metric: 'memory.percentage',
+        metric: "memory.percentage",
         value: metrics.memory.percentage,
         threshold: 90,
       });
     } else if (metrics.memory.percentage > 80) {
       alerts.push({
-        type: 'warning',
-        message: 'High memory usage detected',
+        type: "warning",
+        message: "High memory usage detected",
         timestamp: new Date().toISOString(),
-        metric: 'memory.percentage',
+        metric: "memory.percentage",
         value: metrics.memory.percentage,
         threshold: 80,
       });
@@ -257,10 +275,10 @@ class SystemStatusMonitor {
     // Response time alerts
     if (metrics.requests.averageResponseTime > 3000) {
       alerts.push({
-        type: 'error',
-        message: 'High average response time detected',
+        type: "error",
+        message: "High average response time detected",
         timestamp: new Date().toISOString(),
-        metric: 'requests.averageResponseTime',
+        metric: "requests.averageResponseTime",
         value: metrics.requests.averageResponseTime,
         threshold: 3000,
       });
@@ -269,36 +287,43 @@ class SystemStatusMonitor {
     // Database query time alerts
     if (metrics.database.averageQueryTime > 500) {
       alerts.push({
-        type: 'warning',
-        message: 'Slow database queries detected',
+        type: "warning",
+        message: "Slow database queries detected",
         timestamp: new Date().toISOString(),
-        metric: 'database.averageQueryTime',
+        metric: "database.averageQueryTime",
         value: metrics.database.averageQueryTime,
         threshold: 500,
       });
     }
 
     // Cache hit rate alerts
-    if (metrics.cache.hitRate < 50 && (metrics.cache.hits + metrics.cache.misses) > 100) {
+    if (
+      metrics.cache.hitRate < 50 &&
+      metrics.cache.hits + metrics.cache.misses > 100
+    ) {
       alerts.push({
-        type: 'warning',
-        message: 'Low cache hit rate detected',
+        type: "warning",
+        message: "Low cache hit rate detected",
         timestamp: new Date().toISOString(),
-        metric: 'cache.hitRate',
+        metric: "cache.hitRate",
         value: metrics.cache.hitRate,
         threshold: 50,
       });
     }
 
     // Log and store alerts
-    alerts.forEach(alert => {
+    alerts.forEach((alert) => {
       this.alerts.push(alert);
-      
-      const logLevel = alert.type === 'critical' ? 'error' : 
-                      alert.type === 'error' ? 'error' : 'warn';
-      
+
+      const logLevel =
+        alert.type === "critical"
+          ? "error"
+          : alert.type === "error"
+            ? "error"
+            : "warn";
+
       logger[logLevel](alert.message, undefined, undefined, {
-        component: 'system-monitor',
+        component: "system-monitor",
         metric: alert.metric,
         value: alert.value,
         threshold: alert.threshold,
@@ -318,7 +343,7 @@ class SystemStatusMonitor {
   trackRequest(duration: number, isError: boolean = false): void {
     this.requestCounts.total++;
     this.requestCounts.totalResponseTime += duration;
-    
+
     if (isError) {
       this.requestCounts.errored++;
     }
@@ -361,22 +386,26 @@ class SystemStatusMonitor {
    * Get current system status
    */
   getStatus(): {
-    status: 'healthy' | 'degraded' | 'unhealthy';
+    status: "healthy" | "degraded" | "unhealthy";
     metrics: SystemMetrics | null;
     alerts: SystemAlert[];
     uptime: number;
   } {
     const currentMetrics = this.metrics[this.metrics.length - 1] || null;
     const recentAlerts = this.alerts.filter(
-      alert => Date.now() - new Date(alert.timestamp).getTime() < 5 * 60 * 1000 // Last 5 minutes
+      (alert) =>
+        Date.now() - new Date(alert.timestamp).getTime() < 5 * 60 * 1000, // Last 5 minutes
     );
 
-    let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
-    
-    if (recentAlerts.some(alert => alert.type === 'critical')) {
-      status = 'unhealthy';
-    } else if (recentAlerts.some(alert => alert.type === 'error') || recentAlerts.length > 3) {
-      status = 'degraded';
+    let status: "healthy" | "degraded" | "unhealthy" = "healthy";
+
+    if (recentAlerts.some((alert) => alert.type === "critical")) {
+      status = "unhealthy";
+    } else if (
+      recentAlerts.some((alert) => alert.type === "error") ||
+      recentAlerts.length > 3
+    ) {
+      status = "degraded";
     }
 
     return {
@@ -398,9 +427,9 @@ class SystemStatusMonitor {
    * Get recent alerts
    */
   getRecentAlerts(minutes: number = 60): SystemAlert[] {
-    const cutoff = Date.now() - (minutes * 60 * 1000);
+    const cutoff = Date.now() - minutes * 60 * 1000;
     return this.alerts.filter(
-      alert => new Date(alert.timestamp).getTime() > cutoff
+      (alert) => new Date(alert.timestamp).getTime() > cutoff,
     );
   }
 }

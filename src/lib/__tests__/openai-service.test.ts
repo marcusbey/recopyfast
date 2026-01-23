@@ -1,278 +1,299 @@
 // Mock OpenAI before importing the service
-jest.mock('openai', () => {
-  const mockCreate = jest.fn()
+jest.mock("openai", () => {
+  const mockCreate = jest.fn();
   return {
     __esModule: true,
     default: jest.fn().mockImplementation(() => ({
       chat: {
         completions: {
-          create: mockCreate
-        }
-      }
-    }))
-  }
-})
+          create: mockCreate,
+        },
+      },
+    })),
+  };
+});
 
-import { OpenAIService, aiService } from '../ai/openai-service'
+import { OpenAIService, aiService } from "../ai/openai-service";
 
-describe('OpenAIService', () => {
-  let mockCreate: jest.Mock
-  let service: OpenAIService
+describe("OpenAIService", () => {
+  let mockCreate: jest.Mock;
+  let service: OpenAIService;
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    jest.clearAllMocks();
     // Get the mock function from the mocked module
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const OpenAI = require('openai').default
-    const mockInstance = new OpenAI()
-    mockCreate = mockInstance.chat.completions.create
-    service = OpenAIService.getInstance()
-  })
+    const OpenAI = require("openai").default;
+    const mockInstance = new OpenAI();
+    mockCreate = mockInstance.chat.completions.create;
+    service = OpenAIService.getInstance();
+  });
 
-  describe('singleton pattern', () => {
-    it('should return the same instance', () => {
-      const instance1 = OpenAIService.getInstance()
-      const instance2 = OpenAIService.getInstance()
-      expect(instance1).toBe(instance2)
-    })
+  describe("singleton pattern", () => {
+    it("should return the same instance", () => {
+      const instance1 = OpenAIService.getInstance();
+      const instance2 = OpenAIService.getInstance();
+      expect(instance1).toBe(instance2);
+    });
 
-    it('should export a singleton instance', () => {
-      expect(aiService).toBeInstanceOf(OpenAIService)
-    })
-  })
+    it("should export a singleton instance", () => {
+      expect(aiService).toBeInstanceOf(OpenAIService);
+    });
+  });
 
-  describe('translateText', () => {
-    it('should successfully translate text', async () => {
+  describe("translateText", () => {
+    it("should successfully translate text", async () => {
       const mockResponse = {
-        choices: [{ message: { content: 'Hola mundo' } }],
-        usage: { total_tokens: 50 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [{ message: { content: "Hola mundo" } }],
+        usage: { total_tokens: 50 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       const result = await service.translateText({
-        text: 'Hello world',
-        fromLanguage: 'English',
-        toLanguage: 'Spanish'
-      })
+        text: "Hello world",
+        fromLanguage: "English",
+        toLanguage: "Spanish",
+      });
 
-      expect(result.success).toBe(true)
-      expect(result.data).toBe('Hola mundo')
-      expect(result.tokensUsed).toBe(50)
-    })
+      expect(result.success).toBe(true);
+      expect(result.data).toBe("Hola mundo");
+      expect(result.tokensUsed).toBe(50);
+    });
 
-    it('should handle translation with context', async () => {
+    it("should handle translation with context", async () => {
       const mockResponse = {
-        choices: [{ message: { content: 'Translated text' } }],
-        usage: { total_tokens: 60 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [{ message: { content: "Translated text" } }],
+        usage: { total_tokens: 60 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       await service.translateText({
-        text: 'Test text',
-        fromLanguage: 'English',
-        toLanguage: 'Spanish',
-        context: 'website header'
-      })
+        text: "Test text",
+        fromLanguage: "English",
+        toLanguage: "Spanish",
+        context: "website header",
+      });
 
-      const callArgs = mockCreate.mock.calls[0][0]
-      expect(callArgs.messages[1].content).toContain('website header')
-    })
+      const callArgs = mockCreate.mock.calls[0][0];
+      expect(callArgs.messages[1].content).toContain("website header");
+    });
 
-    it('should handle translation errors', async () => {
-      mockCreate.mockRejectedValueOnce(new Error('API Error'))
+    it("should handle translation errors", async () => {
+      mockCreate.mockRejectedValueOnce(new Error("API Error"));
 
       const result = await service.translateText({
-        text: 'Hello world',
-        fromLanguage: 'English',
-        toLanguage: 'Spanish'
-      })
+        text: "Hello world",
+        fromLanguage: "English",
+        toLanguage: "Spanish",
+      });
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('API Error')
-    })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("API Error");
+    });
 
-    it('should handle empty translation response', async () => {
+    it("should handle empty translation response", async () => {
       const mockResponse = {
         choices: [{ message: { content: null } }],
-        usage: { total_tokens: 10 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        usage: { total_tokens: 10 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       const result = await service.translateText({
-        text: 'Hello world',
-        fromLanguage: 'English',
-        toLanguage: 'Spanish'
-      })
+        text: "Hello world",
+        fromLanguage: "English",
+        toLanguage: "Spanish",
+      });
 
-      expect(result.success).toBe(false)
-      expect(result.error).toContain('No translation received')
-    })
-  })
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("No translation received");
+    });
+  });
 
-  describe('generateContentSuggestion', () => {
-    it('should generate content suggestions', async () => {
+  describe("generateContentSuggestion", () => {
+    it("should generate content suggestions", async () => {
       const mockResponse = {
-        choices: [{ message: { content: '1. Suggestion one\n2. Suggestion two\n3. Suggestion three' } }],
-        usage: { total_tokens: 80 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [
+          {
+            message: {
+              content:
+                "1. Suggestion one\n2. Suggestion two\n3. Suggestion three",
+            },
+          },
+        ],
+        usage: { total_tokens: 80 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       const result = await service.generateContentSuggestion({
-        originalText: 'Original text',
-        context: 'marketing copy',
-        tone: 'professional',
-        goal: 'improve'
-      })
+        originalText: "Original text",
+        context: "marketing copy",
+        tone: "professional",
+        goal: "improve",
+      });
 
-      expect(result.success).toBe(true)
-      expect(result.data).toEqual(['Suggestion one', 'Suggestion two', 'Suggestion three'])
-      expect(result.tokensUsed).toBe(80)
-    })
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([
+        "Suggestion one",
+        "Suggestion two",
+        "Suggestion three",
+      ]);
+      expect(result.tokensUsed).toBe(80);
+    });
 
-    it('should handle suggestions with different formatting', async () => {
+    it("should handle suggestions with different formatting", async () => {
       const mockResponse = {
-        choices: [{ message: { content: '1. First\n\n2. Second\n\n3. Third\n\n' } }],
-        usage: { total_tokens: 60 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [
+          { message: { content: "1. First\n\n2. Second\n\n3. Third\n\n" } },
+        ],
+        usage: { total_tokens: 60 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       const result = await service.generateContentSuggestion({
-        originalText: 'Text',
-        context: 'test'
-      })
+        originalText: "Text",
+        context: "test",
+      });
 
-      expect(result.data).toEqual(['First', 'Second', 'Third'])
-    })
+      expect(result.data).toEqual(["First", "Second", "Third"]);
+    });
 
-    it('should handle content suggestion errors', async () => {
-      mockCreate.mockRejectedValueOnce(new Error('Rate limit'))
+    it("should handle content suggestion errors", async () => {
+      mockCreate.mockRejectedValueOnce(new Error("Rate limit"));
 
       const result = await service.generateContentSuggestion({
-        originalText: 'Text',
-        context: 'test'
-      })
+        originalText: "Text",
+        context: "test",
+      });
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Rate limit')
-    })
-  })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Rate limit");
+    });
+  });
 
-  describe('batchTranslate', () => {
-    it('should translate multiple elements', async () => {
+  describe("batchTranslate", () => {
+    it("should translate multiple elements", async () => {
       const mockResponse = {
-        choices: [{ message: { content: 'Translated' } }],
-        usage: { total_tokens: 30 }
-      }
+        choices: [{ message: { content: "Translated" } }],
+        usage: { total_tokens: 30 },
+      };
       mockCreate
         .mockResolvedValueOnce(mockResponse)
-        .mockResolvedValueOnce(mockResponse)
+        .mockResolvedValueOnce(mockResponse);
 
       const elements = [
-        { id: '1', text: 'Hello' },
-        { id: '2', text: 'World' }
-      ]
+        { id: "1", text: "Hello" },
+        { id: "2", text: "World" },
+      ];
 
-      const result = await service.batchTranslate(elements, 'English', 'Spanish')
+      const result = await service.batchTranslate(
+        elements,
+        "English",
+        "Spanish",
+      );
 
-      expect(result.success).toBe(true)
-      expect(result.data).toHaveLength(2)
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(2);
       expect(result.data?.[0]).toEqual({
-        id: '1',
-        originalText: 'Hello',
-        translatedText: 'Translated',
-        success: true
-      })
-    })
+        id: "1",
+        originalText: "Hello",
+        translatedText: "Translated",
+        success: true,
+      });
+    });
 
-    it('should handle partial failures in batch translation', async () => {
+    it("should handle partial failures in batch translation", async () => {
       mockCreate
         .mockResolvedValueOnce({
-          choices: [{ message: { content: 'Success' } }],
-          usage: { total_tokens: 20 }
+          choices: [{ message: { content: "Success" } }],
+          usage: { total_tokens: 20 },
         })
-        .mockRejectedValueOnce(new Error('Failed'))
+        .mockRejectedValueOnce(new Error("Failed"));
 
       const elements = [
-        { id: '1', text: 'Hello' },
-        { id: '2', text: 'World' }
-      ]
+        { id: "1", text: "Hello" },
+        { id: "2", text: "World" },
+      ];
 
-      const result = await service.batchTranslate(elements, 'English', 'Spanish')
+      const result = await service.batchTranslate(
+        elements,
+        "English",
+        "Spanish",
+      );
 
-      expect(result.success).toBe(true)
-      expect(result.data).toHaveLength(1) // Only successful translation
-    })
-  })
+      expect(result.success).toBe(true);
+      expect(result.data).toHaveLength(1); // Only successful translation
+    });
+  });
 
-  describe('detectLanguage', () => {
-    it('should detect language correctly', async () => {
+  describe("detectLanguage", () => {
+    it("should detect language correctly", async () => {
       const mockResponse = {
-        choices: [{ message: { content: 'es' } }],
-        usage: { total_tokens: 5 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [{ message: { content: "es" } }],
+        usage: { total_tokens: 5 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
-      const result = await service.detectLanguage('Hola mundo')
+      const result = await service.detectLanguage("Hola mundo");
 
-      expect(result.success).toBe(true)
-      expect(result.data).toBe('es')
-    })
+      expect(result.success).toBe(true);
+      expect(result.data).toBe("es");
+    });
 
-    it('should handle language detection errors', async () => {
-      mockCreate.mockRejectedValueOnce(new Error('Detection failed'))
+    it("should handle language detection errors", async () => {
+      mockCreate.mockRejectedValueOnce(new Error("Detection failed"));
 
-      const result = await service.detectLanguage('Text')
+      const result = await service.detectLanguage("Text");
 
-      expect(result.success).toBe(false)
-      expect(result.error).toBe('Detection failed')
-    })
-  })
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Detection failed");
+    });
+  });
 
-  describe('prompt building', () => {
-    it('should build translation prompt correctly', async () => {
+  describe("prompt building", () => {
+    it("should build translation prompt correctly", async () => {
       const mockResponse = {
-        choices: [{ message: { content: 'Translated' } }],
-        usage: { total_tokens: 30 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [{ message: { content: "Translated" } }],
+        usage: { total_tokens: 30 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       await service.translateText({
-        text: 'Test text',
-        fromLanguage: 'English',
-        toLanguage: 'Spanish',
-        context: 'navigation menu'
-      })
+        text: "Test text",
+        fromLanguage: "English",
+        toLanguage: "Spanish",
+        context: "navigation menu",
+      });
 
-      const callArgs = mockCreate.mock.calls[0][0]
-      const userMessage = callArgs.messages[1].content
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content;
 
-      expect(userMessage).toContain('Test text')
-      expect(userMessage).toContain('English')
-      expect(userMessage).toContain('Spanish')
-      expect(userMessage).toContain('navigation menu')
-    })
+      expect(userMessage).toContain("Test text");
+      expect(userMessage).toContain("English");
+      expect(userMessage).toContain("Spanish");
+      expect(userMessage).toContain("navigation menu");
+    });
 
-    it('should build content suggestion prompt correctly', async () => {
+    it("should build content suggestion prompt correctly", async () => {
       const mockResponse = {
-        choices: [{ message: { content: '1. Test' } }],
-        usage: { total_tokens: 30 }
-      }
-      mockCreate.mockResolvedValueOnce(mockResponse)
+        choices: [{ message: { content: "1. Test" } }],
+        usage: { total_tokens: 30 },
+      };
+      mockCreate.mockResolvedValueOnce(mockResponse);
 
       await service.generateContentSuggestion({
-        originalText: 'Original',
-        context: 'button text',
-        tone: 'casual',
-        goal: 'shorten'
-      })
+        originalText: "Original",
+        context: "button text",
+        tone: "casual",
+        goal: "shorten",
+      });
 
-      const callArgs = mockCreate.mock.calls[0][0]
-      const userMessage = callArgs.messages[1].content
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content;
 
-      expect(userMessage).toContain('Original')
-      expect(userMessage).toContain('button text')
-      expect(userMessage).toContain('casual')
-      expect(userMessage).toContain('shorten')
-    })
-  })
-})
+      expect(userMessage).toContain("Original");
+      expect(userMessage).toContain("button text");
+      expect(userMessage).toContain("casual");
+      expect(userMessage).toContain("shorten");
+    });
+  });
+});

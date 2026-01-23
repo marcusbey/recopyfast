@@ -1,9 +1,9 @@
 /**
  * ReCopyFast Editing Rules
- * 
+ *
  * This file defines the core rules and behaviors for content editing
  * to ensure consistent user experience across all demo websites.
- * 
+ *
  * CONSISTENT RULE FOR TEXT COLOR:
  * - ALWAYS preserve the original text color during editing
  * - DO NOT automatically change colors based on background detection
@@ -26,12 +26,12 @@ export interface TextEditingRules {
   preserveTextAlign: boolean;
   preservePadding: boolean;
   preserveMargin: boolean;
-  
+
   // Container behavior
   maintainContainerDimensions: boolean;
   allowTextOverflow: boolean;
-  scrollBehavior: 'hidden' | 'auto' | 'visible';
-  
+  scrollBehavior: "hidden" | "auto" | "visible";
+
   // Editing states
   editingBackgroundColor: string;
   editingBorderStyle: string;
@@ -43,15 +43,15 @@ export interface ImageEditingRules {
   preserveContainerSize: boolean;
   preserveAspectRatio: boolean;
   preserveBorderRadius: boolean;
-  
+
   // Editing options
   allowRandomGeneration: boolean;
   allowPromptGeneration: boolean;
   allowUnsplashSearch: boolean;
-  
+
   // Modal behavior
   showEditingModal: boolean;
-  modalPosition: 'center' | 'overlay' | 'sidebar';
+  modalPosition: "center" | "overlay" | "sidebar";
 }
 
 export interface ContainerRules {
@@ -59,10 +59,10 @@ export interface ContainerRules {
   lockWidth: boolean;
   lockHeight: boolean;
   lockPosition: boolean;
-  
+
   // Overflow handling
-  textOverflow: 'ellipsis' | 'clip' | 'visible';
-  overflowWrap: 'normal' | 'break-word' | 'anywhere';
+  textOverflow: "ellipsis" | "clip" | "visible";
+  overflowWrap: "normal" | "break-word" | "anywhere";
 }
 
 /**
@@ -78,52 +78,54 @@ export const DEFAULT_EDITING_RULES: EditingRules = {
     preserveTextAlign: true,
     preservePadding: true,
     preserveMargin: true,
-    
+
     // Container behavior - maintain original dimensions
     maintainContainerDimensions: true,
     allowTextOverflow: true,
-    scrollBehavior: 'visible',
-    
+    scrollBehavior: "visible",
+
     // Subtle editing indicators
-    editingBackgroundColor: 'transparent', // No background change
-    editingBorderStyle: '2px solid #3b82f6',
-    focusRingColor: '#3b82f6'
+    editingBackgroundColor: "transparent", // No background change
+    editingBorderStyle: "2px solid #3b82f6",
+    focusRingColor: "#3b82f6",
   },
-  
+
   image: {
     // Preserve container properties
     preserveContainerSize: true,
     preserveAspectRatio: true,
     preserveBorderRadius: true,
-    
+
     // Enable all editing options
     allowRandomGeneration: true,
     allowPromptGeneration: true,
     allowUnsplashSearch: true,
-    
+
     // Show overlay modal for image editing
     showEditingModal: true,
-    modalPosition: 'overlay'
+    modalPosition: "overlay",
   },
-  
+
   container: {
     // Lock all dimensions during editing
     lockWidth: true,
     lockHeight: false, // Allow height to grow for longer text
     lockPosition: true,
-    
+
     // Handle text overflow gracefully
-    textOverflow: 'visible',
-    overflowWrap: 'break-word'
-  }
+    textOverflow: "visible",
+    overflowWrap: "break-word",
+  },
 };
 
 /**
  * Generate CSS styles for text editing that preserve original formatting
  */
-export function getTextEditingStyles(originalElement: HTMLElement): React.CSSProperties {
+export function getTextEditingStyles(
+  originalElement: HTMLElement,
+): React.CSSProperties {
   const computedStyle = window.getComputedStyle(originalElement);
-  
+
   return {
     // Preserve all visual properties EXACTLY
     fontFamily: computedStyle.fontFamily,
@@ -136,7 +138,7 @@ export function getTextEditingStyles(originalElement: HTMLElement): React.CSSPro
     textAlign: computedStyle.textAlign as any,
     textDecoration: computedStyle.textDecoration,
     textTransform: computedStyle.textTransform,
-    
+
     // Preserve spacing EXACTLY
     padding: computedStyle.padding,
     paddingTop: computedStyle.paddingTop,
@@ -148,42 +150,45 @@ export function getTextEditingStyles(originalElement: HTMLElement): React.CSSPro
     marginRight: computedStyle.marginRight,
     marginBottom: computedStyle.marginBottom,
     marginLeft: computedStyle.marginLeft,
-    
+
     // Maintain dimensions EXACTLY
     width: computedStyle.width,
     minWidth: computedStyle.minWidth,
     maxWidth: computedStyle.maxWidth,
     minHeight: computedStyle.height,
     boxSizing: computedStyle.boxSizing,
-    
+
     // Preserve background (no change during editing)
     backgroundColor: computedStyle.backgroundColor,
     backgroundImage: computedStyle.backgroundImage,
     backgroundSize: computedStyle.backgroundSize,
     backgroundPosition: computedStyle.backgroundPosition,
     backgroundRepeat: computedStyle.backgroundRepeat,
-    
+
     // Preserve border radius and other visual elements
     borderRadius: computedStyle.borderRadius,
     borderTopLeftRadius: computedStyle.borderTopLeftRadius,
     borderTopRightRadius: computedStyle.borderTopRightRadius,
     borderBottomLeftRadius: computedStyle.borderBottomLeftRadius,
     borderBottomRightRadius: computedStyle.borderBottomRightRadius,
-    
+
     // Preserve shadows and effects
     boxShadow: computedStyle.boxShadow,
     textShadow: computedStyle.textShadow,
-    
+
     // Editing-specific styles (minimal override)
-    border: '2px solid #3b82f6', // Blue editing indicator
-    outline: 'none',
-    resize: 'none',
-    
+    border: "2px solid #3b82f6", // Blue editing indicator
+    outline: "none",
+    resize: "none",
+
     // Text overflow handling - preserve original or allow natural growth
-    overflow: 'visible',
-    overflowWrap: 'break-word',
-    wordWrap: 'break-word',
-    whiteSpace: computedStyle.whiteSpace === 'nowrap' ? 'normal' : computedStyle.whiteSpace,
+    overflow: "visible",
+    overflowWrap: "break-word",
+    wordWrap: "break-word",
+    whiteSpace:
+      computedStyle.whiteSpace === "nowrap"
+        ? "normal"
+        : computedStyle.whiteSpace,
   };
 }
 
@@ -193,41 +198,55 @@ export function getTextEditingStyles(originalElement: HTMLElement): React.CSSPro
 export const TEXT_EDITING_CONSISTENCY_RULES = {
   // Always preserve these properties exactly
   preserveExactly: [
-    'fontSize', 'fontFamily', 'fontWeight', 'fontStyle',
-    'lineHeight', 'letterSpacing', 'textAlign', 'color',
-    'padding', 'margin', 'backgroundColor', 'borderRadius',
-    'boxShadow', 'textShadow', 'textDecoration', 'textTransform'
+    "fontSize",
+    "fontFamily",
+    "fontWeight",
+    "fontStyle",
+    "lineHeight",
+    "letterSpacing",
+    "textAlign",
+    "color",
+    "padding",
+    "margin",
+    "backgroundColor",
+    "borderRadius",
+    "boxShadow",
+    "textShadow",
+    "textDecoration",
+    "textTransform",
   ],
-  
+
   // Handle these properties with special logic
   handleSpecially: {
-    width: 'maintain', // Keep original width
-    height: 'auto-expand', // Allow height to grow naturally
-    whiteSpace: 'normalize-if-nowrap', // Allow text wrapping if originally nowrap
-    overflow: 'make-visible' // Ensure text is always visible
+    width: "maintain", // Keep original width
+    height: "auto-expand", // Allow height to grow naturally
+    whiteSpace: "normalize-if-nowrap", // Allow text wrapping if originally nowrap
+    overflow: "make-visible", // Ensure text is always visible
   },
-  
+
   // Minimal editing indicators
   editingIndicators: {
-    border: '2px solid #3b82f6',
-    outline: 'none',
-    cursor: 'text'
-  }
+    border: "2px solid #3b82f6",
+    outline: "none",
+    cursor: "text",
+  },
 };
 
 /**
  * Generate CSS styles for image containers during editing
  */
-export function getImageEditingStyles(originalElement: HTMLElement): React.CSSProperties {
+export function getImageEditingStyles(
+  originalElement: HTMLElement,
+): React.CSSProperties {
   const computedStyle = window.getComputedStyle(originalElement);
-  
+
   return {
     width: computedStyle.width,
     height: computedStyle.height,
     borderRadius: computedStyle.borderRadius,
     objectFit: computedStyle.objectFit as any,
     objectPosition: computedStyle.objectPosition,
-    transition: 'all 0.2s ease',
+    transition: "all 0.2s ease",
   };
 }
 
@@ -235,19 +254,26 @@ export function getImageEditingStyles(originalElement: HTMLElement): React.CSSPr
  * Unsplash categories for different image types
  */
 export const UNSPLASH_CATEGORIES = {
-  restaurant: ['food', 'restaurant', 'cuisine', 'dining', 'chef', 'kitchen'],
-  car: ['car', 'automobile', 'vehicle', 'luxury-car', 'sports-car', 'automotive'],
-  bakery: ['bakery', 'bread', 'pastry', 'cake', 'baking', 'dessert'],
-  general: ['business', 'office', 'modern', 'professional', 'abstract'],
+  restaurant: ["food", "restaurant", "cuisine", "dining", "chef", "kitchen"],
+  car: [
+    "car",
+    "automobile",
+    "vehicle",
+    "luxury-car",
+    "sports-car",
+    "automotive",
+  ],
+  bakery: ["bakery", "bread", "pastry", "cake", "baking", "dessert"],
+  general: ["business", "office", "modern", "professional", "abstract"],
 } as const;
 
 /**
  * Generate random Unsplash image URL based on category
  */
 export function generateUnsplashUrl(
-  category: keyof typeof UNSPLASH_CATEGORIES, 
-  width: number = 400, 
-  height: number = 300
+  category: keyof typeof UNSPLASH_CATEGORIES,
+  width: number = 400,
+  height: number = 300,
 ): string {
   const keywords = UNSPLASH_CATEGORIES[category];
   const randomKeyword = keywords[Math.floor(Math.random() * keywords.length)];
@@ -271,28 +297,30 @@ export interface ColorRGBA {
  */
 export const parseColor = (color: string): ColorRGBA => {
   // Handle hex colors
-  if (color.startsWith('#')) {
+  if (color.startsWith("#")) {
     const hex = color.slice(1);
     const r = parseInt(hex.substr(0, 2), 16);
     const g = parseInt(hex.substr(2, 2), 16);
     const b = parseInt(hex.substr(4, 2), 16);
     return { r, g, b, a: 1 };
   }
-  
+
   // Handle rgb/rgba colors
   const match = color.match(/rgba?\(([^)]+)\)/);
   if (match) {
-    const [r, g, b, a = 1] = match[1].split(',').map(n => parseFloat(n.trim()));
+    const [r, g, b, a = 1] = match[1]
+      .split(",")
+      .map((n) => parseFloat(n.trim()));
     return { r, g, b, a };
   }
-  
+
   // Handle named colors or fallback to black
   const colorMap: Record<string, ColorRGBA> = {
-    'transparent': { r: 0, g: 0, b: 0, a: 0 },
-    'white': { r: 255, g: 255, b: 255, a: 1 },
-    'black': { r: 0, g: 0, b: 0, a: 1 },
+    transparent: { r: 0, g: 0, b: 0, a: 0 },
+    white: { r: 255, g: 255, b: 255, a: 1 },
+    black: { r: 0, g: 0, b: 0, a: 1 },
   };
-  
+
   return colorMap[color.toLowerCase()] || { r: 0, g: 0, b: 0, a: 1 };
 };
 
@@ -301,9 +329,11 @@ export const parseColor = (color: string): ColorRGBA => {
  */
 export const getLuminance = (color: ColorRGBA): number => {
   const { r, g, b } = color;
-  const [rs, gs, bs] = [r, g, b].map(c => {
+  const [rs, gs, bs] = [r, g, b].map((c) => {
     const normalized = c / 255;
-    return normalized <= 0.03928 ? normalized / 12.92 : Math.pow((normalized + 0.055) / 1.055, 2.4);
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : Math.pow((normalized + 0.055) / 1.055, 2.4);
   });
   return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
 };
@@ -311,7 +341,10 @@ export const getLuminance = (color: ColorRGBA): number => {
 /**
  * Calculate contrast ratio between two colors
  */
-export const getContrastRatio = (luminance1: number, luminance2: number): number => {
+export const getContrastRatio = (
+  luminance1: number,
+  luminance2: number,
+): number => {
   const lighter = Math.max(luminance1, luminance2);
   const darker = Math.min(luminance1, luminance2);
   return (lighter + 0.05) / (darker + 0.05);
@@ -320,40 +353,46 @@ export const getContrastRatio = (luminance1: number, luminance2: number): number
 /**
  * Get effective background color by traversing parent elements
  */
-export const getEffectiveBackgroundColor = (element: HTMLElement): ColorRGBA => {
+export const getEffectiveBackgroundColor = (
+  element: HTMLElement,
+): ColorRGBA => {
   let currentElement: HTMLElement | null = element;
   const colors: ColorRGBA[] = [];
-  
+
   while (currentElement && currentElement !== document.body) {
     const style = window.getComputedStyle(currentElement);
     const bgColor = style.backgroundColor;
-    
-    if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+
+    if (
+      bgColor &&
+      bgColor !== "rgba(0, 0, 0, 0)" &&
+      bgColor !== "transparent"
+    ) {
       colors.push(parseColor(bgColor));
-      
+
       // If we hit an opaque background, we can stop
       if (colors[colors.length - 1].a >= 1) {
         break;
       }
     }
-    
+
     currentElement = currentElement.parentElement;
   }
-  
+
   // If no background found, assume white
   if (colors.length === 0) {
     return { r: 255, g: 255, b: 255, a: 1 };
   }
-  
+
   // Composite colors from top to bottom
   return colors.reduce((result, color) => {
     if (color.a >= 1) return color;
-    
+
     return {
       r: Math.round(color.r * color.a + result.r * (1 - color.a)),
       g: Math.round(color.g * color.a + result.g * (1 - color.a)),
       b: Math.round(color.b * color.a + result.b * (1 - color.a)),
-      a: Math.min(1, color.a + result.a)
+      a: Math.min(1, color.a + result.a),
     };
   });
 };
@@ -365,33 +404,38 @@ export const getOptimalTextColor = (element: HTMLElement): string => {
   // Get background color from element and its parents
   const backgroundColor = getEffectiveBackgroundColor(element);
   const computedStyle = window.getComputedStyle(element);
-  
+
   // Calculate luminance
   const luminance = getLuminance(backgroundColor);
-  
+
   // Use original color if it has good contrast, otherwise use optimal color
   const originalColor = computedStyle.color;
   const originalColorRGBA = parseColor(originalColor);
   const originalLuminance = getLuminance(originalColorRGBA);
-  
+
   // Calculate contrast ratio
   const originalContrast = getContrastRatio(luminance, originalLuminance);
-  
+
   // If original has good contrast (4.5:1 for normal text), keep it
   if (originalContrast >= 4.5) {
     return originalColor;
   }
-  
+
   // Otherwise, choose high contrast color
-  return luminance > 0.5 ? '#000000' : '#ffffff';
+  return luminance > 0.5 ? "#000000" : "#ffffff";
 };
 
 /**
  * Get text shadow for better visibility
  */
 export const getTextShadow = (textColor: string): string => {
-  const isDark = textColor === '#000000' || textColor.startsWith('rgb(0') || textColor === 'black';
-  return isDark ? '0 1px 2px rgba(255, 255, 255, 0.5)' : '0 1px 2px rgba(0, 0, 0, 0.5)';
+  const isDark =
+    textColor === "#000000" ||
+    textColor.startsWith("rgb(0") ||
+    textColor === "black";
+  return isDark
+    ? "0 1px 2px rgba(255, 255, 255, 0.5)"
+    : "0 1px 2px rgba(0, 0, 0, 0.5)";
 };
 
 /**
@@ -399,22 +443,22 @@ export const getTextShadow = (textColor: string): string => {
  */
 export const getFullElementText = (element: HTMLElement): string => {
   // Try different methods to get full text
-  let text = '';
-  
-  if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+  let text = "";
+
+  if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
     const inputElement = element as HTMLInputElement | HTMLTextAreaElement;
-    text = inputElement.value || inputElement.placeholder || '';
+    text = inputElement.value || inputElement.placeholder || "";
   } else {
     // Get all text content, including hidden overflow
-    text = element.textContent || element.innerText || '';
-    
+    text = element.textContent || element.innerText || "";
+
     // If text seems truncated (ends with ...), try to get original
-    if (text.endsWith('...') || text.endsWith('…')) {
+    if (text.endsWith("...") || text.endsWith("…")) {
       // Look for title attribute or data attributes that might contain full text
-      text = element.title || element.getAttribute('data-full-text') || text;
+      text = element.title || element.getAttribute("data-full-text") || text;
     }
   }
-  
+
   return text.trim();
 };
 
@@ -428,8 +472,12 @@ export const VALIDATION_RULES = {
     allowedCharacters: /^[\w\s\-.,!?()'"\/&@#$%:;+=]*$/,
   },
   image: {
-    allowedDomains: ['unsplash.com', 'source.unsplash.com', 'images.unsplash.com'],
+    allowedDomains: [
+      "unsplash.com",
+      "source.unsplash.com",
+      "images.unsplash.com",
+    ],
     maxPromptLength: 100,
     minPromptLength: 3,
-  }
+  },
 };

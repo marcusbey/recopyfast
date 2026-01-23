@@ -35,7 +35,7 @@ export interface ProductionConfig {
   cache: {
     ttl: number;
     maxItems: number;
-    strategy: 'lru' | 'lfu' | 'fifo';
+    strategy: "lru" | "lfu" | "fifo";
   };
   security: {
     corsEnabled: boolean;
@@ -51,7 +51,7 @@ export interface ProductionConfig {
       profilesSampleRate: number;
     };
     logging: {
-      level: 'error' | 'warn' | 'info' | 'debug';
+      level: "error" | "warn" | "info" | "debug";
       structured: boolean;
       retention: number; // days
     };
@@ -83,9 +83,9 @@ export interface ProductionConfig {
 
 const developmentConfig: ProductionConfig = {
   app: {
-    name: 'ReCopyFast',
-    version: process.env.npm_package_version || '1.0.0',
-    environment: 'development',
+    name: "ReCopyFast",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: "development",
     debug: true,
   },
   api: {
@@ -95,7 +95,7 @@ const developmentConfig: ProductionConfig = {
       maxRequests: 1000, // Very generous for development
     },
     cors: {
-      origins: ['http://localhost:3000', 'http://localhost:3001'],
+      origins: ["http://localhost:3000", "http://localhost:3001"],
       credentials: true,
     },
   },
@@ -107,13 +107,13 @@ const developmentConfig: ProductionConfig = {
   },
   storage: {
     maxFileSize: 50 * 1024 * 1024, // 50MB
-    allowedTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-    bucketName: 'assets',
+    allowedTypes: ["image/jpeg", "image/png", "image/webp", "image/gif"],
+    bucketName: "assets",
   },
   cache: {
     ttl: 5 * 60 * 1000, // 5 minutes
     maxItems: 1000,
-    strategy: 'lru',
+    strategy: "lru",
   },
   security: {
     corsEnabled: true,
@@ -129,7 +129,7 @@ const developmentConfig: ProductionConfig = {
       profilesSampleRate: 1.0,
     },
     logging: {
-      level: 'debug',
+      level: "debug",
       structured: false,
       retention: 7,
     },
@@ -141,9 +141,9 @@ const developmentConfig: ProductionConfig = {
   performance: {
     compression: false,
     cacheControl: {
-      static: 'no-cache',
-      api: 'no-cache',
-      dynamic: 'no-cache',
+      static: "no-cache",
+      api: "no-cache",
+      dynamic: "no-cache",
     },
     optimization: {
       images: false,
@@ -161,9 +161,9 @@ const developmentConfig: ProductionConfig = {
 
 const productionConfig: ProductionConfig = {
   app: {
-    name: 'ReCopyFast',
-    version: process.env.npm_package_version || '1.0.0',
-    environment: 'production',
+    name: "ReCopyFast",
+    version: process.env.npm_package_version || "1.0.0",
+    environment: "production",
     debug: false,
   },
   api: {
@@ -174,10 +174,10 @@ const productionConfig: ProductionConfig = {
     },
     cors: {
       origins: [
-        'https://recopyfast.com',
-        'https://www.recopyfast.com',
-        'https://app.recopyfast.com',
-        ...(process.env.ALLOWED_ORIGINS?.split(',') || []),
+        "https://recopyfast.com",
+        "https://www.recopyfast.com",
+        "https://app.recopyfast.com",
+        ...(process.env.ALLOWED_ORIGINS?.split(",") || []),
       ],
       credentials: true,
     },
@@ -190,13 +190,13 @@ const productionConfig: ProductionConfig = {
   },
   storage: {
     maxFileSize: 10 * 1024 * 1024, // 10MB
-    allowedTypes: ['image/jpeg', 'image/png', 'image/webp'],
-    bucketName: 'assets',
+    allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+    bucketName: "assets",
   },
   cache: {
     ttl: 60 * 60 * 1000, // 1 hour
     maxItems: 10000,
-    strategy: 'lru',
+    strategy: "lru",
   },
   security: {
     corsEnabled: true,
@@ -212,7 +212,7 @@ const productionConfig: ProductionConfig = {
       profilesSampleRate: 0.1,
     },
     logging: {
-      level: 'info',
+      level: "info",
       structured: true,
       retention: 30,
     },
@@ -224,9 +224,9 @@ const productionConfig: ProductionConfig = {
   performance: {
     compression: true,
     cacheControl: {
-      static: 'public, max-age=31536000, immutable', // 1 year
-      api: 'private, no-cache, no-store, must-revalidate',
-      dynamic: 'private, max-age=300', // 5 minutes
+      static: "public, max-age=31536000, immutable", // 1 year
+      api: "private, no-cache, no-store, must-revalidate",
+      dynamic: "private, max-age=300", // 5 minutes
     },
     optimization: {
       images: true,
@@ -246,7 +246,7 @@ const stagingConfig: ProductionConfig = {
   ...productionConfig,
   app: {
     ...productionConfig.app,
-    environment: 'staging',
+    environment: "staging",
     debug: true,
   },
   api: {
@@ -258,8 +258,8 @@ const stagingConfig: ProductionConfig = {
     cors: {
       origins: [
         ...productionConfig.api.cors.origins,
-        'https://staging.recopyfast.com',
-        'https://preview.recopyfast.com',
+        "https://staging.recopyfast.com",
+        "https://preview.recopyfast.com",
       ],
       credentials: true,
     },
@@ -272,7 +272,7 @@ const stagingConfig: ProductionConfig = {
       profilesSampleRate: 0.5,
     },
     logging: {
-      level: 'debug',
+      level: "debug",
       structured: true,
       retention: 14,
     },
@@ -284,15 +284,15 @@ const stagingConfig: ProductionConfig = {
 };
 
 function getConfig(): ProductionConfig {
-  const env = process.env.VERCEL_ENV || process.env.NODE_ENV || 'development';
-  
+  const env = process.env.VERCEL_ENV || process.env.NODE_ENV || "development";
+
   switch (env) {
-    case 'production':
+    case "production":
       return productionConfig;
-    case 'preview':
-    case 'staging':
+    case "preview":
+    case "staging":
       return stagingConfig;
-    case 'development':
+    case "development":
     default:
       return developmentConfig;
   }
@@ -306,15 +306,15 @@ export { developmentConfig, stagingConfig, productionConfig };
 
 // Utility functions
 export function isProduction(): boolean {
-  return config.app.environment === 'production';
+  return config.app.environment === "production";
 }
 
 export function isDevelopment(): boolean {
-  return config.app.environment === 'development';
+  return config.app.environment === "development";
 }
 
 export function isStaging(): boolean {
-  return config.app.environment === 'staging';
+  return config.app.environment === "staging";
 }
 
 export function getEnvironment(): string {
@@ -327,16 +327,13 @@ export function validateConfig(): { valid: boolean; errors: string[] } {
 
   // Required environment variables
   const requiredEnvVars = [
-    'NEXT_PUBLIC_SUPABASE_URL',
-    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
-    'SUPABASE_SERVICE_ROLE_KEY',
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
   ];
 
   if (isProduction()) {
-    requiredEnvVars.push(
-      'NEXT_PUBLIC_SENTRY_DSN',
-      'VERCEL_URL',
-    );
+    requiredEnvVars.push("NEXT_PUBLIC_SENTRY_DSN", "VERCEL_URL");
   }
 
   for (const envVar of requiredEnvVars) {
@@ -349,16 +346,16 @@ export function validateConfig(): { valid: boolean; errors: string[] } {
   try {
     new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!);
   } catch {
-    errors.push('Invalid NEXT_PUBLIC_SUPABASE_URL');
+    errors.push("Invalid NEXT_PUBLIC_SUPABASE_URL");
   }
 
   // Validate numeric values
   if (config.api.timeout <= 0) {
-    errors.push('API timeout must be positive');
+    errors.push("API timeout must be positive");
   }
 
   if (config.storage.maxFileSize <= 0) {
-    errors.push('Max file size must be positive');
+    errors.push("Max file size must be positive");
   }
 
   return {

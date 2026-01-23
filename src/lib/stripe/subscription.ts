@@ -1,7 +1,7 @@
-import { stripe, SUBSCRIPTION_PLANS } from './config';
-import { createClient } from '@/lib/supabase/server';
-import { createOrGetCustomer } from './customer';
-import type { Subscription, SubscriptionUpdateRequest } from '@/types/billing';
+import { stripe, SUBSCRIPTION_PLANS } from "./config";
+import { createClient } from "@/lib/supabase/server";
+import { createOrGetCustomer } from "./customer";
+import type { Subscription, SubscriptionUpdateRequest } from "@/types/billing";
 
 /**
  * Create a new subscription
@@ -9,15 +9,16 @@ import type { Subscription, SubscriptionUpdateRequest } from '@/types/billing';
 export async function createSubscription(
   userId: string,
   email: string,
-  planId: 'pro' | 'enterprise',
+  planId: "pro" | "enterprise",
   paymentMethodId?: string,
-  trialDays?: number
+  trialDays?: number,
 ): Promise<{ subscription: Subscription; clientSecret?: string }> {
   const supabase = await createClient();
-  
-  const plan = SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+
+  const plan =
+    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
   if (!plan.priceId) {
-    throw new Error('Invalid plan selected');
+    throw new Error("Invalid plan selected");
   }
 
   // Create or get customer
@@ -38,7 +39,7 @@ export async function createSubscription(
   }
 
   // Create subscription in Stripe
-  const subscriptionParams: import('stripe').Stripe.SubscriptionCreateParams = {
+  const subscriptionParams: import("stripe").Stripe.SubscriptionCreateParams = {
     customer: stripeCustomer.id,
     items: [{ price: plan.priceId }],
     metadata: {
@@ -54,32 +55,37 @@ export async function createSubscription(
 
   // If no payment method, require payment confirmation
   if (!paymentMethodId) {
-    subscriptionParams.payment_behavior = 'default_incomplete';
+    subscriptionParams.payment_behavior = "default_incomplete";
     subscriptionParams.payment_settings = {
-      save_default_payment_method: 'on_subscription',
+      save_default_payment_method: "on_subscription",
     };
-    subscriptionParams.expand = ['latest_invoice.payment_intent'];
+    subscriptionParams.expand = ["latest_invoice.payment_intent"];
   }
 
-  const stripeSubscription = await stripe.subscriptions.create(subscriptionParams);
+  const stripeSubscription =
+    await stripe.subscriptions.create(subscriptionParams);
 
   // Save subscription to our database
   const { data: newSubscription, error } = await supabase
-    .from('subscriptions')
+    .from("subscriptions")
     .insert({
       user_id: userId,
       customer_id: customer.id,
       stripe_subscription_id: stripeSubscription.id,
       plan_id: planId,
       status: stripeSubscription.status,
-      current_period_start: new Date(stripeSubscription.current_period_start * 1000).toISOString(),
-      current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+      current_period_start: new Date(
+        stripeSubscription.current_period_start * 1000,
+      ).toISOString(),
+      current_period_end: new Date(
+        stripeSubscription.current_period_end * 1000,
+      ).toISOString(),
       cancel_at_period_end: stripeSubscription.cancel_at_period_end,
-      trial_start: stripeSubscription.trial_start 
-        ? new Date(stripeSubscription.trial_start * 1000).toISOString() 
+      trial_start: stripeSubscription.trial_start
+        ? new Date(stripeSubscription.trial_start * 1000).toISOString()
         : null,
-      trial_end: stripeSubscription.trial_end 
-        ? new Date(stripeSubscription.trial_end * 1000).toISOString() 
+      trial_end: stripeSubscription.trial_end
+        ? new Date(stripeSubscription.trial_end * 1000).toISOString()
         : null,
     })
     .select()
@@ -93,9 +99,12 @@ export async function createSubscription(
 
   // Extract client secret if payment confirmation is needed
   let clientSecret: string | undefined;
-  if (stripeSubscription.latest_invoice && typeof stripeSubscription.latest_invoice === 'object') {
+  if (
+    stripeSubscription.latest_invoice &&
+    typeof stripeSubscription.latest_invoice === "object"
+  ) {
     const paymentIntent = stripeSubscription.latest_invoice.payment_intent;
-    if (paymentIntent && typeof paymentIntent === 'object') {
+    if (paymentIntent && typeof paymentIntent === "object") {
       clientSecret = paymentIntent.client_secret;
     }
   }
@@ -108,33 +117,36 @@ export async function createSubscription(
  */
 export async function updateSubscription(
   userId: string,
-  updates: SubscriptionUpdateRequest
+  updates: SubscriptionUpdateRequest,
 ): Promise<Subscription> {
   const supabase = await createClient();
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'active')
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "active")
     .single();
 
   if (fetchError || !currentSubscription) {
-    throw new Error('No active subscription found');
+    throw new Error("No active subscription found");
   }
 
-  const plan = SUBSCRIPTION_PLANS[updates.planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+  const plan =
+    SUBSCRIPTION_PLANS[
+      updates.planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
+    ];
   if (!plan.priceId) {
-    throw new Error('Invalid plan selected');
+    throw new Error("Invalid plan selected");
   }
 
   // Update payment method if provided
   if (updates.paymentMethodId) {
     const { data: customer } = await supabase
-      .from('customers')
-      .select('stripe_customer_id')
-      .eq('id', currentSubscription.customer_id)
+      .from("customers")
+      .select("stripe_customer_id")
+      .eq("id", currentSubscription.customer_id)
       .single();
 
     if (customer) {
@@ -151,7 +163,9 @@ export async function updateSubscription(
   }
 
   // Update subscription in Stripe
-  const existingSubscription = await stripe.subscriptions.retrieve(currentSubscription.stripe_subscription_id);
+  const existingSubscription = await stripe.subscriptions.retrieve(
+    currentSubscription.stripe_subscription_id,
+  );
   const stripeSubscription = await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
@@ -161,24 +175,28 @@ export async function updateSubscription(
           price: plan.priceId,
         },
       ],
-      proration_behavior: 'create_prorations',
+      proration_behavior: "create_prorations",
       metadata: {
         plan_id: updates.planId,
       },
-    }
+    },
   );
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from('subscriptions')
+    .from("subscriptions")
     .update({
       plan_id: updates.planId,
       status: stripeSubscription.status,
-      current_period_start: new Date(stripeSubscription.current_period_start * 1000).toISOString(),
-      current_period_end: new Date(stripeSubscription.current_period_end * 1000).toISOString(),
+      current_period_start: new Date(
+        stripeSubscription.current_period_start * 1000,
+      ).toISOString(),
+      current_period_end: new Date(
+        stripeSubscription.current_period_end * 1000,
+      ).toISOString(),
       cancel_at_period_end: stripeSubscription.cancel_at_period_end,
     })
-    .eq('id', currentSubscription.id)
+    .eq("id", currentSubscription.id)
     .select()
     .single();
 
@@ -194,40 +212,45 @@ export async function updateSubscription(
  */
 export async function cancelSubscription(
   userId: string,
-  immediate: boolean = false
+  immediate: boolean = false,
 ): Promise<Subscription> {
   const supabase = await createClient();
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'active')
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("status", "active")
     .single();
 
   if (fetchError || !currentSubscription) {
-    throw new Error('No active subscription found');
+    throw new Error("No active subscription found");
   }
 
   // Cancel subscription in Stripe
   const stripeSubscription = immediate
-    ? await stripe.subscriptions.cancel(currentSubscription.stripe_subscription_id)
-    : await stripe.subscriptions.update(currentSubscription.stripe_subscription_id, {
-        cancel_at_period_end: true,
-      });
+    ? await stripe.subscriptions.cancel(
+        currentSubscription.stripe_subscription_id,
+      )
+    : await stripe.subscriptions.update(
+        currentSubscription.stripe_subscription_id,
+        {
+          cancel_at_period_end: true,
+        },
+      );
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from('subscriptions')
+    .from("subscriptions")
     .update({
       status: stripeSubscription.status,
       cancel_at_period_end: stripeSubscription.cancel_at_period_end,
-      canceled_at: stripeSubscription.canceled_at 
-        ? new Date(stripeSubscription.canceled_at * 1000).toISOString() 
+      canceled_at: stripeSubscription.canceled_at
+        ? new Date(stripeSubscription.canceled_at * 1000).toISOString()
         : null,
     })
-    .eq('id', currentSubscription.id)
+    .eq("id", currentSubscription.id)
     .select()
     .single();
 
@@ -241,22 +264,24 @@ export async function cancelSubscription(
 /**
  * Reactivate a canceled subscription
  */
-export async function reactivateSubscription(userId: string): Promise<Subscription> {
+export async function reactivateSubscription(
+  userId: string,
+): Promise<Subscription> {
   const supabase = await createClient();
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", userId)
     .single();
 
   if (fetchError || !currentSubscription) {
-    throw new Error('No subscription found');
+    throw new Error("No subscription found");
   }
 
   if (!currentSubscription.cancel_at_period_end) {
-    throw new Error('Subscription is not scheduled for cancellation');
+    throw new Error("Subscription is not scheduled for cancellation");
   }
 
   // Reactivate subscription in Stripe
@@ -264,17 +289,17 @@ export async function reactivateSubscription(userId: string): Promise<Subscripti
     currentSubscription.stripe_subscription_id,
     {
       cancel_at_period_end: false,
-    }
+    },
   );
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from('subscriptions')
+    .from("subscriptions")
     .update({
       cancel_at_period_end: false,
       canceled_at: null,
     })
-    .eq('id', currentSubscription.id)
+    .eq("id", currentSubscription.id)
     .select()
     .single();
 
@@ -288,15 +313,17 @@ export async function reactivateSubscription(userId: string): Promise<Subscripti
 /**
  * Get user's current subscription
  */
-export async function getUserSubscription(userId: string): Promise<Subscription | null> {
+export async function getUserSubscription(
+  userId: string,
+): Promise<Subscription | null> {
   const supabase = await createClient();
 
   const { data: subscription } = await supabase
-    .from('subscriptions')
-    .select('*')
-    .eq('user_id', userId)
-    .in('status', ['active', 'trialing', 'past_due'])
-    .order('created_at', { ascending: false })
+    .from("subscriptions")
+    .select("*")
+    .eq("user_id", userId)
+    .in("status", ["active", "trialing", "past_due"])
+    .order("created_at", { ascending: false })
     .limit(1)
     .single();
 
@@ -308,26 +335,35 @@ export async function getUserSubscription(userId: string): Promise<Subscription 
  */
 export async function checkFeatureAccess(
   userId: string,
-  feature: 'aiFeatures' | 'unlimited_websites' | 'collaborators' | 'translations'
+  feature:
+    | "aiFeatures"
+    | "unlimited_websites"
+    | "collaborators"
+    | "translations",
 ): Promise<boolean> {
   const subscription = await getUserSubscription(userId);
-  
+
   if (!subscription) {
     // User has no subscription, check free tier limits
     const freePlan = SUBSCRIPTION_PLANS.FREE;
-    return freePlan.limits.aiFeatures && feature === 'aiFeatures' ? false : true;
+    return freePlan.limits.aiFeatures && feature === "aiFeatures"
+      ? false
+      : true;
   }
 
-  const plan = SUBSCRIPTION_PLANS[subscription.plan_id.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
-  
+  const plan =
+    SUBSCRIPTION_PLANS[
+      subscription.plan_id.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
+    ];
+
   switch (feature) {
-    case 'aiFeatures':
+    case "aiFeatures":
       return plan.limits.aiFeatures;
-    case 'unlimited_websites':
+    case "unlimited_websites":
       return plan.limits.websites === -1;
-    case 'collaborators':
+    case "collaborators":
       return plan.limits.collaborators > 0;
-    case 'translations':
+    case "translations":
       return plan.limits.translations !== 0;
     default:
       return false;

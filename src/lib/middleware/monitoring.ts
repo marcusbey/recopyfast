@@ -3,12 +3,12 @@
  * Tracks API requests, responses, and performance metrics
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { logger, createRequestContext, LogContext } from '../monitoring/logger';
-import { performanceMonitor } from '../monitoring/performance';
-import { systemMonitor } from '../monitoring/system-status';
-import { config } from '../config/production';
-import * as Sentry from '@sentry/nextjs';
+import { NextRequest, NextResponse } from "next/server";
+import { logger, createRequestContext, LogContext } from "../monitoring/logger";
+import { performanceMonitor } from "../monitoring/performance";
+import { systemMonitor } from "../monitoring/system-status";
+import { config } from "../config/production";
+import * as Sentry from "@sentry/nextjs";
 
 interface RequestMetadata {
   method: string;
@@ -37,16 +37,22 @@ export function withApiMonitoring(
     skipLogging?: boolean;
     skipMetrics?: boolean;
     operationName?: string;
-  } = {}
+  } = {},
 ) {
-  return async function monitoredHandler(req: NextRequest, context?: unknown): Promise<NextResponse> {
+  return async function monitoredHandler(
+    req: NextRequest,
+    context?: unknown,
+  ): Promise<NextResponse> {
     const startTime = Date.now();
     const requestId = Math.random().toString(36).substring(7);
-    const operationName = options.operationName || `${req.method} ${new URL(req.url).pathname}`;
+    const operationName =
+      options.operationName || `${req.method} ${new URL(req.url).pathname}`;
 
     // Create request context for logging
     const requestContext: LogContext = {
-      ...createRequestContext(req as Parameters<typeof createRequestContext>[0]),
+      ...createRequestContext(
+        req as Parameters<typeof createRequestContext>[0],
+      ),
       requestId,
       method: req.method,
       url: req.url,
@@ -57,15 +63,16 @@ export function withApiMonitoring(
     const requestMetadata: RequestMetadata = {
       method: req.method,
       url: req.url,
-      userAgent: req.headers.get('user-agent') || undefined,
-      referer: req.headers.get('referer') || undefined,
-      contentLength: req.headers.get('content-length') ? 
-        parseInt(req.headers.get('content-length')!, 10) : undefined,
+      userAgent: req.headers.get("user-agent") || undefined,
+      referer: req.headers.get("referer") || undefined,
+      contentLength: req.headers.get("content-length")
+        ? parseInt(req.headers.get("content-length")!, 10)
+        : undefined,
     };
 
     // Try to extract user info from auth headers
     try {
-      const authHeader = req.headers.get('authorization');
+      const authHeader = req.headers.get("authorization");
       if (authHeader) {
         // Add user context if available (implement based on your auth system)
         // const user = await extractUserFromAuth(authHeader);
@@ -76,11 +83,15 @@ export function withApiMonitoring(
     }
 
     // Start performance tracking
-    const timerId = options.skipMetrics ? null : 
-      performanceMonitor.startTimer(`api.${req.method.toLowerCase()}_request`, {
-        method: req.method,
-        path: new URL(req.url).pathname,
-      });
+    const timerId = options.skipMetrics
+      ? null
+      : performanceMonitor.startTimer(
+          `api.${req.method.toLowerCase()}_request`,
+          {
+            method: req.method,
+            path: new URL(req.url).pathname,
+          },
+        );
 
     // Track active request
     systemMonitor.trackActiveRequest(1);
@@ -90,11 +101,11 @@ export function withApiMonitoring(
     if (config.monitoring.sentry.enabled) {
       transaction = Sentry.startTransaction({
         name: operationName,
-        op: 'http.server',
+        op: "http.server",
         data: {
-          'http.method': req.method,
-          'http.url': req.url,
-          'http.user_agent': requestMetadata.userAgent,
+          "http.method": req.method,
+          "http.url": req.url,
+          "http.user_agent": requestMetadata.userAgent,
         },
       });
       Sentry.getCurrentScope().setSpan(transaction);
@@ -106,25 +117,30 @@ export function withApiMonitoring(
     try {
       // Log request start
       if (!options.skipLogging) {
-        logger.http(`${req.method} ${new URL(req.url).pathname} - Started`, requestContext, {
-          component: 'api-middleware',
-          requestMetadata,
-        });
+        logger.http(
+          `${req.method} ${new URL(req.url).pathname} - Started`,
+          requestContext,
+          {
+            component: "api-middleware",
+            requestMetadata,
+          },
+        );
       }
 
       // Execute the actual handler
       response = await handler(req, context);
-      
+
       // Calculate response time
       const duration = Date.now() - startTime;
-      
+
       // Extract response metadata
       responseMetadata = {
         statusCode: response.status,
-        contentLength: response.headers.get('content-length') ? 
-          parseInt(response.headers.get('content-length')!, 10) : undefined,
+        contentLength: response.headers.get("content-length")
+          ? parseInt(response.headers.get("content-length")!, 10)
+          : undefined,
         duration,
-        cached: response.headers.get('x-cache-status') === 'HIT',
+        cached: response.headers.get("x-cache-status") === "HIT",
       };
 
       // Log successful response
@@ -133,22 +149,22 @@ export function withApiMonitoring(
           `${req.method} ${new URL(req.url).pathname} - ${response.status}`,
           requestContext,
           {
-            component: 'api-middleware',
+            component: "api-middleware",
             requestMetadata,
             responseMetadata,
-          }
+          },
         );
       }
 
       // Track metrics
       if (!options.skipMetrics) {
         systemMonitor.trackRequest(duration, response.status >= 400);
-        
+
         // Record API response time
         performanceMonitor.recordMetric({
-          name: 'api.response_time',
+          name: "api.response_time",
           value: duration,
-          unit: 'ms',
+          unit: "ms",
           tags: {
             method: req.method,
             status: response.status.toString(),
@@ -164,24 +180,23 @@ export function withApiMonitoring(
       // Set Sentry transaction status
       if (transaction) {
         transaction.setHttpStatus(response.status);
-        transaction.setData('http.response.status_code', response.status);
-        transaction.setStatus(response.status < 400 ? 'ok' : 'internal_error');
+        transaction.setData("http.response.status_code", response.status);
+        transaction.setStatus(response.status < 400 ? "ok" : "internal_error");
       }
 
       return response;
-
     } catch (err) {
       const error = err as Error;
       const duration = Date.now() - startTime;
-      
+
       // Create error response
       response = NextResponse.json(
-        { 
-          error: 'Internal Server Error',
+        {
+          error: "Internal Server Error",
           requestId,
           timestamp: new Date().toISOString(),
         },
-        { status: 500 }
+        { status: 500 },
       );
 
       responseMetadata = {
@@ -196,20 +211,20 @@ export function withApiMonitoring(
         error,
         requestContext,
         {
-          component: 'api-middleware',
+          component: "api-middleware",
           requestMetadata,
           responseMetadata,
-        }
+        },
       );
 
       // Track error metrics
       if (!options.skipMetrics) {
         systemMonitor.trackRequest(duration, true);
-        
+
         performanceMonitor.recordMetric({
-          name: 'api.error_rate',
+          name: "api.error_rate",
           value: 1,
-          unit: 'count',
+          unit: "count",
           tags: {
             method: req.method,
             path: new URL(req.url).pathname,
@@ -223,13 +238,12 @@ export function withApiMonitoring(
 
       // Set Sentry transaction error status
       if (transaction) {
-        transaction.setStatus('internal_error');
-        transaction.setData('error', error.message);
+        transaction.setStatus("internal_error");
+        transaction.setData("error", error.message);
         Sentry.captureException(error);
       }
 
       return response;
-
     } finally {
       // End performance tracking
       if (timerId) {
@@ -260,21 +274,27 @@ export function withRateLimit(
     maxRequests?: number;
     keyGenerator?: (req: NextRequest) => string;
     skip?: (req: NextRequest) => boolean;
-  } = {}
+  } = {},
 ) {
   const requestCounts = new Map<string, { count: number; resetTime: number }>();
   const windowMs = options.windowMs || config.api.rateLimiting.windowMs;
-  const maxRequests = options.maxRequests || config.api.rateLimiting.maxRequests;
+  const maxRequests =
+    options.maxRequests || config.api.rateLimiting.maxRequests;
 
   const defaultKeyGenerator = (req: NextRequest) => {
-    return req.headers.get('x-forwarded-for') || 
-           req.headers.get('x-real-ip') || 
-           'unknown';
+    return (
+      req.headers.get("x-forwarded-for") ||
+      req.headers.get("x-real-ip") ||
+      "unknown"
+    );
   };
 
   const keyGenerator = options.keyGenerator || defaultKeyGenerator;
 
-  return async function rateLimitedHandler(req: NextRequest, context?: unknown): Promise<NextResponse> {
+  return async function rateLimitedHandler(
+    req: NextRequest,
+    context?: unknown,
+  ): Promise<NextResponse> {
     // Skip rate limiting if configured
     if (options.skip && options.skip(req)) {
       return handler(req, context);
@@ -300,28 +320,37 @@ export function withRateLimit(
 
     // Check rate limit
     if (requestData.count >= maxRequests) {
-      logger.warn('Rate limit exceeded', { ip: key }, {
-        component: 'rate-limiter',
-        limit: maxRequests,
-        window: windowMs,
-        current: requestData.count,
-      });
+      logger.warn(
+        "Rate limit exceeded",
+        { ip: key },
+        {
+          component: "rate-limiter",
+          limit: maxRequests,
+          window: windowMs,
+          current: requestData.count,
+        },
+      );
 
       return NextResponse.json(
         {
-          error: 'Too Many Requests',
+          error: "Too Many Requests",
           message: `Rate limit exceeded. Try again in ${Math.ceil((requestData.resetTime - now) / 1000)} seconds.`,
           retryAfter: Math.ceil((requestData.resetTime - now) / 1000),
         },
         {
           status: 429,
           headers: {
-            'Retry-After': Math.ceil((requestData.resetTime - now) / 1000).toString(),
-            'X-RateLimit-Limit': maxRequests.toString(),
-            'X-RateLimit-Remaining': Math.max(0, maxRequests - requestData.count - 1).toString(),
-            'X-RateLimit-Reset': new Date(requestData.resetTime).toISOString(),
+            "Retry-After": Math.ceil(
+              (requestData.resetTime - now) / 1000,
+            ).toString(),
+            "X-RateLimit-Limit": maxRequests.toString(),
+            "X-RateLimit-Remaining": Math.max(
+              0,
+              maxRequests - requestData.count - 1,
+            ).toString(),
+            "X-RateLimit-Reset": new Date(requestData.resetTime).toISOString(),
           },
-        }
+        },
       );
     }
 
@@ -330,10 +359,16 @@ export function withRateLimit(
 
     // Add rate limit headers to response
     const response = await handler(req, context);
-    
-    response.headers.set('X-RateLimit-Limit', maxRequests.toString());
-    response.headers.set('X-RateLimit-Remaining', Math.max(0, maxRequests - requestData.count).toString());
-    response.headers.set('X-RateLimit-Reset', new Date(requestData.resetTime).toISOString());
+
+    response.headers.set("X-RateLimit-Limit", maxRequests.toString());
+    response.headers.set(
+      "X-RateLimit-Remaining",
+      Math.max(0, maxRequests - requestData.count).toString(),
+    );
+    response.headers.set(
+      "X-RateLimit-Reset",
+      new Date(requestData.resetTime).toISOString(),
+    );
 
     return response;
   };
@@ -349,26 +384,43 @@ export function withCors(
     methods?: string[];
     headers?: string[];
     credentials?: boolean;
-  } = {}
+  } = {},
 ) {
   const origins = options.origins || config.api.cors.origins;
-  const methods = options.methods || ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'];
-  const headers = options.headers || ['Content-Type', 'Authorization', 'X-Requested-With'];
-  const credentials = options.credentials !== undefined ? options.credentials : config.api.cors.credentials;
+  const methods = options.methods || [
+    "GET",
+    "POST",
+    "PUT",
+    "DELETE",
+    "OPTIONS",
+  ];
+  const headers = options.headers || [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+  ];
+  const credentials =
+    options.credentials !== undefined
+      ? options.credentials
+      : config.api.cors.credentials;
 
-  return async function corsHandler(req: NextRequest, context?: unknown): Promise<NextResponse> {
-    const origin = req.headers.get('origin');
+  return async function corsHandler(
+    req: NextRequest,
+    context?: unknown,
+  ): Promise<NextResponse> {
+    const origin = req.headers.get("origin");
 
     // Handle preflight requests
-    if (req.method === 'OPTIONS') {
+    if (req.method === "OPTIONS") {
       return new NextResponse(null, {
         status: 200,
         headers: {
-          'Access-Control-Allow-Origin': origin && origins.includes(origin) ? origin : origins[0],
-          'Access-Control-Allow-Methods': methods.join(', '),
-          'Access-Control-Allow-Headers': headers.join(', '),
-          'Access-Control-Allow-Credentials': credentials.toString(),
-          'Access-Control-Max-Age': '86400',
+          "Access-Control-Allow-Origin":
+            origin && origins.includes(origin) ? origin : origins[0],
+          "Access-Control-Allow-Methods": methods.join(", "),
+          "Access-Control-Allow-Headers": headers.join(", "),
+          "Access-Control-Allow-Credentials": credentials.toString(),
+          "Access-Control-Max-Age": "86400",
         },
       });
     }
@@ -377,13 +429,16 @@ export function withCors(
 
     // Add CORS headers
     if (origin && origins.includes(origin)) {
-      response.headers.set('Access-Control-Allow-Origin', origin);
+      response.headers.set("Access-Control-Allow-Origin", origin);
     } else if (origins.length > 0) {
-      response.headers.set('Access-Control-Allow-Origin', origins[0]);
+      response.headers.set("Access-Control-Allow-Origin", origins[0]);
     }
-    
-    response.headers.set('Access-Control-Allow-Credentials', credentials.toString());
-    response.headers.set('Vary', 'Origin');
+
+    response.headers.set(
+      "Access-Control-Allow-Credentials",
+      credentials.toString(),
+    );
+    response.headers.set("Vary", "Origin");
 
     return response;
   };

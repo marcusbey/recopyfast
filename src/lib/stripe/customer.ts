@@ -1,6 +1,6 @@
-import { stripe } from './config';
-import { createClient } from '@/lib/supabase/server';
-import type { Customer } from '@/types/billing';
+import { stripe } from "./config";
+import { createClient } from "@/lib/supabase/server";
+import type { Customer } from "@/types/billing";
 
 /**
  * Create or retrieve a Stripe customer for a user
@@ -8,21 +8,24 @@ import type { Customer } from '@/types/billing';
 export async function createOrGetCustomer(
   userId: string,
   email: string,
-  name?: string
-): Promise<{ customer: Customer; stripeCustomer: import('stripe').Stripe.Customer }> {
+  name?: string,
+): Promise<{
+  customer: Customer;
+  stripeCustomer: import("stripe").Stripe.Customer;
+}> {
   const supabase = await createClient();
 
   // Check if customer already exists in our database
   const { data: existingCustomer } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('user_id', userId)
+    .from("customers")
+    .select("*")
+    .eq("user_id", userId)
     .single();
 
   if (existingCustomer) {
     // Get the Stripe customer
     const stripeCustomer = await stripe.customers.retrieve(
-      existingCustomer.stripe_customer_id
+      existingCustomer.stripe_customer_id,
     );
     return { customer: existingCustomer, stripeCustomer };
   }
@@ -38,7 +41,7 @@ export async function createOrGetCustomer(
 
   // Save customer to our database
   const { data: newCustomer, error } = await supabase
-    .from('customers')
+    .from("customers")
     .insert({
       user_id: userId,
       stripe_customer_id: stripeCustomer.id,
@@ -60,19 +63,19 @@ export async function createOrGetCustomer(
  */
 export async function updateCustomer(
   customerId: string,
-  updates: { email?: string; name?: string }
+  updates: { email?: string; name?: string },
 ): Promise<Customer> {
   const supabase = await createClient();
 
   // Get the customer
   const { data: customer, error: fetchError } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('id', customerId)
+    .from("customers")
+    .select("*")
+    .eq("id", customerId)
     .single();
 
   if (fetchError || !customer) {
-    throw new Error('Customer not found');
+    throw new Error("Customer not found");
   }
 
   // Update Stripe customer
@@ -80,9 +83,9 @@ export async function updateCustomer(
 
   // Update our database
   const { data: updatedCustomer, error } = await supabase
-    .from('customers')
+    .from("customers")
     .update(updates)
-    .eq('id', customerId)
+    .eq("id", customerId)
     .select()
     .single();
 
@@ -96,13 +99,15 @@ export async function updateCustomer(
 /**
  * Get customer by user ID
  */
-export async function getCustomerByUserId(userId: string): Promise<Customer | null> {
+export async function getCustomerByUserId(
+  userId: string,
+): Promise<Customer | null> {
   const supabase = await createClient();
 
   const { data: customer } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('user_id', userId)
+    .from("customers")
+    .select("*")
+    .eq("user_id", userId)
     .single();
 
   return customer;
@@ -116,13 +121,13 @@ export async function deleteCustomer(customerId: string): Promise<void> {
 
   // Get the customer
   const { data: customer, error: fetchError } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('id', customerId)
+    .from("customers")
+    .select("*")
+    .eq("id", customerId)
     .single();
 
   if (fetchError || !customer) {
-    throw new Error('Customer not found');
+    throw new Error("Customer not found");
   }
 
   // Delete from Stripe
@@ -130,9 +135,9 @@ export async function deleteCustomer(customerId: string): Promise<void> {
 
   // Delete from our database (cascade will handle related records)
   const { error } = await supabase
-    .from('customers')
+    .from("customers")
     .delete()
-    .eq('id', customerId);
+    .eq("id", customerId);
 
   if (error) {
     throw new Error(`Failed to delete customer: ${error.message}`);

@@ -1,6 +1,6 @@
-import { createServerClient } from '@supabase/ssr';
-import { Webhook, WebhookDelivery } from '@/types';
-import crypto from 'crypto';
+import { createServerClient } from "@supabase/ssr";
+import { Webhook, WebhookDelivery } from "@/types";
+import crypto from "crypto";
 
 export class WebhookManager {
   private supabase;
@@ -11,11 +11,11 @@ export class WebhookManager {
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       {
         cookies: {
-          get: () => '',
+          get: () => "",
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
   }
 
@@ -30,9 +30,9 @@ export class WebhookManager {
     createdBy: string;
   }): Promise<Webhook> {
     const secret = params.secret || this.generateSecret();
-    
+
     const { data: webhook, error } = await this.supabase
-      .from('webhooks')
+      .from("webhooks")
       .insert({
         site_id: params.siteId,
         url: params.url,
@@ -41,7 +41,7 @@ export class WebhookManager {
         created_by: params.createdBy,
         is_active: true,
         failure_count: 0,
-        max_failures: 5
+        max_failures: 5,
       })
       .select()
       .single();
@@ -56,14 +56,17 @@ export class WebhookManager {
   /**
    * Update webhook
    */
-  async updateWebhook(webhookId: string, updates: Partial<Webhook>): Promise<Webhook> {
+  async updateWebhook(
+    webhookId: string,
+    updates: Partial<Webhook>,
+  ): Promise<Webhook> {
     const { data: webhook, error } = await this.supabase
-      .from('webhooks')
+      .from("webhooks")
       .update({
         ...updates,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', webhookId)
+      .eq("id", webhookId)
       .select()
       .single();
 
@@ -79,9 +82,9 @@ export class WebhookManager {
    */
   async deleteWebhook(webhookId: string): Promise<void> {
     const { error } = await this.supabase
-      .from('webhooks')
+      .from("webhooks")
       .delete()
-      .eq('id', webhookId);
+      .eq("id", webhookId);
 
     if (error) {
       throw error;
@@ -93,11 +96,11 @@ export class WebhookManager {
    */
   async getWebhooks(siteId: string): Promise<Webhook[]> {
     const { data: webhooks, error } = await this.supabase
-      .from('webhooks')
-      .select('*')
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
+      .from("webhooks")
+      .select("*")
+      .eq("site_id", siteId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
 
     if (error) {
       throw error;
@@ -118,14 +121,14 @@ export class WebhookManager {
     try {
       // Get active webhooks for this site and event
       const { data: webhooks, error } = await this.supabase
-        .from('webhooks')
-        .select('*')
-        .eq('site_id', params.siteId)
-        .eq('is_active', true)
-        .contains('events', [params.eventType]);
+        .from("webhooks")
+        .select("*")
+        .eq("site_id", params.siteId)
+        .eq("is_active", true)
+        .contains("events", [params.eventType]);
 
       if (error) {
-        console.error('Failed to get webhooks:', error);
+        console.error("Failed to get webhooks:", error);
         return;
       }
 
@@ -134,13 +137,18 @@ export class WebhookManager {
       }
 
       // Trigger each webhook
-      const deliveryPromises = webhooks.map(webhook => 
-        this.deliverWebhook(webhook, params.eventType, params.payload, params.metadata)
+      const deliveryPromises = webhooks.map((webhook) =>
+        this.deliverWebhook(
+          webhook,
+          params.eventType,
+          params.payload,
+          params.metadata,
+        ),
       );
 
       await Promise.allSettled(deliveryPromises);
     } catch (error) {
-      console.error('Failed to trigger webhook event:', error);
+      console.error("Failed to trigger webhook event:", error);
     }
   }
 
@@ -151,7 +159,7 @@ export class WebhookManager {
     webhook: Webhook,
     eventType: string,
     payload: Record<string, unknown>,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
   ): Promise<void> {
     const delivery: Partial<WebhookDelivery> = {
       webhook_id: webhook.id,
@@ -161,34 +169,37 @@ export class WebhookManager {
         timestamp: new Date().toISOString(),
         site_id: webhook.site_id,
         data: payload,
-        metadata
+        metadata,
       },
       attempt_number: 1,
-      success: false
+      success: false,
     };
 
     try {
       const startTime = Date.now();
-      
+
       // Prepare request
       const requestPayload = JSON.stringify(delivery.payload);
-      const signature = this.generateSignature(requestPayload, webhook.secret || '');
+      const signature = this.generateSignature(
+        requestPayload,
+        webhook.secret || "",
+      );
 
       const response = await fetch(webhook.url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'ReCopyFast-Webhooks/1.0',
-          'X-ReCopyFast-Event': eventType,
-          'X-ReCopyFast-Signature': signature,
-          'X-ReCopyFast-Delivery': crypto.randomUUID()
+          "Content-Type": "application/json",
+          "User-Agent": "ReCopyFast-Webhooks/1.0",
+          "X-ReCopyFast-Event": eventType,
+          "X-ReCopyFast-Signature": signature,
+          "X-ReCopyFast-Delivery": crypto.randomUUID(),
         },
         body: requestPayload,
-        signal: AbortSignal.timeout(30000) // 30 second timeout
+        signal: AbortSignal.timeout(30000), // 30 second timeout
       });
 
       const responseTime = Date.now() - startTime;
-      const responseBody = await response.text().catch(() => '');
+      const responseBody = await response.text().catch(() => "");
 
       delivery.response_status = response.status;
       delivery.response_body = responseBody.substring(0, 1000); // Limit response body size
@@ -198,28 +209,27 @@ export class WebhookManager {
       if (response.ok) {
         // Update webhook last triggered time
         await this.supabase
-          .from('webhooks')
+          .from("webhooks")
           .update({
             last_triggered_at: new Date().toISOString(),
-            failure_count: 0 // Reset failure count on success
+            failure_count: 0, // Reset failure count on success
           })
-          .eq('id', webhook.id);
+          .eq("id", webhook.id);
       } else {
         // Handle failure
         await this.handleWebhookFailure(webhook, delivery);
       }
     } catch (error) {
       // Handle delivery error
-      delivery.error_message = error instanceof Error ? error.message : 'Unknown error';
+      delivery.error_message =
+        error instanceof Error ? error.message : "Unknown error";
       delivery.success = false;
-      
+
       await this.handleWebhookFailure(webhook, delivery);
     }
 
     // Log delivery attempt
-    await this.supabase
-      .from('webhook_deliveries')
-      .insert(delivery);
+    await this.supabase.from("webhook_deliveries").insert(delivery);
   }
 
   /**
@@ -227,27 +237,27 @@ export class WebhookManager {
    */
   private async handleWebhookFailure(
     webhook: Webhook,
-    delivery: Partial<WebhookDelivery>
+    delivery: Partial<WebhookDelivery>,
   ): Promise<void> {
     const newFailureCount = webhook.failure_count + 1;
-    
+
     if (newFailureCount >= webhook.max_failures) {
       // Disable webhook after max failures
       await this.supabase
-        .from('webhooks')
+        .from("webhooks")
         .update({
           is_active: false,
-          failure_count: newFailureCount
+          failure_count: newFailureCount,
         })
-        .eq('id', webhook.id);
+        .eq("id", webhook.id);
     } else {
       // Increment failure count
       await this.supabase
-        .from('webhooks')
+        .from("webhooks")
         .update({
-          failure_count: newFailureCount
+          failure_count: newFailureCount,
         })
-        .eq('id', webhook.id);
+        .eq("id", webhook.id);
 
       // Schedule retry (would be handled by a background job in production)
       setTimeout(() => {
@@ -261,7 +271,7 @@ export class WebhookManager {
    */
   private async retryWebhook(
     webhook: Webhook,
-    originalDelivery: Partial<WebhookDelivery>
+    originalDelivery: Partial<WebhookDelivery>,
   ): Promise<void> {
     if (!originalDelivery.payload || !originalDelivery.event_type) {
       return;
@@ -273,30 +283,33 @@ export class WebhookManager {
       event_type: originalDelivery.event_type,
       payload: originalDelivery.payload,
       attempt_number: (originalDelivery.attempt_number || 1) + 1,
-      success: false
+      success: false,
     };
 
     try {
       const startTime = Date.now();
       const requestPayload = JSON.stringify(retryDelivery.payload);
-      const signature = this.generateSignature(requestPayload, webhook.secret || '');
+      const signature = this.generateSignature(
+        requestPayload,
+        webhook.secret || "",
+      );
 
       const response = await fetch(webhook.url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'ReCopyFast-Webhooks/1.0',
-          'X-ReCopyFast-Event': originalDelivery.event_type,
-          'X-ReCopyFast-Signature': signature,
-          'X-ReCopyFast-Delivery': crypto.randomUUID(),
-          'X-ReCopyFast-Retry': 'true'
+          "Content-Type": "application/json",
+          "User-Agent": "ReCopyFast-Webhooks/1.0",
+          "X-ReCopyFast-Event": originalDelivery.event_type,
+          "X-ReCopyFast-Signature": signature,
+          "X-ReCopyFast-Delivery": crypto.randomUUID(),
+          "X-ReCopyFast-Retry": "true",
         },
         body: requestPayload,
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(30000),
       });
 
       const responseTime = Date.now() - startTime;
-      const responseBody = await response.text().catch(() => '');
+      const responseBody = await response.text().catch(() => "");
 
       retryDelivery.response_status = response.status;
       retryDelivery.response_body = responseBody.substring(0, 1000);
@@ -306,22 +319,21 @@ export class WebhookManager {
       if (response.ok) {
         // Reset failure count on successful retry
         await this.supabase
-          .from('webhooks')
+          .from("webhooks")
           .update({
             last_triggered_at: new Date().toISOString(),
-            failure_count: 0
+            failure_count: 0,
           })
-          .eq('id', webhook.id);
+          .eq("id", webhook.id);
       }
     } catch (error) {
-      retryDelivery.error_message = error instanceof Error ? error.message : 'Unknown error';
+      retryDelivery.error_message =
+        error instanceof Error ? error.message : "Unknown error";
       retryDelivery.success = false;
     }
 
     // Log retry attempt
-    await this.supabase
-      .from('webhook_deliveries')
-      .insert(retryDelivery);
+    await this.supabase.from("webhook_deliveries").insert(retryDelivery);
   }
 
   /**
@@ -336,10 +348,7 @@ export class WebhookManager {
    * Generate webhook signature
    */
   private generateSignature(payload: string, secret: string): string {
-    return crypto
-      .createHmac('sha256', secret)
-      .update(payload)
-      .digest('hex');
+    return crypto.createHmac("sha256", secret).update(payload).digest("hex");
   }
 
   /**
@@ -348,8 +357,8 @@ export class WebhookManager {
   verifySignature(payload: string, signature: string, secret: string): boolean {
     const expectedSignature = this.generateSignature(payload, secret);
     return crypto.timingSafeEqual(
-      Buffer.from(signature, 'hex'),
-      Buffer.from(expectedSignature, 'hex')
+      Buffer.from(signature, "hex"),
+      Buffer.from(expectedSignature, "hex"),
     );
   }
 
@@ -357,18 +366,21 @@ export class WebhookManager {
    * Generate secure webhook secret
    */
   private generateSecret(): string {
-    return crypto.randomBytes(32).toString('hex');
+    return crypto.randomBytes(32).toString("hex");
   }
 
   /**
    * Get webhook delivery logs
    */
-  async getDeliveryLogs(webhookId: string, limit: number = 50): Promise<WebhookDelivery[]> {
+  async getDeliveryLogs(
+    webhookId: string,
+    limit: number = 50,
+  ): Promise<WebhookDelivery[]> {
     const { data: deliveries, error } = await this.supabase
-      .from('webhook_deliveries')
-      .select('*')
-      .eq('webhook_id', webhookId)
-      .order('delivered_at', { ascending: false })
+      .from("webhook_deliveries")
+      .select("*")
+      .eq("webhook_id", webhookId)
+      .order("delivered_at", { ascending: false })
       .limit(limit);
 
     if (error) {
@@ -389,63 +401,64 @@ export class WebhookManager {
   }> {
     try {
       const { data: webhook, error } = await this.supabase
-        .from('webhooks')
-        .select('*')
-        .eq('id', webhookId)
+        .from("webhooks")
+        .select("*")
+        .eq("id", webhookId)
         .single();
 
       if (error || !webhook) {
-        return { success: false, error: 'Webhook not found' };
+        return { success: false, error: "Webhook not found" };
       }
 
       const testPayload = {
-        event: 'test',
+        event: "test",
         timestamp: new Date().toISOString(),
         site_id: webhook.site_id,
-        data: { message: 'This is a test webhook delivery' }
+        data: { message: "This is a test webhook delivery" },
       };
 
       const startTime = Date.now();
       const payloadString = JSON.stringify(testPayload);
-      const signature = this.generateSignature(payloadString, webhook.secret || '');
+      const signature = this.generateSignature(
+        payloadString,
+        webhook.secret || "",
+      );
 
       const response = await fetch(webhook.url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'ReCopyFast-Webhooks/1.0',
-          'X-ReCopyFast-Event': 'test',
-          'X-ReCopyFast-Signature': signature,
-          'X-ReCopyFast-Test': 'true'
+          "Content-Type": "application/json",
+          "User-Agent": "ReCopyFast-Webhooks/1.0",
+          "X-ReCopyFast-Event": "test",
+          "X-ReCopyFast-Signature": signature,
+          "X-ReCopyFast-Test": "true",
         },
         body: payloadString,
-        signal: AbortSignal.timeout(10000) // 10 second timeout for tests
+        signal: AbortSignal.timeout(10000), // 10 second timeout for tests
       });
 
       const responseTime = Date.now() - startTime;
 
       // Log test delivery
-      await this.supabase
-        .from('webhook_deliveries')
-        .insert({
-          webhook_id: webhookId,
-          event_type: 'test',
-          payload: testPayload,
-          response_status: response.status,
-          response_time: responseTime,
-          success: response.ok,
-          attempt_number: 1
-        });
+      await this.supabase.from("webhook_deliveries").insert({
+        webhook_id: webhookId,
+        event_type: "test",
+        payload: testPayload,
+        response_status: response.status,
+        response_time: responseTime,
+        success: response.ok,
+        attempt_number: 1,
+      });
 
       return {
         success: response.ok,
         statusCode: response.status,
-        responseTime
+        responseTime,
       };
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
   }
@@ -453,18 +466,19 @@ export class WebhookManager {
 
 // Event types that can trigger webhooks
 export const WEBHOOK_EVENTS = {
-  CONTENT_UPDATED: 'content.updated',
-  CONTENT_CREATED: 'content.created',
-  CONTENT_DELETED: 'content.deleted',
-  SITE_UPDATED: 'site.updated',
-  USER_INVITED: 'user.invited',
-  TEAM_MEMBER_ADDED: 'team.member_added',
-  BULK_OPERATION_COMPLETED: 'bulk.operation_completed',
-  AB_TEST_STARTED: 'ab_test.started',
-  AB_TEST_COMPLETED: 'ab_test.completed'
+  CONTENT_UPDATED: "content.updated",
+  CONTENT_CREATED: "content.created",
+  CONTENT_DELETED: "content.deleted",
+  SITE_UPDATED: "site.updated",
+  USER_INVITED: "user.invited",
+  TEAM_MEMBER_ADDED: "team.member_added",
+  BULK_OPERATION_COMPLETED: "bulk.operation_completed",
+  AB_TEST_STARTED: "ab_test.started",
+  AB_TEST_COMPLETED: "ab_test.completed",
 } as const;
 
-export type WebhookEventType = typeof WEBHOOK_EVENTS[keyof typeof WEBHOOK_EVENTS];
+export type WebhookEventType =
+  (typeof WEBHOOK_EVENTS)[keyof typeof WEBHOOK_EVENTS];
 
 // Export singleton instance
 export const webhookManager = new WebhookManager();

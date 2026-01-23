@@ -1,10 +1,10 @@
-import { createClient } from 'redis';
+import { createClient } from "redis";
 
 export interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
   identifier: string;
-  identifierType: 'user' | 'ip' | 'api_key';
+  identifierType: "user" | "ip" | "api_key";
   endpoint?: string;
 }
 
@@ -28,7 +28,7 @@ export class MemoryRateLimiter {
   private requests: Map<string, RateLimitInfo> = new Map();
 
   private generateKey(config: RateLimitConfig): string {
-    const endpoint = config.endpoint || 'global';
+    const endpoint = config.endpoint || "global";
     return `${config.identifierType}:${config.identifier}:${endpoint}`;
   }
 
@@ -43,7 +43,7 @@ export class MemoryRateLimiter {
 
   async checkLimit(config: RateLimitConfig): Promise<RateLimitResult> {
     this.cleanupExpiredEntries();
-    
+
     const key = this.generateKey(config);
     const now = Date.now();
     const windowStart = now;
@@ -56,7 +56,7 @@ export class MemoryRateLimiter {
       info = {
         requests: 1,
         windowStart,
-        windowEnd
+        windowEnd,
       };
     } else {
       // Increment requests in current window
@@ -72,7 +72,7 @@ export class MemoryRateLimiter {
       allowed,
       remaining,
       resetTime: info.windowEnd,
-      totalRequests: info.requests
+      totalRequests: info.requests,
     };
   }
 
@@ -89,7 +89,7 @@ export class MemoryRateLimiter {
     this.cleanupExpiredEntries();
     return {
       totalKeys: this.requests.size,
-      activeWindows: this.requests.size
+      activeWindows: this.requests.size,
     };
   }
 }
@@ -103,16 +103,16 @@ export class RedisRateLimiter {
 
   constructor(redisUrl?: string) {
     this.client = createClient({
-      url: redisUrl || process.env.REDIS_URL || 'redis://localhost:6379'
+      url: redisUrl || process.env.REDIS_URL || "redis://localhost:6379",
     });
 
-    this.client.on('error', (err) => {
-      console.error('Redis Client Error:', err);
+    this.client.on("error", (err) => {
+      console.error("Redis Client Error:", err);
       this.isConnected = false;
     });
 
-    this.client.on('connect', () => {
-      console.log('Redis Client Connected');
+    this.client.on("connect", () => {
+      console.log("Redis Client Connected");
       this.isConnected = true;
     });
   }
@@ -131,7 +131,7 @@ export class RedisRateLimiter {
   }
 
   private generateKey(config: RateLimitConfig): string {
-    const endpoint = config.endpoint || 'global';
+    const endpoint = config.endpoint || "global";
     const window = Math.floor(Date.now() / config.windowMs);
     return `rate_limit:${config.identifierType}:${config.identifier}:${endpoint}:${window}`;
   }
@@ -146,15 +146,15 @@ export class RedisRateLimiter {
 
     // Use Redis pipeline for atomic operations
     const pipeline = this.client.multi();
-    
+
     pipeline.incr(key);
     pipeline.expire(key, Math.ceil(config.windowMs / 1000));
     pipeline.ttl(key);
 
     const results = await pipeline.exec();
-    
+
     if (!results || results.length < 3) {
-      throw new Error('Redis pipeline execution failed');
+      throw new Error("Redis pipeline execution failed");
     }
 
     const requests = results[0] as number;
@@ -162,13 +162,13 @@ export class RedisRateLimiter {
 
     const allowed = requests <= config.maxRequests;
     const remaining = Math.max(0, config.maxRequests - requests);
-    const resetTime = ttl > 0 ? now + (ttl * 1000) : windowEnd;
+    const resetTime = ttl > 0 ? now + ttl * 1000 : windowEnd;
 
     return {
       allowed,
       remaining,
       resetTime,
-      totalRequests: requests
+      totalRequests: requests,
     };
   }
 
@@ -180,7 +180,7 @@ export class RedisRateLimiter {
 
   async clearAll(): Promise<void> {
     await this.connect();
-    const keys = await this.client.keys('rate_limit:*');
+    const keys = await this.client.keys("rate_limit:*");
     if (keys.length > 0) {
       await this.client.del(keys);
     }
@@ -188,10 +188,10 @@ export class RedisRateLimiter {
 
   async getStats(): Promise<{ totalKeys: number; activeWindows: number }> {
     await this.connect();
-    const keys = await this.client.keys('rate_limit:*');
+    const keys = await this.client.keys("rate_limit:*");
     return {
       totalKeys: keys.length,
-      activeWindows: keys.length
+      activeWindows: keys.length,
     };
   }
 }
@@ -245,7 +245,7 @@ export const RATE_LIMIT_CONFIGS = {
   // API key-based limits
   API_KEY_DEFAULT: { windowMs: 60 * 1000, maxRequests: 1000 }, // 1000 requests per minute
   API_KEY_PREMIUM: { windowMs: 60 * 1000, maxRequests: 5000 }, // 5000 requests per minute
-  API_KEY_ENTERPRISE: { windowMs: 60 * 1000, maxRequests: 20000 } // 20000 requests per minute
+  API_KEY_ENTERPRISE: { windowMs: 60 * 1000, maxRequests: 20000 }, // 20000 requests per minute
 } as const;
 
 /**
@@ -253,16 +253,16 @@ export const RATE_LIMIT_CONFIGS = {
  */
 export function createRateLimitConfig(
   identifier: string,
-  identifierType: 'user' | 'ip' | 'api_key',
+  identifierType: "user" | "ip" | "api_key",
   limitType: keyof typeof RATE_LIMIT_CONFIGS,
-  endpoint?: string
+  endpoint?: string,
 ): RateLimitConfig {
   const baseConfig = RATE_LIMIT_CONFIGS[limitType];
   return {
     ...baseConfig,
     identifier,
     identifierType,
-    endpoint
+    endpoint,
   };
 }
 
@@ -270,17 +270,24 @@ export function createRateLimitConfig(
  * Abuse detection utilities
  */
 export class AbuseDetector {
-  private suspiciousActivity: Map<string, { count: number; lastSeen: number }> = new Map();
+  private suspiciousActivity: Map<string, { count: number; lastSeen: number }> =
+    new Map();
   private readonly thresholds = {
     rapidRequests: 50, // 50 requests in a short time
     timeWindow: 10 * 1000, // 10 seconds
     suspicionThreshold: 3, // 3 rapid bursts = suspicious
-    banDuration: 60 * 60 * 1000 // 1 hour ban
+    banDuration: 60 * 60 * 1000, // 1 hour ban
   };
 
-  detectRapidRequests(identifier: string): { isSuspicious: boolean; shouldBan: boolean } {
+  detectRapidRequests(identifier: string): {
+    isSuspicious: boolean;
+    shouldBan: boolean;
+  } {
     const now = Date.now();
-    const activity = this.suspiciousActivity.get(identifier) || { count: 0, lastSeen: now };
+    const activity = this.suspiciousActivity.get(identifier) || {
+      count: 0,
+      lastSeen: now,
+    };
 
     // Reset counter if enough time has passed
     if (now - activity.lastSeen > this.thresholds.timeWindow) {
@@ -293,7 +300,9 @@ export class AbuseDetector {
     this.suspiciousActivity.set(identifier, activity);
 
     const isSuspicious = activity.count > this.thresholds.rapidRequests;
-    const shouldBan = activity.count > this.thresholds.suspicionThreshold * this.thresholds.rapidRequests;
+    const shouldBan =
+      activity.count >
+      this.thresholds.suspicionThreshold * this.thresholds.rapidRequests;
 
     return { isSuspicious, shouldBan };
   }
@@ -316,15 +325,23 @@ export class AbuseDetector {
     }
   }
 
-  getSuspiciousActivities(): Array<{ identifier: string; count: number; lastSeen: Date }> {
-    return Array.from(this.suspiciousActivity.entries()).map(([identifier, activity]) => ({
-      identifier,
-      count: activity.count,
-      lastSeen: new Date(activity.lastSeen)
-    }));
+  getSuspiciousActivities(): Array<{
+    identifier: string;
+    count: number;
+    lastSeen: Date;
+  }> {
+    return Array.from(this.suspiciousActivity.entries()).map(
+      ([identifier, activity]) => ({
+        identifier,
+        count: activity.count,
+        lastSeen: new Date(activity.lastSeen),
+      }),
+    );
   }
 }
 
 // Export default instances
-export const rateLimiter = RateLimiterFactory.getLimiter(process.env.NODE_ENV === 'production');
+export const rateLimiter = RateLimiterFactory.getLimiter(
+  process.env.NODE_ENV === "production",
+);
 export const abuseDetector = new AbuseDetector();

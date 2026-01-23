@@ -3,10 +3,10 @@
  * Tracks database queries, connections, and performance metrics
  */
 
-import { logger } from './logger';
-import { performanceMonitor } from './performance';
-import { systemMonitor } from './system-status';
-import { SupabaseClient } from '@supabase/supabase-js';
+import { logger } from "./logger";
+import { performanceMonitor } from "./performance";
+import { systemMonitor } from "./system-status";
+import { SupabaseClient } from "@supabase/supabase-js";
 
 interface QueryMetrics {
   query: string;
@@ -32,7 +32,10 @@ interface QueryMetrics {
 class DatabaseMonitor {
   private queryMetrics: QueryMetrics[] = [];
   private slowQueryThreshold: number = 1000; // 1 second
-  private longRunningQueries: Map<string, { startTime: number; query: string }> = new Map();
+  private longRunningQueries: Map<
+    string,
+    { startTime: number; query: string }
+  > = new Map();
 
   /**
    * Wrap a database query with monitoring
@@ -41,11 +44,11 @@ class DatabaseMonitor {
     operation: string,
     table: string,
     queryFn: () => Promise<T>,
-    query?: string
+    query?: string,
   ): Promise<T> {
     const startTime = Date.now();
     const queryId = Math.random().toString(36).substring(7);
-    
+
     // Track long-running queries
     if (query) {
       this.longRunningQueries.set(queryId, {
@@ -60,11 +63,14 @@ class DatabaseMonitor {
 
       // Extract row count if possible
       let rowCount: number | undefined;
-      if (result && typeof result === 'object') {
+      if (result && typeof result === "object") {
         const resultObj = result as Record<string, unknown>;
-        if ('data' in resultObj && Array.isArray(resultObj.data)) {
+        if ("data" in resultObj && Array.isArray(resultObj.data)) {
           rowCount = resultObj.data.length;
-        } else if ('count' in resultObj && typeof resultObj.count === 'number') {
+        } else if (
+          "count" in resultObj &&
+          typeof resultObj.count === "number"
+        ) {
           rowCount = resultObj.count;
         }
       }
@@ -84,8 +90,8 @@ class DatabaseMonitor {
 
       // Log slow queries
       if (duration > this.slowQueryThreshold) {
-        logger.warn('Slow database query detected', undefined, {
-          component: 'database-monitor',
+        logger.warn("Slow database query detected", undefined, {
+          component: "database-monitor",
           query: query?.substring(0, 200),
           table,
           operation,
@@ -98,7 +104,6 @@ class DatabaseMonitor {
       systemMonitor.trackDatabaseQuery(duration);
 
       return result;
-
     } catch (error) {
       const duration = Date.now() - startTime;
       const err = error as Error;
@@ -117,8 +122,8 @@ class DatabaseMonitor {
       this.recordQueryMetrics(metrics);
 
       // Log database error
-      logger.error('Database query failed', err, undefined, {
-        component: 'database-monitor',
+      logger.error("Database query failed", err, undefined, {
+        component: "database-monitor",
         query: query?.substring(0, 200),
         table,
         operation,
@@ -126,7 +131,6 @@ class DatabaseMonitor {
       });
 
       throw error;
-
     } finally {
       // Clean up long-running query tracking
       this.longRunningQueries.delete(queryId);
@@ -145,9 +149,9 @@ class DatabaseMonitor {
 
     // Record performance metrics
     performanceMonitor.recordMetric({
-      name: 'database.query_time',
+      name: "database.query_time",
       value: metrics.duration,
-      unit: 'ms',
+      unit: "ms",
       tags: {
         table: metrics.table,
         operation: metrics.operation,
@@ -162,9 +166,9 @@ class DatabaseMonitor {
     // Record error rate
     if (!metrics.success) {
       performanceMonitor.recordMetric({
-        name: 'database.error_rate',
+        name: "database.error_rate",
         value: 1,
-        unit: 'count',
+        unit: "count",
         tags: {
           table: metrics.table,
           operation: metrics.operation,
@@ -188,34 +192,43 @@ class DatabaseMonitor {
   } {
     const cutoff = Date.now() - timeWindow;
     const recentQueries = this.queryMetrics.filter(
-      metric => metric.timestamp.getTime() > cutoff
+      (metric) => metric.timestamp.getTime() > cutoff,
     );
 
     const totalQueries = recentQueries.length;
-    const successfulQueries = recentQueries.filter(m => m.success).length;
+    const successfulQueries = recentQueries.filter((m) => m.success).length;
     const failedQueries = totalQueries - successfulQueries;
-    const averageResponseTime = totalQueries > 0 
-      ? Math.round(recentQueries.reduce((sum, m) => sum + m.duration, 0) / totalQueries)
-      : 0;
-    
-    const slowQueries = recentQueries.filter(m => m.duration > this.slowQueryThreshold).length;
-    
+    const averageResponseTime =
+      totalQueries > 0
+        ? Math.round(
+            recentQueries.reduce((sum, m) => sum + m.duration, 0) /
+              totalQueries,
+          )
+        : 0;
+
+    const slowQueries = recentQueries.filter(
+      (m) => m.duration > this.slowQueryThreshold,
+    ).length;
+
     const topSlowQueries = recentQueries
-      .filter(m => m.duration > this.slowQueryThreshold)
+      .filter((m) => m.duration > this.slowQueryThreshold)
       .sort((a, b) => b.duration - a.duration)
       .slice(0, 10)
-      .map(m => ({
+      .map((m) => ({
         query: m.query.substring(0, 100),
         duration: m.duration,
         table: m.table,
       }));
 
     const errorsByTable = recentQueries
-      .filter(m => !m.success)
-      .reduce((acc, m) => {
-        acc[m.table] = (acc[m.table] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
+      .filter((m) => !m.success)
+      .reduce(
+        (acc, m) => {
+          acc[m.table] = (acc[m.table] || 0) + 1;
+          return acc;
+        },
+        {} as Record<string, number>,
+      );
 
     return {
       totalQueries,
@@ -237,7 +250,11 @@ class DatabaseMonitor {
     duration: number;
   }> {
     const now = Date.now();
-    const longRunning: Array<{ queryId: string; query: string; duration: number }> = [];
+    const longRunning: Array<{
+      queryId: string;
+      query: string;
+      duration: number;
+    }> = [];
 
     for (const [queryId, data] of this.longRunningQueries.entries()) {
       const duration = now - data.startTime;
@@ -252,10 +269,10 @@ class DatabaseMonitor {
 
     // Log long-running queries
     if (longRunning.length > 0) {
-      logger.warn('Long-running database queries detected', undefined, {
-        component: 'database-monitor',
+      logger.warn("Long-running database queries detected", undefined, {
+        component: "database-monitor",
         count: longRunning.length,
-        queries: longRunning.map(q => ({
+        queries: longRunning.map((q) => ({
           duration: q.duration,
           query: q.query,
         })),
@@ -275,15 +292,17 @@ class DatabaseMonitor {
         const originalMethod = target[prop as keyof SupabaseClient];
 
         // Monitor specific methods
-        if (prop === 'from') {
+        if (prop === "from") {
           return (table: string) => {
             const query = target.from(table);
             return this.createMonitoredQueryBuilder(query, table);
           };
         }
 
-        if (typeof originalMethod === 'function') {
-          return (originalMethod as (...args: unknown[]) => unknown).bind(target);
+        if (typeof originalMethod === "function") {
+          return (originalMethod as (...args: unknown[]) => unknown).bind(
+            target,
+          );
         }
 
         return originalMethod;
@@ -297,29 +316,39 @@ class DatabaseMonitor {
   private createMonitoredQueryBuilder(query: unknown, table: string): unknown {
     return new Proxy(query as Record<string, unknown>, {
       get: (target, prop) => {
-        const originalMethod = (target as Record<string | symbol, unknown>)[prop];
+        const originalMethod = (target as Record<string | symbol, unknown>)[
+          prop
+        ];
 
         // Monitor query execution methods
-        if (['select', 'insert', 'update', 'delete', 'upsert'].includes(prop as string)) {
+        if (
+          ["select", "insert", "update", "delete", "upsert"].includes(
+            prop as string,
+          )
+        ) {
           return (...args: unknown[]) => {
-            const result = (originalMethod as (...args: unknown[]) => unknown).apply(target, args);
-            
+            const result = (
+              originalMethod as (...args: unknown[]) => unknown
+            ).apply(target, args);
+
             // If this returns a thenable (Promise-like), wrap it
-            if (result && typeof result.then === 'function') {
+            if (result && typeof result.then === "function") {
               return this.monitorQuery(
                 prop as string,
                 table,
                 () => result,
-                `${prop} from ${table}`
+                `${prop} from ${table}`,
               );
             }
-            
+
             return result;
           };
         }
 
-        if (typeof originalMethod === 'function') {
-          return (originalMethod as (...args: unknown[]) => unknown).bind(target);
+        if (typeof originalMethod === "function") {
+          return (originalMethod as (...args: unknown[]) => unknown).bind(
+            target,
+          );
         }
 
         return originalMethod;
@@ -332,9 +361,9 @@ class DatabaseMonitor {
    */
   setSlowQueryThreshold(threshold: number): void {
     this.slowQueryThreshold = threshold;
-    
-    logger.info('Updated slow query threshold', undefined, {
-      component: 'database-monitor',
+
+    logger.info("Updated slow query threshold", undefined, {
+      component: "database-monitor",
       threshold,
     });
   }
@@ -345,9 +374,9 @@ class DatabaseMonitor {
   clearMetrics(): void {
     this.queryMetrics = [];
     this.longRunningQueries.clear();
-    
-    logger.info('Database metrics cleared', undefined, {
-      component: 'database-monitor',
+
+    logger.info("Database metrics cleared", undefined, {
+      component: "database-monitor",
     });
   }
 }
@@ -359,7 +388,11 @@ export const databaseMonitor = new DatabaseMonitor();
  * Decorator for monitoring database operations
  */
 export function monitorDatabaseOperation(table: string, operation: string) {
-  return function (target: unknown, propertyName: string, descriptor: PropertyDescriptor) {
+  return function (
+    target: unknown,
+    propertyName: string,
+    descriptor: PropertyDescriptor,
+  ) {
     const originalMethod = descriptor.value;
 
     descriptor.value = async function (...args: unknown[]) {
@@ -367,7 +400,7 @@ export function monitorDatabaseOperation(table: string, operation: string) {
         operation,
         table,
         () => originalMethod.apply(this, args),
-        `${operation} on ${table}`
+        `${operation} on ${table}`,
       );
     };
 
@@ -381,7 +414,7 @@ export function monitorDatabaseOperation(table: string, operation: string) {
 export async function monitorSupabaseQuery<T>(
   operation: string,
   table: string,
-  queryFn: () => Promise<T>
+  queryFn: () => Promise<T>,
 ): Promise<T> {
   return databaseMonitor.monitorQuery(operation, table, queryFn);
 }

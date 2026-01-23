@@ -1,24 +1,24 @@
-import DOMPurify from 'dompurify';
+import DOMPurify from "dompurify";
 
 // Create DOMPurify instance - works both client and server side
 let createDOMPurify: typeof DOMPurify;
 
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   // Browser environment
   createDOMPurify = DOMPurify;
 } else {
   // Server environment
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { JSDOM } = require('jsdom');
-    const window = new JSDOM('').window;
+    const { JSDOM } = require("jsdom");
+    const window = new JSDOM("").window;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     createDOMPurify = DOMPurify(window as any);
   } catch {
     // Fallback if JSDOM is not available
-    console.warn('JSDOM not available for server-side sanitization');
+    console.warn("JSDOM not available for server-side sanitization");
     createDOMPurify = {
-      sanitize: (content: string) => content.replace(/<[^>]*>/g, ''),
+      sanitize: (content: string) => content.replace(/<[^>]*>/g, ""),
       clearConfig: () => {},
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
@@ -32,45 +32,80 @@ export const SANITIZATION_CONFIGS = {
   // For rich text content (user-generated content)
   RICH_TEXT: {
     ALLOWED_TAGS: [
-      'p', 'br', 'strong', 'em', 'u', 's', 'span', 'div',
-      'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-      'ul', 'ol', 'li',
-      'blockquote', 'pre', 'code',
-      'a', 'img'
+      "p",
+      "br",
+      "strong",
+      "em",
+      "u",
+      "s",
+      "span",
+      "div",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "ul",
+      "ol",
+      "li",
+      "blockquote",
+      "pre",
+      "code",
+      "a",
+      "img",
     ],
     ALLOWED_ATTR: [
-      'href', 'title', 'alt', 'src', 'width', 'height',
-      'class', 'id', 'style'
+      "href",
+      "title",
+      "alt",
+      "src",
+      "width",
+      "height",
+      "class",
+      "id",
+      "style",
     ],
     ALLOWED_URI_REGEXP: /^(?:(?:https?|ftp):\/\/|mailto:|tel:|#)/i,
-    FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button'],
-    FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover'],
+    FORBID_TAGS: ["script", "object", "embed", "form", "input", "button"],
+    FORBID_ATTR: ["onerror", "onload", "onclick", "onmouseover"],
     STRIP_EMPTY: true,
     RETURN_DOM_FRAGMENT: false,
     RETURN_DOM_IMPORT: false,
     SANITIZE_DOM: true,
-    WHOLE_DOCUMENT: false
+    WHOLE_DOCUMENT: false,
   },
 
   // For basic text content (minimal HTML)
   BASIC_TEXT: {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'span'],
-    ALLOWED_ATTR: ['class'],
-    FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed'],
-    STRIP_EMPTY: true
+    ALLOWED_TAGS: ["p", "br", "strong", "em", "span"],
+    ALLOWED_ATTR: ["class"],
+    FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
+    STRIP_EMPTY: true,
   },
 
   // For embedded content (very restrictive)
   EMBED_SAFE: {
-    ALLOWED_TAGS: ['span', 'div', 'p', 'strong', 'em'],
-    ALLOWED_ATTR: ['class', 'data-element-id'],
+    ALLOWED_TAGS: ["span", "div", "p", "strong", "em"],
+    ALLOWED_ATTR: ["class", "data-element-id"],
     FORBID_TAGS: [
-      'script', 'style', 'iframe', 'object', 'embed', 'form', 'input',
-      'button', 'a', 'img', 'video', 'audio', 'source'
+      "script",
+      "style",
+      "iframe",
+      "object",
+      "embed",
+      "form",
+      "input",
+      "button",
+      "a",
+      "img",
+      "video",
+      "audio",
+      "source",
     ],
     STRIP_EMPTY: true,
-    SANITIZE_DOM: true
-  }
+    SANITIZE_DOM: true,
+  },
 } as const;
 
 /**
@@ -78,25 +113,25 @@ export const SANITIZATION_CONFIGS = {
  */
 export function sanitizeHTML(
   content: string,
-  config: keyof typeof SANITIZATION_CONFIGS = 'RICH_TEXT'
+  config: keyof typeof SANITIZATION_CONFIGS = "RICH_TEXT",
 ): string {
-  if (!content || typeof content !== 'string') {
-    return '';
+  if (!content || typeof content !== "string") {
+    return "";
   }
 
   try {
     const sanitizationConfig = SANITIZATION_CONFIGS[config];
-    
+
     // Configure DOMPurify
     createDOMPurify.clearConfig();
-    
+
     const sanitized = createDOMPurify.sanitize(content, sanitizationConfig);
-    
+
     return sanitized;
   } catch (error) {
-    console.error('Content sanitization failed:', error);
+    console.error("Content sanitization failed:", error);
     // In case of error, return empty string for security
-    return '';
+    return "";
   }
 }
 
@@ -104,10 +139,10 @@ export function sanitizeHTML(
  * Validate and sanitize user input for XSS prevention
  */
 export function validateAndSanitizeInput(input: unknown): string {
-  if (!input) return '';
-  
+  if (!input) return "";
+
   const stringInput = String(input);
-  
+
   // Check for common XSS patterns
   const xssPatterns = [
     /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
@@ -122,30 +157,30 @@ export function validateAndSanitizeInput(input: unknown): string {
     /expression\s*\(/gi,
     /eval\s*\(/gi,
     /setTimeout\s*\(/gi,
-    /setInterval\s*\(/gi
+    /setInterval\s*\(/gi,
   ];
 
   // Check if input contains potential XSS
-  const hasXSS = xssPatterns.some(pattern => pattern.test(stringInput));
-  
+  const hasXSS = xssPatterns.some((pattern) => pattern.test(stringInput));
+
   if (hasXSS) {
     // Log security event
-    console.warn('Potential XSS attempt detected:', {
+    console.warn("Potential XSS attempt detected:", {
       input: stringInput.substring(0, 100),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
-    
+
     // Return sanitized version
-    return sanitizeHTML(stringInput, 'BASIC_TEXT');
+    return sanitizeHTML(stringInput, "BASIC_TEXT");
   }
 
   // For non-HTML content, just sanitize basic patterns
   return stringInput
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
-    .replace(/\//g, '&#x2F;');
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;")
+    .replace(/\//g, "&#x2F;");
 }
 
 /**
@@ -156,7 +191,7 @@ export function sanitizeJSONData(data: any): any {
     return data;
   }
 
-  if (typeof data === 'string') {
+  if (typeof data === "string") {
     return validateAndSanitizeInput(data);
   }
 
@@ -164,7 +199,7 @@ export function sanitizeJSONData(data: any): any {
     return data.map(sanitizeJSONData);
   }
 
-  if (typeof data === 'object') {
+  if (typeof data === "object") {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sanitized: any = {};
     for (const [key, value] of Object.entries(data)) {
@@ -191,7 +226,7 @@ export const CSP_CONFIG = {
   FRAME_SRC: ["'none'"],
   OBJECT_SRC: ["'none'"],
   BASE_URI: ["'self'"],
-  FORM_ACTION: ["'self'"]
+  FORM_ACTION: ["'self'"],
 };
 
 /**
@@ -200,10 +235,10 @@ export const CSP_CONFIG = {
 export function generateCSPHeader(): string {
   const directives = Object.entries(CSP_CONFIG)
     .map(([key, values]) => {
-      const directive = key.toLowerCase().replace(/_/g, '-');
-      return `${directive} ${values.join(' ')}`;
+      const directive = key.toLowerCase().replace(/_/g, "-");
+      return `${directive} ${values.join(" ")}`;
     })
-    .join('; ');
+    .join("; ");
 
   return directives;
 }
@@ -217,10 +252,10 @@ export function validateFileContent(content: string): {
   errors: string[];
 } {
   const errors: string[] = [];
-  
+
   if (!content) {
-    errors.push('Content is empty');
-    return { isValid: false, sanitized: '', errors };
+    errors.push("Content is empty");
+    return { isValid: false, sanitized: "", errors };
   }
 
   // Check for suspicious patterns in file content
@@ -233,7 +268,7 @@ export function validateFileContent(content: string): {
     /require\s*\(/gi, // Node.js require
     /eval\s*\(/gi,
     /exec\s*\(/gi,
-    /system\s*\(/gi
+    /system\s*\(/gi,
   ];
 
   for (const pattern of suspiciousPatterns) {
@@ -243,12 +278,12 @@ export function validateFileContent(content: string): {
   }
 
   // Sanitize content
-  const sanitized = sanitizeHTML(content, 'BASIC_TEXT');
+  const sanitized = sanitizeHTML(content, "BASIC_TEXT");
 
   return {
     isValid: errors.length === 0,
     sanitized,
-    errors
+    errors,
   };
 }
 
@@ -268,10 +303,12 @@ export class ContentRateLimiter {
   isAllowed(identifier: string): boolean {
     const now = Date.now();
     const operations = this.operations.get(identifier) || [];
-    
+
     // Remove old operations outside the window
-    const validOperations = operations.filter(time => now - time < this.windowMs);
-    
+    const validOperations = operations.filter(
+      (time) => now - time < this.windowMs,
+    );
+
     if (validOperations.length >= this.maxOperations) {
       return false;
     }
@@ -279,15 +316,17 @@ export class ContentRateLimiter {
     // Add current operation
     validOperations.push(now);
     this.operations.set(identifier, validOperations);
-    
+
     return true;
   }
 
   getRemainingOperations(identifier: string): number {
     const now = Date.now();
     const operations = this.operations.get(identifier) || [];
-    const validOperations = operations.filter(time => now - time < this.windowMs);
-    
+    const validOperations = operations.filter(
+      (time) => now - time < this.windowMs,
+    );
+
     return Math.max(0, this.maxOperations - validOperations.length);
   }
 

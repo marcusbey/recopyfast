@@ -3,13 +3,13 @@
  * Track and report performance metrics throughout the application
  */
 
-import { logger } from './logger';
-import * as Sentry from '@sentry/nextjs';
+import { logger } from "./logger";
+import * as Sentry from "@sentry/nextjs";
 
 interface PerformanceMetric {
   name: string;
   value: number;
-  unit: 'ms' | 'bytes' | 'count';
+  unit: "ms" | "bytes" | "count";
   tags?: Record<string, string>;
   metadata?: Record<string, unknown>;
 }
@@ -20,11 +20,11 @@ interface PerformanceThreshold {
 }
 
 const PERFORMANCE_THRESHOLDS: Record<string, PerformanceThreshold> = {
-  'api.response_time': { warning: 1000, critical: 3000 },
-  'database.query_time': { warning: 100, critical: 500 },
-  'page.load_time': { warning: 3000, critical: 5000 },
-  'image.processing_time': { warning: 2000, critical: 5000 },
-  'websocket.latency': { warning: 100, critical: 300 },
+  "api.response_time": { warning: 1000, critical: 3000 },
+  "database.query_time": { warning: 100, critical: 500 },
+  "page.load_time": { warning: 3000, critical: 5000 },
+  "image.processing_time": { warning: 2000, critical: 5000 },
+  "websocket.latency": { warning: 100, critical: 300 },
 };
 
 class PerformanceMonitor {
@@ -34,29 +34,16 @@ class PerformanceMonitor {
   /**
    * Start a performance timer
    */
-  startTimer(name: string, tags?: Record<string, string>): string {
+  startTimer(name: string, _tags?: Record<string, string>): string {
     const timerId = `${name}_${Date.now()}_${Math.random()}`;
     this.timers.set(timerId, performance.now());
-    
-    // Start Sentry transaction if in production
-    if (process.env.NODE_ENV === 'production') {
-      const transaction = Sentry.startTransaction({
-        name,
-        tags,
-      });
-      Sentry.getCurrentScope().setSpan(transaction);
-    }
-    
     return timerId;
   }
 
   /**
    * End a performance timer and record the metric
    */
-  endTimer(
-    timerId: string, 
-    metadata?: Record<string, unknown>
-  ): number | null {
+  endTimer(timerId: string, metadata?: Record<string, unknown>): number | null {
     const startTime = this.timers.get(timerId);
     if (!startTime) {
       logger.warn(`Timer ${timerId} not found`);
@@ -67,22 +54,15 @@ class PerformanceMonitor {
     this.timers.delete(timerId);
 
     // Extract name from timerId
-    const name = timerId.split('_')[0];
+    const name = timerId.split("_")[0];
 
     // Record the metric
     this.recordMetric({
       name: `${name}.duration`,
       value: duration,
-      unit: 'ms',
+      unit: "ms",
       metadata,
     });
-
-    // End Sentry transaction
-    const transaction = Sentry.getCurrentScope().getTransaction();
-    if (transaction) {
-      transaction.setStatus('ok');
-      transaction.finish();
-    }
 
     return duration;
   }
@@ -129,7 +109,7 @@ class PerformanceMonitor {
     });
 
     // Send to Sentry as custom metric
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === "production") {
       Sentry.metrics.distribution(name, value, {
         unit,
         tags,
@@ -160,7 +140,7 @@ class PerformanceMonitor {
       return null;
     }
 
-    const values = metrics.map(m => m.value).sort((a, b) => a - b);
+    const values = metrics.map((m) => m.value).sort((a, b) => a - b);
     const count = values.length;
     const sum = values.reduce((acc, val) => acc + val, 0);
 
@@ -190,11 +170,16 @@ export const performanceMonitor = new PerformanceMonitor();
 /**
  * Performance timing decorator for class methods
  */
-export function measurePerformance(target: unknown, propertyName: string, descriptor: PropertyDescriptor) {
+export function measurePerformance(
+  target: unknown,
+  propertyName: string,
+  descriptor: PropertyDescriptor,
+) {
   const originalMethod = descriptor.value;
 
   descriptor.value = async function (...args: unknown[]) {
-    const className = (target as { constructor: { name: string } }).constructor.name;
+    const className = (target as { constructor: { name: string } }).constructor
+      .name;
     const metricName = `${className}.${propertyName}`;
     const timerId = performanceMonitor.startTimer(metricName);
 
@@ -217,16 +202,20 @@ export function measurePerformance(target: unknown, propertyName: string, descri
 export async function measureAsync<T>(
   name: string,
   fn: () => Promise<T>,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
 ): Promise<T> {
   const timerId = performanceMonitor.startTimer(name);
-  
+
   try {
     const result = await fn();
     performanceMonitor.endTimer(timerId, { ...metadata, success: true });
     return result;
   } catch (error) {
-    performanceMonitor.endTimer(timerId, { ...metadata, success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+    performanceMonitor.endTimer(timerId, {
+      ...metadata,
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 }
@@ -237,16 +226,20 @@ export async function measureAsync<T>(
 export function measureSync<T>(
   name: string,
   fn: () => T,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
 ): T {
   const timerId = performanceMonitor.startTimer(name);
-  
+
   try {
     const result = fn();
     performanceMonitor.endTimer(timerId, { ...metadata, success: true });
     return result;
   } catch (error) {
-    performanceMonitor.endTimer(timerId, { ...metadata, success: false, error: error instanceof Error ? error.message : 'Unknown error' });
+    performanceMonitor.endTimer(timerId, {
+      ...metadata,
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
     throw error;
   }
 }
@@ -255,20 +248,20 @@ export function measureSync<T>(
  * Resource timing observer
  */
 export function observeResourceTiming() {
-  if (typeof window === 'undefined' || !('PerformanceObserver' in window)) {
+  if (typeof window === "undefined" || !("PerformanceObserver" in window)) {
     return;
   }
 
   try {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        if (entry.entryType === 'resource') {
+        if (entry.entryType === "resource") {
           const resourceEntry = entry as PerformanceResourceTiming;
-          
+
           performanceMonitor.recordMetric({
-            name: 'resource.load_time',
+            name: "resource.load_time",
             value: resourceEntry.duration,
-            unit: 'ms',
+            unit: "ms",
             tags: {
               type: resourceEntry.initiatorType,
               name: resourceEntry.name,
@@ -283,9 +276,9 @@ export function observeResourceTiming() {
       }
     });
 
-    observer.observe({ entryTypes: ['resource'] });
+    observer.observe({ entryTypes: ["resource"] });
   } catch (error) {
-    logger.error('Failed to setup resource timing observer', error as Error);
+    logger.error("Failed to setup resource timing observer", error as Error);
   }
 }
 
@@ -295,14 +288,14 @@ export function observeResourceTiming() {
 export function trackWebVitals(metric: {
   name: string;
   value: number;
-  rating: 'good' | 'needs-improvement' | 'poor';
+  rating: "good" | "needs-improvement" | "poor";
   delta: number;
   id: string;
 }) {
   performanceMonitor.recordMetric({
     name: `web_vitals.${metric.name.toLowerCase()}`,
     value: metric.value,
-    unit: 'ms',
+    unit: "ms",
     tags: {
       rating: metric.rating,
     },
@@ -313,11 +306,15 @@ export function trackWebVitals(metric: {
   });
 
   // Send to Sentry
-  if (process.env.NODE_ENV === 'production') {
-    Sentry.metrics.distribution(`web_vitals.${metric.name.toLowerCase()}`, metric.value, {
-      tags: {
-        rating: metric.rating,
+  if (process.env.NODE_ENV === "production") {
+    Sentry.metrics.distribution(
+      `web_vitals.${metric.name.toLowerCase()}`,
+      metric.value,
+      {
+        tags: {
+          rating: metric.rating,
+        },
       },
-    });
+    );
   }
 }
