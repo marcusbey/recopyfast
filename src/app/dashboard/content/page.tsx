@@ -1,91 +1,234 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { FileText, Search, Filter, Eye, Edit, Trash2, Globe } from 'lucide-react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useState, useEffect, useCallback } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { FileText, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import {
+  ContentElementCard,
+  type ContentElement,
+} from "@/components/dashboard/ContentElementCard";
+import { ContentFilterBar } from "@/components/dashboard/ContentFilterBar";
 
-interface ContentItem {
+interface Site {
   id: string;
-  site_domain: string;
-  page_url: string;
-  content_type: string;
-  original_text: string;
-  edited_text?: string;
-  status: 'original' | 'edited' | 'pending';
-  last_modified: string;
+  name: string;
+  domain: string;
 }
 
-export default function ContentPage() {
-  const [content, setContent] = useState<ContentItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'original' | 'edited' | 'pending'>('all');
+interface RawContentElement {
+  id: string;
+  site_id: string;
+  element_id: string;
+  selector: string;
+  original_content: string;
+  current_content?: string;
+  published_content?: string;
+  staging_content?: string;
+  language: string;
+  variant: string;
+  metadata?: {
+    type?: string;
+  };
+  published_at?: string;
+  updated_at?: string;
+}
 
-  useEffect(() => {
-    fetchContent();
+const ITEMS_PER_PAGE = 10;
+
+export default function ContentPage() {
+  const [sites, setSites] = useState<Site[]>([]);
+  const [siteContents, setSiteContents] = useState<
+    Map<string, ContentElement[]>
+  >(new Map());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<
+    "all" | "original" | "edited" | "pending"
+  >("all");
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Fetch user's sites
+  const fetchSites = useCallback(async () => {
+    try {
+      const res = await fetch("/api/sites");
+      const data = await res.json();
+      if (data.sites) {
+        setSites(data.sites);
+        return data.sites;
+      }
+      return [];
+    } catch (err) {
+      console.error("Failed to fetch sites:", err);
+      return [];
+    }
   }, []);
 
-  const fetchContent = async () => {
+  // Fetch content for a specific site
+  const fetchSiteContent = useCallback(async (site: Site) => {
+    try {
+      const res = await fetch(`/api/content/${site.id}`);
+      if (!res.ok) return [];
+
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return data.map((item: RawContentElement) => ({
+          id: item.id,
+          siteId: item.site_id,
+          siteDomain: site.domain,
+          elementId: item.element_id,
+          selector: item.selector,
+          originalContent: item.original_content || "",
+          currentContent: item.current_content || item.original_content || "",
+          stagingContent: item.staging_content,
+          publishedContent: item.published_content,
+          language: item.language,
+          variant: item.variant,
+          metadata: item.metadata,
+          lastModified: item.updated_at || item.published_at || "",
+        }));
+      }
+      return [];
+    } catch (err) {
+      console.error(`Failed to fetch content for site ${site.id}:`, err);
+      return [];
+    }
+  }, []);
+
+  // Fetch all content
+  const fetchAllContent = useCallback(async () => {
     try {
       setLoading(true);
-      // Mock data for now
-      const mockData: ContentItem[] = [
-        {
-          id: '1',
-          site_domain: 'example.com',
-          page_url: '/home',
-          content_type: 'heading',
-          original_text: 'Welcome to our website',
-          edited_text: 'Welcome to our amazing platform',
-          status: 'edited',
-          last_modified: new Date().toISOString(),
-        },
-      ];
-      setContent(mockData);
-    } catch (error) {
-      console.error('Error fetching content:', error);
+      setError(null);
+
+      const fetchedSites = await fetchSites();
+      if (fetchedSites.length === 0) {
+        setLoading(false);
+        return;
+      }
+
+      const contentMap = new Map<string, ContentElement[]>();
+
+      await Promise.all(
+        fetchedSites.map(async (site: Site) => {
+          const content = await fetchSiteContent(site);
+          if (content.length > 0) {
+            contentMap.set(site.id, content);
+          }
+        }),
+      );
+
+      setSiteContents(contentMap);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch content");
     } finally {
       setLoading(false);
     }
+  }, [fetchSites, fetchSiteContent]);
+
+  useEffect(() => {
+    fetchAllContent();
+  }, [fetchAllContent]);
+
+  // Get all content as a flat array
+  const allContent: ContentElement[] = Array.from(siteContents.values()).flat();
+
+  // Get status for filtering
+  const getStatus = (
+    element: ContentElement,
+  ): "original" | "edited" | "pending" => {
+    if (
+      element.stagingContent &&
+      element.stagingContent !== element.publishedContent
+    ) {
+      return "pending";
+    }
+    if (element.currentContent !== element.originalContent) {
+      return "edited";
+    }
+    return "original";
   };
 
-  const filteredContent = content.filter((item) => {
+  // Filter content
+  const filteredContent = allContent.filter((element) => {
+    // Search filter
+    const searchLower = searchQuery.toLowerCase();
     const matchesSearch =
-      item.original_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.site_domain.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || item.status === filterStatus;
-    return matchesSearch && matchesFilter;
+      !searchQuery ||
+      element.elementId.toLowerCase().includes(searchLower) ||
+      element.originalContent.toLowerCase().includes(searchLower) ||
+      element.currentContent.toLowerCase().includes(searchLower) ||
+      element.siteDomain.toLowerCase().includes(searchLower);
+
+    // Site filter
+    const matchesSite = !selectedSiteId || element.siteId === selectedSiteId;
+
+    // Status filter
+    const status = getStatus(element);
+    const matchesStatus = selectedStatus === "all" || status === selectedStatus;
+
+    return matchesSearch && matchesSite && matchesStatus;
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'edited':
-        return 'bg-green-100 text-green-700 border-green-200';
-      case 'original':
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700 border-yellow-200';
-      default:
-        return 'bg-gray-100 text-gray-700 border-gray-200';
-    }
-  };
+  // Pagination
+  const totalPages = Math.ceil(filteredContent.length / ITEMS_PER_PAGE);
+  const paginatedContent = filteredContent.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE,
+  );
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedSiteId, selectedStatus]);
+
+  // Loading state
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="animate-pulse">
-          <div className="h-8 bg-gray-200 rounded w-1/4 mb-2"></div>
-          <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Content</h1>
+          <p className="text-gray-600 mt-1">
+            Manage all editable content across your sites
+          </p>
         </div>
-        <div className="space-y-4">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-32 bg-gray-200 rounded-lg"></div>
-          ))}
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
         </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Content</h1>
+          <p className="text-gray-600 mt-1">
+            Manage all editable content across your sites
+          </p>
+        </div>
+        <Card>
+          <CardContent className="py-12">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Failed to load content
+              </h3>
+              <p className="text-gray-600 mb-6">{error}</p>
+              <Button onClick={fetchAllContent}>Try Again</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -95,31 +238,23 @@ export default function ContentPage() {
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-gray-900">Content</h1>
-        <p className="text-gray-600 mt-1">Manage your website content and edits</p>
+        <p className="text-gray-600 mt-1">
+          Manage all editable content across your sites
+        </p>
       </div>
 
-      {/* Search and Filters */}
+      {/* Filters */}
       <Card>
         <CardContent className="p-6">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <Input
-                placeholder="Search content..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-            <Tabs value={filterStatus} onValueChange={(v) => setFilterStatus(v as any)}>
-              <TabsList>
-                <TabsTrigger value="all">All</TabsTrigger>
-                <TabsTrigger value="edited">Edited</TabsTrigger>
-                <TabsTrigger value="original">Original</TabsTrigger>
-                <TabsTrigger value="pending">Pending</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+          <ContentFilterBar
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            selectedSiteId={selectedSiteId}
+            onSiteChange={setSelectedSiteId}
+            selectedStatus={selectedStatus}
+            onStatusChange={setSelectedStatus}
+            sites={sites}
+          />
         </CardContent>
       </Card>
 
@@ -131,66 +266,76 @@ export default function ContentPage() {
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <FileText className="w-8 h-8 text-gray-400" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">No content found</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                No content found
+              </h3>
               <p className="text-gray-600 mb-6 max-w-sm mx-auto">
-                Start editing content on your sites to see it appear here.
+                {allContent.length === 0
+                  ? "Register a site and add content elements to see them here."
+                  : "No content matches your current filters. Try adjusting your search or filters."}
               </p>
             </div>
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {filteredContent.map((item) => (
-            <Card key={item.id} className="hover:shadow-md transition-shadow">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-3">
-                    <Globe className="w-5 h-5 text-gray-600" />
-                    <div>
-                      <p className="font-medium text-gray-900">{item.site_domain}</p>
-                      <p className="text-sm text-gray-600">{item.page_url}</p>
-                    </div>
-                  </div>
-                  <Badge className={getStatusColor(item.status)}>
-                    {item.status}
-                  </Badge>
-                </div>
+        <>
+          <div className="space-y-4">
+            {paginatedContent.map((element) => (
+              <ContentElementCard
+                key={`${element.siteId}-${element.elementId}`}
+                element={element}
+                onView={(el) => {
+                  window.open(
+                    `https://${el.siteDomain}?rcf_highlight=${el.elementId}`,
+                    "_blank",
+                  );
+                }}
+                onEdit={(el) => {
+                  window.open(
+                    `https://${el.siteDomain}?rcf_staging=1&rcf_edit=${el.elementId}`,
+                    "_blank",
+                  );
+                }}
+              />
+            ))}
+          </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-gray-600 mb-1">Original Text</p>
-                    <p className="text-sm text-gray-900">{item.original_text}</p>
-                  </div>
-                  {item.edited_text && (
-                    <div>
-                      <p className="text-xs text-gray-600 mb-1">Edited Text</p>
-                      <p className="text-sm text-green-700 font-medium">{item.edited_text}</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
-                  <p className="text-xs text-gray-600">
-                    Last modified: {new Date(item.last_modified).toLocaleDateString()}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm">
-                      <Eye className="w-4 h-4 mr-2" />
-                      View
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <Edit className="w-4 h-4 mr-2" />
-                      Edit
-                    </Button>
-                    <Button variant="outline" size="sm">
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4">
+              <p className="text-sm text-gray-600">
+                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}-
+                {Math.min(currentPage * ITEMS_PER_PAGE, filteredContent.length)}{" "}
+                of {filteredContent.length} elements
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  Prev
+                </Button>
+                <span className="text-sm text-gray-600 px-2">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setCurrentPage((p) => Math.min(totalPages, p + 1))
+                  }
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                  <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
