@@ -1,9 +1,15 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   CheckCircle2,
   AlertCircle,
@@ -14,11 +20,14 @@ import {
   BarChart3,
   FileText,
   Activity,
-} from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
-import type { Site } from '@/types';
+  History,
+} from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import type { Site } from "@/types";
+import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { ShareButton } from "./ShareButton";
 
-export type SiteStatus = 'active' | 'inactive' | 'verifying';
+export type SiteStatus = "active" | "inactive" | "verifying";
 
 interface SiteWithDetails extends Site {
   stats?: {
@@ -39,35 +48,36 @@ interface SiteDetailViewProps {
 
 const statusConfig = {
   active: {
-    label: 'Active',
+    label: "Active",
     icon: CheckCircle2,
-    className: 'bg-green-100 text-green-700 border-green-200',
-    description: 'Site is verified and operational',
+    className: "bg-green-100 text-green-700 border-green-200",
+    description: "Site is verified and operational",
   },
   inactive: {
-    label: 'Inactive',
+    label: "Inactive",
     icon: AlertCircle,
-    className: 'bg-gray-100 text-gray-700 border-gray-200',
-    description: 'Site is not currently active',
+    className: "bg-gray-100 text-gray-700 border-gray-200",
+    description: "Site is not currently active",
   },
   verifying: {
-    label: 'Verifying',
+    label: "Verifying",
     icon: Clock,
-    className: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-    description: 'Site verification in progress',
+    className: "bg-yellow-100 text-yellow-700 border-yellow-200",
+    description: "Site verification in progress",
   },
 };
 
-export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
+export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
-  const status = site.status || 'active';
+  const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const status = site.status || "active";
   const StatusIcon = statusConfig[status].icon;
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const embedScript =
     site.embedScript ||
-    `<script src="${appUrl}/embed/recopyfast.js" data-site-id="${site.id}" data-site-token="${site.siteToken || 'YOUR_SITE_TOKEN'}"></script>`;
+    `<script src="${appUrl}/embed/recopyfast.js" data-site-id="${site.id}" data-site-token="${site.siteToken || "YOUR_SITE_TOKEN"}"></script>`;
 
   const handleCopyScript = async () => {
     await navigator.clipboard.writeText(embedScript);
@@ -84,8 +94,10 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
   };
 
   const lastActivity = site.stats?.last_activity
-    ? formatDistanceToNow(new Date(site.stats.last_activity), { addSuffix: true })
-    : 'No recent activity';
+    ? formatDistanceToNow(new Date(site.stats.last_activity), {
+        addSuffix: true,
+      })
+    : "No recent activity";
 
   return (
     <div className="space-y-6">
@@ -107,29 +119,46 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
                 </a>
               </CardDescription>
             </div>
-            <Badge className={statusConfig[status].className}>
-              <StatusIcon className="w-3 h-3 mr-1" />
-              {statusConfig[status].label}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <ShareButton site={site} variant="default" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setHistoryPanelOpen(true)}
+              >
+                <History className="w-4 h-4 mr-2" />
+                History
+              </Button>
+              <Badge className={statusConfig[status].className}>
+                <StatusIcon className="w-3 h-3 mr-1" />
+                {statusConfig[status].label}
+              </Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div>
               <p className="text-sm text-gray-600 mb-1">Status Description</p>
-              <p className="text-sm text-gray-900">{statusConfig[status].description}</p>
+              <p className="text-sm text-gray-900">
+                {statusConfig[status].description}
+              </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Created</p>
                 <p className="text-sm text-gray-900">
-                  {formatDistanceToNow(new Date(site.created_at), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(site.created_at), {
+                    addSuffix: true,
+                  })}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Last Updated</p>
                 <p className="text-sm text-gray-900">
-                  {formatDistanceToNow(new Date(site.updated_at), { addSuffix: true })}
+                  {formatDistanceToNow(new Date(site.updated_at), {
+                    addSuffix: true,
+                  })}
                 </p>
               </div>
             </div>
@@ -160,7 +189,9 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Page Views</p>
-                <p className="text-2xl font-bold text-gray-900">{site.stats?.views || 0}</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {site.stats?.views || 0}
+                </p>
               </div>
               <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
                 <BarChart3 className="w-6 h-6 text-white" />
@@ -190,7 +221,9 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Last Activity</p>
-                <p className="text-sm font-semibold text-gray-900 mt-2">{lastActivity}</p>
+                <p className="text-sm font-semibold text-gray-900 mt-2">
+                  {lastActivity}
+                </p>
               </div>
               <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
                 <Activity className="w-6 h-6 text-white" />
@@ -211,7 +244,9 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
         <CardContent>
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <code className="text-sm text-gray-800 break-all">{embedScript}</code>
+              <code className="text-sm text-gray-800 break-all">
+                {embedScript}
+              </code>
             </div>
             <Button onClick={handleCopyScript} className="w-full">
               {copiedScript ? (
@@ -236,7 +271,8 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
           <CardHeader>
             <CardTitle>Site Token</CardTitle>
             <CardDescription>
-              Use this token for API requests (keep it secure and never expose it publicly)
+              Use this token for API requests (keep it secure and never expose
+              it publicly)
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -246,7 +282,11 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
                   {site.siteToken}
                 </code>
               </div>
-              <Button onClick={handleCopyToken} variant="outline" className="w-full">
+              <Button
+                onClick={handleCopyToken}
+                variant="outline"
+                className="w-full"
+              >
                 {copiedToken ? (
                   <>
                     <CheckCircle2 className="w-4 h-4 mr-2" />
@@ -268,7 +308,9 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
       <Card className="border-gray-200">
         <CardHeader>
           <CardTitle>Integration Status</CardTitle>
-          <CardDescription>Current integration health and setup status</CardDescription>
+          <CardDescription>
+            Current integration health and setup status
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -295,6 +337,14 @@ export function SiteDetailView({ site, onClose }: SiteDetailViewProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Version History Panel */}
+      <VersionHistoryPanel
+        open={historyPanelOpen}
+        onClose={() => setHistoryPanelOpen(false)}
+        siteId={site.id}
+        stagingToken={site.siteToken || ""}
+      />
     </div>
   );
 }
