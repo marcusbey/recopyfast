@@ -96,9 +96,6 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   
   // Build configuration
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },
