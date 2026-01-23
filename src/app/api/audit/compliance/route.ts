@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { auditLogger } from '@/lib/audit/logger';
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { auditLogger } from "@/lib/audit/logger";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,16 +9,16 @@ export async function POST(req: NextRequest) {
 
     if (!report_type || !start_date || !end_date) {
       return NextResponse.json(
-        { error: 'Missing required fields: report_type, start_date, end_date' },
-        { status: 400 }
+        { error: "Missing required fields: report_type, start_date, end_date" },
+        { status: 400 },
       );
     }
 
-    const validReportTypes = ['gdpr', 'soc2', 'hipaa', 'custom'];
+    const validReportTypes = ["gdpr", "soc2", "hipaa", "custom"];
     if (!validReportTypes.includes(report_type)) {
       return NextResponse.json(
-        { error: 'Invalid report type' },
-        { status: 400 }
+        { error: "Invalid report type" },
+        { status: 400 },
       );
     }
 
@@ -31,36 +31,44 @@ export async function POST(req: NextRequest) {
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Check if user has admin permissions or site access
     if (site_id) {
       const { data: permission } = await supabase
-        .from('site_permissions')
-        .select('permission')
-        .eq('site_id', site_id)
-        .eq('user_id', user.id)
+        .from("site_permissions")
+        .select("permission")
+        .eq("site_id", site_id)
+        .eq("user_id", user.id)
         .single();
 
-      if (!permission || permission.permission !== 'admin') {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+      if (!permission || permission.permission !== "admin") {
+        return NextResponse.json(
+          { error: "Insufficient permissions" },
+          { status: 403 },
+        );
       }
     } else {
       // For global reports, check if user is admin
       const { data: userProfile } = await supabase
-        .from('auth.users')
-        .select('raw_user_meta_data')
-        .eq('id', user.id)
+        .from("auth.users")
+        .select("raw_user_meta_data")
+        .eq("id", user.id)
         .single();
 
-      if (userProfile?.raw_user_meta_data?.role !== 'admin') {
-        return NextResponse.json({ error: 'Admin privileges required' }, { status: 403 });
+      if (userProfile?.raw_user_meta_data?.role !== "admin") {
+        return NextResponse.json(
+          { error: "Admin privileges required" },
+          { status: 403 },
+        );
       }
     }
 
@@ -70,15 +78,15 @@ export async function POST(req: NextRequest) {
       reportType: report_type,
       startDate: start_date,
       endDate: end_date,
-      generatedBy: user.id
+      generatedBy: user.id,
     });
 
     return NextResponse.json(report);
   } catch (error) {
-    console.error('Generate compliance report error:', error);
+    console.error("Generate compliance report error:", error);
     return NextResponse.json(
-      { error: 'Failed to generate compliance report' },
-      { status: 500 }
+      { error: "Failed to generate compliance report" },
+      { status: 500 },
     );
   }
 }
@@ -86,8 +94,8 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const siteId = searchParams.get('siteId');
-    const reportType = searchParams.get('reportType');
+    const siteId = searchParams.get("siteId");
+    const reportType = searchParams.get("reportType");
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -98,51 +106,56 @@ export async function GET(req: NextRequest) {
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Check permissions
     if (siteId) {
       const { data: permission } = await supabase
-        .from('site_permissions')
-        .select('permission')
-        .eq('site_id', siteId)
-        .eq('user_id', user.id)
+        .from("site_permissions")
+        .select("permission")
+        .eq("site_id", siteId)
+        .eq("user_id", user.id)
         .single();
 
-      if (!permission || permission.permission !== 'admin') {
-        return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+      if (!permission || permission.permission !== "admin") {
+        return NextResponse.json(
+          { error: "Insufficient permissions" },
+          { status: 403 },
+        );
       }
     }
 
     // Build query
     let query = supabase
-      .from('compliance_reports')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .from("compliance_reports")
+      .select("*")
+      .order("created_at", { ascending: false });
 
     if (siteId) {
-      query = query.eq('site_id', siteId);
+      query = query.eq("site_id", siteId);
     }
 
     if (reportType) {
-      query = query.eq('report_type', reportType);
+      query = query.eq("report_type", reportType);
     }
 
     // Limit to user's reports if not admin
     const { data: userProfile } = await supabase
-      .from('auth.users')
-      .select('raw_user_meta_data')
-      .eq('id', user.id)
+      .from("auth.users")
+      .select("raw_user_meta_data")
+      .eq("id", user.id)
       .single();
 
-    if (userProfile?.raw_user_meta_data?.role !== 'admin') {
-      query = query.eq('generated_by', user.id);
+    if (userProfile?.raw_user_meta_data?.role !== "admin") {
+      query = query.eq("generated_by", user.id);
     }
 
     const { data: reports, error } = await query.limit(50);
@@ -153,10 +166,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(reports || []);
   } catch (error) {
-    console.error('Get compliance reports error:', error);
+    console.error("Get compliance reports error:", error);
     return NextResponse.json(
-      { error: 'Failed to fetch compliance reports' },
-      { status: 500 }
+      { error: "Failed to fetch compliance reports" },
+      { status: 500 },
     );
   }
 }

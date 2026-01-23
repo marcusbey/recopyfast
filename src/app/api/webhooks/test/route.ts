@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { webhookManager } from '@/lib/webhooks/manager';
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { webhookManager } from "@/lib/webhooks/manager";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,8 +9,8 @@ export async function POST(req: NextRequest) {
 
     if (!webhook_id) {
       return NextResponse.json(
-        { error: 'Missing webhook_id' },
-        { status: 400 }
+        { error: "Missing webhook_id" },
+        { status: 400 },
       );
     }
 
@@ -23,46 +23,51 @@ export async function POST(req: NextRequest) {
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Get webhook and verify permissions
     const { data: webhook, error: webhookError } = await supabase
-      .from('webhooks')
-      .select('site_id, created_by')
-      .eq('id', webhook_id)
+      .from("webhooks")
+      .select("site_id, created_by")
+      .eq("id", webhook_id)
       .single();
 
     if (webhookError || !webhook) {
-      return NextResponse.json({ error: 'Webhook not found' }, { status: 404 });
+      return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
     }
 
     // Check site permissions
     const { data: permission } = await supabase
-      .from('site_permissions')
-      .select('permission')
-      .eq('site_id', webhook.site_id)
-      .eq('user_id', user.id)
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", webhook.site_id)
+      .eq("user_id", user.id)
       .single();
 
-    if (!permission || !['edit', 'admin'].includes(permission.permission)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    if (!permission || !["edit", "admin"].includes(permission.permission)) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
     }
 
     // Test the webhook
     const testResult = await webhookManager.testWebhook(webhook_id);
-    
+
     return NextResponse.json(testResult);
   } catch (error) {
-    console.error('Test webhook error:', error);
+    console.error("Test webhook error:", error);
     return NextResponse.json(
-      { error: 'Failed to test webhook' },
-      { status: 500 }
+      { error: "Failed to test webhook" },
+      { status: 500 },
     );
   }
 }

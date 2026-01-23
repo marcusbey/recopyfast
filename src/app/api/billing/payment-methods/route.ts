@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { stripe } from '@/lib/stripe/config';
-import { createOrGetCustomer } from '@/lib/stripe/customer';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { stripe } from "@/lib/stripe/config";
+import { createOrGetCustomer } from "@/lib/stripe/customer";
 
 /**
  * GET /api/billing/payment-methods
@@ -12,16 +12,19 @@ export async function GET() {
     const supabase = await createClient();
 
     // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Get customer
     const { data: customer } = await supabase
-      .from('customers')
-      .select('*')
-      .eq('user_id', user.id)
+      .from("customers")
+      .select("*")
+      .eq("user_id", user.id)
       .single();
 
     if (!customer) {
@@ -31,19 +34,21 @@ export async function GET() {
     // Get payment methods from Stripe
     const paymentMethods = await stripe.paymentMethods.list({
       customer: customer.stripe_customer_id,
-      type: 'card',
+      type: "card",
     });
 
     // Get payment methods from our database
     const { data: dbPaymentMethods } = await supabase
-      .from('payment_methods')
-      .select('*')
-      .eq('customer_id', customer.id)
-      .order('created_at', { ascending: false });
+      .from("payment_methods")
+      .select("*")
+      .eq("customer_id", customer.id)
+      .order("created_at", { ascending: false });
 
     // Merge Stripe and database data
-    const combinedPaymentMethods = paymentMethods.data.map(pm => {
-      const dbPm = dbPaymentMethods?.find(dbPm => dbPm.stripe_payment_method_id === pm.id);
+    const combinedPaymentMethods = paymentMethods.data.map((pm) => {
+      const dbPm = dbPaymentMethods?.find(
+        (dbPm) => dbPm.stripe_payment_method_id === pm.id,
+      );
       return {
         id: pm.id,
         type: pm.type,
@@ -55,10 +60,10 @@ export async function GET() {
 
     return NextResponse.json({ paymentMethods: combinedPaymentMethods });
   } catch (error: any) {
-    console.error('Error fetching payment methods:', error);
+    console.error("Error fetching payment methods:", error);
     return NextResponse.json(
-      { error: 'Failed to fetch payment methods' },
-      { status: 500 }
+      { error: "Failed to fetch payment methods" },
+      { status: 500 },
     );
   }
 }
@@ -72,9 +77,12 @@ export async function POST(req: NextRequest) {
     const supabase = await createClient();
 
     // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
@@ -82,8 +90,8 @@ export async function POST(req: NextRequest) {
 
     if (!paymentMethodId) {
       return NextResponse.json(
-        { error: 'Payment method ID is required' },
-        { status: 400 }
+        { error: "Payment method ID is required" },
+        { status: 400 },
       );
     }
 
@@ -91,7 +99,7 @@ export async function POST(req: NextRequest) {
     const { customer, stripeCustomer } = await createOrGetCustomer(
       user.id,
       user.email!,
-      user.user_metadata?.name
+      user.user_metadata?.name,
     );
 
     // Attach payment method to customer
@@ -104,7 +112,7 @@ export async function POST(req: NextRequest) {
 
     // Save to our database
     const { data: newPaymentMethod, error } = await supabase
-      .from('payment_methods')
+      .from("payment_methods")
       .insert({
         customer_id: customer.id,
         stripe_payment_method_id: paymentMethodId,
@@ -128,10 +136,10 @@ export async function POST(req: NextRequest) {
     if (setAsDefault) {
       // Remove default from other payment methods
       await supabase
-        .from('payment_methods')
+        .from("payment_methods")
         .update({ is_default: false })
-        .eq('customer_id', customer.id)
-        .neq('id', newPaymentMethod.id);
+        .eq("customer_id", customer.id)
+        .neq("id", newPaymentMethod.id);
 
       // Update customer's default payment method in Stripe
       await stripe.customers.update(stripeCustomer.id, {
@@ -143,10 +151,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ paymentMethod: newPaymentMethod });
   } catch (error: any) {
-    console.error('Error adding payment method:', error);
+    console.error("Error adding payment method:", error);
     return NextResponse.json(
-      { error: error.message || 'Failed to add payment method' },
-      { status: 500 }
+      { error: error.message || "Failed to add payment method" },
+      { status: 500 },
     );
   }
 }
@@ -160,40 +168,46 @@ export async function DELETE(req: NextRequest) {
     const supabase = await createClient();
 
     // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const url = new URL(req.url);
-    const paymentMethodId = url.searchParams.get('paymentMethodId');
+    const paymentMethodId = url.searchParams.get("paymentMethodId");
 
     if (!paymentMethodId) {
       return NextResponse.json(
-        { error: 'Payment method ID is required' },
-        { status: 400 }
+        { error: "Payment method ID is required" },
+        { status: 400 },
       );
     }
 
     // Get the payment method from our database
     const { data: paymentMethod } = await supabase
-      .from('payment_methods')
-      .select('*')
-      .eq('stripe_payment_method_id', paymentMethodId)
+      .from("payment_methods")
+      .select("*")
+      .eq("stripe_payment_method_id", paymentMethodId)
       .single();
 
     if (!paymentMethod) {
       return NextResponse.json(
-        { error: 'Payment method not found' },
-        { status: 404 }
+        { error: "Payment method not found" },
+        { status: 404 },
       );
     }
 
     // Check if this is the default payment method
     if (paymentMethod.is_default) {
       return NextResponse.json(
-        { error: 'Cannot delete default payment method. Set another as default first.' },
-        { status: 400 }
+        {
+          error:
+            "Cannot delete default payment method. Set another as default first.",
+        },
+        { status: 400 },
       );
     }
 
@@ -202,16 +216,16 @@ export async function DELETE(req: NextRequest) {
 
     // Remove from our database
     await supabase
-      .from('payment_methods')
+      .from("payment_methods")
       .delete()
-      .eq('stripe_payment_method_id', paymentMethodId);
+      .eq("stripe_payment_method_id", paymentMethodId);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('Error removing payment method:', error);
+    console.error("Error removing payment method:", error);
     return NextResponse.json(
-      { error: error.message || 'Failed to remove payment method' },
-      { status: 500 }
+      { error: error.message || "Failed to remove payment method" },
+      { status: 500 },
     );
   }
 }

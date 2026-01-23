@@ -1,64 +1,61 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { aiService } from '@/lib/ai/openai-service';
-import { createClient } from '@/lib/supabase/server';
-import { consumeFeatureUsage } from '@/lib/feature-gating/permissions';
+import { NextRequest, NextResponse } from "next/server";
+import { aiService } from "@/lib/ai/openai-service";
+import { createClient } from "@/lib/supabase/server";
+import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 
 export async function POST(request: NextRequest) {
   try {
-    const { 
-      siteId, 
-      fromLanguage, 
-      toLanguage, 
-      elements,
-      context 
-    } = await request.json();
-    
+    const { siteId, fromLanguage, toLanguage, elements, context } =
+      await request.json();
+
     if (!siteId || !fromLanguage || !toLanguage || !elements) {
       return NextResponse.json(
-        { error: 'Missing required fields: siteId, fromLanguage, toLanguage, elements' },
-        { status: 400 }
+        {
+          error:
+            "Missing required fields: siteId, fromLanguage, toLanguage, elements",
+        },
+        { status: 400 },
       );
     }
 
     // Check authentication and verify site access
     const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { data: site } = await supabase
-      .from('sites')
-      .select('id')
-      .eq('id', siteId)
+      .from("sites")
+      .select("id")
+      .eq("id", siteId)
       .single();
 
     if (!site) {
-      return NextResponse.json(
-        { error: 'Site not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
     // Check feature access and consume usage
-    const usageResult = await consumeFeatureUsage(user.id, 'translation', {
+    const usageResult = await consumeFeatureUsage(user.id, "translation", {
       siteId,
       fromLanguage,
       toLanguage,
-      elementCount: elements.length
+      elementCount: elements.length,
     });
 
     if (!usageResult.success) {
       return NextResponse.json(
-        { 
+        {
           error: usageResult.error,
-          requiresUpgrade: usageResult.error?.includes('plan') || usageResult.error?.includes('tickets')
+          requiresUpgrade:
+            usageResult.error?.includes("plan") ||
+            usageResult.error?.includes("tickets"),
         },
-        { status: 403 }
+        { status: 403 },
       );
     }
 
@@ -67,41 +64,38 @@ export async function POST(request: NextRequest) {
       elements,
       fromLanguage,
       toLanguage,
-      context
+      context,
     );
 
     if (!result.success) {
-      return NextResponse.json(
-        { error: result.error },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: result.error }, { status: 500 });
     }
 
     // Save translations to database as new language variant
-    const translatedElements = result.data!.map(translation => ({
+    const translatedElements = result.data!.map((translation) => ({
       site_id: siteId,
       element_id: translation.id,
-      selector: '', // Will be populated from existing element
+      selector: "", // Will be populated from existing element
       original_content: translation.originalText,
       current_content: translation.translatedText,
       language: toLanguage,
-      variant: 'default',
+      variant: "default",
       metadata: {
         translatedFrom: fromLanguage,
         aiGenerated: true,
-        tokensUsed: result.tokensUsed
-      }
+        tokensUsed: result.tokensUsed,
+      },
     }));
 
     // Insert or update translated content
     const { error: dbError } = await supabase
-      .from('content_elements')
+      .from("content_elements")
       .upsert(translatedElements, {
-        onConflict: 'site_id,element_id,language,variant'
+        onConflict: "site_id,element_id,language,variant",
       });
 
     if (dbError) {
-      console.error('Error saving translations:', dbError);
+      console.error("Error saving translations:", dbError);
       // Still return success since translation worked
     }
 
@@ -109,14 +103,13 @@ export async function POST(request: NextRequest) {
       success: true,
       translations: result.data,
       tokensUsed: result.tokensUsed,
-      message: `Successfully translated ${result.data!.length} elements to ${toLanguage}`
+      message: `Successfully translated ${result.data!.length} elements to ${toLanguage}`,
     });
-
   } catch (error) {
-    console.error('Translation API error:', error);
+    console.error("Translation API error:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }
 }

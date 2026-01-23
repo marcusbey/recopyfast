@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { BulkImportPayload, ContentElement } from '@/types';
-import { v4 as uuidv4 } from 'uuid';
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { BulkImportPayload, ContentElement } from "@/types";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,8 +10,8 @@ export async function POST(req: NextRequest) {
 
     if (!site_id || !format || !data) {
       return NextResponse.json(
-        { error: 'Missing required fields: site_id, format, data' },
-        { status: 400 }
+        { error: "Missing required fields: site_id, format, data" },
+        { status: 400 },
       );
     }
 
@@ -25,38 +25,43 @@ export async function POST(req: NextRequest) {
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Check site permissions
     const { data: permission } = await supabase
-      .from('site_permissions')
-      .select('permission')
-      .eq('site_id', site_id)
-      .eq('user_id', user.id)
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", site_id)
+      .eq("user_id", user.id)
       .single();
 
-    if (!permission || !['edit', 'admin'].includes(permission.permission)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    if (!permission || !["edit", "admin"].includes(permission.permission)) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
     }
 
     // Create bulk operation record
     const operationId = uuidv4();
     const { error: operationError } = await supabase
-      .from('bulk_operations')
+      .from("bulk_operations")
       .insert({
         id: operationId,
         user_id: user.id,
         site_id,
-        operation_type: 'import',
-        status: 'running',
+        operation_type: "import",
+        status: "running",
         configuration: { format, options },
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
       });
 
     if (operationError) {
@@ -65,16 +70,16 @@ export async function POST(req: NextRequest) {
 
     // Process import data based on format
     let contentElements: Partial<ContentElement>[] = [];
-    
+
     try {
       switch (format) {
-        case 'json':
+        case "json":
           contentElements = parseJSONImport(data);
           break;
-        case 'csv':
+        case "csv":
           contentElements = parseCSVImport(data);
           break;
-        case 'xml':
+        case "xml":
           contentElements = parseXMLImport(data);
           break;
         default:
@@ -83,10 +88,10 @@ export async function POST(req: NextRequest) {
 
       // Validate content elements
       const validatedElements = await validateContentElements(
-        contentElements, 
-        site_id, 
-        options, 
-        supabase
+        contentElements,
+        site_id,
+        options,
+        supabase,
       );
 
       // Import content elements
@@ -95,127 +100,135 @@ export async function POST(req: NextRequest) {
         site_id,
         user.id,
         options,
-        supabase
+        supabase,
       );
 
       // Update operation status
       await supabase
-        .from('bulk_operations')
+        .from("bulk_operations")
         .update({
-          status: 'completed',
+          status: "completed",
           total_items: contentElements.length,
           processed_items: results.successful,
           failed_items: results.failed,
           result_data: {
             successful_imports: results.successful,
             failed_imports: results.failed,
-            errors: results.errors
+            errors: results.errors,
           },
-          completed_at: new Date().toISOString()
+          completed_at: new Date().toISOString(),
         })
-        .eq('id', operationId);
+        .eq("id", operationId);
 
       return NextResponse.json({
         operation_id: operationId,
-        status: 'completed',
+        status: "completed",
         results: {
           total: contentElements.length,
           successful: results.successful,
           failed: results.failed,
-          errors: results.errors
-        }
+          errors: results.errors,
+        },
       });
-
     } catch (processingError) {
       // Update operation status with error
       await supabase
-        .from('bulk_operations')
+        .from("bulk_operations")
         .update({
-          status: 'failed',
-          error_log: [processingError instanceof Error ? processingError.message : 'Unknown error'],
-          completed_at: new Date().toISOString()
+          status: "failed",
+          error_log: [
+            processingError instanceof Error
+              ? processingError.message
+              : "Unknown error",
+          ],
+          completed_at: new Date().toISOString(),
         })
-        .eq('id', operationId);
+        .eq("id", operationId);
 
       throw processingError;
     }
-
   } catch (error) {
-    console.error('Bulk import error:', error);
+    console.error("Bulk import error:", error);
     return NextResponse.json(
-      { error: 'Failed to process bulk import' },
-      { status: 500 }
+      { error: "Failed to process bulk import" },
+      { status: 500 },
     );
   }
 }
 
 function parseJSONImport(data: any): Partial<ContentElement>[] {
   if (!Array.isArray(data)) {
-    throw new Error('JSON data must be an array');
+    throw new Error("JSON data must be an array");
   }
 
   return data.map((item, index) => {
     if (!item.element_id || !item.selector || !item.current_content) {
-      throw new Error(`Invalid item at index ${index}: missing required fields`);
+      throw new Error(
+        `Invalid item at index ${index}: missing required fields`,
+      );
     }
 
     return {
       element_id: item.element_id,
       selector: item.selector,
-      original_content: item.original_content || '',
+      original_content: item.original_content || "",
       current_content: item.current_content,
-      language: item.language || 'en',
-      variant: item.variant || 'default',
-      metadata: item.metadata || {}
+      language: item.language || "en",
+      variant: item.variant || "default",
+      metadata: item.metadata || {},
     };
   });
 }
 
 function parseCSVImport(data: string): Partial<ContentElement>[] {
-  const lines = data.trim().split('\n');
-  const headers = lines[0].split(',').map(h => h.trim());
-  
-  const requiredHeaders = ['element_id', 'selector', 'current_content'];
-  const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
-  
+  const lines = data.trim().split("\n");
+  const headers = lines[0].split(",").map((h) => h.trim());
+
+  const requiredHeaders = ["element_id", "selector", "current_content"];
+  const missingHeaders = requiredHeaders.filter((h) => !headers.includes(h));
+
   if (missingHeaders.length > 0) {
-    throw new Error(`Missing required CSV headers: ${missingHeaders.join(', ')}`);
+    throw new Error(
+      `Missing required CSV headers: ${missingHeaders.join(", ")}`,
+    );
   }
 
   return lines.slice(1).map((line, index) => {
-    const values = line.split(',').map(v => v.trim());
+    const values = line.split(",").map((v) => v.trim());
     const item: any = {};
-    
+
     headers.forEach((header, i) => {
-      item[header] = values[i] || '';
+      item[header] = values[i] || "";
     });
 
     if (!item.element_id || !item.selector || !item.current_content) {
-      throw new Error(`Invalid CSV row at line ${index + 2}: missing required fields`);
+      throw new Error(
+        `Invalid CSV row at line ${index + 2}: missing required fields`,
+      );
     }
 
     return {
       element_id: item.element_id,
       selector: item.selector,
-      original_content: item.original_content || '',
+      original_content: item.original_content || "",
       current_content: item.current_content,
-      language: item.language || 'en',
-      variant: item.variant || 'default',
-      metadata: item.metadata ? JSON.parse(item.metadata) : {}
+      language: item.language || "en",
+      variant: item.variant || "default",
+      metadata: item.metadata ? JSON.parse(item.metadata) : {},
     };
   });
 }
 
 function parseXMLImport(data: string): Partial<ContentElement>[] {
   // Basic XML parsing - in production, use a proper XML parser
-  throw new Error('XML import not yet implemented');
+  throw new Error("XML import not yet implemented");
 }
 
 async function validateContentElements(
   elements: Partial<ContentElement>[],
   siteId: string,
-  options: BulkImportPayload['options'],
-  supabase: any
+  options: BulkImportPayload["options"],
+  supabase: any,
 ): Promise<Partial<ContentElement>[]> {
   const validatedElements: Partial<ContentElement>[] = [];
 
@@ -234,12 +247,12 @@ async function validateContentElements(
     // Check if element exists if not creating missing
     if (!options.create_missing_elements) {
       const { data: existingElement } = await supabase
-        .from('content_elements')
-        .select('id')
-        .eq('site_id', siteId)
-        .eq('element_id', element.element_id)
-        .eq('language', element.language || 'en')
-        .eq('variant', element.variant || 'default')
+        .from("content_elements")
+        .select("id")
+        .eq("site_id", siteId)
+        .eq("element_id", element.element_id)
+        .eq("language", element.language || "en")
+        .eq("variant", element.variant || "default")
         .single();
 
       if (!existingElement) {
@@ -249,7 +262,7 @@ async function validateContentElements(
 
     validatedElements.push({
       ...element,
-      site_id: siteId
+      site_id: siteId,
     });
   }
 
@@ -260,8 +273,8 @@ async function importContentElements(
   elements: Partial<ContentElement>[],
   siteId: string,
   userId: string,
-  options: BulkImportPayload['options'],
-  supabase: any
+  options: BulkImportPayload["options"],
+  supabase: any,
 ): Promise<{ successful: number; failed: number; errors: string[] }> {
   let successful = 0;
   let failed = 0;
@@ -273,31 +286,32 @@ async function importContentElements(
         site_id: siteId,
         element_id: element.element_id!,
         selector: element.selector!,
-        original_content: element.original_content || '',
+        original_content: element.original_content || "",
         current_content: element.current_content!,
-        language: element.language || 'en',
-        variant: element.variant || 'default',
+        language: element.language || "en",
+        variant: element.variant || "default",
         metadata: element.metadata || {},
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
 
       if (options.overwrite_existing) {
         // Upsert operation
         const { error } = await supabase
-          .from('content_elements')
+          .from("content_elements")
           .upsert(elementData, {
-            onConflict: 'site_id,element_id,language,variant'
+            onConflict: "site_id,element_id,language,variant",
           });
 
         if (error) throw error;
       } else {
         // Insert only
         const { error } = await supabase
-          .from('content_elements')
+          .from("content_elements")
           .insert(elementData);
 
         if (error) {
-          if (error.code === '23505') { // Unique constraint violation
+          if (error.code === "23505") {
+            // Unique constraint violation
             errors.push(`Element ${element.element_id} already exists`);
             failed++;
             continue;
@@ -309,7 +323,9 @@ async function importContentElements(
       successful++;
     } catch (error) {
       failed++;
-      errors.push(`Failed to import ${element.element_id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      errors.push(
+        `Failed to import ${element.element_id}: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     }
   }
 
@@ -319,12 +335,12 @@ async function importContentElements(
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const operationId = searchParams.get('operationId');
+    const operationId = searchParams.get("operationId");
 
     if (!operationId) {
       return NextResponse.json(
-        { error: 'Missing operationId parameter' },
-        { status: 400 }
+        { error: "Missing operationId parameter" },
+        { status: 400 },
       );
     }
 
@@ -337,35 +353,37 @@ export async function GET(req: NextRequest) {
           set: () => {},
           remove: () => {},
         },
-      }
+      },
     );
 
-    const { data: { user } } = await supabase.auth.getUser();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
     if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Get operation status
     const { data: operation, error } = await supabase
-      .from('bulk_operations')
-      .select('*')
-      .eq('id', operationId)
-      .eq('user_id', user.id)
+      .from("bulk_operations")
+      .select("*")
+      .eq("id", operationId)
+      .eq("user_id", user.id)
       .single();
 
     if (error || !operation) {
       return NextResponse.json(
-        { error: 'Operation not found' },
-        { status: 404 }
+        { error: "Operation not found" },
+        { status: 404 },
       );
     }
 
     return NextResponse.json(operation);
   } catch (error) {
-    console.error('Get operation status error:', error);
+    console.error("Get operation status error:", error);
     return NextResponse.json(
-      { error: 'Failed to get operation status' },
-      { status: 500 }
+      { error: "Failed to get operation status" },
+      { status: 500 },
     );
   }
 }

@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { 
-  purchaseTickets, 
-  getUserTickets, 
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import {
+  purchaseTickets,
+  getUserTickets,
   getTicketTransactions,
-  getTicketPricing 
-} from '@/lib/stripe/tickets';
+  getTicketPricing,
+} from "@/lib/stripe/tickets";
 
 /**
  * GET /api/billing/tickets
@@ -16,14 +16,18 @@ export async function GET(req: NextRequest) {
     const supabase = await createClient();
 
     // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const url = new URL(req.url);
-    const includeTransactions = url.searchParams.get('includeTransactions') === 'true';
-    const limit = parseInt(url.searchParams.get('limit') || '50');
+    const includeTransactions =
+      url.searchParams.get("includeTransactions") === "true";
+    const limit = parseInt(url.searchParams.get("limit") || "50");
 
     const tickets = await getUserTickets(user.id);
     const pricing = getTicketPricing();
@@ -39,10 +43,10 @@ export async function GET(req: NextRequest) {
       pricing,
     });
   } catch (error: any) {
-    console.error('Error fetching tickets:', error);
+    console.error("Error fetching tickets:", error);
     return NextResponse.json(
-      { error: 'Failed to fetch tickets' },
-      { status: 500 }
+      { error: "Failed to fetch tickets" },
+      { status: 500 },
     );
   }
 }
@@ -56,9 +60,12 @@ export async function POST(req: NextRequest) {
     const supabase = await createClient();
 
     // Get the current user
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
@@ -67,8 +74,8 @@ export async function POST(req: NextRequest) {
     // Validate quantity
     if (!quantity || quantity < 1 || quantity > 100) {
       return NextResponse.json(
-        { error: 'Invalid quantity. Must be between 1 and 100.' },
-        { status: 400 }
+        { error: "Invalid quantity. Must be between 1 and 100." },
+        { status: 400 },
       );
     }
 
@@ -79,10 +86,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: any) {
-    console.error('Error purchasing tickets:', error);
+    console.error("Error purchasing tickets:", error);
     return NextResponse.json(
-      { error: error.message || 'Failed to purchase tickets' },
-      { status: 500 }
+      { error: error.message || "Failed to purchase tickets" },
+      { status: 500 },
     );
   }
 }
