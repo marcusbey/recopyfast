@@ -9,7 +9,9 @@ These integration tests validate complete user authentication journeys, testing 
 ## Test Files
 
 ### 1. `simple-auth.test.tsx` ✅ PASSING
+
 Basic authentication functionality tests:
+
 - Authentication modal rendering
 - Form tab switching
 - Client-side validation
@@ -17,8 +19,10 @@ Basic authentication functionality tests:
 - Login functionality
 - Loading states
 
-### 2. `registration-flow.test.tsx` 
+### 2. `registration-flow.test.tsx`
+
 User registration and onboarding tests:
+
 - Complete registration with valid data
 - Email already exists handling
 - Email format validation
@@ -28,7 +32,9 @@ User registration and onboarding tests:
 - Form state management
 
 ### 3. `login-flow.test.tsx`
+
 Login and dashboard access tests:
+
 - Valid credential login
 - Invalid credential handling
 - Account locked scenarios
@@ -38,7 +44,9 @@ Login and dashboard access tests:
 - Network error recovery
 
 ### 4. `logout-flow.test.tsx`
+
 Logout and cleanup tests:
+
 - User menu logout
 - Session data clearing
 - Error handling during logout
@@ -48,7 +56,9 @@ Logout and cleanup tests:
 - Loading states
 
 ### 5. `protected-routes.test.tsx`
+
 Route access control tests:
+
 - Unauthenticated user redirects
 - Authenticated user access
 - Role-based access control
@@ -58,7 +68,9 @@ Route access control tests:
 - Concurrent access checks
 
 ### 6. `session-management.test.tsx`
+
 Session management tests:
+
 - Session persistence across refreshes
 - Automatic session refresh
 - Session expiry handling
@@ -68,7 +80,9 @@ Session management tests:
 - Activity-based renewal
 
 ### 7. `auth-error-handling.test.tsx`
+
 Error handling and recovery tests:
+
 - Network timeouts
 - Server errors with retry
 - Rate limiting
@@ -79,7 +93,9 @@ Error handling and recovery tests:
 - Form resubmission prevention
 
 ### 8. `auth-setup.ts`
+
 Authentication test utilities:
+
 - MSW handlers for auth endpoints
 - Mock user data and sessions
 - Network condition simulation
@@ -89,6 +105,7 @@ Authentication test utilities:
 ## Features Tested
 
 ### Authentication Flows
+
 - ✅ User registration with email confirmation
 - ✅ Email/password login
 - ✅ Logout with session cleanup
@@ -96,6 +113,7 @@ Authentication test utilities:
 - ✅ Form validation and error handling
 
 ### Session Management
+
 - ✅ Session persistence across page refreshes
 - ✅ Automatic session renewal
 - ✅ Session expiry detection
@@ -103,6 +121,7 @@ Authentication test utilities:
 - ✅ Remember me functionality
 
 ### Protected Routes
+
 - ✅ Unauthenticated access prevention
 - ✅ Automatic redirects to login
 - ✅ Post-login redirect to intended page
@@ -110,6 +129,7 @@ Authentication test utilities:
 - ✅ Loading states during auth checks
 
 ### Error Handling
+
 - ✅ Network failures and retries
 - ✅ Server error responses
 - ✅ Rate limiting responses
@@ -118,6 +138,7 @@ Authentication test utilities:
 - ✅ Offline/online detection
 
 ### User Interface
+
 - ✅ Modal state management
 - ✅ Form loading states
 - ✅ Tab switching
@@ -128,26 +149,28 @@ Authentication test utilities:
 ## Mock Setup
 
 ### MSW Handlers
+
 The tests use MSW (Mock Service Worker) to intercept and mock authentication API calls:
 
 ```typescript
 // Auth signup endpoint
-http.post('/api/auth/signup', async ({ request }) => {
+http.post("/api/auth/signup", async ({ request }) => {
   // Handle validation, existing users, success responses
 });
 
-// Auth login endpoint  
-http.post('/api/auth/login', async ({ request }) => {
+// Auth login endpoint
+http.post("/api/auth/login", async ({ request }) => {
   // Handle credentials validation, account states
 });
 
 // Session management
-http.get('/api/auth/session', () => {
+http.get("/api/auth/session", () => {
   // Handle session validation and expiry
 });
 ```
 
 ### Supabase Mocking
+
 Supabase authentication client is mocked to test internal application logic:
 
 ```typescript
@@ -163,6 +186,7 @@ const mockSupabaseAuth = {
 ## Test Scenarios
 
 ### User Registration Journey
+
 1. Open signup modal from header
 2. Fill registration form with valid data
 3. Handle validation errors
@@ -171,6 +195,7 @@ const mockSupabaseAuth = {
 6. Handle various error conditions
 
 ### User Login Journey
+
 1. Navigate to login form
 2. Enter credentials
 3. Submit and handle authentication
@@ -179,6 +204,7 @@ const mockSupabaseAuth = {
 6. Handle authentication errors
 
 ### Protected Route Access
+
 1. Attempt to access protected route
 2. Check authentication status
 3. Redirect to login if unauthenticated
@@ -187,6 +213,7 @@ const mockSupabaseAuth = {
 6. Redirect to original destination
 
 ### Session Management Workflow
+
 1. Establish authenticated session
 2. Persist session across page loads
 3. Monitor session expiry

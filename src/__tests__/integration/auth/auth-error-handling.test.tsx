@@ -1,14 +1,14 @@
-import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { AuthProvider } from '@/contexts/AuthContext';
-import { AuthModal } from '@/components/auth/AuthModal';
-import { server } from '../setup';
-import { http, HttpResponse } from 'msw';
-import { useRouter } from 'next/navigation';
+import React from "react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { server } from "../setup";
+import { http, HttpResponse } from "msw";
+import { useRouter } from "next/navigation";
 
 // Mock next/navigation
-jest.mock('next/navigation', () => ({
+jest.mock("next/navigation", () => ({
   useRouter: jest.fn(),
 }));
 
@@ -22,7 +22,7 @@ const mockSupabaseAuth = {
   resetPasswordForEmail: jest.fn(),
 };
 
-jest.mock('@/lib/supabase/client', () => ({
+jest.mock("@/lib/supabase/client", () => ({
   createClient: jest.fn(() => ({
     auth: mockSupabaseAuth,
   })),
@@ -31,37 +31,37 @@ jest.mock('@/lib/supabase/client', () => ({
 // Error scenarios handlers
 const errorHandlers = [
   // Network timeout simulation
-  http.post('/api/auth/signup', async () => {
-    await new Promise(resolve => setTimeout(resolve, 30000)); // Never resolves in test time
+  http.post("/api/auth/signup", async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30000)); // Never resolves in test time
     return HttpResponse.json({ success: true });
   }),
 
   // Server errors
-  http.post('/api/auth/login', () => {
+  http.post("/api/auth/login", () => {
     return HttpResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
+      { error: "Internal server error" },
+      { status: 500 },
     );
   }),
 
   // Rate limiting
-  http.post('/api/auth/password-reset', () => {
+  http.post("/api/auth/password-reset", () => {
     return HttpResponse.json(
-      { error: 'Too many requests. Please try again later.' },
-      { status: 429 }
+      { error: "Too many requests. Please try again later." },
+      { status: 429 },
     );
   }),
 
   // Service unavailable
-  http.get('/api/auth/session', () => {
+  http.get("/api/auth/session", () => {
     return HttpResponse.json(
-      { error: 'Service temporarily unavailable' },
-      { status: 503 }
+      { error: "Service temporarily unavailable" },
+      { status: 503 },
     );
   }),
 ];
 
-describe('Authentication Error Handling and Recovery', () => {
+describe("Authentication Error Handling and Recovery", () => {
   const mockRouter = {
     push: jest.fn(),
     refresh: jest.fn(),
@@ -86,50 +86,57 @@ describe('Authentication Error Handling and Recovery', () => {
     }));
   });
 
-  it('should handle network timeouts during signup', async () => {
+  it("should handle network timeouts during signup", async () => {
     const user = userEvent.setup();
 
-    mockSupabaseAuth.signUp.mockImplementation(() => 
-      new Promise(resolve => setTimeout(() => resolve({ error: null }), 30000))
+    mockSupabaseAuth.signUp.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ error: null }), 30000),
+        ),
     );
 
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="signup" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Fill and submit form
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/^password$/i), 'Password123!');
-    await user.type(screen.getByLabelText(/confirm password/i), 'Password123!');
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "Password123!");
+    await user.type(screen.getByLabelText(/confirm password/i), "Password123!");
 
-    const submitButton = screen.getByRole('button', { name: /sign up/i });
+    const submitButton = screen.getByRole("button", { name: /sign up/i });
     await user.click(submitButton);
 
     // Should show loading state
     expect(submitButton).toBeDisabled();
 
     // Should handle timeout gracefully after reasonable wait
-    await waitFor(() => {
-      const errorMessage = screen.queryByText(/timeout/i) ||
-                          screen.queryByText(/try again/i) ||
-                          screen.queryByText(/network/i);
-      expect(errorMessage).toBeInTheDocument();
-    }, { timeout: 5000 });
+    await waitFor(
+      () => {
+        const errorMessage =
+          screen.queryByText(/timeout/i) ||
+          screen.queryByText(/try again/i) ||
+          screen.queryByText(/network/i);
+        expect(errorMessage).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
   });
 
-  it('should recover from validation errors', async () => {
+  it("should recover from validation errors", async () => {
     const user = userEvent.setup();
 
     mockSupabaseAuth.signUp
       .mockResolvedValueOnce({
         data: { user: null, session: null },
-        error: { message: 'Password should be at least 8 characters' },
+        error: { message: "Password should be at least 8 characters" },
       })
       .mockResolvedValueOnce({
         data: {
-          user: { id: 'user-123', email: 'test@example.com' },
+          user: { id: "user-123", email: "test@example.com" },
           session: null,
         },
         error: null,
@@ -138,52 +145,56 @@ describe('Authentication Error Handling and Recovery', () => {
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="signup" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // First attempt with weak password
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/^password$/i), 'weak');
-    await user.type(screen.getByLabelText(/confirm password/i), 'weak');
-    await user.click(screen.getByRole('button', { name: /sign up/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "weak");
+    await user.type(screen.getByLabelText(/confirm password/i), "weak");
+    await user.click(screen.getByRole("button", { name: /sign up/i }));
 
     // Should show validation error
     await waitFor(() => {
-      expect(screen.getByText(/password should be at least 8 characters/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/password should be at least 8 characters/i),
+      ).toBeInTheDocument();
     });
 
     // Fix password and retry
     const passwordInput = screen.getByLabelText(/^password$/i);
     const confirmInput = screen.getByLabelText(/confirm password/i);
-    
+
     await user.clear(passwordInput);
     await user.clear(confirmInput);
-    await user.type(passwordInput, 'StrongPassword123!');
-    await user.type(confirmInput, 'StrongPassword123!');
+    await user.type(passwordInput, "StrongPassword123!");
+    await user.type(confirmInput, "StrongPassword123!");
 
     // Error should be cleared when user starts typing
-    expect(screen.queryByText(/password should be at least 8 characters/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/password should be at least 8 characters/i),
+    ).not.toBeInTheDocument();
 
     // Second attempt should succeed
-    await user.click(screen.getByRole('button', { name: /sign up/i }));
+    await user.click(screen.getByRole("button", { name: /sign up/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/check your email/i)).toBeInTheDocument();
     });
   });
 
-  it('should handle server errors with retry capability', async () => {
+  it("should handle server errors with retry capability", async () => {
     const user = userEvent.setup();
 
     mockSupabaseAuth.signInWithPassword
       .mockResolvedValueOnce({
         data: { user: null, session: null },
-        error: { message: 'Internal server error' },
+        error: { message: "Internal server error" },
       })
       .mockResolvedValueOnce({
         data: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          session: { access_token: 'token' },
+          user: { id: "user-123", email: "test@example.com" },
+          session: { access_token: "token" },
         },
         error: null,
       });
@@ -191,13 +202,13 @@ describe('Authentication Error Handling and Recovery', () => {
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // First login attempt
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'Password123!');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password123!");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     // Should show server error
     await waitFor(() => {
@@ -205,29 +216,30 @@ describe('Authentication Error Handling and Recovery', () => {
     });
 
     // Should show retry button or allow retry
-    const retryButton = screen.queryByRole('button', { name: /retry/i }) ||
-                       screen.getByRole('button', { name: /sign in/i });
+    const retryButton =
+      screen.queryByRole("button", { name: /retry/i }) ||
+      screen.getByRole("button", { name: /sign in/i });
 
     await user.click(retryButton);
 
     // Second attempt should succeed
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/dashboard');
+      expect(mockRouter.push).toHaveBeenCalledWith("/dashboard");
     });
   });
 
-  it('should handle rate limiting errors', async () => {
+  it("should handle rate limiting errors", async () => {
     const user = userEvent.setup();
 
     mockSupabaseAuth.resetPasswordForEmail.mockResolvedValueOnce({
       data: null,
-      error: { message: 'Too many requests. Please try again later.' },
+      error: { message: "Too many requests. Please try again later." },
     });
 
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Navigate to password reset if available
@@ -236,8 +248,8 @@ describe('Authentication Error Handling and Recovery', () => {
       await user.click(forgotPasswordLink);
 
       const emailInput = screen.getByLabelText(/email/i);
-      await user.type(emailInput, 'test@example.com');
-      await user.click(screen.getByRole('button', { name: /reset/i }));
+      await user.type(emailInput, "test@example.com");
+      await user.click(screen.getByRole("button", { name: /reset/i }));
 
       // Should show rate limit message
       await waitFor(() => {
@@ -245,18 +257,19 @@ describe('Authentication Error Handling and Recovery', () => {
       });
 
       // Reset button should be disabled with countdown
-      const resetButton = screen.getByRole('button', { name: /reset/i });
+      const resetButton = screen.getByRole("button", { name: /reset/i });
       expect(resetButton).toBeDisabled();
 
       // Should show when user can retry
-      const retryMessage = screen.queryByText(/try again in/i) ||
-                          screen.queryByText(/wait/i);
+      const retryMessage =
+        screen.queryByText(/try again in/i) || screen.queryByText(/wait/i);
       expect(retryMessage).toBeInTheDocument();
     }
   });
 
-  it('should handle expired session errors gracefully', async () => {
-    let authStateCallback: ((event: string, session: any) => void) | null = null;
+  it("should handle expired session errors gracefully", async () => {
+    let authStateCallback: ((event: string, session: any) => void) | null =
+      null;
 
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: null },
@@ -275,12 +288,12 @@ describe('Authentication Error Handling and Recovery', () => {
       React.useEffect(() => {
         const checkSession = async () => {
           try {
-            const response = await fetch('/api/auth/session');
+            const response = await fetch("/api/auth/session");
             if (!response.ok) {
-              throw new Error('Session expired');
+              throw new Error("Session expired");
             }
           } catch (err) {
-            setError(err instanceof Error ? err.message : 'Unknown error');
+            setError(err instanceof Error ? err.message : "Unknown error");
           }
         };
 
@@ -304,7 +317,7 @@ describe('Authentication Error Handling and Recovery', () => {
     render(
       <AuthProvider>
         <TestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should handle session error
@@ -313,10 +326,10 @@ describe('Authentication Error Handling and Recovery', () => {
     });
 
     // Should provide recovery option
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
-  it('should implement exponential backoff for retries', async () => {
+  it("should implement exponential backoff for retries", async () => {
     const user = userEvent.setup();
     jest.useFakeTimers();
 
@@ -324,12 +337,12 @@ describe('Authentication Error Handling and Recovery', () => {
     mockSupabaseAuth.signInWithPassword.mockImplementation(async () => {
       attemptCount++;
       if (attemptCount < 3) {
-        throw new Error('Network error');
+        throw new Error("Network error");
       }
       return {
         data: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          session: { access_token: 'token' },
+          user: { id: "user-123", email: "test@example.com" },
+          session: { access_token: "token" },
         },
         error: null,
       };
@@ -341,15 +354,18 @@ describe('Authentication Error Handling and Recovery', () => {
 
       const handleRetry = async () => {
         setIsRetrying(true);
-        
+
         const backoffDelay = Math.pow(2, retryCount) * 1000; // Exponential backoff
-        
+
         setTimeout(async () => {
           try {
-            await mockSupabaseAuth.signInWithPassword('test@example.com', 'password');
+            await mockSupabaseAuth.signInWithPassword(
+              "test@example.com",
+              "password",
+            );
             setIsRetrying(false);
           } catch (error) {
-            setRetryCount(prev => prev + 1);
+            setRetryCount((prev) => prev + 1);
             setIsRetrying(false);
           }
         }, backoffDelay);
@@ -358,7 +374,9 @@ describe('Authentication Error Handling and Recovery', () => {
       return (
         <div>
           <button onClick={handleRetry} disabled={isRetrying}>
-            {isRetrying ? `Retrying... (attempt ${retryCount + 1})` : 'Retry Login'}
+            {isRetrying
+              ? `Retrying... (attempt ${retryCount + 1})`
+              : "Retry Login"}
           </button>
         </div>
       );
@@ -367,19 +385,21 @@ describe('Authentication Error Handling and Recovery', () => {
     render(<RetryComponent />);
 
     // First retry (immediate)
-    await user.click(screen.getByRole('button', { name: /retry login/i }));
+    await user.click(screen.getByRole("button", { name: /retry login/i }));
     expect(screen.getByText(/retrying.*attempt 1/i)).toBeInTheDocument();
 
     // Fast forward 1 second
     jest.advanceTimersByTime(1000);
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /retry login/i })).not.toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: /retry login/i }),
+      ).not.toBeDisabled();
     });
 
     // Second retry (2 second delay)
-    await user.click(screen.getByRole('button', { name: /retry login/i }));
+    await user.click(screen.getByRole("button", { name: /retry login/i }));
     jest.advanceTimersByTime(2000);
-    
+
     // Third retry should succeed
     await waitFor(() => {
       expect(attemptCount).toBe(3);
@@ -388,25 +408,25 @@ describe('Authentication Error Handling and Recovery', () => {
     jest.useRealTimers();
   });
 
-  it('should provide detailed error messages for different failure types', async () => {
+  it("should provide detailed error messages for different failure types", async () => {
     const user = userEvent.setup();
 
     // Test different error scenarios
     const errorScenarios = [
       {
-        error: { message: 'Invalid email or password' },
+        error: { message: "Invalid email or password" },
         expectedText: /invalid email or password/i,
       },
       {
-        error: { message: 'User not found' },
+        error: { message: "User not found" },
         expectedText: /user not found/i,
       },
       {
-        error: { message: 'Email not confirmed' },
+        error: { message: "Email not confirmed" },
         expectedText: /email.*confirm/i,
       },
       {
-        error: { message: 'Account locked' },
+        error: { message: "Account locked" },
         expectedText: /account.*locked/i,
       },
     ];
@@ -420,12 +440,12 @@ describe('Authentication Error Handling and Recovery', () => {
       const { unmount } = render(
         <AuthProvider>
           <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-        </AuthProvider>
+        </AuthProvider>,
       );
 
-      await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-      await user.type(screen.getByLabelText(/password/i), 'Password123!');
-      await user.click(screen.getByRole('button', { name: /sign in/i }));
+      await user.type(screen.getByLabelText(/email/i), "test@example.com");
+      await user.type(screen.getByLabelText(/password/i), "Password123!");
+      await user.click(screen.getByRole("button", { name: /sign in/i }));
 
       // Should show specific error message
       await waitFor(() => {
@@ -436,70 +456,71 @@ describe('Authentication Error Handling and Recovery', () => {
     }
   });
 
-  it('should handle connection failures with offline detection', async () => {
+  it("should handle connection failures with offline detection", async () => {
     const user = userEvent.setup();
 
     mockSupabaseAuth.signInWithPassword.mockRejectedValueOnce(
-      new TypeError('Failed to fetch')
+      new TypeError("Failed to fetch"),
     );
 
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Simulate going offline
-    Object.defineProperty(navigator, 'onLine', {
+    Object.defineProperty(navigator, "onLine", {
       writable: true,
       value: false,
     });
 
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'Password123!');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password123!");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     // Should detect offline state
     await waitFor(() => {
-      const offlineMessage = screen.queryByText(/offline/i) ||
-                            screen.queryByText(/connection/i) ||
-                            screen.queryByText(/network/i);
+      const offlineMessage =
+        screen.queryByText(/offline/i) ||
+        screen.queryByText(/connection/i) ||
+        screen.queryByText(/network/i);
       expect(offlineMessage).toBeInTheDocument();
     });
 
     // Simulate coming back online
-    Object.defineProperty(navigator, 'onLine', {
+    Object.defineProperty(navigator, "onLine", {
       writable: true,
       value: true,
     });
 
     // Should automatically retry or show retry option
-    const retryButton = screen.queryByRole('button', { name: /retry/i });
+    const retryButton = screen.queryByRole("button", { name: /retry/i });
     if (retryButton) {
       expect(retryButton).toBeInTheDocument();
     }
   });
 
-  it('should prevent form resubmission during error states', async () => {
+  it("should prevent form resubmission during error states", async () => {
     const user = userEvent.setup();
 
     mockSupabaseAuth.signInWithPassword.mockResolvedValueOnce({
       data: { user: null, session: null },
-      error: { message: 'Server error' },
+      error: { message: "Server error" },
     });
 
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Fill form
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'Password123!');
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/password/i), "Password123!");
 
-    const submitButton = screen.getByRole('button', { name: /sign in/i });
-    
+    const submitButton = screen.getByRole("button", { name: /sign in/i });
+
     // First submission
     await user.click(submitButton);
 
@@ -518,39 +539,43 @@ describe('Authentication Error Handling and Recovery', () => {
     expect(mockSupabaseAuth.signInWithPassword).toHaveBeenCalledTimes(2);
   });
 
-  it('should clear errors when switching between auth modes', async () => {
+  it("should clear errors when switching between auth modes", async () => {
     const user = userEvent.setup();
 
     // Login with error
     mockSupabaseAuth.signInWithPassword.mockResolvedValueOnce({
       data: { user: null, session: null },
-      error: { message: 'Invalid credentials' },
+      error: { message: "Invalid credentials" },
     });
 
     render(
       <AuthProvider>
         <AuthModal isOpen={true} onClose={jest.fn()} defaultTab="login" />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Trigger login error
-    await user.type(screen.getByLabelText(/email/i), 'test@example.com');
-    await user.type(screen.getByLabelText(/password/i), 'wrong');
-    await user.click(screen.getByRole('button', { name: /sign in/i }));
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.type(screen.getByLabelText(/password/i), "wrong");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/invalid credentials/i)).toBeInTheDocument();
     });
 
     // Switch to signup tab
-    await user.click(screen.getByRole('tab', { name: /sign up/i }));
+    await user.click(screen.getByRole("tab", { name: /sign up/i }));
 
     // Error should be cleared
     await waitFor(() => {
-      expect(screen.queryByText(/invalid credentials/i)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/invalid credentials/i),
+      ).not.toBeInTheDocument();
     });
 
     // Should show signup form without previous errors
-    expect(screen.getByRole('button', { name: /sign up/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /sign up/i }),
+    ).toBeInTheDocument();
   });
 });

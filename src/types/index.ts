@@ -1,7 +1,12 @@
 // Collaboration Types
-export type TeamRole = 'viewer' | 'editor' | 'manager' | 'owner';
-export type BillingPlan = 'free' | 'starter' | 'pro' | 'enterprise';
-export type NotificationType = 'invitation' | 'permission_change' | 'content_edit' | 'team_update' | 'site_shared';
+export type TeamRole = "viewer" | "editor" | "manager" | "owner";
+export type BillingPlan = "free" | "starter" | "pro" | "enterprise";
+export type NotificationType =
+  | "invitation"
+  | "permission_change"
+  | "content_edit"
+  | "team_update"
+  | "site_shared";
 
 export interface Site {
   id: string;
@@ -42,7 +47,7 @@ export interface ContentHistory {
   content_element_id: string;
   content: string;
   changed_by: string;
-  change_type: 'create' | 'update' | 'delete';
+  change_type: "create" | "update" | "delete";
   created_at: string;
 }
 
@@ -61,7 +66,7 @@ export interface SitePermission {
 export interface User {
   id: string;
   email: string;
-  role: 'user' | 'admin';
+  role: "user" | "admin";
   created_at: string;
 }
 
@@ -158,8 +163,6 @@ export interface TeamActivityLog {
   };
 }
 
-
-
 export interface ContentUpdatePayload {
   siteId: string;
   elementId: string;
@@ -171,11 +174,14 @@ export interface ContentUpdatePayload {
 export interface ContentMapPayload {
   siteId: string;
   url: string;
-  contentMap: Record<string, {
-    selector: string;
-    content: string;
-    type: string;
-  }>;
+  contentMap: Record<
+    string,
+    {
+      selector: string;
+      content: string;
+      type: string;
+    }
+  >;
 }
 
 // Invitation and Team Management Payloads
@@ -234,7 +240,7 @@ export interface EditConflict {
   elementId: string;
   conflictingEdits: CollaborativeEdit[];
   baseContent: string;
-  resolution?: 'auto' | 'manual';
+  resolution?: "auto" | "manual";
 }
 
 // Analytics Types
@@ -257,8 +263,8 @@ export interface UserActivityLog {
   id: string;
   user_id?: string;
   site_id: string;
-  action_type: 'page_view' | 'content_edit' | 'login' | 'logout' | 'api_call';
-  resource_type?: 'content_element' | 'site' | 'user' | 'team';
+  action_type: "page_view" | "content_edit" | "login" | "logout" | "api_call";
+  resource_type?: "content_element" | "site" | "user" | "team";
   resource_id?: string;
   metadata: Record<string, unknown>;
   ip_address?: string;
@@ -270,7 +276,7 @@ export interface UserActivityLog {
 export interface PerformanceMetric {
   id: string;
   site_id: string;
-  metric_type: 'load_time' | 'edit_time' | 'api_response_time';
+  metric_type: "load_time" | "edit_time" | "api_response_time";
   value: number;
   metadata: Record<string, unknown>;
   recorded_at: string;
@@ -280,7 +286,7 @@ export interface ConversionEvent {
   id: string;
   site_id: string;
   user_id?: string;
-  event_type: 'trial_start' | 'subscription' | 'upgrade' | 'churn';
+  event_type: "trial_start" | "subscription" | "upgrade" | "churn";
   value?: number;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -291,8 +297,8 @@ export interface BulkOperation {
   id: string;
   user_id: string;
   site_id: string;
-  operation_type: 'import' | 'export' | 'batch_update' | 'sync';
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  operation_type: "import" | "export" | "batch_update" | "sync";
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
   total_items: number;
   processed_items: number;
   failed_items: number;
@@ -337,11 +343,11 @@ export interface ABTest {
   site_id: string;
   name: string;
   description?: string;
-  status: 'draft' | 'running' | 'completed' | 'paused';
+  status: "draft" | "running" | "completed" | "paused";
   traffic_split: number;
   start_date?: string;
   end_date?: string;
-  success_metric: 'conversion_rate' | 'engagement' | 'click_through';
+  success_metric: "conversion_rate" | "engagement" | "click_through";
   created_by?: string;
   created_at: string;
   updated_at: string;
@@ -364,7 +370,7 @@ export interface ABTestResult {
   variant_id: string;
   user_id?: string;
   session_id?: string;
-  event_type: 'view' | 'click' | 'conversion';
+  event_type: "view" | "click" | "conversion";
   value: number;
   metadata: Record<string, unknown>;
   recorded_at: string;
@@ -391,7 +397,7 @@ export interface ApprovalRequest {
   workflow_id: string;
   proposed_content: string;
   current_step: number;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  status: "pending" | "approved" | "rejected" | "cancelled";
   requested_by: string;
   comments?: string;
   metadata: Record<string, unknown>;
@@ -404,7 +410,7 @@ export interface ScheduledContent {
   content_element_id: string;
   scheduled_content: string;
   publish_at: string;
-  status: 'scheduled' | 'published' | 'cancelled' | 'failed';
+  status: "scheduled" | "published" | "cancelled" | "failed";
   created_by: string;
   created_at: string;
   published_at?: string;
@@ -430,13 +436,13 @@ export interface AuditLog {
 
 export interface ComplianceReport {
   id: string;
-  report_type: 'gdpr' | 'soc2' | 'hipaa' | 'custom';
+  report_type: "gdpr" | "soc2" | "hipaa" | "custom";
   site_id: string;
   generated_by?: string;
   report_data: Record<string, unknown>;
   period_start?: string;
   period_end?: string;
-  status: 'generated' | 'reviewed' | 'approved' | 'exported';
+  status: "generated" | "reviewed" | "approved" | "exported";
   created_at: string;
 }
 
@@ -549,7 +555,7 @@ export interface AnalyticsDashboardData {
 // Bulk Operation Payloads
 export interface BulkImportPayload {
   site_id: string;
-  format: 'json' | 'csv' | 'xml';
+  format: "json" | "csv" | "xml";
   data: unknown;
   options: {
     overwrite_existing?: boolean;
@@ -560,7 +566,7 @@ export interface BulkImportPayload {
 
 export interface BulkExportPayload {
   site_id: string;
-  format: 'json' | 'csv' | 'xml';
+  format: "json" | "csv" | "xml";
   filters?: {
     language?: string;
     variant?: string;
@@ -573,7 +579,7 @@ export interface BulkUpdatePayload {
   site_id: string;
   operations: Array<{
     element_id: string;
-    operation: 'find_replace' | 'append' | 'prepend' | 'set';
+    operation: "find_replace" | "append" | "prepend" | "set";
     find?: string;
     replace?: string;
     content?: string;

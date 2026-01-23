@@ -1,12 +1,12 @@
-import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
-import { AuthProvider } from '@/contexts/AuthContext';
-import { useRouter, usePathname } from 'next/navigation';
-import { server } from '../setup';
-import { http, HttpResponse } from 'msw';
+import React from "react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { useRouter, usePathname } from "next/navigation";
+import { server } from "../setup";
+import { http, HttpResponse } from "msw";
 
 // Mock next/navigation
-jest.mock('next/navigation', () => ({
+jest.mock("next/navigation", () => ({
   useRouter: jest.fn(),
   usePathname: jest.fn(),
 }));
@@ -17,7 +17,7 @@ const mockSupabaseAuth = {
   onAuthStateChange: jest.fn(),
 };
 
-jest.mock('@/lib/supabase/client', () => ({
+jest.mock("@/lib/supabase/client", () => ({
   createClient: jest.fn(() => ({
     auth: mockSupabaseAuth,
   })),
@@ -40,17 +40,17 @@ function MockSettings({ requiredRole }: { requiredRole?: string }) {
   React.useEffect(() => {
     // Simulate role check
     const checkAccess = async () => {
-      const response = await fetch('/api/auth/check-role', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/auth/check-role", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requiredRole }),
       });
-      
+
       if (response.ok) {
         setHasAccess(true);
       }
     };
-    
+
     checkAccess();
   }, [requiredRole]);
 
@@ -67,10 +67,10 @@ function MockSettings({ requiredRole }: { requiredRole?: string }) {
 }
 
 // Protected Route wrapper component
-function ProtectedRoute({ 
-  children, 
-  requiredRole 
-}: { 
+function ProtectedRoute({
+  children,
+  requiredRole,
+}: {
   children: React.ReactNode;
   requiredRole?: string;
 }) {
@@ -82,33 +82,35 @@ function ProtectedRoute({
   React.useEffect(() => {
     const checkAuth = async () => {
       try {
-        const { data: { session } } = await mockSupabaseAuth.getSession();
-        
+        const {
+          data: { session },
+        } = await mockSupabaseAuth.getSession();
+
         if (!session) {
           // Store intended destination
-          sessionStorage.setItem('redirectAfterLogin', pathname);
-          router.push('/login');
+          sessionStorage.setItem("redirectAfterLogin", pathname);
+          router.push("/login");
           return;
         }
 
         if (requiredRole) {
           // Check role-based access
-          const response = await fetch('/api/auth/check-role', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+          const response = await fetch("/api/auth/check-role", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ requiredRole }),
           });
-          
+
           if (!response.ok) {
-            router.push('/unauthorized');
+            router.push("/unauthorized");
             return;
           }
         }
 
         setHasAccess(true);
       } catch (error) {
-        console.error('Auth check failed:', error);
-        router.push('/login');
+        console.error("Auth check failed:", error);
+        router.push("/login");
       } finally {
         setIsChecking(false);
       }
@@ -130,26 +132,23 @@ function ProtectedRoute({
 
 // Auth handlers
 const authHandlers = [
-  http.post('/api/auth/check-role', async ({ request }) => {
-    const body = await request.json() as { requiredRole: string };
-    
+  http.post("/api/auth/check-role", async ({ request }) => {
+    const body = (await request.json()) as { requiredRole: string };
+
     // Get current session from mock
     const session = mockSupabaseAuth.getSession();
-    
+
     if (!session) {
-      return HttpResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Mock role checking
-    const userRole = 'user'; // Default role
-    
-    if (body.requiredRole === 'admin' && userRole !== 'admin') {
+    const userRole = "user"; // Default role
+
+    if (body.requiredRole === "admin" && userRole !== "admin") {
       return HttpResponse.json(
-        { error: 'Insufficient permissions' },
-        { status: 403 }
+        { error: "Insufficient permissions" },
+        { status: 403 },
       );
     }
 
@@ -157,7 +156,7 @@ const authHandlers = [
   }),
 ];
 
-describe('Protected Route Access Control', () => {
+describe("Protected Route Access Control", () => {
   const mockRouter = {
     push: jest.fn(),
     back: jest.fn(),
@@ -170,12 +169,12 @@ describe('Protected Route Access Control', () => {
 
   beforeEach(() => {
     (useRouter as jest.Mock).mockReturnValue(mockRouter);
-    (usePathname as jest.Mock).mockReturnValue('/dashboard');
+    (usePathname as jest.Mock).mockReturnValue("/dashboard");
     jest.clearAllMocks();
     sessionStorage.clear();
   });
 
-  it('should redirect unauthenticated users to login', async () => {
+  it("should redirect unauthenticated users to login", async () => {
     // Mock no session
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: null },
@@ -190,7 +189,7 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should show loading initially
@@ -198,23 +197,23 @@ describe('Protected Route Access Control', () => {
 
     // Should redirect to login
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/login');
+      expect(mockRouter.push).toHaveBeenCalledWith("/login");
     });
 
     // Should store intended destination
-    expect(sessionStorage.getItem('redirectAfterLogin')).toBe('/dashboard');
+    expect(sessionStorage.getItem("redirectAfterLogin")).toBe("/dashboard");
 
     // Protected content should not be visible
     expect(screen.queryByText(/protected content/i)).not.toBeInTheDocument();
   });
 
-  it('should allow authenticated users to access protected routes', async () => {
+  it("should allow authenticated users to access protected routes", async () => {
     // Mock authenticated session
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: {
         session: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          access_token: 'token',
+          user: { id: "user-123", email: "test@example.com" },
+          access_token: "token",
         },
       },
     });
@@ -224,12 +223,12 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Wait for auth check
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
     });
 
     // Should not redirect
@@ -239,17 +238,17 @@ describe('Protected Route Access Control', () => {
     expect(screen.getByText(/protected content/i)).toBeInTheDocument();
   });
 
-  it('should enforce role-based access control', async () => {
+  it("should enforce role-based access control", async () => {
     // Mock authenticated user without admin role
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: {
         session: {
-          user: { 
-            id: 'user-123', 
-            email: 'test@example.com',
-            user_metadata: { role: 'user' }
+          user: {
+            id: "user-123",
+            email: "test@example.com",
+            user_metadata: { role: "user" },
           },
-          access_token: 'token',
+          access_token: "token",
         },
       },
     });
@@ -259,54 +258,54 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute requiredRole="admin">
           <MockSettings requiredRole="admin" />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should redirect to unauthorized
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/unauthorized');
+      expect(mockRouter.push).toHaveBeenCalledWith("/unauthorized");
     });
 
     // Admin content should not be accessible
     expect(screen.queryByText(/admin only content/i)).not.toBeInTheDocument();
   });
 
-  it('should redirect to intended destination after login', async () => {
+  it("should redirect to intended destination after login", async () => {
     // Set intended destination
-    sessionStorage.setItem('redirectAfterLogin', '/dashboard/settings');
+    sessionStorage.setItem("redirectAfterLogin", "/dashboard/settings");
 
     // Mock successful authentication
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: {
         session: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          access_token: 'token',
+          user: { id: "user-123", email: "test@example.com" },
+          access_token: "token",
         },
       },
     });
 
     // Simulate login completion
     const loginComplete = () => {
-      const redirect = sessionStorage.getItem('redirectAfterLogin');
+      const redirect = sessionStorage.getItem("redirectAfterLogin");
       if (redirect) {
         mockRouter.push(redirect);
-        sessionStorage.removeItem('redirectAfterLogin');
+        sessionStorage.removeItem("redirectAfterLogin");
       }
     };
 
     loginComplete();
 
     // Should redirect to intended destination
-    expect(mockRouter.push).toHaveBeenCalledWith('/dashboard/settings');
-    expect(sessionStorage.getItem('redirectAfterLogin')).toBeNull();
+    expect(mockRouter.push).toHaveBeenCalledWith("/dashboard/settings");
+    expect(sessionStorage.getItem("redirectAfterLogin")).toBeNull();
   });
 
-  it('should handle auth check failures gracefully', async () => {
-    const consoleError = jest.spyOn(console, 'error').mockImplementation();
+  it("should handle auth check failures gracefully", async () => {
+    const consoleError = jest.spyOn(console, "error").mockImplementation();
 
     // Mock auth check failure
     mockSupabaseAuth.getSession.mockRejectedValueOnce(
-      new Error('Auth service unavailable')
+      new Error("Auth service unavailable"),
     );
 
     render(
@@ -314,30 +313,35 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should redirect to login on error
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/login');
+      expect(mockRouter.push).toHaveBeenCalledWith("/login");
     });
 
     consoleError.mockRestore();
   });
 
-  it('should show loading state during auth check', async () => {
+  it("should show loading state during auth check", async () => {
     // Delay auth response
-    mockSupabaseAuth.getSession.mockImplementation(() => 
-      new Promise(resolve => 
-        setTimeout(() => resolve({
-          data: {
-            session: {
-              user: { id: 'user-123', email: 'test@example.com' },
-              access_token: 'token',
-            },
-          },
-        }), 100)
-      )
+    mockSupabaseAuth.getSession.mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                data: {
+                  session: {
+                    user: { id: "user-123", email: "test@example.com" },
+                    access_token: "token",
+                  },
+                },
+              }),
+            100,
+          ),
+        ),
     );
 
     render(
@@ -345,7 +349,7 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should show loading state
@@ -357,16 +361,16 @@ describe('Protected Route Access Control', () => {
     });
 
     // Content should appear after loading
-    expect(screen.getByText('Dashboard')).toBeInTheDocument();
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
-  it('should handle nested protected routes', async () => {
+  it("should handle nested protected routes", async () => {
     // Mock authenticated session
     mockSupabaseAuth.getSession.mockResolvedValue({
       data: {
         session: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          access_token: 'token',
+          user: { id: "user-123", email: "test@example.com" },
+          access_token: "token",
         },
       },
     });
@@ -387,21 +391,22 @@ describe('Protected Route Access Control', () => {
     render(
       <AuthProvider>
         <NestedProtectedContent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Both parent and nested content should be accessible
     await waitFor(() => {
-      expect(screen.getByText('Parent Protected')).toBeInTheDocument();
+      expect(screen.getByText("Parent Protected")).toBeInTheDocument();
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Nested Protected Content')).toBeInTheDocument();
+      expect(screen.getByText("Nested Protected Content")).toBeInTheDocument();
     });
   });
 
-  it('should update access when auth state changes', async () => {
-    let authStateCallback: ((event: string, session: any) => void) | null = null;
+  it("should update access when auth state changes", async () => {
+    let authStateCallback: ((event: string, session: any) => void) | null =
+      null;
 
     // Start with no session
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
@@ -420,27 +425,27 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Initially should redirect
     await waitFor(() => {
-      expect(mockRouter.push).toHaveBeenCalledWith('/login');
+      expect(mockRouter.push).toHaveBeenCalledWith("/login");
     });
 
     // Simulate successful login
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: {
         session: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          access_token: 'token',
+          user: { id: "user-123", email: "test@example.com" },
+          access_token: "token",
         },
       },
     });
 
     if (authStateCallback) {
-      authStateCallback('SIGNED_IN', {
-        user: { id: 'user-123', email: 'test@example.com' },
+      authStateCallback("SIGNED_IN", {
+        user: { id: "user-123", email: "test@example.com" },
       });
     }
 
@@ -450,21 +455,21 @@ describe('Protected Route Access Control', () => {
         <ProtectedRoute>
           <MockDashboard />
         </ProtectedRoute>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Should now show protected content
     await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
     });
   });
 
-  it('should handle concurrent route protection checks', async () => {
+  it("should handle concurrent route protection checks", async () => {
     mockSupabaseAuth.getSession.mockResolvedValue({
       data: {
         session: {
-          user: { id: 'user-123', email: 'test@example.com' },
-          access_token: 'token',
+          user: { id: "user-123", email: "test@example.com" },
+          access_token: "token",
         },
       },
     });
@@ -483,14 +488,14 @@ describe('Protected Route Access Control', () => {
             <div>Route 3</div>
           </ProtectedRoute>
         </div>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // All routes should be accessible
     await waitFor(() => {
-      expect(screen.getByText('Route 1')).toBeInTheDocument();
-      expect(screen.getByText('Route 2')).toBeInTheDocument();
-      expect(screen.getByText('Route 3')).toBeInTheDocument();
+      expect(screen.getByText("Route 1")).toBeInTheDocument();
+      expect(screen.getByText("Route 2")).toBeInTheDocument();
+      expect(screen.getByText("Route 3")).toBeInTheDocument();
     });
 
     // Should only check session once (or minimal times)

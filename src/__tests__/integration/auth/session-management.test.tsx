@@ -1,12 +1,12 @@
-import React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { server } from '../setup';
-import { http, HttpResponse } from 'msw';
+import React from "react";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { server } from "../setup";
+import { http, HttpResponse } from "msw";
 
 // Mock next/navigation
-jest.mock('next/navigation', () => ({
+jest.mock("next/navigation", () => ({
   useRouter: jest.fn(() => ({
     push: jest.fn(),
     refresh: jest.fn(),
@@ -21,7 +21,7 @@ const mockSupabaseAuth = {
   signOut: jest.fn(),
 };
 
-jest.mock('@/lib/supabase/client', () => ({
+jest.mock("@/lib/supabase/client", () => ({
   createClient: jest.fn(() => ({
     auth: mockSupabaseAuth,
   })),
@@ -34,7 +34,7 @@ function SessionTestComponent() {
 
   React.useEffect(() => {
     // Check session info from localStorage/cookies
-    const storedSession = localStorage.getItem('session-info');
+    const storedSession = localStorage.getItem("session-info");
     if (storedSession) {
       setSessionInfo(JSON.parse(storedSession));
     }
@@ -47,7 +47,7 @@ function SessionTestComponent() {
       ) : user ? (
         <>
           <p>User: {user.email}</p>
-          <p>Session expires: {sessionInfo?.expiresAt || 'Unknown'}</p>
+          <p>Session expires: {sessionInfo?.expiresAt || "Unknown"}</p>
           <button onClick={refreshSession}>Refresh Session</button>
         </>
       ) : (
@@ -59,16 +59,16 @@ function SessionTestComponent() {
 
 // Session handlers
 const sessionHandlers = [
-  http.post('/api/auth/refresh', async () => {
+  http.post("/api/auth/refresh", async () => {
     // Simulate session refresh
     const newSession = {
-      access_token: 'new-access-token',
-      refresh_token: 'new-refresh-token',
+      access_token: "new-access-token",
+      refresh_token: "new-refresh-token",
       expires_in: 3600,
       expires_at: Date.now() + 3600000,
       user: {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
         updated_at: new Date().toISOString(),
       },
     };
@@ -76,37 +76,36 @@ const sessionHandlers = [
     return HttpResponse.json({ session: newSession });
   }),
 
-  http.get('/api/auth/session', () => {
+  http.get("/api/auth/session", () => {
     // Check if session is valid
-    const sessionExpiry = parseInt(localStorage.getItem('session-expiry') || '0');
-    
+    const sessionExpiry = parseInt(
+      localStorage.getItem("session-expiry") || "0",
+    );
+
     if (Date.now() > sessionExpiry) {
-      return HttpResponse.json(
-        { error: 'Session expired' },
-        { status: 401 }
-      );
+      return HttpResponse.json({ error: "Session expired" }, { status: 401 });
     }
 
     return HttpResponse.json({
       user: {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
       },
       expiresAt: sessionExpiry,
     });
   }),
 ];
 
-describe('Session Management and Persistence', () => {
+describe("Session Management and Persistence", () => {
   const mockSession = {
     user: {
-      id: 'user-123',
-      email: 'test@example.com',
+      id: "user-123",
+      email: "test@example.com",
       app_metadata: {},
       user_metadata: {},
     },
-    access_token: 'mock-access-token',
-    refresh_token: 'mock-refresh-token',
+    access_token: "mock-access-token",
+    refresh_token: "mock-refresh-token",
     expires_in: 3600,
     expires_at: Date.now() + 3600000,
   };
@@ -126,7 +125,7 @@ describe('Session Management and Persistence', () => {
     }));
   });
 
-  it('should persist session across page refreshes', async () => {
+  it("should persist session across page refreshes", async () => {
     // Initial render with session
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: mockSession },
@@ -135,7 +134,7 @@ describe('Session Management and Persistence', () => {
     const { unmount } = render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Wait for initial load
@@ -144,9 +143,12 @@ describe('Session Management and Persistence', () => {
     });
 
     // Store session info
-    localStorage.setItem('session-info', JSON.stringify({
-      expiresAt: new Date(mockSession.expires_at).toISOString(),
-    }));
+    localStorage.setItem(
+      "session-info",
+      JSON.stringify({
+        expiresAt: new Date(mockSession.expires_at).toISOString(),
+      }),
+    );
 
     // Unmount component (simulate page refresh)
     unmount();
@@ -159,7 +161,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Session should be restored
@@ -171,7 +173,7 @@ describe('Session Management and Persistence', () => {
     expect(screen.getByText(/session expires:/i)).toBeInTheDocument();
   });
 
-  it('should automatically refresh expiring sessions', async () => {
+  it("should automatically refresh expiring sessions", async () => {
     jest.useFakeTimers();
 
     // Session that expires in 5 minutes
@@ -188,7 +190,7 @@ describe('Session Management and Persistence', () => {
       data: {
         session: {
           ...mockSession,
-          access_token: 'refreshed-token',
+          access_token: "refreshed-token",
           expires_at: Date.now() + 3600000, // 1 hour
         },
       },
@@ -198,7 +200,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Initial session loaded
@@ -219,9 +221,9 @@ describe('Session Management and Persistence', () => {
     jest.useRealTimers();
   });
 
-  it('should handle session refresh failures', async () => {
+  it("should handle session refresh failures", async () => {
     const user = userEvent.setup();
-    const consoleError = jest.spyOn(console, 'error').mockImplementation();
+    const consoleError = jest.spyOn(console, "error").mockImplementation();
 
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: mockSession },
@@ -229,13 +231,13 @@ describe('Session Management and Persistence', () => {
 
     mockSupabaseAuth.refreshSession.mockResolvedValueOnce({
       data: { session: null },
-      error: { message: 'Refresh token expired' },
+      error: { message: "Refresh token expired" },
     });
 
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
@@ -243,22 +245,23 @@ describe('Session Management and Persistence', () => {
     });
 
     // Manually trigger refresh
-    await user.click(screen.getByRole('button', { name: /refresh session/i }));
+    await user.click(screen.getByRole("button", { name: /refresh session/i }));
 
     // Should handle error gracefully
     await waitFor(() => {
       expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('Error refreshing session'),
-        expect.any(Object)
+        expect.stringContaining("Error refreshing session"),
+        expect.any(Object),
       );
     });
 
     consoleError.mockRestore();
   });
 
-  it('should clear session on expiry', async () => {
+  it("should clear session on expiry", async () => {
     jest.useFakeTimers();
-    let authStateCallback: ((event: string, session: any) => void) | null = null;
+    let authStateCallback: ((event: string, session: any) => void) | null =
+      null;
 
     mockSupabaseAuth.onAuthStateChange.mockImplementation((callback) => {
       authStateCallback = callback;
@@ -280,7 +283,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Session active initially
@@ -295,7 +298,7 @@ describe('Session Management and Persistence', () => {
 
     // Simulate session expiry event
     if (authStateCallback) {
-      authStateCallback('TOKEN_REFRESHED', null);
+      authStateCallback("TOKEN_REFRESHED", null);
     }
 
     // Session should be cleared
@@ -306,7 +309,7 @@ describe('Session Management and Persistence', () => {
     jest.useRealTimers();
   });
 
-  it('should handle remember me functionality', async () => {
+  it("should handle remember me functionality", async () => {
     // Simulate "remember me" checked during login
     const rememberMeSession = {
       ...mockSession,
@@ -320,26 +323,31 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Set remember me flag
-    localStorage.setItem('remember-me', 'true');
-    localStorage.setItem('session-info', JSON.stringify({
-      expiresAt: new Date(rememberMeSession.expires_at).toISOString(),
-      remembered: true,
-    }));
+    localStorage.setItem("remember-me", "true");
+    localStorage.setItem(
+      "session-info",
+      JSON.stringify({
+        expiresAt: new Date(rememberMeSession.expires_at).toISOString(),
+        remembered: true,
+      }),
+    );
 
     await waitFor(() => {
       expect(screen.getByText(/user: test@example.com/i)).toBeInTheDocument();
     });
 
     // Verify extended session
-    const sessionInfo = JSON.parse(localStorage.getItem('session-info') || '{}');
+    const sessionInfo = JSON.parse(
+      localStorage.getItem("session-info") || "{}",
+    );
     expect(sessionInfo.remembered).toBe(true);
   });
 
-  it('should sync session across browser tabs', async () => {
+  it("should sync session across browser tabs", async () => {
     // Initial session in first tab
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: mockSession },
@@ -348,7 +356,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
@@ -356,8 +364,8 @@ describe('Session Management and Persistence', () => {
     });
 
     // Simulate storage event from another tab (logout)
-    const storageEvent = new StorageEvent('storage', {
-      key: 'auth-session',
+    const storageEvent = new StorageEvent("storage", {
+      key: "auth-session",
       oldValue: JSON.stringify(mockSession),
       newValue: null,
       storageArea: localStorage,
@@ -373,7 +381,7 @@ describe('Session Management and Persistence', () => {
     });
   });
 
-  it('should handle session renewal on activity', async () => {
+  it("should handle session renewal on activity", async () => {
     const user = userEvent.setup();
     jest.useFakeTimers();
 
@@ -397,7 +405,7 @@ describe('Session Management and Persistence', () => {
           <SessionTestComponent />
           <button>Interactive Element</button>
         </div>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
@@ -410,7 +418,9 @@ describe('Session Management and Persistence', () => {
     });
 
     // User interaction should trigger session check
-    await user.click(screen.getByRole('button', { name: /interactive element/i }));
+    await user.click(
+      screen.getByRole("button", { name: /interactive element/i }),
+    );
 
     // Session should be renewed if needed
     // This depends on implementation details
@@ -418,7 +428,7 @@ describe('Session Management and Persistence', () => {
     jest.useRealTimers();
   });
 
-  it('should handle offline session management', async () => {
+  it("should handle offline session management", async () => {
     // Start with active session
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: mockSession },
@@ -427,7 +437,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
@@ -436,7 +446,7 @@ describe('Session Management and Persistence', () => {
 
     // Simulate going offline
     act(() => {
-      window.dispatchEvent(new Event('offline'));
+      window.dispatchEvent(new Event("offline"));
     });
 
     // Session should remain cached while offline
@@ -444,7 +454,7 @@ describe('Session Management and Persistence', () => {
 
     // Simulate coming back online
     act(() => {
-      window.dispatchEvent(new Event('online'));
+      window.dispatchEvent(new Event("online"));
     });
 
     // Should verify session validity
@@ -453,7 +463,7 @@ describe('Session Management and Persistence', () => {
     });
   });
 
-  it('should implement session timeout warnings', async () => {
+  it("should implement session timeout warnings", async () => {
     jest.useFakeTimers();
 
     // Session expiring in 2 minutes
@@ -469,7 +479,7 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <SessionTestComponent />
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     await waitFor(() => {
@@ -483,9 +493,9 @@ describe('Session Management and Persistence', () => {
 
     // Should show warning (implementation specific)
     // This would typically show a modal or notification
-    const warningElement = screen.queryByText(/session.*expir/i) ||
-                          screen.queryByRole('alert');
-    
+    const warningElement =
+      screen.queryByText(/session.*expir/i) || screen.queryByRole("alert");
+
     // Note: Actual implementation may vary
     if (warningElement) {
       expect(warningElement).toBeInTheDocument();
@@ -494,12 +504,15 @@ describe('Session Management and Persistence', () => {
     jest.useRealTimers();
   });
 
-  it('should clean up session data on logout', async () => {
+  it("should clean up session data on logout", async () => {
     // Set up session with various stored data
-    localStorage.setItem('auth-token', 'mock-token');
-    localStorage.setItem('session-info', JSON.stringify({ expiresAt: Date.now() + 3600000 }));
-    localStorage.setItem('user-preferences', JSON.stringify({ theme: 'dark' }));
-    sessionStorage.setItem('temp-data', 'temporary');
+    localStorage.setItem("auth-token", "mock-token");
+    localStorage.setItem(
+      "session-info",
+      JSON.stringify({ expiresAt: Date.now() + 3600000 }),
+    );
+    localStorage.setItem("user-preferences", JSON.stringify({ theme: "dark" }));
+    sessionStorage.setItem("temp-data", "temporary");
 
     mockSupabaseAuth.getSession.mockResolvedValueOnce({
       data: { session: mockSession },
@@ -510,20 +523,20 @@ describe('Session Management and Persistence', () => {
     render(
       <AuthProvider>
         <button onClick={() => mockSupabaseAuth.signOut()}>Logout</button>
-      </AuthProvider>
+      </AuthProvider>,
     );
 
     // Trigger logout
-    await userEvent.click(screen.getByRole('button', { name: /logout/i }));
+    await userEvent.click(screen.getByRole("button", { name: /logout/i }));
 
     await waitFor(() => {
       expect(mockSupabaseAuth.signOut).toHaveBeenCalled();
     });
 
     // Auth-related storage should be cleared
-    expect(localStorage.getItem('auth-token')).toBeNull();
-    expect(localStorage.getItem('session-info')).toBeNull();
-    
+    expect(localStorage.getItem("auth-token")).toBeNull();
+    expect(localStorage.getItem("session-info")).toBeNull();
+
     // Non-auth data might be preserved (implementation specific)
     // expect(localStorage.getItem('user-preferences')).not.toBeNull();
   });

@@ -13,8 +13,16 @@ export interface Subscription {
   user_id: string;
   customer_id: string;
   stripe_subscription_id: string;
-  plan_id: 'free' | 'pro' | 'enterprise';
-  status: 'incomplete' | 'incomplete_expired' | 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' | 'paused';
+  plan_id: "free" | "pro" | "enterprise";
+  status:
+    | "incomplete"
+    | "incomplete_expired"
+    | "trialing"
+    | "active"
+    | "past_due"
+    | "canceled"
+    | "unpaid"
+    | "paused";
   current_period_start: string;
   current_period_end: string;
   cancel_at_period_end: boolean;
@@ -47,7 +55,7 @@ export interface Invoice {
   amount_paid: number;
   amount_due: number;
   currency: string;
-  status: 'draft' | 'open' | 'paid' | 'uncollectible' | 'void';
+  status: "draft" | "open" | "paid" | "uncollectible" | "void";
   hosted_invoice_url?: string;
   invoice_pdf?: string;
   period_start?: string;
@@ -73,7 +81,7 @@ export interface TicketTransaction {
   id: string;
   user_id: string;
   ticket_id: string;
-  type: 'purchase' | 'consumption' | 'refund';
+  type: "purchase" | "consumption" | "refund";
   amount: number;
   description?: string;
   stripe_payment_intent_id?: string;
@@ -136,7 +144,7 @@ export interface BillingDashboardData {
 
 // Subscription management
 export interface SubscriptionUpdateRequest {
-  planId: 'pro' | 'enterprise';
+  planId: "pro" | "enterprise";
   paymentMethodId?: string;
 }
 
@@ -157,15 +165,19 @@ export interface StripeWebhookEvent {
 
 // Feature usage tracking
 export interface FeatureUsage {
-  feature: 'ai_suggestion' | 'translation' | 'collaboration' | 'api_call';
+  feature: "ai_suggestion" | "translation" | "collaboration" | "api_call";
   userId: string;
   metadata?: Record<string, unknown>;
 }
 
 // Billing alerts
 export interface BillingAlert {
-  type: 'payment_failed' | 'subscription_canceled' | 'trial_ending' | 'low_tickets';
+  type:
+    | "payment_failed"
+    | "subscription_canceled"
+    | "trial_ending"
+    | "low_tickets";
   message: string;
-  severity: 'info' | 'warning' | 'error';
+  severity: "info" | "warning" | "error";
   actionRequired: boolean;
 }

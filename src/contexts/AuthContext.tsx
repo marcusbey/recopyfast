@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { User } from '@supabase/supabase-js';
-import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
+import { createContext, useContext, useEffect, useState } from "react";
+import { User } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
 
 interface AuthContextType {
   user: User | null;
@@ -25,10 +25,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Check active sessions and sets the user
     const checkUser = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         setUser(session?.user ?? null);
       } catch (error) {
-        console.error('Error checking user session:', error);
+        console.error("Error checking user session:", error);
       } finally {
         setLoading(false);
       }
@@ -37,7 +39,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     checkUser();
 
     // Listen for changes on auth state (logged in, signed out, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       setLoading(false);
     });
@@ -52,14 +56,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
-            source: 'magic-link'
-          }
-        }
+            source: "magic-link",
+          },
+        },
       });
 
       if (error) throw error;
     } catch (error: any) {
-      throw new Error(error.message || 'An error occurred while sending magic link');
+      throw new Error(
+        error.message || "An error occurred while sending magic link",
+      );
     }
   };
 
@@ -67,30 +73,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      router.push('/');
+      router.push("/");
     } catch (error: any) {
-      throw new Error(error.message || 'An error occurred during sign out');
+      throw new Error(error.message || "An error occurred during sign out");
     }
   };
 
   const refreshSession = async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.refreshSession();
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.refreshSession();
       if (error) throw error;
       setUser(session?.user ?? null);
     } catch (error: any) {
-      console.error('Error refreshing session:', error);
+      console.error("Error refreshing session:", error);
     }
   };
 
   return (
-    <AuthContext.Provider value={{
-      user,
-      loading,
-      signInWithMagicLink,
-      signOut,
-      refreshSession,
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        signInWithMagicLink,
+        signOut,
+        refreshSession,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -99,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }

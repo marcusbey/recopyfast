@@ -1,9 +1,9 @@
-import { NextRequest } from 'next/server';
-import { GET } from '@/app/api/auth/session/route';
-import { createClient } from '@/lib/supabase/server';
+import { NextRequest } from "next/server";
+import { GET } from "@/app/api/auth/session/route";
+import { createClient } from "@/lib/supabase/server";
 
 // Mock dependencies
-jest.mock('@/lib/supabase/server');
+jest.mock("@/lib/supabase/server");
 
 const mockSupabaseAuth = {
   getUser: jest.fn(),
@@ -15,25 +15,29 @@ const mockSupabase = {
   auth: mockSupabaseAuth,
 };
 
-const mockCreateClient = createClient as jest.MockedFunction<typeof createClient>;
+const mockCreateClient = createClient as jest.MockedFunction<
+  typeof createClient
+>;
 
-describe('/api/auth/session - GET', () => {
+describe("/api/auth/session - GET", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockCreateClient.mockResolvedValue(mockSupabase as ReturnType<typeof createClient>);
+    mockCreateClient.mockResolvedValue(
+      mockSupabase as ReturnType<typeof createClient>,
+    );
   });
 
-  describe('Successful session retrieval', () => {
-    it('should return user data for authenticated session', async () => {
+  describe("Successful session retrieval", () => {
+    it("should return user data for authenticated session", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
-        email_confirmed_at: '2024-01-01T00:00:00Z',
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
+        id: "user-123",
+        email: "test@example.com",
+        email_confirmed_at: "2024-01-01T00:00:00Z",
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
         user_metadata: {
-          name: 'Test User',
-          avatar_url: 'https://example.com/avatar.jpg',
+          name: "Test User",
+          avatar_url: "https://example.com/avatar.jpg",
         },
       };
 
@@ -42,10 +46,10 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Authorization': 'Bearer valid-token',
+          Authorization: "Bearer valid-token",
         },
       });
 
@@ -59,10 +63,10 @@ describe('/api/auth/session - GET', () => {
       expect(mockSupabaseAuth.getUser).toHaveBeenCalled();
     });
 
-    it('should handle session check without Authorization header', async () => {
+    it("should handle session check without Authorization header", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
       };
 
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
@@ -70,8 +74,8 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -83,27 +87,27 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should return user with full metadata', async () => {
+    it("should return user with full metadata", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
-        email_confirmed_at: '2024-01-01T00:00:00Z',
-        phone: '+1234567890',
-        phone_confirmed_at: '2024-01-01T00:00:00Z',
-        confirmed_at: '2024-01-01T00:00:00Z',
-        last_sign_in_at: '2024-01-02T00:00:00Z',
-        role: 'authenticated',
+        id: "user-123",
+        email: "test@example.com",
+        email_confirmed_at: "2024-01-01T00:00:00Z",
+        phone: "+1234567890",
+        phone_confirmed_at: "2024-01-01T00:00:00Z",
+        confirmed_at: "2024-01-01T00:00:00Z",
+        last_sign_in_at: "2024-01-02T00:00:00Z",
+        role: "authenticated",
         user_metadata: {
-          name: 'Test User',
-          avatar_url: 'https://example.com/avatar.jpg',
+          name: "Test User",
+          avatar_url: "https://example.com/avatar.jpg",
           preferences: {
-            theme: 'dark',
-            language: 'en',
+            theme: "dark",
+            language: "en",
           },
         },
         app_metadata: {
-          provider: 'email',
-          providers: ['email'],
+          provider: "email",
+          providers: ["email"],
         },
       };
 
@@ -112,8 +116,8 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -126,15 +130,15 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('No session scenarios', () => {
-    it('should return null user when no session exists', async () => {
+  describe("No session scenarios", () => {
+    it("should return null user when no session exists", async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -146,14 +150,14 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should return null user when session is expired', async () => {
+    it("should return null user when session is expired", async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
-        error: { message: 'Session expired' },
+        error: { message: "Session expired" },
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -165,16 +169,16 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should return null user for invalid token', async () => {
+    it("should return null user for invalid token", async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
-        error: { message: 'Invalid token' },
+        error: { message: "Invalid token" },
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Authorization': 'Bearer invalid-token',
+          Authorization: "Bearer invalid-token",
         },
       });
 
@@ -188,30 +192,14 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('Error handling scenarios', () => {
-    it('should return 500 when Supabase client creation fails', async () => {
-      mockCreateClient.mockRejectedValueOnce(new Error('Supabase connection failed'));
-
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
-      });
-
-      const response = await GET(request);
-      const data = await response.json();
-
-      expect(response.status).toBe(500);
-      expect(data).toEqual({
-        error: 'Internal server error',
-      });
-    });
-
-    it('should return 500 for unexpected errors', async () => {
-      mockSupabaseAuth.getUser.mockRejectedValueOnce(
-        new Error('Unexpected database error')
+  describe("Error handling scenarios", () => {
+    it("should return 500 when Supabase client creation fails", async () => {
+      mockCreateClient.mockRejectedValueOnce(
+        new Error("Supabase connection failed"),
       );
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -219,18 +207,36 @@ describe('/api/auth/session - GET', () => {
 
       expect(response.status).toBe(500);
       expect(data).toEqual({
-        error: 'Internal server error',
+        error: "Internal server error",
       });
     });
 
-    it('should handle when getUser returns unexpected format', async () => {
+    it("should return 500 for unexpected errors", async () => {
+      mockSupabaseAuth.getUser.mockRejectedValueOnce(
+        new Error("Unexpected database error"),
+      );
+
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
+      });
+
+      const response = await GET(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data).toEqual({
+        error: "Internal server error",
+      });
+    });
+
+    it("should handle when getUser returns unexpected format", async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: null as unknown as { user: null },
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -238,17 +244,17 @@ describe('/api/auth/session - GET', () => {
 
       expect(response.status).toBe(500);
       expect(data).toEqual({
-        error: 'Internal server error',
+        error: "Internal server error",
       });
     });
   });
 
-  describe('Security scenarios', () => {
-    it('should not leak sensitive information in errors', async () => {
+  describe("Security scenarios", () => {
+    it("should not leak sensitive information in errors", async () => {
       const sensitiveErrors = [
-        { message: 'Database connection string: postgresql://...' },
-        { message: 'API key: sk_test_...' },
-        { message: 'Internal server configuration: {...}' },
+        { message: "Database connection string: postgresql://..." },
+        { message: "API key: sk_test_..." },
+        { message: "Internal server configuration: {...}" },
       ];
 
       for (const error of sensitiveErrors) {
@@ -257,8 +263,8 @@ describe('/api/auth/session - GET', () => {
           error,
         });
 
-        const request = new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
+        const request = new NextRequest("http://localhost/api/auth/session", {
+          method: "GET",
         });
 
         const response = await GET(request);
@@ -272,14 +278,14 @@ describe('/api/auth/session - GET', () => {
       }
     });
 
-    it('should handle various authorization header formats', async () => {
+    it("should handle various authorization header formats", async () => {
       const authHeaders = [
-        'Bearer valid-token',
-        'bearer VALID-TOKEN', // lowercase bearer
-        'Token abc123', // Different scheme
-        'Basic dXNlcjpwYXNz', // Basic auth
-        'Bearer ', // Empty token
-        'InvalidFormat', // No scheme
+        "Bearer valid-token",
+        "bearer VALID-TOKEN", // lowercase bearer
+        "Token abc123", // Different scheme
+        "Basic dXNlcjpwYXNz", // Basic auth
+        "Bearer ", // Empty token
+        "InvalidFormat", // No scheme
       ];
 
       for (const authHeader of authHeaders) {
@@ -288,10 +294,10 @@ describe('/api/auth/session - GET', () => {
           error: null,
         });
 
-        const request = new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
+        const request = new NextRequest("http://localhost/api/auth/session", {
+          method: "GET",
           headers: {
-            'Authorization': authHeader,
+            Authorization: authHeader,
           },
         });
 
@@ -300,26 +306,26 @@ describe('/api/auth/session - GET', () => {
       }
     });
 
-    it('should handle JWT token manipulation attempts', async () => {
+    it("should handle JWT token manipulation attempts", async () => {
       const manipulatedTokens = [
-        'Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake',
-        'Bearer malformed.jwt.token',
-        'Bearer ../../../etc/passwd',
-        'Bearer null',
-        'Bearer undefined',
+        "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake",
+        "Bearer malformed.jwt.token",
+        "Bearer ../../../etc/passwd",
+        "Bearer null",
+        "Bearer undefined",
         'Bearer <script>alert("XSS")</script>',
       ];
 
       for (const token of manipulatedTokens) {
         mockSupabaseAuth.getUser.mockResolvedValueOnce({
           data: { user: null },
-          error: { message: 'Invalid token' },
+          error: { message: "Invalid token" },
         });
 
-        const request = new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
+        const request = new NextRequest("http://localhost/api/auth/session", {
+          method: "GET",
           headers: {
-            'Authorization': token,
+            Authorization: token,
           },
         });
 
@@ -334,11 +340,11 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('Session refresh scenarios', () => {
-    it('should handle concurrent session checks', async () => {
+  describe("Session refresh scenarios", () => {
+    it("should handle concurrent session checks", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
       };
 
       mockSupabaseAuth.getUser.mockResolvedValue({
@@ -346,36 +352,39 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const requests = Array(10).fill(null).map(() =>
-        new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer valid-token',
-          },
-        })
-      );
+      const requests = Array(10)
+        .fill(null)
+        .map(
+          () =>
+            new NextRequest("http://localhost/api/auth/session", {
+              method: "GET",
+              headers: {
+                Authorization: "Bearer valid-token",
+              },
+            }),
+        );
 
       const responses = await Promise.all(
-        requests.map(request => GET(request))
+        requests.map((request) => GET(request)),
       );
 
-      responses.forEach(response => {
+      responses.forEach((response) => {
         expect(response.status).toBe(200);
       });
       expect(mockSupabaseAuth.getUser).toHaveBeenCalledTimes(10);
     });
 
-    it('should handle session check during token refresh', async () => {
+    it("should handle session check during token refresh", async () => {
       // First call returns expired error
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
-        error: { message: 'Token expired' },
+        error: { message: "Token expired" },
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Authorization': 'Bearer expired-token',
+          Authorization: "Bearer expired-token",
         },
       });
 
@@ -389,19 +398,19 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('Edge cases', () => {
-    it('should handle extremely long tokens', async () => {
-      const longToken = 'Bearer ' + 'a'.repeat(10000);
+  describe("Edge cases", () => {
+    it("should handle extremely long tokens", async () => {
+      const longToken = "Bearer " + "a".repeat(10000);
 
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
-        error: { message: 'Invalid token' },
+        error: { message: "Invalid token" },
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Authorization': longToken,
+          Authorization: longToken,
         },
       });
 
@@ -414,10 +423,10 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should handle session check with custom headers', async () => {
+    it("should handle session check with custom headers", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
       };
 
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
@@ -425,12 +434,12 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'X-Custom-Header': 'custom-value',
-          'X-Request-ID': '12345',
-          'User-Agent': 'Custom-Agent/1.0',
+          "X-Custom-Header": "custom-value",
+          "X-Request-ID": "12345",
+          "User-Agent": "Custom-Agent/1.0",
         },
       });
 
@@ -438,12 +447,12 @@ describe('/api/auth/session - GET', () => {
       expect(response.status).toBe(200);
     });
 
-    it('should handle session check from different origins', async () => {
+    it("should handle session check from different origins", async () => {
       const origins = [
-        'http://localhost:3000',
-        'https://example.com',
-        'https://app.recopyfast.com',
-        'null',
+        "http://localhost:3000",
+        "https://example.com",
+        "https://app.recopyfast.com",
+        "null",
       ];
 
       for (const origin of origins) {
@@ -452,10 +461,10 @@ describe('/api/auth/session - GET', () => {
           error: null,
         });
 
-        const request = new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
+        const request = new NextRequest("http://localhost/api/auth/session", {
+          method: "GET",
           headers: {
-            'Origin': origin,
+            Origin: origin,
           },
         });
 
@@ -464,10 +473,10 @@ describe('/api/auth/session - GET', () => {
       }
     });
 
-    it('should handle user with special characters in email', async () => {
+    it("should handle user with special characters in email", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test+special@example.com',
+        id: "user-123",
+        email: "test+special@example.com",
       };
 
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
@@ -475,8 +484,8 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -488,14 +497,14 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should handle user with unicode characters in metadata', async () => {
+    it("should handle user with unicode characters in metadata", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
         user_metadata: {
-          name: '山田太郎',
-          bio: 'Hello 👋 World 🌍',
-          company: 'Société Française',
+          name: "山田太郎",
+          bio: "Hello 👋 World 🌍",
+          company: "Société Française",
         },
       };
 
@@ -504,8 +513,8 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const response = await GET(request);
@@ -518,19 +527,19 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('Performance scenarios', () => {
-    it('should handle slow Supabase responses', async () => {
+  describe("Performance scenarios", () => {
+    it("should handle slow Supabase responses", async () => {
       mockSupabaseAuth.getUser.mockImplementationOnce(async () => {
         // Simulate slow response
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         return {
-          data: { user: { id: 'user-123', email: 'test@example.com' } },
+          data: { user: { id: "user-123", email: "test@example.com" } },
           error: null,
         };
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
       });
 
       const startTime = Date.now();
@@ -541,23 +550,27 @@ describe('/api/auth/session - GET', () => {
       expect(endTime - startTime).toBeGreaterThanOrEqual(100);
     });
 
-    it('should handle rapid successive session checks', async () => {
+    it("should handle rapid successive session checks", async () => {
       mockSupabaseAuth.getUser.mockResolvedValue({
-        data: { user: { id: 'user-123', email: 'test@example.com' } },
+        data: { user: { id: "user-123", email: "test@example.com" } },
         error: null,
       });
 
       const startTime = Date.now();
-      const requests = Array(20).fill(null).map(() =>
-        GET(new NextRequest('http://localhost/api/auth/session', {
-          method: 'GET',
-        }))
-      );
+      const requests = Array(20)
+        .fill(null)
+        .map(() =>
+          GET(
+            new NextRequest("http://localhost/api/auth/session", {
+              method: "GET",
+            }),
+          ),
+        );
 
       const responses = await Promise.all(requests);
       const endTime = Date.now();
 
-      responses.forEach(response => {
+      responses.forEach((response) => {
         expect(response.status).toBe(200);
       });
 
@@ -566,11 +579,11 @@ describe('/api/auth/session - GET', () => {
     });
   });
 
-  describe('Cookie handling', () => {
-    it('should handle session check with cookies', async () => {
+  describe("Cookie handling", () => {
+    it("should handle session check with cookies", async () => {
       const mockUser = {
-        id: 'user-123',
-        email: 'test@example.com',
+        id: "user-123",
+        email: "test@example.com",
       };
 
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
@@ -578,10 +591,10 @@ describe('/api/auth/session - GET', () => {
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Cookie': 'sb-access-token=valid-token; sb-refresh-token=refresh-token',
+          Cookie: "sb-access-token=valid-token; sb-refresh-token=refresh-token",
         },
       });
 
@@ -594,16 +607,16 @@ describe('/api/auth/session - GET', () => {
       });
     });
 
-    it('should handle malformed cookies', async () => {
+    it("should handle malformed cookies", async () => {
       mockSupabaseAuth.getUser.mockResolvedValueOnce({
         data: { user: null },
         error: null,
       });
 
-      const request = new NextRequest('http://localhost/api/auth/session', {
-        method: 'GET',
+      const request = new NextRequest("http://localhost/api/auth/session", {
+        method: "GET",
         headers: {
-          'Cookie': 'invalid-cookie-format;;;===',
+          Cookie: "invalid-cookie-format;;;===",
         },
       });
 
