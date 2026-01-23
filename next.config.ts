@@ -6,7 +6,10 @@ const nextConfig: NextConfig = {
   experimental: {
     // instrumentationHook is enabled by default in Next.js 15
   },
-  
+
+  // Turbopack configuration (required in Next.js 16 when webpack config is present)
+  turbopack: {},
+
   // Configure webpack for Node.js compatibility
   webpack: (config, { isServer }) => {
     // Handle Node.js modules that don't work in browser
