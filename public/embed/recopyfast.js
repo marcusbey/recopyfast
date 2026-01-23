@@ -1,13 +1,17 @@
 (function() {
   'use strict';
-  
+
   // Configuration
   const RECOPYFAST_API = window.RECOPYFAST_API || 'http://localhost:3000/api';
   const RECOPYFAST_WS = window.RECOPYFAST_WS || 'http://localhost:3001';
   const SITE_ID = document.currentScript.getAttribute('data-site-id');
   const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
-  const EDIT_MODE = document.currentScript.getAttribute('data-edit-mode') === 'true';
-  
+
+  // Staging mode detection from URL parameters
+  const urlParams = new URLSearchParams(window.location.search);
+  const STAGING_MODE = urlParams.get('rcf_staging') === '1';
+  const STAGING_TOKEN = urlParams.get('rcf_token');
+
   if (!SITE_ID) {
     console.error('ReCopyFast: No site ID provided');
     return;
@@ -18,34 +22,957 @@
     return;
   }
 
+  // Helper to safely escape HTML for display
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   class ReCopyFast {
     constructor() {
       this.elements = new Map();
       this.socket = null;
       this.observer = null;
       this.isInitialized = false;
-      this.editMode = EDIT_MODE;
       this.selectedElement = null;
-      
+
+      // Staging mode properties
+      this.stagingMode = STAGING_MODE;
+      this.stagingToken = STAGING_TOKEN;
+      this.stagingAccess = null;
+      this.editMode = false;
+
       this.init();
     }
-    
+
     async init() {
       try {
         await this.waitForDOM();
+
+        if (this.stagingMode && this.stagingToken) {
+          await this.initStagingMode();
+        } else {
+          this.editMode = false;
+        }
+
         this.scanForContent();
         await this.establishConnection();
         this.setupMutationObserver();
-        this.setupEditMode();
+
+        if (this.editMode) {
+          this.setupEditMode();
+        }
+
         this.isInitialized = true;
-        console.log('ReCopyFast initialized successfully');
+        console.log('ReCopyFast initialized (' + (this.stagingMode ? 'staging' : 'live') + ' mode)');
       } catch (error) {
         console.error('ReCopyFast initialization error:', error);
       }
     }
-    
-    waitForDOM() {
+
+    async initStagingMode() {
+      try {
+        // Demo mode: tokens starting with "test_" enable immediate edit access
+        // This allows testing without database validation
+        const isDemoToken = this.stagingToken && this.stagingToken.startsWith('test_');
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+        if (isDemoToken && isLocalhost) {
+          console.log('ReCopyFast: Demo mode enabled (test token on localhost)');
+          this.stagingAccess = {
+            verified: true,
+            email: 'demo@recopyfast.local',
+            permissions: ['view', 'edit', 'publish', 'admin'],
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24h
+          };
+          this.editMode = true;
+          this.showStagingBanner();
+          return;
+        }
+
+        const response = await fetch(RECOPYFAST_API + '/staging/validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: this.stagingToken,
+            siteId: SITE_ID
+          })
+        });
+
+        const result = await response.json();
+
+        if (!result.valid) {
+          this.showStagingError('Invalid or expired staging link.');
+          return;
+        }
+
+        if (result.requiresEmail) {
+          await this.showEmailCaptureUI();
+          return;
+        }
+
+        if (result.requiresVerification) {
+          await this.showVerificationUI(result.email);
+          return;
+        }
+
+        this.stagingAccess = {
+          verified: true,
+          email: result.email,
+          permissions: result.permissions,
+          expiresAt: result.expiresAt
+        };
+
+        const canEdit = result.permissions.includes('edit') ||
+                       result.permissions.includes('publish') ||
+                       result.permissions.includes('admin');
+
+        this.editMode = canEdit;
+        this.showStagingBanner();
+
+      } catch (error) {
+        console.error('Staging validation error:', error);
+        this.showStagingError('Failed to validate staging access.');
+      }
+    }
+
+    showEmailCaptureUI() {
       return new Promise((resolve) => {
+        const overlay = this.createOverlay();
+        const modal = document.createElement('div');
+        modal.className = 'rcf-modal';
+
+        // Build modal using DOM methods for security
+        const iconContainer = document.createElement('div');
+        iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
+
+        const icon = document.createElement('div');
+        icon.className = 'rcf-modal-icon';
+        icon.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)';
+        icon.style.border = '1px solid rgba(59, 130, 246, 0.3)';
+        icon.textContent = '🔐';
+
+        const title = document.createElement('h2');
+        title.className = 'rcf-modal-title';
+        title.textContent = 'Staging Access';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'rcf-modal-subtitle';
+        subtitle.textContent = 'Enter your email to access the staging environment';
+
+        iconContainer.appendChild(icon);
+        iconContainer.appendChild(title);
+        iconContainer.appendChild(subtitle);
+
+        const formContainer = document.createElement('div');
+        formContainer.style.cssText = 'margin-bottom: 24px;';
+
+        const label = document.createElement('label');
+        label.className = 'rcf-modal-label';
+        label.textContent = 'Email Address';
+
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.id = 'rcf-email-input';
+        emailInput.className = 'rcf-modal-input';
+        emailInput.placeholder = 'your@email.com';
+
+        const errorEl = document.createElement('p');
+        errorEl.id = 'rcf-email-error';
+        errorEl.className = 'rcf-modal-error';
+
+        formContainer.appendChild(label);
+        formContainer.appendChild(emailInput);
+        formContainer.appendChild(errorEl);
+
+        const submitBtn = document.createElement('button');
+        submitBtn.id = 'rcf-email-submit';
+        submitBtn.className = 'rcf-modal-btn rcf-modal-btn-primary';
+        const btnText = document.createElement('span');
+        btnText.textContent = 'Continue';
+        const btnArrow = document.createElement('span');
+        btnArrow.textContent = '→';
+        submitBtn.appendChild(btnText);
+        submitBtn.appendChild(btnArrow);
+
+        modal.appendChild(iconContainer);
+        modal.appendChild(formContainer);
+        modal.appendChild(submitBtn);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        emailInput.focus();
+
+        const submit = async () => {
+          const email = emailInput.value.trim();
+
+          if (!email || !email.includes('@')) {
+            errorEl.textContent = 'Please enter a valid email address';
+            errorEl.style.display = 'block';
+            return;
+          }
+
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span>Sending code...</span>';
+
+          try {
+            const response = await fetch(RECOPYFAST_API + '/staging/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: this.stagingToken,
+                email: email,
+                action: 'capture'
+              })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              document.body.removeChild(overlay);
+              await this.showVerificationUI(email);
+              resolve();
+            } else {
+              errorEl.textContent = result.error || 'Failed to send verification code';
+              errorEl.style.display = 'block';
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
+            }
+          } catch (error) {
+            errorEl.textContent = 'Network error. Please try again.';
+            errorEl.style.display = 'block';
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
+          }
+        };
+
+        submitBtn.onclick = submit;
+        emailInput.onkeydown = function(e) {
+          if (e.key === 'Enter') submit();
+        };
+      });
+    }
+
+    showVerificationUI(email) {
+      const self = this;
+      return new Promise((resolve) => {
+        const overlay = this.createOverlay();
+        const modal = document.createElement('div');
+        modal.className = 'rcf-modal';
+
+        const iconContainer = document.createElement('div');
+        iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
+
+        const icon = document.createElement('div');
+        icon.className = 'rcf-modal-icon';
+        icon.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)';
+        icon.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+        icon.textContent = '📧';
+
+        const title = document.createElement('h2');
+        title.className = 'rcf-modal-title';
+        title.textContent = 'Check Your Email';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'rcf-modal-subtitle';
+        const emailSpan = document.createElement('strong');
+        emailSpan.style.color = '#10b981';
+        emailSpan.textContent = email;
+        subtitle.appendChild(document.createTextNode('We sent a 6-digit code to '));
+        subtitle.appendChild(emailSpan);
+
+        iconContainer.appendChild(icon);
+        iconContainer.appendChild(title);
+        iconContainer.appendChild(subtitle);
+
+        const formContainer = document.createElement('div');
+        formContainer.style.cssText = 'margin-bottom: 24px;';
+
+        const label = document.createElement('label');
+        label.className = 'rcf-modal-label';
+        label.textContent = 'Verification Code';
+
+        const codeInput = document.createElement('input');
+        codeInput.type = 'text';
+        codeInput.id = 'rcf-code-input';
+        codeInput.className = 'rcf-code-input';
+        codeInput.placeholder = '000000';
+        codeInput.maxLength = 6;
+
+        const errorEl = document.createElement('p');
+        errorEl.id = 'rcf-code-error';
+        errorEl.className = 'rcf-modal-error';
+
+        formContainer.appendChild(label);
+        formContainer.appendChild(codeInput);
+        formContainer.appendChild(errorEl);
+
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
+        submitBtn.style.marginBottom = '12px';
+        submitBtn.innerHTML = '<span>Verify & Continue</span>';
+
+        const resendBtn = document.createElement('button');
+        resendBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
+        resendBtn.innerHTML = '<span>Resend Code</span>';
+
+        modal.appendChild(iconContainer);
+        modal.appendChild(formContainer);
+        modal.appendChild(submitBtn);
+        modal.appendChild(resendBtn);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        codeInput.focus();
+
+        codeInput.oninput = function() {
+          codeInput.value = codeInput.value.replace(/[^0-9]/g, '').slice(0, 6);
+        };
+
+        const submit = async () => {
+          const code = codeInput.value.trim();
+
+          if (code.length !== 6) {
+            errorEl.textContent = 'Please enter the 6-digit code';
+            errorEl.style.display = 'block';
+            return;
+          }
+
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span>Verifying...</span>';
+
+          try {
+            const response = await fetch(RECOPYFAST_API + '/staging/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: self.stagingToken,
+                code: code,
+                action: 'verify'
+              })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.verified) {
+              self.stagingAccess = {
+                verified: true,
+                email: result.email,
+                permissions: result.permissions,
+                expiresAt: result.expiresAt
+              };
+
+              const canEdit = result.permissions.includes('edit') ||
+                             result.permissions.includes('publish') ||
+                             result.permissions.includes('admin');
+
+              self.editMode = canEdit;
+
+              document.body.removeChild(overlay);
+              self.showStagingBanner();
+
+              if (self.editMode) {
+                self.setupEditMode();
+                self.elements.forEach(function(data) {
+                  data.element.classList.add('rcf-editable');
+                });
+              }
+
+              resolve();
+            } else {
+              errorEl.textContent = result.error || 'Invalid verification code';
+              errorEl.style.display = 'block';
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = '<span>Verify & Continue</span>';
+            }
+          } catch (error) {
+            errorEl.textContent = 'Network error. Please try again.';
+            errorEl.style.display = 'block';
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = '<span>Verify & Continue</span>';
+          }
+        };
+
+        resendBtn.onclick = async function() {
+          resendBtn.disabled = true;
+          resendBtn.innerHTML = '<span>Sending...</span>';
+
+          try {
+            const response = await fetch(RECOPYFAST_API + '/staging/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                token: self.stagingToken,
+                action: 'resend'
+              })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              resendBtn.innerHTML = '<span>✓ Code Sent!</span>';
+              setTimeout(function() {
+                resendBtn.innerHTML = '<span>Resend Code</span>';
+                resendBtn.disabled = false;
+              }, 3000);
+            } else {
+              resendBtn.innerHTML = '<span>Failed - Try Again</span>';
+              resendBtn.disabled = false;
+            }
+          } catch (e) {
+            resendBtn.innerHTML = '<span>Failed - Try Again</span>';
+            resendBtn.disabled = false;
+          }
+        };
+
+        submitBtn.onclick = submit;
+        codeInput.onkeydown = function(e) {
+          if (e.key === 'Enter') submit();
+        };
+      });
+    }
+
+    showStagingBanner() {
+      if (!this.stagingAccess) return;
+
+      const self = this;
+
+      // Inject banner-specific styles
+      if (!document.querySelector('#rcf-banner-styles')) {
+        const style = document.createElement('style');
+        style.id = 'rcf-banner-styles';
+        style.textContent = `
+          @keyframes rcf-pulse-ring {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.8); opacity: 0; }
+          }
+          @keyframes rcf-shimmer {
+            0% { background-position: -200% center; }
+            100% { background-position: 200% center; }
+          }
+          .rcf-banner-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            font-size: 13px;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            outline: none;
+          }
+          .rcf-banner-btn:hover {
+            transform: translateY(-1px);
+          }
+          .rcf-banner-btn:active {
+            transform: scale(0.98);
+          }
+          .rcf-banner-btn-ghost {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            color: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+          }
+          .rcf-banner-btn-ghost:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.25);
+          }
+          .rcf-banner-btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+          }
+          .rcf-banner-btn-success:hover {
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+          }
+          .rcf-status-dot {
+            position: relative;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #f97316;
+            box-shadow: 0 0 12px rgba(249, 115, 22, 0.6);
+          }
+          .rcf-status-dot::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: #f97316;
+            animation: rcf-pulse-ring 2s ease-out infinite;
+          }
+          .rcf-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 9999px;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+          }
+          .rcf-pill strong {
+            color: white;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      const banner = document.createElement('div');
+      banner.id = 'rcf-staging-banner';
+      banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); color: white; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; z-index: 99999; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.08);';
+
+      const permissions = this.stagingAccess.permissions || [];
+      const permText = permissions.map(function(p) { return p.charAt(0).toUpperCase() + p.slice(1); }).join(', ');
+      const expiresAt = this.stagingAccess.expiresAt
+        ? new Date(this.stagingAccess.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : '--';
+
+      const infoDiv = document.createElement('div');
+      infoDiv.style.cssText = 'display: flex; align-items: center; gap: 16px;';
+
+      // Status indicator with pulse
+      const statusContainer = document.createElement('div');
+      statusContainer.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+
+      const statusDot = document.createElement('span');
+      statusDot.className = 'rcf-status-dot';
+
+      const modeLabel = document.createElement('span');
+      modeLabel.style.cssText = 'font-weight: 600; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; color: #f97316;';
+      modeLabel.textContent = 'STAGING';
+
+      statusContainer.appendChild(statusDot);
+      statusContainer.appendChild(modeLabel);
+
+      // User info pill
+      const userPill = document.createElement('span');
+      userPill.className = 'rcf-pill';
+      const userIcon = document.createElement('span');
+      userIcon.textContent = '👤';
+      userIcon.style.fontSize = '11px';
+      const userEmail = document.createElement('strong');
+      userEmail.textContent = this.stagingAccess.email;
+      userPill.appendChild(userIcon);
+      userPill.appendChild(userEmail);
+
+      // Permissions pill
+      const permPill = document.createElement('span');
+      permPill.className = 'rcf-pill';
+      const permIcon = document.createElement('span');
+      permIcon.textContent = '🔑';
+      permIcon.style.fontSize = '11px';
+      const permValue = document.createElement('span');
+      permValue.textContent = permText;
+      permPill.appendChild(permIcon);
+      permPill.appendChild(permValue);
+
+      // Expires pill
+      const expiresPill = document.createElement('span');
+      expiresPill.className = 'rcf-pill';
+      const expiresIcon = document.createElement('span');
+      expiresIcon.textContent = '⏱️';
+      expiresIcon.style.fontSize = '11px';
+      const expiresValue = document.createElement('span');
+      expiresValue.textContent = expiresAt;
+      expiresPill.appendChild(expiresIcon);
+      expiresPill.appendChild(expiresValue);
+
+      infoDiv.appendChild(statusContainer);
+      infoDiv.appendChild(userPill);
+      infoDiv.appendChild(permPill);
+      infoDiv.appendChild(expiresPill);
+
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.style.cssText = 'display: flex; gap: 10px;';
+
+      const previewBtn = document.createElement('button');
+      previewBtn.id = 'rcf-preview-live';
+      previewBtn.className = 'rcf-banner-btn rcf-banner-btn-ghost';
+      const previewIcon = document.createElement('span');
+      previewIcon.textContent = '👁️';
+      const previewText = document.createElement('span');
+      previewText.textContent = 'Preview Live';
+      previewBtn.appendChild(previewIcon);
+      previewBtn.appendChild(previewText);
+
+      buttonsDiv.appendChild(previewBtn);
+
+      // Edit Board button
+      const editBoardBtn = document.createElement('button');
+      editBoardBtn.id = 'rcf-edit-board-btn';
+      editBoardBtn.className = 'rcf-banner-btn rcf-banner-btn-ghost';
+      const editBoardIcon = document.createElement('span');
+      editBoardIcon.textContent = '📋';
+      const editBoardText = document.createElement('span');
+      editBoardText.textContent = 'Edit Board';
+      editBoardBtn.appendChild(editBoardIcon);
+      editBoardBtn.appendChild(editBoardText);
+      buttonsDiv.appendChild(editBoardBtn);
+
+      editBoardBtn.onclick = function() {
+        if (!self.editBoard) {
+          self.editBoard = new EditBoardPanel(self);
+        }
+        self.editBoard.open();
+      };
+
+      if (permissions.includes('publish') || permissions.includes('admin')) {
+        const publishBtn = document.createElement('button');
+        publishBtn.id = 'rcf-publish-btn';
+        publishBtn.className = 'rcf-banner-btn rcf-banner-btn-success';
+        const publishIcon = document.createElement('span');
+        publishIcon.textContent = '🚀';
+        const publishText = document.createElement('span');
+        publishText.textContent = 'Publish';
+        publishBtn.appendChild(publishIcon);
+        publishBtn.appendChild(publishText);
+        buttonsDiv.appendChild(publishBtn);
+
+        publishBtn.onclick = function() {
+          self.showPublishConfirmation();
+        };
+      }
+
+      banner.appendChild(infoDiv);
+      banner.appendChild(buttonsDiv);
+      document.body.appendChild(banner);
+
+      document.body.style.paddingTop = (banner.offsetHeight + parseInt(document.body.style.paddingTop || 0)) + 'px';
+
+      previewBtn.onclick = function() {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('rcf_staging');
+        url.searchParams.delete('rcf_token');
+        window.open(url.toString(), '_blank');
+      };
+    }
+
+    async showPublishConfirmation() {
+      const self = this;
+      const overlay = this.createOverlay();
+      const modal = document.createElement('div');
+      modal.className = 'rcf-modal';
+
+      const iconContainer = document.createElement('div');
+      iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
+
+      const icon = document.createElement('div');
+      icon.className = 'rcf-modal-icon';
+      icon.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)';
+      icon.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+      icon.textContent = '🚀';
+
+      const title = document.createElement('h2');
+      title.className = 'rcf-modal-title';
+      title.textContent = 'Publish Changes';
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'rcf-modal-subtitle';
+      subtitle.textContent = 'This will make your staging changes live on the website.';
+
+      iconContainer.appendChild(icon);
+      iconContainer.appendChild(title);
+      iconContainer.appendChild(subtitle);
+
+      const statusEl = document.createElement('div');
+      statusEl.id = 'rcf-publish-status';
+      statusEl.style.cssText = 'margin-bottom: 24px; padding: 16px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px;';
+      const statusText = document.createElement('p');
+      statusText.style.cssText = 'margin: 0; color: #94a3b8; text-align: center; font-size: 14px;';
+      statusText.textContent = 'Loading pending changes...';
+      statusEl.appendChild(statusText);
+
+      const buttonsContainer = document.createElement('div');
+      buttonsContainer.style.cssText = 'display: flex; gap: 12px;';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
+      cancelBtn.style.flex = '1';
+      cancelBtn.innerHTML = '<span>Cancel</span>';
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
+      confirmBtn.style.flex = '1';
+      confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+
+      buttonsContainer.appendChild(cancelBtn);
+      buttonsContainer.appendChild(confirmBtn);
+
+      modal.appendChild(iconContainer);
+      modal.appendChild(statusEl);
+      modal.appendChild(buttonsContainer);
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      const close = function() {
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      cancelBtn.onclick = close;
+      overlay.onclick = function(e) { if (e.target === overlay) close(); };
+
+      // Fetch pending changes
+      try {
+        const response = await fetch(RECOPYFAST_API + '/staging/publish?siteId=' + SITE_ID, {
+          headers: { 'Authorization': 'Bearer ' + SITE_TOKEN }
+        });
+        const result = await response.json();
+
+        if (result.success) {
+          if (result.pendingChanges === 0) {
+            statusText.textContent = '✅ No pending changes to publish.';
+            confirmBtn.disabled = true;
+            confirmBtn.style.opacity = '0.5';
+          } else {
+            statusText.textContent = '📝 ' + result.pendingChanges + ' element(s) with changes';
+          }
+        }
+      } catch (error) {
+        statusText.textContent = 'Failed to load pending changes.';
+        statusText.style.color = '#ef4444';
+      }
+
+      confirmBtn.onclick = async function() {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span>Publishing...</span>';
+
+        try {
+          const response = await fetch(RECOPYFAST_API + '/staging/publish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              siteId: SITE_ID,
+              stagingToken: self.stagingToken
+            })
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            statusText.textContent = '✅ Published ' + result.published + ' change(s) successfully!';
+            statusText.style.color = '#10b981';
+            confirmBtn.innerHTML = '<span>✓ Done!</span>';
+            setTimeout(close, 2000);
+          } else {
+            statusText.textContent = result.error || 'Failed to publish changes.';
+            statusText.style.color = '#f87171';
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+          }
+        } catch (error) {
+          statusText.textContent = 'Network error. Please try again.';
+          statusText.style.color = '#f87171';
+          confirmBtn.disabled = false;
+          confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+        }
+      };
+    }
+
+    showStagingError(message) {
+      const overlay = this.createOverlay();
+      const modal = document.createElement('div');
+      modal.className = 'rcf-modal';
+
+      const iconContainer = document.createElement('div');
+      iconContainer.style.cssText = 'text-align: center;';
+
+      const icon = document.createElement('div');
+      icon.className = 'rcf-modal-icon';
+      icon.style.background = 'linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(220, 38, 38, 0.2) 100%)';
+      icon.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+      icon.textContent = '⚠️';
+
+      const title = document.createElement('h2');
+      title.className = 'rcf-modal-title';
+      title.textContent = 'Access Denied';
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'rcf-modal-subtitle';
+      subtitle.style.marginBottom = '24px';
+      subtitle.textContent = message;
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
+      closeBtn.innerHTML = '<span>← Go Back</span>';
+
+      iconContainer.appendChild(icon);
+      iconContainer.appendChild(title);
+      iconContainer.appendChild(subtitle);
+      iconContainer.appendChild(closeBtn);
+
+      modal.appendChild(iconContainer);
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      closeBtn.onclick = function() {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('rcf_staging');
+        url.searchParams.delete('rcf_token');
+        window.location.href = url.toString();
+      };
+    }
+
+    createOverlay() {
+      const overlay = document.createElement('div');
+      overlay.className = 'rcf-overlay';
+      overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 100000; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
+
+      if (!document.querySelector('#rcf-modal-styles')) {
+        const style = document.createElement('style');
+        style.id = 'rcf-modal-styles';
+        style.textContent = `
+          .rcf-modal {
+            background: linear-gradient(180deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+            border-radius: 20px;
+            padding: 32px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            animation: rcf-modal-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            color: #e2e8f0;
+          }
+          @keyframes rcf-modal-in {
+            from { opacity: 0; transform: scale(0.95) translateY(20px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+          }
+          .rcf-modal-input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 15px;
+            color: #f1f5f9;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
+          }
+          .rcf-modal-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+          }
+          .rcf-modal-input::placeholder {
+            color: rgba(148, 163, 184, 0.6);
+          }
+          .rcf-modal-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 14px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: none;
+            outline: none;
+          }
+          .rcf-modal-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+          }
+          .rcf-modal-btn-primary {
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            color: white;
+            box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+          }
+          .rcf-modal-btn-primary:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+          }
+          .rcf-modal-btn-success {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+          }
+          .rcf-modal-btn-success:hover:not(:disabled) {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+          }
+          .rcf-modal-btn-ghost {
+            background: rgba(255, 255, 255, 0.08);
+            color: #94a3b8;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+          }
+          .rcf-modal-btn-ghost:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+          }
+          .rcf-modal-icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            font-size: 36px;
+          }
+          .rcf-modal-title {
+            margin: 0 0 8px;
+            color: #f1f5f9;
+            font-size: 22px;
+            font-weight: 600;
+          }
+          .rcf-modal-subtitle {
+            margin: 0;
+            color: #94a3b8;
+            font-size: 14px;
+            line-height: 1.5;
+          }
+          .rcf-modal-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #cbd5e1;
+            font-size: 13px;
+          }
+          .rcf-modal-error {
+            color: #f87171;
+            font-size: 12px;
+            margin: 8px 0 0;
+            display: none;
+          }
+          .rcf-code-input {
+            width: 100%;
+            padding: 18px;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            font-size: 28px;
+            text-align: center;
+            letter-spacing: 12px;
+            font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
+            color: #f1f5f9;
+            box-sizing: border-box;
+          }
+          .rcf-code-input:focus {
+            outline: none;
+            border-color: #10b981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      return overlay;
+    }
+
+    waitForDOM() {
+      return new Promise(function(resolve) {
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', resolve);
         } else {
@@ -53,327 +980,391 @@
         }
       });
     }
-    
+
     scanForContent() {
-      // Select all text-containing elements
-      const selector = 'h1, h2, h3, h4, h5, h6, p, span, button, a, li, td, th, label, div[data-rcf-content]';
+      const self = this;
+      const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, a.rcf-editable-link, div[data-rcf-content]';
       const textElements = document.querySelectorAll(selector);
-      
-      textElements.forEach((element, index) => {
-        // Skip elements that are scripts, styles, or already processed
-        if (this.shouldSkipElement(element)) return;
-        
-        const text = this.getElementText(element);
+
+      textElements.forEach(function(element, index) {
+        if (self.shouldSkipElement(element)) return;
+
+        const text = self.getElementText(element);
         if (!text || text.trim().length < 2) return;
-        
-        // Generate unique ID
-        const elementId = element.getAttribute('data-rcf-id') || `rcf-${SITE_ID}-${Date.now()}-${index}`;
+
+        const elementId = element.getAttribute('data-rcf-id') || 'rcf-' + SITE_ID + '-' + Date.now() + '-' + index;
         element.setAttribute('data-rcf-id', elementId);
-        
-        // Store element data
-        this.elements.set(elementId, {
+
+        self.elements.set(elementId, {
           element: element,
           originalContent: text,
-          selector: this.generateSelector(element),
+          selector: self.generateSelector(element),
           type: element.tagName.toLowerCase()
         });
-        
-        // Add hover effect in edit mode
-        if (this.editMode) {
+
+        if (self.editMode) {
           element.classList.add('rcf-editable');
         }
       });
-      
-      console.log(`ReCopyFast: Found ${this.elements.size} editable elements`);
+
+      console.log('ReCopyFast: Found ' + this.elements.size + ' editable elements');
     }
-    
+
     shouldSkipElement(element) {
-      // Skip if element or parent is script/style
       const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'];
       if (skipTags.includes(element.tagName)) return true;
-      
-      // Skip if element has rcf-ignore attribute
       if (element.hasAttribute('data-rcf-ignore')) return true;
-      
-      // Skip if element is inside a content editable area
       if (element.closest('[contenteditable="true"]')) return true;
-      
-      // Skip if element only contains other elements (no direct text)
-      const hasOnlyElements = Array.from(element.childNodes).every(
-        node => node.nodeType !== Node.TEXT_NODE || !node.textContent.trim()
-      );
-      
+      if (element.closest('#rcf-staging-banner')) return true;
+      if (element.closest('#rcf-edit-board')) return true;
+      if (element.closest('.rcf-overlay')) return true;
+
+      const hasOnlyElements = Array.from(element.childNodes).every(function(node) {
+        return node.nodeType !== Node.TEXT_NODE || !node.textContent.trim();
+      });
+
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
     }
-    
+
     getElementText(element) {
-      // For inputs and textareas, get the value
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         return element.value;
       }
-      
-      // For other elements, get text content
       return element.textContent;
     }
 
-    /**
-     * Get full text content including hidden overflow text
-     */
     getFullElementText(element) {
-      // Try different methods to get full text
-      let text = '';
-      
+      var text = '';
+
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         text = element.value || element.placeholder || '';
       } else {
-        // Get all text content, including hidden overflow
         text = element.textContent || element.innerText || '';
-        
-        // If text seems truncated (ends with ...), try to get original
         if (text.endsWith('...') || text.endsWith('…')) {
-          // Look for title attribute or data attributes that might contain full text
           text = element.title || element.getAttribute('data-full-text') || text;
         }
       }
-      
+
       return text.trim();
     }
 
-    /**
-     * Calculate optimal text color based on background contrast
-     */
-    getOptimalTextColor(element, computedStyle) {
-      // Get background color from element and its parents
-      const backgroundColor = this.getEffectiveBackgroundColor(element);
-      
-      // Calculate luminance
-      const luminance = this.getLuminance(backgroundColor);
-      
-      // Use original color if it has good contrast, otherwise use optimal color
-      const originalColor = computedStyle.color;
-      const originalLuminance = this.getLuminance(this.parseColor(originalColor));
-      
-      // Calculate contrast ratio
-      const originalContrast = this.getContrastRatio(luminance, originalLuminance);
-      
-      // If original has good contrast (4.5:1 for normal text), keep it
-      if (originalContrast >= 4.5) {
-        return originalColor;
-      }
-      
-      // Otherwise, choose high contrast color
-      return luminance > 0.5 ? '#000000' : '#ffffff';
-    }
+    // Capture ALL computed styles for perfect editing preservation
+    captureAllStyles(element) {
+      const computed = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
 
-    /**
-     * Get effective background color by traversing parent elements
-     */
-    getEffectiveBackgroundColor(element) {
-      let currentElement = element;
-      const colors = [];
-      
-      while (currentElement && currentElement !== document.body) {
-        const style = window.getComputedStyle(currentElement);
-        const bgColor = style.backgroundColor;
-        
-        if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
-          colors.push(this.parseColor(bgColor));
-          
-          // If we hit an opaque background, we can stop
-          if (colors[colors.length - 1].a >= 1) {
-            break;
-          }
-        }
-        
-        currentElement = currentElement.parentElement;
-      }
-      
-      // If no background found, assume white
-      if (colors.length === 0) {
-        return { r: 255, g: 255, b: 255, a: 1 };
-      }
-      
-      // Composite colors from top to bottom
-      return colors.reduce((bottom, top) => {
-        return this.compositeColors(bottom, top);
-      });
-    }
-
-    /**
-     * Parse CSS color to RGB object
-     */
-    parseColor(color) {
-      const div = document.createElement('div');
-      div.style.color = color;
-      document.body.appendChild(div);
-      
-      const computedColor = window.getComputedStyle(div).color;
-      document.body.removeChild(div);
-      
-      const match = computedColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-      
-      if (match) {
-        return {
-          r: parseInt(match[1]),
-          g: parseInt(match[2]),
-          b: parseInt(match[3]),
-          a: match[4] ? parseFloat(match[4]) : 1
-        };
-      }
-      
-      // Fallback for hex colors
-      if (color.startsWith('#')) {
-        const hex = color.slice(1);
-        return {
-          r: parseInt(hex.slice(0, 2), 16),
-          g: parseInt(hex.slice(2, 4), 16),
-          b: parseInt(hex.slice(4, 6), 16),
-          a: 1
-        };
-      }
-      
-      return { r: 0, g: 0, b: 0, a: 1 };
-    }
-
-    /**
-     * Calculate luminance of a color
-     */
-    getLuminance(color) {
-      const { r, g, b } = color;
-      
-      const rs = r / 255;
-      const gs = g / 255;
-      const bs = b / 255;
-      
-      const rLin = rs <= 0.03928 ? rs / 12.92 : Math.pow((rs + 0.055) / 1.055, 2.4);
-      const gLin = gs <= 0.03928 ? gs / 12.92 : Math.pow((gs + 0.055) / 1.055, 2.4);
-      const bLin = bs <= 0.03928 ? bs / 12.92 : Math.pow((bs + 0.055) / 1.055, 2.4);
-      
-      return 0.2126 * rLin + 0.7152 * gLin + 0.0722 * bLin;
-    }
-
-    /**
-     * Calculate contrast ratio between two luminance values
-     */
-    getContrastRatio(lum1, lum2) {
-      const brighter = Math.max(lum1, lum2);
-      const darker = Math.min(lum1, lum2);
-      return (brighter + 0.05) / (darker + 0.05);
-    }
-
-    /**
-     * Composite two colors (alpha blending)
-     */
-    compositeColors(bottom, top) {
-      const alpha = top.a;
-      const invAlpha = 1 - alpha;
-      
       return {
-        r: Math.round(alpha * top.r + invAlpha * bottom.r),
-        g: Math.round(alpha * top.g + invAlpha * bottom.g),
-        b: Math.round(alpha * top.b + invAlpha * bottom.b),
-        a: alpha + bottom.a * invAlpha
+        // Dimensions
+        width: rect.width,
+        height: rect.height,
+        offsetWidth: element.offsetWidth,
+        offsetHeight: element.offsetHeight,
+
+        // Position for overlay
+        top: rect.top,
+        left: rect.left,
+
+        // Typography
+        fontFamily: computed.fontFamily,
+        fontSize: computed.fontSize,
+        fontWeight: computed.fontWeight,
+        fontStyle: computed.fontStyle,
+        lineHeight: computed.lineHeight,
+        letterSpacing: computed.letterSpacing,
+        textAlign: computed.textAlign,
+        textTransform: computed.textTransform,
+        textDecoration: computed.textDecoration,
+        color: computed.color,
+        textShadow: computed.textShadow,
+        wordSpacing: computed.wordSpacing,
+        whiteSpace: computed.whiteSpace,
+        wordBreak: computed.wordBreak,
+        overflowWrap: computed.overflowWrap,
+
+        // Spacing - preserve original margins
+        padding: computed.padding,
+        paddingTop: computed.paddingTop,
+        paddingRight: computed.paddingRight,
+        paddingBottom: computed.paddingBottom,
+        paddingLeft: computed.paddingLeft,
+        margin: computed.margin,
+        marginTop: computed.marginTop,
+        marginRight: computed.marginRight,
+        marginBottom: computed.marginBottom,
+        marginLeft: computed.marginLeft,
+
+        // Background
+        background: computed.background,
+        backgroundColor: computed.backgroundColor,
+        backgroundImage: computed.backgroundImage,
+
+        // Border
+        border: computed.border,
+        borderRadius: computed.borderRadius,
+        boxShadow: computed.boxShadow,
+
+        // Transform (for animated elements)
+        transform: computed.transform,
+        transformOrigin: computed.transformOrigin,
+
+        // Animation (to pause/resume)
+        animation: computed.animation,
+        animationName: computed.animationName,
+        animationPlayState: computed.animationPlayState,
+        transition: computed.transition,
+
+        // Display
+        display: computed.display,
+        position: computed.position,
+        boxSizing: computed.boxSizing,
+        verticalAlign: computed.verticalAlign
       };
     }
 
     /**
-     * Get appropriate text shadow for better visibility
+     * EDITING STYLE SYSTEM
+     * Rules for consistent, accessible editing across all backgrounds
      */
-    getTextShadow(textColor) {
-      const isLight = textColor === '#ffffff' || textColor.toLowerCase() === 'white';
-      
-      if (isLight) {
-        return '1px 1px 2px rgba(0, 0, 0, 0.7)';
+
+    // Parse RGB/RGBA color string to RGB values
+    parseColor(colorStr) {
+      if (!colorStr || colorStr === 'transparent' || colorStr === 'rgba(0, 0, 0, 0)') {
+        return null;
+      }
+      const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+      if (match) {
+        return {
+          r: parseInt(match[1], 10),
+          g: parseInt(match[2], 10),
+          b: parseInt(match[3], 10)
+        };
+      }
+      return null;
+    }
+
+    // Calculate relative luminance (0 = black, 1 = white)
+    getLuminance(r, g, b) {
+      const sRGB = [r, g, b].map(function(v) {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
+    }
+
+    // Detect if background is light or dark by walking up the DOM
+    detectBackgroundLuminance(element) {
+      let current = element;
+      let bgColor = null;
+
+      // Walk up the DOM to find first non-transparent background
+      while (current && current !== document.body) {
+        const computed = window.getComputedStyle(current);
+        const bg = this.parseColor(computed.backgroundColor);
+        if (bg) {
+          bgColor = bg;
+          break;
+        }
+        current = current.parentElement;
+      }
+
+      // Check body background if nothing found
+      if (!bgColor) {
+        const bodyBg = this.parseColor(window.getComputedStyle(document.body).backgroundColor);
+        if (bodyBg) {
+          bgColor = bodyBg;
+        }
+      }
+
+      // Default to white (light) if no background found
+      if (!bgColor) {
+        return { isLight: true, luminance: 1, color: { r: 255, g: 255, b: 255 } };
+      }
+
+      const luminance = this.getLuminance(bgColor.r, bgColor.g, bgColor.b);
+      return {
+        isLight: luminance > 0.5,
+        luminance: luminance,
+        color: bgColor
+      };
+    }
+
+    // Get appropriate selection/highlight colors based on background
+    getEditingColors(element) {
+      const bg = this.detectBackgroundLuminance(element);
+
+      if (bg.isLight) {
+        // Light background: use dark selection highlight
+        return {
+          selectionBg: 'rgba(59, 130, 246, 0.3)',      // Blue tint
+          selectionText: 'inherit',
+          caretColor: '#1e40af',                       // Dark blue caret
+          outlineColor: 'rgba(59, 130, 246, 0.8)',    // Blue outline
+          inputBg: 'rgba(255, 255, 255, 0.95)',       // Slight white overlay for contrast
+          counterBg: 'rgba(15, 23, 42, 0.9)',
+          counterText: '#64748b'
+        };
       } else {
-        return '1px 1px 2px rgba(255, 255, 255, 0.7)';
+        // Dark background: use light selection highlight
+        return {
+          selectionBg: 'rgba(147, 197, 253, 0.4)',     // Light blue tint
+          selectionText: 'inherit',
+          caretColor: '#93c5fd',                       // Light blue caret
+          outlineColor: 'rgba(147, 197, 253, 0.8)',   // Light blue outline
+          inputBg: 'rgba(0, 0, 0, 0.1)',              // Slight dark overlay
+          counterBg: 'rgba(255, 255, 255, 0.9)',
+          counterText: '#374151'
+        };
       }
     }
-    
+
+    // Determine element type for appropriate edit handler
+    getElementEditType(element) {
+      const tagName = element.tagName.toLowerCase();
+      const computed = window.getComputedStyle(element);
+
+      // Image elements
+      if (tagName === 'img' ||
+          (tagName === 'picture') ||
+          (tagName === 'svg' && element.querySelector('image'))) {
+        return 'image';
+      }
+
+      // Link elements
+      if (tagName === 'a') {
+        return 'link';
+      }
+
+      // Form elements
+      if (['input', 'textarea', 'select', 'button'].includes(tagName)) {
+        return 'form';
+      }
+
+      // Check for ACTUAL animations (not just transitions)
+      // Only detect keyframe animations that are actively running
+      const animationName = computed.animationName;
+      const animationDuration = parseFloat(computed.animationDuration) || 0;
+
+      // Has actual keyframe animation (not 'none', has duration, and is running or exists)
+      const hasKeyframeAnimation = animationName !== 'none' &&
+                                   animationName !== '' &&
+                                   animationDuration > 0;
+
+      // Check for Framer Motion or GSAP markers
+      const hasFramerMotion = element.hasAttribute('data-framer-name') ||
+                             element.hasAttribute('data-framer-component-type') ||
+                             element.classList.contains('framer-motion');
+      const hasGSAP = element.hasAttribute('data-gsap') ||
+                     element._gsap !== undefined;
+
+      // Only treat as animated if it has REAL animations
+      if (hasKeyframeAnimation || hasFramerMotion || hasGSAP) {
+        return 'animated';
+      }
+
+      // Container elements - check if contains only child elements
+      if (['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav'].includes(tagName)) {
+        // Check if element has direct text content (not just whitespace)
+        const hasDirectText = Array.from(element.childNodes).some(function(node) {
+          return node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0;
+        });
+
+        if (!hasDirectText && element.children.length > 0) {
+          return 'container'; // Not editable - only has child elements
+        }
+      }
+
+      // Standard text elements
+      return 'text';
+    }
+
     generateSelector(element) {
       const path = [];
       let current = element;
-      
+
       while (current && current !== document.body) {
         let selector = current.tagName.toLowerCase();
-        
-        // Add ID if exists
+
         if (current.id) {
-          selector = `#${current.id}`;
+          selector = '#' + current.id;
           path.unshift(selector);
           break;
         }
-        
-        // Add classes
+
         if (current.className && typeof current.className === 'string') {
-          const classes = current.className.trim().split(/\s+/).filter(c => !c.startsWith('rcf-'));
+          const classes = current.className.trim().split(/\s+/).filter(function(c) { return !c.startsWith('rcf-'); });
           if (classes.length > 0) {
-            selector += `.${classes.join('.')}`;
+            selector += '.' + classes.join('.');
           }
         }
-        
-        // Add index if needed
+
         const siblings = Array.from(current.parentNode?.children || []);
         const index = siblings.indexOf(current);
         if (siblings.length > 1) {
-          selector += `:nth-child(${index + 1})`;
+          selector += ':nth-child(' + (index + 1) + ')';
         }
-        
+
         path.unshift(selector);
         current = current.parentNode;
       }
-      
+
       return path.join(' > ');
     }
-    
+
     async establishConnection() {
+      const self = this;
       try {
-        // Load Socket.io dynamically
         await this.loadSocketIO();
-        
-        // Connect to WebSocket server
+
         this.socket = io(RECOPYFAST_WS, {
-          query: { 
+          query: {
             siteId: SITE_ID,
             editMode: this.editMode,
-            token: SITE_TOKEN
+            token: SITE_TOKEN,
+            stagingMode: this.stagingMode,
+            stagingToken: this.stagingToken || ''
           },
           reconnection: true,
           reconnectionDelay: 1000,
           reconnectionAttempts: 5
         });
-        
-        // Socket event handlers
-        this.socket.on('connect', () => {
+
+        this.socket.on('connect', function() {
           console.log('ReCopyFast: Connected to server');
-          this.sendContentMap();
+          self.sendContentMap();
         });
-        
-        this.socket.on('content-update', (data) => {
-          this.handleContentUpdate(data);
+
+        this.socket.on('content-update', function(data) {
+          self.handleContentUpdate(data);
         });
-        
-        this.socket.on('disconnect', () => {
+
+        this.socket.on('disconnect', function() {
           console.log('ReCopyFast: Disconnected from server');
         });
-        
-        this.socket.on('error', (error) => {
+
+        this.socket.on('error', function(error) {
           console.error('ReCopyFast: Socket error:', error);
         });
-        
+
+        this.socket.on('auth-error', function(data) {
+          console.error('ReCopyFast: Auth error:', data.error);
+          if (self.stagingMode) {
+            self.showStagingError(data.error);
+          }
+        });
+
       } catch (error) {
         console.error('ReCopyFast: Failed to establish connection:', error);
-        // Fallback to polling if WebSocket fails
         this.startPolling();
       }
     }
-    
+
     loadSocketIO() {
-      return new Promise((resolve, reject) => {
+      return new Promise(function(resolve, reject) {
         if (window.io) {
           resolve();
           return;
         }
-        
+
         const script = document.createElement('script');
         script.src = 'https://cdn.socket.io/4.7.2/socket.io.min.js';
         script.onload = resolve;
@@ -381,540 +1372,1651 @@
         document.head.appendChild(script);
       });
     }
-    
+
     sendContentMap() {
       const contentMap = {};
-      
-      this.elements.forEach((data, elementId) => {
+
+      this.elements.forEach(function(data, elementId) {
         contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
           type: data.type
         };
       });
-      
+
       this.socket.emit('content-map', {
         siteId: SITE_ID,
         url: window.location.href,
         token: SITE_TOKEN,
+        stagingMode: this.stagingMode,
+        stagingToken: this.stagingToken,
         contentMap: contentMap
       });
     }
-    
+
     handleContentUpdate(data) {
-      const { elementId, content, language, variant } = data;
-      
-      // Handle language/variant switching if needed
+      const elementId = data.elementId;
+      const content = data.content;
+      const language = data.language;
+      const variant = data.variant;
+
       if ((language && language !== 'en') || (variant && variant !== 'default')) {
-        // Store for later use or implement language switching
         return;
       }
-      
+
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
-      
-      // Update content
+
       if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
         elementData.element.value = content;
       } else {
         elementData.element.textContent = content;
       }
-      
-      // Add update animation
+
       elementData.element.classList.add('rcf-updated');
-      setTimeout(() => {
+      setTimeout(function() {
         elementData.element.classList.remove('rcf-updated');
       }, 300);
     }
-    
+
     setupMutationObserver() {
-      this.observer = new MutationObserver((mutations) => {
+      const self = this;
+      this.observer = new MutationObserver(function(mutations) {
         let shouldRescan = false;
-        
-        mutations.forEach((mutation) => {
+
+        mutations.forEach(function(mutation) {
           if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
             shouldRescan = true;
           }
         });
-        
+
         if (shouldRescan) {
-          // Debounce rescan
-          clearTimeout(this.rescanTimeout);
-          this.rescanTimeout = setTimeout(() => {
-            this.scanForContent();
-            this.sendContentMap();
+          clearTimeout(self.rescanTimeout);
+          self.rescanTimeout = setTimeout(function() {
+            self.scanForContent();
+            self.sendContentMap();
           }, 500);
         }
       });
-      
+
       this.observer.observe(document.body, {
         childList: true,
         subtree: true
       });
     }
-    
+
     setupEditMode() {
       if (!this.editMode) return;
-      
-      // Add styles for edit mode
+
+      const self = this;
       this.injectStyles();
-      
-      // Add click handlers for inline editing
-      document.addEventListener('click', (e) => {
+
+      document.addEventListener('click', function(e) {
         const element = e.target.closest('[data-rcf-id]');
         if (!element) return;
-        
+
         e.preventDefault();
         e.stopPropagation();
-        
-        this.startInlineEdit(element);
+
+        // Route to appropriate handler based on element type
+        const editType = self.getElementEditType(element);
+
+        switch (editType) {
+          case 'image':
+            self.openImageEditor(element);
+            break;
+          case 'link':
+            self.startLinkEdit(element);
+            break;
+          case 'animated':
+            self.startAnimatedEdit(element);
+            break;
+          case 'form':
+            self.startFormEdit(element);
+            break;
+          case 'container':
+            self.showContainerHint(element);
+            break;
+          case 'text':
+          default:
+            self.startInlineEdit(element);
+            break;
+        }
       });
-      
-      // Add hover effects
-      document.addEventListener('mouseover', (e) => {
+
+      document.addEventListener('mouseover', function(e) {
         const element = e.target.closest('[data-rcf-id]');
         if (element && !element.getAttribute('data-rcf-editing')) {
           element.classList.add('rcf-hovering');
         }
       });
-      
-      document.addEventListener('mouseout', (e) => {
+
+      document.addEventListener('mouseout', function(e) {
         const element = e.target.closest('[data-rcf-id]');
         if (element) {
           element.classList.remove('rcf-hovering');
         }
       });
     }
-    
+
     injectStyles() {
       const style = document.createElement('style');
       style.textContent = `
-        /* Consistent with demo styling */
         [data-rcf-id] {
           position: relative;
-          transition: all 0.2s ease;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        
         .rcf-hovering {
           cursor: pointer !important;
-          border: 2px dashed #3b82f6 !important;
-          border-radius: 12px !important;
-          padding: 12px !important;
+          outline: 2px dashed rgba(59, 130, 246, 0.6) !important;
+          outline-offset: 4px !important;
+          border-radius: 8px !important;
           box-sizing: border-box !important;
         }
-        
         .rcf-hovering::before {
-          content: 'Click to edit';
+          content: "Click to edit";
           position: absolute;
-          top: -48px;
+          top: -44px;
           left: 50%;
           transform: translateX(-50%);
-          background: #1f2937;
-          color: white;
-          padding: 4px 12px;
-          border-radius: 6px;
+          background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+          color: #e2e8f0;
+          padding: 6px 12px;
+          border-radius: 8px;
           font-size: 12px;
+          font-weight: 500;
           white-space: nowrap;
           z-index: 10;
           opacity: 0;
           animation: rcf-fadeIn 0.2s ease forwards;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
         .rcf-hovering::after {
-          content: '✏️';
+          content: "✏️";
           position: absolute;
-          top: -12px;
-          right: -12px;
-          width: 32px;
-          height: 32px;
-          background: #3b82f6;
+          top: -10px;
+          right: -10px;
+          width: 28px;
+          height: 28px;
+          background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 14px;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+          font-size: 12px;
+          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
           opacity: 0;
           animation: rcf-fadeIn 0.2s ease forwards;
         }
-        
-        /* Inline editing styles - preserve exact formatting */
         .rcf-editing {
-          border: 2px solid #3b82f6 !important;
-          border-radius: 12px !important;
-          outline: none !important;
+          /* Lock dimensions during edit using CSS custom properties */
+          min-width: var(--rcf-lock-width) !important;
+          min-height: var(--rcf-lock-height) !important;
+          max-width: var(--rcf-lock-width) !important;
+          max-height: var(--rcf-lock-height) !important;
+
+          /* Prevent layout shift */
+          contain: layout style;
+          overflow: hidden !important;
+
+          /* Visual editing indicator */
+          outline: 2px solid #3b82f6 !important;
+          outline-offset: 2px !important;
+          border-radius: 4px !important;
+
+          /* Enable text selection in contenteditable */
+          user-select: text !important;
+          -webkit-user-select: text !important;
+          cursor: text !important;
+
+          /* Prevent wrapping changes */
+          white-space: var(--rcf-lock-whitespace, pre-wrap) !important;
         }
-        
-        .rcf-editing input,
-        .rcf-editing textarea {
-          background: transparent !important;
-          border: none !important;
-          padding: 0 !important;
-          margin: 0 !important;
-          outline: none !important;
-          resize: none !important;
-          width: 100% !important;
-          font-family: inherit !important;
-          font-size: inherit !important;
-          font-weight: inherit !important;
-          font-style: inherit !important;
-          line-height: inherit !important;
-          letter-spacing: inherit !important;
-          text-align: inherit !important;
-          text-decoration: inherit !important;
-          text-transform: inherit !important;
-          color: inherit !important;
-          word-wrap: break-word !important;
-          overflow-wrap: break-word !important;
+        .rcf-editing:focus {
+          outline: 2px solid #3b82f6 !important;
+          outline-offset: 2px !important;
         }
-        
-        .rcf-editing textarea {
-          white-space: pre-wrap !important;
-          overflow: visible !important;
-          min-height: auto !important;
-          height: auto !important;
+        /* Wrapper for relative toolbar positioning */
+        .rcf-edit-wrapper {
+          position: relative !important;
+          display: inline-block !important;
         }
-        
-        /* Action buttons */
-        .rcf-actions {
+        /* Relatively-positioned toolbar (for in-place editing) */
+        .rcf-actions-relative {
           position: absolute;
-          top: -64px;
+          bottom: calc(100% + 8px);
           left: 50%;
           transform: translateX(-50%);
           display: flex;
-          gap: 8px;
-          background: white;
-          border: 1px solid #e5e7eb;
-          border-radius: 8px;
-          padding: 8px 12px;
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-          z-index: 1000;
+          gap: 6px;
+          background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          padding: 8px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+          z-index: 10000;
+          white-space: nowrap;
         }
-        
+        .rcf-actions-relative button {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          padding: 8px 14px;
+          font-size: 13px;
+          font-weight: 500;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .rcf-actions-relative button:hover {
+          transform: translateY(-1px);
+        }
+        .rcf-actions-relative button:active {
+          transform: scale(0.98);
+        }
+        /* Character counter for in-place editing */
+        .rcf-char-counter-inline {
+          position: absolute;
+          top: calc(100% + 4px);
+          right: 0;
+          font-size: 11px;
+          font-family: ui-sans-serif, system-ui, sans-serif;
+          padding: 4px 10px;
+          border-radius: 6px;
+          backdrop-filter: blur(8px);
+          z-index: 10000;
+          white-space: nowrap;
+        }
+        .rcf-actions {
+          position: fixed;
+          display: flex;
+          gap: 6px;
+          background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 12px;
+          padding: 8px;
+          box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+          z-index: 10000;
+        }
         .rcf-actions button {
           display: flex;
           align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          font-size: 12px;
+          gap: 5px;
+          padding: 8px 14px;
+          font-size: 13px;
+          font-weight: 500;
           border: none;
-          border-radius: 4px;
+          border-radius: 8px;
           cursor: pointer;
-          transition: all 0.15s ease;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        
+        .rcf-actions button:hover {
+          transform: translateY(-1px);
+        }
+        .rcf-actions button:active {
+          transform: scale(0.98);
+        }
         .rcf-btn-save {
-          background: #10b981;
+          background: linear-gradient(135deg, #10b981 0%, #059669 100%);
           color: white;
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
-        
         .rcf-btn-save:hover {
-          background: #059669;
+          box-shadow: 0 6px 16px rgba(16, 185, 129, 0.4);
         }
-        
         .rcf-btn-cancel {
-          background: #f3f4f6;
-          color: #6b7280;
+          background: rgba(255, 255, 255, 0.08);
+          color: #94a3b8;
+          border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        
         .rcf-btn-cancel:hover {
-          background: #e5e7eb;
+          background: rgba(255, 255, 255, 0.12);
+          color: #e2e8f0;
         }
-        
         .rcf-btn-ai {
-          background: #f3f4f6;
-          color: #8b5cf6;
+          background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(59, 130, 246, 0.2) 100%);
+          color: #a78bfa;
+          border: 1px solid rgba(139, 92, 246, 0.3);
         }
-        
         .rcf-btn-ai:hover {
-          background: #ede9fe;
+          background: linear-gradient(135deg, rgba(139, 92, 246, 0.3) 0%, rgba(59, 130, 246, 0.3) 100%);
+          color: #c4b5fd;
         }
-        
-        /* Success animation */
         .rcf-updated {
-          animation: rcf-highlight 0.5s ease;
+          animation: rcf-highlight 0.6s ease;
         }
-        
         @keyframes rcf-fadeIn {
           from { opacity: 0; transform: translateX(-50%) translateY(4px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
-        
         @keyframes rcf-highlight {
-          0% { background-color: transparent; }
-          50% { background-color: #dcfce7; }
-          100% { background-color: transparent; }
+          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+          50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3); }
+          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        /* Edit overlay - positioned over original element */
+        .rcf-edit-overlay {
+          outline: 2px solid #3b82f6;
+          outline-offset: 2px;
+          border-radius: 4px;
+        }
+        .rcf-edit-overlay .rcf-edit-input {
+          display: block;
+        }
+        .rcf-edit-overlay .rcf-edit-input:focus {
+          outline: none;
+        }
+        /* Link editing URL field */
+        .rcf-link-edit {
+          overflow: visible;
+        }
+        .rcf-url-field input:focus {
+          border-color: rgba(59, 130, 246, 0.5);
+        }
+        /* Animation indicator */
+        .rcf-animation-indicator {
+          pointer-events: none;
+        }
+        /* Form popover */
+        .rcf-form-popover input:focus {
+          border-color: rgba(59, 130, 246, 0.5);
+          background: rgba(255, 255, 255, 0.08);
+        }
+        /* Container hint animation */
+        @keyframes rcf-hintFadeIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        .rcf-container-hint {
+          animation: rcf-hintFadeIn 0.3s ease forwards;
+        }
+        /* Modal animation */
+        @keyframes rcf-modal-in {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+        /* Image editor specific */
+        .rcf-modal img {
+          transition: opacity 0.2s ease;
+        }
+        .rcf-modal img.loading {
+          opacity: 0.5;
         }
       `;
       document.head.appendChild(style);
     }
-    
+
+    // Calculate max characters based on element container dimensions
+    calculateMaxChars(element) {
+      const CONTENT_LIMITS = {
+        minChars: 50,
+        maxCharsAbsolute: 2000,
+        maxCharsDefault: 500,
+        warningThreshold: 0.9
+      };
+
+      try {
+        const computed = window.getComputedStyle(element);
+        const containerWidth = element.offsetWidth;
+        const containerHeight = element.offsetHeight;
+        const fontSize = parseFloat(computed.fontSize) || 16;
+        const lineHeight = parseFloat(computed.lineHeight) || fontSize * 1.2;
+
+        // Estimate characters per line (average char width ~0.5em)
+        const charsPerLine = Math.floor(containerWidth / (fontSize * 0.5));
+
+        // Estimate max lines that fit
+        const maxLines = Math.floor(containerHeight / lineHeight);
+
+        // Calculate max characters with safety margin (80%)
+        const maxChars = Math.floor(charsPerLine * maxLines * 0.8);
+
+        // Return with reasonable min/max bounds
+        return Math.max(CONTENT_LIMITS.minChars, Math.min(maxChars || CONTENT_LIMITS.maxCharsDefault, CONTENT_LIMITS.maxCharsAbsolute));
+      } catch (e) {
+        return CONTENT_LIMITS.maxCharsDefault;
+      }
+    }
+
+    // Check if content will overflow the element container
+    checkOverflow(element, newContent) {
+      try {
+        const ghost = element.cloneNode(true);
+        ghost.style.cssText = 'position: absolute; visibility: hidden; overflow: visible; white-space: pre-wrap; width: ' + element.offsetWidth + 'px; height: auto; pointer-events: none;';
+        ghost.textContent = newContent;
+        document.body.appendChild(ghost);
+
+        const isOverflowing = ghost.scrollHeight > element.offsetHeight * 1.1; // 10% tolerance
+        document.body.removeChild(ghost);
+
+        return isOverflowing;
+      } catch (e) {
+        return false;
+      }
+    }
+
+    /**
+     * IN-PLACE CONTENTEDITABLE EDITING
+     * Instead of creating an overlay, we make the actual element editable.
+     * This eliminates layout synchronization problems completely.
+     */
     startInlineEdit(element) {
+      const self = this;
       const elementId = element.getAttribute('data-rcf-id');
       const elementData = this.elements.get(elementId);
       if (!elementData || element.getAttribute('data-rcf-editing')) return;
 
-      // Mark element as being edited
+      // Store original content for cancel (textContent is safe/sanitized)
+      const originalText = this.getFullElementText(element);
+
+      // Capture dimensions and styles BEFORE making any changes
+      const rect = element.getBoundingClientRect();
+      const computed = window.getComputedStyle(element);
+
+      // Lock dimensions using CSS custom properties
+      element.style.setProperty('--rcf-lock-width', rect.width + 'px');
+      element.style.setProperty('--rcf-lock-height', rect.height + 'px');
+      element.style.setProperty('--rcf-lock-whitespace', computed.whiteSpace || 'normal');
+
+      // Mark as editing
       element.setAttribute('data-rcf-editing', 'true');
       element.classList.add('rcf-editing');
       element.classList.remove('rcf-hovering');
 
-      // Store original content and styles (fix issue #2 - get full text)
-      const originalText = this.getFullElementText(element);
-      const computedStyle = window.getComputedStyle(element);
-      let originalPadding = computedStyle.padding;
-      if (originalPadding === '0px') {
-        originalPadding = '8px';
-      }
+      // Get appropriate colors based on background luminance
+      const editColors = this.getEditingColors(element);
 
-      // Create input element based on content type
-      let inputElement;
-      const isMultiline = originalText.includes('\n') || originalText.length > 60;
-      
-      if (isMultiline) {
-        inputElement = document.createElement('textarea');
-        inputElement.style.minHeight = Math.max(element.offsetHeight, 40) + 'px';
-        inputElement.style.resize = 'vertical';
-      } else {
-        inputElement = document.createElement('input');
-        inputElement.type = 'text';
-      }
+      // Generate unique ID for this edit session
+      const editSessionId = 'rcf-edit-' + Date.now();
+      element.setAttribute('data-rcf-edit-session', editSessionId);
 
-      // CONSISTENT RULE: Always preserve original text color and formatting
-      const originalTextColor = computedStyle.color;
+      // Inject dynamic selection styles
+      const selectionStyle = document.createElement('style');
+      selectionStyle.id = editSessionId + '-styles';
+      selectionStyle.textContent = [
+        '[data-rcf-edit-session="' + editSessionId + '"]::selection { background: ' + editColors.selectionBg + '; color: ' + editColors.selectionText + '; }',
+        '[data-rcf-edit-session="' + editSessionId + '"]::-moz-selection { background: ' + editColors.selectionBg + '; color: ' + editColors.selectionText + '; }'
+      ].join('\n');
+      document.head.appendChild(selectionStyle);
 
-      // Apply inherited styles to maintain appearance
-      inputElement.value = originalText;
-      inputElement.style.cssText = `
-        background: transparent !important;
-        border: none !important;
-        outline: none !important;
-        padding: ${originalPadding} !important;
-        margin: 0 !important;
-        width: 100% !important;
-        font-family: ${computedStyle.fontFamily} !important;
-        font-size: ${computedStyle.fontSize} !important;
-        font-weight: ${computedStyle.fontWeight} !important;
-        font-style: ${computedStyle.fontStyle} !important;
-        line-height: ${computedStyle.lineHeight} !important;
-        letter-spacing: ${computedStyle.letterSpacing} !important;
-        text-align: ${computedStyle.textAlign} !important;
-        text-decoration: ${computedStyle.textDecoration} !important;
-        text-transform: ${computedStyle.textTransform} !important;
-        color: ${originalTextColor} !important;
-        word-wrap: break-word !important;
-        overflow-wrap: break-word !important;
-        box-sizing: border-box !important;
-        text-shadow: inherit !important;
-      `;
+      // Create wrapper to position toolbar relatively
+      const wrapper = document.createElement('div');
+      wrapper.className = 'rcf-edit-wrapper';
+      wrapper.setAttribute('data-rcf-wrapper', editSessionId);
 
-      if (inputElement.tagName === 'TEXTAREA') {
-        inputElement.style.cssText += `
-          white-space: pre-wrap !important;
-          overflow: visible !important;
-          height: auto !important;
-        `;
-      }
+      // Insert wrapper before element, then move element into it
+      element.parentNode.insertBefore(wrapper, element);
+      wrapper.appendChild(element);
 
-      // Create action buttons
+      // Make element contenteditable (the key change!)
+      element.setAttribute('contenteditable', 'true');
+      element.style.outline = '2px solid ' + editColors.outlineColor;
+      element.style.outlineOffset = '2px';
+
+      // Create toolbar positioned relative to wrapper
       const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'rcf-actions';
-      actionsDiv.innerHTML = `
-        <button class="rcf-btn-ai" type="button" title="AI Suggestions">
-          🪄 AI
-        </button>
-        <button class="rcf-btn-save" type="button" title="Save changes">
-          ✓ Save
-        </button>
-        <button class="rcf-btn-cancel" type="button" title="Cancel editing">
-          ✕ Cancel
-        </button>
-      `;
+      actionsDiv.className = 'rcf-actions-relative';
+      actionsDiv.setAttribute('data-rcf-toolbar', editSessionId);
 
-      // Position actions relative to element
-      const rect = element.getBoundingClientRect();
-      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-      actionsDiv.style.position = 'absolute';
-      actionsDiv.style.left = '50%';
-      actionsDiv.style.top = (rect.top + scrollTop - 64) + 'px';
-      actionsDiv.style.zIndex = '10000';
+      const aiBtn = document.createElement('button');
+      aiBtn.className = 'rcf-btn-ai';
+      aiBtn.type = 'button';
+      aiBtn.title = 'AI Suggestions';
+      aiBtn.textContent = '🪄 AI';
 
-      // Replace element content with input
-      const originalContent = element.innerHTML;
-      element.innerHTML = '';
-      element.appendChild(inputElement);
-      
-      // Add actions to body
-      document.body.appendChild(actionsDiv);
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'rcf-btn-save';
+      saveBtn.type = 'button';
+      saveBtn.title = 'Save changes (Cmd/Ctrl + Enter)';
+      saveBtn.textContent = '✓ Save';
 
-      // Focus and select input
-      inputElement.focus();
-      inputElement.select();
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-btn-cancel';
+      cancelBtn.type = 'button';
+      cancelBtn.title = 'Cancel editing (Esc)';
+      cancelBtn.textContent = '✕ Cancel';
 
-      // Auto-resize textarea
-      if (inputElement.tagName === 'TEXTAREA') {
-        const autoResize = () => {
-          inputElement.style.height = 'auto';
-          inputElement.style.height = (inputElement.scrollHeight) + 'px';
-        };
-        inputElement.addEventListener('input', autoResize);
-        autoResize();
-      }
+      actionsDiv.appendChild(aiBtn);
+      actionsDiv.appendChild(saveBtn);
+      actionsDiv.appendChild(cancelBtn);
 
-      // Handle save
-      const saveBtn = actionsDiv.querySelector('.rcf-btn-save');
-      const cancelBtn = actionsDiv.querySelector('.rcf-btn-cancel');
-      const aiBtn = actionsDiv.querySelector('.rcf-btn-ai');
+      // Insert toolbar as first child of wrapper (positions above element)
+      wrapper.insertBefore(actionsDiv, element);
 
-      const cleanup = () => {
-        element.removeAttribute('data-rcf-editing');
-        element.classList.remove('rcf-editing');
-        if (document.body.contains(actionsDiv)) {
-          document.body.removeChild(actionsDiv);
+      // Create character counter
+      const maxChars = self.calculateMaxChars(element);
+      const counterContainer = document.createElement('div');
+      counterContainer.className = 'rcf-char-counter-inline';
+      counterContainer.setAttribute('data-rcf-counter', editSessionId);
+
+      // Use adaptive colors based on background luminance
+      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+      const defaultBorderColor = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+      counterContainer.style.color = editColors.counterText;
+      counterContainer.style.background = editColors.counterBg;
+      counterContainer.style.border = '1px solid ' + defaultBorderColor;
+
+      wrapper.appendChild(counterContainer);
+
+      // Sanitize content - get clean text from contenteditable
+      const sanitizeContent = function() {
+        // Get text content, preserving line breaks
+        const text = element.innerText || element.textContent || '';
+        return text.trim();
+      };
+
+      const updateCounter = function() {
+        const current = sanitizeContent().length;
+        counterContainer.textContent = current + ' / ' + maxChars;
+
+        if (current > maxChars) {
+          counterContainer.style.color = '#ef4444';
+          counterContainer.style.background = 'rgba(239, 68, 68, 0.2)';
+          counterContainer.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        } else if (current > maxChars * 0.9) {
+          counterContainer.style.color = '#f59e0b';
+          counterContainer.style.background = 'rgba(245, 158, 11, 0.2)';
+          counterContainer.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+        } else {
+          counterContainer.style.color = editColors.counterText;
+          counterContainer.style.background = editColors.counterBg;
+          counterContainer.style.borderColor = defaultBorderColor;
         }
       };
 
-      const save = () => {
-        const newContent = inputElement.value;
-        
-        // Update element content
-        if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-          element.value = newContent;
-          element.innerHTML = originalContent; // Restore original structure
-        } else {
-          element.textContent = newContent;
+      element.addEventListener('input', updateCounter);
+      updateCounter();
+
+      // Focus and select all text
+      element.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Track if we're in the middle of cleanup to prevent double cleanup
+      let isCleaningUp = false;
+
+      const cleanup = function() {
+        if (isCleaningUp) return;
+        isCleaningUp = true;
+
+        // Remove contenteditable
+        element.removeAttribute('contenteditable');
+        element.removeAttribute('data-rcf-editing');
+        element.removeAttribute('data-rcf-edit-session');
+        element.classList.remove('rcf-editing');
+
+        // Remove dimension locks
+        element.style.removeProperty('--rcf-lock-width');
+        element.style.removeProperty('--rcf-lock-height');
+        element.style.removeProperty('--rcf-lock-whitespace');
+        element.style.outline = '';
+        element.style.outlineOffset = '';
+
+        // Remove wrapper (move element back to original position)
+        if (wrapper.parentNode) {
+          wrapper.parentNode.insertBefore(element, wrapper);
+          wrapper.parentNode.removeChild(wrapper);
         }
 
-        // Update stored data
+        // Remove dynamic selection styles
+        const dynamicStyle = document.getElementById(editSessionId + '-styles');
+        if (dynamicStyle) {
+          dynamicStyle.remove();
+        }
+
+        // Remove event listener
+        document.removeEventListener('mousedown', outsideClickHandler);
+      };
+
+      const save = function() {
+        const newContent = sanitizeContent();
+
+        // Check for content length limit
+        if (newContent.length > 2000) {
+          if (!confirm('Content exceeds 2000 characters. This may cause issues. Save anyway?')) {
+            return;
+          }
+        }
+
+        // Check for overflow
+        if (self.checkOverflow(element, newContent)) {
+          if (!confirm('This content may overflow the container and affect layout. Save anyway?')) {
+            return;
+          }
+        }
+
+        // Update element with sanitized content (textContent removes any HTML)
+        element.textContent = newContent;
         elementData.originalContent = newContent;
 
-        // Send update to server if connected
-        if (this.socket && this.socket.connected) {
-          this.socket.emit('content-update', {
+        // Send update to server
+        if (self.socket && self.socket.connected) {
+          self.socket.emit('content-update', {
             siteId: SITE_ID,
             elementId: elementId,
             content: newContent,
-            token: SITE_TOKEN
+            token: SITE_TOKEN,
+            stagingMode: self.stagingMode,
+            stagingToken: self.stagingToken
           });
         }
 
-        // Add success animation
+        cleanup();
+
+        // Show success feedback
         element.classList.add('rcf-updated');
-        setTimeout(() => {
+        setTimeout(function() {
+          element.classList.remove('rcf-updated');
+        }, 500);
+      };
+
+      const cancel = function() {
+        // Restore original content using safe textContent
+        element.textContent = originalText;
+        cleanup();
+      };
+
+      // Button handlers
+      saveBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        save();
+      };
+
+      cancelBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        cancel();
+      };
+
+      aiBtn.onclick = function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Create a fake input element interface for AI suggestions
+        const fakeInput = {
+          get value() { return sanitizeContent(); },
+          set value(v) { element.textContent = v; updateCounter(); }
+        };
+        self.showAISuggestions(fakeInput, elementId);
+      };
+
+      // Keyboard handling
+      element.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          cancel();
+        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          save();
+        } else if (e.key === 'Enter' && !e.shiftKey) {
+          // For single-line elements, Enter saves
+          const isMultiline = originalText.includes('\n') || rect.height > 60;
+          if (!isMultiline) {
+            e.preventDefault();
+            save();
+          }
+        }
+      });
+
+      // Handle paste - sanitize pasted content
+      element.addEventListener('paste', function(e) {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+        document.execCommand('insertText', false, text);
+        updateCounter();
+      });
+
+      // Outside click handler
+      const outsideClickHandler = function(e) {
+        // Don't trigger on clicks within the wrapper (toolbar, element, counter)
+        if (wrapper.contains(e.target)) {
+          return;
+        }
+        // Save on outside click
+        save();
+      };
+
+      // Delay adding the handler to prevent immediate trigger
+      setTimeout(function() {
+        document.addEventListener('mousedown', outsideClickHandler);
+      }, 100);
+    }
+
+    // Image editor modal for image elements
+    openImageEditor(element) {
+      const self = this;
+      const elementId = element.getAttribute('data-rcf-id');
+      const elementData = this.elements.get(elementId);
+      if (!elementData || element.getAttribute('data-rcf-editing')) return;
+
+      element.setAttribute('data-rcf-editing', 'true');
+      element.classList.add('rcf-editing');
+      element.classList.remove('rcf-hovering');
+
+      const isImg = element.tagName.toLowerCase() === 'img';
+      const currentSrc = isImg ? element.src : (element.style.backgroundImage || '').replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
+      const currentAlt = isImg ? element.alt : '';
+      const currentWidth = element.offsetWidth;
+      const currentHeight = element.offsetHeight;
+
+      // Create modal overlay
+      const overlay = this.createOverlay();
+      const modal = document.createElement('div');
+      modal.className = 'rcf-modal';
+
+      // Build modal content using DOM methods
+      const iconContainer = document.createElement('div');
+      iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
+
+      const icon = document.createElement('div');
+      icon.className = 'rcf-modal-icon';
+      icon.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)';
+      icon.style.border = '1px solid rgba(59, 130, 246, 0.3)';
+      icon.textContent = '🖼️';
+
+      const title = document.createElement('h2');
+      title.className = 'rcf-modal-title';
+      title.textContent = 'Edit Image';
+
+      const subtitle = document.createElement('p');
+      subtitle.className = 'rcf-modal-subtitle';
+      subtitle.textContent = 'Replace image or edit properties';
+
+      iconContainer.appendChild(icon);
+      iconContainer.appendChild(title);
+      iconContainer.appendChild(subtitle);
+      modal.appendChild(iconContainer);
+
+      // Current image preview
+      const previewContainer = document.createElement('div');
+      previewContainer.style.cssText = 'margin-bottom: 20px; padding: 16px; background: rgba(15, 23, 42, 0.5); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1);';
+
+      const previewLabel = document.createElement('p');
+      previewLabel.style.cssText = 'margin: 0 0 8px 0; font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;';
+      previewLabel.textContent = 'Current Image';
+
+      const previewImg = document.createElement('img');
+      previewImg.src = currentSrc;
+      previewImg.style.cssText = 'max-width: 100%; max-height: 200px; border-radius: 8px; display: block; margin: 0 auto;';
+
+      const dimensions = document.createElement('p');
+      dimensions.style.cssText = 'margin: 8px 0 0 0; font-size: 11px; color: #64748b; text-align: center;';
+      dimensions.textContent = currentWidth + ' × ' + currentHeight + ' px';
+
+      previewContainer.appendChild(previewLabel);
+      previewContainer.appendChild(previewImg);
+      previewContainer.appendChild(dimensions);
+      modal.appendChild(previewContainer);
+
+      // URL input
+      const urlContainer = document.createElement('div');
+      urlContainer.style.cssText = 'margin-bottom: 16px;';
+
+      const urlLabel = document.createElement('label');
+      urlLabel.className = 'rcf-modal-label';
+      urlLabel.textContent = 'Image URL';
+
+      const urlInput = document.createElement('input');
+      urlInput.type = 'url';
+      urlInput.className = 'rcf-modal-input';
+      urlInput.value = currentSrc;
+      urlInput.placeholder = 'https://example.com/image.jpg';
+
+      urlContainer.appendChild(urlLabel);
+      urlContainer.appendChild(urlInput);
+      modal.appendChild(urlContainer);
+
+      // Alt text input (for img elements)
+      let altInput = null;
+      if (isImg) {
+        const altContainer = document.createElement('div');
+        altContainer.style.cssText = 'margin-bottom: 16px;';
+
+        const altLabel = document.createElement('label');
+        altLabel.className = 'rcf-modal-label';
+        altLabel.textContent = 'Alt Text (accessibility)';
+
+        altInput = document.createElement('input');
+        altInput.type = 'text';
+        altInput.className = 'rcf-modal-input';
+        altInput.value = currentAlt;
+        altInput.placeholder = 'Describe this image';
+
+        altContainer.appendChild(altLabel);
+        altContainer.appendChild(altInput);
+        modal.appendChild(altContainer);
+      }
+
+      // Update preview on URL change
+      urlInput.addEventListener('input', function() {
+        const url = urlInput.value.trim();
+        if (url) {
+          previewImg.src = url;
+        }
+      });
+
+      // File upload button
+      const uploadContainer = document.createElement('div');
+      uploadContainer.style.cssText = 'margin-bottom: 24px; text-align: center;';
+
+      const uploadLabel = document.createElement('label');
+      uploadLabel.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; background: rgba(59, 130, 246, 0.1); border: 1px dashed rgba(59, 130, 246, 0.5); border-radius: 10px; cursor: pointer; color: #93c5fd; font-size: 14px; transition: all 0.2s;';
+
+      const uploadIcon = document.createElement('span');
+      uploadIcon.textContent = '📤';
+      const uploadText = document.createElement('span');
+      uploadText.textContent = 'Upload New Image';
+      uploadLabel.appendChild(uploadIcon);
+      uploadLabel.appendChild(uploadText);
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = 'image/*';
+      fileInput.style.display = 'none';
+
+      fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(ev) {
+            urlInput.value = ev.target.result;
+            previewImg.src = ev.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      uploadLabel.appendChild(fileInput);
+      uploadContainer.appendChild(uploadLabel);
+      modal.appendChild(uploadContainer);
+
+      // Action buttons
+      const footer = document.createElement('div');
+      footer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
+      cancelBtn.textContent = 'Cancel';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
+      saveBtn.textContent = 'Save Changes';
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(saveBtn);
+      modal.appendChild(footer);
+
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+
+      const closeModal = function() {
+        element.removeAttribute('data-rcf-editing');
+        element.classList.remove('rcf-editing');
+        if (document.body.contains(overlay)) {
+          document.body.removeChild(overlay);
+        }
+      };
+
+      cancelBtn.onclick = closeModal;
+      overlay.onclick = function(e) {
+        if (e.target === overlay) closeModal();
+      };
+
+      saveBtn.onclick = function() {
+        const newSrc = urlInput.value.trim();
+        if (!newSrc) {
+          alert('Please enter an image URL');
+          return;
+        }
+
+        if (isImg) {
+          element.src = newSrc;
+          if (altInput) {
+            element.alt = altInput.value;
+          }
+        } else {
+          element.style.backgroundImage = 'url("' + newSrc + '")';
+        }
+
+        elementData.originalContent = newSrc;
+
+        if (self.socket && self.socket.connected) {
+          self.socket.emit('content-update', {
+            siteId: SITE_ID,
+            elementId: elementId,
+            content: newSrc,
+            contentType: 'image',
+            alt: isImg ? element.alt : null,
+            token: SITE_TOKEN,
+            stagingMode: self.stagingMode,
+            stagingToken: self.stagingToken
+          });
+        }
+
+        element.classList.add('rcf-updated');
+        setTimeout(function() {
+          element.classList.remove('rcf-updated');
+        }, 500);
+
+        closeModal();
+      };
+
+      document.addEventListener('keydown', function onKeyDown(e) {
+        if (e.key === 'Escape') {
+          closeModal();
+          document.removeEventListener('keydown', onKeyDown);
+        }
+      });
+    }
+
+    // Link editing with URL field
+    startLinkEdit(element) {
+      const self = this;
+      const elementId = element.getAttribute('data-rcf-id');
+      const elementData = this.elements.get(elementId);
+      if (!elementData || element.getAttribute('data-rcf-editing')) return;
+
+      element.setAttribute('data-rcf-editing', 'true');
+      element.classList.add('rcf-editing');
+      element.classList.remove('rcf-hovering');
+
+      const styles = this.captureAllStyles(element);
+      const originalText = this.getFullElementText(element);
+      const originalHref = element.href || '';
+
+      // Get adaptive colors based on background luminance
+      const editColors = this.getEditingColors(element);
+      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+
+      // Generate unique ID for this edit session's styles
+      const editSessionId = 'rcf-link-edit-' + Date.now();
+
+      // Inject dynamic selection styles
+      const selectionStyle = document.createElement('style');
+      selectionStyle.id = editSessionId + '-styles';
+      selectionStyle.textContent = [
+        '#' + editSessionId + '::selection { background: ' + editColors.selectionBg + '; }',
+        '#' + editSessionId + '::-moz-selection { background: ' + editColors.selectionBg + '; }'
+      ].join('\n');
+      document.head.appendChild(selectionStyle);
+
+      // Create overlay for text editing
+      const overlay = document.createElement('div');
+      overlay.className = 'rcf-edit-overlay rcf-link-edit';
+
+      // CRITICAL: overflow hidden and exact height to prevent text spillover
+      overlay.style.cssText = [
+        'position: fixed',
+        'z-index: 9999',
+        'pointer-events: auto',
+        'box-sizing: border-box',
+        'overflow: hidden',
+        'left: ' + styles.left + 'px',
+        'top: ' + styles.top + 'px',
+        'width: ' + styles.width + 'px',
+        'height: ' + styles.height + 'px',
+        'font-family: ' + styles.fontFamily,
+        'font-size: ' + styles.fontSize,
+        'font-weight: ' + styles.fontWeight,
+        'line-height: ' + styles.lineHeight,
+        'letter-spacing: ' + styles.letterSpacing,
+        'text-align: ' + styles.textAlign,
+        'color: ' + styles.color,
+        'text-decoration: ' + styles.textDecoration,
+        'background: ' + styles.background,
+        'padding: ' + styles.padding,
+        'outline: 2px solid ' + editColors.outlineColor,
+        'outline-offset: 2px'
+      ].join(' !important; ') + ' !important;';
+
+      // Text input
+      const textInput = document.createElement('input');
+      textInput.type = 'text';
+      textInput.value = originalText;
+      textInput.id = editSessionId;
+      textInput.className = 'rcf-edit-input';
+      textInput.style.cssText = [
+        'all: inherit',
+        'width: 100%',
+        'height: 100%',
+        'background: transparent',
+        'border: none',
+        'outline: none',
+        'padding: 0',
+        'margin: 0',
+        'font: inherit',
+        'color: inherit',
+        'overflow: hidden',
+        'text-overflow: ellipsis',
+        'caret-color: ' + editColors.caretColor
+      ].join(' !important; ') + ' !important;';
+
+      overlay.appendChild(textInput);
+
+      // URL input field below the text - adaptive colors based on background
+      const urlField = document.createElement('div');
+      urlField.className = 'rcf-url-field';
+      const urlFieldBg = isLightBg ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+      const urlFieldBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+      urlField.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; background: ' + urlFieldBg + '; border-radius: 10px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); border: 1px solid ' + urlFieldBorder + '; backdrop-filter: blur(20px);';
+
+      const urlLabel = document.createElement('label');
+      const urlLabelColor = isLightBg ? '#94a3b8' : '#475569';
+      urlLabel.style.cssText = 'display: block; font-size: 11px; color: ' + urlLabelColor + '; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;';
+      urlLabel.textContent = 'Link URL';
+
+      const urlInput = document.createElement('input');
+      urlInput.type = 'url';
+      urlInput.value = originalHref;
+      urlInput.placeholder = 'https://example.com';
+      const urlInputBg = isLightBg ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+      const urlInputBorder = isLightBg ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+      const urlInputColor = isLightBg ? '#e2e8f0' : '#1e293b';
+      urlInput.style.cssText = 'width: 100%; padding: 8px 12px; background: ' + urlInputBg + '; border: 1px solid ' + urlInputBorder + '; border-radius: 6px; color: ' + urlInputColor + '; font-size: 13px; outline: none;';
+
+      urlField.appendChild(urlLabel);
+      urlField.appendChild(urlInput);
+      overlay.appendChild(urlField);
+
+      // Actions
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'rcf-actions';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'rcf-btn-save';
+      saveBtn.type = 'button';
+      saveBtn.textContent = '✓ Save';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-btn-cancel';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '✕ Cancel';
+
+      actionsDiv.appendChild(saveBtn);
+      actionsDiv.appendChild(cancelBtn);
+
+      actionsDiv.style.position = 'fixed';
+      actionsDiv.style.left = (styles.left + styles.width / 2) + 'px';
+      actionsDiv.style.top = (styles.top - 56) + 'px';
+      actionsDiv.style.transform = 'translateX(-50%)';
+      actionsDiv.style.zIndex = '10000';
+
+      // Hide original element
+      const originalVisibility = element.style.visibility;
+      element.style.visibility = 'hidden';
+
+      document.body.appendChild(overlay);
+      document.body.appendChild(actionsDiv);
+      textInput.focus();
+      textInput.select();
+
+      const updatePosition = function() {
+        const newRect = element.getBoundingClientRect();
+        overlay.style.left = newRect.left + 'px';
+        overlay.style.top = newRect.top + 'px';
+        actionsDiv.style.left = (newRect.left + newRect.width / 2) + 'px';
+        actionsDiv.style.top = (newRect.top - 56) + 'px';
+      };
+
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+
+      const cleanup = function() {
+        element.removeAttribute('data-rcf-editing');
+        element.classList.remove('rcf-editing');
+        element.style.visibility = originalVisibility || '';
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        if (document.body.contains(actionsDiv)) document.body.removeChild(actionsDiv);
+        // Remove dynamic selection styles
+        const dynamicStyle = document.getElementById(editSessionId + '-styles');
+        if (dynamicStyle) dynamicStyle.remove();
+      };
+
+      const save = function() {
+        const newText = textInput.value;
+        const newHref = urlInput.value.trim();
+
+        element.textContent = newText;
+        if (newHref) {
+          element.href = newHref;
+        }
+
+        elementData.originalContent = newText;
+
+        if (self.socket && self.socket.connected) {
+          self.socket.emit('content-update', {
+            siteId: SITE_ID,
+            elementId: elementId,
+            content: newText,
+            href: newHref,
+            token: SITE_TOKEN,
+            stagingMode: self.stagingMode,
+            stagingToken: self.stagingToken
+          });
+        }
+
+        element.classList.add('rcf-updated');
+        setTimeout(function() {
           element.classList.remove('rcf-updated');
         }, 500);
 
         cleanup();
       };
 
-      const cancel = () => {
-        // Restore original content
-        element.innerHTML = originalContent;
-        cleanup();
-      };
-
-      // Button event handlers
       saveBtn.onclick = save;
-      cancelBtn.onclick = cancel;
+      cancelBtn.onclick = cleanup;
 
-      // AI suggestions handler
-      aiBtn.onclick = () => {
-        this.showAISuggestions(inputElement, elementId);
-      };
-
-      // Keyboard handlers
-      inputElement.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-          cancel();
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          save();
-        }
+      textInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') cleanup();
+        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
       });
 
-      // Click outside to save (optional behavior)
-      const outsideClickHandler = (e) => {
-        if (!element.contains(e.target) && !actionsDiv.contains(e.target)) {
+      urlInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') cleanup();
+        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+      });
+
+      const outsideClickHandler = function(e) {
+        if (!overlay.contains(e.target) && !actionsDiv.contains(e.target)) {
           save();
           document.removeEventListener('click', outsideClickHandler);
         }
       };
-      
-      // Delay adding the outside click handler to prevent immediate trigger
-      setTimeout(() => {
+
+      setTimeout(function() {
         document.addEventListener('click', outsideClickHandler);
       }, 100);
     }
 
-    showAISuggestions(inputElement, elementId) {
-      // Create AI suggestions modal
+    // Animated element editing with pause/resume
+    startAnimatedEdit(element) {
+      const self = this;
+
+      // Get adaptive colors based on background luminance FIRST
+      const editColors = this.getEditingColors(element);
+      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+
+      // Store original animation state
+      const originalAnimation = element.style.animation;
+      const originalTransition = element.style.transition;
+      const originalAnimationPlayState = element.style.animationPlayState;
+
+      // Pause animations
+      element.style.animation = 'none';
+      element.style.transition = 'none';
+      element.style.animationPlayState = 'paused';
+
+      // Show animation paused indicator - adaptive colors
+      const indicator = document.createElement('div');
+      indicator.className = 'rcf-animation-indicator';
+      const indicatorBg = isLightBg ? 'rgba(251, 191, 36, 0.15)' : 'rgba(251, 191, 36, 0.25)';
+      const indicatorBorder = isLightBg ? 'rgba(251, 191, 36, 0.4)' : 'rgba(251, 191, 36, 0.5)';
+      const indicatorColor = isLightBg ? '#b45309' : '#fbbf24';
+      indicator.style.cssText = 'position: absolute; top: -32px; left: 50%; transform: translateX(-50%); background: ' + indicatorBg + '; border: 1px solid ' + indicatorBorder + '; color: ' + indicatorColor + '; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; z-index: 10001;';
+      indicator.textContent = '⏸ Animation paused';
+
+      const originalPosition = element.style.position;
+      element.style.position = 'relative';
+      element.appendChild(indicator);
+
+      // Store cleanup to restore animations
+      const restoreAnimations = function() {
+        element.style.animation = originalAnimation || '';
+        element.style.transition = originalTransition || '';
+        element.style.animationPlayState = originalAnimationPlayState || '';
+        element.style.position = originalPosition || '';
+        if (element.contains(indicator)) {
+          element.removeChild(indicator);
+        }
+      };
+
+      // Use normal text editing but with animation restoration on cleanup
+      const elementId = element.getAttribute('data-rcf-id');
+      const elementData = this.elements.get(elementId);
+      if (!elementData || element.getAttribute('data-rcf-editing')) {
+        restoreAnimations();
+        return;
+      }
+
+      element.setAttribute('data-rcf-editing', 'true');
+      element.classList.add('rcf-editing');
+      element.classList.remove('rcf-hovering');
+
+      const styles = this.captureAllStyles(element);
+      const originalText = this.getFullElementText(element);
+
+      // Generate unique ID for this edit session's styles
+      const editSessionId = 'rcf-anim-edit-' + Date.now();
+
+      // Inject dynamic selection styles
+      const selectionStyle = document.createElement('style');
+      selectionStyle.id = editSessionId + '-styles';
+      selectionStyle.textContent = [
+        '#' + editSessionId + '::selection { background: ' + editColors.selectionBg + '; }',
+        '#' + editSessionId + '::-moz-selection { background: ' + editColors.selectionBg + '; }'
+      ].join('\n');
+      document.head.appendChild(selectionStyle);
+
+      // Create overlay - CRITICAL: overflow hidden and exact height
       const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(0, 0, 0, 0.5);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10001;
-      `;
+      overlay.className = 'rcf-edit-overlay';
+
+      overlay.style.cssText = [
+        'position: fixed',
+        'z-index: 9999',
+        'pointer-events: auto',
+        'box-sizing: border-box',
+        'overflow: hidden',
+        'left: ' + styles.left + 'px',
+        'top: ' + styles.top + 'px',
+        'width: ' + styles.width + 'px',
+        'height: ' + styles.height + 'px',
+        'font-family: ' + styles.fontFamily,
+        'font-size: ' + styles.fontSize,
+        'font-weight: ' + styles.fontWeight,
+        'line-height: ' + styles.lineHeight,
+        'color: ' + styles.color,
+        'background: ' + styles.background,
+        'padding: ' + styles.padding,
+        'border-radius: ' + styles.borderRadius,
+        'outline: 2px solid ' + editColors.outlineColor,
+        'outline-offset: 2px'
+      ].join(' !important; ') + ' !important;';
+
+      const inputElement = document.createElement('textarea');
+      inputElement.value = originalText;
+      inputElement.id = editSessionId;
+      inputElement.className = 'rcf-edit-input';
+      inputElement.style.cssText = [
+        'all: inherit',
+        'width: 100%',
+        'height: 100%',
+        'background: transparent',
+        'border: none',
+        'outline: none',
+        'resize: none',
+        'overflow: hidden',
+        'caret-color: ' + editColors.caretColor
+      ].join(' !important; ') + ' !important;';
+
+      overlay.appendChild(inputElement);
+
+      const actionsDiv = document.createElement('div');
+      actionsDiv.className = 'rcf-actions';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'rcf-btn-save';
+      saveBtn.textContent = '✓ Save';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-btn-cancel';
+      cancelBtn.textContent = '✕ Cancel';
+
+      actionsDiv.appendChild(saveBtn);
+      actionsDiv.appendChild(cancelBtn);
+
+      actionsDiv.style.position = 'fixed';
+      actionsDiv.style.left = (styles.left + styles.width / 2) + 'px';
+      actionsDiv.style.top = (styles.top - 56) + 'px';
+      actionsDiv.style.transform = 'translateX(-50%)';
+      actionsDiv.style.zIndex = '10000';
+
+      const originalVisibility = element.style.visibility;
+      element.style.visibility = 'hidden';
+
+      document.body.appendChild(overlay);
+      document.body.appendChild(actionsDiv);
+      inputElement.focus();
+
+      const cleanup = function() {
+        element.removeAttribute('data-rcf-editing');
+        element.classList.remove('rcf-editing');
+        element.style.visibility = originalVisibility || '';
+        if (document.body.contains(overlay)) document.body.removeChild(overlay);
+        if (document.body.contains(actionsDiv)) document.body.removeChild(actionsDiv);
+        // Remove dynamic selection styles
+        const dynamicStyle = document.getElementById(editSessionId + '-styles');
+        if (dynamicStyle) dynamicStyle.remove();
+        // Restore animations
+        restoreAnimations();
+      };
+
+      const save = function() {
+        const newContent = inputElement.value;
+        element.textContent = newContent;
+        elementData.originalContent = newContent;
+
+        if (self.socket && self.socket.connected) {
+          self.socket.emit('content-update', {
+            siteId: SITE_ID,
+            elementId: elementId,
+            content: newContent,
+            token: SITE_TOKEN,
+            stagingMode: self.stagingMode,
+            stagingToken: self.stagingToken
+          });
+        }
+
+        element.classList.add('rcf-updated');
+        setTimeout(function() {
+          element.classList.remove('rcf-updated');
+        }, 500);
+
+        cleanup();
+      };
+
+      saveBtn.onclick = save;
+      cancelBtn.onclick = cleanup;
+
+      inputElement.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') cleanup();
+        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+      });
+
+      const outsideClickHandler = function(e) {
+        if (!overlay.contains(e.target) && !actionsDiv.contains(e.target)) {
+          save();
+          document.removeEventListener('click', outsideClickHandler);
+        }
+      };
+
+      setTimeout(function() {
+        document.addEventListener('click', outsideClickHandler);
+      }, 100);
+    }
+
+    // Form element editing
+    startFormEdit(element) {
+      const self = this;
+      const elementId = element.getAttribute('data-rcf-id');
+      const elementData = this.elements.get(elementId);
+      if (!elementData || element.getAttribute('data-rcf-editing')) return;
+
+      const tagName = element.tagName.toLowerCase();
+
+      // For buttons, use inline editing
+      if (tagName === 'button') {
+        this.startInlineEdit(element);
+        return;
+      }
+
+      // Get adaptive colors based on background luminance
+      const editColors = this.getEditingColors(element);
+      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+
+      // For input/textarea, edit placeholder and value
+      element.setAttribute('data-rcf-editing', 'true');
+      element.classList.add('rcf-editing');
+      element.classList.remove('rcf-hovering');
+
+      const originalPlaceholder = element.placeholder || '';
+      const originalValue = element.value || '';
+
+      // Create edit popover - adaptive colors based on background
+      const rect = element.getBoundingClientRect();
+      const popover = document.createElement('div');
+      popover.className = 'rcf-form-popover';
+      const popoverBg = isLightBg ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
+      const popoverBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+      popover.style.cssText = 'position: fixed; left: ' + rect.left + 'px; top: ' + (rect.bottom + 8) + 'px; background: ' + popoverBg + '; border-radius: 12px; padding: 16px; box-shadow: 0 12px 36px rgba(0,0,0,0.4); border: 1px solid ' + popoverBorder + '; backdrop-filter: blur(20px); z-index: 10000; min-width: 280px;';
+
+      const title = document.createElement('p');
+      const titleColor = isLightBg ? '#94a3b8' : '#475569';
+      title.style.cssText = 'margin: 0 0 12px 0; font-size: 12px; color: ' + titleColor + '; text-transform: uppercase; letter-spacing: 0.05em;';
+      title.textContent = 'Edit Form Field';
+
+      // Placeholder input
+      const placeholderLabel = document.createElement('label');
+      const labelColor = isLightBg ? '#64748b' : '#475569';
+      placeholderLabel.style.cssText = 'display: block; font-size: 11px; color: ' + labelColor + '; margin-bottom: 4px;';
+      placeholderLabel.textContent = 'Placeholder';
+
+      const placeholderInput = document.createElement('input');
+      placeholderInput.type = 'text';
+      placeholderInput.value = originalPlaceholder;
+      const inputBg = isLightBg ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+      const inputBorder = isLightBg ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+      const inputColor = isLightBg ? '#e2e8f0' : '#1e293b';
+      placeholderInput.style.cssText = 'width: 100%; padding: 8px 12px; background: ' + inputBg + '; border: 1px solid ' + inputBorder + '; border-radius: 6px; color: ' + inputColor + '; font-size: 13px; margin-bottom: 12px; outline: none;';
+
+      // Value input (for inputs with values)
+      const valueLabel = document.createElement('label');
+      valueLabel.style.cssText = 'display: block; font-size: 11px; color: ' + labelColor + '; margin-bottom: 4px;';
+      valueLabel.textContent = 'Default Value';
+
+      const valueInput = document.createElement('input');
+      valueInput.type = 'text';
+      valueInput.value = originalValue;
+      valueInput.style.cssText = 'width: 100%; padding: 8px 12px; background: ' + inputBg + '; border: 1px solid ' + inputBorder + '; border-radius: 6px; color: ' + inputColor + '; font-size: 13px; margin-bottom: 16px; outline: none;';
+
+      // Buttons
+      const btnContainer = document.createElement('div');
+      btnContainer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'rcf-btn-cancel';
+      cancelBtn.textContent = 'Cancel';
+      const cancelBtnBg = isLightBg ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+      const cancelBtnBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+      const cancelBtnColor = isLightBg ? '#94a3b8' : '#475569';
+      cancelBtn.style.cssText = 'padding: 8px 14px; background: ' + cancelBtnBg + '; border: 1px solid ' + cancelBtnBorder + '; border-radius: 6px; color: ' + cancelBtnColor + '; cursor: pointer; font-size: 12px;';
+
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'rcf-btn-save';
+      saveBtn.textContent = 'Save';
+      saveBtn.style.cssText = 'padding: 8px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 6px; color: white; cursor: pointer; font-size: 12px;';
+
+      btnContainer.appendChild(cancelBtn);
+      btnContainer.appendChild(saveBtn);
+
+      popover.appendChild(title);
+      popover.appendChild(placeholderLabel);
+      popover.appendChild(placeholderInput);
+      popover.appendChild(valueLabel);
+      popover.appendChild(valueInput);
+      popover.appendChild(btnContainer);
+
+      document.body.appendChild(popover);
+      placeholderInput.focus();
+
+      const cleanup = function() {
+        element.removeAttribute('data-rcf-editing');
+        element.classList.remove('rcf-editing');
+        if (document.body.contains(popover)) document.body.removeChild(popover);
+      };
+
+      const save = function() {
+        element.placeholder = placeholderInput.value;
+        element.value = valueInput.value;
+
+        elementData.originalContent = placeholderInput.value;
+
+        if (self.socket && self.socket.connected) {
+          self.socket.emit('content-update', {
+            siteId: SITE_ID,
+            elementId: elementId,
+            content: placeholderInput.value,
+            value: valueInput.value,
+            contentType: 'form',
+            token: SITE_TOKEN,
+            stagingMode: self.stagingMode,
+            stagingToken: self.stagingToken
+          });
+        }
+
+        element.classList.add('rcf-updated');
+        setTimeout(function() {
+          element.classList.remove('rcf-updated');
+        }, 500);
+
+        cleanup();
+      };
+
+      saveBtn.onclick = save;
+      cancelBtn.onclick = cleanup;
+
+      placeholderInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') cleanup();
+        else if (e.key === 'Enter') save();
+      });
+
+      valueInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') cleanup();
+        else if (e.key === 'Enter') save();
+      });
+
+      const outsideClickHandler = function(e) {
+        if (!popover.contains(e.target) && e.target !== element) {
+          cleanup();
+          document.removeEventListener('click', outsideClickHandler);
+        }
+      };
+
+      setTimeout(function() {
+        document.addEventListener('click', outsideClickHandler);
+      }, 100);
+    }
+
+    // Show hint for non-editable containers
+    showContainerHint(element) {
+      // Show a temporary tooltip indicating the container can't be edited
+      element.classList.remove('rcf-hovering');
+
+      // Get adaptive colors based on background luminance
+      const editColors = this.getEditingColors(element);
+      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+
+      const rect = element.getBoundingClientRect();
+      const hint = document.createElement('div');
+      hint.className = 'rcf-container-hint';
+      // Use adaptive orange colors for better visibility
+      const hintBg = isLightBg ? 'rgba(251, 146, 60, 0.15)' : 'rgba(251, 146, 60, 0.25)';
+      const hintBorder = isLightBg ? 'rgba(251, 146, 60, 0.4)' : 'rgba(251, 146, 60, 0.5)';
+      const hintColor = isLightBg ? '#c2410c' : '#fb923c';
+      hint.style.cssText = 'position: fixed; left: ' + (rect.left + rect.width / 2) + 'px; top: ' + (rect.top - 48) + 'px; transform: translateX(-50%); background: ' + hintBg + '; border: 1px solid ' + hintBorder + '; color: ' + hintColor + '; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; z-index: 10001; animation: rcf-fadeIn 0.2s ease;';
+      hint.textContent = '📦 Click on specific text elements inside';
+
+      document.body.appendChild(hint);
+
+      // Auto-remove after 2 seconds
+      setTimeout(function() {
+        hint.style.opacity = '0';
+        hint.style.transition = 'opacity 0.3s ease';
+        setTimeout(function() {
+          if (document.body.contains(hint)) {
+            document.body.removeChild(hint);
+          }
+        }, 300);
+      }, 2000);
+    }
+
+    showAISuggestions(inputElement, elementId) {
+      const self = this;
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; z-index: 10001; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
 
       const modal = document.createElement('div');
-      modal.style.cssText = `
-        background: white;
-        border-radius: 12px;
-        padding: 24px;
-        max-width: 500px;
-        width: 90%;
-        max-height: 80%;
-        overflow-y: auto;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-      `;
+      modal.style.cssText = 'background: linear-gradient(180deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%); border-radius: 20px; padding: 28px; max-width: 500px; width: 90%; max-height: 80%; overflow-y: auto; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1); animation: rcf-modal-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);';
 
-      modal.innerHTML = `
-        <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 16px;">
-          <h3 style="margin: 0; color: #1f2937;">✨ AI Content Suggestions</h3>
-          <button id="rcf-ai-close" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #6b7280;">×</button>
-        </div>
-        
-        <div style="margin-bottom: 16px;">
-          <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #374151;">Goal:</label>
-          <select id="rcf-suggestion-goal" style="width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: white;">
-            <option value="improve">Improve clarity and readability</option>
-            <option value="shorten">Make more concise</option>
-            <option value="expand">Add more detail</option>
-            <option value="engage">Optimize for engagement</option>
-            <option value="professional">Make more professional</option>
-            <option value="casual">Make more casual</option>
-          </select>
-        </div>
-        
-        <div style="margin-bottom: 16px;">
-          <button id="rcf-generate-suggestions" style="width: 100%; padding: 12px; background: #8b5cf6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 500;">
-            🪄 Generate Suggestions
-          </button>
-        </div>
-        
-        <div id="rcf-suggestions-list" style="margin-bottom: 16px;"></div>
-        
-        <div style="display: flex; gap: 8px; justify-content: flex-end;">
-          <button id="rcf-ai-cancel" style="padding: 8px 16px; border: 1px solid #d1d5db; background: white; border-radius: 6px; cursor: pointer; color: #6b7280;">Close</button>
-        </div>
-      `;
+      const header = document.createElement('div');
+      header.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;';
+
+      const titleContainer = document.createElement('div');
+      titleContainer.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+
+      const titleIcon = document.createElement('span');
+      titleIcon.style.cssText = 'display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(59, 130, 246, 0.2) 100%); border-radius: 10px; font-size: 18px; border: 1px solid rgba(139, 92, 246, 0.3);';
+      titleIcon.textContent = '✨';
+
+      const title = document.createElement('h3');
+      title.style.cssText = 'margin: 0; color: #f1f5f9; font-size: 18px; font-weight: 600;';
+      title.textContent = 'AI Content Suggestions';
+
+      titleContainer.appendChild(titleIcon);
+      titleContainer.appendChild(title);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.style.cssText = 'background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); width: 32px; height: 32px; border-radius: 8px; font-size: 18px; cursor: pointer; color: #94a3b8; display: flex; align-items: center; justify-content: center; transition: all 0.2s;';
+      closeBtn.textContent = '×';
+      closeBtn.onmouseenter = function() { closeBtn.style.background = 'rgba(255, 255, 255, 0.12)'; closeBtn.style.color = '#e2e8f0'; };
+      closeBtn.onmouseleave = function() { closeBtn.style.background = 'rgba(255, 255, 255, 0.08)'; closeBtn.style.color = '#94a3b8'; };
+
+      header.appendChild(titleContainer);
+      header.appendChild(closeBtn);
+
+      const goalContainer = document.createElement('div');
+      goalContainer.style.cssText = 'margin-bottom: 20px;';
+
+      const goalLabel = document.createElement('label');
+      goalLabel.style.cssText = 'display: block; margin-bottom: 8px; font-weight: 500; color: #cbd5e1; font-size: 13px;';
+      goalLabel.textContent = 'Optimization Goal';
+
+      const goalSelect = document.createElement('select');
+      goalSelect.style.cssText = 'width: 100%; padding: 12px 16px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px; background: rgba(15, 23, 42, 0.6); color: #f1f5f9; font-size: 14px; cursor: pointer; transition: all 0.2s; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 12 12\'%3E%3Cpath fill=\'%2394a3b8\' d=\'M6 8L1 3h10z\'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center;';
+
+      const options = [
+        { value: 'improve', text: '✨ Improve clarity and readability' },
+        { value: 'shorten', text: '📝 Make more concise' },
+        { value: 'expand', text: '📖 Add more detail' },
+        { value: 'engage', text: '🎯 Optimize for engagement' },
+        { value: 'professional', text: '💼 Make more professional' },
+        { value: 'casual', text: '😊 Make more casual' }
+      ];
+
+      options.forEach(function(opt) {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.text;
+        option.style.background = '#1e293b';
+        goalSelect.appendChild(option);
+      });
+
+      goalContainer.appendChild(goalLabel);
+      goalContainer.appendChild(goalSelect);
+
+      const generateBtn = document.createElement('button');
+      generateBtn.style.cssText = 'width: 100%; padding: 14px; background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4); transition: all 0.2s;';
+      generateBtn.innerHTML = '<span>🪄</span><span>Generate Suggestions</span>';
+      generateBtn.onmouseenter = function() { if (!generateBtn.disabled) { generateBtn.style.transform = 'translateY(-1px)'; generateBtn.style.boxShadow = '0 6px 20px rgba(139, 92, 246, 0.5)'; } };
+      generateBtn.onmouseleave = function() { generateBtn.style.transform = 'translateY(0)'; generateBtn.style.boxShadow = '0 4px 14px rgba(139, 92, 246, 0.4)'; };
+
+      const suggestionsList = document.createElement('div');
+      suggestionsList.style.cssText = 'margin-bottom: 20px;';
+
+      const footer = document.createElement('div');
+      footer.style.cssText = 'display: flex; gap: 8px; justify-content: flex-end;';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.style.cssText = 'padding: 10px 20px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.08); border-radius: 8px; cursor: pointer; color: #94a3b8; font-size: 13px; font-weight: 500; transition: all 0.2s;';
+      cancelBtn.textContent = 'Close';
+      cancelBtn.onmouseenter = function() { cancelBtn.style.background = 'rgba(255, 255, 255, 0.12)'; cancelBtn.style.color = '#e2e8f0'; };
+      cancelBtn.onmouseleave = function() { cancelBtn.style.background = 'rgba(255, 255, 255, 0.08)'; cancelBtn.style.color = '#94a3b8'; };
+
+      footer.appendChild(cancelBtn);
+
+      modal.appendChild(header);
+      modal.appendChild(goalContainer);
+      modal.appendChild(generateBtn);
+      modal.appendChild(suggestionsList);
+      modal.appendChild(footer);
 
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
 
-      // Event handlers
-      const closeBtn = modal.querySelector('#rcf-ai-close');
-      const cancelBtn = modal.querySelector('#rcf-ai-cancel');
-      const generateBtn = modal.querySelector('#rcf-generate-suggestions');
-      const goalSelect = modal.querySelector('#rcf-suggestion-goal');
-      const suggestionsList = modal.querySelector('#rcf-suggestions-list');
-
-      const closeModal = () => {
+      const closeModal = function() {
         if (document.body.contains(overlay)) {
           document.body.removeChild(overlay);
         }
@@ -922,28 +3024,33 @@
 
       closeBtn.onclick = closeModal;
       cancelBtn.onclick = closeModal;
-      overlay.onclick = (e) => {
+      overlay.onclick = function(e) {
         if (e.target === overlay) closeModal();
       };
 
-      generateBtn.onclick = async () => {
+      generateBtn.onclick = async function() {
         const currentText = inputElement.value;
         const goal = goalSelect.value;
-        
+
         if (!currentText.trim()) {
-          suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Please enter some text first.</p>';
+          const errorP = document.createElement('p');
+          errorP.style.cssText = 'color: #fbbf24; margin: 0; padding: 16px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 10px; font-size: 13px;';
+          errorP.textContent = '⚠️ Please enter some text first.';
+          suggestionsList.textContent = '';
+          suggestionsList.appendChild(errorP);
           return;
         }
 
-        generateBtn.textContent = '🔄 Generating...';
+        generateBtn.innerHTML = '<span>🔄</span><span>Generating...</span>';
         generateBtn.disabled = true;
+        generateBtn.style.opacity = '0.7';
 
         try {
-          const response = await fetch(`${RECOPYFAST_API}/ai/suggest`, {
+          const response = await fetch(RECOPYFAST_API + '/ai/suggest', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${SITE_TOKEN}`,
+              'Authorization': 'Bearer ' + SITE_TOKEN,
             },
             body: JSON.stringify({
               text: currentText,
@@ -956,27 +3063,22 @@
           const data = await response.json();
 
           if (response.ok && data.success) {
-            suggestionsList.innerHTML = '';
-            data.suggestions.forEach((suggestion, index) => {
+            suggestionsList.textContent = '';
+            data.suggestions.forEach(function(suggestion, index) {
               const suggestionDiv = document.createElement('div');
-              suggestionDiv.style.cssText = `
-                margin-bottom: 12px; 
-                padding: 12px; 
-                background: #f9fafb; 
-                border: 1px solid #e5e7eb; 
-                border-radius: 8px;
-                transition: all 0.2s ease;
-              `;
-              
-              suggestionDiv.innerHTML = `
-                <p style="margin: 0 0 8px 0; font-size: 14px; line-height: 1.5; color: #374151;">${suggestion}</p>
-                <button style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">
-                  Use This Suggestion
-                </button>
-              `;
+              suggestionDiv.style.cssText = 'margin-bottom: 12px; padding: 16px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; transition: all 0.2s ease; animation: rcf-modal-in 0.3s ease; animation-delay: ' + (index * 0.05) + 's; animation-fill-mode: both;';
 
-              const useBtn = suggestionDiv.querySelector('button');
-              useBtn.onclick = () => {
+              const suggestionText = document.createElement('p');
+              suggestionText.style.cssText = 'margin: 0 0 12px 0; font-size: 14px; line-height: 1.6; color: #e2e8f0;';
+              suggestionText.textContent = suggestion;
+
+              const useBtn = document.createElement('button');
+              useBtn.style.cssText = 'padding: 8px 16px; background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);';
+              useBtn.textContent = '✓ Use This';
+              useBtn.onmouseenter = function() { useBtn.style.transform = 'translateY(-1px)'; useBtn.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.4)'; };
+              useBtn.onmouseleave = function() { useBtn.style.transform = 'translateY(0)'; useBtn.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.3)'; };
+
+              useBtn.onclick = function() {
                 inputElement.value = suggestion;
                 if (inputElement.tagName === 'TEXTAREA') {
                   inputElement.style.height = 'auto';
@@ -986,62 +3088,75 @@
                 closeModal();
               };
 
-              // Hover effects
-              suggestionDiv.onmouseenter = () => {
-                suggestionDiv.style.background = '#f3f4f6';
-                suggestionDiv.style.borderColor = '#d1d5db';
+              suggestionDiv.onmouseenter = function() {
+                suggestionDiv.style.background = 'rgba(30, 41, 59, 0.6)';
+                suggestionDiv.style.borderColor = 'rgba(59, 130, 246, 0.3)';
               };
-              suggestionDiv.onmouseleave = () => {
-                suggestionDiv.style.background = '#f9fafb';
-                suggestionDiv.style.borderColor = '#e5e7eb';
+              suggestionDiv.onmouseleave = function() {
+                suggestionDiv.style.background = 'rgba(15, 23, 42, 0.5)';
+                suggestionDiv.style.borderColor = 'rgba(255, 255, 255, 0.1)';
               };
 
+              suggestionDiv.appendChild(suggestionText);
+              suggestionDiv.appendChild(useBtn);
               suggestionsList.appendChild(suggestionDiv);
             });
           } else {
-            suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Failed to generate suggestions. Please try again.</p>';
+            const errorP = document.createElement('p');
+            errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
+            errorP.textContent = 'Failed to generate suggestions. Please try again.';
+            suggestionsList.textContent = '';
+            suggestionsList.appendChild(errorP);
           }
         } catch (error) {
           console.error('AI suggestion error:', error);
-          suggestionsList.innerHTML = '<p style="color: #ef4444; margin: 0;">Error connecting to AI service. Please check your connection.</p>';
+          const errorP = document.createElement('p');
+          errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
+          errorP.textContent = 'Error connecting to AI service. Please check your connection.';
+          suggestionsList.textContent = '';
+          suggestionsList.appendChild(errorP);
         } finally {
-          generateBtn.textContent = '🪄 Generate Suggestions';
+          generateBtn.innerHTML = '<span>🪄</span><span>Generate Suggestions</span>';
           generateBtn.disabled = false;
+          generateBtn.style.opacity = '1';
         }
       };
 
-      // Handle escape key
-      overlay.addEventListener('keydown', (e) => {
+      overlay.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
           closeModal();
         }
       });
     }
-    
-    // Fallback polling method
+
     startPolling() {
-      setInterval(async () => {
+      const self = this;
+      setInterval(async function() {
         try {
-          const response = await fetch(`${RECOPYFAST_API}/content/${SITE_ID}`, {
+          const endpoint = self.stagingMode
+            ? RECOPYFAST_API + '/staging/content/' + SITE_ID + '?rcf_token=' + self.stagingToken
+            : RECOPYFAST_API + '/content/' + SITE_ID;
+
+          const response = await fetch(endpoint, {
             headers: {
-              Authorization: `Bearer ${SITE_TOKEN}`,
+              'Authorization': 'Bearer ' + SITE_TOKEN,
             },
           });
           if (response.ok) {
-            const updates = await response.json();
-            updates.forEach(update => this.handleContentUpdate(update));
+            const data = await response.json();
+            const updates = self.stagingMode ? data.content : data;
+            updates.forEach(function(update) { self.handleContentUpdate(update); });
           }
         } catch (error) {
           console.error('ReCopyFast: Polling error:', error);
         }
       }, 5000);
     }
-    
-    // Public API
+
     updateContent(elementId, content) {
-      this.handleContentUpdate({ elementId, content });
+      this.handleContentUpdate({ elementId: elementId, content: content });
     }
-    
+
     destroy() {
       if (this.socket) {
         this.socket.disconnect();
@@ -1050,19 +3165,1050 @@
         this.observer.disconnect();
       }
       this.elements.clear();
+
+      const banner = document.querySelector('#rcf-staging-banner');
+      if (banner) {
+        document.body.removeChild(banner);
+      }
     }
   }
-  
-  // Initialize ReCopyFast
+
+  // Edit Board Panel Class
+  class EditBoardPanel {
+    constructor(rcf) {
+      this.rcf = rcf;
+      this.isOpen = false;
+      this.activeTab = 'elements';
+      this.panel = null;
+      this.styles = [];
+      this.languages = [];
+      this.versions = [];
+      this.themes = [];
+      this.selectedElements = new Set();
+    }
+
+    open() {
+      if (this.isOpen) return;
+      this.isOpen = true;
+      this.createPanel();
+      this.loadTabData();
+    }
+
+    close() {
+      if (!this.isOpen) return;
+      this.isOpen = false;
+      if (this.panel && document.body.contains(this.panel)) {
+        this.panel.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+          if (this.panel && document.body.contains(this.panel)) {
+            document.body.removeChild(this.panel);
+          }
+          this.panel = null;
+        }, 300);
+      }
+    }
+
+    createPanel() {
+      const self = this;
+
+      // Inject panel styles
+      if (!document.querySelector('#rcf-edit-board-styles')) {
+        const style = document.createElement('style');
+        style.id = 'rcf-edit-board-styles';
+        style.textContent = `
+          .rcf-edit-board {
+            position: fixed;
+            top: 0;
+            right: 0;
+            width: 420px;
+            height: 100vh;
+            background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(10, 15, 30, 0.98) 100%);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: -20px 0 60px rgba(0, 0, 0, 0.5);
+            z-index: 99998;
+            display: flex;
+            flex-direction: column;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: #e2e8f0;
+            transform: translateX(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          }
+          .rcf-edit-board.rcf-open {
+            transform: translateX(0);
+          }
+          .rcf-eb-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(30, 41, 59, 0.5);
+          }
+          .rcf-eb-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #f1f5f9;
+          }
+          .rcf-eb-close {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 18px;
+          }
+          .rcf-eb-close:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+          }
+          .rcf-eb-tabs {
+            display: flex;
+            gap: 2px;
+            padding: 8px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(15, 23, 42, 0.3);
+          }
+          .rcf-eb-tab {
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: #64748b;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: color 0.15s, background 0.15s;
+          }
+          .rcf-eb-tab:hover {
+            color: #94a3b8;
+            background: rgba(255, 255, 255, 0.04);
+          }
+          .rcf-eb-tab.active {
+            background: rgba(255, 255, 255, 0.08);
+            color: #f1f5f9;
+          }
+          .rcf-eb-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+          }
+          .rcf-eb-section {
+            margin-bottom: 24px;
+          }
+          .rcf-eb-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+          }
+          .rcf-eb-card {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: background 0.15s;
+          }
+          .rcf-eb-card:hover {
+            background: rgba(30, 41, 59, 0.6);
+          }
+          .rcf-eb-card.selected {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: rgba(59, 130, 246, 0.2);
+          }
+          .rcf-eb-card-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #f1f5f9;
+            margin-bottom: 4px;
+          }
+          .rcf-eb-card-desc {
+            font-size: 12px;
+            color: #64748b;
+            line-height: 1.4;
+          }
+          .rcf-eb-card-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #64748b;
+          }
+          .rcf-eb-badge {
+            padding: 2px 8px;
+            background: rgba(59, 130, 246, 0.2);
+            border-radius: 4px;
+            font-size: 10px;
+            color: #93c5fd;
+          }
+          .rcf-eb-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: opacity 0.15s;
+          }
+          .rcf-eb-btn:hover {
+            opacity: 0.9;
+          }
+          .rcf-eb-btn-primary {
+            background: #3b82f6;
+            color: white;
+          }
+          .rcf-eb-btn-success {
+            background: #10b981;
+            color: white;
+          }
+          .rcf-eb-btn-ghost {
+            background: rgba(255, 255, 255, 0.06);
+            color: #94a3b8;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+          }
+          .rcf-eb-btn-ghost:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: #e2e8f0;
+          }
+          .rcf-eb-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: #64748b;
+          }
+          .rcf-eb-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 20px;
+            color: #94a3b8;
+          }
+          .rcf-eb-checkbox {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.2s;
+          }
+          .rcf-eb-checkbox:checked {
+            background: #3b82f6;
+            border-color: #3b82f6;
+          }
+          .rcf-eb-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            color: #f1f5f9;
+            font-size: 13px;
+          }
+          .rcf-eb-input:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.15);
+          }
+          .rcf-eb-input::placeholder {
+            color: #64748b;
+          }
+          .rcf-eb-select {
+            width: 100%;
+            padding: 10px 12px;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            color: #f1f5f9;
+            font-size: 13px;
+            cursor: pointer;
+          }
+          .rcf-eb-select:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.15);
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      // Create panel
+      this.panel = document.createElement('div');
+      this.panel.className = 'rcf-edit-board';
+      this.panel.id = 'rcf-edit-board-panel';
+
+      // Header
+      const header = document.createElement('div');
+      header.className = 'rcf-eb-header';
+
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-title';
+      title.innerHTML = '<span>📋</span><span>Edit Board</span>';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'rcf-eb-close';
+      closeBtn.textContent = '×';
+      closeBtn.onclick = () => self.close();
+
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      // Tabs
+      const tabs = document.createElement('div');
+      tabs.className = 'rcf-eb-tabs';
+
+      const tabData = [
+        { id: 'elements', label: 'Elements' },
+        { id: 'styles', label: 'Styles' },
+        { id: 'languages', label: 'Languages' },
+        { id: 'history', label: 'History' },
+        { id: 'themes', label: 'Themes' }
+      ];
+
+      tabData.forEach(tab => {
+        const tabBtn = document.createElement('button');
+        tabBtn.className = 'rcf-eb-tab' + (tab.id === self.activeTab ? ' active' : '');
+        tabBtn.textContent = tab.label;
+        tabBtn.onclick = () => self.switchTab(tab.id);
+        tabs.appendChild(tabBtn);
+      });
+
+      // Content area
+      const content = document.createElement('div');
+      content.className = 'rcf-eb-content';
+      content.id = 'rcf-eb-content';
+
+      this.panel.appendChild(header);
+      this.panel.appendChild(tabs);
+      this.panel.appendChild(content);
+
+      document.body.appendChild(this.panel);
+
+      // Trigger open animation
+      requestAnimationFrame(() => {
+        self.panel.classList.add('rcf-open');
+      });
+
+      this.renderTab();
+    }
+
+    switchTab(tabId) {
+      this.activeTab = tabId;
+
+      // Update tab buttons
+      const tabs = this.panel.querySelectorAll('.rcf-eb-tab');
+      tabs.forEach(tab => {
+        tab.classList.remove('active');
+        if (tab.textContent.toLowerCase().includes(tabId)) {
+          tab.classList.add('active');
+        }
+      });
+
+      this.loadTabData();
+    }
+
+    async loadTabData() {
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '<div class="rcf-eb-loading">Loading...</div>';
+
+      try {
+        switch (this.activeTab) {
+          case 'elements':
+            this.renderElementsTab();
+            break;
+          case 'styles':
+            await this.loadStyles();
+            this.renderStylesTab();
+            break;
+          case 'languages':
+            await this.loadLanguages();
+            this.renderLanguagesTab();
+            break;
+          case 'history':
+            await this.loadHistory();
+            this.renderHistoryTab();
+            break;
+          case 'themes':
+            await this.loadThemes();
+            this.renderThemesTab();
+            break;
+        }
+      } catch (error) {
+        console.error('Error loading tab data:', error);
+        content.innerHTML = '<div class="rcf-eb-empty">Failed to load data</div>';
+      }
+    }
+
+    renderTab() {
+      this.loadTabData();
+    }
+
+    // Elements Tab
+    renderElementsTab() {
+      const self = this;
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '';
+
+      const section = document.createElement('div');
+      section.className = 'rcf-eb-section';
+
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-section-title';
+      title.textContent = 'Editable Elements (' + this.rcf.elements.size + ')';
+      section.appendChild(title);
+
+      // Filter out buttons and links - they are interactive, not content
+      const contentElements = [];
+      this.rcf.elements.forEach((data, elementId) => {
+        const tagName = data.type.toLowerCase();
+        if (tagName !== 'button' && tagName !== 'a') {
+          contentElements.push({ data, elementId });
+        }
+      });
+
+      title.textContent = 'Editable Elements (' + contentElements.length + ')';
+
+      if (contentElements.length === 0) {
+        section.innerHTML += '<div class="rcf-eb-empty">No editable elements found</div>';
+      } else {
+        contentElements.forEach(({ data, elementId }) => {
+          const card = document.createElement('div');
+          card.className = 'rcf-eb-card';
+          if (self.selectedElements.has(elementId)) {
+            card.classList.add('selected');
+          }
+
+          const cardHeader = document.createElement('div');
+          cardHeader.style.cssText = 'display: flex; align-items: flex-start; gap: 10px;';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'rcf-eb-checkbox';
+          checkbox.checked = self.selectedElements.has(elementId);
+          checkbox.onclick = (e) => {
+            e.stopPropagation();
+            if (checkbox.checked) {
+              self.selectedElements.add(elementId);
+            } else {
+              self.selectedElements.delete(elementId);
+            }
+            card.classList.toggle('selected', checkbox.checked);
+          };
+
+          const cardContent = document.createElement('div');
+          cardContent.style.flex = '1';
+
+          const cardTitle = document.createElement('div');
+          cardTitle.className = 'rcf-eb-card-title';
+          cardTitle.textContent = data.type.toUpperCase();
+
+          const cardDesc = document.createElement('div');
+          cardDesc.className = 'rcf-eb-card-desc';
+          const previewText = data.originalContent.substring(0, 100);
+          cardDesc.textContent = previewText + (data.originalContent.length > 100 ? '...' : '');
+
+          cardContent.appendChild(cardTitle);
+          cardContent.appendChild(cardDesc);
+
+          cardHeader.appendChild(checkbox);
+          cardHeader.appendChild(cardContent);
+
+          card.appendChild(cardHeader);
+
+          card.onclick = () => {
+            data.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            data.element.classList.add('rcf-hovering');
+            setTimeout(() => data.element.classList.remove('rcf-hovering'), 2000);
+          };
+
+          section.appendChild(card);
+        });
+      }
+
+      content.appendChild(section);
+
+      // Actions
+      if (this.selectedElements.size > 0) {
+        const actions = document.createElement('div');
+        actions.style.cssText = 'position: sticky; bottom: 0; padding: 16px 0; background: linear-gradient(transparent, rgba(15, 23, 42, 0.98) 20%);';
+
+        const selectInfo = document.createElement('div');
+        selectInfo.style.cssText = 'margin-bottom: 10px; font-size: 12px; color: #94a3b8;';
+        selectInfo.textContent = this.selectedElements.size + ' element(s) selected';
+
+        const actionBtns = document.createElement('div');
+        actionBtns.style.cssText = 'display: flex; gap: 8px;';
+
+        const applyStyleBtn = document.createElement('button');
+        applyStyleBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
+        applyStyleBtn.textContent = '🎨 Apply Style';
+        applyStyleBtn.onclick = () => self.switchTab('styles');
+
+        actionBtns.appendChild(applyStyleBtn);
+
+        actions.appendChild(selectInfo);
+        actions.appendChild(actionBtns);
+        content.appendChild(actions);
+      }
+    }
+
+    // Styles Tab
+    async loadStyles() {
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/styles?siteId=' + SITE_ID, {
+          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
+        });
+        const data = await response.json();
+        this.styles = [...(data.presets || []), ...(data.custom || [])];
+      } catch (error) {
+        console.error('Error loading styles:', error);
+        this.styles = [];
+      }
+    }
+
+    renderStylesTab() {
+      const self = this;
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '';
+
+      // Section title
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-section-title';
+      title.textContent = 'Apply a writing style';
+      title.style.marginBottom = '16px';
+      content.appendChild(title);
+
+      if (this.styles.length === 0) {
+        content.innerHTML += '<div class="rcf-eb-empty">No styles available</div>';
+        return;
+      }
+
+      // Style grid
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 8px;';
+
+      this.styles.forEach(style => {
+        const card = document.createElement('button');
+        card.className = 'rcf-eb-card';
+        card.style.cssText = 'text-align: left; width: 100%; cursor: pointer;';
+
+        const cardTitle = document.createElement('div');
+        cardTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 4px;';
+        cardTitle.textContent = style.name;
+
+        const cardDesc = document.createElement('div');
+        cardDesc.style.cssText = 'font-size: 11px; color: #64748b; line-height: 1.3;';
+        cardDesc.textContent = style.description || '';
+
+        card.appendChild(cardTitle);
+        card.appendChild(cardDesc);
+
+        card.onclick = async () => {
+          await self.applyStyle(style.id);
+        };
+
+        grid.appendChild(card);
+      });
+
+      content.appendChild(grid);
+
+      // Info text
+      const info = document.createElement('div');
+      info.style.cssText = 'margin-top: 16px; padding: 12px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; font-size: 12px; color: #94a3b8;';
+      info.textContent = 'Click a style to transform all text on the page with AI.';
+      content.appendChild(info);
+    }
+
+    async applyStyle(styleId) {
+      const self = this;
+      const elementIds = this.selectedElements.size > 0
+        ? Array.from(this.selectedElements)
+        : null;
+
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '<div class="rcf-eb-loading">Applying style...</div>';
+
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/styles/apply', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + this.rcf.stagingToken
+          },
+          body: JSON.stringify({
+            siteId: SITE_ID,
+            styleId: styleId,
+            elementIds: elementIds
+          })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          content.innerHTML = '<div class="rcf-eb-empty">Applied ' + result.styleName + ' to ' + result.transformedCount + ' elements</div>';
+
+          // Refresh the page content
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          content.innerHTML = '<div class="rcf-eb-empty">' + (result.error || 'Failed to apply style') + '</div>';
+        }
+      } catch (error) {
+        console.error('Error applying style:', error);
+        content.innerHTML = '<div class="rcf-eb-empty">Error applying style</div>';
+      }
+    }
+
+    // Languages Tab
+    async loadLanguages() {
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/languages?siteId=' + SITE_ID, {
+          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
+        });
+        const data = await response.json();
+        this.languages = data.languages || [];
+        this.availableLanguages = data.availableLanguages || [];
+      } catch (error) {
+        console.error('Error loading languages:', error);
+        this.languages = [];
+      }
+    }
+
+    renderLanguagesTab() {
+      const self = this;
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '';
+
+      // Current languages
+      const section = document.createElement('div');
+      section.className = 'rcf-eb-section';
+
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-section-title';
+      title.textContent = 'Site Languages';
+      section.appendChild(title);
+
+      if (this.languages.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'rcf-eb-empty';
+        empty.textContent = 'No languages configured';
+        section.appendChild(empty);
+      } else {
+        this.languages.forEach(lang => {
+          const card = document.createElement('div');
+          card.className = 'rcf-eb-card';
+
+          const cardTitle = document.createElement('div');
+          cardTitle.className = 'rcf-eb-card-title';
+          cardTitle.textContent = lang.language_name + ' (' + lang.language_code + ')';
+
+          const cardMeta = document.createElement('div');
+          cardMeta.className = 'rcf-eb-card-meta';
+
+          if (lang.is_default) {
+            const badge = document.createElement('span');
+            badge.className = 'rcf-eb-badge';
+            badge.textContent = 'Default';
+            cardMeta.appendChild(badge);
+          }
+
+          const coverage = document.createElement('span');
+          coverage.textContent = Math.round(lang.translation_coverage || 0) + '% translated';
+          cardMeta.appendChild(coverage);
+
+          card.appendChild(cardTitle);
+          card.appendChild(cardMeta);
+          section.appendChild(card);
+        });
+      }
+
+      content.appendChild(section);
+
+      // Add language section
+      const addSection = document.createElement('div');
+      addSection.className = 'rcf-eb-section';
+
+      const addTitle = document.createElement('div');
+      addTitle.className = 'rcf-eb-section-title';
+      addTitle.textContent = 'Add Language';
+      addSection.appendChild(addTitle);
+
+      const select = document.createElement('select');
+      select.className = 'rcf-eb-select';
+      select.innerHTML = '<option value="">Select language...</option>';
+
+      (this.availableLanguages || []).forEach(lang => {
+        const exists = this.languages.some(l => l.language_code === lang.code);
+        if (!exists) {
+          const option = document.createElement('option');
+          option.value = lang.code;
+          option.textContent = lang.name;
+          select.appendChild(option);
+        }
+      });
+
+      const autoTranslateLabel = document.createElement('label');
+      autoTranslateLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13px; color: #94a3b8;';
+
+      const autoTranslateCheck = document.createElement('input');
+      autoTranslateCheck.type = 'checkbox';
+      autoTranslateCheck.className = 'rcf-eb-checkbox';
+      autoTranslateCheck.checked = true;
+      autoTranslateLabel.appendChild(autoTranslateCheck);
+      autoTranslateLabel.appendChild(document.createTextNode('Auto-translate with AI'));
+
+      const addBtn = document.createElement('button');
+      addBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
+      addBtn.style.marginTop = '10px';
+      addBtn.textContent = 'Add Language';
+      addBtn.onclick = async () => {
+        if (!select.value) return;
+
+        addBtn.disabled = true;
+        addBtn.textContent = 'Adding...';
+
+        try {
+          await fetch(RECOPYFAST_API + '/edit-board/languages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + self.rcf.stagingToken
+            },
+            body: JSON.stringify({
+              siteId: SITE_ID,
+              languageCode: select.value,
+              autoTranslate: autoTranslateCheck.checked
+            })
+          });
+
+          self.loadTabData();
+        } catch (error) {
+          console.error('Error adding language:', error);
+          addBtn.disabled = false;
+          addBtn.textContent = 'Add Language';
+        }
+      };
+
+      addSection.appendChild(select);
+      addSection.appendChild(autoTranslateLabel);
+      addSection.appendChild(addBtn);
+      content.appendChild(addSection);
+    }
+
+    // History Tab
+    async loadHistory() {
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/history?siteId=' + SITE_ID, {
+          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
+        });
+        const data = await response.json();
+        this.versions = data.versions || [];
+      } catch (error) {
+        console.error('Error loading history:', error);
+        this.versions = [];
+      }
+    }
+
+    renderHistoryTab() {
+      const self = this;
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '';
+
+      const section = document.createElement('div');
+      section.className = 'rcf-eb-section';
+
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-section-title';
+      title.textContent = 'Version History';
+      section.appendChild(title);
+
+      if (this.versions.length === 0) {
+        section.innerHTML += '<div class="rcf-eb-empty">No versions saved yet</div>';
+      } else {
+        this.versions.forEach(version => {
+          const card = document.createElement('div');
+          card.className = 'rcf-eb-card';
+
+          const cardTitle = document.createElement('div');
+          cardTitle.className = 'rcf-eb-card-title';
+          cardTitle.textContent = 'Version ' + version.version_number;
+
+          const cardDesc = document.createElement('div');
+          cardDesc.className = 'rcf-eb-card-desc';
+          cardDesc.textContent = version.description || version.change_type || 'Manual edit';
+
+          const cardMeta = document.createElement('div');
+          cardMeta.className = 'rcf-eb-card-meta';
+
+          const date = new Date(version.created_at);
+          const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+          cardMeta.innerHTML = '<span>' + dateStr + '</span><span>by ' + (version.created_by || 'Unknown') + '</span>';
+
+          const restoreBtn = document.createElement('button');
+          restoreBtn.className = 'rcf-eb-btn rcf-eb-btn-ghost';
+          restoreBtn.style.marginTop = '10px';
+          restoreBtn.textContent = 'Restore';
+          restoreBtn.onclick = async (e) => {
+            e.stopPropagation();
+            await self.restoreVersion(version.id);
+          };
+
+          card.appendChild(cardTitle);
+          card.appendChild(cardDesc);
+          card.appendChild(cardMeta);
+          card.appendChild(restoreBtn);
+
+          section.appendChild(card);
+        });
+      }
+
+      content.appendChild(section);
+
+      // Create snapshot button
+      const createBtn = document.createElement('button');
+      createBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
+      createBtn.style.width = '100%';
+      createBtn.textContent = 'Save Current Version';
+      createBtn.onclick = async () => {
+        createBtn.disabled = true;
+        createBtn.textContent = 'Saving...';
+
+        try {
+          await fetch(RECOPYFAST_API + '/edit-board/history', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + self.rcf.stagingToken
+            },
+            body: JSON.stringify({
+              siteId: SITE_ID,
+              description: 'Manual snapshot'
+            })
+          });
+
+          self.loadTabData();
+        } catch (error) {
+          console.error('Error creating version:', error);
+          createBtn.disabled = false;
+          createBtn.textContent = 'Save Current Version';
+        }
+      };
+
+      content.appendChild(createBtn);
+    }
+
+    async restoreVersion(versionId) {
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '<div class="rcf-eb-loading">Restoring version...</div>';
+
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/history/' + versionId, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + this.rcf.stagingToken
+          }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          content.innerHTML = '<div class="rcf-eb-empty">Restored ' + result.elementsRestored + ' elements</div>';
+
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          content.innerHTML = '<div class="rcf-eb-empty">' + (result.error || 'Failed to restore') + '</div>';
+        }
+      } catch (error) {
+        console.error('Error restoring version:', error);
+        content.innerHTML = '<div class="rcf-eb-empty">Error restoring version</div>';
+      }
+    }
+
+    // Themes Tab
+    async loadThemes() {
+      try {
+        const response = await fetch(RECOPYFAST_API + '/edit-board/themes?siteId=' + SITE_ID, {
+          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
+        });
+        const data = await response.json();
+        this.themes = data.themes || [];
+      } catch (error) {
+        console.error('Error loading themes:', error);
+        this.themes = [];
+      }
+    }
+
+    renderThemesTab() {
+      const self = this;
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '';
+
+      const section = document.createElement('div');
+      section.className = 'rcf-eb-section';
+
+      const title = document.createElement('div');
+      title.className = 'rcf-eb-section-title';
+      title.textContent = 'Event Themes';
+      section.appendChild(title);
+
+      if (this.themes.length === 0) {
+        section.innerHTML += '<div class="rcf-eb-empty">No themes created yet</div>';
+      } else {
+        this.themes.forEach(theme => {
+          const card = document.createElement('div');
+          card.className = 'rcf-eb-card';
+
+          const cardTitle = document.createElement('div');
+          cardTitle.className = 'rcf-eb-card-title';
+          cardTitle.textContent = theme.name;
+
+          const cardDesc = document.createElement('div');
+          cardDesc.className = 'rcf-eb-card-desc';
+          cardDesc.textContent = theme.description || theme.overrideCount + ' content overrides';
+
+          const cardMeta = document.createElement('div');
+          cardMeta.className = 'rcf-eb-card-meta';
+
+          if (theme.is_active) {
+            const badge = document.createElement('span');
+            badge.className = 'rcf-eb-badge';
+            badge.style.background = 'rgba(16, 185, 129, 0.2)';
+            badge.style.color = '#6ee7b7';
+            badge.textContent = 'Active';
+            cardMeta.appendChild(badge);
+          }
+
+          if (theme.schedule_start) {
+            const schedule = document.createElement('span');
+            schedule.textContent = 'Scheduled';
+            cardMeta.appendChild(schedule);
+          }
+
+          const toggleBtn = document.createElement('button');
+          toggleBtn.className = theme.is_active ? 'rcf-eb-btn rcf-eb-btn-ghost' : 'rcf-eb-btn rcf-eb-btn-success';
+          toggleBtn.style.marginTop = '10px';
+          toggleBtn.textContent = theme.is_active ? 'Deactivate' : 'Activate';
+          toggleBtn.onclick = async (e) => {
+            e.stopPropagation();
+            await self.toggleTheme(theme.id, !theme.is_active);
+          };
+
+          card.appendChild(cardTitle);
+          card.appendChild(cardDesc);
+          card.appendChild(cardMeta);
+          card.appendChild(toggleBtn);
+
+          section.appendChild(card);
+        });
+      }
+
+      content.appendChild(section);
+
+      // Create theme button
+      const createSection = document.createElement('div');
+      createSection.className = 'rcf-eb-section';
+
+      const createTitle = document.createElement('div');
+      createTitle.className = 'rcf-eb-section-title';
+      createTitle.textContent = 'Create Theme';
+      createSection.appendChild(createTitle);
+
+      const nameInput = document.createElement('input');
+      nameInput.className = 'rcf-eb-input';
+      nameInput.placeholder = 'Theme name (e.g., Holiday Sale)';
+
+      const createBtn = document.createElement('button');
+      createBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
+      createBtn.style.cssText = 'margin-top: 10px; width: 100%;';
+      createBtn.textContent = 'Create Theme';
+      createBtn.onclick = async () => {
+        if (!nameInput.value.trim()) return;
+
+        createBtn.disabled = true;
+        createBtn.textContent = 'Creating...';
+
+        try {
+          await fetch(RECOPYFAST_API + '/edit-board/themes', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + self.rcf.stagingToken
+            },
+            body: JSON.stringify({
+              siteId: SITE_ID,
+              name: nameInput.value.trim()
+            })
+          });
+
+          self.loadTabData();
+        } catch (error) {
+          console.error('Error creating theme:', error);
+          createBtn.disabled = false;
+          createBtn.textContent = 'Create Theme';
+        }
+      };
+
+      createSection.appendChild(nameInput);
+      createSection.appendChild(createBtn);
+      content.appendChild(createSection);
+    }
+
+    async toggleTheme(themeId, activate) {
+      const content = document.getElementById('rcf-eb-content');
+      content.innerHTML = '<div class="rcf-eb-loading">' + (activate ? 'Activating...' : 'Deactivating...') + '</div>';
+
+      try {
+        await fetch(RECOPYFAST_API + '/edit-board/themes', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + this.rcf.stagingToken
+          },
+          body: JSON.stringify({
+            siteId: SITE_ID,
+            themeId: themeId,
+            isActive: activate
+          })
+        });
+
+        this.loadTabData();
+      } catch (error) {
+        console.error('Error toggling theme:', error);
+        this.loadTabData();
+      }
+    }
+  }
+
   window.ReCopyFast = new ReCopyFast();
-  
-  // Expose API
+
   window.recopyfast = {
-    update: (elementId, content) => window.ReCopyFast.updateContent(elementId, content),
-    destroy: () => window.ReCopyFast.destroy(),
-    rescan: () => {
+    update: function(elementId, content) { window.ReCopyFast.updateContent(elementId, content); },
+    destroy: function() { window.ReCopyFast.destroy(); },
+    rescan: function() {
       window.ReCopyFast.scanForContent();
       window.ReCopyFast.sendContentMap();
-    }
+    },
+    isStaging: function() { return window.ReCopyFast.stagingMode; },
+    getStagingAccess: function() { return window.ReCopyFast.stagingAccess; }
   };
 })();

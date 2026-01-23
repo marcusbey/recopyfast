@@ -22,9 +22,6 @@ Sentry.init({
   // Release tracking
   release: process.env.VERCEL_GIT_COMMIT_SHA,
   
-  // Server-specific options
-  autoSessionTracking: true,
-  
   // Integrations
   integrations: [
     // Default Next.js integrations
@@ -45,7 +42,7 @@ Sentry.init({
     'Invalid token',
   ],
   
-  beforeSend(event, hint) {
+  beforeSend(event) {
     // Filter sensitive data
     if (event.request) {
       // Remove sensitive headers
@@ -54,21 +51,22 @@ Sentry.init({
         delete event.request.headers['cookie'];
         delete event.request.headers['x-supabase-auth'];
       }
-      
+
       // Remove sensitive query params
-      if (event.request.query_string) {
+      if (typeof event.request.query_string === 'string') {
         event.request.query_string = event.request.query_string
           .split('&')
-          .filter(param => !param.includes('token') && !param.includes('key'))
+          .filter((param: string) => !param.includes('token') && !param.includes('key'))
           .join('&');
       }
-      
+
       // Remove sensitive body data
-      if (event.request.data) {
+      const data = event.request.data as Record<string, unknown> | undefined;
+      if (data && typeof data === 'object') {
         const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'creditCard'];
         sensitiveKeys.forEach(key => {
-          if (event.request.data[key]) {
-            event.request.data[key] = '[REDACTED]';
+          if (data[key]) {
+            data[key] = '[REDACTED]';
           }
         });
       }

@@ -32,7 +32,6 @@ Sentry.init({
       maskAllText: false,
       blockAllMedia: false,
       maskAllInputs: true,
-      maskAllSelectors: ['.sensitive-data'],
     }),
     Sentry.browserTracingIntegration(),
   ],
@@ -62,15 +61,15 @@ Sentry.init({
   beforeSend(event, hint) {
     // Filter out non-critical errors
     if (event.exception) {
-      const error = hint.originalException;
-      
+      const error = hint.originalException as Error | undefined;
+
       // Ignore errors from browser extensions
-      if (error && error.stack && error.stack.includes('chrome-extension://')) {
+      if (error?.stack?.includes('chrome-extension://')) {
         return null;
       }
-      
+
       // Ignore errors from third-party scripts
-      if (error && error.stack && (
+      if (error?.stack && (
         error.stack.includes('gtm.js') ||
         error.stack.includes('analytics.js') ||
         error.stack.includes('fbevents.js')
