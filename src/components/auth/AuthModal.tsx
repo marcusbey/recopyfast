@@ -1,24 +1,28 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { LoginForm } from './LoginForm';
-import { SignupForm } from './SignupForm';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+} from "@/components/ui/dialog";
+import { LoginForm } from "./LoginForm";
+import { SignupForm } from "./SignupForm";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
-  defaultTab?: 'login' | 'signup';
+  defaultTab?: "login" | "signup";
 }
 
-export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalProps) {
+export function AuthModal({
+  isOpen,
+  onClose,
+  defaultTab = "login",
+}: AuthModalProps) {
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
   const handleSuccess = () => {
@@ -39,31 +43,31 @@ export function AuthModal({ isOpen, onClose, defaultTab = 'login' }: AuthModalPr
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-6">
           <TabsList className="grid w-full grid-cols-2 bg-gray-100 rounded-lg p-1">
-            <TabsTrigger 
+            <TabsTrigger
               value="login"
               className="text-gray-600 data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm rounded-md font-medium"
             >
               Sign In
             </TabsTrigger>
-            <TabsTrigger 
+            <TabsTrigger
               value="signup"
               className="text-gray-600 data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm rounded-md font-medium"
             >
               Sign Up
             </TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="login" className="mt-6">
-            <LoginForm 
+            <LoginForm
               onSuccess={handleSuccess}
-              onSwitchToSignup={() => setActiveTab('signup')}
+              onSwitchToSignup={() => setActiveTab("signup")}
             />
           </TabsContent>
-          
+
           <TabsContent value="signup" className="mt-6">
-            <SignupForm 
+            <SignupForm
               onSuccess={handleSuccess}
-              onSwitchToLogin={() => setActiveTab('login')}
+              onSwitchToLogin={() => setActiveTab("login")}
             />
           </TabsContent>
         </Tabs>

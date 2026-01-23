@@ -1,156 +1,190 @@
 "use client";
 
-import { Code2, Search, Edit3, Copy } from "lucide-react";
-import { useState } from "react";
+import { motion, useInView } from "framer-motion";
+import { useRef, useState } from "react";
+import { Copy, Check, Code2, Scan, MousePointerClick } from "lucide-react";
 
 const steps = [
   {
     number: "01",
     icon: Code2,
-    title: "Add Script Tag",
-    description: "Copy-paste our lightweight script before </body>. That's it - no complex setup required.",
-    code: `<script src="https://cdn.recopyfast.com/embed/recopyfast.js"
+    title: "Copy one line of code",
+    description:
+      "Add our lightweight script to any page. No build steps, no framework changes, no backend setup. Just paste and you're ready.",
+    code: `<script src="https://cdn.recopyfast.com/embed.js"
         data-site-id="your-site-id"></script>`,
-    visual: "Code snippet with one-click copy"
+    visual: "code",
   },
   {
     number: "02",
-    icon: Search,
-    title: "Content Detection",
-    description: "ReCopyFast automatically finds and indexes all editable text elements on your website.",
-    code: "// Auto-detection in progress...\nScanning: <h1>, <p>, <span>, <div>\nFound: 47 editable elements ✓\nAI suggestions: Ready ✓",
-    visual: "Website scan animation highlighting text"
+    icon: Scan,
+    title: "We detect everything",
+    description:
+      "ReCopyFast automatically finds and maps every text element on your site. Headlines, paragraphs, buttons, links — all ready to edit.",
+    code: `✓ Scanning page elements...
+✓ Found 47 editable text elements
+✓ AI suggestions ready
+✓ Real-time sync enabled`,
+    visual: "scan",
   },
   {
     number: "03",
-    icon: Edit3,
-    title: "Edit in Real-time",
-    description: "Click any text to edit it instantly with AI-powered suggestions and real-time synchronization.",
-    code: "// Click to edit mode active\nuser.click(element) → editor.show()\nai.suggest() → options.display()\nchange.sync() → broadcast.all() ✓",
-    visual: "Inline editing interface preview"
-  }
+    icon: MousePointerClick,
+    title: "Click anywhere to edit",
+    description:
+      "That's it. Anyone on your team can now click any text on your live website and edit it instantly. Changes go live immediately.",
+    code: `// Your team's new workflow:
+1. Click any text
+2. Type your changes
+3. Done. It's live.`,
+    visual: "edit",
+  },
 ];
 
 export default function HowItWorks() {
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const ref = useRef(null);
+  const isInView = useInView(ref, { once: true, margin: "-100px" });
+  const [copied, setCopied] = useState(false);
 
-  const handleCopyCode = async (code: string, index: number) => {
-    try {
-      await navigator.clipboard.writeText(code);
-      setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy code:', err);
-    }
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(steps[0].code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <section className="py-20 bg-gradient-to-br from-gray-50 to-blue-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="text-center mb-12 lg:mb-16">
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4 lg:mb-6">
-            How It Works
+    <section
+      ref={ref}
+      className="py-32 px-6 bg-transparent relative overflow-hidden"
+    >
+      {/* Decorative line */}
+      <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-sky-200 to-transparent hidden lg:block" />
+
+      <div className="max-w-6xl mx-auto relative z-10">
+        {/* Section header */}
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.8 }}
+          className="text-center mb-24"
+        >
+          <span className="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-sky-600 bg-sky-50 rounded-full mb-6">
+            How it works
+          </span>
+          <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-slate-900 tracking-tight mb-6">
+            Three steps.
+            <br />
+            <span className="text-slate-400">Five minutes.</span>
           </h2>
-          <p className="text-lg sm:text-xl text-gray-600 max-w-3xl mx-auto">
-            Transform your website into an AI-powered editable platform in three simple steps. 
-            No backend changes, no complex setup, no headaches.
+          <p className="text-xl text-slate-600 max-w-2xl mx-auto">
+            No complex migration. No learning curve. Just instant content
+            control.
           </p>
-        </div>
+        </motion.div>
 
-        <div className="space-y-12 lg:space-y-16">
-          {steps.map((step, index) => (
-            <div
-              key={index}
-              className={`flex flex-col ${
-                index % 2 === 0 ? "lg:flex-row" : "lg:flex-row-reverse"
-              } items-start lg:items-center gap-8 lg:gap-20`}
+        {/* Steps */}
+        <div className="space-y-24 lg:space-y-32">
+          {steps.map((step, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 60 }}
+              animate={isInView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.8, delay: 0.2 * i }}
+              className={`flex flex-col ${i % 2 === 0 ? "lg:flex-row" : "lg:flex-row-reverse"} items-center gap-12 lg:gap-20`}
             >
-              {/* Content */}
-              <div className="flex-1 space-y-6 w-full">
-                <div className="flex items-center space-x-4">
-                  <span className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">{step.number}</span>
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                    <step.icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
+              {/* Content side */}
+              <div className="flex-1 max-w-xl">
+                <div className="flex items-center gap-4 mb-6">
+                  <span className="text-5xl font-bold bg-gradient-to-br from-sky-500 to-emerald-500 bg-clip-text text-transparent">
+                    {step.number}
+                  </span>
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
+                    <step.icon className="w-7 h-7 text-white" />
                   </div>
                 </div>
-                
-                <h3 className="text-2xl sm:text-3xl font-bold text-gray-900">{step.title}</h3>
-                <p className="text-lg sm:text-xl text-gray-600">{step.description}</p>
-                
-                <div className="bg-gray-900 rounded-xl p-4 sm:p-6 w-full overflow-hidden relative group">
-                  {step.number === "01" && (
-                    <button
-                      onClick={() => handleCopyCode(step.code, index)}
-                      className="absolute top-3 right-3 p-2 bg-gray-800 hover:bg-gray-700 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                      title="Copy script tag"
-                    >
-                      {copiedIndex === index ? (
-                        <span className="text-green-400 text-xs font-medium">Copied!</span>
-                      ) : (
-                        <Copy className="h-4 w-4 text-gray-400" />
-                      )}
-                    </button>
-                  )}
-                  <pre className="text-green-400 font-mono text-xs sm:text-sm overflow-x-auto whitespace-pre-wrap break-words sm:break-normal pr-12">
-                    <code>{step.code}</code>
-                  </pre>
-                </div>
+
+                <h3 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-4">
+                  {step.title}
+                </h3>
+
+                <p className="text-lg text-slate-600 leading-relaxed mb-8">
+                  {step.description}
+                </p>
+
+                {i === 0 && (
+                  <button
+                    onClick={handleCopy}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 rounded-lg text-sm font-medium text-sky-700 transition-colors border border-sky-200"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-500" />
+                        Copied to clipboard
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        Copy script tag
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
-              {/* Visual */}
-              <div className="flex-1 w-full">
-                <div className="bg-white rounded-2xl border border-gray-200 p-4 sm:p-8">
-                  <div className="space-y-4">
-                    {step.number === "01" && (
-                      <div className="space-y-3">
-                        <div className="h-4 bg-blue-200 rounded animate-pulse"></div>
-                        <div className="h-4 bg-blue-200 rounded w-3/4 animate-pulse"></div>
-                        <div className="h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded text-white flex items-center justify-center text-sm font-medium">
-                          Script Tag Added ✓
-                        </div>
-                      </div>
-                    )}
-                    
-                    {step.number === "02" && (
-                      <div className="space-y-3">
-                        <div className="relative">
-                          <div className="h-4 bg-yellow-200 rounded animate-pulse"></div>
-                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-yellow-400 to-transparent animate-pulse opacity-50"></div>
-                        </div>
-                        <div className="relative">
-                          <div className="h-4 bg-yellow-200 rounded w-3/4 animate-pulse"></div>
-                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-yellow-400 to-transparent animate-pulse opacity-50"></div>
-                        </div>
-                        <div className="h-6 bg-green-200 rounded flex items-center justify-center text-sm font-medium text-green-800">
-                          47 elements detected + AI ready
-                        </div>
-                      </div>
-                    )}
-                    
-                    {step.number === "03" && (
-                      <div className="space-y-3">
-                        <div className="h-4 bg-blue-300 rounded cursor-pointer hover:bg-blue-400 transition-colors border-2 border-blue-500"></div>
-                        <div className="h-4 bg-blue-300 rounded w-3/4 cursor-pointer hover:bg-blue-400 transition-colors"></div>
-                        <div className="flex items-center space-x-2 text-sm text-blue-700 bg-blue-50 p-2 rounded">
-                          <Edit3 className="h-4 w-4" />
-                          <span>AI-powered editing mode active</span>
-                        </div>
+              {/* Visual side */}
+              <div className="flex-1 w-full max-w-xl">
+                <div className="relative">
+                  {/* Glow effect */}
+                  <div className="absolute -inset-4 bg-gradient-to-r from-sky-500/20 to-emerald-500/20 rounded-3xl blur-2xl opacity-50" />
+
+                  {/* Code block */}
+                  <div className="relative bg-slate-900 rounded-2xl p-6 shadow-2xl border border-sky-200/20">
+                    {/* Window controls */}
+                    <div className="flex items-center gap-2 mb-4">
+                      <div className="w-3 h-3 rounded-full bg-red-500" />
+                      <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                      <div className="w-3 h-3 rounded-full bg-green-500" />
+                    </div>
+
+                    {/* Code content */}
+                    <pre className="font-mono text-sm text-emerald-400 whitespace-pre-wrap leading-relaxed">
+                      {step.code}
+                    </pre>
+
+                    {/* Status indicator for step 2 */}
+                    {step.visual === "scan" && (
+                      <div className="mt-4 pt-4 border-t border-white/10 flex items-center gap-2 text-sm text-white/50">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        Live and ready
                       </div>
                     )}
                   </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
 
         {/* Bottom CTA */}
-        <div className="text-center mt-16">
-          <div className="inline-flex items-center px-6 py-3 rounded-full bg-green-100 text-green-700 text-lg font-medium mb-6">
-            <span className="w-3 h-3 bg-green-500 rounded-full mr-3 animate-pulse"></span>
-            Ready in under 5 minutes
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          animate={isInView ? { opacity: 1, y: 0 } : {}}
+          transition={{ duration: 0.8, delay: 0.6 }}
+          className="mt-24 text-center"
+        >
+          <div className="inline-flex items-center gap-3 px-6 py-3 bg-emerald-50 rounded-full border border-emerald-100">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+            </span>
+            <span className="font-semibold text-emerald-700">
+              Average setup time: 4 minutes 32 seconds
+            </span>
           </div>
-        </div>
+        </motion.div>
       </div>
     </section>
   );

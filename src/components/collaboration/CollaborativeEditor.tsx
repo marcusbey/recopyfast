@@ -1,27 +1,27 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Editor } from '@tiptap/react';
-import { StarterKit } from '@tiptap/starter-kit';
-import { Placeholder } from '@tiptap/extension-placeholder';
-import { ContentElement, PresenceData, CollaborativeEdit } from '@/types';
-import { collaborationRealtime } from '@/lib/collaboration/realtime';
-import { CollaborationPermissions } from '@/lib/collaboration/permissions';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { 
-  Users, 
-  Save, 
-  AlertCircle, 
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Editor } from "@tiptap/react";
+import { StarterKit } from "@tiptap/starter-kit";
+import { Placeholder } from "@tiptap/extension-placeholder";
+import { ContentElement, PresenceData, CollaborativeEdit } from "@/types";
+import { collaborationRealtime } from "@/lib/collaboration/realtime";
+import { CollaborationPermissions } from "@/lib/collaboration/permissions";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  Users,
+  Save,
+  AlertCircle,
   Lock,
   Eye,
   Edit3,
   Crown,
   Shield,
-  Loader2
-} from 'lucide-react';
+  Loader2,
+} from "lucide-react";
 
 interface CollaborativeEditorProps {
   contentElement: ContentElement;
@@ -31,19 +31,19 @@ interface CollaborativeEditorProps {
   className?: string;
 }
 
-export function CollaborativeEditor({ 
-  contentElement, 
-  siteId, 
-  userId, 
+export function CollaborativeEditor({
+  contentElement,
+  siteId,
+  userId,
   onSave,
-  className 
+  className,
 }: CollaborativeEditorProps) {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [presenceList, setPresenceList] = useState<PresenceData[]>([]);
   const [hasPermission, setHasPermission] = useState(false);
-  const [userRole, setUserRole] = useState<string>('viewer');
+  const [userRole, setUserRole] = useState<string>("viewer");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [conflict, setConflict] = useState<any>(null);
@@ -61,7 +61,7 @@ export function CollaborativeEditor({
       extensions: [
         StarterKit,
         Placeholder.configure({
-          placeholder: 'Start editing...',
+          placeholder: "Start editing...",
         }),
       ],
       content: contentElement.current_content,
@@ -69,10 +69,10 @@ export function CollaborativeEditor({
         if (!isRemoteUpdate.current && isEditing && sessionToken) {
           const content = editor.getHTML();
           lastContent.current = content;
-          
+
           // Send collaborative edit
           collaborationRealtime.sendEdit(content);
-          
+
           // Update cursor position
           const { from } = editor.state.selection;
           collaborationRealtime.updateCursor(contentElement.id, from);
@@ -82,9 +82,9 @@ export function CollaborativeEditor({
         if (isEditing && sessionToken) {
           const { from, to } = editor.state.selection;
           collaborationRealtime.updateCursor(
-            contentElement.id, 
-            from, 
-            from !== to ? { start: from, end: to } : undefined
+            contentElement.id,
+            from,
+            from !== to ? { start: from, end: to } : undefined,
           );
         }
       },
@@ -108,7 +108,11 @@ export function CollaborativeEditor({
     if (!connected) return;
 
     const handleContentEdit = (edit: CollaborativeEdit) => {
-      if (edit.elementId === contentElement.id && editor && edit.userId !== userId) {
+      if (
+        edit.elementId === contentElement.id &&
+        editor &&
+        edit.userId !== userId
+      ) {
         isRemoteUpdate.current = true;
         editor.commands.setContent(edit.content);
         lastContent.current = edit.content;
@@ -119,18 +123,18 @@ export function CollaborativeEditor({
     };
 
     const handlePresenceUpdate = (presence: PresenceData) => {
-      setPresenceList(prev => {
-        const filtered = prev.filter(p => p.userId !== presence.userId);
+      setPresenceList((prev) => {
+        const filtered = prev.filter((p) => p.userId !== presence.userId);
         return [...filtered, presence];
       });
     };
 
     const handleUserLeft = (leftUserId: string) => {
-      setPresenceList(prev => prev.filter(p => p.userId !== leftUserId));
+      setPresenceList((prev) => prev.filter((p) => p.userId !== leftUserId));
     };
 
     const handlePresenceList = (users: PresenceData[]) => {
-      setPresenceList(users.filter(p => p.userId !== userId));
+      setPresenceList(users.filter((p) => p.userId !== userId));
     };
 
     const handleEditConflict = (conflictData: any) => {
@@ -139,50 +143,50 @@ export function CollaborativeEditor({
       }
     };
 
-    collaborationRealtime.on('content-editing', handleContentEdit);
-    collaborationRealtime.on('presence-updated', handlePresenceUpdate);
-    collaborationRealtime.on('user-left', handleUserLeft);
-    collaborationRealtime.on('presence-list', handlePresenceList);
-    collaborationRealtime.on('edit-conflict', handleEditConflict);
+    collaborationRealtime.on("content-editing", handleContentEdit);
+    collaborationRealtime.on("presence-updated", handlePresenceUpdate);
+    collaborationRealtime.on("user-left", handleUserLeft);
+    collaborationRealtime.on("presence-list", handlePresenceList);
+    collaborationRealtime.on("edit-conflict", handleEditConflict);
 
     return () => {
-      collaborationRealtime.off('content-editing', handleContentEdit);
-      collaborationRealtime.off('presence-updated', handlePresenceUpdate);
-      collaborationRealtime.off('user-left', handleUserLeft);
-      collaborationRealtime.off('presence-list', handlePresenceList);
-      collaborationRealtime.off('edit-conflict', handleEditConflict);
+      collaborationRealtime.off("content-editing", handleContentEdit);
+      collaborationRealtime.off("presence-updated", handlePresenceUpdate);
+      collaborationRealtime.off("user-left", handleUserLeft);
+      collaborationRealtime.off("presence-list", handlePresenceList);
+      collaborationRealtime.off("edit-conflict", handleEditConflict);
     };
   }, [connected, editor, contentElement.id, userId]);
 
   const checkPermissionsAndConnect = async () => {
     try {
       setLoading(true);
-      
+
       // Check content edit permissions
-      const permissionCheck = await permissions.current.checkContentEditPermission(
-        userId, 
-        contentElement.id
-      );
-      
+      const permissionCheck =
+        await permissions.current.checkContentEditPermission(
+          userId,
+          contentElement.id,
+        );
+
       setHasPermission(permissionCheck.hasPermission);
-      setUserRole(permissionCheck.userRole || 'viewer');
-      
+      setUserRole(permissionCheck.userRole || "viewer");
+
       // Connect to collaboration server
       const connectionSuccess = await collaborationRealtime.connect(siteId);
       setConnected(connectionSuccess);
-      
+
       if (connectionSuccess && permissionCheck.hasPermission) {
         // Update user presence
         collaborationRealtime.updatePresence({
           userId,
-          userEmail: '', // This should come from auth context
+          userEmail: "", // This should come from auth context
           elementId: contentElement.id,
           lastActivity: new Date().toISOString(),
         });
       }
-      
     } catch (error) {
-      console.error('Error checking permissions:', error);
+      console.error("Error checking permissions:", error);
     } finally {
       setLoading(false);
     }
@@ -193,27 +197,31 @@ export function CollaborativeEditor({
 
     try {
       // Start editing session
-      const token = await permissions.current.startEditingSession(userId, contentElement.id);
+      const token = await permissions.current.startEditingSession(
+        userId,
+        contentElement.id,
+      );
       if (!token) {
-        alert('Unable to start editing session. Content may be locked by another user.');
+        alert(
+          "Unable to start editing session. Content may be locked by another user.",
+        );
         return;
       }
 
       setSessionToken(token);
       setIsEditing(true);
-      
+
       // Enable editor
       editor?.setEditable(true);
-      
+
       // Start collaboration session
       await collaborationRealtime.startEditingSession(contentElement.id, token);
-      
+
       // Focus editor
       editor?.commands.focus();
-      
     } catch (error) {
-      console.error('Error starting editing session:', error);
-      alert('Failed to start editing session');
+      console.error("Error starting editing session:", error);
+      alert("Failed to start editing session");
     }
   };
 
@@ -223,18 +231,17 @@ export function CollaborativeEditor({
     try {
       // End collaboration session
       collaborationRealtime.endEditingSession();
-      
+
       // End editing session
       await permissions.current.endEditingSession(sessionToken);
-      
+
       setIsEditing(false);
       setSessionToken(null);
-      
+
       // Disable editor
       editor?.setEditable(false);
-      
     } catch (error) {
-      console.error('Error stopping editing session:', error);
+      console.error("Error stopping editing session:", error);
     }
   };
 
@@ -247,36 +254,36 @@ export function CollaborativeEditor({
       await onSave(content);
       lastContent.current = content;
     } catch (error) {
-      console.error('Error saving content:', error);
-      alert('Failed to save content');
+      console.error("Error saving content:", error);
+      alert("Failed to save content");
     } finally {
       setSaving(false);
     }
   };
 
-  const resolveConflict = (resolution: 'keep-local' | 'keep-remote') => {
+  const resolveConflict = (resolution: "keep-local" | "keep-remote") => {
     if (!conflict || !editor) return;
 
-    if (resolution === 'keep-remote') {
+    if (resolution === "keep-remote") {
       isRemoteUpdate.current = true;
       editor.commands.setContent(conflict.baseContent);
       setTimeout(() => {
         isRemoteUpdate.current = false;
       }, 100);
     }
-    
+
     setConflict(null);
   };
 
   const getUserIcon = (role: string) => {
     switch (role) {
-      case 'owner':
+      case "owner":
         return <Crown className="h-3 w-3 text-yellow-500" />;
-      case 'manager':
+      case "manager":
         return <Shield className="h-3 w-3 text-blue-500" />;
-      case 'editor':
+      case "editor":
         return <Edit3 className="h-3 w-3 text-green-500" />;
-      case 'viewer':
+      case "viewer":
         return <Eye className="h-3 w-3 text-gray-500" />;
       default:
         return null;
@@ -318,18 +325,20 @@ export function CollaborativeEditor({
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             <div className="space-y-2">
-              <p>Edit conflict detected. Another user has modified this content.</p>
+              <p>
+                Edit conflict detected. Another user has modified this content.
+              </p>
               <div className="flex gap-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => resolveConflict('keep-local')}
+                  onClick={() => resolveConflict("keep-local")}
                 >
                   Keep My Changes
                 </Button>
                 <Button
                   size="sm"
-                  onClick={() => resolveConflict('keep-remote')}
+                  onClick={() => resolveConflict("keep-remote")}
                 >
                   Use Their Changes
                 </Button>
@@ -348,14 +357,14 @@ export function CollaborativeEditor({
               {userRole}
             </Badge>
           </div>
-          
+
           {!connected && (
             <Badge variant="destructive">
               <AlertCircle className="h-3 w-3 mr-1" />
               Offline
             </Badge>
           )}
-          
+
           {presenceList.length > 0 && (
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-gray-500" />
@@ -400,7 +409,7 @@ export function CollaborativeEditor({
               )}
             </>
           )}
-          
+
           {!hasPermission && (
             <Badge variant="secondary">
               <Lock className="h-3 w-3 mr-1" />
@@ -416,7 +425,7 @@ export function CollaborativeEditor({
           <div
             ref={editorRef}
             className={`min-h-[200px] p-4 prose prose-sm max-w-none focus:outline-none ${
-              isEditing ? 'border-2 border-blue-500 bg-blue-50' : 'bg-gray-50'
+              isEditing ? "border-2 border-blue-500 bg-blue-50" : "bg-gray-50"
             }`}
           />
         </CardContent>
@@ -434,14 +443,18 @@ export function CollaborativeEditor({
             <span>Read only</span>
           )}
         </div>
-        
+
         <div className="flex items-center gap-4">
           {presenceList.length > 0 && (
-            <span>{presenceList.length} user{presenceList.length > 1 ? 's' : ''} online</span>
+            <span>
+              {presenceList.length} user{presenceList.length > 1 ? "s" : ""}{" "}
+              online
+            </span>
           )}
-          
+
           <span>
-            Last modified: {new Date(contentElement.updated_at).toLocaleString()}
+            Last modified:{" "}
+            {new Date(contentElement.updated_at).toLocaleString()}
           </span>
         </div>
       </div>

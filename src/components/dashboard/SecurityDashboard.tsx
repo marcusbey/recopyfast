@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Alert } from '@/components/ui/alert';
-import { 
+import React, { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert } from "@/components/ui/alert";
+import {
   Shield,
   AlertTriangle,
   Activity,
@@ -18,8 +18,8 @@ import {
   Ban,
   RefreshCw,
   Filter,
-  Download
-} from 'lucide-react';
+  Download,
+} from "lucide-react";
 
 interface SecurityEvent {
   id: string;
@@ -62,17 +62,17 @@ interface SecurityDashboardProps {
 }
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
-  rate_limit_exceeded: 'Rate Limit Exceeded',
-  invalid_domain: 'Invalid Domain',
-  xss_attempt: 'XSS Attempt',
-  suspicious_activity: 'Suspicious Activity'
+  rate_limit_exceeded: "Rate Limit Exceeded",
+  invalid_domain: "Invalid Domain",
+  xss_attempt: "XSS Attempt",
+  suspicious_activity: "Suspicious Activity",
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
-  low: 'bg-blue-100 text-blue-800',
-  medium: 'bg-yellow-100 text-yellow-800',
-  high: 'bg-orange-100 text-orange-800',
-  critical: 'bg-red-100 text-red-800'
+  low: "bg-blue-100 text-blue-800",
+  medium: "bg-yellow-100 text-yellow-800",
+  high: "bg-orange-100 text-orange-800",
+  critical: "bg-red-100 text-red-800",
 };
 
 export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
@@ -80,9 +80,11 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [timeframe, setTimeframe] = useState('24h');
+  const [timeframe, setTimeframe] = useState("24h");
   const [selectedSeverity, setSelectedSeverity] = useState<string | null>(null);
-  const [selectedEventType, setSelectedEventType] = useState<string | null>(null);
+  const [selectedEventType, setSelectedEventType] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     fetchStats();
@@ -93,18 +95,18 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
     try {
       setLoading(true);
       const params = new URLSearchParams({ timeframe });
-      if (siteId) params.set('siteId', siteId);
+      if (siteId) params.set("siteId", siteId);
 
       const response = await fetch(`/api/security/stats?${params}`);
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch security stats');
+        throw new Error(data.error || "Failed to fetch security stats");
       }
 
       setStats(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -112,47 +114,49 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
 
   const fetchEvents = async () => {
     try {
-      const params = new URLSearchParams({ 
-        limit: '50',
-        offset: '0'
+      const params = new URLSearchParams({
+        limit: "50",
+        offset: "0",
       });
-      if (siteId) params.set('siteId', siteId);
-      if (selectedSeverity) params.set('severity', selectedSeverity);
-      if (selectedEventType) params.set('eventType', selectedEventType);
+      if (siteId) params.set("siteId", siteId);
+      if (selectedSeverity) params.set("severity", selectedSeverity);
+      if (selectedEventType) params.set("eventType", selectedEventType);
 
       const response = await fetch(`/api/security/events?${params}`);
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch security events');
+        throw new Error(data.error || "Failed to fetch security events");
       }
 
       setEvents(data.events || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     }
   };
 
   const formatEventType = (eventType: string) => {
-    return EVENT_TYPE_LABELS[eventType] || eventType.replace(/_/g, ' ').toUpperCase();
+    return (
+      EVENT_TYPE_LABELS[eventType] || eventType.replace(/_/g, " ").toUpperCase()
+    );
   };
 
   const getSeverityBadge = (severity: string) => {
-    const colorClass = SEVERITY_COLORS[severity] || 'bg-gray-100 text-gray-800';
+    const colorClass = SEVERITY_COLORS[severity] || "bg-gray-100 text-gray-800";
     return <Badge className={colorClass}>{severity.toUpperCase()}</Badge>;
   };
 
-  const StatCard = ({ 
-    title, 
-    value, 
-    icon: Icon, 
-    trend, 
-    description 
+  const StatCard = ({
+    title,
+    value,
+    icon: Icon,
+    trend,
+    description,
   }: {
     title: string;
     value: string | number;
     icon: React.ElementType;
-    trend?: 'up' | 'down' | 'neutral';
+    trend?: "up" | "down" | "neutral";
     description?: string;
   }) => (
     <Card className="p-6">
@@ -166,11 +170,15 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
         </div>
         <div className="flex items-center gap-2">
           {trend && (
-            <TrendingUp className={`w-4 h-4 ${
-              trend === 'up' ? 'text-red-500' : 
-              trend === 'down' ? 'text-green-500' : 
-              'text-gray-500'
-            }`} />
+            <TrendingUp
+              className={`w-4 h-4 ${
+                trend === "up"
+                  ? "text-red-500"
+                  : trend === "down"
+                    ? "text-green-500"
+                    : "text-gray-500"
+              }`}
+            />
           )}
           <Icon className="w-8 h-8 text-gray-400" />
         </div>
@@ -195,12 +203,14 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
             <Shield className="w-6 h-6" />
             Security Dashboard
           </h2>
-          <p className="text-gray-600">Monitor security events and system health</p>
+          <p className="text-gray-600">
+            Monitor security events and system health
+          </p>
         </div>
-        
+
         <div className="flex gap-2">
-          <select 
-            value={timeframe} 
+          <select
+            value={timeframe}
             onChange={(e) => setTimeframe(e.target.value)}
             className="px-3 py-2 border rounded-md text-sm"
           >
@@ -209,9 +219,11 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
             <option value="7d">Last 7 Days</option>
             <option value="30d">Last 30 Days</option>
           </select>
-          
+
           <Button onClick={fetchStats} disabled={loading} size="sm">
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`}
+            />
             Refresh
           </Button>
         </div>
@@ -238,7 +250,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
               title="Rate Limit Violations"
               value={stats.rateLimitStats.total}
               icon={Ban}
-              trend={stats.rateLimitStats.total > 0 ? 'up' : 'neutral'}
+              trend={stats.rateLimitStats.total > 0 ? "up" : "neutral"}
             />
             <StatCard
               title="Verified Domains"
@@ -269,30 +281,44 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                   <h3 className="text-lg font-semibold mb-4">Events by Type</h3>
                   <div className="space-y-2">
                     {Object.entries(stats.eventsByType).map(([type, count]) => (
-                      <div key={type} className="flex justify-between items-center">
+                      <div
+                        key={type}
+                        className="flex justify-between items-center"
+                      >
                         <span className="text-sm">{formatEventType(type)}</span>
                         <Badge variant="outline">{count}</Badge>
                       </div>
                     ))}
                     {Object.keys(stats.eventsByType).length === 0 && (
-                      <p className="text-gray-500 text-sm">No events recorded</p>
+                      <p className="text-gray-500 text-sm">
+                        No events recorded
+                      </p>
                     )}
                   </div>
                 </Card>
 
                 {/* Events by Severity */}
                 <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Events by Severity</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    Events by Severity
+                  </h3>
                   <div className="space-y-2">
-                    {Object.entries(stats.eventsBySeverity).map(([severity, count]) => (
-                      <div key={severity} className="flex justify-between items-center">
-                        <span className="text-sm capitalize">{severity}</span>
-                        {getSeverityBadge(severity)}
-                        <span className="text-sm font-medium">{count}</span>
-                      </div>
-                    ))}
+                    {Object.entries(stats.eventsBySeverity).map(
+                      ([severity, count]) => (
+                        <div
+                          key={severity}
+                          className="flex justify-between items-center"
+                        >
+                          <span className="text-sm capitalize">{severity}</span>
+                          {getSeverityBadge(severity)}
+                          <span className="text-sm font-medium">{count}</span>
+                        </div>
+                      ),
+                    )}
                     {Object.keys(stats.eventsBySeverity).length === 0 && (
-                      <p className="text-gray-500 text-sm">No events recorded</p>
+                      <p className="text-gray-500 text-sm">
+                        No events recorded
+                      </p>
                     )}
                   </div>
                 </Card>
@@ -301,8 +327,8 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
 
             <TabsContent value="events" className="space-y-4">
               <div className="flex gap-2 mb-4">
-                <select 
-                  value={selectedSeverity || ''} 
+                <select
+                  value={selectedSeverity || ""}
                   onChange={(e) => setSelectedSeverity(e.target.value || null)}
                   className="px-3 py-2 border rounded-md text-sm"
                 >
@@ -312,15 +338,17 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                   <option value="high">High</option>
                   <option value="critical">Critical</option>
                 </select>
-                
-                <select 
-                  value={selectedEventType || ''} 
+
+                <select
+                  value={selectedEventType || ""}
                   onChange={(e) => setSelectedEventType(e.target.value || null)}
                   className="px-3 py-2 border rounded-md text-sm"
                 >
                   <option value="">All Event Types</option>
-                  {Object.keys(EVENT_TYPE_LABELS).map(type => (
-                    <option key={type} value={type}>{EVENT_TYPE_LABELS[type]}</option>
+                  {Object.keys(EVENT_TYPE_LABELS).map((type) => (
+                    <option key={type} value={type}>
+                      {EVENT_TYPE_LABELS[type]}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -331,15 +359,27 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium">{formatEventType(event.eventType)}</span>
+                          <span className="font-medium">
+                            {formatEventType(event.eventType)}
+                          </span>
                           {getSeverityBadge(event.severity)}
                         </div>
                         <div className="text-sm text-gray-600 space-y-1">
                           {event.ipAddress && (
-                            <p>IP: <code className="bg-gray-100 px-1 rounded">{event.ipAddress}</code></p>
+                            <p>
+                              IP:{" "}
+                              <code className="bg-gray-100 px-1 rounded">
+                                {event.ipAddress}
+                              </code>
+                            </p>
                           )}
                           {event.endpoint && (
-                            <p>Endpoint: <code className="bg-gray-100 px-1 rounded">{event.endpoint}</code></p>
+                            <p>
+                              Endpoint:{" "}
+                              <code className="bg-gray-100 px-1 rounded">
+                                {event.endpoint}
+                              </code>
+                            </p>
                           )}
                           {event.sites?.domain && (
                             <p>Domain: {event.sites.domain}</p>
@@ -355,7 +395,9 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                 ))}
                 {events.length === 0 && (
                   <Card className="p-8 text-center">
-                    <p className="text-gray-500">No security events found for the selected filters.</p>
+                    <p className="text-gray-500">
+                      No security events found for the selected filters.
+                    </p>
                   </Card>
                 )}
               </div>
@@ -368,32 +410,45 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                   <h3 className="text-lg font-semibold mb-4">Top Source IPs</h3>
                   <div className="space-y-2">
                     {stats.topIPs.slice(0, 5).map((ipData, index) => (
-                      <div key={ipData.ip} className="flex justify-between items-center">
+                      <div
+                        key={ipData.ip}
+                        className="flex justify-between items-center"
+                      >
                         <span className="text-sm font-mono">{ipData.ip}</span>
                         <Badge variant="outline">{ipData.count} events</Badge>
                       </div>
                     ))}
                     {stats.topIPs.length === 0 && (
-                      <p className="text-gray-500 text-sm">No security events recorded</p>
+                      <p className="text-gray-500 text-sm">
+                        No security events recorded
+                      </p>
                     )}
                   </div>
                 </Card>
 
                 {/* Rate Limit Analysis */}
                 <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Rate Limit Analysis</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    Rate Limit Analysis
+                  </h3>
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <span className="text-sm">Total Violations</span>
-                      <span className="font-medium">{stats.rateLimitStats.total}</span>
+                      <span className="font-medium">
+                        {stats.rateLimitStats.total}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Unique IPs</span>
-                      <span className="font-medium">{stats.rateLimitStats.uniqueIPs}</span>
+                      <span className="font-medium">
+                        {stats.rateLimitStats.uniqueIPs}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Affected Endpoints</span>
-                      <span className="font-medium">{stats.rateLimitStats.uniqueEndpoints}</span>
+                      <span className="font-medium">
+                        {stats.rateLimitStats.uniqueEndpoints}
+                      </span>
                     </div>
                   </div>
                 </Card>
@@ -404,11 +459,15 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 {/* Domain Verification Status */}
                 <Card className="p-6">
-                  <h3 className="text-lg font-semibold mb-4">Domain Verification</h3>
+                  <h3 className="text-lg font-semibold mb-4">
+                    Domain Verification
+                  </h3>
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <span className="text-sm">Total Domains</span>
-                      <span className="font-medium">{stats.domainVerificationStats.total}</span>
+                      <span className="font-medium">
+                        {stats.domainVerificationStats.total}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Verified</span>
@@ -431,7 +490,9 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                   <div className="space-y-3">
                     <div className="flex justify-between">
                       <span className="text-sm">Total Keys</span>
-                      <span className="font-medium">{stats.apiKeyStats.total}</span>
+                      <span className="font-medium">
+                        {stats.apiKeyStats.total}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Active</span>

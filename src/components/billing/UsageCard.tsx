@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { SUBSCRIPTION_PLANS } from '@/lib/stripe/config';
-import type { Subscription } from '@/types/billing';
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import type { Subscription } from "@/types/billing";
 
 interface UsageCardProps {
   currentUsage: {
@@ -16,26 +16,30 @@ interface UsageCardProps {
 }
 
 export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
-  const planId = subscription?.plan_id || 'free';
-  const plan = SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+  const planId = subscription?.plan_id || "free";
+  const plan =
+    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
 
   const getUsageStatus = (current: number, limit: number) => {
-    if (limit === -1) return 'unlimited';
-    if (current >= limit) return 'exceeded';
-    if (current >= limit * 0.8) return 'warning';
-    return 'normal';
+    if (limit === -1) return "unlimited";
+    if (current >= limit) return "exceeded";
+    if (current >= limit * 0.8) return "warning";
+    return "normal";
   };
 
   const getUsageBadge = (current: number, limit: number) => {
     const status = getUsageStatus(current, limit);
-    
+
     if (limit === -1) {
       return <Badge variant="secondary">Unlimited</Badge>;
     }
-    
-    const variant = status === 'exceeded' ? 'destructive' :
-                   status === 'warning' ? 'secondary' :
-                   'default';
+
+    const variant =
+      status === "exceeded"
+        ? "destructive"
+        : status === "warning"
+          ? "secondary"
+          : "default";
 
     return (
       <Badge variant={variant}>
@@ -46,10 +50,12 @@ export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
 
   const getProgressBarColor = (current: number, limit: number) => {
     const status = getUsageStatus(current, limit);
-    
-    return status === 'exceeded' ? 'bg-red-500' :
-           status === 'warning' ? 'bg-yellow-500' :
-           'bg-blue-500';
+
+    return status === "exceeded"
+      ? "bg-red-500"
+      : status === "warning"
+        ? "bg-yellow-500"
+        : "bg-blue-500";
   };
 
   const getProgressPercentage = (current: number, limit: number) => {
@@ -59,22 +65,22 @@ export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
 
   const usageItems = [
     {
-      label: 'Websites',
+      label: "Websites",
       current: currentUsage.websites,
       limit: plan.limits.websites,
-      icon: '🌐',
+      icon: "🌐",
     },
     {
-      label: 'AI Usage (this month)',
+      label: "AI Usage (this month)",
       current: currentUsage.aiUsage,
       limit: plan.limits.aiFeatures ? -1 : 0,
-      icon: '🤖',
+      icon: "🤖",
     },
     {
-      label: 'Translations (this month)',
+      label: "Translations (this month)",
       current: currentUsage.translations,
       limit: plan.limits.translations,
-      icon: '🌍',
+      icon: "🌍",
     },
   ];
 
@@ -92,12 +98,14 @@ export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
               </div>
               {getUsageBadge(item.current, item.limit)}
             </div>
-            
+
             {item.limit !== -1 && (
               <div className="w-full bg-gray-200 rounded-full h-2">
                 <div
                   className={`h-2 rounded-full transition-all ${getProgressBarColor(item.current, item.limit)}`}
-                  style={{ width: `${getProgressPercentage(item.current, item.limit)}%` }}
+                  style={{
+                    width: `${getProgressPercentage(item.current, item.limit)}%`,
+                  }}
                 ></div>
               </div>
             )}
@@ -110,10 +118,32 @@ export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
           {plan.name} Plan Benefits
         </h4>
         <ul className="text-sm text-blue-700 space-y-1">
-          <li>• {plan.limits.websites === -1 ? 'Unlimited' : plan.limits.websites} website{plan.limits.websites !== 1 ? 's' : ''}</li>
-          <li>• {plan.limits.aiFeatures ? 'AI features included' : 'No AI features (use tickets)'}</li>
-          <li>• {plan.limits.translations === -1 ? 'Unlimited' : plan.limits.translations === 0 ? 'No' : plan.limits.translations} translation{plan.limits.translations !== 1 ? 's' : ''}</li>
-          <li>• {plan.limits.collaborators === -1 ? 'Unlimited' : plan.limits.collaborators} collaborator{plan.limits.collaborators !== 1 ? 's' : ''} per site</li>
+          <li>
+            • {plan.limits.websites === -1 ? "Unlimited" : plan.limits.websites}{" "}
+            website{plan.limits.websites !== 1 ? "s" : ""}
+          </li>
+          <li>
+            •{" "}
+            {plan.limits.aiFeatures
+              ? "AI features included"
+              : "No AI features (use tickets)"}
+          </li>
+          <li>
+            •{" "}
+            {plan.limits.translations === -1
+              ? "Unlimited"
+              : plan.limits.translations === 0
+                ? "No"
+                : plan.limits.translations}{" "}
+            translation{plan.limits.translations !== 1 ? "s" : ""}
+          </li>
+          <li>
+            •{" "}
+            {plan.limits.collaborators === -1
+              ? "Unlimited"
+              : plan.limits.collaborators}{" "}
+            collaborator{plan.limits.collaborators !== 1 ? "s" : ""} per site
+          </li>
         </ul>
       </div>
     </Card>

@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Alert } from '@/components/ui/alert';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert } from "@/components/ui/alert";
 
 interface PurchaseTicketsDialogProps {
   open: boolean;
@@ -38,10 +38,10 @@ export function PurchaseTicketsDialog({
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/billing/tickets', {
-        method: 'POST',
+      const response = await fetch("/api/billing/tickets", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           quantity,
@@ -50,16 +50,21 @@ export function PurchaseTicketsDialog({
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to purchase tickets');
+        throw new Error(errorData.error || "Failed to purchase tickets");
       }
 
       const data = await response.json();
 
       // Handle payment confirmation if needed
-      if (data.paymentIntent && data.paymentIntent.status === 'requires_confirmation') {
+      if (
+        data.paymentIntent &&
+        data.paymentIntent.status === "requires_confirmation"
+      ) {
         // In a real implementation, you would use Stripe Elements here
         // For now, we'll assume the payment is handled externally
-        alert('Payment confirmation required. Please complete the payment process.');
+        alert(
+          "Payment confirmation required. Please complete the payment process.",
+        );
         return;
       }
 
@@ -79,7 +84,8 @@ export function PurchaseTicketsDialog({
         <DialogHeader>
           <DialogTitle>Purchase AI Tickets</DialogTitle>
           <DialogDescription>
-            Buy tickets to use AI-powered features like suggestions and translations.
+            Buy tickets to use AI-powered features like suggestions and
+            translations.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,7 +104,9 @@ export function PurchaseTicketsDialog({
               min="1"
               max="100"
               value={quantity}
-              onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+              onChange={(e) =>
+                setQuantity(Math.max(1, parseInt(e.target.value) || 1))
+              }
               placeholder="1"
             />
             <p className="text-sm text-gray-600">
@@ -141,7 +149,7 @@ export function PurchaseTicketsDialog({
               disabled={loading}
               className="flex-1"
             >
-              {loading ? 'Processing...' : `Purchase $${totalPrice}`}
+              {loading ? "Processing..." : `Purchase $${totalPrice}`}
             </Button>
           </div>
         </div>

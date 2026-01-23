@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Check, Copy, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Check, Copy, Loader2, AlertCircle, ExternalLink } from "lucide-react";
 
 interface SiteRegistrationModalProps {
   isOpen: boolean;
@@ -44,20 +44,25 @@ interface RegistrationResponse {
   embedScript: string;
 }
 
-export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegistrationModalProps) {
+export function SiteRegistrationModal({
+  isOpen,
+  onClose,
+  onSuccess,
+}: SiteRegistrationModalProps) {
   const [formData, setFormData] = useState<FormData>({
-    name: '',
-    domain: '',
-    description: '',
+    name: "",
+    domain: "",
+    description: "",
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [registrationResult, setRegistrationResult] = useState<RegistrationResponse | null>(null);
+  const [registrationResult, setRegistrationResult] =
+    useState<RegistrationResponse | null>(null);
   const [copied, setCopied] = useState(false);
 
   const validateUrl = (url: string): boolean => {
     try {
-      const urlString = url.startsWith('http') ? url : `https://${url}`;
+      const urlString = url.startsWith("http") ? url : `https://${url}`;
       const urlObj = new URL(urlString);
       return !!urlObj.hostname;
     } catch {
@@ -69,13 +74,14 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
     const newErrors: FormErrors = {};
 
     if (!formData.name.trim()) {
-      newErrors.name = 'Website name is required';
+      newErrors.name = "Website name is required";
     }
 
     if (!formData.domain.trim()) {
-      newErrors.domain = 'Website URL is required';
+      newErrors.domain = "Website URL is required";
     } else if (!validateUrl(formData.domain)) {
-      newErrors.domain = 'Please enter a valid domain (e.g., example.com or https://example.com)';
+      newErrors.domain =
+        "Please enter a valid domain (e.g., example.com or https://example.com)";
     }
 
     setErrors(newErrors);
@@ -93,10 +99,10 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
     setErrors({});
 
     try {
-      const response = await fetch('/api/sites/register', {
-        method: 'POST',
+      const response = await fetch("/api/sites/register", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           name: formData.name.trim(),
@@ -107,17 +113,20 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 400 && data.error === 'Domain already registered') {
-          setErrors({ domain: 'This domain is already registered' });
+        if (
+          response.status === 400 &&
+          data.error === "Domain already registered"
+        ) {
+          setErrors({ domain: "This domain is already registered" });
         } else {
-          setErrors({ general: data.error || 'Failed to register site' });
+          setErrors({ general: data.error || "Failed to register site" });
         }
         return;
       }
 
       setRegistrationResult(data);
     } catch (error) {
-      setErrors({ general: 'An unexpected error occurred. Please try again.' });
+      setErrors({ general: "An unexpected error occurred. Please try again." });
     } finally {
       setIsLoading(false);
     }
@@ -131,12 +140,12 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      console.error("Failed to copy:", err);
     }
   };
 
   const handleClose = () => {
-    setFormData({ name: '', domain: '', description: '' });
+    setFormData({ name: "", domain: "", description: "" });
     setErrors({});
     setRegistrationResult(null);
     setCopied(false);
@@ -160,13 +169,17 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                 Register New Site
               </DialogTitle>
               <DialogDescription className="text-gray-600">
-                Add a new website to start making your content editable with AI assistance.
+                Add a new website to start making your content editable with AI
+                assistance.
               </DialogDescription>
             </DialogHeader>
 
             <form onSubmit={handleSubmit} className="space-y-6 mt-6">
               {errors.general && (
-                <Alert variant="destructive" className="bg-red-50 border-red-200">
+                <Alert
+                  variant="destructive"
+                  className="bg-red-50 border-red-200"
+                >
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription className="text-red-800">
                     {errors.general}
@@ -188,7 +201,11 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                       setErrors({ ...errors, name: undefined });
                     }
                   }}
-                  className={errors.name ? 'border-red-500 focus-visible:ring-red-500' : ''}
+                  className={
+                    errors.name
+                      ? "border-red-500 focus-visible:ring-red-500"
+                      : ""
+                  }
                   disabled={isLoading}
                 />
                 {errors.name && (
@@ -210,7 +227,11 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                       setErrors({ ...errors, domain: undefined });
                     }
                   }}
-                  className={errors.domain ? 'border-red-500 focus-visible:ring-red-500' : ''}
+                  className={
+                    errors.domain
+                      ? "border-red-500 focus-visible:ring-red-500"
+                      : ""
+                  }
                   disabled={isLoading}
                 />
                 {errors.domain && (
@@ -222,14 +243,19 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="description" className="text-gray-900 font-medium">
+                <Label
+                  htmlFor="description"
+                  className="text-gray-900 font-medium"
+                >
                   Description <span className="text-gray-500">(Optional)</span>
                 </Label>
                 <Input
                   id="description"
                   placeholder="Brief description of your website"
                   value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, description: e.target.value })
+                  }
                   disabled={isLoading}
                 />
               </div>
@@ -254,7 +280,7 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                       Registering...
                     </>
                   ) : (
-                    'Register Site'
+                    "Register Site"
                   )}
                 </Button>
               </div>
@@ -270,7 +296,8 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                 Site Registered Successfully!
               </DialogTitle>
               <DialogDescription className="text-gray-600 text-center">
-                Your website has been registered. Follow the steps below to integrate ReCopyFast.
+                Your website has been registered. Follow the steps below to
+                integrate ReCopyFast.
               </DialogDescription>
             </DialogHeader>
 
@@ -279,13 +306,15 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                 <h3 className="font-semibold text-gray-900">Site Details</h3>
                 <div className="space-y-1 text-sm">
                   <p className="text-gray-600">
-                    <span className="font-medium">Name:</span> {registrationResult.site.name}
+                    <span className="font-medium">Name:</span>{" "}
+                    {registrationResult.site.name}
                   </p>
                   <p className="text-gray-600">
-                    <span className="font-medium">Domain:</span> {registrationResult.site.domain}
+                    <span className="font-medium">Domain:</span>{" "}
+                    {registrationResult.site.domain}
                   </p>
                   <p className="text-gray-600">
-                    <span className="font-medium">Site ID:</span>{' '}
+                    <span className="font-medium">Site ID:</span>{" "}
                     <code className="bg-white px-2 py-0.5 rounded text-xs border border-gray-200">
                       {registrationResult.site.id}
                     </code>
@@ -294,7 +323,9 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
               </div>
 
               <div className="space-y-3">
-                <h3 className="font-semibold text-gray-900">Integration Instructions</h3>
+                <h3 className="font-semibold text-gray-900">
+                  Integration Instructions
+                </h3>
 
                 <div className="space-y-2">
                   <p className="text-sm text-gray-600 font-medium">
@@ -330,8 +361,10 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                     Step 2: Add the script to your website
                   </p>
                   <p className="text-sm text-gray-600">
-                    Paste the script tag in your HTML, just before the closing{' '}
-                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">&lt;/body&gt;</code>{' '}
+                    Paste the script tag in your HTML, just before the closing{" "}
+                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">
+                      &lt;/body&gt;
+                    </code>{" "}
                     tag.
                   </p>
                 </div>
@@ -341,10 +374,10 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                     Step 3: Mark elements as editable
                   </p>
                   <p className="text-sm text-gray-600">
-                    Add the{' '}
+                    Add the{" "}
                     <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">
                       data-recopyfast-editable
-                    </code>{' '}
+                    </code>{" "}
                     attribute to any HTML element you want to make editable.
                   </p>
                   <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs overflow-x-auto">
@@ -354,7 +387,7 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
 
                 <Alert className="bg-blue-50 border-blue-200">
                   <AlertDescription className="text-blue-800 text-sm">
-                    <strong>Need help?</strong> Check out our{' '}
+                    <strong>Need help?</strong> Check out our{" "}
                     <a
                       href="/docs/integration"
                       className="underline hover:text-blue-900"
@@ -362,17 +395,14 @@ export function SiteRegistrationModal({ isOpen, onClose, onSuccess }: SiteRegist
                       rel="noopener noreferrer"
                     >
                       integration guide
-                    </a>{' '}
+                    </a>{" "}
                     for more details.
                   </AlertDescription>
                 </Alert>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-                <Button
-                  variant="outline"
-                  onClick={handleClose}
-                >
+                <Button variant="outline" onClick={handleClose}>
                   Close
                 </Button>
                 <Button

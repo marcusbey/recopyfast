@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { ChevronRight, Home } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { ChevronRight, Home } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface BreadcrumbItem {
   label: string;
@@ -14,21 +14,21 @@ export function Breadcrumbs() {
   const pathname = usePathname();
 
   const generateBreadcrumbs = (): BreadcrumbItem[] => {
-    const paths = pathname.split('/').filter(Boolean);
+    const paths = pathname.split("/").filter(Boolean);
     const breadcrumbs: BreadcrumbItem[] = [];
 
     // Always start with dashboard
-    if (paths[0] === 'dashboard') {
-      breadcrumbs.push({ label: 'Dashboard', href: '/dashboard' });
+    if (paths[0] === "dashboard") {
+      breadcrumbs.push({ label: "Dashboard", href: "/dashboard" });
 
       // Add subsequent paths
       for (let i = 1; i < paths.length; i++) {
         const path = paths[i];
-        const href = `/dashboard/${paths.slice(1, i + 1).join('/')}`;
+        const href = `/dashboard/${paths.slice(1, i + 1).join("/")}`;
         const label = path
-          .split('-')
+          .split("-")
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(' ');
+          .join(" ");
 
         breadcrumbs.push({ label, href });
       }
@@ -39,7 +39,7 @@ export function Breadcrumbs() {
 
   const breadcrumbs = generateBreadcrumbs();
 
-  if (breadcrumbs.length === 0 || pathname === '/dashboard') {
+  if (breadcrumbs.length === 0 || pathname === "/dashboard") {
     return null;
   }
 

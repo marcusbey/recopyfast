@@ -1,13 +1,13 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Play, Copy, Check, ChevronRight, Sparkles } from 'lucide-react';
-import InteractiveHero from '@/components/landing/InteractiveHero';
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Play, Copy, Check, ChevronRight, Sparkles } from "lucide-react";
+import InteractiveHero from "@/components/landing/InteractiveHero";
 
 export default function EnhancedHero() {
   const [copied, setCopied] = useState(false);
-  const [typedText, setTypedText] = useState('');
+  const [typedText, setTypedText] = useState("");
   const scriptTag = `<script src="https://cdn.recopyfast.com/embed/recopyfast.js"
         data-site-id="your-site-id"></script>`;
 
@@ -43,7 +43,7 @@ export default function EnhancedHero() {
 
           {/* Main Headline */}
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-gray-900 mb-6 leading-tight">
-            Transform Any Website Into an{' '}
+            Transform Any Website Into an{" "}
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               Editable Platform
             </span>
@@ -51,13 +51,17 @@ export default function EnhancedHero() {
 
           {/* Subheading */}
           <p className="text-xl text-gray-600 mb-10 max-w-3xl mx-auto leading-relaxed">
-            Add a single script tag to make your website content editable with AI assistance. 
-            No backend changes required. Perfect for quick prototypes and instant content management.
+            Add a single script tag to make your website content editable with
+            AI assistance. No backend changes required. Perfect for quick
+            prototypes and instant content management.
           </p>
 
           {/* Single CTA */}
           <div className="flex justify-center mb-20">
-            <Button size="lg" className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-xl px-12 py-5 font-semibold">
+            <Button
+              size="lg"
+              className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-xl px-12 py-5 font-semibold"
+            >
               Try ReCopyFast Now
               <ChevronRight className="ml-2 h-6 w-6" />
             </Button>
@@ -66,20 +70,20 @@ export default function EnhancedHero() {
           {/* Interactive Demo Section - Full Width */}
         </div>
       </div>
-      
+
       {/* Full Width Interactive Demo with Gradient Background */}
       <div className="relative py-16 mb-16 overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800">
         {/* Gradient Background */}
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 opacity-20"></div>
         <div className="absolute inset-0 bg-gradient-to-t from-slate-900/30 via-transparent to-slate-900/30"></div>
-        
+
         {/* Enhanced Decorative Elements */}
         <div className="absolute top-20 left-20 w-64 h-64 bg-gradient-to-r from-blue-400/30 to-purple-400/30 rounded-full blur-3xl"></div>
         <div className="absolute bottom-20 right-20 w-80 h-80 bg-gradient-to-r from-purple-400/25 to-pink-400/25 rounded-full blur-3xl"></div>
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-gradient-to-r from-cyan-400/20 to-blue-400/20 rounded-full blur-3xl"></div>
         <div className="absolute top-10 right-1/3 w-48 h-48 bg-gradient-to-r from-emerald-400/25 to-teal-400/25 rounded-full blur-3xl"></div>
         <div className="absolute bottom-10 left-1/3 w-56 h-56 bg-gradient-to-r from-rose-400/20 to-orange-400/20 rounded-full blur-3xl"></div>
-        
+
         <div className="relative z-10 max-w-[calc(80rem+10%)] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="rounded-3xl p-12">
             <div className="text-center mb-12">
@@ -87,10 +91,12 @@ export default function EnhancedHero() {
                 <div className="w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
                   <Sparkles className="w-7 h-7 text-white" />
                 </div>
-                <h3 className="text-3xl font-bold text-white mt-4">Try it yourself - Click any text below!</h3>
+                <h3 className="text-3xl font-bold text-white mt-4">
+                  Try it yourself - Click any text below!
+                </h3>
               </div>
             </div>
-            
+
             {/* Our existing interactive demo */}
             <InteractiveHero />
           </div>
@@ -99,7 +105,6 @@ export default function EnhancedHero() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-4xl mx-auto">
-
           {/* Code Demo */}
           <div className="max-w-4xl mx-auto">
             <div className="bg-gray-900 rounded-xl p-6 text-left">
@@ -133,27 +138,35 @@ export default function EnhancedHero() {
                 </div>
               </div>
             </div>
-            
+
             {/* Before/After Preview */}
             <div className="grid md:grid-cols-2 gap-8 mt-12">
               <div className="bg-white rounded-lg border border-gray-200 p-6">
-                <h3 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">Before</h3>
+                <h3 className="text-sm font-semibold text-gray-500 mb-3 uppercase tracking-wide">
+                  Before
+                </h3>
                 <div className="space-y-3">
                   <div className="h-4 bg-gray-200 rounded"></div>
                   <div className="h-4 bg-gray-200 rounded w-3/4"></div>
                   <div className="h-4 bg-gray-200 rounded w-1/2"></div>
                 </div>
-                <p className="text-sm text-gray-500 mt-4">Static content, developer required for changes</p>
+                <p className="text-sm text-gray-500 mt-4">
+                  Static content, developer required for changes
+                </p>
               </div>
-              
+
               <div className="bg-white rounded-lg border-2 border-green-200 p-6">
-                <h3 className="text-sm font-semibold text-green-600 mb-3 uppercase tracking-wide">After</h3>
+                <h3 className="text-sm font-semibold text-green-600 mb-3 uppercase tracking-wide">
+                  After
+                </h3>
                 <div className="space-y-3">
                   <div className="h-4 bg-gradient-to-r from-blue-200 to-purple-200 rounded cursor-pointer hover:from-blue-300 hover:to-purple-300 transition-colors"></div>
                   <div className="h-4 bg-gradient-to-r from-blue-200 to-purple-200 rounded w-3/4 cursor-pointer hover:from-blue-300 hover:to-purple-300 transition-colors"></div>
                   <div className="h-4 bg-gradient-to-r from-blue-200 to-purple-200 rounded w-1/2 cursor-pointer hover:from-blue-300 hover:to-purple-300 transition-colors"></div>
                 </div>
-                <p className="text-sm text-green-600 mt-4">✨ Click to edit, AI-powered suggestions</p>
+                <p className="text-sm text-green-600 mt-4">
+                  ✨ Click to edit, AI-powered suggestions
+                </p>
               </div>
             </div>
 

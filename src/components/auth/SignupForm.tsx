@@ -1,12 +1,12 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Mail, Lock, User, CheckCircle } from 'lucide-react';
+import { useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2, Mail, Lock, User, CheckCircle } from "lucide-react";
 
 interface SignupFormProps {
   onSuccess?: () => void;
@@ -15,8 +15,8 @@ interface SignupFormProps {
 
 export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
   const { signInWithMagicLink } = useAuth();
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -30,7 +30,9 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
       await signInWithMagicLink(email);
       setSuccess(true);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to send magic link');
+      setError(
+        err instanceof Error ? err.message : "Failed to send magic link",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -43,12 +45,16 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
           <Mail className="w-8 h-8 text-green-600" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-gray-900">Check your email</h3>
+          <h3 className="text-lg font-semibold text-gray-900">
+            Check your email
+          </h3>
           <p className="text-gray-600 text-sm">
-            We've sent a magic link to <span className="font-medium text-gray-900">{email}</span>
+            We've sent a magic link to{" "}
+            <span className="font-medium text-gray-900">{email}</span>
           </p>
           <p className="text-gray-500 text-xs">
-            Click the link in your email to create your account and sign in. You can close this window.
+            Click the link in your email to create your account and sign in. You
+            can close this window.
           </p>
         </div>
         <Button

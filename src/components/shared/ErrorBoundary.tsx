@@ -3,13 +3,13 @@
  * Catches React errors and displays user-friendly error messages
  */
 
-'use client';
+"use client";
 
-import React, { Component, ReactNode } from 'react';
-import * as Sentry from '@sentry/nextjs';
-import { logger } from '@/lib/monitoring/logger';
-import { Button } from '@/components/ui/button';
-import { AlertCircle, RefreshCcw, Home } from 'lucide-react';
+import React, { Component, ReactNode } from "react";
+import * as Sentry from "@sentry/nextjs";
+import { logger } from "@/lib/monitoring/logger";
+import { Button } from "@/components/ui/button";
+import { AlertCircle, RefreshCcw, Home } from "lucide-react";
 
 interface Props {
   children: ReactNode;
@@ -18,7 +18,7 @@ interface Props {
   resetKeys?: Array<string | number>;
   resetOnPropsChange?: boolean;
   isolate?: boolean;
-  level?: 'page' | 'section' | 'component';
+  level?: "page" | "section" | "component";
 }
 
 interface State {
@@ -50,7 +50,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidUpdate() {
     const { resetKeys = [], resetOnPropsChange = true } = this.props;
     const hasResetKeysChanged = resetKeys.some(
-      (key, index) => key !== this.previousResetKeys[index]
+      (key, index) => key !== this.previousResetKeys[index],
     );
 
     if (resetOnPropsChange && hasResetKeysChanged) {
@@ -60,12 +60,12 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    const { onError, level = 'component' } = this.props;
+    const { onError, level = "component" } = this.props;
     const { errorId } = this.state;
 
     // Log error
-    logger.error('React Error Boundary caught error', error, undefined, {
-      component: 'ErrorBoundary',
+    logger.error("React Error Boundary caught error", error, undefined, {
+      component: "ErrorBoundary",
       errorId,
       level,
       componentStack: errorInfo.componentStack,
@@ -73,9 +73,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
     // Report to Sentry
     Sentry.withScope((scope) => {
-      scope.setTag('error_boundary', true);
-      scope.setTag('error_boundary_level', level);
-      scope.setContext('error_info', {
+      scope.setTag("error_boundary", true);
+      scope.setTag("error_boundary_level", level);
+      scope.setContext("error_info", {
         componentStack: errorInfo.componentStack,
         errorId,
       });
@@ -89,7 +89,7 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ errorInfo });
 
     // Auto-recover for component-level errors after 10 seconds
-    if (level === 'component' && !this.props.isolate) {
+    if (level === "component" && !this.props.isolate) {
       this.resetTimeoutId = window.setTimeout(() => {
         this.resetErrorBoundary();
       }, 10000);
@@ -113,7 +113,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     const { hasError, error, errorId } = this.state;
-    const { children, fallback, level = 'component' } = this.props;
+    const { children, fallback, level = "component" } = this.props;
 
     if (hasError && error) {
       // Custom fallback
@@ -123,30 +123,35 @@ export class ErrorBoundary extends Component<Props, State> {
 
       // Default error UI based on level
       return (
-        <div className={`
+        <div
+          className={`
           flex flex-col items-center justify-center
-          ${level === 'page' ? 'min-h-screen' : ''}
-          ${level === 'section' ? 'min-h-[400px]' : ''}
-          ${level === 'component' ? 'min-h-[200px]' : ''}
+          ${level === "page" ? "min-h-screen" : ""}
+          ${level === "section" ? "min-h-[400px]" : ""}
+          ${level === "component" ? "min-h-[200px]" : ""}
           p-8 text-center
-        `}>
+        `}
+        >
           <div className="max-w-md mx-auto">
             <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-            
+
             <h2 className="text-2xl font-semibold text-gray-900 mb-2">
-              {level === 'page' && 'Something went wrong'}
-              {level === 'section' && 'This section encountered an error'}
-              {level === 'component' && 'Component error'}
+              {level === "page" && "Something went wrong"}
+              {level === "section" && "This section encountered an error"}
+              {level === "component" && "Component error"}
             </h2>
-            
+
             <p className="text-gray-600 mb-6">
-              {level === 'page' && 'We apologize for the inconvenience. The error has been reported and we\'re working on fixing it.'}
-              {level === 'section' && 'This section couldn\'t load properly. You can try refreshing or continue using other parts of the app.'}
-              {level === 'component' && 'This component encountered an issue but the rest of the page should work fine.'}
+              {level === "page" &&
+                "We apologize for the inconvenience. The error has been reported and we're working on fixing it."}
+              {level === "section" &&
+                "This section couldn't load properly. You can try refreshing or continue using other parts of the app."}
+              {level === "component" &&
+                "This component encountered an issue but the rest of the page should work fine."}
             </p>
 
             {/* Error details in development */}
-            {process.env.NODE_ENV === 'development' && (
+            {process.env.NODE_ENV === "development" && (
               <details className="mb-6 text-left">
                 <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
                   Error details
@@ -174,11 +179,11 @@ export class ErrorBoundary extends Component<Props, State> {
                 <RefreshCcw className="w-4 h-4" />
                 Try again
               </Button>
-              
-              {level === 'page' && (
+
+              {level === "page" && (
                 <Button
                   variant="default"
-                  onClick={() => window.location.href = '/'}
+                  onClick={() => (window.location.href = "/")}
                   className="flex items-center gap-2"
                 >
                   <Home className="w-4 h-4" />
@@ -188,9 +193,10 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {/* Error ID for support */}
-            {errorId && level !== 'component' && (
+            {errorId && level !== "component" && (
               <p className="text-xs text-gray-500 mt-6">
-                If the problem persists, please contact support with error ID: {errorId}
+                If the problem persists, please contact support with error ID:{" "}
+                {errorId}
               </p>
             )}
           </div>
@@ -203,21 +209,21 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 // Async Error Boundary for handling async errors
-export function AsyncErrorBoundary({ 
-  children, 
-  fallback 
-}: { 
-  children: ReactNode; 
+export function AsyncErrorBoundary({
+  children,
+  fallback,
+}: {
+  children: ReactNode;
   fallback?: ReactNode;
 }) {
   return (
-    <ErrorBoundary 
+    <ErrorBoundary
       fallback={fallback}
       level="component"
       onError={(error) => {
         // Check if it's an async error
-        if (error.message.includes('async')) {
-          logger.error('Async error in component', error);
+        if (error.message.includes("async")) {
+          logger.error("Async error in component", error);
         }
       }}
     >
@@ -229,7 +235,7 @@ export function AsyncErrorBoundary({
 // HOC for wrapping components with error boundary
 export function withErrorBoundary<P extends object>(
   Component: React.ComponentType<P>,
-  errorBoundaryProps?: Omit<Props, 'children'>
+  errorBoundaryProps?: Omit<Props, "children">,
 ) {
   const WrappedComponent = (props: P) => (
     <ErrorBoundary {...errorBoundaryProps}>

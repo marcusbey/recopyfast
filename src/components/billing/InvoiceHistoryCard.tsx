@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import type { Invoice } from '@/types/billing';
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import type { Invoice } from "@/types/billing";
 
 interface InvoiceHistoryCardProps {
   invoices: Invoice[];
@@ -11,25 +11,29 @@ interface InvoiceHistoryCardProps {
 
 export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
     });
   };
 
   const formatAmount = (amount: number) => {
-    return (amount / 100).toLocaleString('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return (amount / 100).toLocaleString("en-US", {
+      style: "currency",
+      currency: "USD",
     });
   };
 
   const getStatusBadge = (status: string) => {
-    const variant = status === 'paid' ? 'default' :
-                   status === 'open' ? 'secondary' :
-                   status === 'draft' ? 'outline' :
-                   'destructive';
+    const variant =
+      status === "paid"
+        ? "default"
+        : status === "open"
+          ? "secondary"
+          : status === "draft"
+            ? "outline"
+            : "destructive";
 
     return <Badge variant={variant}>{status.toUpperCase()}</Badge>;
   };
@@ -55,7 +59,8 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
                 <div className="text-sm text-gray-600">
                   {invoice.period_start && invoice.period_end ? (
                     <span>
-                      {formatDate(invoice.period_start)} - {formatDate(invoice.period_end)}
+                      {formatDate(invoice.period_start)} -{" "}
+                      {formatDate(invoice.period_end)}
                     </span>
                   ) : (
                     <span>Issued {formatDate(invoice.created_at)}</span>
@@ -71,7 +76,9 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    onClick={() => window.open(invoice.hosted_invoice_url, '_blank')}
+                    onClick={() =>
+                      window.open(invoice.hosted_invoice_url, "_blank")
+                    }
                     className="text-blue-600 hover:text-blue-700 p-0 h-auto"
                   >
                     View PDF

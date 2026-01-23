@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { useState } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 interface PaymentMethod {
   id: string;
@@ -24,24 +24,31 @@ interface PaymentMethodsCardProps {
   onUpdate: () => void;
 }
 
-export function PaymentMethodsCard({ paymentMethods, customerId, onUpdate }: PaymentMethodsCardProps) {
+export function PaymentMethodsCard({
+  paymentMethods,
+  customerId,
+  onUpdate,
+}: PaymentMethodsCardProps) {
   const [loading, setLoading] = useState<string | null>(null);
 
   const handleDelete = async (paymentMethodId: string) => {
-    if (!confirm('Are you sure you want to remove this payment method?')) {
+    if (!confirm("Are you sure you want to remove this payment method?")) {
       return;
     }
 
     try {
       setLoading(paymentMethodId);
 
-      const response = await fetch(`/api/billing/payment-methods?paymentMethodId=${paymentMethodId}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(
+        `/api/billing/payment-methods?paymentMethodId=${paymentMethodId}`,
+        {
+          method: "DELETE",
+        },
+      );
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to remove payment method');
+        throw new Error(errorData.error || "Failed to remove payment method");
       }
 
       onUpdate();
@@ -54,14 +61,14 @@ export function PaymentMethodsCard({ paymentMethods, customerId, onUpdate }: Pay
 
   const getBrandIcon = (brand: string) => {
     switch (brand?.toLowerCase()) {
-      case 'visa':
-        return '💳';
-      case 'mastercard':
-        return '💳';
-      case 'amex':
-        return '💳';
+      case "visa":
+        return "💳";
+      case "mastercard":
+        return "💳";
+      case "amex":
+        return "💳";
       default:
-        return '💳';
+        return "💳";
     }
   };
 
@@ -86,11 +93,14 @@ export function PaymentMethodsCard({ paymentMethods, customerId, onUpdate }: Pay
               className="flex items-center justify-between p-3 border rounded-lg"
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">{getBrandIcon(pm.card?.brand || '')}</span>
+                <span className="text-2xl">
+                  {getBrandIcon(pm.card?.brand || "")}
+                </span>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">
-                      {formatCardBrand(pm.card?.brand || '')} •••• {pm.card?.last4}
+                      {formatCardBrand(pm.card?.brand || "")} ••••{" "}
+                      {pm.card?.last4}
                     </span>
                     {pm.is_default && (
                       <Badge variant="secondary" className="text-xs">
@@ -121,7 +131,7 @@ export function PaymentMethodsCard({ paymentMethods, customerId, onUpdate }: Pay
                   disabled={loading === pm.id || pm.is_default}
                   className="text-red-600 hover:text-red-700"
                 >
-                  {loading === pm.id ? 'Removing...' : 'Remove'}
+                  {loading === pm.id ? "Removing..." : "Remove"}
                 </Button>
               </div>
             </div>
@@ -130,7 +140,9 @@ export function PaymentMethodsCard({ paymentMethods, customerId, onUpdate }: Pay
       ) : (
         <div className="text-center py-8 text-gray-500">
           <p>No payment methods added yet</p>
-          <p className="text-sm">Add a payment method to start your subscription</p>
+          <p className="text-sm">
+            Add a payment method to start your subscription
+          </p>
         </div>
       )}
     </Card>

@@ -4,23 +4,27 @@ const problems = [
   {
     icon: Clock,
     title: "Every text change requires developer time",
-    description: "Simple copy updates become complex development tasks, delaying campaigns and product launches"
+    description:
+      "Simple copy updates become complex development tasks, delaying campaigns and product launches",
   },
   {
     icon: Settings,
     title: "Traditional CMSs need complete rebuilds",
-    description: "Existing websites require extensive refactoring to add content management capabilities"
+    description:
+      "Existing websites require extensive refactoring to add content management capabilities",
   },
   {
     icon: Users,
     title: "Complex workflows slow down marketing teams",
-    description: "Content updates get stuck in technical bottlenecks, frustrating non-technical team members"
+    description:
+      "Content updates get stuck in technical bottlenecks, frustrating non-technical team members",
   },
   {
     icon: AlertCircle,
     title: "Static sites become bottlenecks for content updates",
-    description: "Every change requires deployment and technical intervention, making A/B testing impossible"
-  }
+    description:
+      "Every change requires deployment and technical intervention, making A/B testing impossible",
+  },
 ];
 
 export default function Problem() {
@@ -33,7 +37,9 @@ export default function Problem() {
             <span className="text-red-600">Change Website Copy?</span>
           </h2>
           <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Most websites trap content behind technical barriers, creating unnecessary friction for teams that need to move fast and iterate quickly.
+            Most websites trap content behind technical barriers, creating
+            unnecessary friction for teams that need to move fast and iterate
+            quickly.
           </p>
         </div>
 
@@ -64,7 +70,9 @@ export default function Problem() {
         <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8 max-w-4xl mx-auto">
           <div className="text-center">
             <div className="text-3xl font-bold text-red-600 mb-2">72 hours</div>
-            <p className="text-gray-600">Average time for simple copy changes</p>
+            <p className="text-gray-600">
+              Average time for simple copy changes
+            </p>
           </div>
           <div className="text-center">
             <div className="text-3xl font-bold text-red-600 mb-2">$500+</div>
@@ -72,7 +80,9 @@ export default function Problem() {
           </div>
           <div className="text-center">
             <div className="text-3xl font-bold text-red-600 mb-2">87%</div>
-            <p className="text-gray-600">Of teams frustrated with content workflows</p>
+            <p className="text-gray-600">
+              Of teams frustrated with content workflows
+            </p>
           </div>
         </div>
       </div>

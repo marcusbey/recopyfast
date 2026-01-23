@@ -1,17 +1,17 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useCallback } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { 
-  BulkOperation, 
+import React, { useState, useRef, useCallback } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  BulkOperation,
   BulkImportPayload,
   BulkUpdatePayload,
-  Site 
-} from '@/types';
+  Site,
+} from "@/types";
 import {
   Upload,
   Download,
@@ -24,8 +24,8 @@ import {
   Trash2,
   Edit3,
   Plus,
-  Loader2
-} from 'lucide-react';
+  Loader2,
+} from "lucide-react";
 
 interface BulkOperationsProps {
   siteId: string;
@@ -33,40 +33,47 @@ interface BulkOperationsProps {
 }
 
 export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
-  const [activeTab, setActiveTab] = useState('import');
+  const [activeTab, setActiveTab] = useState("import");
   const [operations, setOperations] = useState<BulkOperation[]>([]);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Import state
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importFormat, setImportFormat] = useState<'json' | 'csv' | 'xml'>('json');
+  const [importFormat, setImportFormat] = useState<"json" | "csv" | "xml">(
+    "json",
+  );
   const [importOptions, setImportOptions] = useState({
     overwrite_existing: false,
     create_missing_elements: true,
-    validate_content: true
+    validate_content: true,
   });
 
   // Export state
-  const [exportFormat, setExportFormat] = useState<'json' | 'csv' | 'xml'>('json');
+  const [exportFormat, setExportFormat] = useState<"json" | "csv" | "xml">(
+    "json",
+  );
   const [exportFilters, setExportFilters] = useState({
-    language: '',
-    variant: '',
-    element_ids: '',
-    updated_since: ''
+    language: "",
+    variant: "",
+    element_ids: "",
+    updated_since: "",
   });
 
   // Batch update state
-  const [batchOperations, setBatchOperations] = useState<BulkUpdatePayload['operations']>([
-    { element_id: '', operation: 'find_replace', find: '', replace: '' }
-  ]);
+  const [batchOperations, setBatchOperations] = useState<
+    BulkUpdatePayload["operations"]
+  >([{ element_id: "", operation: "find_replace", find: "", replace: "" }]);
 
-  const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setImportFile(file);
-    }
-  }, []);
+  const handleFileUpload = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (file) {
+        setImportFile(file);
+      }
+    },
+    [],
+  );
 
   const processImport = async () => {
     if (!importFile) return;
@@ -74,52 +81,54 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
     setLoading(true);
     try {
       const fileContent = await readFileContent(importFile);
-      
+
       let data: any;
       switch (importFormat) {
-        case 'json':
+        case "json":
           data = JSON.parse(fileContent);
           break;
-        case 'csv':
+        case "csv":
           data = fileContent;
           break;
-        case 'xml':
+        case "xml":
           data = fileContent;
           break;
         default:
-          throw new Error('Unsupported format');
+          throw new Error("Unsupported format");
       }
 
       const payload: BulkImportPayload = {
         site_id: siteId,
         format: importFormat,
         data,
-        options: importOptions
+        options: importOptions,
       };
 
-      const response = await fetch('/api/bulk/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const response = await fetch("/api/bulk/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Import failed');
+        throw new Error(error.error || "Import failed");
       }
 
       const result = await response.json();
-      
+
       // Poll for operation status
       await pollOperationStatus(result.operation_id);
-      
+
       setImportFile(null);
       if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        fileInputRef.current.value = "";
       }
     } catch (error) {
-      console.error('Import error:', error);
-      alert(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Import error:", error);
+      alert(
+        `Import failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     } finally {
       setLoading(false);
     }
@@ -129,33 +138,38 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
     setLoading(true);
     try {
       const filters = Object.fromEntries(
-        Object.entries(exportFilters).filter(([_, value]) => value !== '')
+        Object.entries(exportFilters).filter(([_, value]) => value !== ""),
       );
 
       const payload = {
         site_id: siteId,
         format: exportFormat,
-        filters: Object.keys(filters).length > 0 ? {
-          ...filters,
-          element_ids: filters.element_ids ? filters.element_ids.split(',').map(id => id.trim()) : undefined
-        } : undefined
+        filters:
+          Object.keys(filters).length > 0
+            ? {
+                ...filters,
+                element_ids: filters.element_ids
+                  ? filters.element_ids.split(",").map((id) => id.trim())
+                  : undefined,
+              }
+            : undefined,
       };
 
-      const response = await fetch('/api/bulk/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const response = await fetch("/api/bulk/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Export failed');
+        throw new Error(error.error || "Export failed");
       }
 
       // Download the file
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
+      const a = document.createElement("a");
       a.href = url;
       a.download = `content-export-${siteId}-${Date.now()}.${exportFormat}`;
       document.body.appendChild(a);
@@ -163,23 +177,26 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error('Export error:', error);
-      alert(`Export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Export error:", error);
+      alert(
+        `Export failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     } finally {
       setLoading(false);
     }
   };
 
   const processBatchUpdate = async () => {
-    const validOperations = batchOperations.filter(op => 
-      op.element_id && op.operation && (
-        (op.operation === 'find_replace' && op.find !== undefined) ||
-        (op.operation !== 'find_replace' && op.content)
-      )
+    const validOperations = batchOperations.filter(
+      (op) =>
+        op.element_id &&
+        op.operation &&
+        ((op.operation === "find_replace" && op.find !== undefined) ||
+          (op.operation !== "find_replace" && op.content)),
     );
 
     if (validOperations.length === 0) {
-      alert('Please add at least one valid operation');
+      alert("Please add at least one valid operation");
       return;
     }
 
@@ -187,30 +204,34 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
     try {
       const payload: BulkUpdatePayload = {
         site_id: siteId,
-        operations: validOperations
+        operations: validOperations,
       };
 
-      const response = await fetch('/api/bulk/update', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+      const response = await fetch("/api/bulk/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || 'Batch update failed');
+        throw new Error(error.error || "Batch update failed");
       }
 
       const result = await response.json();
-      
+
       // Poll for operation status
       await pollOperationStatus(result.operation_id);
-      
+
       // Reset operations
-      setBatchOperations([{ element_id: '', operation: 'find_replace', find: '', replace: '' }]);
+      setBatchOperations([
+        { element_id: "", operation: "find_replace", find: "", replace: "" },
+      ]);
     } catch (error) {
-      console.error('Batch update error:', error);
-      alert(`Batch update failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error("Batch update error:", error);
+      alert(
+        `Batch update failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     } finally {
       setLoading(false);
     }
@@ -222,21 +243,23 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
 
     while (attempts < maxAttempts) {
       try {
-        const response = await fetch(`/api/bulk/import?operationId=${operationId}`);
+        const response = await fetch(
+          `/api/bulk/import?operationId=${operationId}`,
+        );
         if (!response.ok) break;
 
         const operation = await response.json();
-        
-        if (operation.status === 'completed' || operation.status === 'failed') {
+
+        if (operation.status === "completed" || operation.status === "failed") {
           // Refresh operations list
           fetchOperations();
           break;
         }
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
         attempts++;
       } catch (error) {
-        console.error('Polling error:', error);
+        console.error("Polling error:", error);
         break;
       }
     }
@@ -250,25 +273,29 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
         setOperations(ops);
       }
     } catch (error) {
-      console.error('Failed to fetch operations:', error);
+      console.error("Failed to fetch operations:", error);
     }
   };
 
   const addBatchOperation = () => {
-    setBatchOperations(prev => [
+    setBatchOperations((prev) => [
       ...prev,
-      { element_id: '', operation: 'find_replace', find: '', replace: '' }
+      { element_id: "", operation: "find_replace", find: "", replace: "" },
     ]);
   };
 
   const removeBatchOperation = (index: number) => {
-    setBatchOperations(prev => prev.filter((_, i) => i !== index));
+    setBatchOperations((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateBatchOperation = (index: number, field: string, value: string) => {
-    setBatchOperations(prev => prev.map((op, i) => 
-      i === index ? { ...op, [field]: value } : op
-    ));
+  const updateBatchOperation = (
+    index: number,
+    field: string,
+    value: string,
+  ) => {
+    setBatchOperations((prev) =>
+      prev.map((op, i) => (i === index ? { ...op, [field]: value } : op)),
+    );
   };
 
   const readFileContent = (file: File): Promise<string> => {
@@ -282,11 +309,11 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'completed':
+      case "completed":
         return <CheckCircle className="h-5 w-5 text-green-600" />;
-      case 'failed':
+      case "failed":
         return <XCircle className="h-5 w-5 text-red-600" />;
-      case 'running':
+      case "running":
         return <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />;
       default:
         return <Clock className="h-5 w-5 text-gray-600" />;
@@ -301,7 +328,9 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900">Bulk Operations</h2>
-        <p className="text-gray-600">Import, export, and batch update content efficiently</p>
+        <p className="text-gray-600">
+          Import, export, and batch update content efficiently
+        </p>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -315,14 +344,16 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
         <TabsContent value="import" className="space-y-4">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Import Content</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <Label htmlFor="import-format">Format</Label>
                 <select
                   id="import-format"
                   value={importFormat}
-                  onChange={(e) => setImportFormat(e.target.value as 'json' | 'csv' | 'xml')}
+                  onChange={(e) =>
+                    setImportFormat(e.target.value as "json" | "csv" | "xml")
+                  }
                   className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
                 >
                   <option value="json">JSON</option>
@@ -343,7 +374,8 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                 />
                 {importFile && (
                   <p className="text-sm text-gray-600 mt-1">
-                    Selected: {importFile.name} ({(importFile.size / 1024).toFixed(1)} KB)
+                    Selected: {importFile.name} (
+                    {(importFile.size / 1024).toFixed(1)} KB)
                   </p>
                 )}
               </div>
@@ -355,10 +387,12 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                     <input
                       type="checkbox"
                       checked={importOptions.overwrite_existing}
-                      onChange={(e) => setImportOptions(prev => ({
-                        ...prev,
-                        overwrite_existing: e.target.checked
-                      }))}
+                      onChange={(e) =>
+                        setImportOptions((prev) => ({
+                          ...prev,
+                          overwrite_existing: e.target.checked,
+                        }))
+                      }
                       className="mr-2"
                     />
                     Overwrite existing content
@@ -367,10 +401,12 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                     <input
                       type="checkbox"
                       checked={importOptions.create_missing_elements}
-                      onChange={(e) => setImportOptions(prev => ({
-                        ...prev,
-                        create_missing_elements: e.target.checked
-                      }))}
+                      onChange={(e) =>
+                        setImportOptions((prev) => ({
+                          ...prev,
+                          create_missing_elements: e.target.checked,
+                        }))
+                      }
                       className="mr-2"
                     />
                     Create missing elements
@@ -379,10 +415,12 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                     <input
                       type="checkbox"
                       checked={importOptions.validate_content}
-                      onChange={(e) => setImportOptions(prev => ({
-                        ...prev,
-                        validate_content: e.target.checked
-                      }))}
+                      onChange={(e) =>
+                        setImportOptions((prev) => ({
+                          ...prev,
+                          validate_content: e.target.checked,
+                        }))
+                      }
                       className="mr-2"
                     />
                     Validate content
@@ -414,14 +452,16 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
         <TabsContent value="export" className="space-y-4">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Export Content</h3>
-            
+
             <div className="space-y-4">
               <div>
                 <Label htmlFor="export-format">Format</Label>
                 <select
                   id="export-format"
                   value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value as 'json' | 'csv' | 'xml')}
+                  onChange={(e) =>
+                    setExportFormat(e.target.value as "json" | "csv" | "xml")
+                  }
                   className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
                 >
                   <option value="json">JSON</option>
@@ -436,10 +476,12 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                   <Input
                     id="export-language"
                     value={exportFilters.language}
-                    onChange={(e) => setExportFilters(prev => ({
-                      ...prev,
-                      language: e.target.value
-                    }))}
+                    onChange={(e) =>
+                      setExportFilters((prev) => ({
+                        ...prev,
+                        language: e.target.value,
+                      }))
+                    }
                     placeholder="e.g., en, es, fr"
                   />
                 </div>
@@ -449,23 +491,29 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                   <Input
                     id="export-variant"
                     value={exportFilters.variant}
-                    onChange={(e) => setExportFilters(prev => ({
-                      ...prev,
-                      variant: e.target.value
-                    }))}
+                    onChange={(e) =>
+                      setExportFilters((prev) => ({
+                        ...prev,
+                        variant: e.target.value,
+                      }))
+                    }
                     placeholder="e.g., default, mobile"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor="export-elements">Element IDs (optional)</Label>
+                  <Label htmlFor="export-elements">
+                    Element IDs (optional)
+                  </Label>
                   <Input
                     id="export-elements"
                     value={exportFilters.element_ids}
-                    onChange={(e) => setExportFilters(prev => ({
-                      ...prev,
-                      element_ids: e.target.value
-                    }))}
+                    onChange={(e) =>
+                      setExportFilters((prev) => ({
+                        ...prev,
+                        element_ids: e.target.value,
+                      }))
+                    }
                     placeholder="Comma-separated IDs"
                   />
                 </div>
@@ -476,10 +524,12 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                     id="export-since"
                     type="datetime-local"
                     value={exportFilters.updated_since}
-                    onChange={(e) => setExportFilters(prev => ({
-                      ...prev,
-                      updated_since: e.target.value
-                    }))}
+                    onChange={(e) =>
+                      setExportFilters((prev) => ({
+                        ...prev,
+                        updated_since: e.target.value,
+                      }))
+                    }
                   />
                 </div>
               </div>
@@ -507,8 +557,10 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
 
         <TabsContent value="batch" className="space-y-4">
           <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-4">Batch Update Operations</h3>
-            
+            <h3 className="text-lg font-semibold mb-4">
+              Batch Update Operations
+            </h3>
+
             <div className="space-y-4">
               {batchOperations.map((operation, index) => (
                 <div key={index} className="p-4 border rounded-lg space-y-3">
@@ -530,7 +582,13 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                       <Label>Element ID</Label>
                       <Input
                         value={operation.element_id}
-                        onChange={(e) => updateBatchOperation(index, 'element_id', e.target.value)}
+                        onChange={(e) =>
+                          updateBatchOperation(
+                            index,
+                            "element_id",
+                            e.target.value,
+                          )
+                        }
                         placeholder="Element ID to update"
                       />
                     </div>
@@ -539,7 +597,13 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                       <Label>Operation</Label>
                       <select
                         value={operation.operation}
-                        onChange={(e) => updateBatchOperation(index, 'operation', e.target.value)}
+                        onChange={(e) =>
+                          updateBatchOperation(
+                            index,
+                            "operation",
+                            e.target.value,
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 rounded-md"
                       >
                         <option value="find_replace">Find & Replace</option>
@@ -549,21 +613,33 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                       </select>
                     </div>
 
-                    {operation.operation === 'find_replace' ? (
+                    {operation.operation === "find_replace" ? (
                       <>
                         <div>
                           <Label>Find</Label>
                           <Input
-                            value={operation.find || ''}
-                            onChange={(e) => updateBatchOperation(index, 'find', e.target.value)}
+                            value={operation.find || ""}
+                            onChange={(e) =>
+                              updateBatchOperation(
+                                index,
+                                "find",
+                                e.target.value,
+                              )
+                            }
                             placeholder="Text to find"
                           />
                         </div>
                         <div>
                           <Label>Replace</Label>
                           <Input
-                            value={operation.replace || ''}
-                            onChange={(e) => updateBatchOperation(index, 'replace', e.target.value)}
+                            value={operation.replace || ""}
+                            onChange={(e) =>
+                              updateBatchOperation(
+                                index,
+                                "replace",
+                                e.target.value,
+                              )
+                            }
                             placeholder="Replacement text"
                           />
                         </div>
@@ -572,8 +648,14 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                       <div className="md:col-span-2">
                         <Label>Content</Label>
                         <Input
-                          value={operation.content || ''}
-                          onChange={(e) => updateBatchOperation(index, 'content', e.target.value)}
+                          value={operation.content || ""}
+                          onChange={(e) =>
+                            updateBatchOperation(
+                              index,
+                              "content",
+                              e.target.value,
+                            )
+                          }
                           placeholder="Content to add/set"
                         />
                       </div>
@@ -583,10 +665,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
               ))}
 
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  onClick={addBatchOperation}
-                >
+                <Button variant="outline" onClick={addBatchOperation}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Operation
                 </Button>
@@ -616,7 +695,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
         <TabsContent value="history" className="space-y-4">
           <Card className="p-6">
             <h3 className="text-lg font-semibold mb-4">Operation History</h3>
-            
+
             <div className="space-y-3">
               {operations.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
@@ -625,23 +704,28 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                 </div>
               ) : (
                 operations.map((operation) => (
-                  <div key={operation.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div
+                    key={operation.id}
+                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  >
                     <div className="flex items-center gap-3">
                       {getStatusIcon(operation.status)}
                       <div>
                         <p className="font-medium capitalize">
-                          {operation.operation_type.replace('_', ' ')}
+                          {operation.operation_type.replace("_", " ")}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {new Date(operation.created_at).toLocaleDateString()} at{' '}
+                          {new Date(operation.created_at).toLocaleDateString()}{" "}
+                          at{" "}
                           {new Date(operation.created_at).toLocaleTimeString()}
                         </p>
                       </div>
                     </div>
-                    
+
                     <div className="text-right">
                       <p className="text-sm font-medium">
-                        {operation.processed_items}/{operation.total_items} processed
+                        {operation.processed_items}/{operation.total_items}{" "}
+                        processed
                       </p>
                       {operation.failed_items > 0 && (
                         <p className="text-sm text-red-600">

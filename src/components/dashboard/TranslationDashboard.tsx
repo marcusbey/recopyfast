@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { Globe, Loader2, CheckCircle, AlertCircle, Wand2 } from 'lucide-react';
+import { useState } from "react";
+import { Globe, Loader2, CheckCircle, AlertCircle, Wand2 } from "lucide-react";
 
 interface ContentElement {
   id: string;
@@ -17,18 +17,18 @@ interface TranslationResult {
 }
 
 const SUPPORTED_LANGUAGES = [
-  { code: 'en', name: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', flag: '🇫🇷' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'it', name: 'Italian', flag: '🇮🇹' },
-  { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
-  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
-  { code: 'zh', name: 'Chinese', flag: '🇨🇳' },
-  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
-  { code: 'hi', name: 'Hindi', flag: '🇮🇳' },
-  { code: 'ru', name: 'Russian', flag: '🇷🇺' },
+  { code: "en", name: "English", flag: "🇺🇸" },
+  { code: "es", name: "Spanish", flag: "🇪🇸" },
+  { code: "fr", name: "French", flag: "🇫🇷" },
+  { code: "de", name: "German", flag: "🇩🇪" },
+  { code: "it", name: "Italian", flag: "🇮🇹" },
+  { code: "pt", name: "Portuguese", flag: "🇵🇹" },
+  { code: "ja", name: "Japanese", flag: "🇯🇵" },
+  { code: "ko", name: "Korean", flag: "🇰🇷" },
+  { code: "zh", name: "Chinese", flag: "🇨🇳" },
+  { code: "ar", name: "Arabic", flag: "🇸🇦" },
+  { code: "hi", name: "Hindi", flag: "🇮🇳" },
+  { code: "ru", name: "Russian", flag: "🇷🇺" },
 ];
 
 interface TranslationDashboardProps {
@@ -36,12 +36,17 @@ interface TranslationDashboardProps {
   contentElements: ContentElement[];
 }
 
-export default function TranslationDashboard({ siteId, contentElements }: TranslationDashboardProps) {
+export default function TranslationDashboard({
+  siteId,
+  contentElements,
+}: TranslationDashboardProps) {
   const [isTranslating, setIsTranslating] = useState(false);
-  const [fromLanguage, setFromLanguage] = useState('en');
-  const [toLanguage, setToLanguage] = useState('es');
+  const [fromLanguage, setFromLanguage] = useState("en");
+  const [toLanguage, setToLanguage] = useState("es");
   const [selectedElements, setSelectedElements] = useState<string[]>([]);
-  const [translationResults, setTranslationResults] = useState<TranslationResult[]>([]);
+  const [translationResults, setTranslationResults] = useState<
+    TranslationResult[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -49,21 +54,21 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
     if (selectedElements.length === contentElements.length) {
       setSelectedElements([]);
     } else {
-      setSelectedElements(contentElements.map(el => el.element_id));
+      setSelectedElements(contentElements.map((el) => el.element_id));
     }
   };
 
   const handleElementToggle = (elementId: string) => {
-    setSelectedElements(prev => 
-      prev.includes(elementId) 
-        ? prev.filter(id => id !== elementId)
-        : [...prev, elementId]
+    setSelectedElements((prev) =>
+      prev.includes(elementId)
+        ? prev.filter((id) => id !== elementId)
+        : [...prev, elementId],
     );
   };
 
   const handleTranslate = async () => {
     if (selectedElements.length === 0) {
-      setError('Please select at least one element to translate');
+      setError("Please select at least one element to translate");
       return;
     }
 
@@ -73,43 +78,46 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
 
     try {
       const elementsToTranslate = contentElements
-        .filter(el => selectedElements.includes(el.element_id))
-        .map(el => ({
+        .filter((el) => selectedElements.includes(el.element_id))
+        .map((el) => ({
           id: el.element_id,
-          text: el.current_content
+          text: el.current_content,
         }));
 
-      const response = await fetch('/api/ai/translate', {
-        method: 'POST',
+      const response = await fetch("/api/ai/translate", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           siteId,
           fromLanguage,
           toLanguage,
           elements: elementsToTranslate,
-          context: 'website content'
+          context: "website content",
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Translation failed');
+        throw new Error(data.error || "Translation failed");
       }
 
       setTranslationResults(data.translations);
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Translation failed');
+      setError(err instanceof Error ? err.message : "Translation failed");
     } finally {
       setIsTranslating(false);
     }
   };
 
-  const getLanguageInfo = (code: string) => 
-    SUPPORTED_LANGUAGES.find(lang => lang.code === code) || { name: code, flag: '🌐' };
+  const getLanguageInfo = (code: string) =>
+    SUPPORTED_LANGUAGES.find((lang) => lang.code === code) || {
+      name: code,
+      flag: "🌐",
+    };
 
   return (
     <div className="bg-white rounded-lg shadow-md p-6">
@@ -134,7 +142,7 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
             onChange={(e) => setFromLanguage(e.target.value)}
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            {SUPPORTED_LANGUAGES.map(lang => (
+            {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.flag} {lang.name}
               </option>
@@ -151,7 +159,7 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
             onChange={(e) => setToLanguage(e.target.value)}
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            {SUPPORTED_LANGUAGES.map(lang => (
+            {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
                 {lang.flag} {lang.name}
               </option>
@@ -168,7 +176,9 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
             onClick={handleSelectAll}
             className="text-blue-600 hover:text-blue-800 text-sm font-medium"
           >
-            {selectedElements.length === contentElements.length ? 'Deselect All' : 'Select All'}
+            {selectedElements.length === contentElements.length
+              ? "Deselect All"
+              : "Select All"}
           </button>
         </div>
 
@@ -186,14 +196,17 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-600 mb-1">{element.selector}</p>
-                <p className="text-sm text-gray-900 truncate">{element.current_content}</p>
+                <p className="text-sm text-gray-900 truncate">
+                  {element.current_content}
+                </p>
               </div>
             </div>
           ))}
         </div>
 
         <p className="text-sm text-gray-500 mt-2">
-          {selectedElements.length} of {contentElements.length} elements selected
+          {selectedElements.length} of {contentElements.length} elements
+          selected
         </p>
       </div>
 
@@ -209,12 +222,13 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
           ) : (
             <Wand2 className="h-4 w-4" />
           )}
-          {isTranslating ? 'Translating...' : 'Translate with AI'}
+          {isTranslating ? "Translating..." : "Translate with AI"}
         </button>
 
         {fromLanguage && toLanguage && (
           <span className="text-sm text-gray-600">
-            {getLanguageInfo(fromLanguage).flag} → {getLanguageInfo(toLanguage).flag}
+            {getLanguageInfo(fromLanguage).flag} →{" "}
+            {getLanguageInfo(toLanguage).flag}
           </span>
         )}
       </div>
@@ -231,7 +245,8 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
         <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-md mb-4">
           <CheckCircle className="h-4 w-4" />
           <span className="text-sm">
-            Successfully translated {translationResults.length} elements to {getLanguageInfo(toLanguage).name}
+            Successfully translated {translationResults.length} elements to{" "}
+            {getLanguageInfo(toLanguage).name}
           </span>
         </div>
       )}
@@ -242,19 +257,26 @@ export default function TranslationDashboard({ siteId, contentElements }: Transl
           <h3 className="text-lg font-medium mb-4">Translation Results</h3>
           <div className="space-y-4">
             {translationResults.map((result) => (
-              <div key={result.id} className="border border-gray-200 rounded-md p-4">
+              <div
+                key={result.id}
+                className="border border-gray-200 rounded-md p-4"
+              >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">
                       Original ({getLanguageInfo(fromLanguage).name})
                     </label>
-                    <p className="text-sm text-gray-900">{result.originalText}</p>
+                    <p className="text-sm text-gray-900">
+                      {result.originalText}
+                    </p>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-500 mb-1">
                       Translation ({getLanguageInfo(toLanguage).name})
                     </label>
-                    <p className="text-sm text-gray-900">{result.translatedText}</p>
+                    <p className="text-sm text-gray-900">
+                      {result.translatedText}
+                    </p>
                   </div>
                 </div>
               </div>

@@ -1,23 +1,34 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Team, TeamMember } from '@/types';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { 
-  Plus, 
-  Users, 
+import React, { useState, useEffect } from "react";
+import { Team, TeamMember } from "@/types";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Plus,
+  Users,
   ChevronDown,
   Crown,
   Shield,
   Edit3,
-  Eye
-} from 'lucide-react';
+  Eye,
+} from "lucide-react";
 
 interface TeamSelectorProps {
   selectedTeam?: Team;
@@ -25,13 +36,17 @@ interface TeamSelectorProps {
   onCreateTeam?: (team: Team) => void;
 }
 
-export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamSelectorProps) {
+export function TeamSelector({
+  selectedTeam,
+  onTeamSelect,
+  onCreateTeam,
+}: TeamSelectorProps) {
   const [teams, setTeams] = useState<(Team & { role?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
-  const [newTeamName, setNewTeamName] = useState('');
-  const [newTeamDescription, setNewTeamDescription] = useState('');
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamDescription, setNewTeamDescription] = useState("");
 
   useEffect(() => {
     loadTeams();
@@ -40,25 +55,25 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
   const loadTeams = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/teams');
+      const response = await fetch("/api/teams");
       if (response.ok) {
         const { teams } = await response.json();
-        
+
         // Add user role from team_members data
         const teamsWithRoles = teams.map((team: any) => ({
           ...team,
-          role: team.team_members?.[0]?.role || 'member',
+          role: team.team_members?.[0]?.role || "member",
         }));
-        
+
         setTeams(teamsWithRoles);
-        
+
         // Auto-select first team if none selected
         if (!selectedTeam && teamsWithRoles.length > 0) {
           onTeamSelect(teamsWithRoles[0]);
         }
       }
     } catch (error) {
-      console.error('Error loading teams:', error);
+      console.error("Error loading teams:", error);
     } finally {
       setLoading(false);
     }
@@ -69,10 +84,10 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
 
     try {
       setCreateLoading(true);
-      const response = await fetch('/api/teams', {
-        method: 'POST',
+      const response = await fetch("/api/teams", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           name: newTeamName.trim(),
@@ -82,25 +97,25 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
 
       if (response.ok) {
         const { team } = await response.json();
-        const teamWithRole = { ...team, role: 'owner' };
-        
-        setTeams(prev => [...prev, teamWithRole]);
-        setNewTeamName('');
-        setNewTeamDescription('');
+        const teamWithRole = { ...team, role: "owner" };
+
+        setTeams((prev) => [...prev, teamWithRole]);
+        setNewTeamName("");
+        setNewTeamDescription("");
         setCreateDialogOpen(false);
-        
+
         if (onCreateTeam) {
           onCreateTeam(teamWithRole);
         }
-        
+
         onTeamSelect(teamWithRole);
       } else {
         const error = await response.json();
-        alert(error.error || 'Failed to create team');
+        alert(error.error || "Failed to create team");
       }
     } catch (error) {
-      console.error('Error creating team:', error);
-      alert('Failed to create team');
+      console.error("Error creating team:", error);
+      alert("Failed to create team");
     } finally {
       setCreateLoading(false);
     }
@@ -108,13 +123,13 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'owner':
+      case "owner":
         return <Crown className="h-3 w-3 text-yellow-500" />;
-      case 'manager':
+      case "manager":
         return <Shield className="h-3 w-3 text-blue-500" />;
-      case 'editor':
+      case "editor":
         return <Edit3 className="h-3 w-3 text-green-500" />;
-      case 'viewer':
+      case "viewer":
         return <Eye className="h-3 w-3 text-gray-500" />;
       default:
         return null;
@@ -123,16 +138,16 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'owner':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'manager':
-        return 'bg-blue-100 text-blue-800';
-      case 'editor':
-        return 'bg-green-100 text-green-800';
-      case 'viewer':
-        return 'bg-gray-100 text-gray-800';
+      case "owner":
+        return "bg-yellow-100 text-yellow-800";
+      case "manager":
+        return "bg-blue-100 text-blue-800";
+      case "editor":
+        return "bg-green-100 text-green-800";
+      case "viewer":
+        return "bg-gray-100 text-gray-800";
       default:
-        return 'bg-gray-100 text-gray-800';
+        return "bg-gray-100 text-gray-800";
     }
   };
 
@@ -170,7 +185,9 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
             <div className="p-4 text-center text-gray-600">
               <Users className="h-8 w-8 mx-auto mb-2 text-gray-400" />
               <p className="text-sm">No teams yet</p>
-              <p className="text-xs text-gray-500">Create your first team to get started</p>
+              <p className="text-xs text-gray-500">
+                Create your first team to get started
+              </p>
             </div>
           ) : (
             teams.map((team) => (
@@ -253,7 +270,7 @@ export function TeamSelector({ selectedTeam, onTeamSelect, onCreateTeam }: TeamS
                 onClick={handleCreateTeam}
                 disabled={createLoading || !newTeamName.trim()}
               >
-                {createLoading ? 'Creating...' : 'Create Team'}
+                {createLoading ? "Creating..." : "Create Team"}
               </Button>
             </div>
           </div>
@@ -273,13 +290,13 @@ interface TeamCardProps {
 export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'owner':
+      case "owner":
         return <Crown className="h-4 w-4 text-yellow-500" />;
-      case 'manager':
+      case "manager":
         return <Shield className="h-4 w-4 text-blue-500" />;
-      case 'editor':
+      case "editor":
         return <Edit3 className="h-4 w-4 text-green-500" />;
-      case 'viewer':
+      case "viewer":
         return <Eye className="h-4 w-4 text-gray-500" />;
       default:
         return null;
@@ -288,23 +305,23 @@ export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'owner':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'manager':
-        return 'bg-blue-100 text-blue-800';
-      case 'editor':
-        return 'bg-green-100 text-green-800';
-      case 'viewer':
-        return 'bg-gray-100 text-gray-800';
+      case "owner":
+        return "bg-yellow-100 text-yellow-800";
+      case "manager":
+        return "bg-blue-100 text-blue-800";
+      case "editor":
+        return "bg-green-100 text-green-800";
+      case "viewer":
+        return "bg-gray-100 text-gray-800";
       default:
-        return 'bg-gray-100 text-gray-800';
+        return "bg-gray-100 text-gray-800";
     }
   };
 
   return (
-    <Card 
+    <Card
       className={`cursor-pointer transition-all hover:shadow-md ${
-        isSelected ? 'ring-2 ring-blue-500 bg-blue-50' : ''
+        isSelected ? "ring-2 ring-blue-500 bg-blue-50" : ""
       }`}
       onClick={onClick}
     >
@@ -315,9 +332,7 @@ export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
             {team.role && getRoleIcon(team.role)}
           </CardTitle>
           {team.role && (
-            <Badge className={getRoleBadgeColor(team.role)}>
-              {team.role}
-            </Badge>
+            <Badge className={getRoleBadgeColor(team.role)}>{team.role}</Badge>
           )}
         </div>
       </CardHeader>

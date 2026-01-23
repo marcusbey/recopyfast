@@ -1,82 +1,188 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { AuthModal } from '@/components/auth/AuthModal';
-import { UserMenu } from '@/components/auth/UserMenu';
-import { Code } from 'lucide-react';
-import Link from 'next/link';
+import { useState, useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { UserMenu } from "@/components/auth/UserMenu";
+import { Zap, Menu, X } from "lucide-react";
+import Link from "next/link";
 
 export function Header() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => {
-      // Consider "scrolled past hero" as scrolling more than 80vh
-      setIsScrolled(window.scrollY > window.innerHeight * 0.8);
+      setIsScrolled(window.scrollY > 50);
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   return (
     <>
-      <header className="border-b border-gray-200 bg-white/95 backdrop-blur sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-3">
-            <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-              <Code className="w-5 h-5 text-white" />
+      <header
+        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+          isScrolled
+            ? "bg-white/70 backdrop-blur-xl border-b border-sky-100/50 shadow-sm"
+            : "bg-transparent"
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <Link href="/" className="flex items-center gap-2.5">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                  isScrolled
+                    ? "bg-gradient-to-br from-sky-500 to-emerald-500"
+                    : "bg-white/20 backdrop-blur-sm border border-sky-200/50"
+                }`}
+              >
+                <Zap
+                  className={`w-5 h-5 ${isScrolled ? "text-white" : "text-sky-500"}`}
+                />
+              </div>
+              <span
+                className={`font-bold text-xl tracking-tight transition-colors ${
+                  isScrolled ? "text-slate-900" : "text-slate-800"
+                }`}
+              >
+                ReCopyFast
+              </span>
+            </Link>
+
+            {/* Desktop Navigation */}
+            <nav className="hidden md:flex items-center gap-8">
+              <a
+                href="#features"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:text-slate-900"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Features
+              </a>
+              <a
+                href="#pricing"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:text-slate-900"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Pricing
+              </a>
+              <Link
+                href="/demo"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:text-slate-900"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Demo
+              </Link>
+              <Link
+                href="/blog"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:text-slate-900"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Blog
+              </Link>
+            </nav>
+
+            {/* Auth Section */}
+            <div className="flex items-center gap-4">
+              {loading ? (
+                <div className="w-9 h-9 rounded-full bg-sky-100 animate-pulse" />
+              ) : user ? (
+                <UserMenu />
+              ) : (
+                <>
+                  <button
+                    onClick={() => setShowAuthModal(true)}
+                    className="hidden sm:inline-flex text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+                  >
+                    Sign in
+                  </button>
+                  <Button
+                    onClick={() => setShowAuthModal(true)}
+                    size="sm"
+                    className="bg-sky-500 text-white hover:bg-sky-600 shadow-lg shadow-sky-500/20 transition-all"
+                  >
+                    Get started
+                  </Button>
+                </>
+              )}
+
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className={`md:hidden p-2 rounded-lg transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:bg-sky-50"
+                    : "text-slate-700 hover:bg-white/50"
+                }`}
+              >
+                {mobileMenuOpen ? (
+                  <X className="w-5 h-5" />
+                ) : (
+                  <Menu className="w-5 h-5" />
+                )}
+              </button>
             </div>
-            <span className="font-bold text-xl text-gray-900 tracking-tight">ReCopyFast</span>
-          </Link>
-          
-          <nav className="hidden md:flex items-center space-x-8">
-            <a href="#features" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
-              Features
-            </a>
-            <a href="#pricing" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
-              Pricing
-            </a>
-            <Link href="/demo" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
-              Live Demo
-            </Link>
-            <Link href="/blog" className="text-gray-600 hover:text-gray-900 transition-colors font-medium">
-              Blog
-            </Link>
-            
-            {loading ? (
-              <div className="w-10 h-10 rounded-full bg-gray-200 animate-pulse" />
-            ) : user ? (
-              <UserMenu />
-            ) : isScrolled ? (
-              <Button 
-                onClick={() => setShowAuthModal(true)}
-                size="sm" 
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium border-0"
-              >
-                Sign In
-              </Button>
-            ) : (
-              <Button 
-                onClick={() => setShowAuthModal(true)}
-                variant="outline" 
-                size="sm" 
-                className="border-2 border-blue-600 text-blue-600 hover:bg-blue-50 hover:border-blue-700 font-medium transition-colors duration-200"
-              >
-                Sign In
-              </Button>
-            )}
-          </nav>
+          </div>
+
+          {/* Mobile menu */}
+          {mobileMenuOpen && (
+            <div className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4">
+              <nav className="flex flex-col gap-4">
+                <a
+                  href="#features"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Features
+                </a>
+                <a
+                  href="#pricing"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Pricing
+                </a>
+                <Link
+                  href="/demo"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Demo
+                </Link>
+                <Link
+                  href="/blog"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Blog
+                </Link>
+              </nav>
+            </div>
+          )}
         </div>
       </header>
 
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
       />
     </>
   );

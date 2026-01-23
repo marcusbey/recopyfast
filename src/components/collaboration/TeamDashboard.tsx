@@ -1,28 +1,39 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Team, TeamMember, TeamInvitation, TeamActivityLog } from '@/types';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { 
-  Users, 
-  Mail, 
-  Settings, 
-  Activity, 
-  UserPlus, 
+import React, { useState, useEffect } from "react";
+import { Team, TeamMember, TeamInvitation, TeamActivityLog } from "@/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Users,
+  Mail,
+  Settings,
+  Activity,
+  UserPlus,
   MoreHorizontal,
   Crown,
   Shield,
   Eye,
   Edit3,
-  Trash2
-} from 'lucide-react';
+  Trash2,
+} from "lucide-react";
 
 interface TeamDashboardProps {
   team: Team;
@@ -30,17 +41,23 @@ interface TeamDashboardProps {
   onUpdateTeam?: (team: Team) => void;
 }
 
-export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardProps) {
+export function TeamDashboard({
+  team,
+  userRole,
+  onUpdateTeam,
+}: TeamDashboardProps) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [activities, setActivities] = useState<TeamActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'viewer' | 'editor' | 'manager'>('editor');
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"viewer" | "editor" | "manager">(
+    "editor",
+  );
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  const canManageTeam = userRole === 'manager' || userRole === 'owner';
+  const canManageTeam = userRole === "manager" || userRole === "owner";
   const canInvite = canManageTeam;
 
   useEffect(() => {
@@ -50,7 +67,7 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
   const loadTeamData = async () => {
     try {
       setLoading(true);
-      
+
       // Load team members
       const membersResponse = await fetch(`/api/teams/${team.id}/members`);
       if (membersResponse.ok) {
@@ -60,7 +77,9 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
 
       // Load invitations if user can manage
       if (canManageTeam) {
-        const invitationsResponse = await fetch(`/api/teams/${team.id}/invitations`);
+        const invitationsResponse = await fetch(
+          `/api/teams/${team.id}/invitations`,
+        );
         if (invitationsResponse.ok) {
           const { invitations } = await invitationsResponse.json();
           setInvitations(invitations);
@@ -68,13 +87,15 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
       }
 
       // Load recent activity
-      const activityResponse = await fetch(`/api/teams/${team.id}/activity?limit=20`);
+      const activityResponse = await fetch(
+        `/api/teams/${team.id}/activity?limit=20`,
+      );
       if (activityResponse.ok) {
         const { activities } = await activityResponse.json();
         setActivities(activities);
       }
     } catch (error) {
-      console.error('Error loading team data:', error);
+      console.error("Error loading team data:", error);
     } finally {
       setLoading(false);
     }
@@ -86,9 +107,9 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
     try {
       setInviteLoading(true);
       const response = await fetch(`/api/teams/${team.id}/invitations`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           email: inviteEmail.trim(),
@@ -98,16 +119,16 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
       });
 
       if (response.ok) {
-        setInviteEmail('');
+        setInviteEmail("");
         setInviteDialogOpen(false);
         loadTeamData(); // Refresh data
       } else {
         const error = await response.json();
-        alert(error.error || 'Failed to send invitation');
+        alert(error.error || "Failed to send invitation");
       }
     } catch (error) {
-      console.error('Error inviting member:', error);
-      alert('Failed to send invitation');
+      console.error("Error inviting member:", error);
+      alert("Failed to send invitation");
     } finally {
       setInviteLoading(false);
     }
@@ -116,9 +137,9 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
   const handleUpdateMemberRole = async (memberId: string, newRole: string) => {
     try {
       const response = await fetch(`/api/teams/${team.id}/members`, {
-        method: 'PATCH',
+        method: "PATCH",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           memberId,
@@ -130,45 +151,50 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
         loadTeamData(); // Refresh data
       } else {
         const error = await response.json();
-        alert(error.error || 'Failed to update member role');
+        alert(error.error || "Failed to update member role");
       }
     } catch (error) {
-      console.error('Error updating member role:', error);
-      alert('Failed to update member role');
+      console.error("Error updating member role:", error);
+      alert("Failed to update member role");
     }
   };
 
   const handleRemoveMember = async (memberId: string) => {
-    if (!confirm('Are you sure you want to remove this member from the team?')) {
+    if (
+      !confirm("Are you sure you want to remove this member from the team?")
+    ) {
       return;
     }
 
     try {
-      const response = await fetch(`/api/teams/${team.id}/members?memberId=${memberId}`, {
-        method: 'DELETE',
-      });
+      const response = await fetch(
+        `/api/teams/${team.id}/members?memberId=${memberId}`,
+        {
+          method: "DELETE",
+        },
+      );
 
       if (response.ok) {
         loadTeamData(); // Refresh data
       } else {
         const error = await response.json();
-        alert(error.error || 'Failed to remove member');
+        alert(error.error || "Failed to remove member");
       }
     } catch (error) {
-      console.error('Error removing member:', error);
-      alert('Failed to remove member');
+      console.error("Error removing member:", error);
+      alert("Failed to remove member");
     }
   };
 
   const getRoleIcon = (role: string) => {
     switch (role) {
-      case 'owner':
+      case "owner":
         return <Crown className="h-4 w-4 text-yellow-500" />;
-      case 'manager':
+      case "manager":
         return <Shield className="h-4 w-4 text-blue-500" />;
-      case 'editor':
+      case "editor":
         return <Edit3 className="h-4 w-4 text-green-500" />;
-      case 'viewer':
+      case "viewer":
         return <Eye className="h-4 w-4 text-gray-500" />;
       default:
         return null;
@@ -177,21 +203,21 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
 
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
-      case 'owner':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'manager':
-        return 'bg-blue-100 text-blue-800';
-      case 'editor':
-        return 'bg-green-100 text-green-800';
-      case 'viewer':
-        return 'bg-gray-100 text-gray-800';
+      case "owner":
+        return "bg-yellow-100 text-yellow-800";
+      case "manager":
+        return "bg-blue-100 text-blue-800";
+      case "editor":
+        return "bg-green-100 text-green-800";
+      case "viewer":
+        return "bg-gray-100 text-gray-800";
       default:
-        return 'bg-gray-100 text-gray-800';
+        return "bg-gray-100 text-gray-800";
     }
   };
 
   const formatActivityAction = (action: string) => {
-    return action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    return action.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
   if (loading) {
@@ -223,7 +249,7 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
             </Badge>
           </div>
         </div>
-        
+
         {canInvite && (
           <Dialog open={inviteDialogOpen} onOpenChange={setInviteDialogOpen}>
             <DialogTrigger asChild>
@@ -271,7 +297,7 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                     onClick={handleInviteMember}
                     disabled={inviteLoading || !inviteEmail.trim()}
                   >
-                    {inviteLoading ? 'Sending...' : 'Send Invitation'}
+                    {inviteLoading ? "Sending..." : "Send Invitation"}
                   </Button>
                 </div>
               </div>
@@ -288,7 +314,10 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
             Members
           </TabsTrigger>
           {canManageTeam && (
-            <TabsTrigger value="invitations" className="flex items-center gap-2">
+            <TabsTrigger
+              value="invitations"
+              className="flex items-center gap-2"
+            >
               <Mail className="h-4 w-4" />
               Invitations
             </TabsTrigger>
@@ -335,23 +364,27 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                       <div>
                         <div className="flex items-center gap-2">
                           <p className="font-medium">
-                            {member.user?.raw_user_meta_data?.name || member.user?.email}
+                            {member.user?.raw_user_meta_data?.name ||
+                              member.user?.email}
                           </p>
                           {getRoleIcon(member.role)}
                         </div>
-                        <p className="text-sm text-gray-600">{member.user?.email}</p>
+                        <p className="text-sm text-gray-600">
+                          {member.user?.email}
+                        </p>
                         <p className="text-xs text-gray-500">
-                          Joined {new Date(member.joined_at).toLocaleDateString()}
+                          Joined{" "}
+                          {new Date(member.joined_at).toLocaleDateString()}
                         </p>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-2">
                       <Badge className={getRoleBadgeColor(member.role)}>
                         {member.role}
                       </Badge>
-                      
-                      {canManageTeam && member.role !== 'owner' && (
+
+                      {canManageTeam && member.role !== "owner" && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm">
@@ -360,20 +393,26 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem
-                              onClick={() => handleUpdateMemberRole(member.id, 'viewer')}
-                              disabled={member.role === 'viewer'}
+                              onClick={() =>
+                                handleUpdateMemberRole(member.id, "viewer")
+                              }
+                              disabled={member.role === "viewer"}
                             >
                               Make Viewer
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => handleUpdateMemberRole(member.id, 'editor')}
-                              disabled={member.role === 'editor'}
+                              onClick={() =>
+                                handleUpdateMemberRole(member.id, "editor")
+                              }
+                              disabled={member.role === "editor"}
                             >
                               Make Editor
                             </DropdownMenuItem>
                             <DropdownMenuItem
-                              onClick={() => handleUpdateMemberRole(member.id, 'manager')}
-                              disabled={member.role === 'manager'}
+                              onClick={() =>
+                                handleUpdateMemberRole(member.id, "manager")
+                              }
+                              disabled={member.role === "manager"}
                             >
                               Make Manager
                             </DropdownMenuItem>
@@ -400,7 +439,9 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
           <TabsContent value="invitations">
             <Card>
               <CardHeader>
-                <CardTitle>Pending Invitations ({invitations.length})</CardTitle>
+                <CardTitle>
+                  Pending Invitations ({invitations.length})
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 {invitations.length === 0 ? (
@@ -417,8 +458,10 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                         <div>
                           <p className="font-medium">{invitation.email}</p>
                           <p className="text-sm text-gray-600">
-                            Invited as {invitation.role} • 
-                            Expires {new Date(invitation.expires_at).toLocaleDateString()}
+                            Invited as {invitation.role} • Expires{" "}
+                            {new Date(
+                              invitation.expires_at,
+                            ).toLocaleDateString()}
                           </p>
                         </div>
                         <Badge className={getRoleBadgeColor(invitation.role)}>
@@ -459,7 +502,7 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                           {formatActivityAction(activity.action)}
                         </p>
                         <p className="text-sm text-gray-600">
-                          {activity.user?.email || 'System'} • 
+                          {activity.user?.email || "System"} •
                           {new Date(activity.created_at).toLocaleString()}
                         </p>
                       </div>
@@ -496,10 +539,13 @@ export function TeamDashboard({ team, userRole, onUpdateTeam }: TeamDashboardPro
                     <Label htmlFor="team-description">Description</Label>
                     <Input
                       id="team-description"
-                      value={team.description || ''}
+                      value={team.description || ""}
                       onChange={(e) => {
                         if (onUpdateTeam) {
-                          onUpdateTeam({ ...team, description: e.target.value });
+                          onUpdateTeam({
+                            ...team,
+                            description: e.target.value,
+                          });
                         }
                       }}
                       placeholder="Optional team description"

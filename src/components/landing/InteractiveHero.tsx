@@ -1,9 +1,41 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Wand2, Sparkles, CheckCircle, ArrowRight, ChevronLeft, ChevronRight, Utensils, Car, Coffee, Edit3, Save, X, Image, Code, Zap } from 'lucide-react';
-import { DEFAULT_EDITING_RULES, getTextEditingStyles, generateUnsplashUrl, TEXT_EDITING_CONSISTENCY_RULES, getOptimalTextColor, getTextShadow, getFullElementText, UNSPLASH_CATEGORIES } from '@/lib/editingRules';
+import { useState, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Wand2,
+  Sparkles,
+  CheckCircle,
+  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  Utensils,
+  Car,
+  Coffee,
+  Edit3,
+  Save,
+  X,
+  Image,
+  Code,
+  Zap,
+} from "lucide-react";
+import {
+  DEFAULT_EDITING_RULES,
+  getTextEditingStyles,
+  generateUnsplashUrl,
+  TEXT_EDITING_CONSISTENCY_RULES,
+  getOptimalTextColor,
+  getTextShadow,
+  getFullElementText,
+  UNSPLASH_CATEGORIES,
+} from "@/lib/editingRules";
+import {
+  FloatingEditorToolbar,
+  ElementTagBadge,
+  UnsavedChangesBar,
+} from "@/components/editor";
+import { useFloatingPosition } from "@/lib/hooks/useFloatingPosition";
+import type { TypographyStyles, PendingChange } from "@/types/editor";
 
 interface EditableText {
   id: string;
@@ -25,331 +57,522 @@ interface DemoSite {
 
 const demoSites: DemoSite[] = [
   {
-    id: 'restaurant',
-    name: 'Bella Vista Restaurant',
-    theme: 'restaurant',
+    id: "restaurant",
+    name: "Bella Vista Restaurant",
+    theme: "restaurant",
     icon: Utensils,
-    background: 'bg-gradient-to-br from-amber-50 to-orange-50',
-    textColor: 'text-amber-900',
-    accentColor: 'from-amber-600 to-orange-600',
+    background: "bg-gradient-to-br from-amber-50 to-orange-50",
+    textColor: "text-amber-900",
+    accentColor: "from-amber-600 to-orange-600",
     editableTexts: [
       {
-        id: 'headline',
-        text: 'Authentic Italian Cuisine',
+        id: "headline",
+        text: "Authentic Italian Cuisine",
         isEditing: false,
-        originalText: 'Authentic Italian Cuisine'
+        originalText: "Authentic Italian Cuisine",
       },
       {
-        id: 'subheading',
-        text: 'Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.',
+        id: "subheading",
+        text: "Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.",
         isEditing: false,
-        originalText: 'Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.'
+        originalText:
+          "Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.",
       },
       {
-        id: 'cta',
-        text: 'Book Your Table',
+        id: "cta",
+        text: "Book Your Table",
         isEditing: false,
-        originalText: 'Book Your Table'
+        originalText: "Book Your Table",
       },
       {
-        id: 'about-title',
-        text: 'Our Story',
+        id: "about-title",
+        text: "Our Story",
         isEditing: false,
-        originalText: 'Our Story'
+        originalText: "Our Story",
       },
       {
-        id: 'about-text',
-        text: 'Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.',
+        id: "about-text",
+        text: "Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.",
         isEditing: false,
-        originalText: 'Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.'
+        originalText:
+          "Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.",
       },
       {
-        id: 'menu-title',
-        text: 'Today\'s Specials',
+        id: "menu-title",
+        text: "Today's Specials",
         isEditing: false,
-        originalText: 'Today\'s Specials'
+        originalText: "Today's Specials",
       },
       {
-        id: 'special-1',
-        text: 'Truffle Risotto with Wild Mushrooms - $28',
+        id: "special-1",
+        text: "Truffle Risotto with Wild Mushrooms - $28",
         isEditing: false,
-        originalText: 'Truffle Risotto with Wild Mushrooms - $28'
+        originalText: "Truffle Risotto with Wild Mushrooms - $28",
       },
       {
-        id: 'special-2',
-        text: 'Osso Buco alla Milanese - $32',
+        id: "special-2",
+        text: "Osso Buco alla Milanese - $32",
         isEditing: false,
-        originalText: 'Osso Buco alla Milanese - $32'
+        originalText: "Osso Buco alla Milanese - $32",
       },
       {
-        id: 'feature-1-title',
-        text: 'Fresh Pasta',
+        id: "feature-1-title",
+        text: "Fresh Pasta",
         isEditing: false,
-        originalText: 'Fresh Pasta'
+        originalText: "Fresh Pasta",
       },
       {
-        id: 'feature-1-desc',
-        text: 'Made daily with authentic Italian recipes',
+        id: "feature-1-desc",
+        text: "Made daily with authentic Italian recipes",
         isEditing: false,
-        originalText: 'Made daily with authentic Italian recipes'
+        originalText: "Made daily with authentic Italian recipes",
       },
       {
-        id: 'feature-2-title',
-        text: 'Fine Wine',
+        id: "feature-2-title",
+        text: "Fine Wine",
         isEditing: false,
-        originalText: 'Fine Wine'
+        originalText: "Fine Wine",
       },
       {
-        id: 'feature-2-desc',
-        text: 'Curated selection from Italian vineyards',
+        id: "feature-2-desc",
+        text: "Curated selection from Italian vineyards",
         isEditing: false,
-        originalText: 'Curated selection from Italian vineyards'
+        originalText: "Curated selection from Italian vineyards",
       },
       {
-        id: 'learn-more-btn',
-        text: 'Learn More',
+        id: "learn-more-btn",
+        text: "Learn More",
         isEditing: false,
-        originalText: 'Learn More'
-      }
-    ]
+        originalText: "Learn More",
+      },
+    ],
   },
   {
-    id: 'carwash',
-    name: 'Premium Auto Spa',
-    theme: 'carwash',
+    id: "carwash",
+    name: "Premium Auto Spa",
+    theme: "carwash",
     icon: Car,
-    background: 'bg-gradient-to-br from-blue-50 to-cyan-50',
-    textColor: 'text-blue-900',
-    accentColor: 'from-blue-600 to-cyan-600',
+    background: "bg-gradient-to-br from-blue-50 to-cyan-50",
+    textColor: "text-blue-900",
+    accentColor: "from-blue-600 to-cyan-600",
     editableTexts: [
       {
-        id: 'headline',
-        text: 'Premium Car Detailing',
+        id: "headline",
+        text: "Premium Car Detailing",
         isEditing: false,
-        originalText: 'Premium Car Detailing'
+        originalText: "Premium Car Detailing",
       },
       {
-        id: 'subheading',
-        text: 'Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.',
+        id: "subheading",
+        text: "Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.",
         isEditing: false,
-        originalText: 'Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.'
+        originalText:
+          "Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.",
       },
       {
-        id: 'cta',
-        text: 'Schedule Service',
+        id: "cta",
+        text: "Schedule Service",
         isEditing: false,
-        originalText: 'Schedule Service'
+        originalText: "Schedule Service",
       },
       {
-        id: 'services-title',
-        text: 'Our Services',
+        id: "services-title",
+        text: "Our Services",
         isEditing: false,
-        originalText: 'Our Services'
+        originalText: "Our Services",
       },
       {
-        id: 'service-desc',
-        text: 'From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.',
+        id: "service-desc",
+        text: "From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.",
         isEditing: false,
-        originalText: 'From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.'
+        originalText:
+          "From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.",
       },
       {
-        id: 'pricing-title',
-        text: 'Service Packages',
+        id: "pricing-title",
+        text: "Service Packages",
         isEditing: false,
-        originalText: 'Service Packages'
+        originalText: "Service Packages",
       },
       {
-        id: 'package-1',
-        text: 'Express Wash - Interior vacuum, exterior wash - $25',
+        id: "package-1",
+        text: "Express Wash - Interior vacuum, exterior wash - $25",
         isEditing: false,
-        originalText: 'Express Wash - Interior vacuum, exterior wash - $25'
+        originalText: "Express Wash - Interior vacuum, exterior wash - $25",
       },
       {
-        id: 'package-2',
-        text: 'Premium Detail - Full detail, wax, tire shine - $85',
+        id: "package-2",
+        text: "Premium Detail - Full detail, wax, tire shine - $85",
         isEditing: false,
-        originalText: 'Premium Detail - Full detail, wax, tire shine - $85'
+        originalText: "Premium Detail - Full detail, wax, tire shine - $85",
       },
       // Additional Car Wash Service Cards
       {
-        id: 'basic-wash-title',
-        text: 'Basic Wash',
+        id: "basic-wash-title",
+        text: "Basic Wash",
         isEditing: false,
-        originalText: 'Basic Wash'
+        originalText: "Basic Wash",
       },
       {
-        id: 'basic-wash-desc',
-        text: 'Quick exterior wash with tire shine',
+        id: "basic-wash-desc",
+        text: "Quick exterior wash with tire shine",
         isEditing: false,
-        originalText: 'Quick exterior wash with tire shine'
+        originalText: "Quick exterior wash with tire shine",
       },
       {
-        id: 'premium-detail-title',
-        text: 'Premium Detail',
+        id: "premium-detail-title",
+        text: "Premium Detail",
         isEditing: false,
-        originalText: 'Premium Detail'
+        originalText: "Premium Detail",
       },
       {
-        id: 'premium-detail-desc',
-        text: 'Full interior & exterior detailing',
+        id: "premium-detail-desc",
+        text: "Full interior & exterior detailing",
         isEditing: false,
-        originalText: 'Full interior & exterior detailing'
+        originalText: "Full interior & exterior detailing",
       },
       {
-        id: 'ceramic-coating-title',
-        text: 'Ceramic Coating',
+        id: "ceramic-coating-title",
+        text: "Ceramic Coating",
         isEditing: false,
-        originalText: 'Ceramic Coating'
+        originalText: "Ceramic Coating",
       },
       {
-        id: 'ceramic-coating-desc',
-        text: 'Long-lasting paint protection',
+        id: "ceramic-coating-desc",
+        text: "Long-lasting paint protection",
         isEditing: false,
-        originalText: 'Long-lasting paint protection'
+        originalText: "Long-lasting paint protection",
       },
       {
-        id: 'satisfaction-title',
-        text: '100% Satisfaction',
+        id: "satisfaction-title",
+        text: "100% Satisfaction",
         isEditing: false,
-        originalText: '100% Satisfaction'
+        originalText: "100% Satisfaction",
       },
       {
-        id: 'satisfaction-subtitle',
-        text: 'Guaranteed',
+        id: "satisfaction-subtitle",
+        text: "Guaranteed",
         isEditing: false,
-        originalText: 'Guaranteed'
+        originalText: "Guaranteed",
       },
       {
-        id: 'view-pricing-btn',
-        text: 'View Pricing',
+        id: "view-pricing-btn",
+        text: "View Pricing",
         isEditing: false,
-        originalText: 'View Pricing'
-      }
-    ]
+        originalText: "View Pricing",
+      },
+    ],
   },
   {
-    id: 'bakery',
-    name: 'Sweet Dreams Bakery',
-    theme: 'bakery',
+    id: "bakery",
+    name: "Sweet Dreams Bakery",
+    theme: "bakery",
     icon: Coffee,
-    background: 'bg-gradient-to-br from-pink-50 to-rose-50',
-    textColor: 'text-rose-900',
-    accentColor: 'from-pink-600 to-rose-600',
+    background: "bg-gradient-to-br from-pink-50 to-rose-50",
+    textColor: "text-rose-900",
+    accentColor: "from-pink-600 to-rose-600",
     editableTexts: [
       {
-        id: 'headline',
-        text: 'Freshly Baked Daily',
+        id: "headline",
+        text: "Freshly Baked Daily",
         isEditing: false,
-        originalText: 'Freshly Baked Daily'
+        originalText: "Freshly Baked Daily",
       },
       {
-        id: 'subheading',
-        text: 'Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.',
+        id: "subheading",
+        text: "Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.",
         isEditing: false,
-        originalText: 'Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.'
+        originalText:
+          "Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.",
       },
       {
-        id: 'cta',
-        text: 'Order Online',
+        id: "cta",
+        text: "Order Online",
         isEditing: false,
-        originalText: 'Order Online'
+        originalText: "Order Online",
       },
       {
-        id: 'tradition-title',
-        text: 'Family Tradition',
+        id: "tradition-title",
+        text: "Family Tradition",
         isEditing: false,
-        originalText: 'Family Tradition'
+        originalText: "Family Tradition",
       },
       {
-        id: 'tradition-text',
-        text: 'Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.',
+        id: "tradition-text",
+        text: "Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.",
         isEditing: false,
-        originalText: 'Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.'
+        originalText:
+          "Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.",
       },
       {
-        id: 'hours-title',
-        text: 'Visit Us Today',
+        id: "hours-title",
+        text: "Visit Us Today",
         isEditing: false,
-        originalText: 'Visit Us Today'
+        originalText: "Visit Us Today",
       },
       {
-        id: 'hours-1',
-        text: 'Monday - Friday: 6:00 AM - 7:00 PM',
+        id: "hours-1",
+        text: "Monday - Friday: 6:00 AM - 7:00 PM",
         isEditing: false,
-        originalText: 'Monday - Friday: 6:00 AM - 7:00 PM'
+        originalText: "Monday - Friday: 6:00 AM - 7:00 PM",
       },
       {
-        id: 'hours-2',
-        text: 'Saturday - Sunday: 7:00 AM - 6:00 PM',
+        id: "hours-2",
+        text: "Saturday - Sunday: 7:00 AM - 6:00 PM",
         isEditing: false,
-        originalText: 'Saturday - Sunday: 7:00 AM - 6:00 PM'
+        originalText: "Saturday - Sunday: 7:00 AM - 6:00 PM",
       },
       // Contact Information
       {
-        id: 'contact-address',
-        text: '📍 123 Main Street, Downtown',
+        id: "contact-address",
+        text: "📍 123 Main Street, Downtown",
         isEditing: false,
-        originalText: '📍 123 Main Street, Downtown'
+        originalText: "📍 123 Main Street, Downtown",
       },
       {
-        id: 'contact-phone',
-        text: '📞 (555) 123-4567',
+        id: "contact-phone",
+        text: "📞 (555) 123-4567",
         isEditing: false,
-        originalText: '📞 (555) 123-4567'
-      }
-    ]
-  }
+        originalText: "📞 (555) 123-4567",
+      },
+    ],
+  },
 ];
 
 export default function InteractiveHero() {
   const [currentSite, setCurrentSite] = useState(0);
-  const [editableTexts, setEditableTexts] = useState<EditableText[]>(demoSites[0].editableTexts);
-  const [optimalColors, setOptimalColors] = useState<Record<string, string>>({});
+  const [editableTexts, setEditableTexts] = useState<EditableText[]>(
+    demoSites[0].editableTexts,
+  );
+  const [optimalColors, setOptimalColors] = useState<Record<string, string>>(
+    {},
+  );
   const [textShadows, setTextShadows] = useState<Record<string, string>>({});
-  const [originalHeights, setOriginalHeights] = useState<Record<string, number>>({});
+  const [originalHeights, setOriginalHeights] = useState<
+    Record<string, number>
+  >({});
 
   const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [showDemoWidget, setShowDemoWidget] = useState(false);
 
+  // New editor state for Framer-like UI
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(
+    null,
+  );
+  const [selectedElementBounds, setSelectedElementBounds] =
+    useState<DOMRect | null>(null);
+  const [selectedElementTag, setSelectedElementTag] = useState<string>("");
+  const [elementStyles, setElementStyles] = useState<
+    Record<string, TypographyStyles>
+  >({});
+  const [pendingChanges, setPendingChanges] = useState<
+    Map<string, PendingChange>
+  >(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Floating toolbar position
+  const { position: toolbarPosition } = useFloatingPosition({
+    elementBounds: selectedElementBounds,
+    toolbarHeight: 48,
+    toolbarWidth: 420,
+    offset: 12,
+    containerRef,
+  });
+
   const currentSiteData = demoSites[currentSite];
+
+  // Check if there are unsaved changes
+  const hasUnsavedChanges = pendingChanges.size > 0;
+
+  // Get current element styles or default
+  const getCurrentStyles = (elementId: string): TypographyStyles => {
+    return (
+      elementStyles[elementId] || {
+        fontSize: "1rem",
+        fontWeight: "400",
+        color: "#000000",
+        textAlign: "left",
+      }
+    );
+  };
+
+  // Handle element selection for new editor UI
+  const handleElementSelect = (id: string, element: HTMLElement) => {
+    const bounds = element.getBoundingClientRect();
+    const computedStyle = window.getComputedStyle(element);
+    const tagName = element.tagName.toLowerCase();
+
+    setSelectedElementId(id);
+    setSelectedElementBounds(bounds);
+    setSelectedElementTag(tagName);
+
+    // Initialize styles from computed style if not already set
+    if (!elementStyles[id]) {
+      setElementStyles((prev) => ({
+        ...prev,
+        [id]: {
+          fontSize: computedStyle.fontSize,
+          fontWeight: computedStyle.fontWeight,
+          color: computedStyle.color,
+          textAlign: computedStyle.textAlign as TypographyStyles["textAlign"],
+          lineHeight: computedStyle.lineHeight,
+          letterSpacing: computedStyle.letterSpacing,
+        },
+      }));
+    }
+  };
+
+  // Handle style changes from toolbar
+  const handleStylesChange = (styles: Partial<TypographyStyles>) => {
+    if (!selectedElementId) return;
+
+    const currentItem = editableTexts.find(
+      (item) => item.id === selectedElementId,
+    );
+    if (!currentItem) return;
+
+    setElementStyles((prev) => ({
+      ...prev,
+      [selectedElementId]: {
+        ...getCurrentStyles(selectedElementId),
+        ...styles,
+      },
+    }));
+
+    // Track as pending change
+    const existingChange = pendingChanges.get(selectedElementId);
+    setPendingChanges((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(selectedElementId, {
+        original: existingChange?.original || currentItem.text,
+        current: currentItem.text,
+        originalStyles:
+          existingChange?.originalStyles || getCurrentStyles(selectedElementId),
+        currentStyles: { ...getCurrentStyles(selectedElementId), ...styles },
+      });
+      return newMap;
+    });
+  };
+
+  // Handle save from toolbar
+  const handleToolbarSave = () => {
+    if (selectedElementId) {
+      handleTextSave(selectedElementId);
+    }
+    setSelectedElementId(null);
+    setSelectedElementBounds(null);
+  };
+
+  // Handle delete/cancel from toolbar
+  const handleToolbarDelete = () => {
+    if (selectedElementId) {
+      // Revert to original
+      const pendingChange = pendingChanges.get(selectedElementId);
+      if (pendingChange) {
+        setEditableTexts((prev) =>
+          prev.map((item) =>
+            item.id === selectedElementId
+              ? { ...item, text: pendingChange.original, isEditing: false }
+              : item,
+          ),
+        );
+        if (pendingChange.originalStyles) {
+          setElementStyles((prev) => ({
+            ...prev,
+            [selectedElementId]: pendingChange.originalStyles!,
+          }));
+        }
+      }
+    }
+    setSelectedElementId(null);
+    setSelectedElementBounds(null);
+  };
+
+  // Handle save all changes
+  const handleSaveAllChanges = () => {
+    setPendingChanges(new Map());
+    setShowSuccessAnimation(true);
+    setTimeout(() => setShowSuccessAnimation(false), 2000);
+  };
+
+  // Handle discard all changes
+  const handleDiscardAllChanges = () => {
+    // Revert all pending changes
+    pendingChanges.forEach((change, id) => {
+      setEditableTexts((prev) =>
+        prev.map((item) =>
+          item.id === id ? { ...item, text: change.original } : item,
+        ),
+      );
+      if (change.originalStyles) {
+        setElementStyles((prev) => ({
+          ...prev,
+          [id]: change.originalStyles!,
+        }));
+      }
+    });
+    setPendingChanges(new Map());
+    setSelectedElementId(null);
+    setSelectedElementBounds(null);
+  };
+
+  // Click outside handler for deselection
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      // Don't deselect if clicking on toolbar or editable element
+      if (
+        target.closest("[data-editable-id]") ||
+        target.closest("[data-editor-toolbar]") ||
+        target.closest("[data-typography-panel]")
+      ) {
+        return;
+      }
+      setSelectedElementId(null);
+      setSelectedElementBounds(null);
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Function to determine text color based on theme and context
   const getTextColor = (elementId: string) => {
     const theme = currentSiteData.theme;
-    
+
     // Hero section elements (headline, subheading on hero backgrounds)
-    if (elementId === 'headline' || elementId === 'subheading') {
-      if (theme === 'restaurant') {
-        return 'text-white'; // White text on dark restaurant hero
-      } else if (theme === 'carwash') {
-        return 'text-white'; // White text on blue gradient hero
-      } else if (theme === 'bakery') {
-        return 'text-rose-900'; // Dark text on light pink background
+    if (elementId === "headline" || elementId === "subheading") {
+      if (theme === "restaurant") {
+        return "text-white"; // White text on dark restaurant hero
+      } else if (theme === "carwash") {
+        return "text-white"; // White text on blue gradient hero
+      } else if (theme === "bakery") {
+        return "text-rose-900"; // Dark text on light pink background
       }
     }
-    
+
     // Title elements in content sections
-    if (elementId.includes('title')) {
-      if (theme === 'restaurant') {
-        return 'text-amber-900'; // Dark amber on light backgrounds
-      } else if (theme === 'carwash') {
-        return 'text-gray-900'; // Dark text on light backgrounds
-      } else if (theme === 'bakery') {
-        return 'text-rose-900'; // Dark rose on light backgrounds
+    if (elementId.includes("title")) {
+      if (theme === "restaurant") {
+        return "text-amber-900"; // Dark amber on light backgrounds
+      } else if (theme === "carwash") {
+        return "text-gray-900"; // Dark text on light backgrounds
+      } else if (theme === "bakery") {
+        return "text-rose-900"; // Dark rose on light backgrounds
       }
     }
-    
+
     // Body text elements
-    if (theme === 'restaurant') {
-      return 'text-amber-800';
-    } else if (theme === 'carwash') {
-      return 'text-gray-700';
-    } else if (theme === 'bakery') {
-      return 'text-rose-800';
+    if (theme === "restaurant") {
+      return "text-amber-800";
+    } else if (theme === "carwash") {
+      return "text-gray-700";
+    } else if (theme === "bakery") {
+      return "text-rose-800";
     }
-    
-    return 'text-gray-800'; // Default fallback
+
+    return "text-gray-800"; // Default fallback
   };
 
   const nextSite = () => {
@@ -359,90 +582,93 @@ export default function InteractiveHero() {
   };
 
   const prevSite = () => {
-    const newSiteIndex = (currentSite - 1 + demoSites.length) % demoSites.length;
+    const newSiteIndex =
+      (currentSite - 1 + demoSites.length) % demoSites.length;
     setCurrentSite(newSiteIndex);
     setEditableTexts(demoSites[newSiteIndex].editableTexts);
   };
 
   const handleTextClick = (id: string) => {
     // CLEAR RULE: Always preserve original text color and formatting
-    const element = document.querySelector(`[data-editable-id="${id}"]`) as HTMLElement;
+    const element = document.querySelector(
+      `[data-editable-id="${id}"]`,
+    ) as HTMLElement;
     if (element) {
       const computedStyle = window.getComputedStyle(element);
       // Store the original color to preserve it during editing
       const originalColor = computedStyle.color;
       // Capture the original height before switching to edit mode
       const originalHeight = element.offsetHeight;
-      setOptimalColors(prev => ({ ...prev, [id]: originalColor }));
-      setTextShadows(prev => ({ ...prev, [id]: 'inherit' }));
-      setOriginalHeights(prev => ({ ...prev, [id]: originalHeight }));
-      
+      setOptimalColors((prev) => ({ ...prev, [id]: originalColor }));
+      setTextShadows((prev) => ({ ...prev, [id]: "inherit" }));
+      setOriginalHeights((prev) => ({ ...prev, [id]: originalHeight }));
+
       // Get only the main text content, excluding tooltips and other UI elements
-      const textDivs = element.querySelectorAll('div');
-      let fullText = '';
+      const textDivs = element.querySelectorAll("div");
+      let fullText = "";
       if (textDivs.length > 0) {
         // Get text from the content divs, not from tooltips or UI elements
         fullText = Array.from(textDivs)
-          .map(div => div.textContent?.trim())
-          .filter(text => text && text !== 'Click to edit')
-          .join('\n');
+          .map((div) => div.textContent?.trim())
+          .filter((text) => text && text !== "Click to edit")
+          .join("\n");
       }
-      
+
       // Fallback to finding the item text from state if DOM parsing fails
       if (!fullText) {
-        const currentItem = editableTexts.find(item => item.id === id);
-        fullText = currentItem?.text || '';
+        const currentItem = editableTexts.find((item) => item.id === id);
+        fullText = currentItem?.text || "";
       }
-      
-      setEditableTexts(prev =>
-        prev.map(item => {
+
+      setEditableTexts((prev) =>
+        prev.map((item) => {
           if (item.id === id) {
             return { ...item, text: fullText, isEditing: true };
           }
           return { ...item, isEditing: false };
-        })
+        }),
       );
     } else {
-      setEditableTexts(prev =>
-        prev.map(item =>
-          item.id === id ? { ...item, isEditing: true } : { ...item, isEditing: false }
-        )
+      setEditableTexts((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, isEditing: true }
+            : { ...item, isEditing: false },
+        ),
       );
     }
   };
 
   const handleTextChange = (id: string, newText: string) => {
-    setEditableTexts(prev =>
-      prev.map(item =>
-        item.id === id ? { ...item, text: newText } : item
-      )
+    setEditableTexts((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, text: newText } : item)),
     );
   };
 
   const handleTextSave = (id: string) => {
-    setEditableTexts(prev =>
-      prev.map(item =>
-        item.id === id ? { ...item, isEditing: false } : item
-      )
+    setEditableTexts((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, isEditing: false } : item,
+      ),
     );
-    
+
     // Show success animation
     setShowSuccessAnimation(true);
     setTimeout(() => setShowSuccessAnimation(false), 2000);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent, id: string) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       handleTextSave(id);
     }
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       // Reset to original text
-      setEditableTexts(prev =>
-        prev.map(item =>
-          item.id === id 
+      setEditableTexts((prev) =>
+        prev.map((item) =>
+          item.id === id
             ? { ...item, text: item.originalText, isEditing: false }
-            : item
-        )
+            : item,
+        ),
       );
     }
   };
@@ -450,24 +676,32 @@ export default function InteractiveHero() {
   const runAutoDemo = () => {
     setIsAutoDemo(true);
     const demoSequence = [
-      { id: 'headline', newText: 'Transform Any Website Instantly', delay: 1000 },
-      { id: 'subheading', newText: 'AI-powered content editing with real-time collaboration.', delay: 2000 },
-      { id: 'cta', newText: 'Try AI Magic Now', delay: 3000 }
+      {
+        id: "headline",
+        newText: "Transform Any Website Instantly",
+        delay: 1000,
+      },
+      {
+        id: "subheading",
+        newText: "AI-powered content editing with real-time collaboration.",
+        delay: 2000,
+      },
+      { id: "cta", newText: "Try AI Magic Now", delay: 3000 },
     ];
 
     demoSequence.forEach(({ id, newText, delay }) => {
       setTimeout(() => {
-        setEditableTexts(prev =>
-          prev.map(item =>
-            item.id === id ? { ...item, text: newText, isEditing: true } : item
-          )
+        setEditableTexts((prev) =>
+          prev.map((item) =>
+            item.id === id ? { ...item, text: newText, isEditing: true } : item,
+          ),
         );
-        
+
         setTimeout(() => {
-          setEditableTexts(prev =>
-            prev.map(item =>
-              item.id === id ? { ...item, isEditing: false } : item
-            )
+          setEditableTexts((prev) =>
+            prev.map((item) =>
+              item.id === id ? { ...item, isEditing: false } : item,
+            ),
           );
           setShowSuccessAnimation(true);
           setTimeout(() => setShowSuccessAnimation(false), 500);
@@ -478,153 +712,184 @@ export default function InteractiveHero() {
     setTimeout(() => setIsAutoDemo(false), 5000);
   };
 
-  const EditableImageComponent = ({ src, alt, className, imageType }: { src: string, alt: string, className: string, imageType: string }) => {
+  const EditableImageComponent = ({
+    src,
+    alt,
+    className,
+    imageType,
+  }: {
+    src: string;
+    alt: string;
+    className: string;
+    imageType: string;
+  }) => {
     const [isHovering, setIsHovering] = useState(false);
     const [showImageModal, setShowImageModal] = useState(false);
-    const [imagePrompt, setImagePrompt] = useState('');
+    const [imagePrompt, setImagePrompt] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
     const [currentImageSrc, setCurrentImageSrc] = useState(src);
-    
+
     const handleImageReplace = (newSrc: string) => {
       // Animate image replacement with smooth transition
-      const imgElement = document.querySelector(`img[src="${currentImageSrc}"]`) as HTMLImageElement;
+      const imgElement = document.querySelector(
+        `img[src="${currentImageSrc}"]`,
+      ) as HTMLImageElement;
       if (imgElement) {
         // Create smooth fade transition
-        imgElement.style.transition = 'opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease';
-        imgElement.style.opacity = '0';
-        imgElement.style.transform = 'scale(0.95) rotateY(10deg)';
-        
+        imgElement.style.transition =
+          "opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease";
+        imgElement.style.opacity = "0";
+        imgElement.style.transform = "scale(0.95) rotateY(10deg)";
+
         setTimeout(() => {
           imgElement.src = newSrc;
-          imgElement.style.opacity = '1';
-          imgElement.style.transform = 'scale(1) rotateY(0deg)';
-          
+          imgElement.style.opacity = "1";
+          imgElement.style.transform = "scale(1) rotateY(0deg)";
+
           // Add success animation effect with green glow
-          imgElement.style.boxShadow = '0 0 40px rgba(16, 185, 129, 0.6), 0 0 80px rgba(16, 185, 129, 0.3)';
+          imgElement.style.boxShadow =
+            "0 0 40px rgba(16, 185, 129, 0.6), 0 0 80px rgba(16, 185, 129, 0.3)";
           setTimeout(() => {
-            imgElement.style.boxShadow = '';
+            imgElement.style.boxShadow = "";
           }, 1500);
         }, 400);
       }
-      
+
       setCurrentImageSrc(newSrc);
       setShowImageModal(false);
-      setImagePrompt('');
+      setImagePrompt("");
       setShowSuccessAnimation(true);
       setTimeout(() => setShowSuccessAnimation(false), 3000);
     };
 
     const generateRandomImage = () => {
-      const dimensions = imageType === 'hero' ? '1200x600' : '800x600';
-      const newImage = generateUnsplashUrl(imageType as keyof typeof UNSPLASH_CATEGORIES, 800, 600);
+      const dimensions = imageType === "hero" ? "1200x600" : "800x600";
+      const newImage = generateUnsplashUrl(
+        imageType as keyof typeof UNSPLASH_CATEGORIES,
+        800,
+        600,
+      );
       handleImageReplace(newImage);
     };
 
     const generateFromPrompt = async () => {
       if (!imagePrompt.trim()) return;
-      
+
       setIsGenerating(true);
       try {
         // For demo purposes, generate a themed Unsplash URL based on prompt keywords
         const keywords = imagePrompt.toLowerCase();
         let category = imageType;
-        
-        if (keywords.includes('food') || keywords.includes('dish') || keywords.includes('meal')) {
-          category = 'food';
-        } else if (keywords.includes('car') || keywords.includes('vehicle') || keywords.includes('auto')) {
-          category = 'car';  
-        } else if (keywords.includes('bakery') || keywords.includes('bread') || keywords.includes('cake')) {
-          category = 'bakery';
+
+        if (
+          keywords.includes("food") ||
+          keywords.includes("dish") ||
+          keywords.includes("meal")
+        ) {
+          category = "food";
+        } else if (
+          keywords.includes("car") ||
+          keywords.includes("vehicle") ||
+          keywords.includes("auto")
+        ) {
+          category = "car";
+        } else if (
+          keywords.includes("bakery") ||
+          keywords.includes("bread") ||
+          keywords.includes("cake")
+        ) {
+          category = "bakery";
         }
-        
+
         // Create a more specific URL with prompt keywords
-        const promptFormatted = imagePrompt.replace(/\s+/g, ',');
-        const dimensions = imageType === 'hero' ? '1200x600' : '800x600';
+        const promptFormatted = imagePrompt.replace(/\s+/g, ",");
+        const dimensions = imageType === "hero" ? "1200x600" : "800x600";
         const newImage = `https://source.unsplash.com/${dimensions}/?${promptFormatted}&${Date.now()}`;
-        
+
         handleImageReplace(newImage);
       } catch (error) {
-        console.error('Error generating image:', error);
+        console.error("Error generating image:", error);
         // Fallback to random image
         generateRandomImage();
       } finally {
         setIsGenerating(false);
       }
     };
-    
+
     return (
       <>
-        <div 
+        <div
           className="relative group overflow-visible"
           onMouseEnter={() => setIsHovering(true)}
           onMouseLeave={() => setIsHovering(false)}
         >
-          <motion.img 
-            src={currentImageSrc} 
-            alt={alt} 
+          <motion.img
+            src={currentImageSrc}
+            alt={alt}
             className={`${className} transition-all duration-500 group-hover:scale-105 group-hover:shadow-2xl hover:brightness-110`}
-            whileHover={{ 
-              scale: 1.05, 
+            whileHover={{
+              scale: 1.05,
               rotateY: 5,
               rotateX: 2,
-              filter: "brightness(1.1)"
+              filter: "brightness(1.1)",
             }}
             whileTap={{ scale: 0.98 }}
-            transition={{ 
-              type: "spring", 
-              stiffness: 400, 
+            transition={{
+              type: "spring",
+              stiffness: 400,
               damping: 20,
-              duration: 0.3
+              duration: 0.3,
             }}
             style={{
               transformStyle: "preserve-3d",
               backfaceVisibility: "hidden",
-              transform: "translateZ(0)" // Force GPU layer to prevent text rendering issues
+              transform: "translateZ(0)", // Force GPU layer to prevent text rendering issues
             }}
           />
-          
+
           {isHovering && (
             <motion.div
               initial={{ opacity: 0, scale: 0.9, backdropFilter: "blur(0px)" }}
-              animate={{ 
-                opacity: 1, 
-                scale: 1, 
-                backdropFilter: "blur(4px)"
+              animate={{
+                opacity: 1,
+                scale: 1,
+                backdropFilter: "blur(4px)",
               }}
-              exit={{ 
-                opacity: 0, 
-                scale: 0.9, 
-                backdropFilter: "blur(0px)"
+              exit={{
+                opacity: 0,
+                scale: 0.9,
+                backdropFilter: "blur(0px)",
               }}
               className="absolute inset-0 bg-gradient-to-t from-black/70 via-purple-500/10 to-transparent flex items-center justify-center cursor-pointer rounded-lg backdrop-blur-sm"
               onClick={() => setShowImageModal(true)}
-              whileHover={{ 
-                background: "linear-gradient(to top, rgba(0,0,0,0.8), rgba(147,51,234,0.2), transparent)"
+              whileHover={{
+                background:
+                  "linear-gradient(to top, rgba(0,0,0,0.8), rgba(147,51,234,0.2), transparent)",
               }}
               transition={{ duration: 0.3 }}
             >
-              <motion.div 
+              <motion.div
                 className="bg-white/95 backdrop-blur-sm text-gray-900 px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white transition-all shadow-lg border border-white/20 hover:border-blue-300"
-                whileHover={{ 
+                whileHover={{
                   y: -4,
                   boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
-                  background: "rgba(255,255,255,0.98)"
+                  background: "rgba(255,255,255,0.98)",
                 }}
                 whileTap={{ scale: 0.98 }}
                 initial={{ y: 10, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                transition={{ 
-                  type: "spring", 
-                  stiffness: 400, 
+                transition={{
+                  type: "spring",
+                  stiffness: 400,
                   damping: 15,
-                  delay: 0.1
+                  delay: 0.1,
                 }}
               >
-                <motion.div 
+                <motion.div
                   className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center"
-                  whileHover={{ 
+                  whileHover={{
                     rotate: 360,
-                    background: "linear-gradient(45deg, #8b5cf6, #06b6d4)"
+                    background: "linear-gradient(45deg, #8b5cf6, #06b6d4)",
                   }}
                   transition={{ duration: 0.6 }}
                 >
@@ -662,8 +927,12 @@ export default function InteractiveHero() {
                       <Image className="w-5 h-5 text-white" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-gray-900">Edit Image</h3>
-                      <p className="text-sm text-gray-500">AI-powered image generation</p>
+                      <h3 className="text-xl font-bold text-gray-900">
+                        Edit Image
+                      </h3>
+                      <p className="text-sm text-gray-500">
+                        AI-powered image generation
+                      </p>
                     </div>
                   </div>
                   <button
@@ -676,10 +945,10 @@ export default function InteractiveHero() {
 
                 {/* Current Image Preview */}
                 <div className="mb-8 relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-                  <img 
-                    src={currentImageSrc} 
-                    alt={alt} 
-                    className="w-full h-auto max-h-48 object-contain" 
+                  <img
+                    src={currentImageSrc}
+                    alt={alt}
+                    className="w-full h-auto max-h-48 object-contain"
                   />
                   <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
                     Current
@@ -699,14 +968,17 @@ export default function InteractiveHero() {
                     className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-white text-gray-900 placeholder-gray-500"
                     rows={3}
                     style={{
-                      direction: 'ltr',
-                      unicodeBidi: 'normal',
-                      writingMode: 'horizontal-tb',
-                      transform: 'none',
-                      WebkitTransform: 'none'
+                      direction: "ltr",
+                      unicodeBidi: "normal",
+                      writingMode: "horizontal-tb",
+                      transform: "none",
+                      WebkitTransform: "none",
                     }}
                   />
-                  <p className="text-xs text-gray-500 mt-2">💡 Tip: Be specific about style, mood, and details for better results</p>
+                  <p className="text-xs text-gray-500 mt-2">
+                    💡 Tip: Be specific about style, mood, and details for
+                    better results
+                  </p>
                 </div>
 
                 {/* Action Buttons */}
@@ -715,7 +987,12 @@ export default function InteractiveHero() {
                     onClick={() => {
                       // Check if user is authenticated - for demo purposes, show login modal
                       // In production, this would check actual auth state
-                      window.open('/auth?returnTo=' + encodeURIComponent(window.location.href), '_blank', 'width=500,height=600');
+                      window.open(
+                        "/auth?returnTo=" +
+                          encodeURIComponent(window.location.href),
+                        "_blank",
+                        "width=500,height=600",
+                      );
                     }}
                     className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-4 px-6 rounded-xl font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-3 text-sm cursor-pointer"
                     whileHover={{ scale: 1.02 }}
@@ -727,7 +1004,7 @@ export default function InteractiveHero() {
                       Login Required
                     </div>
                   </motion.button>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <motion.button
                       onClick={generateRandomImage}
@@ -738,7 +1015,7 @@ export default function InteractiveHero() {
                       <span className="text-lg">🎲</span>
                       Surprise Me
                     </motion.button>
-                    
+
                     <motion.button
                       onClick={() => setShowImageModal(false)}
                       className="py-3 px-4 border-2 border-gray-200 text-gray-700 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-sm font-medium"
@@ -763,23 +1040,44 @@ export default function InteractiveHero() {
 
   const EditableTextComponent = ({ item }: { item: EditableText }) => {
     const elementRef = useRef<HTMLDivElement>(null);
-    
+    const isSelected = selectedElementId === item.id;
+    const customStyles = elementStyles[item.id];
+
     // Get the original element's computed styles to preserve them exactly
     useEffect(() => {
       if (item.isEditing && elementRef.current) {
         // Find the original element that was clicked to get its exact styles
-        const originalElement = document.querySelector(`[data-editable-id="${item.id}"]`) as HTMLElement;
+        const originalElement = document.querySelector(
+          `[data-editable-id="${item.id}"]`,
+        ) as HTMLElement;
         if (originalElement) {
           const preservedStyles = getTextEditingStyles(originalElement);
           Object.assign(elementRef.current.style, preservedStyles);
         }
       }
     }, [item.id, item.isEditing]);
-    
+
+    // Handle click to select element for Framer-like UI
+    const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
+      e.stopPropagation();
+      const element = e.currentTarget;
+      handleElementSelect(item.id, element);
+      handleTextClick(item.id);
+    };
+
+    // Determine the element tag based on content type
+    const getElementTag = (): string => {
+      if (item.id === "headline") return "h1";
+      if (item.id === "subheading") return "p";
+      if (item.id === "cta") return "button";
+      if (item.id.includes("title")) return "h2";
+      return "p";
+    };
+
     if (item.isEditing) {
       // Always use textarea to show full text content
       const useTextarea = true;
-      
+
       return (
         <motion.div
           initial={{ scale: 1 }}
@@ -787,106 +1085,90 @@ export default function InteractiveHero() {
           className="relative"
           ref={elementRef}
           data-editing-mode="true"
+          data-editable-id={item.id}
           style={{
             transform: "translateZ(0)", // Create new stacking context
             willChange: "transform", // Optimize for transforms
-            isolation: "isolate" // Isolate from parent 3D context
+            isolation: "isolate", // Isolate from parent 3D context
+            ...(customStyles && {
+              fontSize: customStyles.fontSize,
+              fontWeight: customStyles.fontWeight,
+              color: customStyles.color,
+              textAlign: customStyles.textAlign,
+              lineHeight: customStyles.lineHeight,
+              letterSpacing: customStyles.letterSpacing,
+            }),
           }}
         >
+          {/* Element Tag Badge */}
+          {isSelected && (
+            <ElementTagBadge
+              tagName={selectedElementTag || getElementTag()}
+              position={{ top: -24, left: -4 }}
+            />
+          )}
+
           <textarea
             value={item.text}
             onChange={(e) => handleTextChange(item.id, e.target.value)}
-            onBlur={() => handleTextSave(item.id)}
             onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setEditableTexts(prev =>
-                  prev.map(textItem =>
-                    textItem.id === item.id 
-                      ? { ...textItem, text: textItem.originalText, isEditing: false }
-                      : textItem
-                  )
-                );
+              if (e.key === "Escape") {
+                handleToolbarDelete();
               }
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                handleTextSave(item.id);
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                handleToolbarSave();
               }
             }}
             className="w-full outline-none resize-none"
             style={{
-              background: 'transparent',
-              border: 'none',
-              padding: '0',
-              margin: '0',
-              fontSize: 'inherit',
-              fontFamily: 'inherit',
-              fontWeight: 'inherit',
-              fontStyle: 'inherit',
-              lineHeight: 'inherit',
-              letterSpacing: 'inherit',
-              textAlign: 'inherit',
-              textDecoration: 'inherit',
-              textTransform: 'inherit',
-              color: optimalColors[item.id] || 'inherit',
-              textShadow: textShadows[item.id] || 'none',
-              width: '100%',
-              minHeight: originalHeights[item.id] > 0 ? `${originalHeights[item.id]}px` : 'auto',
-              height: originalHeights[item.id] > 0 ? `${originalHeights[item.id]}px` : 'auto',
-              overflow: 'visible',
-              resize: 'none',
-              wordWrap: 'break-word',
-              overflowWrap: 'break-word',
-              whiteSpace: 'pre-wrap',
-              direction: 'ltr', // Force left-to-right direction
-              unicodeBidi: 'normal', // Normal Unicode bidirectional algorithm
-              writingMode: 'horizontal-tb', // Standard horizontal writing mode
-              transform: 'none', // Ensure no transforms
-              WebkitTransform: 'none' // Safari support
+              background: "transparent",
+              border: "none",
+              padding: "0",
+              margin: "0",
+              fontSize: customStyles?.fontSize || "inherit",
+              fontFamily: "inherit",
+              fontWeight: customStyles?.fontWeight || "inherit",
+              fontStyle: "inherit",
+              lineHeight: customStyles?.lineHeight || "inherit",
+              letterSpacing: customStyles?.letterSpacing || "inherit",
+              textAlign:
+                (customStyles?.textAlign as React.CSSProperties["textAlign"]) ||
+                "inherit",
+              textDecoration: "inherit",
+              textTransform: "inherit",
+              color: customStyles?.color || optimalColors[item.id] || "inherit",
+              textShadow: textShadows[item.id] || "none",
+              width: "100%",
+              minHeight:
+                originalHeights[item.id] > 0
+                  ? `${originalHeights[item.id]}px`
+                  : "auto",
+              height:
+                originalHeights[item.id] > 0
+                  ? `${originalHeights[item.id]}px`
+                  : "auto",
+              overflow: "visible",
+              resize: "none",
+              wordWrap: "break-word",
+              overflowWrap: "break-word",
+              whiteSpace: "pre-wrap",
+              direction: "ltr", // Force left-to-right direction
+              unicodeBidi: "normal", // Normal Unicode bidirectional algorithm
+              writingMode: "horizontal-tb", // Standard horizontal writing mode
+              transform: "none", // Ensure no transforms
+              WebkitTransform: "none", // Safari support
             }}
-            rows={Math.max(1, item.text.split('\n').length)}
+            rows={Math.max(1, item.text.split("\n").length)}
             autoFocus
           />
-        
-          {/* Action buttons */}
-          <div className="absolute -top-16 left-1/2 transform -translate-x-1/2 flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-3 py-2 shadow-lg">
-            <button
-              onClick={() => handleTextSave(item.id)}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-green-600 hover:bg-green-50 rounded transition-colors"
-            >
-              <Save className="w-3 h-3" />
-              Save
-            </button>
-            <div className="w-px h-4 bg-gray-200" />
-            <button
-              onClick={() => {
-                // Check if user is authenticated - for demo purposes, show login modal
-                // In production, this would check actual auth state
-                window.open('/auth?returnTo=' + encodeURIComponent(window.location.href), '_blank', 'width=500,height=600');
-              }}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-3 h-3" />
-              AI
-            </button>
-            <div className="w-px h-4 bg-gray-200" />
-            <button
-              onClick={() => {
-                setEditableTexts(prev =>
-                  prev.map(textItem =>
-                    textItem.id === item.id 
-                      ? { ...textItem, text: textItem.originalText, isEditing: false }
-                      : textItem
-                  )
-                );
-              }}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 rounded transition-colors"
-            >
-              <X className="w-3 h-3" />
-              Cancel
-            </button>
-          </div>
-          
+
+          {/* Selection underline indicator */}
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+
           <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap">
-            {useTextarea ? 'Ctrl+Enter to save, Esc to cancel' : 'Enter to save, Esc to cancel'}
+            {useTextarea
+              ? "Ctrl+Enter to save, Esc to cancel"
+              : "Enter to save, Esc to cancel"}
           </div>
         </motion.div>
       );
@@ -894,42 +1176,114 @@ export default function InteractiveHero() {
 
     return (
       <div
-        onClick={() => handleTextClick(item.id)}
+        onClick={handleClick}
         data-editable-id={item.id}
-        className={`cursor-pointer rounded-xl p-3 transition-all duration-200 relative group border-2 border-transparent hover:border-dashed hover:border-blue-400 ${
-          item.id === 'headline' 
+        className={`cursor-pointer rounded-xl p-3 transition-all duration-200 relative group border-2 ${
+          isSelected
+            ? "border-emerald-400 border-solid"
+            : "border-transparent hover:border-dashed hover:border-blue-400"
+        } ${
+          item.id === "headline"
             ? `text-4xl md:text-5xl lg:text-6xl font-bold ${getTextColor(item.id)}`
-            : item.id === 'subheading'
-            ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
-            : item.id === 'cta'
-            ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold shadow-lg hover:shadow-xl inline-block hover:border-transparent`
-            : item.id.includes('title')
-            ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
-            : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`
+            : item.id === "subheading"
+              ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
+              : item.id === "cta"
+                ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold shadow-lg hover:shadow-xl inline-block hover:border-transparent`
+                : item.id.includes("title")
+                  ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
+                  : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`
         }`}
+        style={
+          customStyles
+            ? {
+                fontSize: customStyles.fontSize,
+                fontWeight: customStyles.fontWeight,
+                color: customStyles.color,
+                textAlign: customStyles.textAlign,
+                lineHeight: customStyles.lineHeight,
+                letterSpacing: customStyles.letterSpacing,
+              }
+            : undefined
+        }
       >
+        {/* Element Tag Badge when selected */}
+        {isSelected && (
+          <ElementTagBadge
+            tagName={getElementTag()}
+            position={{ top: -24, left: -4 }}
+          />
+        )}
+
         {/* Preserve formatting for multi-line content */}
-        {item.text.split('\n').map((line, index) => (
-          <div key={index} className={index > 0 ? 'mt-2' : ''}>
+        {item.text.split("\n").map((line, index) => (
+          <div key={index} className={index > 0 ? "mt-2" : ""}>
             {line}
           </div>
         ))}
-        
-        {/* Hover tooltip */}
-        <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap z-10">
-          Click to edit
-        </div>
-        
-        {/* Edit icon on hover */}
-        <div className="absolute -top-3 -right-3 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-          <Edit3 className="w-4 h-4 text-white" />
-        </div>
+
+        {/* Selection underline indicator */}
+        {isSelected && (
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+        )}
+
+        {/* Hover tooltip - only show when not selected */}
+        {!isSelected && (
+          <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap z-10">
+            Click to edit
+          </div>
+        )}
+
+        {/* Edit icon on hover - only show when not selected */}
+        {!isSelected && (
+          <div className="absolute -top-3 -right-3 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+            <Edit3 className="w-4 h-4 text-white" />
+          </div>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
+      {/* Floating Editor Toolbar (Framer-like) */}
+      <FloatingEditorToolbar
+        position={toolbarPosition}
+        styles={
+          selectedElementId
+            ? getCurrentStyles(selectedElementId)
+            : {
+                fontSize: "1rem",
+                fontWeight: "400",
+                color: "#000000",
+                textAlign: "left",
+              }
+        }
+        onStylesChange={handleStylesChange}
+        onSave={handleToolbarSave}
+        onDelete={handleToolbarDelete}
+        onAIPrompt={(prompt) => {
+          // For demo, just log the prompt - in production this would call AI API
+          console.log("AI prompt:", prompt);
+          window.open(
+            "/auth?returnTo=" + encodeURIComponent(window.location.href),
+            "_blank",
+            "width=500,height=600",
+          );
+        }}
+        isVisible={
+          !!selectedElementId &&
+          editableTexts.some((t) => t.id === selectedElementId && t.isEditing)
+        }
+      />
+
+      {/* Unsaved Changes Bar */}
+      <UnsavedChangesBar
+        hasUnsavedChanges={hasUnsavedChanges}
+        onSave={handleSaveAllChanges}
+        onDiscard={handleDiscardAllChanges}
+        changeCount={pendingChanges.size}
+      />
+
       {/* Success Animation Overlay */}
       <AnimatePresence>
         {showSuccessAnimation && (
@@ -950,11 +1304,11 @@ export default function InteractiveHero() {
         {/* Left Arrow */}
         <button
           onClick={prevSite}
-          className="p-2 rounded-full border border-white/30 text-white/70 hover:text-white hover:border-white/50 transition-all duration-300"
+          className="p-2 rounded-full border border-sky-200 text-slate-500 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50 transition-all duration-300"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        
+
         {/* Tab Buttons */}
         <div className="flex items-center space-x-3">
           {demoSites.map((site, index) => {
@@ -967,9 +1321,9 @@ export default function InteractiveHero() {
                   setEditableTexts(site.editableTexts);
                 }}
                 className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-all duration-300 ${
-                  currentSite === index 
-                    ? `border-white text-white bg-white/10` 
-                    : 'border-white/30 text-white/70 hover:text-white hover:border-white/50 hover:bg-white/5'
+                  currentSite === index
+                    ? `border-sky-500 text-sky-700 bg-sky-50`
+                    : "border-sky-200 text-slate-600 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50"
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -978,11 +1332,11 @@ export default function InteractiveHero() {
             );
           })}
         </div>
-        
+
         {/* Right Arrow */}
         <button
           onClick={nextSite}
-          className="p-2 rounded-full border border-white/30 text-white/70 hover:text-white hover:border-white/50 transition-all duration-300"
+          className="p-2 rounded-full border border-sky-200 text-slate-500 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50 transition-all duration-300"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -1002,85 +1356,118 @@ export default function InteractiveHero() {
                 placeholder="Describe how you want to improve the copy..."
                 className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
                 rows={2}
-                style={{ 
-                  color: '#1f2937', 
-                  backgroundColor: '#ffffff',
-                  direction: 'ltr',
-                  unicodeBidi: 'normal',
-                  writingMode: 'horizontal-tb',
-                  transform: 'none',
-                  WebkitTransform: 'none'
+                style={{
+                  color: "#1f2937",
+                  backgroundColor: "#ffffff",
+                  direction: "ltr",
+                  unicodeBidi: "normal",
+                  writingMode: "horizontal-tb",
+                  transform: "none",
+                  WebkitTransform: "none",
                 }}
               />
               <button className="w-full mt-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 transition-all">
                 ✨ Improve Copy
               </button>
             </div>
-            
+
             {/* Quick Actions */}
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
-                <button 
+                <button
                   onClick={() => {
                     const technicalTexts = {
-                      headline: currentSiteData.theme === 'restaurant' ? 'Culinary Innovation Center' : 'Advanced Automotive Care',
-                      subheading: currentSiteData.theme === 'restaurant'
-                        ? 'State-of-the-art gastronomy utilizing molecular techniques and precision-sourced ingredients.'
-                        : 'Professional-grade detailing services employing advanced ceramic coating technology.'
+                      headline:
+                        currentSiteData.theme === "restaurant"
+                          ? "Culinary Innovation Center"
+                          : "Advanced Automotive Care",
+                      subheading:
+                        currentSiteData.theme === "restaurant"
+                          ? "State-of-the-art gastronomy utilizing molecular techniques and precision-sourced ingredients."
+                          : "Professional-grade detailing services employing advanced ceramic coating technology.",
                     };
-                    
-                    setEditableTexts(prev => prev.map(item => 
-                      technicalTexts[item.id as keyof typeof technicalTexts]
-                        ? { ...item, text: technicalTexts[item.id as keyof typeof technicalTexts] }
-                        : item
-                    ));
+
+                    setEditableTexts((prev) =>
+                      prev.map((item) =>
+                        technicalTexts[item.id as keyof typeof technicalTexts]
+                          ? {
+                              ...item,
+                              text: technicalTexts[
+                                item.id as keyof typeof technicalTexts
+                              ],
+                            }
+                          : item,
+                      ),
+                    );
                   }}
                   className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
                 >
                   🔬 Technical
                 </button>
-                
-                <button 
+
+                <button
                   onClick={() => {
                     const casualTexts = {
-                      headline: currentSiteData.theme === 'restaurant' ? 'Amazing Food Spot' : 'Great Car Wash',
-                      subheading: currentSiteData.theme === 'restaurant'
-                        ? 'Come grab some seriously good Italian food made fresh daily!'
-                        : 'We make your car look awesome with our friendly, professional service.'
+                      headline:
+                        currentSiteData.theme === "restaurant"
+                          ? "Amazing Food Spot"
+                          : "Great Car Wash",
+                      subheading:
+                        currentSiteData.theme === "restaurant"
+                          ? "Come grab some seriously good Italian food made fresh daily!"
+                          : "We make your car look awesome with our friendly, professional service.",
                     };
-                    
-                    setEditableTexts(prev => prev.map(item => 
-                      casualTexts[item.id as keyof typeof casualTexts]
-                        ? { ...item, text: casualTexts[item.id as keyof typeof casualTexts] }
-                        : item
-                    ));
+
+                    setEditableTexts((prev) =>
+                      prev.map((item) =>
+                        casualTexts[item.id as keyof typeof casualTexts]
+                          ? {
+                              ...item,
+                              text: casualTexts[
+                                item.id as keyof typeof casualTexts
+                              ],
+                            }
+                          : item,
+                      ),
+                    );
                   }}
                   className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
                 >
                   😊 Casual
                 </button>
-                
-                <button 
+
+                <button
                   onClick={() => {
                     const urgentTexts = {
-                      headline: currentSiteData.theme === 'restaurant' ? 'Limited Seating Available' : 'Book Today - Spots Filling Fast',
-                      subheading: currentSiteData.theme === 'restaurant'
-                        ? 'Reserve your table now - only a few spots left for this weekend!'
-                        : 'Don\'t wait! Schedule your premium car detail before we\'re fully booked.'
+                      headline:
+                        currentSiteData.theme === "restaurant"
+                          ? "Limited Seating Available"
+                          : "Book Today - Spots Filling Fast",
+                      subheading:
+                        currentSiteData.theme === "restaurant"
+                          ? "Reserve your table now - only a few spots left for this weekend!"
+                          : "Don't wait! Schedule your premium car detail before we're fully booked.",
                     };
-                    
-                    setEditableTexts(prev => prev.map(item => 
-                      urgentTexts[item.id as keyof typeof urgentTexts]
-                        ? { ...item, text: urgentTexts[item.id as keyof typeof urgentTexts] }
-                        : item
-                    ));
+
+                    setEditableTexts((prev) =>
+                      prev.map((item) =>
+                        urgentTexts[item.id as keyof typeof urgentTexts]
+                          ? {
+                              ...item,
+                              text: urgentTexts[
+                                item.id as keyof typeof urgentTexts
+                              ],
+                            }
+                          : item,
+                      ),
+                    );
                   }}
                   className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
                 >
                   ⚡ Urgent
                 </button>
-                
-                <button 
+
+                <button
                   onClick={() => {
                     setEditableTexts(demoSites[currentSite].editableTexts);
                   }}
@@ -1089,39 +1476,61 @@ export default function InteractiveHero() {
                   🔄 Reset
                 </button>
               </div>
-              
+
               {/* Language and Premium Row */}
               <div className="grid grid-cols-2 gap-2">
-                <select 
+                <select
                   onChange={(e) => {
-                    if (e.target.value === 'es') {
+                    if (e.target.value === "es") {
                       const spanishTexts = {
-                        headline: currentSiteData.theme === 'restaurant' ? 'Cocina Italiana Auténtica' : 'Detallado Premium de Autos',
-                        subheading: currentSiteData.theme === 'restaurant' 
-                          ? 'Experimenta los mejores platos italianos con ingredientes frescos y locales.'
-                          : 'Servicios profesionales de lavado y detallado que hacen brillar tu vehículo.'
+                        headline:
+                          currentSiteData.theme === "restaurant"
+                            ? "Cocina Italiana Auténtica"
+                            : "Detallado Premium de Autos",
+                        subheading:
+                          currentSiteData.theme === "restaurant"
+                            ? "Experimenta los mejores platos italianos con ingredientes frescos y locales."
+                            : "Servicios profesionales de lavado y detallado que hacen brillar tu vehículo.",
                       };
-                      
-                      setEditableTexts(prev => prev.map(item => 
-                        spanishTexts[item.id as keyof typeof spanishTexts]
-                          ? { ...item, text: spanishTexts[item.id as keyof typeof spanishTexts] }
-                          : item
-                      ));
-                    } else if (e.target.value === 'fr') {
+
+                      setEditableTexts((prev) =>
+                        prev.map((item) =>
+                          spanishTexts[item.id as keyof typeof spanishTexts]
+                            ? {
+                                ...item,
+                                text: spanishTexts[
+                                  item.id as keyof typeof spanishTexts
+                                ],
+                              }
+                            : item,
+                        ),
+                      );
+                    } else if (e.target.value === "fr") {
                       const frenchTexts = {
-                        headline: currentSiteData.theme === 'restaurant' ? 'Cuisine Italienne Authentique' : 'Détail Auto Premium',
-                        subheading: currentSiteData.theme === 'restaurant' 
-                          ? 'Découvrez les meilleurs plats italiens avec des ingrédients frais et locaux.'
-                          : 'Services professionnels de lavage et détail qui font briller votre véhicule.'
+                        headline:
+                          currentSiteData.theme === "restaurant"
+                            ? "Cuisine Italienne Authentique"
+                            : "Détail Auto Premium",
+                        subheading:
+                          currentSiteData.theme === "restaurant"
+                            ? "Découvrez les meilleurs plats italiens avec des ingrédients frais et locaux."
+                            : "Services professionnels de lavage et détail qui font briller votre véhicule.",
                       };
-                      
-                      setEditableTexts(prev => prev.map(item => 
-                        frenchTexts[item.id as keyof typeof frenchTexts]
-                          ? { ...item, text: frenchTexts[item.id as keyof typeof frenchTexts] }
-                          : item
-                      ));
+
+                      setEditableTexts((prev) =>
+                        prev.map((item) =>
+                          frenchTexts[item.id as keyof typeof frenchTexts]
+                            ? {
+                                ...item,
+                                text: frenchTexts[
+                                  item.id as keyof typeof frenchTexts
+                                ],
+                              }
+                            : item,
+                        ),
+                      );
                     }
-                    e.target.value = '';
+                    e.target.value = "";
                   }}
                   className="p-2 border border-gray-200 rounded text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
@@ -1131,21 +1540,32 @@ export default function InteractiveHero() {
                   <option value="de">🇩🇪 German</option>
                   <option value="it">🇮🇹 Italian</option>
                 </select>
-                
-                <button 
+
+                <button
                   onClick={() => {
                     const premiumTexts = {
-                      headline: currentSiteData.theme === 'restaurant' ? 'Exclusive Dining Experience' : 'Luxury Automotive Care',
-                      subheading: currentSiteData.theme === 'restaurant'
-                        ? 'Indulge in an extraordinary culinary journey crafted by world-renowned chefs.'
-                        : 'Experience unparalleled automotive care with our premium detailing services.'
+                      headline:
+                        currentSiteData.theme === "restaurant"
+                          ? "Exclusive Dining Experience"
+                          : "Luxury Automotive Care",
+                      subheading:
+                        currentSiteData.theme === "restaurant"
+                          ? "Indulge in an extraordinary culinary journey crafted by world-renowned chefs."
+                          : "Experience unparalleled automotive care with our premium detailing services.",
                     };
-                    
-                    setEditableTexts(prev => prev.map(item => 
-                      premiumTexts[item.id as keyof typeof premiumTexts]
-                        ? { ...item, text: premiumTexts[item.id as keyof typeof premiumTexts] }
-                        : item
-                    ));
+
+                    setEditableTexts((prev) =>
+                      prev.map((item) =>
+                        premiumTexts[item.id as keyof typeof premiumTexts]
+                          ? {
+                              ...item,
+                              text: premiumTexts[
+                                item.id as keyof typeof premiumTexts
+                              ],
+                            }
+                          : item,
+                      ),
+                    );
                   }}
                   className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
                 >
@@ -1174,7 +1594,10 @@ export default function InteractiveHero() {
               <div className="w-3 h-3 bg-green-400 rounded-full"></div>
             </div>
             <div className="bg-white rounded-lg px-4 py-1 mx-4 border border-gray-200">
-              <span className="text-gray-600 text-sm">https://{currentSiteData.name.toLowerCase().replace(/\s+/g, '')}.com</span>
+              <span className="text-gray-600 text-sm">
+                https://{currentSiteData.name.toLowerCase().replace(/\s+/g, "")}
+                .com
+              </span>
             </div>
           </div>
           <div className="px-3 py-1 bg-green-500 text-white text-xs font-medium rounded-lg animate-pulse">
@@ -1185,7 +1608,7 @@ export default function InteractiveHero() {
         {/* Demo Website Content */}
         <div className="min-h-[700px] max-h-[700px] overflow-y-auto overflow-x-visible">
           {/* Restaurant Website Design */}
-          {currentSiteData.theme === 'restaurant' && (
+          {currentSiteData.theme === "restaurant" && (
             <>
               {/* Hero Section with Background Image */}
               <div className="relative h-[400px] bg-gradient-to-br from-amber-900/90 to-orange-900/90">
@@ -1197,7 +1620,11 @@ export default function InteractiveHero() {
                     transition={{ delay: 0.2 }}
                     className="text-center"
                   >
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find((item) => item.id === "headline")!
+                      }
+                    />
                   </motion.div>
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -1205,7 +1632,11 @@ export default function InteractiveHero() {
                     transition={{ delay: 0.4 }}
                     className="mt-6 max-w-2xl text-center"
                   >
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find((item) => item.id === "subheading")!
+                      }
+                    />
                   </motion.div>
                   <motion.div
                     initial={{ opacity: 0, y: 20 }}
@@ -1213,7 +1644,9 @@ export default function InteractiveHero() {
                     transition={{ delay: 0.6 }}
                     className="mt-8"
                   >
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                    <EditableTextComponent
+                      item={editableTexts.find((item) => item.id === "cta")!}
+                    />
                   </motion.div>
                 </div>
               </div>
@@ -1222,14 +1655,22 @@ export default function InteractiveHero() {
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
                   <div>
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'about-title')!} />
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'about-text')!} />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find((item) => item.id === "about-title")!
+                      }
+                    />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find((item) => item.id === "about-text")!
+                      }
+                    />
                   </div>
                   <div className="relative group">
-                    <EditableImageComponent 
-                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=800&h=600" 
-                      alt="Restaurant interior" 
-                      className="w-full h-auto object-contain rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                    <EditableImageComponent
+                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=800&h=600"
+                      alt="Restaurant interior"
+                      className="w-full h-auto object-contain rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                       imageType="restaurant"
                     />
                   </div>
@@ -1239,25 +1680,37 @@ export default function InteractiveHero() {
               {/* Menu Section */}
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent item={editableTexts.find(item => item.id === 'menu-title')!} />
+                  <EditableTextComponent
+                    item={
+                      editableTexts.find((item) => item.id === "menu-title")!
+                    }
+                  />
                   <div className="grid md:grid-cols-2 gap-8 mt-12">
                     <div className="p-8 rounded-lg">
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600" 
-                        alt="Special dish" 
-                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105" 
+                      <EditableImageComponent
+                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600"
+                        alt="Special dish"
+                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105"
                         imageType="food"
                       />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'special-1')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "special-1")!
+                        }
+                      />
                     </div>
                     <div className="p-8 rounded-lg">
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=800&h=600" 
-                        alt="Special dish" 
-                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105" 
+                      <EditableImageComponent
+                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=800&h=600"
+                        alt="Special dish"
+                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105"
                         imageType="food"
                       />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'special-2')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "special-2")!
+                        }
+                      />
                     </div>
                   </div>
                 </div>
@@ -1266,7 +1719,7 @@ export default function InteractiveHero() {
           )}
 
           {/* Car Wash Website Design */}
-          {currentSiteData.theme === 'carwash' && (
+          {currentSiteData.theme === "carwash" && (
             <>
               {/* Modern Hero Section */}
               <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white">
@@ -1278,7 +1731,13 @@ export default function InteractiveHero() {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.2 }}
                       >
-                        <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                        <EditableTextComponent
+                          item={
+                            editableTexts.find(
+                              (item) => item.id === "headline",
+                            )!
+                          }
+                        />
                       </motion.div>
                       <motion.div
                         initial={{ opacity: 0, x: -20 }}
@@ -1286,7 +1745,13 @@ export default function InteractiveHero() {
                         transition={{ delay: 0.4 }}
                         className="mt-6"
                       >
-                        <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                        <EditableTextComponent
+                          item={
+                            editableTexts.find(
+                              (item) => item.id === "subheading",
+                            )!
+                          }
+                        />
                       </motion.div>
                       <motion.div
                         initial={{ opacity: 0, x: -20 }}
@@ -1294,17 +1759,27 @@ export default function InteractiveHero() {
                         transition={{ delay: 0.6 }}
                         className="mt-8 flex gap-4"
                       >
-                        <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                        <EditableTextComponent
+                          item={
+                            editableTexts.find((item) => item.id === "cta")!
+                          }
+                        />
                         <button className="px-6 py-3 border-2 border-white text-white rounded-lg hover:bg-white hover:text-blue-600 transition-all">
-                          <EditableTextComponent item={editableTexts.find(item => item.id === 'view-pricing-btn')!} />
+                          <EditableTextComponent
+                            item={
+                              editableTexts.find(
+                                (item) => item.id === "view-pricing-btn",
+                              )!
+                            }
+                          />
                         </button>
                       </motion.div>
                     </div>
                     <div className="relative group overflow-visible">
-                      <EditableImageComponent 
-                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=800&h=600" 
-                        alt="Luxury car" 
-                        className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                      <EditableImageComponent
+                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=800&h=600"
+                        alt="Luxury car"
+                        className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                         imageType="car"
                       />
                       <div className="absolute -bottom-6 -left-6 bg-white p-4 rounded-lg border border-gray-200">
@@ -1313,8 +1788,20 @@ export default function InteractiveHero() {
                             <span className="text-white font-bold">✓</span>
                           </div>
                           <div>
-                            <EditableTextComponent item={editableTexts.find(item => item.id === 'satisfaction-title')!} />
-                            <EditableTextComponent item={editableTexts.find(item => item.id === 'satisfaction-subtitle')!} />
+                            <EditableTextComponent
+                              item={
+                                editableTexts.find(
+                                  (item) => item.id === "satisfaction-title",
+                                )!
+                              }
+                            />
+                            <EditableTextComponent
+                              item={
+                                editableTexts.find(
+                                  (item) => item.id === "satisfaction-subtitle",
+                                )!
+                              }
+                            />
                           </div>
                         </div>
                       </div>
@@ -1326,31 +1813,77 @@ export default function InteractiveHero() {
               {/* Services Section */}
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto">
-                  <EditableTextComponent item={editableTexts.find(item => item.id === 'services-title')!} />
-                  <EditableTextComponent item={editableTexts.find(item => item.id === 'service-desc')!} />
-                  
+                  <EditableTextComponent
+                    item={
+                      editableTexts.find(
+                        (item) => item.id === "services-title",
+                      )!
+                    }
+                  />
+                  <EditableTextComponent
+                    item={
+                      editableTexts.find((item) => item.id === "service-desc")!
+                    }
+                  />
+
                   {/* Service Cards */}
                   <div className="grid md:grid-cols-3 gap-6 mt-12">
                     <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
                       <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
                         <span className="text-2xl">🚿</span>
                       </div>
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'basic-wash-title')!} />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'basic-wash-desc')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "basic-wash-title",
+                          )!
+                        }
+                      />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "basic-wash-desc",
+                          )!
+                        }
+                      />
                     </div>
                     <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
                       <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
                         <span className="text-2xl">✨</span>
                       </div>
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'premium-detail-title')!} />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'premium-detail-desc')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "premium-detail-title",
+                          )!
+                        }
+                      />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "premium-detail-desc",
+                          )!
+                        }
+                      />
                     </div>
                     <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
                       <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
                         <span className="text-2xl">🛡️</span>
                       </div>
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'ceramic-coating-title')!} />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'ceramic-coating-desc')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "ceramic-coating-title",
+                          )!
+                        }
+                      />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "ceramic-coating-desc",
+                          )!
+                        }
+                      />
                     </div>
                   </div>
                 </div>
@@ -1359,13 +1892,25 @@ export default function InteractiveHero() {
               {/* Pricing Section */}
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent item={editableTexts.find(item => item.id === 'pricing-title')!} />
+                  <EditableTextComponent
+                    item={
+                      editableTexts.find((item) => item.id === "pricing-title")!
+                    }
+                  />
                   <div className="grid md:grid-cols-2 gap-8 mt-12">
                     <div className="p-8 rounded-xl">
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'package-1')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "package-1")!
+                        }
+                      />
                     </div>
                     <div className="p-8 rounded-xl">
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'package-2')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "package-2")!
+                        }
+                      />
                     </div>
                   </div>
                 </div>
@@ -1374,7 +1919,7 @@ export default function InteractiveHero() {
           )}
 
           {/* Bakery Website Design */}
-          {currentSiteData.theme === 'bakery' && (
+          {currentSiteData.theme === "bakery" && (
             <>
               {/* Cozy Hero Section */}
               <div className="bg-gradient-to-br from-pink-100 to-rose-100">
@@ -1385,7 +1930,11 @@ export default function InteractiveHero() {
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: 0.2 }}
                     >
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'headline')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "headline")!
+                        }
+                      />
                     </motion.div>
                     <motion.div
                       initial={{ opacity: 0, scale: 0.9 }}
@@ -1393,7 +1942,13 @@ export default function InteractiveHero() {
                       transition={{ delay: 0.4 }}
                       className="mt-4 max-w-2xl mx-auto"
                     >
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'subheading')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "subheading",
+                          )!
+                        }
+                      />
                     </motion.div>
                     <motion.div
                       initial={{ opacity: 0, scale: 0.9 }}
@@ -1401,32 +1956,34 @@ export default function InteractiveHero() {
                       transition={{ delay: 0.6 }}
                       className="mt-8"
                     >
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'cta')!} />
+                      <EditableTextComponent
+                        item={editableTexts.find((item) => item.id === "cta")!}
+                      />
                     </motion.div>
 
                     {/* Product Showcase */}
                     <div className="grid grid-cols-3 gap-6 mt-12 max-w-5xl mx-auto">
                       <div className="group overflow-visible">
-                        <EditableImageComponent 
-                          src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&h=600" 
-                          alt="Fresh bread" 
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                        <EditableImageComponent
+                          src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&h=600"
+                          alt="Fresh bread"
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                           imageType="bakery"
                         />
                       </div>
                       <div className="group overflow-visible">
-                        <EditableImageComponent 
-                          src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=600&h=600" 
-                          alt="Cupcakes" 
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                        <EditableImageComponent
+                          src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=600&h=600"
+                          alt="Cupcakes"
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                           imageType="bakery"
                         />
                       </div>
                       <div className="group overflow-visible">
-                        <EditableImageComponent 
-                          src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&h=600" 
-                          alt="Croissants" 
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                        <EditableImageComponent
+                          src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&h=600"
+                          alt="Croissants"
+                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                           imageType="bakery"
                         />
                       </div>
@@ -1439,16 +1996,28 @@ export default function InteractiveHero() {
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
                   <div className="order-2 md:order-1 group overflow-visible">
-                    <EditableImageComponent 
-                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=800&h=600" 
-                      alt="Baker at work" 
-                      className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105" 
+                    <EditableImageComponent
+                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=800&h=600"
+                      alt="Baker at work"
+                      className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
                       imageType="bakery"
                     />
                   </div>
                   <div className="order-1 md:order-2">
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'tradition-title')!} />
-                    <EditableTextComponent item={editableTexts.find(item => item.id === 'tradition-text')!} />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find(
+                          (item) => item.id === "tradition-title",
+                        )!
+                      }
+                    />
+                    <EditableTextComponent
+                      item={
+                        editableTexts.find(
+                          (item) => item.id === "tradition-text",
+                        )!
+                      }
+                    />
                   </div>
                 </div>
               </div>
@@ -1456,15 +2025,39 @@ export default function InteractiveHero() {
               {/* Hours Section */}
               <div className="py-16 px-8">
                 <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-title')!} />
+                  <EditableTextComponent
+                    item={
+                      editableTexts.find((item) => item.id === "hours-title")!
+                    }
+                  />
                   <div className="p-8 rounded-xl max-w-md mx-auto mt-8">
                     <div className="space-y-4">
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-1')!} />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'hours-2')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "hours-1")!
+                        }
+                      />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find((item) => item.id === "hours-2")!
+                        }
+                      />
                     </div>
                     <div className="mt-8 pt-8 border-t border-gray-200">
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'contact-address')!} />
-                      <EditableTextComponent item={editableTexts.find(item => item.id === 'contact-phone')!} />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "contact-address",
+                          )!
+                        }
+                      />
+                      <EditableTextComponent
+                        item={
+                          editableTexts.find(
+                            (item) => item.id === "contact-phone",
+                          )!
+                        }
+                      />
                     </div>
                   </div>
                 </div>
@@ -1472,7 +2065,7 @@ export default function InteractiveHero() {
             </>
           )}
         </div>
-        
+
         {/* ReCopy Button at Bottom */}
         <div className="absolute bottom-4 right-4">
           <button
@@ -1490,12 +2083,11 @@ export default function InteractiveHero() {
 
       {/* Demo Instructions */}
       <div className="mt-8 text-center">
-        <div className="inline-flex items-center px-4 py-2 rounded-full bg-gray-100 text-gray-700 text-sm">
-          <Sparkles className="w-4 h-4 mr-2 text-blue-600" />
+        <div className="inline-flex items-center px-4 py-2 rounded-full bg-sky-50 border border-sky-200 text-slate-700 text-sm">
+          <Sparkles className="w-4 h-4 mr-2 text-sky-600" />
           Click any text above to edit it instantly
         </div>
       </div>
-
     </div>
   );
 }

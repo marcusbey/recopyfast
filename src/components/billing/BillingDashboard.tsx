@@ -1,19 +1,20 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { SubscriptionCard } from './SubscriptionCard';
-import { PaymentMethodsCard } from './PaymentMethodsCard';
-import { InvoiceHistoryCard } from './InvoiceHistoryCard';
-import { TicketBalanceCard } from './TicketBalanceCard';
-import { UsageCard } from './UsageCard';
-import { UpgradeDialog } from './UpgradeDialog';
-import type { BillingDashboardData } from '@/types/billing';
+import { useState, useEffect } from "react";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { SubscriptionCard } from "./SubscriptionCard";
+import { PaymentMethodsCard } from "./PaymentMethodsCard";
+import { InvoiceHistoryCard } from "./InvoiceHistoryCard";
+import { TicketBalanceCard } from "./TicketBalanceCard";
+import { UsageCard } from "./UsageCard";
+import { UpgradeDialog } from "./UpgradeDialog";
+import type { BillingDashboardData } from "@/types/billing";
 
 export function BillingDashboard() {
-  const [dashboardData, setDashboardData] = useState<BillingDashboardData | null>(null);
+  const [dashboardData, setDashboardData] =
+    useState<BillingDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
@@ -25,10 +26,10 @@ export function BillingDashboard() {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/billing/dashboard');
-      
+      const response = await fetch("/api/billing/dashboard");
+
       if (!response.ok) {
-        throw new Error('Failed to fetch billing data');
+        throw new Error("Failed to fetch billing data");
       }
 
       const data = await response.json();
@@ -63,7 +64,9 @@ export function BillingDashboard() {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="p-6 text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Error Loading Billing Data</h2>
+          <h2 className="text-xl font-semibold text-red-600 mb-2">
+            Error Loading Billing Data
+          </h2>
           <p className="text-gray-600 mb-4">{error}</p>
           <Button onClick={fetchDashboardData}>Try Again</Button>
         </Card>
@@ -71,8 +74,8 @@ export function BillingDashboard() {
     );
   }
 
-  const currentPlan = dashboardData?.subscription?.plan_id || 'free';
-  const isPaidPlan = currentPlan !== 'free';
+  const currentPlan = dashboardData?.subscription?.plan_id || "free";
+  const isPaidPlan = currentPlan !== "free";
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -84,7 +87,10 @@ export function BillingDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge variant={isPaidPlan ? 'default' : 'secondary'} className="text-sm">
+          <Badge
+            variant={isPaidPlan ? "default" : "secondary"}
+            className="text-sm"
+          >
             {currentPlan.toUpperCase()} PLAN
           </Badge>
           {!isPaidPlan && (
@@ -116,12 +122,14 @@ export function BillingDashboard() {
             onUpdate={handleSubscriptionUpdate}
           />
           <UsageCard
-            currentUsage={dashboardData?.currentUsage || {
-              websites: 0,
-              collaborators: 0,
-              aiUsage: 0,
-              translations: 0,
-            }}
+            currentUsage={
+              dashboardData?.currentUsage || {
+                websites: 0,
+                collaborators: 0,
+                aiUsage: 0,
+                translations: 0,
+              }
+            }
             subscription={dashboardData?.subscription}
           />
         </div>

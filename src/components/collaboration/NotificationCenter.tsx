@@ -1,13 +1,18 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { CollaborationNotification, NotificationType } from '@/types';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { 
-  Bell, 
+import React, { useState, useEffect } from "react";
+import { CollaborationNotification, NotificationType } from "@/types";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Bell,
   MoreHorizontal,
   Check,
   CheckCircle,
@@ -16,16 +21,21 @@ import {
   Shield,
   Edit,
   AlertCircle,
-  Globe
-} from 'lucide-react';
+  Globe,
+} from "lucide-react";
 
 interface NotificationCenterProps {
   showAll?: boolean;
   limit?: number;
 }
 
-export function NotificationCenter({ showAll = false, limit = 10 }: NotificationCenterProps) {
-  const [notifications, setNotifications] = useState<CollaborationNotification[]>([]);
+export function NotificationCenter({
+  showAll = false,
+  limit = 10,
+}: NotificationCenterProps) {
+  const [notifications, setNotifications] = useState<
+    CollaborationNotification[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState<string[]>([]);
 
@@ -37,16 +47,16 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
     try {
       setLoading(true);
       const params = new URLSearchParams();
-      if (!showAll) params.append('unread_only', 'true');
-      params.append('limit', limit.toString());
-      
+      if (!showAll) params.append("unread_only", "true");
+      params.append("limit", limit.toString());
+
       const response = await fetch(`/api/notifications?${params}`);
       if (response.ok) {
         const { notifications } = await response.json();
         setNotifications(notifications);
       }
     } catch (error) {
-      console.error('Error loading notifications:', error);
+      console.error("Error loading notifications:", error);
     } finally {
       setLoading(false);
     }
@@ -55,11 +65,11 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
   const markAsRead = async (notificationIds: string[]) => {
     try {
       setMarking(notificationIds);
-      
-      const response = await fetch('/api/notifications', {
-        method: 'PATCH',
+
+      const response = await fetch("/api/notifications", {
+        method: "PATCH",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           notificationIds,
@@ -68,26 +78,24 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
       });
 
       if (response.ok) {
-        setNotifications(prev => 
-          prev.map(notification => 
+        setNotifications((prev) =>
+          prev.map((notification) =>
             notificationIds.includes(notification.id)
               ? { ...notification, read_at: new Date().toISOString() }
-              : notification
-          )
+              : notification,
+          ),
         );
       }
     } catch (error) {
-      console.error('Error marking notifications as read:', error);
+      console.error("Error marking notifications as read:", error);
     } finally {
       setMarking([]);
     }
   };
 
   const markAllAsRead = async () => {
-    const unreadIds = notifications
-      .filter(n => !n.read_at)
-      .map(n => n.id);
-    
+    const unreadIds = notifications.filter((n) => !n.read_at).map((n) => n.id);
+
     if (unreadIds.length > 0) {
       await markAsRead(unreadIds);
     }
@@ -95,15 +103,15 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
 
   const getNotificationIcon = (type: NotificationType) => {
     switch (type) {
-      case 'invitation':
+      case "invitation":
         return <Mail className="h-4 w-4 text-blue-600" />;
-      case 'permission_change':
+      case "permission_change":
         return <Shield className="h-4 w-4 text-yellow-600" />;
-      case 'content_edit':
+      case "content_edit":
         return <Edit className="h-4 w-4 text-green-600" />;
-      case 'team_update':
+      case "team_update":
         return <Users className="h-4 w-4 text-purple-600" />;
-      case 'site_shared':
+      case "site_shared":
         return <Globe className="h-4 w-4 text-indigo-600" />;
       default:
         return <AlertCircle className="h-4 w-4 text-gray-600" />;
@@ -112,56 +120,58 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
 
   const getNotificationColor = (type: NotificationType) => {
     switch (type) {
-      case 'invitation':
-        return 'bg-blue-50 border-blue-200';
-      case 'permission_change':
-        return 'bg-yellow-50 border-yellow-200';
-      case 'content_edit':
-        return 'bg-green-50 border-green-200';
-      case 'team_update':
-        return 'bg-purple-50 border-purple-200';
-      case 'site_shared':
-        return 'bg-indigo-50 border-indigo-200';
+      case "invitation":
+        return "bg-blue-50 border-blue-200";
+      case "permission_change":
+        return "bg-yellow-50 border-yellow-200";
+      case "content_edit":
+        return "bg-green-50 border-green-200";
+      case "team_update":
+        return "bg-purple-50 border-purple-200";
+      case "site_shared":
+        return "bg-indigo-50 border-indigo-200";
       default:
-        return 'bg-gray-50 border-gray-200';
+        return "bg-gray-50 border-gray-200";
     }
   };
 
   const formatNotificationType = (type: NotificationType) => {
     switch (type) {
-      case 'invitation':
-        return 'Invitation';
-      case 'permission_change':
-        return 'Permissions';
-      case 'content_edit':
-        return 'Content Edit';
-      case 'team_update':
-        return 'Team Update';
-      case 'site_shared':
-        return 'Site Shared';
+      case "invitation":
+        return "Invitation";
+      case "permission_change":
+        return "Permissions";
+      case "content_edit":
+        return "Content Edit";
+      case "team_update":
+        return "Team Update";
+      case "site_shared":
+        return "Site Shared";
       default:
-        return 'Notification';
+        return "Notification";
     }
   };
 
   const formatRelativeTime = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
-    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-    
-    if (diffInMinutes < 1) return 'Just now';
+    const diffInMinutes = Math.floor(
+      (now.getTime() - date.getTime()) / (1000 * 60),
+    );
+
+    if (diffInMinutes < 1) return "Just now";
     if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    
+
     const diffInHours = Math.floor(diffInMinutes / 60);
     if (diffInHours < 24) return `${diffInHours}h ago`;
-    
+
     const diffInDays = Math.floor(diffInHours / 24);
     if (diffInDays < 7) return `${diffInDays}d ago`;
-    
+
     return date.toLocaleDateString();
   };
 
-  const unreadCount = notifications.filter(n => !n.read_at).length;
+  const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   if (loading) {
     return (
@@ -181,11 +191,9 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
         <div className="flex items-center gap-2">
           <Bell className="h-5 w-5 text-gray-700" />
           <h3 className="font-medium text-gray-900">Notifications</h3>
-          {unreadCount > 0 && (
-            <Badge variant="secondary">{unreadCount}</Badge>
-          )}
+          {unreadCount > 0 && <Badge variant="secondary">{unreadCount}</Badge>}
         </div>
-        
+
         {unreadCount > 0 && (
           <Button
             variant="ghost"
@@ -206,7 +214,7 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
             <Bell className="h-8 w-8 text-gray-400 mx-auto mb-2" />
             <p className="text-gray-600">No notifications</p>
             <p className="text-sm text-gray-500">
-              {showAll ? 'You have no notifications.' : 'All caught up!'}
+              {showAll ? "You have no notifications." : "All caught up!"}
             </p>
           </CardContent>
         </Card>
@@ -218,7 +226,7 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
               className={`transition-all ${
                 !notification.read_at
                   ? `${getNotificationColor(notification.type)} shadow-sm`
-                  : 'bg-gray-50 border-gray-200'
+                  : "bg-gray-50 border-gray-200"
               }`}
             >
               <CardContent className="p-4">
@@ -227,7 +235,7 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
                   <div className="flex-shrink-0 mt-0.5">
                     {getNotificationIcon(notification.type)}
                   </div>
-                  
+
                   {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
@@ -250,11 +258,15 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
                           {formatRelativeTime(notification.created_at)}
                         </p>
                       </div>
-                      
+
                       {/* Actions */}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                          >
                             <MoreHorizontal className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
@@ -293,7 +305,9 @@ export function NotificationCenter({ showAll = false, limit = 10 }: Notification
 // Notification Bell Component for Header
 export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notifications, setNotifications] = useState<CollaborationNotification[]>([]);
+  const [notifications, setNotifications] = useState<
+    CollaborationNotification[]
+  >([]);
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
@@ -302,14 +316,16 @@ export function NotificationBell() {
 
   const loadUnreadCount = async () => {
     try {
-      const response = await fetch('/api/notifications?unread_only=true&limit=5');
+      const response = await fetch(
+        "/api/notifications?unread_only=true&limit=5",
+      );
       if (response.ok) {
         const { notifications } = await response.json();
         setNotifications(notifications);
         setUnreadCount(notifications.length);
       }
     } catch (error) {
-      console.error('Error loading unread notifications:', error);
+      console.error("Error loading unread notifications:", error);
     }
   };
 
@@ -320,7 +336,7 @@ export function NotificationBell() {
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-              {unreadCount > 9 ? '9+' : unreadCount}
+              {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
         </Button>
@@ -345,7 +361,7 @@ export function NotificationBell() {
             onClick={() => {
               setIsOpen(false);
               // Navigate to full notifications page
-              window.location.href = '/dashboard?tab=notifications';
+              window.location.href = "/dashboard?tab=notifications";
             }}
           >
             View all notifications

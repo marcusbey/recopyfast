@@ -1,24 +1,24 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Alert } from '@/components/ui/alert';
-import { 
-  Key, 
-  Copy, 
-  Trash2, 
+import React, { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/alert";
+import {
+  Key,
+  Copy,
+  Trash2,
   Plus,
   Eye,
   EyeOff,
   AlertTriangle,
   Settings,
   Activity,
-  RefreshCw
-} from 'lucide-react';
+  RefreshCw,
+} from "lucide-react";
 
 interface ApiKey {
   id: string;
@@ -45,11 +45,11 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyName, setNewKeyName] = useState("");
   const [rateLimits, setRateLimits] = useState({
     requestsPerMinute: 60,
     requestsPerHour: 1000,
-    requestsPerDay: 10000
+    requestsPerDay: 10000,
   });
   const [newKey, setNewKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
@@ -66,12 +66,12 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch API keys');
+        throw new Error(data.error || "Failed to fetch API keys");
       }
 
       setApiKeys(data.apiKeys || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -79,7 +79,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
 
   const createApiKey = async () => {
     if (!newKeyName.trim()) {
-      setError('API key name is required');
+      setError("API key name is required");
       return;
     }
 
@@ -87,30 +87,30 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/api-keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/api-keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteId,
           name: newKeyName.trim(),
           requestsPerMinute: rateLimits.requestsPerMinute,
           requestsPerHour: rateLimits.requestsPerHour,
-          requestsPerDay: rateLimits.requestsPerDay
-        })
+          requestsPerDay: rateLimits.requestsPerDay,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to create API key');
+        throw new Error(data.error || "Failed to create API key");
       }
 
       setNewKey(data.apiKey.key);
-      setNewKeyName('');
+      setNewKeyName("");
       setShowCreateForm(false);
       await fetchApiKeys();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -121,49 +121,53 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       setLoading(true);
       setError(null);
 
-      const response = await fetch('/api/api-keys', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/api-keys", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           apiKeyId: keyId,
-          ...updates
-        })
+          ...updates,
+        }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to update API key');
+        throw new Error(data.error || "Failed to update API key");
       }
 
       setEditingKey(null);
       await fetchApiKeys();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   };
 
   const deleteApiKey = async (keyId: string) => {
-    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
+    if (
+      !confirm(
+        "Are you sure you want to delete this API key? This action cannot be undone.",
+      )
+    ) {
       return;
     }
 
     try {
       setLoading(true);
       const response = await fetch(`/api/api-keys?apiKeyId=${keyId}`, {
-        method: 'DELETE'
+        method: "DELETE",
       });
 
       if (!response.ok) {
         const data = await response.json();
-        throw new Error(data.error || 'Failed to delete API key');
+        throw new Error(data.error || "Failed to delete API key");
       }
 
       await fetchApiKeys();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -174,9 +178,9 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
   };
 
   const formatLastUsed = (lastUsedAt?: string) => {
-    if (!lastUsedAt) return 'Never';
+    if (!lastUsedAt) return "Never";
     const date = new Date(lastUsedAt);
-    return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    return date.toLocaleDateString() + " " + date.toLocaleTimeString();
   };
 
   return (
@@ -184,9 +188,11 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">API Key Management</h2>
-          <p className="text-gray-600">Create and manage API keys for your site</p>
+          <p className="text-gray-600">
+            Create and manage API keys for your site
+          </p>
         </div>
-        <Button 
+        <Button
           onClick={() => setShowCreateForm(true)}
           disabled={loading}
           className="flex items-center gap-2"
@@ -209,18 +215,19 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
             <Key className="w-5 h-5" />
             API Key Created Successfully
           </h3>
-          
+
           <Alert className="border-orange-200 bg-orange-50 mb-4">
             <AlertTriangle className="h-4 w-4 text-orange-600" />
             <div className="text-orange-800">
-              <strong>Important:</strong> Store this API key securely. It will not be shown again.
+              <strong>Important:</strong> Store this API key securely. It will
+              not be shown again.
             </div>
           </Alert>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between bg-white p-3 rounded border">
               <code className="font-mono text-sm flex-1">
-                {showKey ? newKey : '●'.repeat(newKey.length)}
+                {showKey ? newKey : "●".repeat(newKey.length)}
               </code>
               <div className="flex gap-2">
                 <Button
@@ -229,8 +236,12 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                   onClick={() => setShowKey(!showKey)}
                   className="flex items-center gap-1"
                 >
-                  {showKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                  {showKey ? 'Hide' : 'Show'}
+                  {showKey ? (
+                    <EyeOff className="w-3 h-3" />
+                  ) : (
+                    <Eye className="w-3 h-3" />
+                  )}
+                  {showKey ? "Hide" : "Show"}
                 </Button>
                 <Button
                   size="sm"
@@ -244,10 +255,10 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
               </div>
             </div>
           </div>
-          
-          <Button 
+
+          <Button
             onClick={() => setNewKey(null)}
-            variant="outline" 
+            variant="outline"
             className="mt-4"
           >
             Close
@@ -272,7 +283,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                 Choose a descriptive name to identify this key later.
               </p>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="perMinute">Requests per Minute</Label>
@@ -280,10 +291,12 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                   id="perMinute"
                   type="number"
                   value={rateLimits.requestsPerMinute}
-                  onChange={(e) => setRateLimits({
-                    ...rateLimits,
-                    requestsPerMinute: parseInt(e.target.value) || 0
-                  })}
+                  onChange={(e) =>
+                    setRateLimits({
+                      ...rateLimits,
+                      requestsPerMinute: parseInt(e.target.value) || 0,
+                    })
+                  }
                   className="mt-1"
                 />
               </div>
@@ -293,10 +306,12 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                   id="perHour"
                   type="number"
                   value={rateLimits.requestsPerHour}
-                  onChange={(e) => setRateLimits({
-                    ...rateLimits,
-                    requestsPerHour: parseInt(e.target.value) || 0
-                  })}
+                  onChange={(e) =>
+                    setRateLimits({
+                      ...rateLimits,
+                      requestsPerHour: parseInt(e.target.value) || 0,
+                    })
+                  }
                   className="mt-1"
                 />
               </div>
@@ -306,17 +321,19 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                   id="perDay"
                   type="number"
                   value={rateLimits.requestsPerDay}
-                  onChange={(e) => setRateLimits({
-                    ...rateLimits,
-                    requestsPerDay: parseInt(e.target.value) || 0
-                  })}
+                  onChange={(e) =>
+                    setRateLimits({
+                      ...rateLimits,
+                      requestsPerDay: parseInt(e.target.value) || 0,
+                    })
+                  }
                   className="mt-1"
                 />
               </div>
             </div>
-            
+
             <div className="flex gap-2">
-              <Button 
+              <Button
                 onClick={createApiKey}
                 disabled={loading || !newKeyName.trim()}
                 className="flex items-center gap-2"
@@ -324,8 +341,8 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                 {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
                 Create API Key
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={() => setShowCreateForm(false)}
               >
                 Cancel
@@ -340,7 +357,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
           <Card className="p-8 text-center">
             <Key className="w-12 h-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-500 mb-4">No API keys created yet.</p>
-            <Button 
+            <Button
               onClick={() => setShowCreateForm(true)}
               className="flex items-center gap-2"
             >
@@ -355,16 +372,29 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="text-lg font-semibold">{apiKey.name}</h3>
-                    <Badge className={apiKey.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                      {apiKey.isActive ? 'Active' : 'Inactive'}
+                    <Badge
+                      className={
+                        apiKey.isActive
+                          ? "bg-green-100 text-green-800"
+                          : "bg-gray-100 text-gray-800"
+                      }
+                    >
+                      {apiKey.isActive ? "Active" : "Inactive"}
                     </Badge>
                   </div>
-                  
+
                   <div className="text-sm text-gray-600 space-y-1">
-                    <p>Key: <code className="bg-gray-100 px-1 rounded">{apiKey.keyPreview}</code></p>
-                    <p>Created: {new Date(apiKey.createdAt).toLocaleDateString()}</p>
+                    <p>
+                      Key:{" "}
+                      <code className="bg-gray-100 px-1 rounded">
+                        {apiKey.keyPreview}
+                      </code>
+                    </p>
+                    <p>
+                      Created: {new Date(apiKey.createdAt).toLocaleDateString()}
+                    </p>
                     <p>Last used: {formatLastUsed(apiKey.lastUsedAt)}</p>
-                    
+
                     {editingKey === apiKey.id ? (
                       <div className="grid grid-cols-3 gap-2 mt-3">
                         <div>
@@ -375,7 +405,10 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                             className="h-8 text-sm"
                             onChange={(e) => {
                               const value = parseInt(e.target.value) || 0;
-                              setRateLimits({ ...rateLimits, requestsPerMinute: value });
+                              setRateLimits({
+                                ...rateLimits,
+                                requestsPerMinute: value,
+                              });
                             }}
                           />
                         </div>
@@ -387,7 +420,10 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                             className="h-8 text-sm"
                             onChange={(e) => {
                               const value = parseInt(e.target.value) || 0;
-                              setRateLimits({ ...rateLimits, requestsPerHour: value });
+                              setRateLimits({
+                                ...rateLimits,
+                                requestsPerHour: value,
+                              });
                             }}
                           />
                         </div>
@@ -399,17 +435,24 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                             className="h-8 text-sm"
                             onChange={(e) => {
                               const value = parseInt(e.target.value) || 0;
-                              setRateLimits({ ...rateLimits, requestsPerDay: value });
+                              setRateLimits({
+                                ...rateLimits,
+                                requestsPerDay: value,
+                              });
                             }}
                           />
                         </div>
                       </div>
                     ) : (
-                      <p>Rate limits: {apiKey.requestsPerMinute}/min, {apiKey.requestsPerHour}/hour, {apiKey.requestsPerDay}/day</p>
+                      <p>
+                        Rate limits: {apiKey.requestsPerMinute}/min,{" "}
+                        {apiKey.requestsPerHour}/hour, {apiKey.requestsPerDay}
+                        /day
+                      </p>
                     )}
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2">
                   {editingKey === apiKey.id ? (
                     <>
@@ -434,16 +477,20 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => updateApiKey(apiKey.id, { isActive: !apiKey.isActive })}
+                        onClick={() =>
+                          updateApiKey(apiKey.id, {
+                            isActive: !apiKey.isActive,
+                          })
+                        }
                         disabled={loading}
                         className={`flex items-center gap-1 ${
-                          apiKey.isActive ? 'text-orange-600' : 'text-green-600'
+                          apiKey.isActive ? "text-orange-600" : "text-green-600"
                         }`}
                       >
                         <Activity className="w-3 h-3" />
-                        {apiKey.isActive ? 'Deactivate' : 'Activate'}
+                        {apiKey.isActive ? "Deactivate" : "Activate"}
                       </Button>
-                      
+
                       <Button
                         size="sm"
                         variant="outline"
@@ -453,7 +500,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                         <Settings className="w-3 h-3" />
                         Edit
                       </Button>
-                      
+
                       <Button
                         size="sm"
                         variant="outline"
