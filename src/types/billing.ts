@@ -13,7 +13,7 @@ export interface Subscription {
   user_id: string;
   customer_id: string;
   stripe_subscription_id: string;
-  plan_id: "free" | "pro" | "enterprise";
+  plan_id: "starter" | "pro" | "enterprise";
   status:
     | "incomplete"
     | "incomplete_expired"
@@ -144,7 +144,7 @@ export interface BillingDashboardData {
 
 // Subscription management
 export interface SubscriptionUpdateRequest {
-  planId: "pro" | "enterprise";
+  planId: "starter" | "pro" | "enterprise";
   paymentMethodId?: string;
 }
 

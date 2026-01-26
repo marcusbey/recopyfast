@@ -9,32 +9,30 @@ const plans = [
   {
     name: "Starter",
     description: "For personal projects and small sites",
-    price: { monthly: 0, yearly: 0 },
+    price: { monthly: 9, yearly: 7.47 },
     icon: Sparkles,
     features: [
       "1 website",
-      "Up to 10,000 views/month",
+      "Instant copy testing",
       "Click-to-edit interface",
       "Basic version history",
       "Community support",
     ],
-    cta: "Start for free",
+    cta: "Get started",
     highlight: false,
   },
   {
     name: "Pro",
-    description: "For teams that ship fast",
-    price: { monthly: 29, yearly: 23 },
+    description: "For growing businesses",
+    price: { monthly: 19, yearly: 15.77 },
     icon: Rocket,
     features: [
-      "5 websites",
-      "Unlimited page views",
-      "AI content suggestions",
-      "Multi-language support",
-      "Team collaboration (3 users)",
+      "Up to 3 websites",
+      "+$6 per additional website",
+      "Instant copy testing",
+      "Click-to-edit interface",
       "Full version history",
       "Priority support",
-      "Custom domains",
     ],
     cta: "Start free trial",
     highlight: true,
@@ -43,17 +41,15 @@ const plans = [
   {
     name: "Enterprise",
     description: "For agencies and large teams",
-    price: { monthly: 99, yearly: 79 },
+    price: { monthly: 39, yearly: 32.37 },
     icon: Building2,
     features: [
       "Unlimited websites",
-      "Unlimited team members",
-      "SSO & advanced security",
-      "Audit logs & compliance",
-      "Dedicated account manager",
+      "Team collaboration",
+      "Multiple users",
+      "Full version history",
+      "Dedicated support",
       "Custom integrations",
-      "SLA guarantee",
-      "White-label options",
     ],
     cta: "Contact sales",
     highlight: false,
@@ -94,7 +90,7 @@ export default function Pricing() {
             <span className="text-slate-400">no surprises</span>
           </h2>
           <p className="text-xl text-slate-600 max-w-2xl mx-auto mb-8">
-            Start free. Upgrade when you need more power.
+            Choose the plan that fits your needs. Upgrade anytime.
           </p>
 
           {/* Billing toggle */}
@@ -119,7 +115,7 @@ export default function Pricing() {
             >
               Yearly
               <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">
-                Save 20%
+                Save 17%
               </span>
             </button>
           </div>

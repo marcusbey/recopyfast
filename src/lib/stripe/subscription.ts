@@ -9,7 +9,7 @@ import type { Subscription, SubscriptionUpdateRequest } from "@/types/billing";
 export async function createSubscription(
   userId: string,
   email: string,
-  planId: "pro" | "enterprise",
+  planId: "starter" | "pro" | "enterprise",
   paymentMethodId?: string,
   trialDays?: number,
 ): Promise<{ subscription: Subscription; clientSecret?: string }> {
@@ -344,11 +344,13 @@ export async function checkFeatureAccess(
   const subscription = await getUserSubscription(userId);
 
   if (!subscription) {
-    // User has no subscription, check free tier limits
-    const freePlan = SUBSCRIPTION_PLANS.FREE;
-    return freePlan.limits.aiFeatures && feature === "aiFeatures"
-      ? false
-      : true;
+    // User has no subscription - no access to paid features
+    return (
+      feature !== "aiFeatures" &&
+      feature !== "unlimited_websites" &&
+      feature !== "collaborators" &&
+      feature !== "translations"
+    );
   }
 
   const plan =

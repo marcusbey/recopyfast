@@ -26,11 +26,14 @@ export function UpgradeDialog({
   currentPlan,
   onSuccess,
 }: UpgradeDialogProps) {
-  const [selectedPlan, setSelectedPlan] = useState<"pro" | "enterprise">("pro");
+  const [selectedPlan, setSelectedPlan] = useState<
+    "starter" | "pro" | "enterprise"
+  >("pro");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const plans = [
+    { id: "starter" as const, data: SUBSCRIPTION_PLANS.STARTER },
     { id: "pro" as const, data: SUBSCRIPTION_PLANS.PRO },
     { id: "enterprise" as const, data: SUBSCRIPTION_PLANS.ENTERPRISE },
   ];
@@ -41,7 +44,7 @@ export function UpgradeDialog({
       setError(null);
 
       const response = await fetch("/api/billing/subscription", {
-        method: currentPlan === "free" ? "POST" : "PUT",
+        method: !currentPlan || currentPlan === "free" ? "POST" : "PUT",
         headers: {
           "Content-Type": "application/json",
         },
@@ -68,8 +71,8 @@ export function UpgradeDialog({
 
       onSuccess();
       onOpenChange(false);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
     }
@@ -92,7 +95,7 @@ export function UpgradeDialog({
             </Alert>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {plans.map((plan) => (
               <div
                 key={plan.id}
@@ -143,7 +146,7 @@ export function UpgradeDialog({
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="font-medium mb-2">What's Included:</h4>
+            <h4 className="font-medium mb-2">What&apos;s Included:</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
               <div>
                 <h5 className="font-medium text-blue-600">AI Features</h5>
@@ -199,9 +202,7 @@ export function UpgradeDialog({
             >
               {loading
                 ? "Processing..."
-                : currentPlan === "free"
-                  ? `Start ${SUBSCRIPTION_PLANS[selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS].name} Plan`
-                  : `Upgrade to ${SUBSCRIPTION_PLANS[selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS].name}`}
+                : `Upgrade to ${SUBSCRIPTION_PLANS[selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS].name}`}
             </Button>
           </div>
         </div>
