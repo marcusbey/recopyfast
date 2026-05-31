@@ -19,12 +19,43 @@ import { User, Bell, Shield, Key, Palette, Save } from "lucide-react";
 export default function SettingsPage() {
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const handleSave = async () => {
+  // Controlled profile fields
+  const [name, setName] = useState(user?.user_metadata?.name ?? "");
+  const [email] = useState(user?.email ?? "");
+  const [company, setCompany] = useState(user?.user_metadata?.company ?? "");
+  const [role, setRole] = useState(user?.user_metadata?.role ?? "");
+
+  const handleSaveProfile = async () => {
     setSaving(true);
-    // Simulate save
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setSaving(false);
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, company, role }),
+      });
+
+      const data: unknown = await response.json();
+
+      if (!response.ok) {
+        const errData = data as { error?: string };
+        throw new Error(errData.error ?? "Failed to save profile");
+      }
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setSaveError(
+        err instanceof Error ? err.message : "An unexpected error occurred",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -71,12 +102,23 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {saveError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                  {saveError}
+                </p>
+              )}
+              {saveSuccess && (
+                <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                  Profile saved successfully.
+                </p>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="name">Full Name</Label>
                 <Input
                   id="name"
                   placeholder="John Doe"
-                  defaultValue={user?.user_metadata?.name || ""}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                 />
               </div>
               <div className="space-y-2">
@@ -85,18 +127,33 @@ export default function SettingsPage() {
                   id="email"
                   type="email"
                   placeholder="john@example.com"
-                  defaultValue={user?.email || ""}
+                  value={email}
+                  disabled
+                  className="bg-gray-50 text-gray-500 cursor-not-allowed"
                 />
+                <p className="text-xs text-gray-500">
+                  Email cannot be changed here. Contact support if needed.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="company">Company</Label>
-                <Input id="company" placeholder="Acme Inc." />
+                <Input
+                  id="company"
+                  placeholder="Acme Inc."
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="role">Role</Label>
-                <Input id="role" placeholder="Developer" />
+                <Input
+                  id="role"
+                  placeholder="Developer"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                />
               </div>
-              <Button onClick={handleSave} disabled={saving}>
+              <Button onClick={handleSaveProfile} disabled={saving}>
                 <Save className="w-4 h-4 mr-2" />
                 {saving ? "Saving..." : "Save Changes"}
               </Button>
@@ -150,9 +207,9 @@ export default function SettingsPage() {
                 </div>
                 <input type="checkbox" className="w-4 h-4" />
               </div>
-              <Button onClick={handleSave} disabled={saving}>
+              <Button disabled>
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? "Saving..." : "Save Preferences"}
+                Save Preferences
               </Button>
             </CardContent>
           </Card>
@@ -259,9 +316,9 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </div>
-              <Button onClick={handleSave} disabled={saving}>
+              <Button disabled>
                 <Save className="w-4 h-4 mr-2" />
-                {saving ? "Saving..." : "Save Appearance"}
+                Save Appearance
               </Button>
             </CardContent>
           </Card>

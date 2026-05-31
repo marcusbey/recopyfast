@@ -289,11 +289,12 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Remove member
+    // Remove member — scope to team_id to prevent cross-team deletion
     const { error } = await supabase
       .from("team_members")
       .delete()
-      .eq("id", memberId);
+      .eq("id", memberId)
+      .eq("team_id", teamId);
 
     if (error) {
       console.error("Error removing team member:", error);

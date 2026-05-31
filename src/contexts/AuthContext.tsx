@@ -62,10 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       if (error) throw error;
-    } catch (error: any) {
-      throw new Error(
-        error.message || "An error occurred while sending magic link",
-      );
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : undefined;
+      throw new Error(msg || "An error occurred while sending magic link");
     }
   };
 
@@ -74,8 +73,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
       router.push("/");
-    } catch (error: any) {
-      throw new Error(error.message || "An error occurred during sign out");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : undefined;
+      throw new Error(msg || "An error occurred during sign out");
     }
   };
 
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } = await supabase.auth.refreshSession();
       if (error) throw error;
       setUser(session?.user ?? null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error refreshing session:", error);
     }
   };

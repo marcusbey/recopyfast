@@ -75,10 +75,10 @@ export async function createSubscription(
       plan_id: planId,
       status: stripeSubscription.status,
       current_period_start: new Date(
-        stripeSubscription.current_period_start * 1000,
+        (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
       ).toISOString(),
       current_period_end: new Date(
-        stripeSubscription.current_period_end * 1000,
+        (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
       ).toISOString(),
       cancel_at_period_end: stripeSubscription.cancel_at_period_end,
       trial_start: stripeSubscription.trial_start
@@ -103,9 +103,14 @@ export async function createSubscription(
     stripeSubscription.latest_invoice &&
     typeof stripeSubscription.latest_invoice === "object"
   ) {
-    const paymentIntent = stripeSubscription.latest_invoice.payment_intent;
+    const latestInvoice =
+      stripeSubscription.latest_invoice as unknown as Record<string, unknown>;
+    const paymentIntent = latestInvoice?.payment_intent as
+      | { client_secret?: string | null }
+      | null
+      | undefined;
     if (paymentIntent && typeof paymentIntent === "object") {
-      clientSecret = paymentIntent.client_secret;
+      clientSecret = paymentIntent.client_secret ?? undefined;
     }
   }
 
@@ -189,10 +194,10 @@ export async function updateSubscription(
       plan_id: updates.planId,
       status: stripeSubscription.status,
       current_period_start: new Date(
-        stripeSubscription.current_period_start * 1000,
+        (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
       ).toISOString(),
       current_period_end: new Date(
-        stripeSubscription.current_period_end * 1000,
+        (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
       ).toISOString(),
       cancel_at_period_end: stripeSubscription.cancel_at_period_end,
     })

@@ -15,10 +15,10 @@ export async function POST(request: NextRequest) {
 
     // Check authentication
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       .from("site_permissions")
       .select("permission")
       .eq("site_id", sanitizedSiteId)
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .single();
 
     if (
@@ -159,10 +159,10 @@ export async function PUT(request: NextRequest) {
 
     // Check authentication
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -193,7 +193,7 @@ export async function PUT(request: NextRequest) {
       `,
       )
       .eq("id", sanitizedVerificationId)
-      .eq("sites.site_permissions.user_id", session.user.id)
+      .eq("sites.site_permissions.user_id", user.id)
       .eq("sites.site_permissions.permission", "admin")
       .single();
 
@@ -264,10 +264,10 @@ export async function GET(request: NextRequest) {
 
     // Check authentication
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -300,7 +300,7 @@ export async function GET(request: NextRequest) {
       `,
       )
       .eq("site_id", sanitizedSiteId)
-      .eq("sites.site_permissions.user_id", session.user.id)
+      .eq("sites.site_permissions.user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -327,10 +327,10 @@ export async function DELETE(request: NextRequest) {
 
     // Check authentication
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -351,7 +351,7 @@ export async function DELETE(request: NextRequest) {
       .from("domain_verifications")
       .delete()
       .eq("id", sanitizedVerificationId)
-      .eq("sites.site_permissions.user_id", session.user.id)
+      .eq("sites.site_permissions.user_id", user.id)
       .eq("sites.site_permissions.permission", "admin");
 
     if (error) {

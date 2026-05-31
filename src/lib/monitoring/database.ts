@@ -172,7 +172,7 @@ class DatabaseMonitor {
         tags: {
           table: metrics.table,
           operation: metrics.operation,
-          error: metrics.error?.substring(0, 50),
+          error: metrics.error?.substring(0, 50) ?? "",
         },
       });
     }
@@ -332,12 +332,17 @@ class DatabaseMonitor {
             ).apply(target, args);
 
             // If this returns a thenable (Promise-like), wrap it
-            if (result && typeof result.then === "function") {
+            const resultAsAny = result as
+              | Record<string, unknown>
+              | null
+              | undefined;
+            if (resultAsAny && typeof resultAsAny["then"] === "function") {
+              const resultPromise = result as Promise<unknown>;
               return this.monitorQuery(
                 prop as string,
                 table,
-                () => result,
-                `${prop} from ${table}`,
+                () => resultPromise,
+                `${String(prop)} from ${table}`,
               );
             }
 

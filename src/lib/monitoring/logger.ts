@@ -300,13 +300,12 @@ class EnhancedLogger {
     context?: LogContext,
     metadata?: LogMetadata,
   ) {
-    const level =
-      severity === "critical" || severity === "high" ? "error" : "warn";
-    this[level](`Security: ${event}`, context, {
-      ...metadata,
-      severity,
-      component: "security",
-    });
+    const logMetadata = { ...metadata, severity, component: "security" };
+    if (severity === "critical" || severity === "high") {
+      this.error(`Security: ${event}`, undefined, context, logMetadata);
+    } else {
+      this.warn(`Security: ${event}`, context, logMetadata);
+    }
   }
 }
 

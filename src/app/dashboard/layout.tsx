@@ -3,7 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { DashboardNavigation } from "@/components/dashboard/DashboardNavigation";
 import { Breadcrumbs } from "@/components/dashboard/Breadcrumbs";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   DropdownMenu,
@@ -24,15 +24,17 @@ export default function DashboardLayout({
 }) {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">(
     "free",
   );
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push("/");
+      const next = encodeURIComponent(pathname ?? "/dashboard");
+      router.push(`/login?next=${next}`);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, pathname]);
 
   useEffect(() => {
     // Fetch user plan from API or user metadata

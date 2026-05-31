@@ -47,7 +47,7 @@ export interface ContentHistory {
   content_element_id: string;
   content: string;
   changed_by: string;
-  change_type: "create" | "update" | "delete";
+  change_type: "create" | "update" | "delete" | "ab_test_winner";
   created_at: string;
 }
 
@@ -343,11 +343,16 @@ export interface ABTest {
   site_id: string;
   name: string;
   description?: string;
-  status: "draft" | "running" | "completed" | "paused";
+  status: "draft" | "active" | "running" | "completed" | "paused";
   traffic_split: number;
   start_date?: string;
   end_date?: string;
   success_metric: "conversion_rate" | "engagement" | "click_through";
+  target_element_id?: string;
+  auto_complete?: boolean;
+  min_sample_size?: number;
+  confidence_threshold?: number;
+  winner_variant?: string;
   created_by?: string;
   created_at: string;
   updated_at: string;
@@ -357,10 +362,14 @@ export interface ABTest {
 export interface ABTestVariant {
   id: string;
   test_id: string;
-  content_element_id: string;
+  content_element_id?: string;
   variant_name: string;
   content: string;
+  variant_content: string;
   traffic_percentage: number;
+  is_control?: boolean;
+  geo_countries?: string[];
+  geo_regions?: string[];
   created_at: string;
 }
 
@@ -368,12 +377,26 @@ export interface ABTestResult {
   id: string;
   test_id: string;
   variant_id: string;
+  visitor_id: string;
   user_id?: string;
   session_id?: string;
   event_type: "view" | "click" | "conversion";
   value: number;
   metadata: Record<string, unknown>;
+  geo_country?: string;
+  geo_region?: string;
   recorded_at: string;
+}
+
+export interface VisitorBucket {
+  id: string;
+  site_id: string;
+  visitor_id: string;
+  test_id: string;
+  variant_id: string;
+  geo_country?: string;
+  geo_region?: string;
+  bucketed_at: string;
 }
 
 export interface ApprovalWorkflow {
@@ -582,6 +605,12 @@ export interface BulkUpdatePayload {
     operation: "find_replace" | "append" | "prepend" | "set";
     find?: string;
     replace?: string;
+    /**
+     * When true, `find` is treated as a regular expression pattern.
+     * Defaults to false (literal string match). Regex mode rejects patterns
+     * that exceed MAX_REGEX_LENGTH or contain dangerous nested quantifiers.
+     */
+    useRegex?: boolean;
     content?: string;
   }>;
 }

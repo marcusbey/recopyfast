@@ -8,10 +8,10 @@ export async function GET(request: NextRequest) {
 
     // Check authentication
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await supabase.auth.getSession();
-    if (authError || !session?.user) {
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
     const { data: userSites } = await supabase
       .from("site_permissions")
       .select("site_id")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .eq("permission", "admin");
 
     if (!userSites || userSites.length === 0) {

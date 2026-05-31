@@ -125,7 +125,12 @@ export function sanitizeHTML(
     // Configure DOMPurify
     createDOMPurify.clearConfig();
 
-    const sanitized = createDOMPurify.sanitize(content, sanitizationConfig);
+    const sanitized = createDOMPurify.sanitize(
+      content,
+      sanitizationConfig as unknown as Parameters<
+        typeof createDOMPurify.sanitize
+      >[1],
+    );
 
     return sanitized;
   } catch (error) {
@@ -186,7 +191,7 @@ export function validateAndSanitizeInput(input: unknown): string {
 /**
  * Sanitize JSON data recursively
  */
-export function sanitizeJSONData(data: any): any {
+export function sanitizeJSONData(data: unknown): unknown {
   if (data === null || data === undefined) {
     return data;
   }
@@ -200,9 +205,10 @@ export function sanitizeJSONData(data: any): any {
   }
 
   if (typeof data === "object") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sanitized: any = {};
-    for (const [key, value] of Object.entries(data)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(
+      data as Record<string, unknown>,
+    )) {
       // Sanitize both key and value
       const sanitizedKey = validateAndSanitizeInput(key);
       sanitized[sanitizedKey] = sanitizeJSONData(value);

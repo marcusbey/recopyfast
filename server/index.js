@@ -115,16 +115,33 @@ if (missingVars.length === 0 && invalidUrls.length === 0) {
   console.warn('  Set up Supabase credentials in .env.local to enable persistence');
 }
 
+// Build the CORS allowlist from environment variables.
+// ALLOWED_ORIGINS is a comma-separated list of trusted origins (e.g. embed domains).
+// NEXT_PUBLIC_APP_URL is always implicitly trusted.
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([appUrl, ...extraOrigins]);
+
 // Initialize Socket.io with CORS
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      // Allow requests without origin (e.g., mobile apps) for development
+      // Requests without an Origin header (e.g. same-origin server-to-server calls
+      // or certain native clients) are rejected when credentials are enabled to
+      // avoid inadvertently granting cross-site access.
       if (!origin) {
-        callback(null, true);
+        callback(new Error('Missing Origin header'), false);
         return;
       }
-      callback(null, true);
+      if (allowedOrigins.has(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`CORS: rejected origin "${origin}"`);
+        callback(new Error('Origin not allowed'), false);
+      }
     },
     methods: ['GET', 'POST'],
     credentials: true
@@ -474,12 +491,27 @@ io.on('connection', async (socket) => {
   // Handle dashboard connections
   socket.on('join-dashboard', (data) => {
     const { siteId: dashboardSiteId, userId } = data;
+
+    // Authorization: the dashboard room must match the site id that was
+    // authenticated during the handshake.  Allowing arbitrary room joins
+    // would let any authenticated socket subscribe to another site's events.
+    if (!dashboardSiteId || dashboardSiteId !== siteId) {
+      socket.emit('auth-error', {
+        error: 'Unauthorized: dashboard site id does not match authenticated site'
+      });
+      console.warn(
+        `join-dashboard rejected: socket ${socket.id} authenticated for site "${siteId}" ` +
+        `requested dashboard for site "${dashboardSiteId}"`
+      );
+      return;
+    }
+
     socket.join(`dashboard:${dashboardSiteId}`);
-    
+
     if (userId) {
       userConnections.set(socket.id, userId);
     }
-    
+
     console.log(`Dashboard user joined for site ${dashboardSiteId}`);
   });
   
@@ -984,6 +1016,34 @@ io.on('connection', async (socket) => {
       console.error('Error publishing content:', error);
       socket.emit('publish-error', { error: 'Internal server error' });
     }
+  });
+
+  // Handle A/B test status changes (emitted by API when test activated/completed)
+  socket.on('ab-test-status-change', async (data) => {
+    const { testId, status, siteId: testSiteId } = data;
+
+    // Authorization: the authenticated handshake siteId is the only authoritative
+    // source. A client must not broadcast to another tenant's rooms by supplying a
+    // different siteId in the payload.
+    if (testSiteId && testSiteId !== siteId) {
+      socket.emit('auth-error', { message: 'Cannot modify A/B tests for another site' });
+      return;
+    }
+    const targetSiteId = siteId;
+
+    console.log(`A/B test ${testId} status changed to ${status} for site ${targetSiteId}`);
+
+    // Broadcast to all live site connections
+    io.to(`site:${targetSiteId}`).emit('ab-test-update', {
+      test_id: testId,
+      status: status
+    });
+
+    // Also notify dashboard
+    io.to(`dashboard:${targetSiteId}`).emit('ab-test-update', {
+      test_id: testId,
+      status: status
+    });
   });
 
   // Handle disconnection

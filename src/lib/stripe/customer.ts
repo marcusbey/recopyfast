@@ -24,10 +24,13 @@ export async function createOrGetCustomer(
 
   if (existingCustomer) {
     // Get the Stripe customer
-    const stripeCustomer = await stripe.customers.retrieve(
+    const retrieved = await stripe.customers.retrieve(
       existingCustomer.stripe_customer_id,
     );
-    return { customer: existingCustomer, stripeCustomer };
+    if (retrieved.deleted) {
+      throw new Error("Stripe customer has been deleted");
+    }
+    return { customer: existingCustomer, stripeCustomer: retrieved };
   }
 
   // Create new Stripe customer

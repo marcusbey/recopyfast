@@ -24,6 +24,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Idempotency guard: short-circuit if this Stripe event was already processed.
+  // Relies on billing_events.stripe_event_id; a UNIQUE constraint on that column
+  // is strongly recommended to prevent races under concurrent retries.
+  // TODO: add UNIQUE constraint on stripe_event_id in billing_events table
+  const supabaseIdempotency = await createClient();
+  const { data: existingEvent, error: idempotencyError } =
+    await supabaseIdempotency
+      .from("billing_events")
+      .select("id")
+      .eq("stripe_event_id", event.id)
+      .maybeSingle();
+
+  if (idempotencyError) {
+    console.error("Idempotency check failed:", idempotencyError.message);
+    // Fail open: continue processing rather than blocking on a DB error.
+  } else if (existingEvent) {
+    console.log(
+      `Stripe event ${event.id} already processed — skipping (idempotent).`,
+    );
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
   console.log("Processing Stripe webhook:", event.type);
 
   try {

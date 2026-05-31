@@ -108,12 +108,9 @@ class PerformanceMonitor {
       ...metadata,
     });
 
-    // Send to Sentry as custom metric
+    // Send to Sentry as custom metric (metrics API removed in Sentry v9+)
     if (process.env.NODE_ENV === "production") {
-      Sentry.metrics.distribution(name, value, {
-        unit,
-        tags,
-      });
+      Sentry.setMeasurement(name, value, unit as string);
     }
 
     // Clean up old metrics (keep last 100)
@@ -305,16 +302,12 @@ export function trackWebVitals(metric: {
     },
   });
 
-  // Send to Sentry
+  // Send to Sentry (metrics API removed in Sentry v9+)
   if (process.env.NODE_ENV === "production") {
-    Sentry.metrics.distribution(
+    Sentry.setMeasurement(
       `web_vitals.${metric.name.toLowerCase()}`,
       metric.value,
-      {
-        tags: {
-          rating: metric.rating,
-        },
-      },
+      "millisecond",
     );
   }
 }

@@ -43,7 +43,6 @@ export interface SecurityContext {
  */
 export function extractSecurityContext(request: NextRequest): SecurityContext {
   const ip =
-    request.ip ||
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "unknown";
@@ -341,19 +340,58 @@ export async function sanitizeRequestContent(
 }
 
 /**
+ * Build the validated CORS origin for a given request origin.
+ *
+ * Rules:
+ *  1. ALLOWED_ORIGINS env var is a comma-separated list of exact origins
+ *     (e.g. "https://app.example.com,https://www.example.com").
+ *  2. If the incoming origin is in that allowlist, reflect it back.
+ *  3. Otherwise return null — callers must NOT set the header.
+ *
+ * Never reflects "*" because we need to support credentialed requests.
+ */
+function resolveAllowedOrigin(
+  requestOrigin: string | undefined,
+): string | null {
+  if (!requestOrigin) return null;
+
+  const rawList = process.env.ALLOWED_ORIGINS ?? "";
+  const allowlist = rawList
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  if (allowlist.length === 0) {
+    // No allowlist configured — fail closed (deny all cross-origin).
+    return null;
+  }
+
+  return allowlist.includes(requestOrigin) ? requestOrigin : null;
+}
+
+/**
  * Security headers middleware
  */
-export function addSecurityHeaders(response: NextResponse): NextResponse {
-  // CORS headers
-  response.headers.set("Access-Control-Allow-Origin", "*"); // Configure properly for production
-  response.headers.set(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, DELETE, OPTIONS",
-  );
-  response.headers.set(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, X-API-Key",
-  );
+export function addSecurityHeaders(
+  response: NextResponse,
+  requestOrigin?: string,
+): NextResponse {
+  // CORS — reflect a validated allowlisted origin only; never use wildcard "*"
+  // because that is incompatible with credentialed requests and exposes data
+  // to any origin.
+  const allowedOrigin = resolveAllowedOrigin(requestOrigin);
+  if (allowedOrigin) {
+    response.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+    response.headers.set("Vary", "Origin");
+    response.headers.set(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS",
+    );
+    response.headers.set(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-API-Key",
+    );
+  }
 
   // Security headers
   response.headers.set("X-Content-Type-Options", "nosniff");
@@ -422,8 +460,8 @@ export async function securityMiddleware(
       }
     }
 
-    // Add security headers
-    response = addSecurityHeaders(response);
+    // Add security headers, passing the request origin for CORS validation
+    response = addSecurityHeaders(response, context.origin);
 
     // Attach sanitized body to request for downstream use
     if (sanitizedBody) {

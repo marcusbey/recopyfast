@@ -23,7 +23,7 @@ export interface CollaborationEvents {
   }) => void;
 
   // Notifications
-  "collaboration-notification": (notification: any) => void;
+  "collaboration-notification": (notification: Record<string, unknown>) => void;
 
   // Connection events
   connect: () => void;
@@ -37,8 +37,11 @@ export class CollaborationRealtime {
   private currentElementId: string | null = null;
   private currentSessionToken: string | null = null;
   private presence: PresenceData | null = null;
-  private eventListeners: Map<keyof CollaborationEvents, Set<Function>> =
-    new Map();
+  private eventListeners: Map<
+    keyof CollaborationEvents,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    Set<(...args: any[]) => void>
+  > = new Map();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
 
@@ -48,21 +51,22 @@ export class CollaborationRealtime {
 
   private initializeEventListeners() {
     // Initialize event listener maps
-    Object.keys({
-      "user-joined": true,
-      "user-left": true,
-      "presence-updated": true,
-      "presence-list": true,
-      "content-editing": true,
-      "content-saved": true,
-      "edit-conflict": true,
-      "edit-session-started": true,
-      "edit-session-ended": true,
-      "collaboration-notification": true,
-      connect: true,
-      disconnect: true,
-      error: true,
-    } as CollaborationEvents).forEach((event) => {
+    const eventNames: Array<keyof CollaborationEvents> = [
+      "user-joined",
+      "user-left",
+      "presence-updated",
+      "presence-list",
+      "content-editing",
+      "content-saved",
+      "edit-conflict",
+      "edit-session-started",
+      "edit-session-ended",
+      "collaboration-notification",
+      "connect",
+      "disconnect",
+      "error",
+    ];
+    eventNames.forEach((event) => {
       this.eventListeners.set(event as keyof CollaborationEvents, new Set());
     });
   }
@@ -191,7 +195,7 @@ export class CollaborationRealtime {
   /**
    * Send collaborative edit
    */
-  sendEdit(content: string, delta?: any) {
+  sendEdit(content: string, delta?: Record<string, unknown>) {
     if (
       !this.socket?.connected ||
       !this.currentElementId ||
@@ -286,7 +290,7 @@ export class CollaborationRealtime {
     if (listeners) {
       listeners.forEach((callback) => {
         try {
-          (callback as any)(...args);
+          callback(...(args as unknown[]));
         } catch (error) {
           console.error(`Error in event listener for ${event}:`, error);
         }
@@ -362,9 +366,12 @@ export class CollaborationRealtime {
     );
 
     // Notification events
-    this.socket.on("collaboration-notification", (notification: any) => {
-      this.emit("collaboration-notification", notification);
-    });
+    this.socket.on(
+      "collaboration-notification",
+      (notification: Record<string, unknown>) => {
+        this.emit("collaboration-notification", notification);
+      },
+    );
 
     // Error handling
     this.socket.on("error", (error: Error) => {

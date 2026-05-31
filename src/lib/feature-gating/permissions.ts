@@ -113,7 +113,7 @@ export async function canAddCollaborator(
 
   return {
     allowed: false,
-    reason: `You've reached your limit of ${collaboratorLimit} collaborator${collaboratorLimit === 1 ? "" : "s"} per website`,
+    reason: `You've reached your limit of ${collaboratorLimit} collaborator${(collaboratorLimit as number) === 1 ? "" : "s"} per website`,
     upgradeRequired: true,
     currentLimit: currentCollaborators || 0,
     maxLimit: collaboratorLimit,

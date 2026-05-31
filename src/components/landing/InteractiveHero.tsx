@@ -432,26 +432,31 @@ export default function InteractiveHero() {
     );
     if (!currentItem) return;
 
-    setElementStyles((prev) => ({
-      ...prev,
-      [selectedElementId]: {
-        ...getCurrentStyles(selectedElementId),
-        ...styles,
-      },
-    }));
+    // Use functional updater to avoid reading stale closure snapshot of
+    // elementStyles on rapid slider events.
+    setElementStyles((prev) => {
+      const existingStyles: TypographyStyles = prev[selectedElementId] ?? {
+        fontSize: "1rem",
+        fontWeight: "400",
+        color: "#000000",
+        textAlign: "left",
+      };
+      const mergedStyles: TypographyStyles = { ...existingStyles, ...styles };
 
-    // Track as pending change
-    const existingChange = pendingChanges.get(selectedElementId);
-    setPendingChanges((prev) => {
-      const newMap = new Map(prev);
-      newMap.set(selectedElementId, {
-        original: existingChange?.original || currentItem.text,
-        current: currentItem.text,
-        originalStyles:
-          existingChange?.originalStyles || getCurrentStyles(selectedElementId),
-        currentStyles: { ...getCurrentStyles(selectedElementId), ...styles },
+      // Track as pending change using the freshly merged styles.
+      setPendingChanges((prevChanges) => {
+        const existingChange = prevChanges.get(selectedElementId);
+        const newMap = new Map(prevChanges);
+        newMap.set(selectedElementId, {
+          original: existingChange?.original ?? currentItem.text,
+          current: currentItem.text,
+          originalStyles: existingChange?.originalStyles ?? existingStyles,
+          currentStyles: mergedStyles,
+        });
+        return newMap;
       });
-      return newMap;
+
+      return { ...prev, [selectedElementId]: mergedStyles };
     });
   };
 
@@ -988,7 +993,7 @@ export default function InteractiveHero() {
                       // Check if user is authenticated - for demo purposes, show login modal
                       // In production, this would check actual auth state
                       window.open(
-                        "/auth?returnTo=" +
+                        "/login?next=" +
                           encodeURIComponent(window.location.href),
                         "_blank",
                         "width=500,height=600",
@@ -1265,7 +1270,7 @@ export default function InteractiveHero() {
           // For demo, just log the prompt - in production this would call AI API
           console.log("AI prompt:", prompt);
           window.open(
-            "/auth?returnTo=" + encodeURIComponent(window.location.href),
+            "/login?next=" + encodeURIComponent(window.location.href),
             "_blank",
             "width=500,height=600",
           );

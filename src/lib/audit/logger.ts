@@ -402,7 +402,7 @@ export class AuditLogger {
     logs: AuditLog[],
     reportType: string,
   ): Record<string, unknown> {
-    const metrics: Record<string, any> = {
+    const metrics: Record<string, unknown> = {
       data_retention_compliance: true,
       access_control_violations: logs.filter(
         (log) => log.action.includes("unauthorized") || !log.success,

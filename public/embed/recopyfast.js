@@ -2,8 +2,29 @@
   'use strict';
 
   // Configuration
-  const RECOPYFAST_API = window.RECOPYFAST_API || 'http://localhost:3000/api';
-  const RECOPYFAST_WS = window.RECOPYFAST_WS || 'http://localhost:3001';
+  // Derive API/WS URLs from data attributes on the script tag, or window globals.
+  // Warn loudly rather than silently falling back to localhost.
+  (function() {
+    var script = document.currentScript;
+    if (!window.RECOPYFAST_API) {
+      var apiAttr = script && script.getAttribute('data-api-url');
+      if (apiAttr) {
+        window.RECOPYFAST_API = apiAttr;
+      } else {
+        console.warn('ReCopyFast: RECOPYFAST_API is not set. Add a data-api-url attribute to the script tag or set window.RECOPYFAST_API before loading this script.');
+      }
+    }
+    if (!window.RECOPYFAST_WS) {
+      var wsAttr = script && script.getAttribute('data-ws-url');
+      if (wsAttr) {
+        window.RECOPYFAST_WS = wsAttr;
+      } else {
+        console.warn('ReCopyFast: RECOPYFAST_WS is not set. Add a data-ws-url attribute to the script tag or set window.RECOPYFAST_WS before loading this script.');
+      }
+    }
+  })();
+  const RECOPYFAST_API = window.RECOPYFAST_API;
+  const RECOPYFAST_WS = window.RECOPYFAST_WS;
   const SITE_ID = document.currentScript.getAttribute('data-site-id');
   const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
 
@@ -11,6 +32,17 @@
   const urlParams = new URLSearchParams(window.location.search);
   const STAGING_MODE = urlParams.get('rcf_staging') === '1';
   const STAGING_TOKEN = urlParams.get('rcf_token');
+
+  // Immediately strip staging params from the visible URL so they don't persist
+  // in browser history, bookmarks, or copy-pasted links.
+  if (STAGING_MODE || STAGING_TOKEN) {
+    const cleanParams = new URLSearchParams(window.location.search);
+    cleanParams.delete('rcf_staging');
+    cleanParams.delete('rcf_token');
+    const cleanSearch = cleanParams.toString();
+    const cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + window.location.hash;
+    history.replaceState(history.state, '', cleanUrl);
+  }
 
   if (!SITE_ID) {
     console.error('ReCopyFast: No site ID provided');
@@ -43,6 +75,12 @@
       this.stagingAccess = null;
       this.editMode = false;
 
+      // A/B testing properties
+      this.activeTests = [];
+      this.variantAssignments = {};
+      this.visitorId = null;
+      this.geoData = null;
+
       this.init();
     }
 
@@ -57,6 +95,17 @@
         }
 
         this.scanForContent();
+
+        // A/B testing pipeline (non-blocking for staging mode)
+        if (!this.stagingMode) {
+          this.initVisitorId();
+          await this.fetchActiveTests();
+          await this.bucketVisitor();
+          this.applyVariants();
+          this.setupClickTracking();
+          this.trackImpressions();
+        }
+
         await this.establishConnection();
         this.setupMutationObserver();
 
@@ -1337,6 +1386,10 @@
           self.handleContentUpdate(data);
         });
 
+        this.socket.on('ab-test-update', function(data) {
+          self.handleABTestUpdate(data);
+        });
+
         this.socket.on('disconnect', function() {
           console.log('ReCopyFast: Disconnected from server');
         });
@@ -1393,6 +1446,258 @@
         contentMap: contentMap
       });
     }
+
+    // ==========================================
+    // A/B TESTING METHODS
+    // ==========================================
+
+    initVisitorId() {
+      // Read existing cookie
+      var cookies = document.cookie.split(';');
+      for (var i = 0; i < cookies.length; i++) {
+        var cookie = cookies[i].trim();
+        if (cookie.indexOf('rcf_vid=') === 0) {
+          this.visitorId = cookie.substring(8);
+          return;
+        }
+      }
+
+      // Generate new visitor ID
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        this.visitorId = crypto.randomUUID();
+      } else {
+        this.visitorId = 'rcf-' + Date.now() + '-' + Math.random().toString(36).substring(2, 11);
+      }
+
+      // Set first-party cookie (1 year)
+      document.cookie = 'rcf_vid=' + this.visitorId + '; path=/; max-age=31536000; SameSite=Lax';
+    }
+
+    async fetchActiveTests() {
+      try {
+        var response = await fetch(
+          RECOPYFAST_API + '/ab-tests/active/' + SITE_ID + '?token=' + encodeURIComponent(SITE_TOKEN)
+        );
+        if (!response.ok) return;
+        var data = await response.json();
+        this.activeTests = data.tests || [];
+      } catch (error) {
+        // Silent failure — A/B tests won't run if fetch fails
+        console.log('ReCopyFast: A/B tests unavailable');
+        this.activeTests = [];
+      }
+    }
+
+    async bucketVisitor() {
+      if (!this.activeTests.length || !this.visitorId) return;
+
+      try {
+        var response = await fetch(
+          RECOPYFAST_API + '/ab-tests/bucket/' + SITE_ID +
+          '?token=' + encodeURIComponent(SITE_TOKEN) +
+          '&visitor_id=' + encodeURIComponent(this.visitorId)
+        );
+
+        if (response.ok) {
+          var data = await response.json();
+          this.variantAssignments = data.assignments || {};
+          this.geoData = data.geo || null;
+          return;
+        }
+      } catch (error) {
+        // Fallback: client-side deterministic bucketing
+        console.log('ReCopyFast: Using client-side bucketing fallback');
+      }
+
+      // Client-side fallback using FNV-1a hash
+      var self = this;
+      this.activeTests.forEach(function(test) {
+        if (self.variantAssignments[test.id]) return;
+
+        var hash = self.fnv1aHash(self.visitorId + ':' + test.id);
+        var bucket = hash % 100;
+        var cumulative = 0;
+
+        var eligible = test.variants.filter(function(v) { return true; }); // No geo filter in fallback
+
+        for (var i = 0; i < eligible.length; i++) {
+          cumulative += eligible[i].traffic_percentage;
+          if (bucket < cumulative) {
+            self.variantAssignments[test.id] = eligible[i].id;
+            break;
+          }
+        }
+      });
+    }
+
+    fnv1aHash(str) {
+      var hash = 2166136261;
+      for (var i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = (hash * 16777619) >>> 0;
+      }
+      return hash;
+    }
+
+    applyVariants() {
+      var self = this;
+
+      this.activeTests.forEach(function(test) {
+        var assignedVariantId = self.variantAssignments[test.id];
+        if (!assignedVariantId) return;
+
+        var variant = test.variants.find(function(v) { return v.id === assignedVariantId; });
+        if (!variant) return;
+
+        // Skip replacement for control variants — visitor sees original
+        if (variant.is_control) return;
+
+        // Find target element by target_element_id in the elements map
+        var targetElementId = test.target_element_id;
+        if (!targetElementId) return;
+
+        var elementData = self.elements.get(targetElementId);
+        if (!elementData || !elementData.element) return;
+
+        // Replace content
+        if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
+          elementData.element.value = variant.variant_content;
+        } else {
+          elementData.element.textContent = variant.variant_content;
+        }
+
+        // Add data attributes for debugging/tracking
+        elementData.element.setAttribute('data-rcf-test', test.id);
+        elementData.element.setAttribute('data-rcf-variant', assignedVariantId);
+      });
+    }
+
+    setupClickTracking() {
+      var self = this;
+
+      this.activeTests.forEach(function(test) {
+        var targetElementId = test.target_element_id;
+        if (!targetElementId) return;
+
+        var elementData = self.elements.get(targetElementId);
+        if (!elementData || !elementData.element) return;
+
+        var el = elementData.element;
+
+        // Track clicks on the element or its clickable parent
+        var clickTarget = el;
+        if (el.tagName !== 'A' && el.tagName !== 'BUTTON') {
+          var clickable = el.closest('a, button');
+          if (clickable) clickTarget = clickable;
+        }
+
+        clickTarget.addEventListener('click', function() {
+          var variantId = self.variantAssignments[test.id];
+          if (!variantId || !self.visitorId) return;
+
+          self.sendTrackEvent({
+            site_id: SITE_ID,
+            test_id: test.id,
+            variant_id: variantId,
+            visitor_id: self.visitorId,
+            event_type: 'click',
+            geo_country: self.geoData ? self.geoData.country : null,
+            geo_region: self.geoData ? self.geoData.region : null
+          });
+        });
+      });
+    }
+
+    trackImpressions() {
+      var self = this;
+      var events = [];
+
+      this.activeTests.forEach(function(test) {
+        var variantId = self.variantAssignments[test.id];
+        if (!variantId || !self.visitorId) return;
+
+        events.push({
+          site_id: SITE_ID,
+          test_id: test.id,
+          variant_id: variantId,
+          visitor_id: self.visitorId,
+          event_type: 'view',
+          geo_country: self.geoData ? self.geoData.country : null,
+          geo_region: self.geoData ? self.geoData.region : null
+        });
+      });
+
+      if (events.length > 0) {
+        this.sendTrackEvent(events);
+      }
+    }
+
+    trackConversion(eventName, value) {
+      var self = this;
+      var events = [];
+
+      this.activeTests.forEach(function(test) {
+        var variantId = self.variantAssignments[test.id];
+        if (!variantId || !self.visitorId) return;
+
+        events.push({
+          site_id: SITE_ID,
+          test_id: test.id,
+          variant_id: variantId,
+          visitor_id: self.visitorId,
+          event_type: 'conversion',
+          value: value || 1,
+          metadata: { event_name: eventName },
+          geo_country: self.geoData ? self.geoData.country : null,
+          geo_region: self.geoData ? self.geoData.region : null
+        });
+      });
+
+      if (events.length > 0) {
+        this.sendTrackEvent(events);
+      }
+    }
+
+    sendTrackEvent(eventOrEvents) {
+      var payload = JSON.stringify(Array.isArray(eventOrEvents) ? eventOrEvents : [eventOrEvents]);
+      var url = RECOPYFAST_API + '/ab-tests/track?token=' + encodeURIComponent(SITE_TOKEN);
+
+      // Use sendBeacon for reliability (fires even on page unload)
+      if (navigator.sendBeacon) {
+        var blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(url, blob);
+      } else {
+        // Fallback to fetch
+        fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true
+        }).catch(function() {});
+      }
+    }
+
+    handleABTestUpdate(data) {
+      var self = this;
+      if (data.status === 'active') {
+        // Reload test config
+        this.fetchActiveTests().then(function() {
+          return self.bucketVisitor();
+        }).then(function() {
+          self.applyVariants();
+          self.setupClickTracking();
+          self.trackImpressions();
+        });
+      } else if (data.status === 'completed') {
+        // Remove test from active list, winner content stays applied
+        self.activeTests = self.activeTests.filter(function(t) { return t.id !== data.test_id; });
+        delete self.variantAssignments[data.test_id];
+      }
+    }
+
+    // ==========================================
+    // END A/B TESTING METHODS
+    // ==========================================
 
     handleContentUpdate(data) {
       const elementId = data.elementId;
@@ -1792,10 +2097,12 @@
         const ghost = element.cloneNode(true);
         ghost.style.cssText = 'position: absolute; visibility: hidden; overflow: visible; white-space: pre-wrap; width: ' + element.offsetWidth + 'px; height: auto; pointer-events: none;';
         ghost.textContent = newContent;
-        document.body.appendChild(ghost);
+        // Append to parentNode (not body) so inherited CSS context is preserved
+        const ghostParent = element.parentNode || document.body;
+        ghostParent.appendChild(ghost);
 
         const isOverflowing = ghost.scrollHeight > element.offsetHeight * 1.1; // 10% tolerance
-        document.body.removeChild(ghost);
+        ghostParent.removeChild(ghost);
 
         return isOverflowing;
       } catch (e) {
@@ -1817,9 +2124,25 @@
       // Store original content for cancel (textContent is safe/sanitized)
       const originalText = this.getFullElementText(element);
 
-      // Capture dimensions and styles BEFORE making any changes
+      // Capture dimensions and styles BEFORE making any changes (including reparent)
       const rect = element.getBoundingClientRect();
       const computed = window.getComputedStyle(element);
+
+      // Snapshot typography properties that will be lost when the element is
+      // reparented into the wrapper (breaking the inherited CSS cascade).
+      const capturedTypography = {
+        fontFamily:     computed.fontFamily,
+        fontSize:       computed.fontSize,
+        fontWeight:     computed.fontWeight,
+        fontStyle:      computed.fontStyle,
+        lineHeight:     computed.lineHeight,
+        letterSpacing:  computed.letterSpacing,
+        textTransform:  computed.textTransform,
+        textDecoration: computed.textDecoration,
+        color:          computed.color,
+        textAlign:      computed.textAlign,
+        wordSpacing:    computed.wordSpacing
+      };
 
       // Lock dimensions using CSS custom properties
       element.style.setProperty('--rcf-lock-width', rect.width + 'px');
@@ -1855,6 +2178,24 @@
       // Insert wrapper before element, then move element into it
       element.parentNode.insertBefore(wrapper, element);
       wrapper.appendChild(element);
+
+      // Restore typography styles lost due to reparenting breaking the CSS cascade
+      element.style.fontFamily     = capturedTypography.fontFamily;
+      element.style.fontSize       = capturedTypography.fontSize;
+      element.style.fontWeight     = capturedTypography.fontWeight;
+      element.style.fontStyle      = capturedTypography.fontStyle;
+      element.style.lineHeight     = capturedTypography.lineHeight;
+      element.style.letterSpacing  = capturedTypography.letterSpacing;
+      element.style.textTransform  = capturedTypography.textTransform;
+      element.style.textDecoration = capturedTypography.textDecoration;
+      element.style.color          = capturedTypography.color;
+      element.style.textAlign      = capturedTypography.textAlign;
+      element.style.wordSpacing    = capturedTypography.wordSpacing;
+
+      // Apply edit-mode background and caret color (computed by getEditingColors
+      // but previously never applied to the element itself)
+      element.style.backgroundColor = editColors.inputBg;
+      element.style.caretColor      = editColors.caretColor;
 
       // Make element contenteditable (the key change!)
       element.setAttribute('contenteditable', 'true');
@@ -1962,6 +2303,21 @@
         element.style.removeProperty('--rcf-lock-whitespace');
         element.style.outline = '';
         element.style.outlineOffset = '';
+
+        // Clear typography and edit-mode styles applied during reparent
+        element.style.fontFamily     = '';
+        element.style.fontSize       = '';
+        element.style.fontWeight     = '';
+        element.style.fontStyle      = '';
+        element.style.lineHeight     = '';
+        element.style.letterSpacing  = '';
+        element.style.textTransform  = '';
+        element.style.textDecoration = '';
+        element.style.color          = '';
+        element.style.textAlign      = '';
+        element.style.wordSpacing    = '';
+        element.style.backgroundColor = '';
+        element.style.caretColor      = '';
 
         // Remove wrapper (move element back to original position)
         if (wrapper.parentNode) {
@@ -4209,6 +4565,12 @@
       window.ReCopyFast.sendContentMap();
     },
     isStaging: function() { return window.ReCopyFast.stagingMode; },
-    getStagingAccess: function() { return window.ReCopyFast.stagingAccess; }
+    getStagingAccess: function() { return window.ReCopyFast.stagingAccess; },
+    trackConversion: function(eventName, value) {
+      window.ReCopyFast.trackConversion(eventName, value);
+    }
   };
+
+  // Also expose as window.rcf shorthand
+  window.rcf = window.recopyfast;
 })();

@@ -48,6 +48,9 @@ export function buildSiteToken(siteId: string, apiKey: string) {
   return `${payload}.${signature}`;
 }
 
+/** Maximum lifetime of a site token: 90 days in seconds. */
+const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+
 export function verifySiteTokenSignature(
   siteId: string,
   apiKey: string,
@@ -60,6 +63,14 @@ export function verifySiteTokenSignature(
   if (tokenSiteId !== siteId) return false;
 
   if (!/^[0-9]+$/.test(issuedAt)) return false;
+
+  // Reject tokens that are older than the maximum allowed age.
+  const issuedAtSeconds = parseInt(issuedAt, 10);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
+
+  // Guard against clock-skew / future-dated tokens (allow 60 s of leeway).
+  if (issuedAtSeconds > nowSeconds + 60) return false;
 
   const expectedSignature = crypto
     .createHmac("sha256", apiKey)

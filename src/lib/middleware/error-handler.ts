@@ -265,7 +265,7 @@ export function withErrorHandler(
         requestId,
         method: req.method,
         url: req.url,
-        userAgent: req.headers.get("user-agent"),
+        userAgent: req.headers.get("user-agent") ?? undefined,
         ip:
           req.headers.get("x-forwarded-for") ||
           req.headers.get("x-real-ip") ||
@@ -282,14 +282,26 @@ export function withErrorHandler(
               ? "warn"
               : "info";
 
-      logger[logLevel](`API Error: ${err.message}`, err, requestContext, {
+      const logMetadata = {
         component: "error-handler",
         errorType: appError.type || "UnknownError",
         statusCode,
         severity,
         operational: isOperationalError(err),
         context: appError.context,
-      });
+      };
+      if (logLevel === "error") {
+        logger.error(
+          `API Error: ${err.message}`,
+          err,
+          requestContext,
+          logMetadata,
+        );
+      } else if (logLevel === "warn") {
+        logger.warn(`API Error: ${err.message}`, requestContext, logMetadata);
+      } else {
+        logger.info(`API Error: ${err.message}`, requestContext, logMetadata);
+      }
 
       // Report to Sentry for non-operational errors or high severity
       if (

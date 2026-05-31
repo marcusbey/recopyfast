@@ -162,19 +162,29 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Check if user is already a member
-    const { data: existingMember } = await supabase
-      .from("team_members")
+    // Check if the invitee email is already a member of this team.
+    // We look up auth.users by email to get their user_id, then check
+    // team_members — using the invitee's email, NOT the inviter's user.id.
+    const { data: inviteeUser } = await supabase
+      .from("auth.users")
       .select("id")
-      .eq("team_id", teamId)
-      .eq("user_id", user.id)
-      .single();
+      .eq("email", body.email.toLowerCase())
+      .maybeSingle();
 
-    if (existingMember) {
-      return NextResponse.json(
-        { error: "User is already a team member" },
-        { status: 400 },
-      );
+    if (inviteeUser) {
+      const { data: existingMember } = await supabase
+        .from("team_members")
+        .select("id")
+        .eq("team_id", teamId)
+        .eq("user_id", inviteeUser.id)
+        .maybeSingle();
+
+      if (existingMember) {
+        return NextResponse.json(
+          { error: "User is already a team member" },
+          { status: 400 },
+        );
+      }
     }
 
     // Check if there's already a pending invitation

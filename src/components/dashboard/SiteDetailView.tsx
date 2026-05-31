@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -21,7 +21,10 @@ import {
   FileText,
   Activity,
   History,
+  FlaskConical,
+  ArrowRight,
 } from "lucide-react";
+import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -71,6 +74,19 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [activeTestCount, setActiveTestCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/ab-tests?siteId=${site.id}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((tests: Array<{ status: string }>) => {
+        setActiveTestCount(
+          tests.filter((t) => t.status === "active" || t.status === "running")
+            .length,
+        );
+      })
+      .catch(() => setActiveTestCount(0));
+  }, [site.id]);
   const status = site.status || "active";
   const StatusIcon = statusConfig[status].icon;
 
@@ -232,6 +248,37 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* A/B Testing Summary */}
+      <Card className="border-gray-200">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-violet-500 to-purple-500">
+                <FlaskConical className="h-5 w-5 text-white" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-900">
+                  A/B Copy Testing
+                </p>
+                <p className="text-xs text-gray-500">
+                  {activeTestCount === null
+                    ? "Loading..."
+                    : activeTestCount === 0
+                      ? "No active tests"
+                      : `${activeTestCount} active test${activeTestCount !== 1 ? "s" : ""}`}
+                </p>
+              </div>
+            </div>
+            <Link href={`/dashboard/ab-tests?siteId=${site.id}`}>
+              <Button variant="outline" size="sm">
+                Manage Tests
+                <ArrowRight className="ml-1 h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Embed Script */}
       <Card className="border-gray-200">

@@ -1,4 +1,5 @@
-import { createServerClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
+import { SupabaseClient } from "@supabase/supabase-js";
 import { TeamRole } from "@/types";
 
 export interface PermissionCheck {
@@ -8,10 +9,10 @@ export interface PermissionCheck {
 }
 
 export class CollaborationPermissions {
-  private supabase;
+  private supabase: Promise<SupabaseClient>;
 
   constructor() {
-    this.supabase = createServerClient();
+    this.supabase = createClient();
   }
 
   /**
@@ -23,7 +24,8 @@ export class CollaborationPermissions {
     requiredRoles: TeamRole[],
   ): Promise<PermissionCheck> {
     try {
-      const { data: membership, error } = await this.supabase
+      const client = await this.supabase;
+      const { data: membership, error } = await client
         .from("team_members")
         .select("role")
         .eq("team_id", teamId)
@@ -64,8 +66,10 @@ export class CollaborationPermissions {
     requiredRoles: TeamRole[],
   ): Promise<PermissionCheck> {
     try {
+      const client = await this.supabase;
+
       // Check direct site permissions
-      const { data: sitePermission } = await this.supabase
+      const { data: sitePermission } = await client
         .from("site_permissions")
         .select("role")
         .eq("site_id", siteId)
@@ -83,7 +87,7 @@ export class CollaborationPermissions {
       }
 
       // Check team-based site permissions
-      const { data: teamSitePermissions } = await this.supabase
+      const { data: teamSitePermissions } = await client
         .from("site_permissions")
         .select(
           `
@@ -97,8 +101,11 @@ export class CollaborationPermissions {
         .eq("team_members.user_id", userId);
 
       for (const permission of teamSitePermissions || []) {
-        if (permission.team?.team_members?.[0]) {
-          const userTeamRole = permission.team.team_members[0].role as TeamRole;
+        const permissionTeam = permission.team as unknown as {
+          team_members: Array<{ role: string }>;
+        } | null;
+        if (permissionTeam?.team_members?.[0]) {
+          const userTeamRole = permissionTeam.team_members[0].role as TeamRole;
           const siteRole = permission.role as TeamRole;
 
           // User must have sufficient role in team AND site permission must allow the required roles
@@ -119,7 +126,7 @@ export class CollaborationPermissions {
       }
 
       // Check if site belongs to user's team
-      const { data: siteTeam } = await this.supabase
+      const { data: siteTeam } = await client
         .from("sites")
         .select(
           `
@@ -132,8 +139,11 @@ export class CollaborationPermissions {
         .eq("team_members.user_id", userId)
         .single();
 
-      if (siteTeam?.team?.team_members?.[0]) {
-        const userRole = siteTeam.team.team_members[0].role as TeamRole;
+      const siteTeamData = siteTeam?.team as unknown as {
+        team_members: Array<{ role: string }>;
+      } | null;
+      if (siteTeamData?.team_members?.[0]) {
+        const userRole = siteTeamData.team_members[0].role as TeamRole;
         if (requiredRoles.includes(userRole)) {
           return {
             hasPermission: true,
@@ -163,8 +173,10 @@ export class CollaborationPermissions {
     contentElementId: string,
   ): Promise<PermissionCheck> {
     try {
+      const client = await this.supabase;
+
       // Get content element and associated site
-      const { data: contentElement, error } = await this.supabase
+      const { data: contentElement, error } = await client
         .from("content_elements")
         .select("site_id")
         .eq("id", contentElementId)
@@ -178,7 +190,7 @@ export class CollaborationPermissions {
       }
 
       // Check if there's an active editing session by another user
-      const { data: activeSessions } = await this.supabase
+      const { data: activeSessions } = await client
         .from("content_editing_sessions")
         .select("user_id")
         .eq("content_element_id", contentElementId)
@@ -252,8 +264,10 @@ export class CollaborationPermissions {
         return null;
       }
 
+      const client = await this.supabase;
+
       // End any existing session for this user and content
-      await this.supabase
+      await client
         .from("content_editing_sessions")
         .update({ ended_at: new Date().toISOString() })
         .eq("user_id", userId)
@@ -261,7 +275,7 @@ export class CollaborationPermissions {
         .is("ended_at", null);
 
       // Create new session
-      const { data: session, error } = await this.supabase
+      const { data: session, error } = await client
         .from("content_editing_sessions")
         .insert({
           user_id: userId,
@@ -287,7 +301,8 @@ export class CollaborationPermissions {
    */
   async endEditingSession(sessionToken: string): Promise<boolean> {
     try {
-      const { error } = await this.supabase
+      const client = await this.supabase;
+      const { error } = await client
         .from("content_editing_sessions")
         .update({ ended_at: new Date().toISOString() })
         .eq("session_token", sessionToken)
@@ -305,7 +320,8 @@ export class CollaborationPermissions {
    */
   async updateSessionActivity(sessionToken: string): Promise<boolean> {
     try {
-      const { error } = await this.supabase
+      const client = await this.supabase;
+      const { error } = await client
         .from("content_editing_sessions")
         .update({ last_activity: new Date().toISOString() })
         .eq("session_token", sessionToken)
@@ -321,9 +337,12 @@ export class CollaborationPermissions {
   /**
    * Get active editing sessions for a content element
    */
-  async getActiveEditingSessions(contentElementId: string): Promise<any[]> {
+  async getActiveEditingSessions(
+    contentElementId: string,
+  ): Promise<Record<string, unknown>[]> {
     try {
-      const { data: sessions, error } = await this.supabase
+      const client = await this.supabase;
+      const { data: sessions, error } = await client
         .from("content_editing_sessions")
         .select(
           `
@@ -341,7 +360,12 @@ export class CollaborationPermissions {
           new Date(Date.now() - 30 * 60 * 1000).toISOString(),
         );
 
-      return sessions || [];
+      if (error) {
+        console.error("Error getting active editing sessions:", error);
+        return [];
+      }
+
+      return (sessions as unknown as Record<string, unknown>[]) || [];
     } catch (error) {
       console.error("Error getting active editing sessions:", error);
       return [];

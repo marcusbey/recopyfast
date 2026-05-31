@@ -98,33 +98,58 @@ export class MemoryRateLimiter {
  * Redis-based rate limiter for production
  */
 export class RedisRateLimiter {
-  private client: ReturnType<typeof createClient>;
+  private client: ReturnType<typeof createClient> | null = null;
   private isConnected = false;
+  private readonly resolvedUrl?: string;
 
   constructor(redisUrl?: string) {
-    this.client = createClient({
-      url: redisUrl || process.env.REDIS_URL || "redis://localhost:6379",
-    });
+    // Store the URL but DO NOT construct the Redis client here. createClient()
+    // parses the URL synchronously, so constructing it at module-import time
+    // would throw during `next build` page-data collection whenever a route
+    // imports this module with a placeholder/invalid REDIS_URL. The client is
+    // created lazily on first connect() instead.
+    this.resolvedUrl = redisUrl ?? process.env.REDIS_URL;
+  }
 
-    this.client.on("error", (err) => {
-      console.error("Redis Client Error:", err);
-      this.isConnected = false;
-    });
+  private ensureClient(): ReturnType<typeof createClient> {
+    if (!this.client) {
+      // In production a missing REDIS_URL means rate limiting would silently
+      // fall back to a local Redis that does not exist on Vercel. Fail fast
+      // so the misconfiguration is caught at first use rather than ignored.
+      if (!this.resolvedUrl && process.env.NODE_ENV === "production") {
+        throw new Error(
+          "REDIS_URL environment variable is required in production. " +
+            "Rate limiting cannot be initialised without a Redis connection.",
+        );
+      }
 
-    this.client.on("connect", () => {
-      console.log("Redis Client Connected");
-      this.isConnected = true;
-    });
+      this.client = createClient({
+        url: this.resolvedUrl ?? "redis://localhost:6379",
+      });
+
+      this.client.on("error", (err) => {
+        console.error("Redis Client Error:", err);
+        this.isConnected = false;
+      });
+
+      this.client.on("connect", () => {
+        console.log("Redis Client Connected");
+        this.isConnected = true;
+      });
+    }
+    return this.client;
   }
 
   async connect(): Promise<void> {
+    const client = this.ensureClient();
     if (!this.isConnected) {
-      await this.client.connect();
+      await client.connect();
+      this.isConnected = true;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
+    if (this.isConnected && this.client) {
       await this.client.disconnect();
       this.isConnected = false;
     }
@@ -145,7 +170,7 @@ export class RedisRateLimiter {
     const windowEnd = windowStart + config.windowMs;
 
     // Use Redis pipeline for atomic operations
-    const pipeline = this.client.multi();
+    const pipeline = this.client!.multi();
 
     pipeline.incr(key);
     pipeline.expire(key, Math.ceil(config.windowMs / 1000));
@@ -157,8 +182,8 @@ export class RedisRateLimiter {
       throw new Error("Redis pipeline execution failed");
     }
 
-    const requests = results[0] as number;
-    const ttl = results[2] as number;
+    const requests = Number(results[0]);
+    const ttl = Number(results[2]);
 
     const allowed = requests <= config.maxRequests;
     const remaining = Math.max(0, config.maxRequests - requests);
@@ -175,20 +200,20 @@ export class RedisRateLimiter {
   async resetLimit(config: RateLimitConfig): Promise<void> {
     await this.connect();
     const key = this.generateKey(config);
-    await this.client.del(key);
+    await this.client!.del(key);
   }
 
   async clearAll(): Promise<void> {
     await this.connect();
-    const keys = await this.client.keys("rate_limit:*");
+    const keys = await this.client!.keys("rate_limit:*");
     if (keys.length > 0) {
-      await this.client.del(keys);
+      await this.client!.del(keys);
     }
   }
 
   async getStats(): Promise<{ totalKeys: number; activeWindows: number }> {
     await this.connect();
-    const keys = await this.client.keys("rate_limit:*");
+    const keys = await this.client!.keys("rate_limit:*");
     return {
       totalKeys: keys.length,
       activeWindows: keys.length,

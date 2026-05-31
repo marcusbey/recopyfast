@@ -5,7 +5,7 @@ if (!process.env.STRIPE_SECRET_KEY) {
 }
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-12-18.acacia",
+  apiVersion: "2025-07-30.basil",
   typescript: true,
 });
 
@@ -23,7 +23,7 @@ export const STRIPE_CONFIG = {
       ? process.env.STRIPE_WEBHOOK_SECRET_LIVE!
       : process.env.STRIPE_WEBHOOK_SECRET!,
   CURRENCY: "usd",
-  API_VERSION: "2024-12-18.acacia" as const,
+  API_VERSION: "2025-07-30.basil" as const,
 } as const;
 
 // Subscription plans configuration
@@ -43,6 +43,7 @@ export const SUBSCRIPTION_PLANS = {
       collaborators: 0,
       aiFeatures: false,
       translations: 0,
+      abTesting: false,
     },
   },
   STARTER: {
@@ -71,6 +72,7 @@ export const SUBSCRIPTION_PLANS = {
       collaborators: 0,
       aiFeatures: false,
       translations: 0,
+      abTesting: false,
     },
   },
   PRO: {
@@ -94,12 +96,14 @@ export const SUBSCRIPTION_PLANS = {
       "Click-to-edit interface",
       "Full version history",
       "Priority support",
+      "AI A/B copy testing",
     ],
     limits: {
       websites: 3,
       collaborators: 5,
       aiFeatures: true,
       translations: -1, // unlimited
+      abTesting: true,
     },
   },
   ENTERPRISE: {
@@ -123,12 +127,14 @@ export const SUBSCRIPTION_PLANS = {
       "Full version history",
       "Dedicated support",
       "Custom integrations",
+      "AI A/B copy testing",
     ],
     limits: {
       websites: -1, // unlimited
       collaborators: -1, // unlimited
       aiFeatures: true,
       translations: -1, // unlimited
+      abTesting: true,
     },
   },
 } as const;

@@ -435,8 +435,9 @@ describe("AuthContext", () => {
   });
 
   it("handles auth state change updates", async () => {
-    let authChangeCallback: ((event: string, session: any) => void) | null =
-      null;
+    let authChangeCallback:
+      | ((event: string, session: Record<string, unknown> | null) => void)
+      | null = null;
 
     mockSupabaseClient.auth.onAuthStateChange.mockImplementation((callback) => {
       authChangeCallback = callback;

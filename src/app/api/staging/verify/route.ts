@@ -62,14 +62,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // TODO: Send verification email
-      // For now, return the code (in production, this would be emailed)
+      // TODO: deliver code via transactional email (Resend/SendGrid)
+      // result.verificationCode is available server-side; never expose it in the response.
 
       return NextResponse.json({
         success: true,
         message: "Verification code sent to email",
-        // In production, don't return this - send via email instead
-        verificationCode: result.verificationCode,
       });
     }
 
@@ -111,14 +109,12 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // TODO: Send verification email
-      // For now, return the code (in production, this would be emailed)
+      // TODO: deliver code via transactional email (Resend/SendGrid)
+      // result.verificationCode is available server-side; never expose it in the response.
 
       return NextResponse.json({
         success: true,
         message: "Verification code resent",
-        // In production, don't return this - send via email instead
-        verificationCode: result.verificationCode,
       });
     }
 

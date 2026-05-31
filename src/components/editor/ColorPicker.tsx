@@ -5,6 +5,20 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { DEFAULT_COLOR_PRESETS } from "@/types/editor";
 
+/**
+ * Converts an rgb/rgba string returned by getComputedStyle (e.g. "rgb(255, 0, 0)")
+ * to a lowercase 6-digit hex string (e.g. "#ff0000").
+ * Returns the original string unchanged when it is already in hex or any other format.
+ */
+function rgbToHex(color: string): string {
+  const match = color.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!match) return color;
+  const r = parseInt(match[1], 10);
+  const g = parseInt(match[2], 10);
+  const b = parseInt(match[3], 10);
+  return "#" + [r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("");
+}
+
 interface ColorPickerProps {
   value: string;
   onChange: (color: string) => void;
@@ -38,9 +52,12 @@ export default function ColorPicker({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Normalize value to hex so the trigger and custom input always show hex
+  const hexValue = rgbToHex(value);
+
   // Update custom color when value changes
   useEffect(() => {
-    setCustomColor(value);
+    setCustomColor(rgbToHex(value));
   }, [value]);
 
   const handlePresetClick = (color: string) => {
@@ -74,9 +91,9 @@ export default function ColorPicker({
         <div className="flex items-center gap-2">
           <div
             className="w-5 h-5 rounded border border-gray-600"
-            style={{ backgroundColor: value }}
+            style={{ backgroundColor: hexValue }}
           />
-          <span className="font-mono text-xs uppercase">{value}</span>
+          <span className="font-mono text-xs uppercase">{hexValue}</span>
         </div>
         <ChevronDown
           className={`w-4 h-4 text-gray-400 transition-transform ${
@@ -102,7 +119,7 @@ export default function ColorPicker({
                   key={preset.value}
                   onClick={() => handlePresetClick(preset.value)}
                   className={`w-8 h-8 rounded-lg border-2 transition-all hover:scale-110 ${
-                    value === preset.value
+                    hexValue === preset.value
                       ? "border-emerald-400 ring-2 ring-emerald-400/30"
                       : "border-gray-600 hover:border-gray-500"
                   }`}

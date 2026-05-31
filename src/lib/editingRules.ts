@@ -135,9 +135,10 @@ export function getTextEditingStyles(
     lineHeight: computedStyle.lineHeight,
     letterSpacing: computedStyle.letterSpacing,
     color: computedStyle.color,
-    textAlign: computedStyle.textAlign as any,
+    textAlign: computedStyle.textAlign as React.CSSProperties["textAlign"],
     textDecoration: computedStyle.textDecoration,
-    textTransform: computedStyle.textTransform,
+    textTransform:
+      computedStyle.textTransform as React.CSSProperties["textTransform"],
 
     // Preserve spacing EXACTLY
     padding: computedStyle.padding,
@@ -156,7 +157,7 @@ export function getTextEditingStyles(
     minWidth: computedStyle.minWidth,
     maxWidth: computedStyle.maxWidth,
     minHeight: computedStyle.height,
-    boxSizing: computedStyle.boxSizing,
+    boxSizing: computedStyle.boxSizing as React.CSSProperties["boxSizing"],
 
     // Preserve background (no change during editing)
     backgroundColor: computedStyle.backgroundColor,
@@ -244,7 +245,7 @@ export function getImageEditingStyles(
     width: computedStyle.width,
     height: computedStyle.height,
     borderRadius: computedStyle.borderRadius,
-    objectFit: computedStyle.objectFit as any,
+    objectFit: computedStyle.objectFit as React.CSSProperties["objectFit"],
     objectPosition: computedStyle.objectPosition,
     transition: "all 0.2s ease",
   };

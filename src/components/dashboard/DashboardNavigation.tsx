@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Globe,
   FileText,
+  FlaskConical,
   BarChart3,
   Users,
   Settings,
@@ -43,6 +44,11 @@ const navItems: NavItem[] = [
     label: "Content",
     href: "/dashboard/content",
     icon: FileText,
+  },
+  {
+    label: "A/B Tests",
+    href: "/dashboard/ab-tests",
+    icon: FlaskConical,
   },
   {
     label: "Analytics",
