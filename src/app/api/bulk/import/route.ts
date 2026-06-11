@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkImportPayload, ContentElement } from "@/types";
 import { v4 as uuidv4 } from "uuid";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 export async function POST(req: NextRequest) {
   try {
@@ -282,12 +283,22 @@ async function importContentElements(
 
   for (const element of elements) {
     try {
+      // Sanitize user-supplied content fields before writing to DB (XSS prevention)
+      const sanitizedCurrentContent = sanitizeHTML(
+        element.current_content!,
+        "RICH_TEXT",
+      );
+      const sanitizedOriginalContent = sanitizeHTML(
+        element.original_content || "",
+        "RICH_TEXT",
+      );
+
       const elementData = {
         site_id: siteId,
         element_id: element.element_id!,
         selector: element.selector!,
-        original_content: element.original_content || "",
-        current_content: element.current_content!,
+        original_content: sanitizedOriginalContent,
+        current_content: sanitizedCurrentContent,
         language: element.language || "en",
         variant: element.variant || "default",
         metadata: element.metadata || {},

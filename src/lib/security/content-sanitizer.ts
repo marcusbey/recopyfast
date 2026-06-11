@@ -81,6 +81,7 @@ export const SANITIZATION_CONFIGS = {
     ALLOWED_TAGS: ["p", "br", "strong", "em", "span"],
     ALLOWED_ATTR: ["class"],
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
+    KEEP_CONTENT: true, // preserve text content when stripping forbidden tags (e.g. <script>text</script> → "text")
     STRIP_EMPTY: true,
   },
 
@@ -175,8 +176,22 @@ export function validateAndSanitizeInput(input: unknown): string {
       timestamp: new Date().toISOString(),
     });
 
-    // Return sanitized version
-    return sanitizeHTML(stringInput, "BASIC_TEXT");
+    // Strip all HTML tags (preserving their text content) then neutralise
+    // dangerous URI schemes and HTML-encode the result so it is safe to embed
+    // anywhere. We cannot use DOMPurify here because DOMPurify intentionally
+    // drops the *content* of <script> tags, which would produce an empty
+    // string for inputs like `<script>alert(1)</script>`.
+    const textContent = stringInput
+      .replace(/<[^>]*>/g, "") // strip tags, keep text nodes
+      .replace(/javascript\s*:/gi, "javascript&#x3A;") // neutralise JS URIs
+      .replace(/vbscript\s*:/gi, "vbscript&#x3A;"); // neutralise VBS URIs
+    return textContent
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#x27;")
+      .replace(/\//g, "&#x2F;");
   }
 
   // For non-HTML content, just sanitize basic patterns

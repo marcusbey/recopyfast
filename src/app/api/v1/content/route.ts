@@ -6,6 +6,7 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/api/rate-limiter";
 import { analytics } from "@/lib/analytics/tracker";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 export async function GET(req: NextRequest) {
   try {
@@ -53,8 +54,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== siteId) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== siteId) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },
@@ -185,8 +186,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== site_id) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== site_id) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },
@@ -205,6 +206,9 @@ export async function POST(req: NextRequest) {
       },
     );
 
+    // Sanitize user-supplied content before any DB write
+    const sanitizedContent = sanitizeHTML(content, "RICH_TEXT");
+
     // Check if content element exists
     const { data: existingElement } = await supabase
       .from("content_elements")
@@ -221,7 +225,7 @@ export async function POST(req: NextRequest) {
       const { data, error: updateError } = await supabase
         .from("content_elements")
         .update({
-          current_content: content,
+          current_content: sanitizedContent,
           metadata: metadata || {},
           updated_at: new Date().toISOString(),
         })
@@ -241,8 +245,8 @@ export async function POST(req: NextRequest) {
           site_id,
           element_id,
           selector: `[data-element-id="${element_id}"]`, // Default selector
-          original_content: content,
-          current_content: content,
+          original_content: sanitizedContent,
+          current_content: sanitizedContent,
           language: language || "en",
           variant: variant || "default",
           metadata: metadata || {},
@@ -330,8 +334,8 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== siteId) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== siteId) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkUpdatePayload } from "@/types";
 import { v4 as uuidv4 } from "uuid";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 export async function POST(req: NextRequest) {
   try {
@@ -301,12 +302,15 @@ async function processBulkUpdates(
           continue;
       }
 
+      // Sanitize computed content before writing to DB (XSS prevention)
+      const sanitizedNewContent = sanitizeHTML(newContent, "RICH_TEXT");
+
       // Update content element if changed
-      if (newContent !== element.current_content) {
+      if (sanitizedNewContent !== element.current_content) {
         const { error: updateError } = await supabase
           .from("content_elements")
           .update({
-            current_content: newContent,
+            current_content: sanitizedNewContent,
             updated_at: new Date().toISOString(),
           })
           .eq("id", element.id);

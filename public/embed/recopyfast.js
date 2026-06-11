@@ -1882,17 +1882,9 @@
           outline: 2px solid #3b82f6 !important;
           outline-offset: 2px !important;
         }
-        /* Wrapper for relative toolbar positioning */
-        .rcf-edit-wrapper {
-          position: relative !important;
-          display: inline-block !important;
-        }
-        /* Relatively-positioned toolbar (for in-place editing) */
-        .rcf-actions-relative {
-          position: absolute;
-          bottom: calc(100% + 8px);
-          left: 50%;
-          transform: translateX(-50%);
+        /* Inline edit toolbar — fixed, floats above the edited element */
+        .rcf-actions-inline {
+          position: fixed;
           display: flex;
           gap: 6px;
           background: linear-gradient(135deg, rgba(30, 41, 59, 0.98) 0%, rgba(15, 23, 42, 0.98) 100%);
@@ -1904,8 +1896,9 @@
           box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
           z-index: 10000;
           white-space: nowrap;
+          pointer-events: auto;
         }
-        .rcf-actions-relative button {
+        .rcf-actions-inline button {
           display: flex;
           align-items: center;
           gap: 5px;
@@ -1918,17 +1911,15 @@
           transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
           font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        .rcf-actions-relative button:hover {
+        .rcf-actions-inline button:hover {
           transform: translateY(-1px);
         }
-        .rcf-actions-relative button:active {
+        .rcf-actions-inline button:active {
           transform: scale(0.98);
         }
         /* Character counter for in-place editing */
         .rcf-char-counter-inline {
-          position: absolute;
-          top: calc(100% + 4px);
-          right: 0;
+          position: fixed;
           font-size: 11px;
           font-family: ui-sans-serif, system-ui, sans-serif;
           padding: 4px 10px;
@@ -1936,6 +1927,7 @@
           backdrop-filter: blur(8px);
           z-index: 10000;
           white-space: nowrap;
+          pointer-events: none;
         }
         .rcf-actions {
           position: fixed;
@@ -2124,27 +2116,11 @@
       // Store original content for cancel (textContent is safe/sanitized)
       const originalText = this.getFullElementText(element);
 
-      // Capture dimensions and styles BEFORE making any changes (including reparent)
+      // Capture dimensions and styles BEFORE making any changes
       const rect = element.getBoundingClientRect();
       const computed = window.getComputedStyle(element);
 
-      // Snapshot typography properties that will be lost when the element is
-      // reparented into the wrapper (breaking the inherited CSS cascade).
-      const capturedTypography = {
-        fontFamily:     computed.fontFamily,
-        fontSize:       computed.fontSize,
-        fontWeight:     computed.fontWeight,
-        fontStyle:      computed.fontStyle,
-        lineHeight:     computed.lineHeight,
-        letterSpacing:  computed.letterSpacing,
-        textTransform:  computed.textTransform,
-        textDecoration: computed.textDecoration,
-        color:          computed.color,
-        textAlign:      computed.textAlign,
-        wordSpacing:    computed.wordSpacing
-      };
-
-      // Lock dimensions using CSS custom properties
+      // Lock dimensions using CSS custom properties (prevents resize while editing)
       element.style.setProperty('--rcf-lock-width', rect.width + 'px');
       element.style.setProperty('--rcf-lock-height', rect.height + 'px');
       element.style.setProperty('--rcf-lock-whitespace', computed.whiteSpace || 'normal');
@@ -2170,41 +2146,22 @@
       ].join('\n');
       document.head.appendChild(selectionStyle);
 
-      // Create wrapper to position toolbar relatively
-      const wrapper = document.createElement('div');
-      wrapper.className = 'rcf-edit-wrapper';
-      wrapper.setAttribute('data-rcf-wrapper', editSessionId);
+      // Only apply background tint when the element has a concrete (non-transparent)
+      // background color. Skipping on transparent/gradient prevents contrast breakage.
+      const elementBgParsed = this.parseColor(computed.backgroundColor);
+      if (elementBgParsed !== null) {
+        element.style.backgroundColor = editColors.inputBg;
+      }
+      element.style.caretColor = editColors.caretColor;
 
-      // Insert wrapper before element, then move element into it
-      element.parentNode.insertBefore(wrapper, element);
-      wrapper.appendChild(element);
-
-      // Restore typography styles lost due to reparenting breaking the CSS cascade
-      element.style.fontFamily     = capturedTypography.fontFamily;
-      element.style.fontSize       = capturedTypography.fontSize;
-      element.style.fontWeight     = capturedTypography.fontWeight;
-      element.style.fontStyle      = capturedTypography.fontStyle;
-      element.style.lineHeight     = capturedTypography.lineHeight;
-      element.style.letterSpacing  = capturedTypography.letterSpacing;
-      element.style.textTransform  = capturedTypography.textTransform;
-      element.style.textDecoration = capturedTypography.textDecoration;
-      element.style.color          = capturedTypography.color;
-      element.style.textAlign      = capturedTypography.textAlign;
-      element.style.wordSpacing    = capturedTypography.wordSpacing;
-
-      // Apply edit-mode background and caret color (computed by getEditingColors
-      // but previously never applied to the element itself)
-      element.style.backgroundColor = editColors.inputBg;
-      element.style.caretColor      = editColors.caretColor;
-
-      // Make element contenteditable (the key change!)
+      // Make element contenteditable in place — no reparenting
       element.setAttribute('contenteditable', 'true');
       element.style.outline = '2px solid ' + editColors.outlineColor;
       element.style.outlineOffset = '2px';
 
-      // Create toolbar positioned relative to wrapper
+      // Create toolbar as a fixed element appended to body (no reparent of the edited element)
       const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'rcf-actions-relative';
+      actionsDiv.className = 'rcf-actions-inline';
       actionsDiv.setAttribute('data-rcf-toolbar', editSessionId);
 
       const aiBtn = document.createElement('button');
@@ -2229,10 +2186,7 @@
       actionsDiv.appendChild(saveBtn);
       actionsDiv.appendChild(cancelBtn);
 
-      // Insert toolbar as first child of wrapper (positions above element)
-      wrapper.insertBefore(actionsDiv, element);
-
-      // Create character counter
+      // Create character counter (also fixed, appended to body)
       const maxChars = self.calculateMaxChars(element);
       const counterContainer = document.createElement('div');
       counterContainer.className = 'rcf-char-counter-inline';
@@ -2245,7 +2199,43 @@
       counterContainer.style.background = editColors.counterBg;
       counterContainer.style.border = '1px solid ' + defaultBorderColor;
 
-      wrapper.appendChild(counterContainer);
+      // Helper: compute toolbar position above the element using fixed viewport coords.
+      // Defined here so actionsDiv and counterContainer are already in scope.
+      const positionToolbar = function() {
+        const r = element.getBoundingClientRect();
+        const toolbarHeight = actionsDiv.offsetHeight || 44;
+        const GAP = 8;
+        let top = r.top - toolbarHeight - GAP;
+        // If toolbar would go off-screen top, flip below the element
+        if (top < 4) {
+          top = r.bottom + GAP;
+        }
+        // Center horizontally, clamped to viewport
+        const toolbarWidth = actionsDiv.offsetWidth || 200;
+        let left = r.left + r.width / 2 - toolbarWidth / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - toolbarWidth - 8));
+        actionsDiv.style.top  = top + 'px';
+        actionsDiv.style.left = left + 'px';
+      };
+
+      // Helper: compute counter position below the element
+      const positionCounter = function() {
+        const r = element.getBoundingClientRect();
+        const GAP = 4;
+        counterContainer.style.top  = (r.bottom + GAP) + 'px';
+        const counterWidth = counterContainer.offsetWidth || 80;
+        let counterLeft = r.right - counterWidth;
+        counterLeft = Math.max(8, Math.min(counterLeft, window.innerWidth - counterWidth - 8));
+        counterContainer.style.left = counterLeft + 'px';
+      };
+
+      // Append both toolbar and counter to body so the edited element stays in place
+      document.body.appendChild(actionsDiv);
+      document.body.appendChild(counterContainer);
+
+      // Initial positioning (done after append so offsetWidth/Height are available)
+      positionToolbar();
+      positionCounter();
 
       // Sanitize content - get clean text from contenteditable
       const sanitizeContent = function() {
@@ -2284,12 +2274,24 @@
       selection.removeAllRanges();
       selection.addRange(range);
 
+      // Reposition toolbar and counter on scroll or resize
+      const repositionHandler = function() {
+        positionToolbar();
+        positionCounter();
+      };
+      window.addEventListener('scroll', repositionHandler, true);
+      window.addEventListener('resize', repositionHandler);
+
       // Track if we're in the middle of cleanup to prevent double cleanup
       let isCleaningUp = false;
 
       const cleanup = function() {
         if (isCleaningUp) return;
         isCleaningUp = true;
+
+        // Remove scroll/resize listeners
+        window.removeEventListener('scroll', repositionHandler, true);
+        window.removeEventListener('resize', repositionHandler);
 
         // Remove contenteditable
         element.removeAttribute('contenteditable');
@@ -2304,25 +2306,17 @@
         element.style.outline = '';
         element.style.outlineOffset = '';
 
-        // Clear typography and edit-mode styles applied during reparent
-        element.style.fontFamily     = '';
-        element.style.fontSize       = '';
-        element.style.fontWeight     = '';
-        element.style.fontStyle      = '';
-        element.style.lineHeight     = '';
-        element.style.letterSpacing  = '';
-        element.style.textTransform  = '';
-        element.style.textDecoration = '';
-        element.style.color          = '';
-        element.style.textAlign      = '';
-        element.style.wordSpacing    = '';
+        // Clear only the edit-mode styles we actually set (no typography restore needed
+        // since the element was never reparented)
         element.style.backgroundColor = '';
         element.style.caretColor      = '';
 
-        // Remove wrapper (move element back to original position)
-        if (wrapper.parentNode) {
-          wrapper.parentNode.insertBefore(element, wrapper);
-          wrapper.parentNode.removeChild(wrapper);
+        // Remove fixed toolbar and counter from body
+        if (actionsDiv.parentNode) {
+          actionsDiv.parentNode.removeChild(actionsDiv);
+        }
+        if (counterContainer.parentNode) {
+          counterContainer.parentNode.removeChild(counterContainer);
         }
 
         // Remove dynamic selection styles
@@ -2435,8 +2429,10 @@
 
       // Outside click handler
       const outsideClickHandler = function(e) {
-        // Don't trigger on clicks within the wrapper (toolbar, element, counter)
-        if (wrapper.contains(e.target)) {
+        // Don't trigger on clicks within the edited element, toolbar, or counter
+        if (element.contains(e.target) ||
+            actionsDiv.contains(e.target) ||
+            counterContainer.contains(e.target)) {
           return;
         }
         // Save on outside click

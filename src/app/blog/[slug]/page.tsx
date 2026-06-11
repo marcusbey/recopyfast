@@ -5,6 +5,7 @@ import { Calendar, Clock, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 interface BlogPost {
   id: string;
@@ -98,7 +99,10 @@ export default async function BlogPostPage({
         <article className="prose prose-lg max-w-none">
           <div
             dangerouslySetInnerHTML={{
-              __html: post.content.replace(/\n/g, "<br />"),
+              __html: sanitizeHTML(
+                post.content.replace(/\n/g, "<br />"),
+                "RICH_TEXT",
+              ),
             }}
           />
         </article>

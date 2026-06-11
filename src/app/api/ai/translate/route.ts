@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,6 +40,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
+    // Authorization: the authenticated user must have a permission on this site.
+    // Without this check any logged-in user could trigger paid translation jobs
+    // and consume ticket quota billed to another tenant's site.
+    const { data: permission } = await supabase
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", siteId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!permission) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     // Check feature access and consume usage
     const usageResult = await consumeFeatureUsage(user.id, "translation", {
       siteId,
@@ -71,13 +86,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
 
-    // Save translations to database as new language variant
+    // Save translations to database as new language variant.
+    // Sanitize AI-generated content before writing (XSS prevention — AI output
+    // can contain injected markup if the source content was adversarially crafted).
     const translatedElements = result.data!.map((translation) => ({
       site_id: siteId,
       element_id: translation.id,
       selector: "", // Will be populated from existing element
-      original_content: translation.originalText,
-      current_content: translation.translatedText,
+      original_content: sanitizeHTML(translation.originalText, "RICH_TEXT"),
+      current_content: sanitizeHTML(translation.translatedText, "RICH_TEXT"),
       language: toLanguage,
       variant: "default",
       metadata: {

@@ -101,7 +101,6 @@ describe("/api/billing/subscription", () => {
         "test@example.com",
         "pro",
         "pm_test_123",
-        undefined,
       );
     });
 

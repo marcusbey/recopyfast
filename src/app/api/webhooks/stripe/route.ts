@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { stripe, STRIPE_CONFIG } from "@/lib/stripe/config";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { addTicketsToUser } from "@/lib/stripe/tickets";
 
 export async function POST(req: NextRequest) {
@@ -24,17 +24,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Use service-role client so RLS does not block webhook DB writes.
+  const supabase = createServiceRoleClient();
+
   // Idempotency guard: short-circuit if this Stripe event was already processed.
-  // Relies on billing_events.stripe_event_id; a UNIQUE constraint on that column
-  // is strongly recommended to prevent races under concurrent retries.
-  // TODO: add UNIQUE constraint on stripe_event_id in billing_events table
-  const supabaseIdempotency = await createClient();
-  const { data: existingEvent, error: idempotencyError } =
-    await supabaseIdempotency
-      .from("billing_events")
-      .select("id")
-      .eq("stripe_event_id", event.id)
-      .maybeSingle();
+  const { data: existingEvent, error: idempotencyError } = await supabase
+    .from("billing_events")
+    .select("id")
+    .eq("stripe_event_id", event.id)
+    .maybeSingle();
 
   if (idempotencyError) {
     console.error("Idempotency check failed:", idempotencyError.message);
@@ -51,23 +49,23 @@ export async function POST(req: NextRequest) {
   try {
     switch (event.type) {
       case "customer.subscription.created":
-        await handleSubscriptionCreated(event.data.object);
+        await handleSubscriptionCreated(event.data.object, supabase);
         break;
 
       case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event.data.object);
+        await handleSubscriptionUpdated(event.data.object, supabase);
         break;
 
       case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event.data.object);
+        await handleSubscriptionDeleted(event.data.object, supabase);
         break;
 
       case "invoice.payment_succeeded":
-        await handleInvoicePaymentSucceeded(event.data.object);
+        await handleInvoicePaymentSucceeded(event.data.object, supabase);
         break;
 
       case "invoice.payment_failed":
-        await handleInvoicePaymentFailed(event.data.object);
+        await handleInvoicePaymentFailed(event.data.object, supabase);
         break;
 
       case "payment_intent.succeeded":
@@ -83,7 +81,7 @@ export async function POST(req: NextRequest) {
         break;
 
       case "customer.updated":
-        await handleCustomerUpdated(event.data.object);
+        await handleCustomerUpdated(event.data.object, supabase);
         break;
 
       default:
@@ -91,10 +89,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Log the event for audit trail
-    await logBillingEvent(event);
+    await logBillingEvent(event, supabase);
 
     return NextResponse.json({ received: true });
   } catch (error: any) {
+    // A unique-violation means a concurrent delivery already processed this
+    // event. Return 200 so Stripe stops retrying — the work is already done.
+    if (error?.code === "23505") {
+      console.log(
+        `Stripe event ${event.id} hit a unique-violation — already processed concurrently.`,
+      );
+      return NextResponse.json({ received: true, duplicate: true });
+    }
     console.error("Error processing webhook:", error);
     return NextResponse.json(
       { error: "Error processing webhook" },
@@ -103,11 +109,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
+type ServiceClient = ReturnType<typeof createServiceRoleClient>;
+
 /**
  * Handle subscription creation
  */
-async function handleSubscriptionCreated(subscription: any) {
-  const supabase = await createClient();
+async function handleSubscriptionCreated(
+  subscription: any,
+  supabase: ServiceClient,
+) {
   const userId = subscription.metadata?.user_id;
 
   if (!userId) {
@@ -115,9 +125,9 @@ async function handleSubscriptionCreated(subscription: any) {
     return;
   }
 
-  // Get customer
+  // Get customer from billing_customers
   const { data: customer } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("stripe_customer_id", subscription.customer)
     .single();
@@ -127,12 +137,13 @@ async function handleSubscriptionCreated(subscription: any) {
     return;
   }
 
-  // Insert or update subscription
-  await supabase.from("subscriptions").upsert({
+  // Insert or update subscription — use actual migration column names:
+  // plan (not plan_id), cancel_at (not cancel_at_period_end)
+  await supabase.from("billing_subscriptions").upsert({
     user_id: userId,
     customer_id: customer.id,
     stripe_subscription_id: subscription.id,
-    plan_id: subscription.metadata?.plan_id || "pro",
+    plan: subscription.metadata?.plan_id || "pro",
     status: subscription.status,
     current_period_start: new Date(
       subscription.current_period_start * 1000,
@@ -140,7 +151,9 @@ async function handleSubscriptionCreated(subscription: any) {
     current_period_end: new Date(
       subscription.current_period_end * 1000,
     ).toISOString(),
-    cancel_at_period_end: subscription.cancel_at_period_end,
+    cancel_at: subscription.cancel_at
+      ? new Date(subscription.cancel_at * 1000).toISOString()
+      : null,
     canceled_at: subscription.canceled_at
       ? new Date(subscription.canceled_at * 1000).toISOString()
       : null,
@@ -156,13 +169,14 @@ async function handleSubscriptionCreated(subscription: any) {
 /**
  * Handle subscription updates
  */
-async function handleSubscriptionUpdated(subscription: any) {
-  const supabase = await createClient();
-
+async function handleSubscriptionUpdated(
+  subscription: any,
+  supabase: ServiceClient,
+) {
   await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .update({
-      plan_id: subscription.metadata?.plan_id || "pro",
+      plan: subscription.metadata?.plan_id || "pro",
       status: subscription.status,
       current_period_start: new Date(
         subscription.current_period_start * 1000,
@@ -170,7 +184,9 @@ async function handleSubscriptionUpdated(subscription: any) {
       current_period_end: new Date(
         subscription.current_period_end * 1000,
       ).toISOString(),
-      cancel_at_period_end: subscription.cancel_at_period_end,
+      cancel_at: subscription.cancel_at
+        ? new Date(subscription.cancel_at * 1000).toISOString()
+        : null,
       canceled_at: subscription.canceled_at
         ? new Date(subscription.canceled_at * 1000).toISOString()
         : null,
@@ -187,11 +203,12 @@ async function handleSubscriptionUpdated(subscription: any) {
 /**
  * Handle subscription deletion
  */
-async function handleSubscriptionDeleted(subscription: any) {
-  const supabase = await createClient();
-
+async function handleSubscriptionDeleted(
+  subscription: any,
+  supabase: ServiceClient,
+) {
   await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .update({
       status: "canceled",
       canceled_at: new Date().toISOString(),
@@ -202,12 +219,13 @@ async function handleSubscriptionDeleted(subscription: any) {
 /**
  * Handle successful invoice payment
  */
-async function handleInvoicePaymentSucceeded(invoice: any) {
-  const supabase = await createClient();
-
+async function handleInvoicePaymentSucceeded(
+  invoice: any,
+  supabase: ServiceClient,
+) {
   // Get customer
   const { data: customer } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("stripe_customer_id", invoice.customer)
     .single();
@@ -219,13 +237,13 @@ async function handleInvoicePaymentSucceeded(invoice: any) {
 
   // Get subscription if exists
   const { data: subscription } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .select("*")
     .eq("stripe_subscription_id", invoice.subscription)
     .single();
 
   // Insert or update invoice
-  await supabase.from("invoices").upsert({
+  await supabase.from("billing_invoices").upsert({
     customer_id: customer.id,
     subscription_id: subscription?.id,
     stripe_invoice_id: invoice.id,
@@ -235,30 +253,19 @@ async function handleInvoicePaymentSucceeded(invoice: any) {
     status: invoice.status,
     hosted_invoice_url: invoice.hosted_invoice_url,
     invoice_pdf: invoice.invoice_pdf,
-    period_start: invoice.period_start
-      ? new Date(invoice.period_start * 1000).toISOString()
-      : null,
-    period_end: invoice.period_end
-      ? new Date(invoice.period_end * 1000).toISOString()
-      : null,
-    due_date: invoice.due_date
-      ? new Date(invoice.due_date * 1000).toISOString()
-      : null,
-    paid_at: invoice.status_transitions?.paid_at
-      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
-      : null,
   });
 }
 
 /**
  * Handle failed invoice payment
  */
-async function handleInvoicePaymentFailed(invoice: any) {
-  const supabase = await createClient();
-
+async function handleInvoicePaymentFailed(
+  invoice: any,
+  supabase: ServiceClient,
+) {
   // Update invoice status
   await supabase
-    .from("invoices")
+    .from("billing_invoices")
     .update({
       status: invoice.status,
     })
@@ -269,7 +276,9 @@ async function handleInvoicePaymentFailed(invoice: any) {
 }
 
 /**
- * Handle successful payment intent (for ticket purchases)
+ * Handle successful payment intent (for ticket purchases).
+ * Tickets are ONLY credited here (in the webhook) to avoid double-crediting
+ * from the synchronous purchase path in tickets.ts.
  */
 async function handlePaymentIntentSucceeded(paymentIntent: any) {
   if (paymentIntent.metadata?.type === "ticket_purchase") {
@@ -309,12 +318,10 @@ async function handleCustomerCreated(customer: any) {
 /**
  * Handle customer updates
  */
-async function handleCustomerUpdated(customer: any) {
-  const supabase = await createClient();
-
+async function handleCustomerUpdated(customer: any, supabase: ServiceClient) {
   // Update customer information
   await supabase
-    .from("customers")
+    .from("billing_customers")
     .update({
       email: customer.email,
       name: customer.name,
@@ -325,9 +332,7 @@ async function handleCustomerUpdated(customer: any) {
 /**
  * Log billing events for audit trail
  */
-async function logBillingEvent(event: any) {
-  const supabase = await createClient();
-
+async function logBillingEvent(event: any, supabase: ServiceClient) {
   // Extract user_id from event metadata
   let userId = null;
   if (event.data.object.metadata?.user_id) {
@@ -335,7 +340,7 @@ async function logBillingEvent(event: any) {
   } else if (event.data.object.customer) {
     // Try to get user_id from customer
     const { data: customer } = await supabase
-      .from("customers")
+      .from("billing_customers")
       .select("user_id")
       .eq("stripe_customer_id", event.data.object.customer)
       .single();
@@ -343,12 +348,17 @@ async function logBillingEvent(event: any) {
   }
 
   if (userId) {
-    await supabase.from("billing_events").insert({
+    const { error } = await supabase.from("billing_events").insert({
       user_id: userId,
       event_type: event.type,
       stripe_event_id: event.id,
       data: event.data,
       processed: true,
     });
+    // 23505 = unique_violation on stripe_event_id: a concurrent delivery already
+    // logged this event. That is the idempotency backstop working — not an error.
+    if (error && error.code !== "23505") {
+      throw error;
+    }
   }
 }

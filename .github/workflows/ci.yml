@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  # ─── Main CI job: lint → test → build ─────────────────────────────────────
+  ci:
+    name: Lint, Test & Build
+    runs-on: ubuntu-latest
+
+    env:
+      # ── Supabase (dummy build-time values) ────────────────────────────────
+      # These are intentionally placeholder values so `next build` can complete
+      # without a real Supabase project. They do NOT grant any database access.
+      NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MDAwMDAwMDAsImV4cCI6MjAwMDAwMDAwMH0.placeholder-signature"
+      SUPABASE_SERVICE_ROLE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTYwMDAwMDAwMCwiZXhwIjoyMDAwMDAwMDAwfQ.placeholder-signature"
+
+      # ── Stripe (dummy values – no real keys, no charges possible) ─────────
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder000000000000000000000000000000000000000000000000"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE: "pk_live_placeholder00000000000000000000000000000000000000000000000"
+      STRIPE_SECRET_KEY: "sk_test_placeholder000000000000000000000000000000000000000000000000"
+      STRIPE_WEBHOOK_SECRET: "whsec_placeholder00000000000000000000000000000000000000000000000000"
+
+      # ── App URL ───────────────────────────────────────────────────────────
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+      # ── Sentry (omitted intentionally so withSentryConfig is bypassed) ────
+      # next.config.ts only wraps with Sentry when NEXT_PUBLIC_SENTRY_DSN is set;
+      # leaving it unset here keeps the build free of Sentry source-map uploads.
+      # NEXT_PUBLIC_SENTRY_DSN: ""
+
+      # ── CI flag (suppresses verbose Sentry logs in next.config.ts) ────────
+      CI: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Step 1: Lint ───────────────────────────────────────────────────────
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      # ── Step 2: Unit / integration tests (Jest) ───────────────────────────
+      - name: Test (Jest – CI mode)
+        run: npm test -- --ci
+
+      # ── Step 3: Production build ───────────────────────────────────────────
+      # typescript.ignoreBuildErrors is already true in next.config.ts so TS
+      # errors will not block the build; the dedicated type-check job below
+      # tracks those separately.
+      - name: Build (Next.js)
+        run: npm run build
+
+  # ─── Separate job: TypeScript strict check ─────────────────────────────────
+  # This job is intentionally NON-BLOCKING (continue-on-error: true) because
+  # there are ~58 pre-existing TS errors being burned down incrementally.
+  #
+  # TODO: once `npm run type-check` exits 0 consistently, flip
+  #       `continue-on-error` to `false` (or remove it) to make this blocking.
+  type-check:
+    name: TypeScript Type-Check (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    env:
+      # Supabase placeholders – tsc only needs the declarations, not live values
+      NEXT_PUBLIC_SUPABASE_URL: "https://placeholder.supabase.co"
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "placeholder"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      CI: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npm run type-check

@@ -60,32 +60,38 @@ export async function GET(request: NextRequest) {
           .select("*", { count: "exact", head: true })
           .eq("site_id", site.id);
 
-        // Get edits count from content_history
-        const { count: editsCount } = await serviceClient
-          .from("content_history")
-          .select("*", { count: "exact", head: true })
-          .in(
-            "content_element_id",
-            serviceClient
-              .from("content_elements")
-              .select("id")
-              .eq("site_id", site.id),
-          );
+        // Resolve element IDs for this site as a plain array (subquery objects
+        // are not supported by the Supabase JS client v2 `.in()` filter).
+        const { data: elementRows } = await serviceClient
+          .from("content_elements")
+          .select("id")
+          .eq("site_id", site.id);
 
-        // Get last activity
-        const { data: lastActivity } = await serviceClient
-          .from("content_history")
-          .select("created_at")
-          .in(
-            "content_element_id",
-            serviceClient
-              .from("content_elements")
-              .select("id")
-              .eq("site_id", site.id),
-          )
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single();
+        const elementIds: string[] = (elementRows ?? []).map(
+          (r: { id: string }) => r.id,
+        );
+
+        let editsCount: number | null = 0;
+        let lastActivity: { created_at: string } | null = null;
+
+        if (elementIds.length > 0) {
+          // Get edits count from content_history
+          const { count } = await serviceClient
+            .from("content_history")
+            .select("*", { count: "exact", head: true })
+            .in("content_element_id", elementIds);
+          editsCount = count;
+
+          // Get last activity
+          const { data: activityRow } = await serviceClient
+            .from("content_history")
+            .select("created_at")
+            .in("content_element_id", elementIds)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+          lastActivity = activityRow;
+        }
 
         // Generate site token
         const siteToken = buildSiteToken(site.id, site.api_key);

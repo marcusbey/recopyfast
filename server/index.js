@@ -3,9 +3,41 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
 const createDOMPurify = require('dompurify');
 const { JSDOM } = require('jsdom');
-require('dotenv').config({ path: '../.env.local' });
+
+// Crash safety: log and exit so the platform (Fly.io, Docker, PM2, etc.)
+// can restart the process.  Without these handlers an unhandled rejection
+// silently kills the event loop with no diagnostic output.
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] uncaughtException – restarting process:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] unhandledRejection – restarting process:', reason);
+  process.exit(1);
+});
+
+// ENV LOADING: resolve paths absolutely so the server works whether it is
+// started from the repo root, the server/ directory, or inside a container
+// where only process.env is populated.  We try several candidate paths in
+// order of preference and fall back gracefully if none exist.
+const envCandidates = [
+  path.resolve(__dirname, '.env.local'),         // server/.env.local
+  path.resolve(__dirname, '..', '.env.local'),   // repo-root/.env.local (dev)
+  path.resolve(__dirname, '.env'),               // server/.env
+  path.resolve(__dirname, '..', '.env'),         // repo-root/.env
+];
+for (const envPath of envCandidates) {
+  const result = require('dotenv').config({ path: envPath });
+  if (!result.error) {
+    console.log(`✓ Loaded env from ${envPath}`);
+    break;
+  }
+}
+// If none of the files exist, process.env values already set by the container
+// runtime (Fly secrets, Docker --env, etc.) are used as-is – no error thrown.
 
 const app = express();
 const httpServer = createServer(app);
@@ -71,18 +103,42 @@ function parseHost(header) {
   }
 }
 
+/** Maximum token lifetime: 90 days in seconds (mirrors site-auth.ts). */
+const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+
+/**
+ * Verify a site token produced by buildSiteToken() on the HTTP side.
+ * Token format: "<siteId>.<issuedAtUnixSeconds>.<hmac-sha256-hex>"
+ *
+ * Checks performed (matching verifySiteTokenSignature in site-auth.ts):
+ *  1. Three-part structure
+ *  2. siteId claim matches expected
+ *  3. issuedAt is a digit-only unix timestamp
+ *  4. Token is not older than 90 days
+ *  5. Token is not future-dated (allows 60 s clock skew)
+ *  6. HMAC signature is valid (timing-safe compare)
+ */
 function verifySiteToken(siteId, apiKey, token) {
   if (!token) return false;
   const parts = token.split('.');
   if (parts.length !== 3) return false;
 
-  const [tokenSiteId, issuedAt, signature] = parts;
+  const [tokenSiteId, issuedAtStr, signature] = parts;
   if (tokenSiteId !== siteId) return false;
-  if (!/^[0-9]+$/.test(issuedAt)) return false;
+  if (!/^[0-9]+$/.test(issuedAtStr)) return false;
+
+  const issuedAtSeconds = parseInt(issuedAtStr, 10);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  // Reject tokens older than 90 days
+  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
+
+  // Reject future-dated tokens (allow 60 s of clock skew)
+  if (issuedAtSeconds > nowSeconds + 60) return false;
 
   const expectedSignature = crypto
     .createHmac('sha256', apiKey)
-    .update(`${tokenSiteId}.${issuedAt}`)
+    .update(`${tokenSiteId}.${issuedAtStr}`)
     .digest('hex');
 
   try {

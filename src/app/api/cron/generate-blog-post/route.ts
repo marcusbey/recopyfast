@@ -23,13 +23,14 @@ export async function GET(request: NextRequest) {
 
     const { suggestion } = await topicResponse.json();
 
-    // Generate blog post
+    // Generate blog post — forward the CRON_SECRET so the auth gate passes
     const generateResponse = await fetch(
       `${process.env.NEXT_PUBLIC_APP_URL}/api/blog/generate`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${cronSecret}`,
         },
         body: JSON.stringify({
           topic: suggestion.topic,

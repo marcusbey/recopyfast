@@ -1,5 +1,6 @@
 import { stripe, TICKET_CONFIG } from "./config";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { createOrGetCustomer } from "./customer";
 import type {
   Tickets,
@@ -8,7 +9,12 @@ import type {
 } from "@/types/billing";
 
 /**
- * Purchase tickets for pay-per-use features
+ * Purchase tickets for pay-per-use features.
+ *
+ * IMPORTANT: Tickets are credited ONLY via the webhook (payment_intent.succeeded)
+ * to avoid double-crediting. This function creates the PaymentIntent and returns
+ * immediately — the webhook will call addTicketsToUser once Stripe confirms the
+ * payment, guarded by the UNIQUE(stripe_payment_intent_id) constraint.
  */
 export async function purchaseTickets(
   userId: string,
@@ -32,7 +38,8 @@ export async function purchaseTickets(
   ); // in cents
   const totalTickets = request.quantity * TICKET_CONFIG.TICKETS_PER_PURCHASE;
 
-  // Create payment intent
+  // Create payment intent. Tickets will be credited by the Stripe webhook
+  // (payment_intent.succeeded) — NOT here — to prevent double-crediting.
   const paymentIntent = await stripe.paymentIntents.create({
     amount: totalAmount,
     currency: "usd",
@@ -48,12 +55,10 @@ export async function purchaseTickets(
     },
   });
 
-  // If payment succeeded, add tickets
-  if (paymentIntent.status === "succeeded") {
-    await addTicketsToUser(userId, totalTickets, paymentIntent.id);
-  }
+  // DO NOT call addTicketsToUser here. The webhook handles crediting so that
+  // tickets are added exactly once, even if the client retries this request.
 
-  // Get updated ticket balance
+  // Get current ticket balance (may not yet reflect the pending payment)
   const { data: tickets } = await supabase
     .from("tickets")
     .select("*")
@@ -64,14 +69,20 @@ export async function purchaseTickets(
 }
 
 /**
- * Add tickets to user's balance
+ * Add tickets to user's balance.
+ * Called exclusively from the webhook handler (payment_intent.succeeded).
+ * Uses the service-role client so RLS does not block the write.
+ * The underlying RPC / UNIQUE(stripe_payment_intent_id) constraint prevents
+ * double-crediting on duplicate webhook deliveries.
  */
 export async function addTicketsToUser(
   userId: string,
   ticketAmount: number,
   stripePaymentIntentId?: string,
 ): Promise<Tickets> {
-  const supabase = await createClient();
+  // Service-role client bypasses RLS — required for webhook context where
+  // there is no authenticated session.
+  const supabase = createServiceRoleClient();
 
   // Use the database function to add tickets
   const { error } = await supabase.rpc("add_tickets", {

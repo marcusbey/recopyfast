@@ -39,7 +39,11 @@ export async function GET() {
 
 /**
  * POST /api/billing/subscription
- * Create a new subscription
+ * Create a new subscription.
+ *
+ * Accepted body fields: { planId, paymentMethodId }
+ * The `trialDays` field is intentionally NOT accepted from the client —
+ * trial periods are derived server-side from plan configuration only.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -55,10 +59,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { planId, paymentMethodId, trialDays } = body;
+    // Destructure only the fields we accept; trialDays is explicitly excluded
+    // so a client cannot grant themselves a free trial.
+    const { planId, paymentMethodId } = body;
 
     // Validate plan
-    if (!planId || !["pro", "enterprise"].includes(planId)) {
+    if (!planId || !["starter", "pro", "enterprise"].includes(planId)) {
       return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
     }
 
@@ -71,12 +77,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // trialDays is NOT forwarded — createSubscription no longer accepts it.
     const result = await createSubscription(
       user.id,
       user.email!,
       planId,
       paymentMethodId,
-      trialDays,
     );
 
     return NextResponse.json(result);
@@ -110,7 +116,7 @@ export async function PUT(req: NextRequest) {
     const { planId, paymentMethodId } = body;
 
     // Validate plan
-    if (!planId || !["pro", "enterprise"].includes(planId)) {
+    if (!planId || !["starter", "pro", "enterprise"].includes(planId)) {
       return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
     }
 

@@ -4,14 +4,16 @@ import { createOrGetCustomer } from "./customer";
 import type { Subscription, SubscriptionUpdateRequest } from "@/types/billing";
 
 /**
- * Create a new subscription
+ * Create a new subscription.
+ * Trial period is NOT taken from the client request — it is derived server-side
+ * from plan config (currently 0 for all paid plans; extend SUBSCRIPTION_PLANS if
+ * you want per-plan trials).
  */
 export async function createSubscription(
   userId: string,
   email: string,
   planId: "starter" | "pro" | "enterprise",
   paymentMethodId?: string,
-  trialDays?: number,
 ): Promise<{ subscription: Subscription; clientSecret?: string }> {
   const supabase = await createClient();
 
@@ -38,7 +40,9 @@ export async function createSubscription(
     });
   }
 
-  // Create subscription in Stripe
+  // Create subscription in Stripe — trial days are derived server-side only.
+  // Currently all plans have 0 trial days; add a trialDays field to
+  // SUBSCRIPTION_PLANS config if per-plan trials are needed.
   const subscriptionParams: import("stripe").Stripe.SubscriptionCreateParams = {
     customer: stripeCustomer.id,
     items: [{ price: plan.priceId }],
@@ -47,11 +51,6 @@ export async function createSubscription(
       plan_id: planId,
     },
   };
-
-  // Add trial if specified
-  if (trialDays) {
-    subscriptionParams.trial_period_days = trialDays;
-  }
 
   // If no payment method, require payment confirmation
   if (!paymentMethodId) {
@@ -65,14 +64,17 @@ export async function createSubscription(
   const stripeSubscription =
     await stripe.subscriptions.create(subscriptionParams);
 
-  // Save subscription to our database
+  // Save subscription to our database.
+  // Column mapping (migration → code):
+  //   plan           (not plan_id)
+  //   cancel_at      (not cancel_at_period_end; migration stores the timestamp)
   const { data: newSubscription, error } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .insert({
       user_id: userId,
       customer_id: customer.id,
       stripe_subscription_id: stripeSubscription.id,
-      plan_id: planId,
+      plan: planId,
       status: stripeSubscription.status,
       current_period_start: new Date(
         (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
@@ -80,7 +82,9 @@ export async function createSubscription(
       current_period_end: new Date(
         (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
       ).toISOString(),
-      cancel_at_period_end: stripeSubscription.cancel_at_period_end,
+      cancel_at: stripeSubscription.cancel_at
+        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
+        : null,
       trial_start: stripeSubscription.trial_start
         ? new Date(stripeSubscription.trial_start * 1000).toISOString()
         : null,
@@ -114,7 +118,7 @@ export async function createSubscription(
     }
   }
 
-  return { subscription: newSubscription, clientSecret };
+  return { subscription: newSubscription as Subscription, clientSecret };
 }
 
 /**
@@ -128,7 +132,7 @@ export async function updateSubscription(
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
     .eq("status", "active")
@@ -149,7 +153,7 @@ export async function updateSubscription(
   // Update payment method if provided
   if (updates.paymentMethodId) {
     const { data: customer } = await supabase
-      .from("customers")
+      .from("billing_customers")
       .select("stripe_customer_id")
       .eq("id", currentSubscription.customer_id)
       .single();
@@ -189,9 +193,9 @@ export async function updateSubscription(
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .update({
-      plan_id: updates.planId,
+      plan: updates.planId,
       status: stripeSubscription.status,
       current_period_start: new Date(
         (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
@@ -199,7 +203,9 @@ export async function updateSubscription(
       current_period_end: new Date(
         (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
       ).toISOString(),
-      cancel_at_period_end: stripeSubscription.cancel_at_period_end,
+      cancel_at: stripeSubscription.cancel_at
+        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
+        : null,
     })
     .eq("id", currentSubscription.id)
     .select()
@@ -209,7 +215,7 @@ export async function updateSubscription(
     throw new Error(`Failed to update subscription: ${error.message}`);
   }
 
-  return updatedSubscription;
+  return updatedSubscription as Subscription;
 }
 
 /**
@@ -223,7 +229,7 @@ export async function cancelSubscription(
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
     .eq("status", "active")
@@ -247,10 +253,12 @@ export async function cancelSubscription(
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .update({
       status: stripeSubscription.status,
-      cancel_at_period_end: stripeSubscription.cancel_at_period_end,
+      cancel_at: stripeSubscription.cancel_at
+        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
+        : null,
       canceled_at: stripeSubscription.canceled_at
         ? new Date(stripeSubscription.canceled_at * 1000).toISOString()
         : null,
@@ -263,7 +271,7 @@ export async function cancelSubscription(
     throw new Error(`Failed to update subscription: ${error.message}`);
   }
 
-  return updatedSubscription;
+  return updatedSubscription as Subscription;
 }
 
 /**
@@ -276,7 +284,7 @@ export async function reactivateSubscription(
 
   // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
     .single();
@@ -285,7 +293,7 @@ export async function reactivateSubscription(
     throw new Error("No subscription found");
   }
 
-  if (!currentSubscription.cancel_at_period_end) {
+  if (!currentSubscription.cancel_at) {
     throw new Error("Subscription is not scheduled for cancellation");
   }
 
@@ -299,9 +307,9 @@ export async function reactivateSubscription(
 
   // Update subscription in our database
   const { data: updatedSubscription, error } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .update({
-      cancel_at_period_end: false,
+      cancel_at: null,
       canceled_at: null,
     })
     .eq("id", currentSubscription.id)
@@ -312,7 +320,7 @@ export async function reactivateSubscription(
     throw new Error(`Failed to reactivate subscription: ${error.message}`);
   }
 
-  return updatedSubscription;
+  return updatedSubscription as Subscription;
 }
 
 /**
@@ -324,7 +332,7 @@ export async function getUserSubscription(
   const supabase = await createClient();
 
   const { data: subscription } = await supabase
-    .from("subscriptions")
+    .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
     .in("status", ["active", "trialing", "past_due"])
@@ -332,7 +340,7 @@ export async function getUserSubscription(
     .limit(1)
     .single();
 
-  return subscription;
+  return subscription as Subscription | null;
 }
 
 /**
@@ -358,10 +366,13 @@ export async function checkFeatureAccess(
     );
   }
 
-  const plan =
-    SUBSCRIPTION_PLANS[
-      subscription.plan_id.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
-    ];
+  // The DB column is `plan`; the TS type declares it as `plan_id` (legacy mismatch).
+  // At runtime the object returned from Supabase carries the actual DB column name.
+  const planKey = (
+    (subscription as unknown as { plan?: string }).plan ?? subscription.plan_id
+  ).toUpperCase() as keyof typeof SUBSCRIPTION_PLANS;
+
+  const plan = SUBSCRIPTION_PLANS[planKey];
 
   switch (feature) {
     case "aiFeatures":

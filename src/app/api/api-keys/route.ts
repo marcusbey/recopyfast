@@ -6,15 +6,18 @@ import { validateAndSanitizeInput } from "@/lib/security/content-sanitizer";
 interface ApiKeyRequest {
   siteId: string;
   name: string;
-  requestsPerMinute?: number;
-  requestsPerHour?: number;
-  requestsPerDay?: number;
 }
 
-function generateApiKey(): { key: string; hash: string } {
+interface ApiKeyUpdates {
+  updated_at: string;
+  is_active?: boolean;
+}
+
+function generateApiKey(): { key: string; hash: string; prefix: string } {
   const key = `rcp_${randomBytes(32).toString("hex")}`;
   const hash = createHash("sha256").update(key).digest("hex");
-  return { key, hash };
+  const prefix = key.slice(0, 12); // "rcp_" + first 8 hex chars
+  return { key, hash, prefix };
 }
 
 export async function POST(request: NextRequest) {
@@ -31,13 +34,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body: ApiKeyRequest = await request.json();
-    const {
-      siteId,
-      name,
-      requestsPerMinute = 60,
-      requestsPerHour = 1000,
-      requestsPerDay = 10000,
-    } = body;
+    const { siteId, name } = body;
 
     // Validate and sanitize inputs
     const sanitizedSiteId = validateAndSanitizeInput(siteId);
@@ -45,12 +42,12 @@ export async function POST(request: NextRequest) {
 
     if (!sanitizedSiteId || !sanitizedName) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing required fields: siteId and name are required" },
         { status: 400 },
       );
     }
 
-    // Check if user has admin permission for this site
+    // Verify the authenticated user has admin permission on this site
     const { data: sitePermission, error: permissionError } = await supabase
       .from("site_permissions")
       .select("permission")
@@ -64,25 +61,26 @@ export async function POST(request: NextRequest) {
       sitePermission.permission !== "admin"
     ) {
       return NextResponse.json(
-        { error: "Insufficient permissions" },
+        {
+          error: "Insufficient permissions — admin role required for this site",
+        },
         { status: 403 },
       );
     }
 
     // Generate API key
-    const { key, hash } = generateApiKey();
+    const { key, hash, prefix } = generateApiKey();
 
-    // Insert API key into database
+    // Insert API key into database — bound to exactly one site
     const { data: apiKey, error: insertError } = await supabase
       .from("api_keys")
       .insert([
         {
+          user_id: user.id,
           site_id: sanitizedSiteId,
-          key_hash: hash,
           name: sanitizedName,
-          requests_per_minute: requestsPerMinute,
-          requests_per_hour: requestsPerHour,
-          requests_per_day: requestsPerDay,
+          key_hash: hash,
+          key_prefix: prefix,
           is_active: true,
         },
       ])
@@ -101,7 +99,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       apiKey: {
         ...apiKey,
-        key, // Only returned on creation
+        key, // Only returned on creation — store it securely
       },
       warning: "Store this API key securely. It will not be shown again.",
     });
@@ -139,32 +137,42 @@ export async function GET(request: NextRequest) {
 
     const sanitizedSiteId = validateAndSanitizeInput(siteId);
 
-    // Get all API keys for the site with permission check
+    // Verify the caller has at least some permission on the site before listing keys
+    const { data: sitePermission, error: permissionError } = await supabase
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", sanitizedSiteId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (permissionError || !sitePermission) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
+    }
+
+    // Fetch all API keys scoped to this site that belong to the caller
     const { data: apiKeys, error } = await supabase
       .from("api_keys")
       .select(
         `
         id,
         name,
-        last_used_at,
-        requests_per_minute,
-        requests_per_hour,
-        requests_per_day,
+        key_prefix,
+        key_hash,
+        site_id,
+        scopes,
+        rate_limit_per_minute,
         is_active,
+        last_used_at,
+        expires_at,
         created_at,
-        updated_at,
-        sites!inner(
-          id,
-          domain,
-          site_permissions!inner(
-            permission,
-            user_id
-          )
-        )
+        updated_at
       `,
       )
       .eq("site_id", sanitizedSiteId)
-      .eq("sites.site_permissions.user_id", user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -175,10 +183,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Don't return the actual keys or hashes
-    const sanitizedApiKeys = apiKeys.map(({ key_hash, ...apiKey }) => ({
+    // Don't return the full hash — expose only the prefix and a masked indicator
+    const sanitizedApiKeys = (apiKeys ?? []).map(({ key_hash, ...apiKey }) => ({
       ...apiKey,
-      keyPreview: "***..." + (key_hash.slice(-8) || ""),
+      keyPreview: `${apiKey.key_prefix}...`,
     }));
 
     return NextResponse.json({ apiKeys: sanitizedApiKeys });
@@ -204,14 +212,8 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const {
-      apiKeyId,
-      isActive,
-      requestsPerMinute,
-      requestsPerHour,
-      requestsPerDay,
-    } = body;
+    const body: { apiKeyId: string; isActive?: boolean } = await request.json();
+    const { apiKeyId, isActive } = body;
 
     const sanitizedApiKeyId = validateAndSanitizeInput(apiKeyId);
     if (!sanitizedApiKeyId) {
@@ -221,23 +223,46 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Build update object
-    const updates: any = { updated_at: new Date().toISOString() };
-    if (typeof isActive === "boolean") updates.is_active = isActive;
-    if (typeof requestsPerMinute === "number")
-      updates.requests_per_minute = requestsPerMinute;
-    if (typeof requestsPerHour === "number")
-      updates.requests_per_hour = requestsPerHour;
-    if (typeof requestsPerDay === "number")
-      updates.requests_per_day = requestsPerDay;
+    // Fetch the key first to get its site_id, confirming ownership
+    const { data: existingKey, error: fetchError } = await supabase
+      .from("api_keys")
+      .select("id, site_id")
+      .eq("id", sanitizedApiKeyId)
+      .eq("user_id", user.id)
+      .single();
 
-    // Update API key with permission check
+    if (fetchError || !existingKey) {
+      return NextResponse.json({ error: "API key not found" }, { status: 404 });
+    }
+
+    // Confirm the caller has admin permission on the key's site
+    const { data: sitePermission, error: permissionError } = await supabase
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", existingKey.site_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (
+      permissionError ||
+      !sitePermission ||
+      sitePermission.permission !== "admin"
+    ) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
+    }
+
+    // Build update object — only allowed fields, no `any`
+    const updates: ApiKeyUpdates = { updated_at: new Date().toISOString() };
+    if (typeof isActive === "boolean") updates.is_active = isActive;
+
     const { data: updatedApiKey, error } = await supabase
       .from("api_keys")
       .update(updates)
       .eq("id", sanitizedApiKeyId)
-      .eq("sites.site_permissions.user_id", user.id)
-      .eq("sites.site_permissions.permission", "admin")
+      .eq("user_id", user.id)
       .select()
       .single();
 
@@ -287,13 +312,43 @@ export async function DELETE(request: NextRequest) {
 
     const sanitizedApiKeyId = validateAndSanitizeInput(apiKeyId);
 
-    // Delete API key with permission check
+    // Fetch the key first to get its site_id, confirming ownership
+    const { data: existingKey, error: fetchError } = await supabase
+      .from("api_keys")
+      .select("id, site_id")
+      .eq("id", sanitizedApiKeyId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (fetchError || !existingKey) {
+      return NextResponse.json({ error: "API key not found" }, { status: 404 });
+    }
+
+    // Confirm the caller has admin permission on the key's site
+    const { data: sitePermission, error: permissionError } = await supabase
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", existingKey.site_id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (
+      permissionError ||
+      !sitePermission ||
+      sitePermission.permission !== "admin"
+    ) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
+    }
+
+    // Delete the key — ownership already confirmed above
     const { error } = await supabase
       .from("api_keys")
       .delete()
       .eq("id", sanitizedApiKeyId)
-      .eq("sites.site_permissions.user_id", user.id)
-      .eq("sites.site_permissions.permission", "admin");
+      .eq("user_id", user.id);
 
     if (error) {
       console.error("API key deletion error:", error);

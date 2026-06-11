@@ -246,10 +246,10 @@ export async function POST(request: NextRequest) {
 
           try {
             // Use AI to translate
-            const result = await aiService.translateContent({
+            const result = await aiService.translateText({
               text: content,
-              targetLanguage: finalLanguageName,
-              sourceLanguage: "English",
+              fromLanguage: "English",
+              toLanguage: finalLanguageName,
             });
 
             if (result.success && result.data) {
