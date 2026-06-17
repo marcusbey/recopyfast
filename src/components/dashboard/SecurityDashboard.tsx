@@ -155,7 +155,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
   }: {
     title: string;
     value: string | number;
-    icon: React.ElementType;
+    icon: React.ComponentType<{ className?: string }>;
     trend?: "up" | "down" | "neutral";
     description?: string;
   }) => (

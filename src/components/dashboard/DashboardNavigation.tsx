@@ -96,12 +96,9 @@ export function DashboardNavigation({
 
   const canAccessItem = (item: NavItem) => {
     if (!item.requiresPlan) return true;
+    // "enterprise" early-return; after it TypeScript narrows userPlan to "free"|"pro"
     if (userPlan === "enterprise") return true;
-    if (
-      item.requiresPlan === "pro" &&
-      (userPlan === "pro" || userPlan === "enterprise")
-    )
-      return true;
+    if (item.requiresPlan === "pro" && userPlan === "pro") return true;
     return false;
   };
 

@@ -169,27 +169,27 @@ export async function POST(
     }
 
     // Process content map with length validation
-    const contentElements = Object.entries(contentMap).map(
-      ([elementId, data]: [string, ContentMapData]) => {
-        // Truncate content that exceeds max length
-        const truncatedContent =
-          data.content && data.content.length > MAX_CONTENT_LENGTH
-            ? data.content.substring(0, MAX_CONTENT_LENGTH)
-            : data.content;
-        const sanitizedContent = sanitizeIncomingContent(truncatedContent);
+    const contentElements = (
+      Object.entries(contentMap) as [string, ContentMapData][]
+    ).map(([elementId, data]) => {
+      // Truncate content that exceeds max length
+      const truncatedContent =
+        data.content && data.content.length > MAX_CONTENT_LENGTH
+          ? data.content.substring(0, MAX_CONTENT_LENGTH)
+          : data.content;
+      const sanitizedContent = sanitizeIncomingContent(truncatedContent);
 
-        return {
-          site_id: siteId,
-          element_id: elementId,
-          selector: data.selector,
-          original_content: sanitizedContent,
-          current_content: sanitizedContent,
-          language: "en",
-          variant: "default",
-          metadata: { type: data.type },
-        };
-      },
-    );
+      return {
+        site_id: siteId,
+        element_id: elementId,
+        selector: data.selector,
+        original_content: sanitizedContent,
+        current_content: sanitizedContent,
+        language: "en",
+        variant: "default",
+        metadata: { type: data.type },
+      };
+    });
 
     // Upsert content elements
     const { error } = await supabase
@@ -313,7 +313,10 @@ export async function OPTIONS(
       request.headers.get("referer"),
     );
 
-    return withCors(NextResponse.json({}, { status: 204 }), allowedOrigin);
+    return withCors(
+      NextResponse.json({}, { status: 204 }),
+      allowedOrigin ?? null,
+    );
   } catch (error) {
     return NextResponse.json({ error: "Origin not allowed" }, { status: 403 });
   }

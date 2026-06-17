@@ -10,7 +10,7 @@ interface TextAlignmentControlsProps {
 
 const alignmentOptions: {
   value: TextAlign;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   label: string;
 }[] = [
   { value: "left", icon: AlignLeft, label: "Align left" },

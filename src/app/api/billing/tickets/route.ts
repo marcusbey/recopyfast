@@ -6,6 +6,7 @@ import {
   getTicketTransactions,
   getTicketPricing,
 } from "@/lib/stripe/tickets";
+import type { TicketTransaction } from "@/types/billing";
 
 /**
  * GET /api/billing/tickets
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
     const tickets = await getUserTickets(user.id);
     const pricing = getTicketPricing();
 
-    let transactions = [];
+    let transactions: TicketTransaction[] = [];
     if (includeTransactions) {
       transactions = await getTicketTransactions(user.id, limit);
     }

@@ -75,13 +75,17 @@ export async function POST(req: NextRequest) {
     try {
       switch (format) {
         case "json":
-          contentElements = parseJSONImport(data);
+          // data is unknown; runtime validation happens inside parseJSONImport
+          contentElements = parseJSONImport(data as unknown[]);
           break;
         case "csv":
+          if (typeof data !== "string") {
+            throw new Error("CSV import requires data to be a string");
+          }
           contentElements = parseCSVImport(data);
           break;
         case "xml":
-          contentElements = parseXMLImport(data);
+          contentElements = parseXMLImport(data as string);
           break;
         default:
           throw new Error(`Unsupported format: ${format}`);

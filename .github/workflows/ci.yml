@@ -60,21 +60,26 @@ jobs:
       - name: Test (Jest – CI mode)
         run: npm test -- --ci
 
-      # ── Step 3: Production build ───────────────────────────────────────────
-      # typescript.ignoreBuildErrors is already true in next.config.ts so TS
-      # errors will not block the build; the dedicated type-check job below
-      # tracks those separately.
+      # ── Step 3: Production type-check (BLOCKING) ──────────────────────────
+      # Type-checks shipped app code only (tsconfig.build.json excludes tests).
+      # next.config.ts now sets ignoreBuildErrors:false, so the build also fails
+      # on type errors — this explicit step surfaces them faster and clearer.
+      - name: Type-check production code (tsc, blocking)
+        run: npm run type-check:build
+
+      # ── Step 4: Production build ───────────────────────────────────────────
       - name: Build (Next.js)
         run: npm run build
 
-  # ─── Separate job: TypeScript strict check ─────────────────────────────────
-  # This job is intentionally NON-BLOCKING (continue-on-error: true) because
-  # there are ~58 pre-existing TS errors being burned down incrementally.
+  # ─── Separate job: full TypeScript check incl. tests ───────────────────────
+  # Production app code is already gated (blocking) in the ci job above. This job
+  # additionally type-checks TEST files, which still carry pre-existing broken-mock
+  # errors. NON-BLOCKING until those are burned down.
   #
-  # TODO: once `npm run type-check` exits 0 consistently, flip
-  #       `continue-on-error` to `false` (or remove it) to make this blocking.
+  # TODO: once `npm run type-check` (root tsconfig, includes tests) exits 0, flip
+  #       `continue-on-error` to `false` (or remove it) to make this blocking too.
   type-check:
-    name: TypeScript Type-Check (non-blocking)
+    name: TypeScript Type-Check incl. tests (non-blocking)
     runs-on: ubuntu-latest
     continue-on-error: true
 

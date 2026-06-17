@@ -205,7 +205,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     // Create invitation
-    const { data: invitation, error } = await supabase
+    // The cross-schema join `auth.users!...` causes Supabase's type generator to
+    // produce a ParserError for the `inviter` field; cast to the actual runtime shape.
+    type InvitationWithInviter = {
+      id: string;
+      team_id: string;
+      email: string;
+      role: string;
+      invited_by: string;
+      accepted_at: string | null;
+      expires_at: string;
+      created_at: string;
+      team: { name: string } | null;
+      inviter: {
+        email: string;
+        raw_user_meta_data: Record<string, unknown>;
+      } | null;
+    };
+    const { data: invitationRaw, error } = await supabase
       .from("team_invitations")
       .insert({
         team_id: teamId,
@@ -224,8 +241,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       `,
       )
       .single();
+    const invitation = invitationRaw as InvitationWithInviter | null;
 
-    if (error) {
+    if (error || !invitation) {
       console.error("Error creating invitation:", error);
       return NextResponse.json(
         { error: "Failed to create invitation" },

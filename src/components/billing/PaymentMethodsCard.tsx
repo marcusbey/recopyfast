@@ -4,19 +4,7 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-
-interface PaymentMethod {
-  id: string;
-  type: string;
-  card?: {
-    brand: string;
-    last4: string;
-    exp_month: number;
-    exp_year: number;
-  };
-  is_default: boolean;
-  created: number;
-}
+import type { PaymentMethod } from "@/types/billing";
 
 interface PaymentMethodsCardProps {
   paymentMethods: PaymentMethod[];
@@ -93,14 +81,11 @@ export function PaymentMethodsCard({
               className="flex items-center justify-between p-3 border rounded-lg"
             >
               <div className="flex items-center gap-3">
-                <span className="text-2xl">
-                  {getBrandIcon(pm.card?.brand || "")}
-                </span>
+                <span className="text-2xl">{getBrandIcon(pm.brand || "")}</span>
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="font-medium">
-                      {formatCardBrand(pm.card?.brand || "")} ••••{" "}
-                      {pm.card?.last4}
+                      {formatCardBrand(pm.brand || "")} •••• {pm.last4}
                     </span>
                     {pm.is_default && (
                       <Badge variant="secondary" className="text-xs">
@@ -109,7 +94,7 @@ export function PaymentMethodsCard({
                     )}
                   </div>
                   <p className="text-sm text-gray-600">
-                    Expires {pm.card?.exp_month}/{pm.card?.exp_year}
+                    Expires {pm.exp_month}/{pm.exp_year}
                   </p>
                 </div>
               </div>

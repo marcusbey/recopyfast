@@ -1,0 +1,20 @@
+{
+  // Production build type-check config. Extends the root tsconfig but EXCLUDES
+  // test files so `next build` enforces type-correctness on shipped app code only.
+  // Tests are still fully type-checked by `npm run type-check` (root tsconfig) and
+  // in CI; they are excluded here because next/jest compiles them with SWC (no type
+  // gate) and their pre-existing mock-type errors must not block production deploys.
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "web",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "e2e/**",
+    "playwright.config.ts"
+  ]
+}

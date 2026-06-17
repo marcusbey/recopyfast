@@ -99,8 +99,12 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   
   // Build configuration
+  // Type errors now FAIL the build (no more silent masking). The build uses
+  // tsconfig.build.json, which excludes test files — production app code is fully
+  // type-checked; broken test mocks are caught separately by `npm run type-check`.
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
+    tsconfigPath: "./tsconfig.build.json",
   },
   
   // Configure output for production deployment

@@ -48,7 +48,7 @@ interface DemoSite {
   id: string;
   name: string;
   theme: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   background: string;
   textColor: string;
   accentColor: string;

@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 
 interface TeamSelectorProps {
-  selectedTeam?: Team;
+  selectedTeam?: Team & { role?: string };
   onTeamSelect: (team: Team) => void;
   onCreateTeam?: (team: Team) => void;
 }
