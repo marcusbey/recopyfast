@@ -84,13 +84,39 @@ export async function middleware(request: NextRequest) {
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self' 'unsafe-inline'";
 
+  // connect-src must allowlist every origin the client opens XHR/fetch/WebSocket to,
+  // or the browser silently blocks them. 'self' alone breaks Supabase (REST + wss
+  // realtime), the Socket.io server, and Sentry ingest. Derive the exact origins
+  // from env so we don't widen the policy to a blanket https:/wss:.
+  const connectSrc = new Set<string>(["'self'"]);
+  const addOrigin = (raw?: string) => {
+    if (!raw) return;
+    try {
+      const { protocol, host } = new URL(raw);
+      // Supabase exposes REST over https and realtime over wss on the same host.
+      if (protocol === "https:" || protocol === "http:") {
+        connectSrc.add(`https://${host}`);
+        connectSrc.add(`wss://${host}`);
+      } else if (protocol === "wss:" || protocol === "ws:") {
+        connectSrc.add(`wss://${host}`);
+        connectSrc.add(`https://${host}`);
+      }
+    } catch {
+      // ignore malformed env values
+    }
+  };
+  addOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  addOrigin(process.env.NEXT_PUBLIC_WS_URL);
+  addOrigin(process.env.NEXT_PUBLIC_SENTRY_DSN);
+  if (isDev) connectSrc.add("ws://localhost:*");
+
   const csp = [
     "default-src 'self'",
     scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' https:",
-    "connect-src 'self'",
+    `connect-src ${Array.from(connectSrc).join(" ")}`,
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
