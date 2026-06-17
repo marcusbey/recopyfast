@@ -12,7 +12,9 @@ export async function GET(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -102,8 +104,8 @@ export async function GET(req: NextRequest) {
       statusCode: 200,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return NextResponse.json(
@@ -139,7 +141,9 @@ export async function POST(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -268,8 +272,8 @@ export async function POST(req: NextRequest) {
       statusCode: 200,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return NextResponse.json(
@@ -308,7 +312,9 @@ export async function DELETE(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -372,8 +378,8 @@ export async function DELETE(req: NextRequest) {
       statusCode: 204,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return new NextResponse(null, { status: 204 });

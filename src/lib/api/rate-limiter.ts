@@ -103,9 +103,10 @@ export class APIRateLimiter {
   }
 
   /**
-   * Generic rate limit checker
+   * Generic rate limit checker.
+   * Public: createRateLimitMiddleware drives it directly with a custom key.
    */
-  private async checkLimit(
+  async checkLimit(
     key: string,
     maxRequests: number,
     windowMs: number,
@@ -247,7 +248,10 @@ export function createRateLimitMiddleware(config: RateLimitConfig) {
  */
 function getDefaultKey(req: NextRequest): string {
   const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded ? forwarded.split(",")[0] : req.ip || "unknown";
+  // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
+  const ip = forwarded
+    ? forwarded.split(",")[0]
+    : req.headers.get("x-real-ip") || "unknown";
   return `ip:${ip}`;
 }
 

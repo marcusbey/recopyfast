@@ -5,11 +5,12 @@ import { auditLogger } from "@/lib/audit/logger";
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const resourceType = searchParams.get("resourceType");
-    const resourceId = searchParams.get("resourceId");
-    const action = searchParams.get("action");
-    const startDate = searchParams.get("startDate");
-    const endDate = searchParams.get("endDate");
+    // searchParams.get returns string | null; getLogs filters expect string | undefined.
+    const resourceType = searchParams.get("resourceType") ?? undefined;
+    const resourceId = searchParams.get("resourceId") ?? undefined;
+    const action = searchParams.get("action") ?? undefined;
+    const startDate = searchParams.get("startDate") ?? undefined;
+    const endDate = searchParams.get("endDate") ?? undefined;
     const limit = parseInt(searchParams.get("limit") || "50");
     const offset = parseInt(searchParams.get("offset") || "0");
 
@@ -107,9 +108,12 @@ export async function POST(req: NextRequest) {
     } = await supabase.auth.getUser();
 
     // Extract client info
+    // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
     const forwarded = req.headers.get("x-forwarded-for");
-    const ipAddress = forwarded ? forwarded.split(",")[0] : req.ip;
-    const userAgent = req.headers.get("user-agent");
+    const ipAddress = forwarded
+      ? forwarded.split(",")[0]
+      : (req.headers.get("x-real-ip") ?? undefined);
+    const userAgent = req.headers.get("user-agent") ?? undefined;
 
     await auditLogger.log({
       userId: user?.id,

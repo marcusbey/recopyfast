@@ -458,9 +458,12 @@ export class ClientAnalytics {
 
 // Middleware helper function
 export function getClientInfo(req: NextRequest) {
+  // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
   const forwarded = req.headers.get("x-forwarded-for");
-  const ipAddress = forwarded ? forwarded.split(",")[0] : req.ip;
-  const userAgent = req.headers.get("user-agent");
+  const ipAddress = forwarded
+    ? forwarded.split(",")[0]
+    : (req.headers.get("x-real-ip") ?? undefined);
+  const userAgent = req.headers.get("user-agent") ?? undefined;
 
   return {
     ipAddress,

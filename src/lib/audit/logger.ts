@@ -452,9 +452,12 @@ export function createAuditMiddleware() {
     const startTime = Date.now();
 
     // Extract client info
+    // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
     const forwarded = req.headers.get("x-forwarded-for");
-    const ipAddress = forwarded ? forwarded.split(",")[0] : req.ip;
-    const userAgent = req.headers.get("user-agent");
+    const ipAddress = forwarded
+      ? forwarded.split(",")[0]
+      : (req.headers.get("x-real-ip") ?? undefined);
+    const userAgent = req.headers.get("user-agent") ?? undefined;
 
     // Add logger to request context (if your framework supports it)
     // req.auditLogger = auditLogger;
