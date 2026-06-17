@@ -5,12 +5,20 @@
 
 import { NextRequest } from "next/server";
 
-// Mock Supabase
-jest.mock("@/lib/supabase/service", () => ({
-  createServiceRoleClient: jest.fn(() => ({
+// Mock the server Supabase client used by the health route's dependency checks
+// so GET exercises the real handler deterministically (healthy DB + storage).
+jest.mock("@/lib/supabase/server", () => ({
+  createClient: jest.fn(async () => ({
     from: jest.fn().mockReturnThis(),
     select: jest.fn().mockReturnThis(),
-    limit: jest.fn().mockResolvedValue({ data: [{}], error: null }),
+    limit: jest.fn().mockReturnThis(),
+    single: jest.fn().mockResolvedValue({ data: { id: "1" }, error: null }),
+    storage: {
+      getBucket: jest.fn().mockResolvedValue({
+        data: { name: "assets", public: false },
+        error: null,
+      }),
+    },
   })),
 }));
 
@@ -18,20 +26,17 @@ describe("/api/health", () => {
   // API-090: GET /api/health returns 200
   describe("API-090: Health endpoint", () => {
     it("should return health status information", async () => {
-      try {
-        const { GET } = await import("@/app/api/health/route");
-        const request = new NextRequest("http://localhost:3000/api/health");
-        const response = await GET(request);
+      const { GET } = await import("@/app/api/health/route");
+      const request = new NextRequest("http://localhost:3000/api/health");
+      const response = await GET(request);
 
-        expect(response).toBeDefined();
-        // Health endpoint should return 200 when healthy
-        if (response.status) {
-          expect([200, 503]).toContain(response.status);
-        }
-      } catch {
-        // If route doesn't exist, verify the expected behavior
-        expect(true).toBe(true);
-      }
+      // Exercise the real handler: it always returns a structured 200/503 JSON
+      // body carrying status + timestamp (both the healthy and error paths).
+      expect([200, 503]).toContain(response.status);
+      const body = await response.json();
+      expect(body).toHaveProperty("status");
+      expect(["healthy", "degraded", "unhealthy"]).toContain(body.status);
+      expect(body).toHaveProperty("timestamp");
     });
 
     it("should include status field in response", () => {
