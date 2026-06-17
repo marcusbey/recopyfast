@@ -1,6 +1,7 @@
 import { WebhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { createServerClient } from "@supabase/ssr";
 import fetch from "node-fetch";
+import crypto from "crypto";
 
 // Mock fetch
 jest.mock("node-fetch");
@@ -339,7 +340,6 @@ describe("WebhookManager", () => {
       const secret = "test-secret";
 
       // Generate expected signature
-      const crypto = require("crypto");
       const expectedSignature = crypto
         .createHmac("sha256", secret)
         .update(payload)

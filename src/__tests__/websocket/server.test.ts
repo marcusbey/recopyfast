@@ -4,6 +4,7 @@
  */
 
 import crypto from "crypto";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 // Mock dependencies
 jest.mock("@/lib/supabase/service", () => ({
@@ -140,8 +141,6 @@ describe("WebSocket Server", () => {
   // WS-007: content-map sanitizes content
   describe("WS-007: Content sanitization on save", () => {
     it("should sanitize HTML content before storage", () => {
-      const { sanitizeHTML } = require("@/lib/security/content-sanitizer");
-
       const dirtyContent = '<script>alert("xss")</script><p>Clean</p>';
       const sanitized = sanitizeHTML(dirtyContent, "BASIC_TEXT");
 

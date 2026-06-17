@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create translations object if auto-translate is enabled
-    let translations: Record<string, string> = {};
+    const translations: Record<string, string> = {};
     let translationCoverage = 0;
 
     if (autoTranslate) {

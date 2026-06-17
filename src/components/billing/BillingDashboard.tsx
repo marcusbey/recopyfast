@@ -34,8 +34,10 @@ export function BillingDashboard() {
 
       const data = await response.json();
       setDashboardData(data);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to fetch billing data",
+      );
     } finally {
       setLoading(false);
     }

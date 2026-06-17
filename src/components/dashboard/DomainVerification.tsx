@@ -251,7 +251,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
           {instructions.type === "dns" ? (
             <div className="space-y-3">
               <p className="text-blue-800">
-                Add the following TXT record to your domain's DNS settings:
+                Add the following TXT record to your domain&apos;s DNS settings:
               </p>
               <div className="bg-blue-100 p-3 rounded font-mono text-sm flex items-center justify-between">
                 <span>{instructions.record}</span>
@@ -273,7 +273,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
           ) : (
             <div className="space-y-3">
               <p className="text-blue-800">
-                Upload the verification file to your domain's web server:
+                Upload the verification file to your domain&apos;s web server:
               </p>
               <div className="bg-blue-100 p-3 rounded">
                 <div className="flex items-center justify-between mb-2">
@@ -343,8 +343,8 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                 </TabsList>
                 <TabsContent value="dns" className="mt-3">
                   <p className="text-sm text-gray-600">
-                    Add a TXT record to your domain's DNS settings. This method
-                    is recommended for most users.
+                    Add a TXT record to your domain&apos;s DNS settings. This
+                    method is recommended for most users.
                   </p>
                 </TabsContent>
                 <TabsContent value="file" className="mt-3">

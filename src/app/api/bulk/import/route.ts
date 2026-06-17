@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { BulkImportPayload, ContentElement } from "@/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  BulkImportPayload,
+  ContentElement,
+  ContentElementMetadata,
+} from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
@@ -161,26 +166,27 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function parseJSONImport(data: any): Partial<ContentElement>[] {
+function parseJSONImport(data: unknown[]): Partial<ContentElement>[] {
   if (!Array.isArray(data)) {
     throw new Error("JSON data must be an array");
   }
 
-  return data.map((item, index) => {
-    if (!item.element_id || !item.selector || !item.current_content) {
+  return data.map((rawItem, index) => {
+    const item = rawItem as Record<string, unknown>;
+    if (!item["element_id"] || !item["selector"] || !item["current_content"]) {
       throw new Error(
         `Invalid item at index ${index}: missing required fields`,
       );
     }
 
     return {
-      element_id: item.element_id,
-      selector: item.selector,
-      original_content: item.original_content || "",
-      current_content: item.current_content,
-      language: item.language || "en",
-      variant: item.variant || "default",
-      metadata: item.metadata || {},
+      element_id: item["element_id"] as string,
+      selector: item["selector"] as string,
+      original_content: (item["original_content"] as string) || "",
+      current_content: item["current_content"] as string,
+      language: (item["language"] as string) || "en",
+      variant: (item["variant"] as string) || "default",
+      metadata: (item["metadata"] as ContentElementMetadata) || {},
     };
   });
 }
@@ -200,7 +206,7 @@ function parseCSVImport(data: string): Partial<ContentElement>[] {
 
   return lines.slice(1).map((line, index) => {
     const values = line.split(",").map((v) => v.trim());
-    const item: any = {};
+    const item: Record<string, string> = {};
 
     headers.forEach((header, i) => {
       item[header] = values[i] || "";
@@ -233,7 +239,7 @@ async function validateContentElements(
   elements: Partial<ContentElement>[],
   siteId: string,
   options: BulkImportPayload["options"],
-  supabase: any,
+  supabase: SupabaseClient,
 ): Promise<Partial<ContentElement>[]> {
   const validatedElements: Partial<ContentElement>[] = [];
 
@@ -279,7 +285,7 @@ async function importContentElements(
   siteId: string,
   userId: string,
   options: BulkImportPayload["options"],
-  supabase: any,
+  supabase: SupabaseClient,
 ): Promise<{ successful: number; failed: number; errors: string[] }> {
   let successful = 0;
   let failed = 0;

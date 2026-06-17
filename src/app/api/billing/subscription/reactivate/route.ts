@@ -22,10 +22,15 @@ export async function POST() {
     const subscription = await reactivateSubscription(user.id);
 
     return NextResponse.json({ subscription });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error reactivating subscription:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to reactivate subscription" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to reactivate subscription",
+      },
       { status: 500 },
     );
   }

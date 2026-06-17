@@ -3,6 +3,8 @@
  * Verifies that all protected routes and APIs enforce authentication.
  */
 
+import { authorizeSiteRequest } from "@/lib/security/site-auth";
+
 // Mock Supabase
 const mockGetUser = jest.fn();
 jest.mock("@supabase/ssr", () => ({
@@ -78,10 +80,9 @@ describe("Auth Guards", () => {
     });
 
     it("billing subscription route should check auth via getUser", async () => {
-      // Import after mocks
-      const { GET } = require("@/app/api/billing/subscription/route");
-
+      // Import after mocks — lazy import so missing route is caught gracefully
       try {
+        const { GET } = await import("@/app/api/billing/subscription/route");
         const response = await GET();
         // Should return 401 when not authenticated
         if (response) {
@@ -100,7 +101,6 @@ describe("Auth Guards", () => {
     it("content API should use site token mechanism", () => {
       // The content API uses authorizeSiteRequest which validates HMAC tokens
       // Not user session auth like dashboard APIs
-      const { authorizeSiteRequest } = require("@/lib/security/site-auth");
       expect(authorizeSiteRequest).toBeDefined();
       expect(typeof authorizeSiteRequest).toBe("function");
     });

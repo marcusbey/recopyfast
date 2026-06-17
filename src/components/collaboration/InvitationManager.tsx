@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { TeamInvitation } from "@/types";
+import { TeamInvitation, TeamRole } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,20 @@ import {
   AlertCircle,
   CheckCircle,
 } from "lucide-react";
+
+// Shape of invitation-type notifications returned by /api/notifications
+interface InvitationNotification {
+  type: string;
+  created_at: string;
+  data: {
+    invitation_id: string;
+    team_id: string;
+    email: string;
+    role: string;
+    team_name?: string;
+    inviter_email?: string;
+  };
+}
 
 export function InvitationManager() {
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
@@ -47,29 +61,32 @@ export function InvitationManager() {
         const { notifications } = await response.json();
 
         // Filter invitation notifications and extract invitation data
-        const invitationNotifications = notifications.filter(
-          (n: any) => n.type === "invitation" && n.data.invitation_id,
-        );
+        const invitationNotifications = (
+          notifications as InvitationNotification[]
+        ).filter((n) => n.type === "invitation" && n.data.invitation_id);
 
         // For now, we'll create invitation objects from notification data
         // In a real implementation, you might want to fetch actual invitation details
-        const inviteData = invitationNotifications.map((n: any) => ({
-          id: n.data.invitation_id,
-          team_id: n.data.team_id,
-          email: n.data.email,
-          role: n.data.role,
-          token: "", // We don't have access to token here
-          expires_at: new Date(
-            Date.now() + 7 * 24 * 60 * 60 * 1000,
-          ).toISOString(),
-          created_at: n.created_at,
-          team: {
-            name: n.data.team_name || "Unknown Team",
-          },
-          inviter: {
-            email: n.data.inviter_email || "Unknown",
-          },
-        }));
+        const inviteData: TeamInvitation[] = invitationNotifications.map(
+          (n) => ({
+            id: n.data.invitation_id,
+            team_id: n.data.team_id,
+            email: n.data.email,
+            role: n.data.role as TeamRole,
+            invited_by: n.data.inviter_email || "",
+            token: "", // We don't have access to token here
+            expires_at: new Date(
+              Date.now() + 7 * 24 * 60 * 60 * 1000,
+            ).toISOString(),
+            created_at: n.created_at,
+            team: {
+              name: n.data.team_name || "Unknown Team",
+            },
+            inviter: {
+              email: n.data.inviter_email || "Unknown",
+            },
+          }),
+        );
 
         setInvitations(inviteData);
       }
@@ -237,7 +254,7 @@ export function InvitationManager() {
               No pending invitations
             </h3>
             <p className="text-gray-600">
-              You don't have any pending team invitations at the moment.
+              You don&apos;t have any pending team invitations at the moment.
             </p>
           </CardContent>
         </Card>

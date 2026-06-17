@@ -7,7 +7,10 @@ import {
   isDomainWhitelisted,
   extractDomainFromURL,
   DomainVerificationChecker,
+  verifyDNSTXTRecord,
+  verifyDomainFile,
 } from "@/lib/security/domain-verification";
+import * as dns from "dns";
 
 // Mock the dns module for testing
 jest.mock("dns", () => ({
@@ -208,8 +211,7 @@ describe("Domain Verification", () => {
     });
 
     it("should cache verification results", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
         ["recopyfast-verification=code123"],
       ]);
 
@@ -225,8 +227,7 @@ describe("Domain Verification", () => {
     });
 
     it("should bypass cache when requested", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
         ["recopyfast-verification=code123"],
       ]);
 
@@ -238,8 +239,7 @@ describe("Domain Verification", () => {
     });
 
     it("should clear cache correctly", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
         ["recopyfast-verification=code123"],
       ]);
 
@@ -253,8 +253,7 @@ describe("Domain Verification", () => {
     });
 
     it("should expire cache after timeout", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
         ["recopyfast-verification=code123"],
       ]);
 
@@ -277,14 +276,10 @@ describe("Domain Verification", () => {
     });
 
     it("should verify correct DNS TXT record", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
         ["recopyfast-verification=code123"],
       ]);
 
-      const {
-        verifyDNSTXTRecord,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDNSTXTRecord("example.com", "code123");
 
       expect(result.success).toBe(true);
@@ -292,12 +287,10 @@ describe("Domain Verification", () => {
     });
 
     it("should fail for incorrect DNS TXT record", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockResolvedValue([["other-verification=wrong"]]);
+      (dns.promises.resolveTxt as jest.Mock).mockResolvedValue([
+        ["other-verification=wrong"],
+      ]);
 
-      const {
-        verifyDNSTXTRecord,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDNSTXTRecord("example.com", "code123");
 
       expect(result.success).toBe(false);
@@ -305,12 +298,10 @@ describe("Domain Verification", () => {
     });
 
     it("should handle DNS resolution errors", async () => {
-      const dns = require("dns");
-      dns.promises.resolveTxt.mockRejectedValue(new Error("NXDOMAIN"));
+      (dns.promises.resolveTxt as jest.Mock).mockRejectedValue(
+        new Error("NXDOMAIN"),
+      );
 
-      const {
-        verifyDNSTXTRecord,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDNSTXTRecord("nonexistent.com", "code123");
 
       expect(result.success).toBe(false);
@@ -332,9 +323,6 @@ describe("Domain Verification", () => {
         text: () => Promise.resolve(expectedContent),
       });
 
-      const {
-        verifyDomainFile,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(true);
@@ -350,9 +338,6 @@ describe("Domain Verification", () => {
         text: () => Promise.resolve("Wrong content"),
       });
 
-      const {
-        verifyDomainFile,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);
@@ -366,9 +351,6 @@ describe("Domain Verification", () => {
         statusText: "Not Found",
       });
 
-      const {
-        verifyDomainFile,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);
@@ -378,9 +360,6 @@ describe("Domain Verification", () => {
     it("should handle network errors", async () => {
       (global.fetch as jest.Mock).mockRejectedValue(new Error("Network error"));
 
-      const {
-        verifyDomainFile,
-      } = require("@/lib/security/domain-verification");
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);

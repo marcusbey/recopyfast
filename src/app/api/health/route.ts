@@ -30,7 +30,7 @@ interface ServiceCheck {
   status: "ok" | "error" | "timeout";
   latency?: number;
   error?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 interface MemoryMetrics {
@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Process results
-    const checks: any = {
+    const checks: HealthStatus["checks"] = {
       database:
         database.status === "fulfilled"
           ? database.value
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
     // Determine overall health status
     const statuses = Object.values(checks)
       .filter(Boolean)
-      .map((check: any) => check.status);
+      .map((check: ServiceCheck) => check.status);
 
     let overallStatus: "healthy" | "degraded" | "unhealthy" = "healthy";
     if (statuses.includes("error")) {

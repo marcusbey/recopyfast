@@ -71,8 +71,10 @@ export function PurchaseTicketsDialog({
       onSuccess();
       onOpenChange(false);
       setQuantity(1);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to purchase tickets",
+      );
     } finally {
       setLoading(false);
     }

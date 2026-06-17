@@ -3,6 +3,8 @@
  * Tests API key creation, listing, and deletion.
  */
 
+import { validateAndSanitizeInput } from "@/lib/security/content-sanitizer";
+
 // Mock Supabase
 const mockGetUser = jest.fn();
 const mockSupabase = {
@@ -120,10 +122,6 @@ describe("/api/api-keys", () => {
   // API-063: POST sanitizes name input
   describe("API-063: Input sanitization", () => {
     it("should sanitize API key name to prevent XSS", () => {
-      const {
-        validateAndSanitizeInput,
-      } = require("@/lib/security/content-sanitizer");
-
       const maliciousName = '<script>alert("xss")</script>My API Key';
       const sanitized = validateAndSanitizeInput(maliciousName);
 

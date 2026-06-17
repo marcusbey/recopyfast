@@ -48,7 +48,7 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
             Check your email
           </h3>
           <p className="text-gray-600 text-sm">
-            We've sent a magic link to{" "}
+            We&apos;ve sent a magic link to{" "}
             <span className="font-medium text-gray-900">{email}</span>
           </p>
           <p className="text-gray-500 text-xs">
@@ -112,7 +112,7 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
       </Button>
 
       <div className="text-center text-sm text-gray-500">
-        <p>We'll send you a secure link to sign in instantly</p>
+        <p>We&apos;ll send you a secure link to sign in instantly</p>
       </div>
 
       <div className="text-center text-sm">

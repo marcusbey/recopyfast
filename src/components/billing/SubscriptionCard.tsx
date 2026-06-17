@@ -49,8 +49,10 @@ export function SubscriptionCard({
       }
 
       onUpdate();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to cancel subscription",
+      );
     } finally {
       setLoading(false);
     }
@@ -71,8 +73,12 @@ export function SubscriptionCard({
       }
 
       onUpdate();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to reactivate subscription",
+      );
     } finally {
       setLoading(false);
     }

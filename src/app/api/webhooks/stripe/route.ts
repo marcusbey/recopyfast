@@ -1,14 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
+import type Stripe from "stripe";
 import { stripe, STRIPE_CONFIG } from "@/lib/stripe/config";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { addTicketsToUser } from "@/lib/stripe/tickets";
+
+// The Stripe SDK types for the 2025-07-30.basil API version removed
+// current_period_start / current_period_end from the top-level Subscription
+// object (they are now on SubscriptionItem). However, the webhook payload
+// still delivers these fields at the top level. We augment the type here so
+// we can read them without resorting to `any`.
+type StripeSubscriptionWithPeriod = Stripe.Subscription & {
+  current_period_start: number;
+  current_period_end: number;
+};
+
+// Similarly, Invoice.subscription was moved under
+// Invoice.parent.subscription_details.subscription in newer API versions,
+// but the webhook payload still includes a top-level `subscription` field.
+type StripeInvoiceWithSubscription = Stripe.Invoice & {
+  subscription: string | Stripe.Subscription | null;
+};
+
+// Minimal shape of event data objects that carry metadata + customer.
+// Used only inside logBillingEvent to avoid operating on the full
+// Stripe.Event.data.object union (which is 70+ types).
+type BillingEventObject = {
+  metadata?: Record<string, string> | null;
+  customer?: string | Stripe.Customer | Stripe.DeletedCustomer | null;
+};
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
   const signature = (await headers()).get("stripe-signature") as string;
 
-  let event: any;
+  let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(
@@ -16,8 +42,9 @@ export async function POST(req: NextRequest) {
       signature,
       STRIPE_CONFIG.WEBHOOK_SECRET,
     );
-  } catch (err: any) {
-    console.error("Webhook signature verification failed:", err.message);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Webhook signature verification failed:", message);
     return NextResponse.json(
       { error: "Webhook signature verification failed" },
       { status: 400 },
@@ -49,11 +76,17 @@ export async function POST(req: NextRequest) {
   try {
     switch (event.type) {
       case "customer.subscription.created":
-        await handleSubscriptionCreated(event.data.object, supabase);
+        await handleSubscriptionCreated(
+          event.data.object as StripeSubscriptionWithPeriod,
+          supabase,
+        );
         break;
 
       case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event.data.object, supabase);
+        await handleSubscriptionUpdated(
+          event.data.object as StripeSubscriptionWithPeriod,
+          supabase,
+        );
         break;
 
       case "customer.subscription.deleted":
@@ -61,11 +94,17 @@ export async function POST(req: NextRequest) {
         break;
 
       case "invoice.payment_succeeded":
-        await handleInvoicePaymentSucceeded(event.data.object, supabase);
+        await handleInvoicePaymentSucceeded(
+          event.data.object as StripeInvoiceWithSubscription,
+          supabase,
+        );
         break;
 
       case "invoice.payment_failed":
-        await handleInvoicePaymentFailed(event.data.object, supabase);
+        await handleInvoicePaymentFailed(
+          event.data.object as StripeInvoiceWithSubscription,
+          supabase,
+        );
         break;
 
       case "payment_intent.succeeded":
@@ -92,10 +131,15 @@ export async function POST(req: NextRequest) {
     await logBillingEvent(event, supabase);
 
     return NextResponse.json({ received: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // A unique-violation means a concurrent delivery already processed this
     // event. Return 200 so Stripe stops retrying — the work is already done.
-    if (error?.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code: string }).code === "23505"
+    ) {
       console.log(
         `Stripe event ${event.id} hit a unique-violation — already processed concurrently.`,
       );
@@ -115,7 +159,7 @@ type ServiceClient = ReturnType<typeof createServiceRoleClient>;
  * Handle subscription creation
  */
 async function handleSubscriptionCreated(
-  subscription: any,
+  subscription: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
   const userId = subscription.metadata?.user_id;
@@ -170,7 +214,7 @@ async function handleSubscriptionCreated(
  * Handle subscription updates
  */
 async function handleSubscriptionUpdated(
-  subscription: any,
+  subscription: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
   await supabase
@@ -204,7 +248,7 @@ async function handleSubscriptionUpdated(
  * Handle subscription deletion
  */
 async function handleSubscriptionDeleted(
-  subscription: any,
+  subscription: Stripe.Subscription,
   supabase: ServiceClient,
 ) {
   await supabase
@@ -220,7 +264,7 @@ async function handleSubscriptionDeleted(
  * Handle successful invoice payment
  */
 async function handleInvoicePaymentSucceeded(
-  invoice: any,
+  invoice: StripeInvoiceWithSubscription,
   supabase: ServiceClient,
 ) {
   // Get customer
@@ -235,12 +279,21 @@ async function handleInvoicePaymentSucceeded(
     return;
   }
 
+  // Resolve the subscription ID from the invoice's top-level subscription field
+  // (still present in webhook payloads even though the TS type moved it under parent).
+  const subscriptionId =
+    typeof invoice.subscription === "string"
+      ? invoice.subscription
+      : (invoice.subscription?.id ?? null);
+
   // Get subscription if exists
-  const { data: subscription } = await supabase
-    .from("billing_subscriptions")
-    .select("*")
-    .eq("stripe_subscription_id", invoice.subscription)
-    .single();
+  const { data: subscription } = subscriptionId
+    ? await supabase
+        .from("billing_subscriptions")
+        .select("*")
+        .eq("stripe_subscription_id", subscriptionId)
+        .single()
+    : { data: null };
 
   // Insert or update invoice
   await supabase.from("billing_invoices").upsert({
@@ -260,7 +313,7 @@ async function handleInvoicePaymentSucceeded(
  * Handle failed invoice payment
  */
 async function handleInvoicePaymentFailed(
-  invoice: any,
+  invoice: StripeInvoiceWithSubscription,
   supabase: ServiceClient,
 ) {
   // Update invoice status
@@ -280,7 +333,9 @@ async function handleInvoicePaymentFailed(
  * Tickets are ONLY credited here (in the webhook) to avoid double-crediting
  * from the synchronous purchase path in tickets.ts.
  */
-async function handlePaymentIntentSucceeded(paymentIntent: any) {
+async function handlePaymentIntentSucceeded(
+  paymentIntent: Stripe.PaymentIntent,
+) {
   if (paymentIntent.metadata?.type === "ticket_purchase") {
     const userId = paymentIntent.metadata.user_id;
     const ticketQuantity = parseInt(paymentIntent.metadata.ticket_quantity);
@@ -294,7 +349,7 @@ async function handlePaymentIntentSucceeded(paymentIntent: any) {
 /**
  * Handle failed payment intent
  */
-async function handlePaymentIntentFailed(paymentIntent: any) {
+async function handlePaymentIntentFailed(paymentIntent: Stripe.PaymentIntent) {
   // Log the failed payment
   console.error(
     "Payment intent failed:",
@@ -309,7 +364,7 @@ async function handlePaymentIntentFailed(paymentIntent: any) {
 /**
  * Handle customer creation
  */
-async function handleCustomerCreated(customer: any) {
+async function handleCustomerCreated(customer: Stripe.Customer) {
   // Customer is already created in our system before the Stripe customer
   // This webhook is mainly for logging and verification
   console.log("Customer created in Stripe:", customer.id);
@@ -318,7 +373,10 @@ async function handleCustomerCreated(customer: any) {
 /**
  * Handle customer updates
  */
-async function handleCustomerUpdated(customer: any, supabase: ServiceClient) {
+async function handleCustomerUpdated(
+  customer: Stripe.Customer,
+  supabase: ServiceClient,
+) {
   // Update customer information
   await supabase
     .from("billing_customers")
@@ -332,19 +390,26 @@ async function handleCustomerUpdated(customer: any, supabase: ServiceClient) {
 /**
  * Log billing events for audit trail
  */
-async function logBillingEvent(event: any, supabase: ServiceClient) {
+async function logBillingEvent(event: Stripe.Event, supabase: ServiceClient) {
+  // Cast to a minimal shape — the actual webhook payload always carries
+  // metadata and customer on the data object, but Stripe.Event.data.object
+  // is a union of 70+ types so we use a local interface to avoid `any`.
+  const obj = event.data.object as BillingEventObject;
+
   // Extract user_id from event metadata
-  let userId = null;
-  if (event.data.object.metadata?.user_id) {
-    userId = event.data.object.metadata.user_id;
-  } else if (event.data.object.customer) {
+  let userId: string | null = null;
+  if (obj.metadata?.user_id) {
+    userId = obj.metadata.user_id;
+  } else if (obj.customer) {
+    const customerId =
+      typeof obj.customer === "string" ? obj.customer : obj.customer.id;
     // Try to get user_id from customer
     const { data: customer } = await supabase
       .from("billing_customers")
       .select("user_id")
-      .eq("stripe_customer_id", event.data.object.customer)
+      .eq("stripe_customer_id", customerId)
       .single();
-    userId = customer?.user_id;
+    userId = customer?.user_id ?? null;
   }
 
   if (userId) {

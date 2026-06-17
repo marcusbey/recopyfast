@@ -112,7 +112,7 @@ export async function GET() {
     };
 
     return NextResponse.json(dashboardData);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching billing dashboard:", error);
     return NextResponse.json(
       { error: "Failed to fetch billing dashboard" },

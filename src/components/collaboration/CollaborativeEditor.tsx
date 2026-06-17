@@ -4,7 +4,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Editor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Placeholder } from "@tiptap/extension-placeholder";
-import { ContentElement, PresenceData, CollaborativeEdit } from "@/types";
+import {
+  ContentElement,
+  PresenceData,
+  CollaborativeEdit,
+  EditConflict,
+} from "@/types";
 import { collaborationRealtime } from "@/lib/collaboration/realtime";
 import { CollaborationPermissions } from "@/lib/collaboration/permissions";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,7 +51,7 @@ export function CollaborativeEditor({
   const [userRole, setUserRole] = useState<string>("viewer");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState<any>(null);
+  const [conflict, setConflict] = useState<EditConflict | null>(null);
   const [connected, setConnected] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -148,7 +153,7 @@ export function CollaborativeEditor({
       setPresenceList(users.filter((p) => p.userId !== userId));
     };
 
-    const handleEditConflict = (conflictData: any) => {
+    const handleEditConflict = (conflictData: EditConflict) => {
       if (conflictData.elementId === contentElement.id) {
         setConflict(conflictData);
       }

@@ -19,7 +19,7 @@ describe("/api/health", () => {
   describe("API-090: Health endpoint", () => {
     it("should return health status information", async () => {
       try {
-        const { GET } = require("@/app/api/health/route");
+        const { GET } = await import("@/app/api/health/route");
         const request = new NextRequest("http://localhost:3000/api/health");
         const response = await GET(request);
 

@@ -168,7 +168,25 @@ export async function POST(
   }
 }
 
-function calculateTestStatistics(results: any[], variants: any[]) {
+interface TestResult {
+  variant_id: string;
+  event_type: string;
+  value?: number;
+  user_id?: string;
+  session_id?: string;
+  recorded_at: string;
+}
+
+interface TestVariant {
+  id: string;
+  variant_name: string;
+  traffic_percentage: number;
+}
+
+function calculateTestStatistics(
+  results: TestResult[],
+  variants: TestVariant[],
+) {
   const variantStats = variants.map((variant) => {
     const variantResults = results.filter((r) => r.variant_id === variant.id);
     const views = variantResults.filter((r) => r.event_type === "view").length;

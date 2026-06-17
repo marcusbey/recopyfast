@@ -59,7 +59,7 @@ export async function GET() {
     });
 
     return NextResponse.json({ paymentMethods: combinedPaymentMethods });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching payment methods:", error);
     return NextResponse.json(
       { error: "Failed to fetch payment methods" },
@@ -150,10 +150,15 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ paymentMethod: newPaymentMethod });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error adding payment method:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to add payment method" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to add payment method",
+      },
       { status: 500 },
     );
   }
@@ -221,10 +226,15 @@ export async function DELETE(req: NextRequest) {
       .eq("stripe_payment_method_id", paymentMethodId);
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error removing payment method:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to remove payment method" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to remove payment method",
+      },
       { status: 500 },
     );
   }

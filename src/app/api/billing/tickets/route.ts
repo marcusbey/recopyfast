@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       transactions,
       pricing,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching tickets:", error);
     return NextResponse.json(
       { error: "Failed to fetch tickets" },
@@ -86,10 +86,13 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error purchasing tickets:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to purchase tickets" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to purchase tickets",
+      },
       { status: 500 },
     );
   }

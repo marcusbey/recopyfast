@@ -28,7 +28,7 @@ export async function GET() {
     const subscription = await getUserSubscription(user.id);
 
     return NextResponse.json({ subscription });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error fetching subscription:", error);
     return NextResponse.json(
       { error: "Failed to fetch subscription" },
@@ -86,10 +86,15 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error creating subscription:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to create subscription" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create subscription",
+      },
       { status: 500 },
     );
   }
@@ -126,10 +131,15 @@ export async function PUT(req: NextRequest) {
     });
 
     return NextResponse.json({ subscription });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error updating subscription:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to update subscription" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update subscription",
+      },
       { status: 500 },
     );
   }
@@ -158,10 +168,15 @@ export async function DELETE(req: NextRequest) {
     const subscription = await cancelSubscription(user.id, immediate);
 
     return NextResponse.json({ subscription });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Error canceling subscription:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to cancel subscription" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to cancel subscription",
+      },
       { status: 500 },
     );
   }
