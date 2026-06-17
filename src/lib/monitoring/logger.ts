@@ -4,8 +4,32 @@
  */
 
 import winston from "winston";
-import DailyRotateFile from "winston-daily-rotate-file";
 import * as Sentry from "@sentry/nextjs";
+import crypto from "crypto";
+
+/**
+ * Pseudonymize an IP address before it enters the logs.
+ *
+ * Raw IPs are personal data (GDPR Recital 30). We keep a stable, one-way token so
+ * abuse/rate-limit correlation still works without retaining the original address.
+ * Salted with LOG_IP_SALT so the digest cannot be reversed via a rainbow table of
+ * the ~4.3B IPv4 space. Falls back to a per-process random salt when unset (still
+ * non-reversible, but not stable across restarts).
+ */
+const IP_SALT =
+  process.env.LOG_IP_SALT || crypto.randomBytes(16).toString("hex");
+
+function pseudonymizeIp(ip?: string): string | undefined {
+  if (!ip) return undefined;
+  // x-forwarded-for can be a comma-separated list — hash the client (first) hop.
+  const client = ip.split(",")[0].trim();
+  if (!client) return undefined;
+  return crypto
+    .createHash("sha256")
+    .update(`${IP_SALT}:${client}`)
+    .digest("hex")
+    .slice(0, 16);
+}
 
 // Define log levels and their priorities
 const logLevels = {
@@ -61,49 +85,10 @@ transports.push(
   }),
 );
 
-// File transports for production
-if (process.env.NODE_ENV === "production") {
-  // Error log file
-  transports.push(
-    new DailyRotateFile({
-      filename: "logs/error-%DATE%.log",
-      datePattern: "YYYY-MM-DD",
-      level: "error",
-      format: productionFormat,
-      maxSize: "20m",
-      maxFiles: "14d",
-      createSymlink: true,
-      symlinkName: "error.log",
-    }),
-  );
-
-  // Combined log file
-  transports.push(
-    new DailyRotateFile({
-      filename: "logs/combined-%DATE%.log",
-      datePattern: "YYYY-MM-DD",
-      format: productionFormat,
-      maxSize: "20m",
-      maxFiles: "30d",
-      createSymlink: true,
-      symlinkName: "combined.log",
-    }),
-  );
-
-  // HTTP requests log
-  transports.push(
-    new DailyRotateFile({
-      filename: "logs/http-%DATE%.log",
-      datePattern: "YYYY-MM-DD",
-      level: "http",
-      format: productionFormat,
-      maxSize: "20m",
-      maxFiles: "7d",
-      createSymlink: true,
-      symlinkName: "http.log",
-    }),
-  );
-}
+// NOTE: No file transports. The production target (Vercel/serverless) has an
+// ephemeral, frequently read-only filesystem — DailyRotateFile would either throw
+// on write or silently drop logs that vanish when the lambda is recycled. stdout is
+// captured by the platform's log drain, and errors are forwarded to Sentry below.
 
 // Create the logger
 const logger = winston.createLogger({
@@ -384,11 +369,12 @@ export function createRequestContext(req: {
     requestId:
       (req.headers["x-request-id"] as string) ||
       (req.headers["x-vercel-id"] as string) ||
-      Math.random().toString(36).substring(7),
+      crypto.randomUUID(),
     userAgent: req.headers["user-agent"] as string,
-    ip:
+    ip: pseudonymizeIp(
       req.ip ||
-      (req.headers["x-forwarded-for"] as string) ||
-      (req.headers["x-real-ip"] as string),
+        (req.headers["x-forwarded-for"] as string) ||
+        (req.headers["x-real-ip"] as string),
+    ),
   };
 }

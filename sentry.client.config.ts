@@ -29,8 +29,11 @@ Sentry.init({
   // Integrations
   integrations: [
     Sentry.replayIntegration({
-      maskAllText: false,
-      blockAllMedia: false,
+      // Mask all text + media in session replays. Recopyfast replays render
+      // customer website content (potentially their end-users' PII); capturing it
+      // unmasked would route third-party personal data into our error tooling.
+      maskAllText: true,
+      blockAllMedia: true,
       maskAllInputs: true,
     }),
     Sentry.browserTracingIntegration(),
@@ -78,20 +81,20 @@ Sentry.init({
       }
     }
     
-    // Add user context if available
+    // Attach only a non-PII user id for correlation. Email is personal data and
+    // must not be shipped to Sentry — id alone is enough to join with our own logs.
     const user = typeof window !== 'undefined' ? window.localStorage.getItem('user') : null;
     if (user) {
       try {
         const userData = JSON.parse(user);
-        event.user = {
-          id: userData.id,
-          email: userData.email,
-        };
-      } catch (e) {
+        if (userData?.id) {
+          event.user = { id: userData.id };
+        }
+      } catch {
         // Ignore parse errors
       }
     }
-    
+
     return event;
   },
   

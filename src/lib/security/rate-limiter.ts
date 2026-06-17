@@ -46,13 +46,17 @@ export class MemoryRateLimiter {
 
     const key = this.generateKey(config);
     const now = Date.now();
-    const windowStart = now;
-    const windowEnd = now + config.windowMs;
+    // Anchor the window to a fixed wall-clock boundary (not to the first request).
+    // This mirrors RedisRateLimiter so dev (memory) and prod (redis) enforce the
+    // SAME limit. Anchoring to first-hit let a caller drift the window forward with
+    // every request and sustain ~2x the intended rate across boundaries.
+    const windowStart = Math.floor(now / config.windowMs) * config.windowMs;
+    const windowEnd = windowStart + config.windowMs;
 
     let info = this.requests.get(key);
 
-    if (!info || now > info.windowEnd) {
-      // Create new window
+    if (!info || now >= info.windowEnd) {
+      // Start of a fresh fixed window
       info = {
         requests: 1,
         windowStart,

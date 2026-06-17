@@ -119,8 +119,12 @@ export async function POST(request: NextRequest) {
       result.access.token,
     );
 
-    // TODO: Send verification email for invite type
-    // For now, return the verification code (in production, this would be emailed)
+    // The verification code is intentionally NOT returned in the response — it is a
+    // shared secret that gates staging access. It must reach the invitee only via a
+    // trusted side channel (transactional email). result.verificationCode is available
+    // server-side for that delivery; exposing it here would let anyone who can call
+    // this endpoint self-verify and bypass email ownership.
+    // TODO: deliver result.verificationCode via transactional email for invite type.
 
     return NextResponse.json({
       success: true,
@@ -135,8 +139,6 @@ export async function POST(request: NextRequest) {
       },
       stagingUrl,
       token: result.access.token,
-      // In production, don't return this - send via email instead
-      verificationCode: result.verificationCode,
     });
   } catch (error) {
     console.error("Error creating staging access:", error);

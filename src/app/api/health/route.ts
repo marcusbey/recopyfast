@@ -292,7 +292,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Support HEAD requests for uptime monitoring
+// Support HEAD requests for uptime monitoring.
+// A HEAD probe must reflect real readiness: if the database is unreachable the
+// instance cannot serve traffic, so return 503 and let the load balancer / uptime
+// monitor route around it. A bare 200 would mask a hard outage.
 export async function HEAD() {
-  return new NextResponse(null, { status: 200 });
+  const db = await checkDatabase();
+  return new NextResponse(null, {
+    status: db.status === "ok" ? 200 : 503,
+    headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
+  });
 }

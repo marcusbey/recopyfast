@@ -5,6 +5,33 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  rateLimiter,
+  createRateLimitConfig,
+} from "@/lib/security/rate-limiter";
+
+/**
+ * Cap verification-code attempts per token. The code is only 6 digits (10^6 space)
+ * with a 10-minute lifetime; without a limit an attacker could exhaust it. 10
+ * attempts / 15 min per token makes brute force infeasible within the code's TTL.
+ */
+async function verifyAttemptAllowed(token: string): Promise<boolean> {
+  try {
+    const config = createRateLimitConfig(
+      token,
+      "api_key",
+      "IP_AUTH",
+      "staging-verify",
+    );
+    const result = await rateLimiter.checkLimit(config);
+    return result.allowed;
+  } catch (err) {
+    // Fail closed: if the limiter backend is unavailable, deny rather than open the
+    // brute-force window. Staging verification is low-volume, so this is safe.
+    console.error("Verify rate-limit check failed:", err);
+    return false;
+  }
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -77,6 +104,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: "Verification code is required" },
           { status: 400 },
+        );
+      }
+
+      // Throttle attempts BEFORE checking the code to prevent brute force.
+      if (!(await verifyAttemptAllowed(token))) {
+        return NextResponse.json(
+          { error: "Too many attempts. Try again later." },
+          { status: 429 },
         );
       }
 
