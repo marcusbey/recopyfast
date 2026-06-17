@@ -26,22 +26,40 @@ export interface DomainVerificationResult {
  * Determine whether an IP address string falls within any range that must not
  * be reachable from the server (SSRF / DNS-rebinding mitigation).
  *
- * Blocked ranges:
- *   IPv4 loopback      127.0.0.0/8
- *   IPv4 link-local    169.254.0.0/16  (includes cloud metadata 169.254.169.254)
- *   IPv4 private       10.0.0.0/8
- *   IPv4 private       172.16.0.0/12
- *   IPv4 private       192.168.0.0/16
- *   IPv6 loopback      ::1
- *   IPv6 link-local    fe80::/10
+ * Blocked ranges (IPv4):
+ *   0.0.0.0/8          unspecified / "this" network (first octet 0)
+ *   10.0.0.0/8         private
+ *   100.64.0.0/10      CGNAT shared address space (RFC 6598)
+ *   127.0.0.0/8        loopback
+ *   169.254.0.0/16     link-local / cloud metadata (169.254.169.254)
+ *   172.16.0.0/12      private
+ *   192.168.0.0/16     private
+ *   224.0.0.0/4+       multicast and reserved (first octet >= 224)
+ *
+ * Blocked ranges (IPv6):
+ *   ::                 unspecified
+ *   ::1                loopback
+ *   ::ffff:0:0/96      IPv4-mapped — recursively checks the embedded v4 address
+ *   fc00::/7           Unique Local Addresses (fc** and fd**)
+ *   fe80::/10          link-local (fe80:: through febf::)
  */
 export function isInternalIP(ip: string): boolean {
   // ── IPv6 ─────────────────────────────────────────────────────────────────
   if (ip.includes(":")) {
     const normalized = ip.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
 
+    // Unspecified ::
+    if (normalized === "::") return true;
+
     // Loopback ::1
     if (normalized === "::1") return true;
+
+    // IPv4-mapped IPv6  ::ffff:a.b.c.d  — recurse on the embedded v4 address
+    const v4MappedMatch = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (v4MappedMatch) return isInternalIP(v4MappedMatch[1]);
+
+    // Unique Local Addresses fc00::/7  (first byte fc or fd — bit pattern 1111 110x)
+    if (/^f[cd][0-9a-f]{2}:/i.test(normalized)) return true;
 
     // Link-local fe80::/10  (first 10 bits = 1111 1110 10)
     // Covers fe80:: through febf::
@@ -54,9 +72,20 @@ export function isInternalIP(ip: string): boolean {
   const parts = ip.split(".");
   if (parts.length !== 4) return false;
 
-  const [a, b] = parts.map(Number);
-  if (parts.some((p) => isNaN(Number(p)) || Number(p) < 0 || Number(p) > 255))
-    return false;
+  const nums = parts.map(Number);
+  if (nums.some((n) => isNaN(n) || n < 0 || n > 255)) return false;
+
+  const [a, b] = nums;
+
+  // 0.0.0.0/8 — unspecified / "this" network (first octet 0)
+  if (a === 0) return true;
+
+  // 10.0.0.0/8 — private
+  if (a === 10) return true;
+
+  // 100.64.0.0/10 — CGNAT shared address space (RFC 6598)
+  // Range: 100.64.0.0 – 100.127.255.255  (b from 64 to 127)
+  if (a === 100 && b >= 64 && b <= 127) return true;
 
   // 127.0.0.0/8  — loopback
   if (a === 127) return true;
@@ -64,14 +93,14 @@ export function isInternalIP(ip: string): boolean {
   // 169.254.0.0/16 — link-local / cloud metadata (169.254.169.254)
   if (a === 169 && b === 254) return true;
 
-  // 10.0.0.0/8 — private
-  if (a === 10) return true;
-
   // 172.16.0.0/12 — private (172.16.x.x – 172.31.x.x)
   if (a === 172 && b >= 16 && b <= 31) return true;
 
   // 192.168.0.0/16 — private
   if (a === 192 && b === 168) return true;
+
+  // 224.0.0.0/4 and above — multicast (224–239) and reserved/broadcast (240–255)
+  if (a >= 224) return true;
 
   return false;
 }

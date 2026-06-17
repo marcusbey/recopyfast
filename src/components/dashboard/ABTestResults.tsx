@@ -29,6 +29,15 @@ export default function ABTestResults({ testId }: ABTestResultsProps) {
   }
 
   const { statistics } = data;
+
+  if (!statistics.variant_stats?.length) {
+    return (
+      <div className="flex items-center justify-center py-12 text-sm text-gray-500">
+        No variant performance data yet
+      </div>
+    );
+  }
+
   const bestVariant = statistics.variant_stats.reduce((best, current) =>
     current.conversion_rate > best.conversion_rate ? current : best,
   );

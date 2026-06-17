@@ -1,12 +1,31 @@
 import Stripe from "stripe";
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+let _stripe: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) {
+      throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+    }
+    _stripe = new Stripe(key, {
+      apiVersion: "2025-07-30.basil",
+      typescript: true,
+    });
+  }
+  return _stripe;
 }
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2025-07-30.basil",
-  typescript: true,
+// Lazy proxy: defers client construction (and the missing-key throw) until first
+// use. Constructing at module scope crashed Vercel's "Collecting page data" phase
+// for any route importing this file when STRIPE_SECRET_KEY is unset at build time.
+// All existing `stripe.x.y(...)` call sites keep working unchanged.
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    const client = getStripe();
+    const value = Reflect.get(client, prop, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
 });
 
 export const STRIPE_CONFIG = {

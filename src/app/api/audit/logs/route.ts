@@ -33,14 +33,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if user has admin role or appropriate permissions
-    const { data: userProfile } = await supabase
-      .from("auth.users")
-      .select("raw_user_meta_data")
-      .eq("id", user.id)
-      .single();
+    // Check if user has admin role or appropriate permissions.
+    // raw_user_meta_data / user_metadata is caller-writable and MUST NOT be used
+    // for server-side authorization. Trust only:
+    //   1. ADMIN_EMAILS env-var allowlist (server-managed)
+    //   2. app_metadata.role set server-side via the Supabase Admin SDK
+    const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
 
-    const isAdmin = userProfile?.raw_user_meta_data?.role === "admin";
+    const isAdmin =
+      (user.email != null && adminEmails.includes(user.email.toLowerCase())) ||
+      user.app_metadata?.role === "admin";
 
     if (!isAdmin) {
       // Non-admin users can only see their own audit logs

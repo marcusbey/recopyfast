@@ -8,8 +8,9 @@ import { createClient } from "@/lib/supabase/server";
  *  1. Cron / server-to-server: `Authorization: Bearer <CRON_SECRET>`
  *     (used by /api/cron/generate-blog-post which has no user session)
  *  2. Interactive admin: a valid Supabase session whose user either has
- *     `raw_user_meta_data.role === "admin"` OR whose email is listed in the
- *     comma-separated ADMIN_EMAILS env var.
+ *     server-managed `app_metadata.role === "admin"` (set via the Supabase Admin
+ *     SDK) OR whose email is listed in the comma-separated ADMIN_EMAILS env var.
+ *     user_metadata is caller-writable and is never trusted for authorization.
  *
  * Fails closed: if CRON_SECRET is unset the bearer path is disabled.
  */
@@ -41,9 +42,10 @@ async function isAuthorised(request: NextRequest): Promise<boolean> {
       return true;
     }
 
-    // Fall back to role stored in user metadata (set via Supabase dashboard / admin SDK)
-    const role = user.user_metadata?.role ?? user.app_metadata?.role;
-    if (role === "admin") {
+    // Trust ONLY server-managed app_metadata for role. user_metadata is caller-writable
+    // (any authenticated user can set it via PATCH /api/auth/profile or Supabase
+    // auth.updateUser), so reading role from user_metadata is a privilege-escalation vector.
+    if (user.app_metadata?.role === "admin") {
       return true;
     }
   } catch {

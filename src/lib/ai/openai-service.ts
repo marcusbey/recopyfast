@@ -1,9 +1,17 @@
 import OpenAI from "openai";
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy singleton — instantiated on first use so the module can be imported
+// during Vercel's "Collecting page data" phase without OPENAI_API_KEY being set.
+let _openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!_openaiClient) {
+    _openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return _openaiClient;
+}
 
 export interface TranslationRequest {
   text: string;
@@ -59,7 +67,7 @@ export class OpenAIService {
     try {
       const prompt = this.buildTranslationPrompt(request);
 
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -105,7 +113,7 @@ export class OpenAIService {
     try {
       const prompt = this.buildContentSuggestionPrompt(request);
 
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -207,7 +215,7 @@ export class OpenAIService {
    */
   async detectLanguage(text: string): Promise<AIResponse<string>> {
     try {
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -256,7 +264,7 @@ export class OpenAIService {
     try {
       const numVariants = request.numVariants || 3;
 
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {

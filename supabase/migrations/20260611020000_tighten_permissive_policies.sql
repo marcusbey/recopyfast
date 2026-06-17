@@ -27,7 +27,8 @@
 DROP POLICY IF EXISTS "Service role can manage ab_test_results" ON ab_test_results;
 
 -- Authenticated users may read results for tests on sites they have access to
-CREATE POLICY IF NOT EXISTS "Site members can view ab_test_results"
+DROP POLICY IF EXISTS "Site members can view ab_test_results" ON ab_test_results;
+CREATE POLICY "Site members can view ab_test_results"
   ON ab_test_results
   FOR SELECT
   USING (
@@ -40,20 +41,23 @@ CREATE POLICY IF NOT EXISTS "Site members can view ab_test_results"
   );
 
 -- Only the service role (backend analytics ingestion) may write
-CREATE POLICY IF NOT EXISTS "Service role can insert ab_test_results"
+DROP POLICY IF EXISTS "Service role can insert ab_test_results" ON ab_test_results;
+CREATE POLICY "Service role can insert ab_test_results"
   ON ab_test_results
   FOR INSERT
   TO service_role
   WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Service role can update ab_test_results"
+DROP POLICY IF EXISTS "Service role can update ab_test_results" ON ab_test_results;
+CREATE POLICY "Service role can update ab_test_results"
   ON ab_test_results
   FOR UPDATE
   TO service_role
   USING (true)
   WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Service role can delete ab_test_results"
+DROP POLICY IF EXISTS "Service role can delete ab_test_results" ON ab_test_results;
+CREATE POLICY "Service role can delete ab_test_results"
   ON ab_test_results
   FOR DELETE
   TO service_role
@@ -65,7 +69,8 @@ CREATE POLICY IF NOT EXISTS "Service role can delete ab_test_results"
 DROP POLICY IF EXISTS "Service role can manage visitor_buckets" ON visitor_buckets;
 
 -- Site members can see bucket assignments for their sites
-CREATE POLICY IF NOT EXISTS "Site members can view visitor_buckets"
+DROP POLICY IF EXISTS "Site members can view visitor_buckets" ON visitor_buckets;
+CREATE POLICY "Site members can view visitor_buckets"
   ON visitor_buckets
   FOR SELECT
   USING (
@@ -77,20 +82,23 @@ CREATE POLICY IF NOT EXISTS "Site members can view visitor_buckets"
   );
 
 -- Only the service role may write visitor bucket assignments
-CREATE POLICY IF NOT EXISTS "Service role can insert visitor_buckets"
+DROP POLICY IF EXISTS "Service role can insert visitor_buckets" ON visitor_buckets;
+CREATE POLICY "Service role can insert visitor_buckets"
   ON visitor_buckets
   FOR INSERT
   TO service_role
   WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Service role can update visitor_buckets"
+DROP POLICY IF EXISTS "Service role can update visitor_buckets" ON visitor_buckets;
+CREATE POLICY "Service role can update visitor_buckets"
   ON visitor_buckets
   FOR UPDATE
   TO service_role
   USING (true)
   WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS "Service role can delete visitor_buckets"
+DROP POLICY IF EXISTS "Service role can delete visitor_buckets" ON visitor_buckets;
+CREATE POLICY "Service role can delete visitor_buckets"
   ON visitor_buckets
   FOR DELETE
   TO service_role
@@ -104,7 +112,8 @@ DROP POLICY IF EXISTS "Staging users can insert history" ON staging_history;
 
 -- Service role handles all staging_history writes (called from API routes
 -- that validate staging token ownership before writing)
-CREATE POLICY IF NOT EXISTS "Service role can insert staging history"
+DROP POLICY IF EXISTS "Service role can insert staging history" ON staging_history;
+CREATE POLICY "Service role can insert staging history"
   ON staging_history
   FOR INSERT
   TO service_role
@@ -117,7 +126,8 @@ CREATE POLICY IF NOT EXISTS "Service role can insert staging history"
 DROP POLICY IF EXISTS "Insert versions via API" ON content_versions;
 
 -- Site editors/admins may create versions for their own sites
-CREATE POLICY IF NOT EXISTS "Site editors can insert content versions"
+DROP POLICY IF EXISTS "Site editors can insert content versions" ON content_versions;
+CREATE POLICY "Site editors can insert content versions"
   ON content_versions
   FOR INSERT
   WITH CHECK (
@@ -130,7 +140,8 @@ CREATE POLICY IF NOT EXISTS "Site editors can insert content versions"
   );
 
 -- Service role may also insert versions (for automated snapshots)
-CREATE POLICY IF NOT EXISTS "Service role can insert content versions"
+DROP POLICY IF EXISTS "Service role can insert content versions" ON content_versions;
+CREATE POLICY "Service role can insert content versions"
   ON content_versions
   FOR INSERT
   TO service_role
