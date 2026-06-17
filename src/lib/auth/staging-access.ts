@@ -351,9 +351,12 @@ export class StagingAccessManager {
   /**
    * Resend verification code
    */
-  static async resendVerificationCode(
-    token: string,
-  ): Promise<{ success: boolean; verificationCode?: string; error?: string }> {
+  static async resendVerificationCode(token: string): Promise<{
+    success: boolean;
+    verificationCode?: string;
+    email?: string;
+    error?: string;
+  }> {
     try {
       const supabase = await createClient();
 
@@ -397,7 +400,7 @@ export class StagingAccessManager {
         return { success: false, error: "Failed to resend code" };
       }
 
-      return { success: true, verificationCode };
+      return { success: true, verificationCode, email: access.email };
     } catch (error) {
       console.error("Error resending verification code:", error);
       return { success: false, error: "Failed to resend code" };

@@ -11,6 +11,7 @@ import {
   StagingPermission,
   AccessType,
 } from "@/lib/auth/staging-access";
+import { sendStagingVerificationEmail } from "@/lib/email/resend";
 
 export async function POST(request: NextRequest) {
   try {
@@ -119,12 +120,23 @@ export async function POST(request: NextRequest) {
       result.access.token,
     );
 
-    // The verification code is intentionally NOT returned in the response — it is a
-    // shared secret that gates staging access. It must reach the invitee only via a
-    // trusted side channel (transactional email). result.verificationCode is available
-    // server-side for that delivery; exposing it here would let anyone who can call
-    // this endpoint self-verify and bypass email ownership.
-    // TODO: deliver result.verificationCode via transactional email for invite type.
+    // The verification code is a shared secret gating staging access. Deliver it
+    // only via email — returning it here would let any caller self-verify and bypass
+    // email ownership. For invite-type access we email it now.
+    if (type === "invite" && email && result.verificationCode) {
+      const mail = await sendStagingVerificationEmail(
+        email,
+        result.verificationCode,
+        result.access.label ?? undefined,
+      );
+      if (!mail.sent) {
+        console.error(
+          "Staging invite created but verification email failed:",
+          mail.error,
+        );
+        // Non-fatal: the access exists and the code can be resent. Surface a hint.
+      }
+    }
 
     return NextResponse.json({
       success: true,

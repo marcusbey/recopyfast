@@ -9,6 +9,7 @@ import {
   rateLimiter,
   createRateLimitConfig,
 } from "@/lib/security/rate-limiter";
+import { sendStagingVerificationEmail } from "@/lib/email/resend";
 
 /**
  * Cap verification-code attempts per token. The code is only 6 digits (10^6 space)
@@ -89,8 +90,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // TODO: deliver code via transactional email (Resend/SendGrid)
-      // result.verificationCode is available server-side; never expose it in the response.
+      // Deliver the code only via email — never in the response body.
+      if (result.verificationCode) {
+        const mail = await sendStagingVerificationEmail(
+          email,
+          result.verificationCode,
+        );
+        if (!mail.sent) {
+          return NextResponse.json(
+            { error: "Could not send verification email. Try again later." },
+            { status: 502 },
+          );
+        }
+      }
 
       return NextResponse.json({
         success: true,
@@ -144,8 +156,19 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // TODO: deliver code via transactional email (Resend/SendGrid)
-      // result.verificationCode is available server-side; never expose it in the response.
+      // Deliver the code only via email — never in the response body.
+      if (result.verificationCode && result.email) {
+        const mail = await sendStagingVerificationEmail(
+          result.email,
+          result.verificationCode,
+        );
+        if (!mail.sent) {
+          return NextResponse.json(
+            { error: "Could not send verification email. Try again later." },
+            { status: 502 },
+          );
+        }
+      }
 
       return NextResponse.json({
         success: true,
