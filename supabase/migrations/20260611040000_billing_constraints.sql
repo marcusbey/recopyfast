@@ -17,7 +17,8 @@
 --
 -- Both fixes are as idempotent as PostgreSQL allows:
 --   • The CHECK drop uses a DO block to skip if the constraint is absent.
---   • The UNIQUE constraint uses ADD CONSTRAINT IF NOT EXISTS (PG 9.6+).
+--   • The UNIQUE add uses a DO block guarded on pg_constraint. (PostgreSQL does
+--     NOT support ADD CONSTRAINT IF NOT EXISTS — that is a syntax error.)
 -- ========================================
 
 -- ============================================================
@@ -70,7 +71,18 @@ WHERE a.ctid > b.ctid
   AND a.stripe_payment_intent_id IS NOT NULL
   AND a.stripe_payment_intent_id = b.stripe_payment_intent_id;
 
--- Add the unique constraint (idempotent via IF NOT EXISTS)
-ALTER TABLE ticket_transactions
-  ADD CONSTRAINT IF NOT EXISTS ticket_transactions_stripe_payment_intent_id_unique
-    UNIQUE (stripe_payment_intent_id);
+-- Add the unique constraint. PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so
+-- guard on pg_constraint inside a DO block to stay idempotent on re-runs.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ticket_transactions_stripe_payment_intent_id_unique'
+      AND conrelid = 'ticket_transactions'::regclass
+  ) THEN
+    ALTER TABLE ticket_transactions
+      ADD CONSTRAINT ticket_transactions_stripe_payment_intent_id_unique
+        UNIQUE (stripe_payment_intent_id);
+  END IF;
+END
+$$;
