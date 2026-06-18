@@ -3,20 +3,27 @@ import { NextRequest } from "next/server";
 import { AuditLog } from "@/types";
 
 export class AuditLogger {
-  private supabase;
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**

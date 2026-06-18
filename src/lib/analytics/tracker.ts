@@ -17,21 +17,33 @@ type ActivityRow = Pick<
   "action_type" | "user_id" | "site_id" | "timestamp"
 >;
 
-export class AnalyticsTracker {
-  private supabase;
+/** Subset of performance_metrics columns selected by the dashboard query. */
+type PerformanceRow = Pick<PerformanceMetric, "metric_type" | "value"> & {
+  recorded_at?: string;
+};
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+export class AnalyticsTracker {
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
+
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**
@@ -168,12 +180,13 @@ export class AnalyticsTracker {
 
       // Guard against performanceData being null/undefined: default numerator to 0
       // so the division always produces a number rather than undefined/NaN.
-      const loadTimeRows = performanceData?.filter(
+      const typedPerformanceData = (performanceData || []) as PerformanceRow[];
+      const loadTimeRows = typedPerformanceData.filter(
         (p) => p.metric_type === "load_time",
       );
       const avgLoadTime =
-        (loadTimeRows?.reduce((sum, p) => sum + p.value, 0) ?? 0) /
-        (loadTimeRows?.length || 1);
+        loadTimeRows.reduce((sum, p) => sum + p.value, 0) /
+        (loadTimeRows.length || 1);
 
       // Calculate trends (group by date)
       const trendData = this.calculateTrends(activityData || []);
@@ -196,12 +209,12 @@ export class AnalyticsTracker {
           avg_load_time: Number(avgLoadTime.toFixed(2)),
           avg_edit_time: (() => {
             // Guard against performanceData being null/undefined; default to 0.
-            const editRows = performanceData?.filter(
+            const editRows = typedPerformanceData.filter(
               (p) => p.metric_type === "edit_time",
             );
             return (
-              (editRows?.reduce((sum, p) => sum + p.value, 0) ?? 0) /
-                (editRows?.length || 1) || 0
+              editRows.reduce((sum, p) => sum + p.value, 0) /
+                (editRows.length || 1) || 0
             );
           })(),
           error_rate: 0, // Calculate from error logs

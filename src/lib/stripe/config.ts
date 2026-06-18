@@ -4,12 +4,12 @@ let _stripe: Stripe | null = null;
 
 function getStripe(): Stripe {
   if (!_stripe) {
-    const key = process.env.STRIPE_SECRET_KEY;
+    const key = STRIPE_CONFIG.SECRET_KEY;
     if (!key) {
-      throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+      throw new Error("Stripe secret key is not set in environment variables");
     }
     _stripe = new Stripe(key, {
-      apiVersion: "2025-07-30.basil",
+      apiVersion: STRIPE_CONFIG.API_VERSION,
       typescript: true,
     });
   }
