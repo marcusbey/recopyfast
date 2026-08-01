@@ -58,3 +58,6 @@ next-env.d.ts
 # broken submodule entry. Keep it out of this repo until it is either a proper
 # submodule (with .gitmodules) or a separate checkout.
 /web/
+
+# Supabase CLI local state
+supabase/.temp/
