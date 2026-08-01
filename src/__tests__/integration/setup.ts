@@ -71,6 +71,9 @@ const authHandlers = [
 ];
 
 // Mock handlers for all API routes
+// Monotonic so concurrently-issued mock sites never collide.
+let registrationSeq = 0;
+
 export const handlers = [
   ...authHandlers,
   // Site registration
@@ -92,9 +95,17 @@ export const handlers = [
       );
     }
 
-    const siteId = `site-${Date.now()}`;
-    const apiKey = "test-api-key-" + Math.random().toString(36).substring(7);
-    const siteToken = `test-site-token-${Math.random().toString(36).substring(2, 8)}`;
+    // Counter rather than Date.now(): two registrations issued inside the same
+    // millisecond produced identical ids, which made the "unique api keys"
+    // test fail intermittently. substring(7) on a base-36 float could also
+    // yield an empty suffix, so build the random part from a fixed slice.
+    const seq = (registrationSeq += 1);
+    const rand = () => Math.random().toString(36).slice(2).padEnd(8, "0");
+    const siteId = `site-${seq}`;
+    // No separator before the random part: callers assert against
+    // /^test-api-key-[a-z0-9]+$/, so an extra hyphen would break the format.
+    const apiKey = `test-api-key-${seq}${rand().slice(0, 6)}`;
+    const siteToken = `test-site-token-${seq}${rand().slice(0, 6)}`;
 
     return HttpResponse.json({
       site: {
