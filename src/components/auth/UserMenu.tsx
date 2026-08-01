@@ -10,7 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
-import { User, Settings, LogOut, LayoutDashboard } from "lucide-react";
+import { Settings, LogOut, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 
 export function UserMenu() {

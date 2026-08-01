@@ -54,9 +54,9 @@ const benefits = [
   },
   {
     icon: Shield,
-    title: "Enterprise-grade security",
+    title: "Secure by default",
     description:
-      "SOC 2 compliant with SSO, audit logs, and encrypted data. Your content is protected with the same security Fortune 500 companies trust.",
+      "Scoped API keys, per-site permissions, and encrypted content in transit and at rest. Every edit is attributed and logged.",
     accent: "from-slate-500 to-zinc-500",
     highlight: "bg-slate-500/10",
   },
@@ -161,71 +161,6 @@ export default function Benefits() {
             </motion.div>
           ))}
         </div>
-
-        {/* Bottom highlight */}
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
-          animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8, delay: 0.6 }}
-          className="mt-20 relative"
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-sky-500 to-emerald-500 rounded-3xl blur-xl opacity-10" />
-          <div className="relative bg-gradient-to-r from-sky-600 to-emerald-600 rounded-3xl p-12 text-center overflow-hidden">
-            {/* Grid overlay */}
-            <div
-              className="absolute inset-0 opacity-5"
-              style={{
-                backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`,
-                backgroundSize: "40px 40px",
-              }}
-            />
-
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-3 mb-6">
-                <div className="flex -space-x-3">
-                  {[...Array(4)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="w-10 h-10 rounded-full bg-white/20 border-2 border-white/30 flex items-center justify-center text-xs font-bold text-white"
-                    >
-                      {["JD", "SM", "AK", "RB"][i]}
-                    </div>
-                  ))}
-                </div>
-                <span className="text-white/70 text-sm">
-                  +2,847 teams this month
-                </span>
-              </div>
-
-              <h3 className="text-2xl sm:text-3xl font-bold text-white mb-4">
-                Join thousands of teams shipping faster
-              </h3>
-              <p className="text-white/70 max-w-xl mx-auto mb-8">
-                From startups to Fortune 500 companies, teams choose ReCopyFast
-                to take control of their website content.
-              </p>
-
-              <div className="flex flex-wrap justify-center gap-8 text-sm">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white">10K+</div>
-                  <div className="text-white/60">Websites powered</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white">5M+</div>
-                  <div className="text-white/60">Edits made</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white">99.9%</div>
-                  <div className="text-white/60">Uptime</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white">&lt;50ms</div>
-                  <div className="text-white/60">Response time</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.div>
       </div>
     </section>
   );

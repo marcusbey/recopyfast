@@ -8,18 +8,21 @@ import { sanitizeNext } from "../sanitize-next";
  *
  * This is the cross-device counterpart to `/auth/callback`. The PKCE code
  * exchange in that route needs the code-verifier cookie that the browser set
- * when the link was requested, so it fails when a user requests a reset on
- * their laptop and opens the email on their phone. `verifyOtp` carries no
- * such requirement.
+ * when the link was requested, so it fails when a user requests a magic link
+ * on their laptop and opens the email on their phone. `verifyOtp` carries no
+ * such requirement, so it is what makes the wrong-device case work at all.
  *
  * Reaching this route requires pointing the Supabase email templates at
  * `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=...`. Until
  * that change is made the default templates keep using `/auth/callback`.
  */
 
-/** Email link types we are willing to confirm here. */
+/**
+ * Email link types we are willing to confirm here. `recovery` is deliberately
+ * absent: this product is passwordless, so a password-recovery link is never
+ * issued and accepting the type would only widen the surface.
+ */
 const ALLOWED_OTP_TYPES: readonly EmailOtpType[] = [
-  "recovery",
   "signup",
   "invite",
   "magiclink",

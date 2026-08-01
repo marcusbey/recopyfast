@@ -77,14 +77,13 @@ jobs:
       - name: Build (Next.js)
         run: npm run build
 
-      # ── Step 4: Unit / integration tests (Jest, NON-BLOCKING) ─────────────
-      # The suite has pre-existing broken-mock failures that predate this CI and
-      # are tracked for a dedicated cleanup. Kept non-blocking so it does not gate
-      # production deploys, but still runs for visibility. Worker count + idle
-      # memory limit are capped to stop the OOM/SIGABRT cascade on CI runners.
-      # TODO: fix the broken mocks, then drop continue-on-error to make blocking.
-      - name: Test (Jest – CI mode, non-blocking)
-        continue-on-error: true
+      # ── Step 4: Unit / integration tests (Jest, BLOCKING) ─────────────────
+      # The broken mocks that forced `continue-on-error` have been fixed: the
+      # suite is green (61 passed / 1 skipped suite, 972 tests passed, 0 failed).
+      # It is now a real gate — if it goes red, the deploy stops.
+      # Worker count + idle memory limit stay capped to avoid the OOM/SIGABRT
+      # cascade this suite used to hit on CI runners.
+      - name: Test (Jest – CI mode, blocking)
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
@@ -167,15 +166,11 @@ jobs:
 
   # ─── Separate job: full TypeScript check incl. tests ───────────────────────
   # Production app code is already gated (blocking) in the ci job above. This job
-  # additionally type-checks TEST files, which still carry pre-existing broken-mock
-  # errors. NON-BLOCKING until those are burned down.
-  #
-  # TODO: once `npm run type-check` (root tsconfig, includes tests) exits 0, flip
-  #       `continue-on-error` to `false` (or remove it) to make this blocking too.
+  # additionally type-checks TEST files. The 65 pre-existing broken-mock errors
+  # have been burned down to 0, so this is now BLOCKING as well.
   type-check:
-    name: TypeScript Type-Check incl. tests (non-blocking)
+    name: TypeScript Type-Check incl. tests
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     env:
       # Supabase placeholders – tsc only needs the declarations, not live values

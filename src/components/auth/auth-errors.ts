@@ -58,14 +58,6 @@ export function getAuthErrorMessage(error: unknown): string {
     return "Too many attempts. Please wait a minute and try again.";
   }
 
-  // Wrong email/password on the password sign-in path.
-  if (
-    code === "invalid_credentials" ||
-    haystack.includes("invalid login credentials")
-  ) {
-    return "That email or password is incorrect.";
-  }
-
   // Account exists but the address was never confirmed.
   if (
     code === "email_not_confirmed" ||
@@ -74,7 +66,9 @@ export function getAuthErrorMessage(error: unknown): string {
     return "Your email address isn't confirmed yet. Check your inbox for the confirmation link.";
   }
 
-  // Recovery / magic links that were already used, expired, or tampered with.
+  // Magic links that were already used, expired, or were opened in a different
+  // browser than the one that requested them (the PKCE code verifier lives in
+  // a cookie, so the exchange has nothing to verify against).
   if (
     code === "otp_expired" ||
     code === "flow_state_expired" ||
@@ -85,22 +79,6 @@ export function getAuthErrorMessage(error: unknown): string {
     haystack.includes("both auth code and code verifier")
   ) {
     return "This link is invalid or has expired. Request a new one to continue.";
-  }
-
-  // Password policy rejections from `updateUser`.
-  if (
-    code === "weak_password" ||
-    haystack.includes("password should be at least") ||
-    haystack.includes("password is too weak")
-  ) {
-    return message || "Please choose a stronger password.";
-  }
-
-  if (
-    code === "same_password" ||
-    haystack.includes("should be different from the old password")
-  ) {
-    return "Your new password must be different from your current one.";
   }
 
   // Signups disabled at the project level.

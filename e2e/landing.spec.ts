@@ -1,5 +1,5 @@
 /**
- * Suite 3B: Landing Page E2E Tests - E2E-010 to E2E-017
+ * Suite 3B: Landing Page E2E Tests - E2E-010 to E2E-018
  * Tests homepage rendering, pricing section, and CTAs.
  *
  * The landing page is served by the main Next.js app at the root URL.
@@ -37,10 +37,12 @@ test.describe("Landing Page", () => {
   test("E2E-012: Pricing shows 3 plans with correct prices", async ({
     page,
   }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Use "load" to ensure React has hydrated
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
     // Scroll to pricing section
     const pricing = page.locator("#pricing");
+    await expect(pricing).toBeAttached({ timeout: 15000 });
     await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -87,9 +89,11 @@ test.describe("Landing Page", () => {
 
   // E2E-014: Monthly toggle restores original prices
   test("E2E-014: Monthly toggle restores prices", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Use "load" to ensure React has hydrated
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
     const pricing = page.locator("#pricing");
+    await expect(pricing).toBeAttached({ timeout: 15000 });
     await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -115,9 +119,11 @@ test.describe("Landing Page", () => {
 
   // E2E-015: Pro shows "Most popular" badge
   test("E2E-015: Pro plan shows popular badge", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Use "load" to ensure React has hydrated
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
     const pricing = page.locator("#pricing");
+    await expect(pricing).toBeAttached({ timeout: 15000 });
     await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -129,9 +135,11 @@ test.describe("Landing Page", () => {
 
   // E2E-016: Starter CTA links to /signup
   test("E2E-016: Starter CTA links to signup", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Use "load" to ensure React has hydrated
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
     const pricing = page.locator("#pricing");
+    await expect(pricing).toBeAttached({ timeout: 15000 });
     await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
     await page.waitForTimeout(500);
 
@@ -141,19 +149,46 @@ test.describe("Landing Page", () => {
     expect(await starterLink.getAttribute("href")).toBe("/signup");
   });
 
-  // E2E-017: Trust indicators present
+  // E2E-017: Pricing trust indicators present
   test("E2E-017: Trust indicators are present", async ({ page }) => {
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    // Use "load" to ensure React has hydrated
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
+    await expect(page.locator("#pricing")).toBeAttached({ timeout: 15000 });
 
-    const pricing = page.locator("#pricing");
-    await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
-    await page.waitForTimeout(500);
-
-    // Check trust indicators near pricing section
+    // These are pricing/plan terms, rendered regardless of scroll position.
     const pageText = await page.textContent("body");
     expect(pageText).toContain("14-day free trial");
     expect(pageText).toContain("No credit card required");
     expect(pageText).toContain("Cancel anytime");
     expect(pageText).toContain("30-day money-back guarantee");
+  });
+
+  // E2E-018: No unsubstantiated social proof (see removal of fabricated claims)
+  test("E2E-018: Landing page makes no fabricated social-proof claims", async ({
+    page,
+  }) => {
+    await page.goto("/", { waitUntil: "load", timeout: 45000 });
+    await expect(page.locator("#pricing")).toBeAttached({ timeout: 15000 });
+
+    const pageText = await page.textContent("body");
+
+    // Invented user counts, ratings, review counts, customer logo rows, and
+    // compliance claims were removed. None of them may come back.
+    const fabricated = [
+      "10,000+",
+      "Trusted by teams at",
+      "Used by innovative teams at",
+      "4.9/5",
+      "500+ reviews",
+      "+2,847",
+      "Fortune 500",
+      "SOC 2",
+      "Websites powered",
+      "Edits made",
+    ];
+
+    for (const claim of fabricated) {
+      expect(pageText).not.toContain(claim);
+    }
   });
 });

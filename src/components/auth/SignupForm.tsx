@@ -10,11 +10,10 @@ import { Loader2, Mail, User } from "lucide-react";
 import { getAuthErrorMessage, logAuthError } from "./auth-errors";
 
 interface SignupFormProps {
-  onSuccess?: () => void;
   onSwitchToLogin?: () => void;
 }
 
-export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
+export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
   const { signInWithMagicLink } = useAuth();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -44,9 +43,9 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
       await signInWithMagicLink(trimmedEmail, {
         name: name.trim() || undefined,
       });
-      // Deliberately not calling `onSuccess` here: in `AuthModal` that closes
-      // the dialog, which would hide the "check your email" confirmation the
-      // user still needs to read.
+      // Show the "check your email" panel rather than signalling success to a
+      // parent. Nothing has actually succeeded yet — the user is only signed in
+      // once they click the emailed link.
       setSuccess(true);
     } catch (err: unknown) {
       logAuthError("signup magic link", err);

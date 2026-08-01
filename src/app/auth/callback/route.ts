@@ -11,6 +11,15 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // Behind a load balancer (Vercel) `request.url` carries the internal
+      // origin, so redirecting to it would send the user somewhere that isn't
+      // the public hostname. `x-forwarded-host` holds the origin the browser
+      // actually asked for. Locally there is no proxy, so `origin` is correct.
+      const forwardedHost = request.headers.get("x-forwarded-host");
+      const isLocalEnv = process.env.NODE_ENV === "development";
+      if (!isLocalEnv && forwardedHost) {
+        return NextResponse.redirect(`https://${forwardedHost}${next}`);
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
     // The exchange fails when the link is expired, already consumed, or was
