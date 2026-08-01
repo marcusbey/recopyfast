@@ -28,8 +28,27 @@ jobs:
       STRIPE_SECRET_KEY: "sk_test_placeholder000000000000000000000000000000000000000000000000"
       STRIPE_WEBHOOK_SECRET: "whsec_placeholder00000000000000000000000000000000000000000000000000"
 
+      # Price IDs are read by src/lib/stripe/plans.ts, and
+      # src/__tests__/lib/stripe/config.test.ts asserts every plan resolves one.
+      # Without these the plans resolve to `undefined` and the suite fails in CI
+      # while passing locally (where .env supplies real values). Placeholders —
+      # no Stripe API call is made in the test suite.
+      STRIPE_STARTER_PRICE_ID: "price_test_starter_monthly_placeholder"
+      STRIPE_STARTER_YEARLY_PRICE_ID: "price_test_starter_yearly_placeholder"
+      STRIPE_PRO_PRICE_ID: "price_test_pro_monthly_placeholder"
+      STRIPE_PRO_YEARLY_PRICE_ID: "price_test_pro_yearly_placeholder"
+      STRIPE_ENTERPRISE_PRICE_ID: "price_test_enterprise_monthly_placeholder"
+      STRIPE_ENTERPRISE_YEARLY_PRICE_ID: "price_test_enterprise_yearly_placeholder"
+      STRIPE_TICKETS_PRICE_ID: "price_test_tickets_placeholder"
+
       # ── App URL ───────────────────────────────────────────────────────────
       NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+
+      # Baked into the embed snippet by src/lib/sites/embed-script.ts and
+      # asserted verbatim by src/__tests__/api/sites/register/route.test.ts.
+      # Unset, the snippet falls back to the app origin and that test fails in
+      # CI while passing locally (where .env supplies this).
+      NEXT_PUBLIC_WS_URL: "http://localhost:4001"
 
       # ── Sentry (omitted intentionally so withSentryConfig is bypassed) ────
       # next.config.ts only wraps with Sentry when NEXT_PUBLIC_SENTRY_DSN is set;
