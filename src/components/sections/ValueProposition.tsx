@@ -7,28 +7,28 @@ import { Clock, DollarSign, Frown, ArrowRight, Sparkles } from "lucide-react";
 const painPoints = [
   {
     icon: Clock,
-    stat: "72 hours",
-    label: "Average wait for a text change",
+    stat: "Days",
+    label: "Waiting on a dev to change one word",
     color: "text-red-500",
   },
   {
     icon: DollarSign,
-    stat: "$500+",
-    label: "Cost per minor content update",
+    stat: "Dev hours",
+    label: "Spent on one-line copy edits",
     color: "text-red-500",
   },
   {
     icon: Frown,
-    stat: "87%",
-    label: "Teams frustrated by slow updates",
+    stat: "Redeploy",
+    label: "Required for every text tweak",
     color: "text-red-500",
   },
 ];
 
 const benefits = [
   {
-    stat: "< 5 min",
-    label: "Setup time",
+    stat: "1 line",
+    label: "Of code to install",
     color: "text-emerald-500",
   },
   {
@@ -37,8 +37,8 @@ const benefits = [
     color: "text-emerald-500",
   },
   {
-    stat: "100%",
-    label: "Team satisfaction",
+    stat: "No deploy",
+    label: "Changes go live instantly",
     color: "text-emerald-500",
   },
 ];
@@ -177,13 +177,9 @@ export default function ValueProposition() {
           className="mt-24 text-center"
         >
           <p className="text-2xl sm:text-3xl text-slate-900 font-medium max-w-3xl mx-auto leading-relaxed">
-            &ldquo;We cut our content update time from{" "}
-            <span className="line-through text-red-400">3 days</span> to{" "}
-            <span className="text-emerald-500 font-bold">3 minutes</span>
-            &rdquo;
-          </p>
-          <p className="mt-4 text-slate-500">
-            — Sarah Chen, Head of Marketing at TechCorp
+            Content updates go from a{" "}
+            <span className="line-through text-red-400">ticket</span> to a{" "}
+            <span className="text-emerald-500 font-bold">click</span>.
           </p>
         </motion.div>
       </div>

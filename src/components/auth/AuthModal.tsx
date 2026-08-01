@@ -25,10 +25,10 @@ export function AuthModal({
 }: AuthModalProps) {
   const [activeTab, setActiveTab] = useState<string>(defaultTab);
 
-  const handleSuccess = () => {
-    onClose();
-  };
-
+  // No success callback is wired into the forms on purpose. With magic links
+  // nothing succeeds while the modal is open — the user only signs in once
+  // they click the emailed link, by which point this dialog is long gone.
+  // Closing on "link sent" would just hide the instructions they need.
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px] bg-white border border-gray-200 rounded-2xl">
@@ -58,17 +58,11 @@ export function AuthModal({
           </TabsList>
 
           <TabsContent value="login" className="mt-6">
-            <LoginForm
-              onSuccess={handleSuccess}
-              onSwitchToSignup={() => setActiveTab("signup")}
-            />
+            <LoginForm onSwitchToSignup={() => setActiveTab("signup")} />
           </TabsContent>
 
           <TabsContent value="signup" className="mt-6">
-            <SignupForm
-              onSuccess={handleSuccess}
-              onSwitchToLogin={() => setActiveTab("login")}
-            />
+            <SignupForm onSwitchToLogin={() => setActiveTab("login")} />
           </TabsContent>
         </Tabs>
       </DialogContent>

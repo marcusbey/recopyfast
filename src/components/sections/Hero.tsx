@@ -46,27 +46,11 @@ export default function Hero() {
         className="relative z-10 max-w-6xl mx-auto px-6 py-32 text-center"
         style={{ opacity }}
       >
-        {/* Eyebrow */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-sky-200 bg-white/80 backdrop-blur-sm mb-8 shadow-sm"
-        >
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          <span className="text-sm text-slate-600 font-medium tracking-wide">
-            Powering 10,000+ websites worldwide
-          </span>
-        </motion.div>
-
         {/* Main headline */}
         <motion.h1
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.1 }}
+          transition={{ duration: 0.8 }}
           className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight text-slate-900 mb-8 leading-[0.95]"
         >
           <span className="block">Change your</span>
@@ -84,7 +68,7 @@ export default function Hero() {
         <motion.p
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.2 }}
+          transition={{ duration: 0.8, delay: 0.1 }}
           className="text-lg sm:text-xl md:text-2xl text-slate-600 max-w-3xl mx-auto mb-12 leading-relaxed font-light"
         >
           Stop waiting days for simple text updates. Add one line of code and
@@ -97,7 +81,7 @@ export default function Hero() {
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.3 }}
+          transition={{ duration: 0.8, delay: 0.2 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
           <Link
@@ -118,35 +102,13 @@ export default function Hero() {
             <span>Watch it work</span>
           </Link>
         </motion.div>
-
-        {/* Trust indicators */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 1, delay: 0.6 }}
-          className="mt-20 pt-12 border-t border-sky-100"
-        >
-          <p className="text-xs text-slate-400 uppercase tracking-widest mb-6">
-            Trusted by teams at
-          </p>
-          <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
-            {["Vercel", "Stripe", "Linear", "Notion", "Figma"].map((brand) => (
-              <span
-                key={brand}
-                className="text-slate-300 text-lg font-semibold tracking-tight hover:text-slate-400 transition-colors"
-              >
-                {brand}
-              </span>
-            ))}
-          </div>
-        </motion.div>
       </motion.div>
 
       {/* Scroll indicator */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1.5 }}
+        transition={{ delay: 1 }}
         className="absolute bottom-8 left-1/2 -translate-x-1/2"
       >
         <motion.div

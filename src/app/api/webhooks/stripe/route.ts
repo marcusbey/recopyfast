@@ -2,18 +2,92 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import type Stripe from "stripe";
 import { stripe, STRIPE_CONFIG } from "@/lib/stripe/config";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { addTicketsToUser } from "@/lib/stripe/tickets";
 
-// The Stripe SDK types for the 2025-07-30.basil API version removed
-// current_period_start / current_period_end from the top-level Subscription
-// object (they are now on SubscriptionItem). However, the webhook payload
-// still delivers these fields at the top level. We augment the type here so
-// we can read them without resorting to `any`.
+// The Stripe SDK types for the 2025-07-30.basil API version (what
+// STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
+// current_period_end from the top-level Subscription object — they now live on
+// each SubscriptionItem.
+//
+// Whether a given webhook payload still carries them at the top level depends
+// on the API version configured on the *endpoint* in the Stripe dashboard,
+// which is set outside this repo and can differ from the pinned SDK version.
+// So the fields are typed OPTIONAL here: asserting them as `number` made `tsc`
+// pass while `new Date(undefined * 1000)` threw RangeError at runtime, 500ing
+// the webhook. Stripe then retries forever and no subscription ever reconciles
+// — payment succeeds but the customer is never provisioned.
 type StripeSubscriptionWithPeriod = Stripe.Subscription & {
-  current_period_start: number;
-  current_period_end: number;
+  current_period_start?: number;
+  current_period_end?: number;
 };
+
+/**
+ * Pick the subscription item whose billing period represents this subscription.
+ *
+ * Stripe moved the period onto SubscriptionItem precisely because items on one
+ * subscription CAN bill on different cycles (e.g. a monthly item alongside a
+ * yearly one), so blindly taking items.data[0] would record the wrong boundary.
+ *
+ * `billing_subscriptions` stores a single period, and createCheckoutSession
+ * only ever builds a one-line-item subscription — so a single item is the
+ * expected case. A multi-item subscription can still arrive from a manual edit
+ * in the Stripe dashboard; resolve it by matching the plan recorded in
+ * metadata, and refuse to guess if that fails.
+ */
+function resolvePeriodItem(
+  subscription: StripeSubscriptionWithPeriod,
+): Stripe.SubscriptionItem | undefined {
+  const items = subscription.items?.data ?? [];
+
+  if (items.length <= 1) return items[0];
+
+  const planId = subscription.metadata?.plan_id;
+  const plan = Object.values(SUBSCRIPTION_PLANS).find((p) => p.id === planId);
+  const candidatePriceIds = [plan?.priceId, plan?.yearlyPriceId].filter(
+    (id): id is string => Boolean(id),
+  );
+
+  const matches = items.filter((item) =>
+    candidatePriceIds.includes(item.price?.id),
+  );
+
+  if (matches.length === 1) return matches[0];
+
+  throw new Error(
+    `Stripe subscription ${subscription.id} has ${items.length} items and ` +
+      `${matches.length} match plan "${planId ?? "unknown"}". billing_subscriptions ` +
+      `stores one billing period, so the correct item is ambiguous. Resolve the ` +
+      `subscription in Stripe, or extend the schema to store a period per item.`,
+  );
+}
+
+/**
+ * Read a billing-period boundary from whichever shape this payload uses:
+ * the subscription item (current API versions) or the top level (older ones).
+ *
+ * Throws rather than emitting an invalid date — a loud failure that Stripe
+ * retries is recoverable; silently writing a bogus period is not.
+ */
+function subscriptionPeriod(
+  subscription: StripeSubscriptionWithPeriod,
+  boundary: "start" | "end",
+): string {
+  const key = `current_period_${boundary}` as const;
+  const epochSeconds =
+    resolvePeriodItem(subscription)?.[key] ?? subscription[key];
+
+  if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds)) {
+    throw new Error(
+      `Stripe subscription ${subscription.id} has no ${key} on either the ` +
+        `subscription item or the top-level object. Check the API version ` +
+        `configured on the webhook endpoint.`,
+    );
+  }
+
+  return new Date(epochSeconds * 1000).toISOString();
+}
 
 // Similarly, Invoice.subscription was moved under
 // Invoice.parent.subscription_details.subscription in newer API versions,
@@ -192,12 +266,8 @@ async function handleSubscriptionCreated(
     stripe_subscription_id: subscription.id,
     plan: subscription.metadata?.plan_id || "pro",
     status: subscription.status,
-    current_period_start: new Date(
-      subscription.current_period_start * 1000,
-    ).toISOString(),
-    current_period_end: new Date(
-      subscription.current_period_end * 1000,
-    ).toISOString(),
+    current_period_start: subscriptionPeriod(subscription, "start"),
+    current_period_end: subscriptionPeriod(subscription, "end"),
     cancel_at: subscription.cancel_at
       ? new Date(subscription.cancel_at * 1000).toISOString()
       : null,
@@ -225,12 +295,8 @@ async function handleSubscriptionUpdated(
     .update({
       plan: subscription.metadata?.plan_id || "pro",
       status: subscription.status,
-      current_period_start: new Date(
-        subscription.current_period_start * 1000,
-      ).toISOString(),
-      current_period_end: new Date(
-        subscription.current_period_end * 1000,
-      ).toISOString(),
+      current_period_start: subscriptionPeriod(subscription, "start"),
+      current_period_end: subscriptionPeriod(subscription, "end"),
       cancel_at: subscription.cancel_at
         ? new Date(subscription.cancel_at * 1000).toISOString()
         : null,

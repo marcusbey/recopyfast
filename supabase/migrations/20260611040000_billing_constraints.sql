@@ -61,24 +61,50 @@ ALTER TABLE billing_subscriptions
 -- B. ticket_transactions: deduplicate then add UNIQUE constraint
 -- ============================================================
 
--- Remove duplicate stripe_payment_intent_id rows, keeping the
--- chronologically first row (lowest ctid as a tie-breaker within
--- the same created_at, consistent with the stripe_event_idempotency
--- migration pattern).
-DELETE FROM ticket_transactions a
-USING ticket_transactions b
-WHERE a.ctid > b.ctid
-  AND a.stripe_payment_intent_id IS NOT NULL
-  AND a.stripe_payment_intent_id = b.stripe_payment_intent_id;
-
--- Add the unique constraint. PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so
--- guard on pg_constraint inside a DO block to stay idempotent on re-runs.
+-- ORDERING NOTE: ticket_transactions is created by 20260617001000, which runs
+-- AFTER this file. On an already-migrated database it exists (from the legacy
+-- supabase/billing-schema.sql applied by hand) and this block is a no-op re-run.
+-- On a FRESH database it did not exist yet, so the DELETE below aborted the
+-- whole chain and `supabase db reset` could never complete. The work is guarded
+-- here and re-applied by 20260731010000_deferred_billing_constraints.sql once
+-- the table definitely exists. Both paths converge on the same schema.
+--
+-- Note `'ticket_transactions'::regclass` throws outright when the table is
+-- absent, so the existence check must come first and must use to_regclass.
 DO $$
 BEGIN
+  IF to_regclass('public.ticket_transactions') IS NULL THEN
+    RAISE NOTICE
+      'ticket_transactions not created yet; deferring to 20260731010000.';
+    RETURN;
+  END IF;
+
+  -- Remove duplicate stripe_payment_intent_id rows, keeping the
+  -- chronologically first row (lowest ctid as a tie-breaker within
+  -- the same created_at, consistent with the stripe_event_idempotency
+  -- migration pattern).
+  DELETE FROM ticket_transactions a
+  USING ticket_transactions b
+  WHERE a.ctid > b.ctid
+    AND a.stripe_payment_intent_id IS NOT NULL
+    AND a.stripe_payment_intent_id = b.stripe_payment_intent_id;
+
+  -- PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so guard on pg_constraint
+  -- to stay idempotent on re-runs.
+  -- 20260617001000 declares the column as `TEXT UNIQUE`, which Postgres names
+  -- ticket_transactions_stripe_payment_intent_id_key. Guarding on our own
+  -- constraint NAME would therefore miss it and add a SECOND redundant unique
+  -- constraint (and its index) on every fresh build. Check for any single-column
+  -- unique/primary-key constraint covering the column instead.
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'ticket_transactions_stripe_payment_intent_id_unique'
-      AND conrelid = 'ticket_transactions'::regclass
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a
+      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    WHERE c.conrelid = 'public.ticket_transactions'::regclass
+      AND c.contype IN ('u', 'p')
+      AND array_length(c.conkey, 1) = 1
+      AND a.attname = 'stripe_payment_intent_id'
   ) THEN
     ALTER TABLE ticket_transactions
       ADD CONSTRAINT ticket_transactions_stripe_payment_intent_id_unique

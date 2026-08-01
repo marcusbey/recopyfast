@@ -9,7 +9,6 @@ import ValueProposition from "@/components/sections/ValueProposition";
 import HowItWorks from "@/components/sections/HowItWorks";
 import Benefits from "@/components/sections/Benefits";
 import Pricing from "@/components/sections/Pricing";
-import SocialProof from "@/components/sections/SocialProof";
 import FinalCTA from "@/components/sections/FinalCTA";
 import InteractiveHero from "@/components/landing/InteractiveHero";
 
@@ -55,7 +54,6 @@ export default function Home() {
 
         <HowItWorks />
         <Benefits />
-        <SocialProof />
         <Pricing />
         <FinalCTA />
       </main>
