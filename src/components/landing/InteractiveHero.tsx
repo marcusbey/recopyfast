@@ -351,6 +351,9 @@ export default function InteractiveHero() {
   const [originalHeights, setOriginalHeights] = useState<
     Record<string, number>
   >({});
+  const [originalWidths, setOriginalWidths] = useState<Record<string, number>>(
+    {},
+  );
 
   const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -602,11 +605,20 @@ export default function InteractiveHero() {
       const computedStyle = window.getComputedStyle(element);
       // Store the original color to preserve it during editing
       const originalColor = computedStyle.color;
-      // Capture the original height before switching to edit mode
+      // Capture the original box before switching to edit mode.
+      //
+      // Width matters as much as height. The edit wrapper sits in a centred
+      // flex column, where a block child is sized shrink-to-fit; the textarea
+      // inside it asks for `w-full`, which resolves against that shrink-to-fit
+      // parent and so falls back to the textarea's intrinsic `cols` width. The
+      // subheading collapsed from 672px to 265px on click for exactly this
+      // reason. Pinning the measured width removes the circular dependency.
       const originalHeight = element.offsetHeight;
+      const originalWidth = element.offsetWidth;
       setOptimalColors((prev) => ({ ...prev, [id]: originalColor }));
       setTextShadows((prev) => ({ ...prev, [id]: "inherit" }));
       setOriginalHeights((prev) => ({ ...prev, [id]: originalHeight }));
+      setOriginalWidths((prev) => ({ ...prev, [id]: originalWidth }));
 
       // Get only the main text content, excluding tooltips and other UI elements
       const textDivs = element.querySelectorAll("div");
@@ -1079,6 +1091,32 @@ export default function InteractiveHero() {
       return "p";
     };
 
+    /**
+     * Typography and box metrics for this element, shared by BOTH the read and
+     * edit branches.
+     *
+     * These used to exist only on the read <div>. The edit branch rendered a
+     * bare `<motion.div className="relative">`, so the textarea's
+     * `fontSize: "inherit"` inherited from the section container rather than
+     * from the element being edited — a text-5xl headline collapsed to base
+     * size the moment you clicked it, and the p-3 padding and border-2 box
+     * disappeared with it, so the block reflowed narrower and taller while its
+     * height stayed pinned to the pixel value captured before the collapse.
+     *
+     * Deriving both branches from one string is what makes edit mode
+     * dimensionally identical to read mode.
+     */
+    const typographyClasses =
+      item.id === "headline"
+        ? `text-4xl md:text-5xl lg:text-6xl font-bold ${getTextColor(item.id)}`
+        : item.id === "subheading"
+          ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
+          : item.id === "cta"
+            ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold inline-block hover:border-transparent`
+            : item.id.includes("title")
+              ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
+              : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`;
+
     if (item.isEditing) {
       // Always use textarea to show full text content
       const useTextarea = true;
@@ -1087,11 +1125,21 @@ export default function InteractiveHero() {
         <motion.div
           initial={{ scale: 1 }}
           animate={{ scale: 1 }}
-          className="relative"
+          // Same box as the read state — rounded-xl p-3 border-2 — so entering
+          // edit mode changes nothing about size, padding or position.
+          className={`relative rounded-xl p-3 border-2 border-emerald-400 border-solid ${typographyClasses}`}
           ref={elementRef}
           data-editing-mode="true"
           data-editable-id={item.id}
           style={{
+            // Pin the box to what it measured in read mode so entering edit
+            // mode cannot reflow the layout around it.
+            ...(originalWidths[item.id] > 0 && {
+              width: `${originalWidths[item.id]}px`,
+            }),
+            ...(originalHeights[item.id] > 0 && {
+              minHeight: `${originalHeights[item.id]}px`,
+            }),
             transform: "translateZ(0)", // Create new stacking context
             willChange: "transform", // Optimize for transforms
             isolation: "isolate", // Isolate from parent 3D context
@@ -1144,14 +1192,16 @@ export default function InteractiveHero() {
               color: customStyles?.color || optimalColors[item.id] || "inherit",
               textShadow: textShadows[item.id] || "none",
               width: "100%",
-              minHeight:
-                originalHeights[item.id] > 0
-                  ? `${originalHeights[item.id]}px`
-                  : "auto",
-              height:
-                originalHeights[item.id] > 0
-                  ? `${originalHeights[item.id]}px`
-                  : "auto",
+              // The WRAPPER carries minHeight (= the read element's offsetHeight,
+              // which already includes its padding and border). Repeating it
+              // here would double-count that chrome and grow the box ~36px on
+              // every click, so the textarea simply fills the space it is given.
+              minHeight: "auto",
+              // minHeight above already prevents the box from shrinking below
+              // its read-mode height. A hard `height` as well would clip the
+              // text whenever an edit reflows to more lines than the captured
+              // value allowed, so height stays auto and is free to grow.
+              height: "auto",
               overflow: "visible",
               resize: "none",
               wordWrap: "break-word",
@@ -1187,17 +1237,7 @@ export default function InteractiveHero() {
           isSelected
             ? "border-emerald-400 border-solid"
             : "border-transparent hover:border-dashed hover:border-blue-400"
-        } ${
-          item.id === "headline"
-            ? `text-4xl md:text-5xl lg:text-6xl font-bold ${getTextColor(item.id)}`
-            : item.id === "subheading"
-              ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
-              : item.id === "cta"
-                ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold shadow-lg hover:shadow-xl inline-block hover:border-transparent`
-                : item.id.includes("title")
-                  ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
-                  : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`
-        }`}
+        } ${typographyClasses}`}
         style={
           customStyles
             ? {
