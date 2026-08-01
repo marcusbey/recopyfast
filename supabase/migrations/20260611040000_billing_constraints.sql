@@ -91,10 +91,20 @@ BEGIN
 
   -- PostgreSQL has no ADD CONSTRAINT IF NOT EXISTS, so guard on pg_constraint
   -- to stay idempotent on re-runs.
+  -- 20260617001000 declares the column as `TEXT UNIQUE`, which Postgres names
+  -- ticket_transactions_stripe_payment_intent_id_key. Guarding on our own
+  -- constraint NAME would therefore miss it and add a SECOND redundant unique
+  -- constraint (and its index) on every fresh build. Check for any single-column
+  -- unique/primary-key constraint covering the column instead.
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'ticket_transactions_stripe_payment_intent_id_unique'
-      AND conrelid = 'public.ticket_transactions'::regclass
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a
+      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    WHERE c.conrelid = 'public.ticket_transactions'::regclass
+      AND c.contype IN ('u', 'p')
+      AND array_length(c.conkey, 1) = 1
+      AND a.attname = 'stripe_payment_intent_id'
   ) THEN
     ALTER TABLE ticket_transactions
       ADD CONSTRAINT ticket_transactions_stripe_payment_intent_id_unique

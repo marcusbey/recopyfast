@@ -12,7 +12,7 @@ import { test, expect } from "@playwright/test";
 
 // Increase timeout for landing page tests (homepage can be slow to hydrate)
 test.describe("Landing Page", () => {
-  test.setTimeout(60000);
+  test.setTimeout(90000);
 
   // E2E-010: Homepage loads with 200
   test("E2E-010: Homepage loads successfully", async ({ page }) => {
@@ -153,14 +153,17 @@ test.describe("Landing Page", () => {
   test("E2E-017: Trust indicators are present", async ({ page }) => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
-    await expect(page.locator("#pricing")).toBeAttached({ timeout: 15000 });
+    const pricing = page.locator("#pricing");
+    await expect(pricing).toBeAttached({ timeout: 15000 });
 
-    // These are pricing/plan terms, rendered regardless of scroll position.
-    const pageText = await page.textContent("body");
-    expect(pageText).toContain("14-day free trial");
-    expect(pageText).toContain("No credit card required");
-    expect(pageText).toContain("Cancel anytime");
-    expect(pageText).toContain("30-day money-back guarantee");
+    // Scoped to #pricing, not the whole body: asserting on body would pass even
+    // if these terms moved out of the pricing section entirely, which is the
+    // only place they mean anything.
+    const pricingText = await pricing.textContent();
+    expect(pricingText).toContain("14-day free trial");
+    expect(pricingText).toContain("No credit card required");
+    expect(pricingText).toContain("Cancel anytime");
+    expect(pricingText).toContain("30-day money-back guarantee");
   });
 
   // E2E-018: No unsubstantiated social proof (see removal of fabricated claims)

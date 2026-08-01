@@ -71,7 +71,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Blocking gates first (audit → lint → type-check → build), then non-blocking tests.
+      # Every step in this job is a blocking gate:
+      # audit → lint → type-check → build → tests.
 
       # ── Step 0: Dependency vulnerabilities (BLOCKING) ─────────────────────
       # Production dependency tree only — dev-only advisories do not ship to

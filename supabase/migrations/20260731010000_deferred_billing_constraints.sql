@@ -2,7 +2,7 @@
 -- tables are created by migrations that run LATER than the migrations which
 -- originally declared them:
 --
---   billing_events        created by 20260731002000, constraint declared in 20260531000000
+--   billing_events        created by 20260731003000, constraint declared in 20260531000000
 --   ticket_transactions   created by 20260617001000, constraint declared in 20260611040000
 --
 -- Those two files now skip their work when the table is absent (so a fresh
@@ -23,7 +23,7 @@ DO $$
 BEGIN
   IF to_regclass('public.billing_events') IS NULL THEN
     RAISE EXCEPTION
-      'billing_events still does not exist — 20260731002000 must run before this migration.';
+      'billing_events still does not exist — 20260731003000 must run before this migration.';
   END IF;
 
   DELETE FROM billing_events a
@@ -62,10 +62,20 @@ BEGIN
     AND a.stripe_payment_intent_id IS NOT NULL
     AND a.stripe_payment_intent_id = b.stripe_payment_intent_id;
 
+  -- 20260617001000 declares the column as `TEXT UNIQUE`, which Postgres names
+  -- ticket_transactions_stripe_payment_intent_id_key. Guarding on our own
+  -- constraint NAME would therefore miss it and add a SECOND redundant unique
+  -- constraint (and its index) on every fresh build. Check for any single-column
+  -- unique/primary-key constraint covering the column instead.
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'ticket_transactions_stripe_payment_intent_id_unique'
-      AND conrelid = 'public.ticket_transactions'::regclass
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_attribute a
+      ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+    WHERE c.conrelid = 'public.ticket_transactions'::regclass
+      AND c.contype IN ('u', 'p')
+      AND array_length(c.conkey, 1) = 1
+      AND a.attname = 'stripe_payment_intent_id'
   ) THEN
     ALTER TABLE ticket_transactions
       ADD CONSTRAINT ticket_transactions_stripe_payment_intent_id_unique

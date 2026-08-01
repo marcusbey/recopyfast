@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { sanitizeNext } from "../sanitize-next";
+import { resolvePublicOrigin } from "../public-origin";
 
 /**
  * Email-link confirmation via one-time token hash.
@@ -38,7 +39,10 @@ function parseOtpType(value: string | null): EmailOtpType | null {
 }
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  // Same validated origin as /auth/callback — see ../public-origin.ts. Shared so
+  // the two confirmation routes cannot disagree about the public hostname.
+  const origin = resolvePublicOrigin(request);
   const tokenHash = searchParams.get("token_hash");
   const type = parseOtpType(searchParams.get("type"));
   const next = sanitizeNext(searchParams.get("next"));

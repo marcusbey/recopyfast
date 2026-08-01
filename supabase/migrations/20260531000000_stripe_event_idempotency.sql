@@ -3,7 +3,7 @@
 -- SELECT-by-stripe_event_id check before either inserts (see
 -- src/app/api/webhooks/stripe/route.ts).
 --
--- ORDERING NOTE: billing_events is created by 20260731002000, which runs AFTER
+-- ORDERING NOTE: billing_events is created by 20260731003000, which runs AFTER
 -- this file. On an already-migrated database the table exists (it came from the
 -- legacy supabase/billing-schema.sql, applied by hand) and this migration is a
 -- no-op re-run. On a FRESH database it did not exist yet, so the statements

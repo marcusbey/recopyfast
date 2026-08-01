@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import type Stripe from "stripe";
 import { stripe, STRIPE_CONFIG } from "@/lib/stripe/config";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { addTicketsToUser } from "@/lib/stripe/tickets";
 
@@ -23,6 +24,46 @@ type StripeSubscriptionWithPeriod = Stripe.Subscription & {
 };
 
 /**
+ * Pick the subscription item whose billing period represents this subscription.
+ *
+ * Stripe moved the period onto SubscriptionItem precisely because items on one
+ * subscription CAN bill on different cycles (e.g. a monthly item alongside a
+ * yearly one), so blindly taking items.data[0] would record the wrong boundary.
+ *
+ * `billing_subscriptions` stores a single period, and createCheckoutSession
+ * only ever builds a one-line-item subscription — so a single item is the
+ * expected case. A multi-item subscription can still arrive from a manual edit
+ * in the Stripe dashboard; resolve it by matching the plan recorded in
+ * metadata, and refuse to guess if that fails.
+ */
+function resolvePeriodItem(
+  subscription: StripeSubscriptionWithPeriod,
+): Stripe.SubscriptionItem | undefined {
+  const items = subscription.items?.data ?? [];
+
+  if (items.length <= 1) return items[0];
+
+  const planId = subscription.metadata?.plan_id;
+  const plan = Object.values(SUBSCRIPTION_PLANS).find((p) => p.id === planId);
+  const candidatePriceIds = [plan?.priceId, plan?.yearlyPriceId].filter(
+    (id): id is string => Boolean(id),
+  );
+
+  const matches = items.filter((item) =>
+    candidatePriceIds.includes(item.price?.id),
+  );
+
+  if (matches.length === 1) return matches[0];
+
+  throw new Error(
+    `Stripe subscription ${subscription.id} has ${items.length} items and ` +
+      `${matches.length} match plan "${planId ?? "unknown"}". billing_subscriptions ` +
+      `stores one billing period, so the correct item is ambiguous. Resolve the ` +
+      `subscription in Stripe, or extend the schema to store a period per item.`,
+  );
+}
+
+/**
  * Read a billing-period boundary from whichever shape this payload uses:
  * the subscription item (current API versions) or the top level (older ones).
  *
@@ -35,7 +76,7 @@ function subscriptionPeriod(
 ): string {
   const key = `current_period_${boundary}` as const;
   const epochSeconds =
-    subscription.items?.data?.[0]?.[key] ?? subscription[key];
+    resolvePeriodItem(subscription)?.[key] ?? subscription[key];
 
   if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds)) {
     throw new Error(
