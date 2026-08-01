@@ -14,7 +14,11 @@ import { resolvePublicOrigin } from "../public-origin";
  * such requirement, so it is what makes the wrong-device case work at all.
  *
  * Reaching this route requires pointing the Supabase email templates at
- * `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=...`. Until
+ * `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=...&next=...`.
+ * The `next` param matters: AuthContext builds `/auth/callback?next=<dest>` to
+ * carry the `redirectedFrom` destination middleware set, and this route honours
+ * `next` too — but only if the configured template actually passes it through,
+ * otherwise every confirmation lands on the default destination. Until
  * that change is made the default templates keep using `/auth/callback`.
  */
 

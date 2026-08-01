@@ -52,3 +52,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Embedded standalone project — was tracked as a gitlink pointing at an
+# unreachable commit, with no .gitmodules to resolve it. Fresh clones got a
+# broken submodule entry. Keep it out of this repo until it is either a proper
+# submodule (with .gitmodules) or a separate checkout.
+/web/

@@ -26,6 +26,11 @@ BEGIN
       'billing_events still does not exist — 20260731003000 must run before this migration.';
   END IF;
 
+  -- Tie-break direction is deliberately kept identical to 20260531000000
+  -- (a.ctid < b.ctid keeps the LAST physical row) so a deferred apply and an
+  -- incremental one converge on the same surviving row. Note this is the
+  -- opposite direction to the ticket_transactions block below, which mirrors
+  -- 20260611040000 and keeps the FIRST row.
   DELETE FROM billing_events a
   USING billing_events b
   WHERE a.ctid < b.ctid
