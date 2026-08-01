@@ -181,26 +181,42 @@ const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
   .filter(Boolean);
 const allowedOrigins = new Set([appUrl, ...extraOrigins]);
 
-// Initialize Socket.io with CORS
+// A static origin allowlist cannot work here. The widget runs on EVERY
+// customer's own domain, so a fixed list would mean adding each new customer to
+// an env var and redeploying — and until then their editors simply cannot
+// connect. That is what happened: the handshake was refused at the CORS layer,
+// so sendContentMap() never ran, no content element was ever registered, and
+// every save failed with "Content element not found".
+//
+// Authorisation does not depend on this layer. The connection handler below
+// looks the site up by its HMAC token and rejects the socket unless the request
+// host matches that site's REGISTERED domain (see the normalizeDomain check in
+// the connection handler). That is a per-site check, and strictly stronger than
+// a global list.
+//
+// So: accept any origin by default and let the token + per-site domain check do
+// the real work. Credentials are off because nothing here authenticates by
+// cookie — the site token travels in the handshake query. Setting
+// ALLOWED_ORIGINS still pins the server to a hard list for operators who want
+// to lock a deployment down.
+const hasExplicitAllowlist = extraOrigins.length > 0;
+
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      // Requests without an Origin header (e.g. same-origin server-to-server calls
-      // or certain native clients) are rejected when credentials are enabled to
-      // avoid inadvertently granting cross-site access.
-      if (!origin) {
-        callback(new Error('Missing Origin header'), false);
+      if (!hasExplicitAllowlist) {
+        callback(null, true);
         return;
       }
-      if (allowedOrigins.has(origin)) {
+      if (origin && allowedOrigins.has(origin)) {
         callback(null, true);
       } else {
-        console.warn(`CORS: rejected origin "${origin}"`);
+        console.warn(`CORS: rejected origin "${origin}" (ALLOWED_ORIGINS is set)`);
         callback(new Error('Origin not allowed'), false);
       }
     },
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: false
   }
 });
 

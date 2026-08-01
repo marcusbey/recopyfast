@@ -8,6 +8,7 @@ import {
   readJsonObject,
   requireString,
 } from "@/lib/api/validation";
+import { withPublicCors, publicOptions } from "@/lib/http/public-cors";
 
 const TONES = ["professional", "casual", "marketing", "technical"] as const;
 const GOALS = ["improve", "shorten", "expand", "optimize"] as const;
@@ -40,7 +41,9 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return withPublicCors(
+        NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+      );
     }
 
     // Per-user limit on the paid path. Fails CLOSED: quota accounting happens in
@@ -59,7 +62,9 @@ export async function POST(request: NextRequest) {
 
     const body = await readJsonObject(request);
     if (!body.ok) {
-      return NextResponse.json({ error: body.error }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: body.error }, { status: 400 }),
+      );
     }
 
     // Bound every field that reaches the model. Request count alone does not cap
@@ -68,24 +73,32 @@ export async function POST(request: NextRequest) {
       maxLength: MAX_TEXT_LENGTH,
     });
     if (!text.ok) {
-      return NextResponse.json({ error: text.error }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: text.error }, { status: 400 }),
+      );
     }
 
     const context = requireString(body.value, "context", {
       maxLength: MAX_CONTEXT_LENGTH,
     });
     if (!context.ok) {
-      return NextResponse.json({ error: context.error }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: context.error }, { status: 400 }),
+      );
     }
 
     const tone = optionalEnum(body.value, "tone", TONES);
     if (!tone.ok) {
-      return NextResponse.json({ error: tone.error }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: tone.error }, { status: 400 }),
+      );
     }
 
     const goal = optionalEnum(body.value, "goal", GOALS);
     if (!goal.ok) {
-      return NextResponse.json({ error: goal.error }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: goal.error }, { status: 400 }),
+      );
     }
 
     // Check feature access and consume usage
@@ -97,14 +110,16 @@ export async function POST(request: NextRequest) {
     });
 
     if (!usageResult.success) {
-      return NextResponse.json(
-        {
-          error: usageResult.error,
-          requiresUpgrade:
-            usageResult.error?.includes("plan") ||
-            usageResult.error?.includes("tickets"),
-        },
-        { status: 403 },
+      return withPublicCors(
+        NextResponse.json(
+          {
+            error: usageResult.error,
+            requiresUpgrade:
+              usageResult.error?.includes("plan") ||
+              usageResult.error?.includes("tickets"),
+          },
+          { status: 403 },
+        ),
       );
     }
 
@@ -117,20 +132,27 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
+      return withPublicCors(
+        NextResponse.json({ error: result.error }, { status: 500 }),
+      );
     }
 
-    return NextResponse.json({
-      success: true,
-      suggestions: result.data,
-      tokensUsed: result.tokensUsed,
-      originalText: text.value,
-    });
+    return withPublicCors(
+      NextResponse.json({
+        success: true,
+        suggestions: result.data,
+        tokensUsed: result.tokensUsed,
+        originalText: text.value,
+      }),
+    );
   } catch (error) {
     console.error("Content suggestion API error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
+    return withPublicCors(
+      NextResponse.json({ error: "Internal server error" }, { status: 500 }),
     );
   }
+}
+
+export async function OPTIONS() {
+  return publicOptions(undefined, "POST,OPTIONS");
 }
