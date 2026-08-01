@@ -18,6 +18,7 @@ const benefits = [
     description:
       "No login dashboards, no complex interfaces. Just click any text on your live website and start typing. Changes go live instantly.",
     accent: "from-sky-500 to-cyan-500",
+    stops: ["#0ea5e9", "#06b6d4"] as const,
     highlight: "bg-sky-500/10",
   },
   {
@@ -26,6 +27,7 @@ const benefits = [
     description:
       "Get intelligent suggestions that match your brand voice. Improve headlines, fix grammar, or translate to 12+ languages with one click.",
     accent: "from-purple-500 to-pink-500",
+    stops: ["#a855f7", "#ec4899"] as const,
     highlight: "bg-purple-500/10",
   },
   {
@@ -34,6 +36,7 @@ const benefits = [
     description:
       "Marketing, product, support — everyone can update content without developer handoffs. Role-based permissions keep everything organized.",
     accent: "from-emerald-500 to-teal-500",
+    stops: ["#10b981", "#14b8a6"] as const,
     highlight: "bg-emerald-500/10",
   },
   {
@@ -42,6 +45,7 @@ const benefits = [
     description:
       "React, Vue, WordPress, Webflow, static HTML — it doesn't matter. One script tag works with any website technology.",
     accent: "from-orange-500 to-amber-500",
+    stops: ["#f97316", "#f59e0b"] as const,
     highlight: "bg-orange-500/10",
   },
   {
@@ -50,6 +54,7 @@ const benefits = [
     description:
       "Every change is tracked with full version history. Made a mistake? Roll back to any previous version in seconds.",
     accent: "from-indigo-500 to-violet-500",
+    stops: ["#6366f1", "#8b5cf6"] as const,
     highlight: "bg-indigo-500/10",
   },
   {
@@ -58,6 +63,7 @@ const benefits = [
     description:
       "Scoped API keys, per-site permissions, and encrypted content in transit and at rest. Every edit is attributed and logged.",
     accent: "from-slate-500 to-zinc-500",
+    stops: ["#64748b", "#71717a"] as const,
     highlight: "bg-slate-500/10",
   },
 ];
@@ -69,6 +75,11 @@ export default function Benefits() {
   return (
     <section
       ref={ref}
+      // Header.tsx (twice) and Footer.tsx link to "#features", but no element
+      // in the app carried that id — all three "Features" links were dead.
+      // This is the features section, so it takes the anchor, matching how
+      // Pricing.tsx:66 already carries id="pricing".
+      id="features"
       className="py-32 px-6 bg-white/60 backdrop-blur-sm relative overflow-hidden"
     >
       {/* Decorative elements */}
@@ -127,20 +138,19 @@ export default function Benefits() {
                       x2="100%"
                       y2="100%"
                     >
-                      <stop
-                        offset="0%"
-                        className={benefit.accent
-                          .split(" ")[0]
-                          .replace("from-", "text-")}
-                        style={{ stopColor: "currentColor" }}
-                      />
-                      <stop
-                        offset="100%"
-                        className={benefit.accent
-                          .split(" ")[1]
-                          .replace("to-", "text-")}
-                        style={{ stopColor: "currentColor" }}
-                      />
+                      {/*
+                        These stops used to build their class names at runtime
+                        from `accent` (e.g. "from-cyan-500" -> "text-cyan-500").
+                        Tailwind v4 extracts class names by scanning source
+                        text, so a name assembled at runtime is never emitted —
+                        7 of the 12 required utilities existed nowhere in the
+                        stylesheet. stopColor then fell through to
+                        `currentColor`, so most icons rendered the same flat
+                        colour and card 5 (indigo->violet) had neither stop.
+                        Literal colour values cannot be purged.
+                      */}
+                      <stop offset="0%" stopColor={benefit.stops[0]} />
+                      <stop offset="100%" stopColor={benefit.stops[1]} />
                     </linearGradient>
                   </defs>
                 </svg>

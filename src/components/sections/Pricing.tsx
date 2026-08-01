@@ -165,8 +165,15 @@ export default function Pricing() {
                 </div>
                 {isYearly && plan.price.monthly > 0 && (
                   <p className="text-sm text-emerald-600 mt-1">
-                    ${(plan.price.monthly - plan.price.yearly) * 12} saved
-                    yearly
+                    {/*
+                      toFixed(2) is load-bearing, not cosmetic. The prices are
+                      binary-inexact decimals, so (9 - 7.47) * 12 evaluates to
+                      18.359999999999996 and was rendering to customers verbatim
+                      on the Starter card.
+                    */}
+                    $
+                    {((plan.price.monthly - plan.price.yearly) * 12).toFixed(2)}{" "}
+                    saved yearly
                   </p>
                 )}
               </div>
@@ -183,7 +190,15 @@ export default function Pricing() {
 
               {/* CTA */}
               <Link
-                href={plan.name === "Enterprise" ? "/contact" : "/signup"}
+                // "/contact" is a 404 — no such route exists in src/app. The
+                // Enterprise CTA sent every enterprise lead to a dead page.
+                // Routed to the address the footer already publishes until a
+                // real contact route exists.
+                href={
+                  plan.name === "Enterprise"
+                    ? "mailto:hello@recopyfast.com?subject=Enterprise%20plan%20enquiry"
+                    : "/signup"
+                }
                 className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
                   plan.highlight
                     ? "bg-gradient-to-r from-sky-500 to-emerald-500 text-white hover:shadow-lg hover:shadow-sky-500/25"
