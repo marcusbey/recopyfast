@@ -64,3 +64,42 @@ export const STRIPE_CONFIG = {
   CURRENCY: "usd",
   API_VERSION: "2025-07-30.basil" as const,
 } as const;
+
+/**
+ * The webhook signing secret, or a throw if it is not configured.
+ *
+ * WHY THIS EXISTS — an empty secret authenticates every caller.
+ *
+ * `stripe.webhooks.constructEvent` does not reject an empty-string key. It
+ * computes HMAC-SHA256("", payload) and compares that to the supplied
+ * signature, so anyone who can reach the endpoint can produce a signature that
+ * verifies. Confirmed against this route: a request signed with "" was accepted
+ * and reached the handler, while the same request signed with a wrong non-empty
+ * secret was correctly rejected with 400.
+ *
+ * The exposure is not theoretical. `payment_intent.succeeded` carrying
+ * `metadata.type=ticket_purchase` credits tickets, and
+ * `customer.subscription.created` provisions a plan — both forgeable for free
+ * with no secret at all.
+ *
+ * `STRIPE_CONFIG.WEBHOOK_SECRET` is declared with a `!` non-null assertion, so
+ * TypeScript believes it is a string and nothing fails at build time when the
+ * variable is unset. Failing closed here is what turns a silent hole into a
+ * loud misconfiguration.
+ */
+export function requireWebhookSecret(): string {
+  const secret = STRIPE_CONFIG.WEBHOOK_SECRET;
+
+  if (!secret || secret.trim() === "") {
+    const variable =
+      process.env.NODE_ENV === "production"
+        ? "STRIPE_WEBHOOK_SECRET_LIVE"
+        : "STRIPE_WEBHOOK_SECRET";
+    throw new Error(
+      `${variable} is not set. Refusing to verify Stripe webhooks: an empty ` +
+        `signing secret makes every forged request verify successfully.`,
+    );
+  }
+
+  return secret;
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import type Stripe from "stripe";
-import { stripe, STRIPE_CONFIG } from "@/lib/stripe/config";
+import { stripe, requireWebhookSecret } from "@/lib/stripe/config";
 import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { addTicketsToUser } from "@/lib/stripe/tickets";
@@ -110,12 +110,25 @@ export async function POST(req: NextRequest) {
 
   let event: Stripe.Event;
 
+  // Fail closed on a missing/empty signing secret BEFORE attempting to verify.
+  // constructEvent happily accepts "" as an HMAC key, so without this an unset
+  // variable would silently authenticate every caller rather than reject them.
+  // 500 rather than 400: the request may be perfectly valid — the server is the
+  // thing that is broken — and 5xx makes Stripe retry once the secret is set.
+  let webhookSecret: string;
   try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      STRIPE_CONFIG.WEBHOOK_SECRET,
+    webhookSecret = requireWebhookSecret();
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Stripe webhook misconfigured:", message);
+    return NextResponse.json(
+      { error: "Webhook signing secret is not configured" },
+      { status: 500 },
     );
+  }
+
+  try {
+    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("Webhook signature verification failed:", message);
@@ -233,6 +246,37 @@ export async function POST(req: NextRequest) {
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
 
 /**
+ * Turn a supabase-js `{ error }` into a throw.
+ *
+ * WHY — supabase-js RESOLVES on failure; it does not reject. Every write in
+ * this file used to be `await supabase.from(...).upsert(...)` with the result
+ * discarded, so a failed write was indistinguishable from a successful one and
+ * the handler went on to return `{ received: true }` with HTTP 200. Stripe
+ * treats 2xx as "delivered", stops retrying, and the event is gone: the card is
+ * charged, the row never lands, and nothing alerts. That is silent revenue loss.
+ *
+ * Throwing routes the failure into the POST handler's catch, which returns 500
+ * and lets Stripe redeliver on its own retry schedule.
+ *
+ * The Postgres error `code` is preserved on the thrown Error because the catch
+ * block keys on `23505` (unique violation) to recognise a concurrent duplicate
+ * delivery and answer 200 instead of 500.
+ */
+function assertWritten(
+  error: { code?: string; message?: string; details?: string } | null,
+  operation: string,
+): void {
+  if (!error) return;
+
+  const failure = new Error(
+    `${operation} failed: ${error.message ?? "unknown error"}` +
+      (error.details ? ` (${error.details})` : ""),
+  ) as Error & { code?: string };
+  failure.code = error.code;
+  throw failure;
+}
+
+/**
  * Handle subscription creation
  */
 async function handleSubscriptionCreated(
@@ -260,27 +304,38 @@ async function handleSubscriptionCreated(
 
   // Insert or update subscription — use actual migration column names:
   // plan (not plan_id), cancel_at (not cancel_at_period_end)
-  await supabase.from("billing_subscriptions").upsert({
-    user_id: userId,
-    customer_id: customer.id,
-    stripe_subscription_id: subscription.id,
-    plan: subscription.metadata?.plan_id || "pro",
-    status: subscription.status,
-    current_period_start: subscriptionPeriod(subscription, "start"),
-    current_period_end: subscriptionPeriod(subscription, "end"),
-    cancel_at: subscription.cancel_at
-      ? new Date(subscription.cancel_at * 1000).toISOString()
-      : null,
-    canceled_at: subscription.canceled_at
-      ? new Date(subscription.canceled_at * 1000).toISOString()
-      : null,
-    trial_start: subscription.trial_start
-      ? new Date(subscription.trial_start * 1000).toISOString()
-      : null,
-    trial_end: subscription.trial_end
-      ? new Date(subscription.trial_end * 1000).toISOString()
-      : null,
-  });
+  //
+  // onConflict MUST name stripe_subscription_id. Without it PostgREST resolves
+  // the conflict against the primary key, which is a generated UUID that never
+  // collides — so this was always a plain INSERT, and a redelivered event hit
+  // the UNIQUE constraint on stripe_subscription_id instead of updating the row.
+  const { error: subscriptionError } = await supabase
+    .from("billing_subscriptions")
+    .upsert(
+      {
+        user_id: userId,
+        customer_id: customer.id,
+        stripe_subscription_id: subscription.id,
+        plan: subscription.metadata?.plan_id || "pro",
+        status: subscription.status,
+        current_period_start: subscriptionPeriod(subscription, "start"),
+        current_period_end: subscriptionPeriod(subscription, "end"),
+        cancel_at: subscription.cancel_at
+          ? new Date(subscription.cancel_at * 1000).toISOString()
+          : null,
+        canceled_at: subscription.canceled_at
+          ? new Date(subscription.canceled_at * 1000).toISOString()
+          : null,
+        trial_start: subscription.trial_start
+          ? new Date(subscription.trial_start * 1000).toISOString()
+          : null,
+        trial_end: subscription.trial_end
+          ? new Date(subscription.trial_end * 1000).toISOString()
+          : null,
+      },
+      { onConflict: "stripe_subscription_id" },
+    );
+  assertWritten(subscriptionError, "billing_subscriptions upsert");
 }
 
 /**
@@ -290,7 +345,7 @@ async function handleSubscriptionUpdated(
   subscription: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
-  await supabase
+  const { error: updateError } = await supabase
     .from("billing_subscriptions")
     .update({
       plan: subscription.metadata?.plan_id || "pro",
@@ -311,6 +366,7 @@ async function handleSubscriptionUpdated(
         : null,
     })
     .eq("stripe_subscription_id", subscription.id);
+  assertWritten(updateError, "billing_subscriptions update");
 }
 
 /**
@@ -320,13 +376,14 @@ async function handleSubscriptionDeleted(
   subscription: Stripe.Subscription,
   supabase: ServiceClient,
 ) {
-  await supabase
+  const { error: cancelError } = await supabase
     .from("billing_subscriptions")
     .update({
       status: "canceled",
       canceled_at: new Date().toISOString(),
     })
     .eq("stripe_subscription_id", subscription.id);
+  assertWritten(cancelError, "billing_subscriptions cancel");
 }
 
 /**
@@ -364,18 +421,29 @@ async function handleInvoicePaymentSucceeded(
         .single()
     : { data: null };
 
-  // Insert or update invoice
-  await supabase.from("billing_invoices").upsert({
-    customer_id: customer.id,
-    subscription_id: subscription?.id,
-    stripe_invoice_id: invoice.id,
-    amount_paid: invoice.amount_paid,
-    amount_due: invoice.amount_due,
-    currency: invoice.currency,
-    status: invoice.status,
-    hosted_invoice_url: invoice.hosted_invoice_url,
-    invoice_pdf: invoice.invoice_pdf,
-  });
+  // Insert or update invoice.
+  //
+  // onConflict names stripe_invoice_id for the same reason as the subscription
+  // upsert above: without it the conflict target is the generated-UUID primary
+  // key, which never collides, so a redelivered invoice.payment_succeeded would
+  // raise a unique violation on stripe_invoice_id instead of updating the row.
+  const { error: invoiceError } = await supabase
+    .from("billing_invoices")
+    .upsert(
+      {
+        customer_id: customer.id,
+        subscription_id: subscription?.id,
+        stripe_invoice_id: invoice.id,
+        amount_paid: invoice.amount_paid,
+        amount_due: invoice.amount_due,
+        currency: invoice.currency,
+        status: invoice.status,
+        hosted_invoice_url: invoice.hosted_invoice_url,
+        invoice_pdf: invoice.invoice_pdf,
+      },
+      { onConflict: "stripe_invoice_id" },
+    );
+  assertWritten(invoiceError, "billing_invoices upsert");
 }
 
 /**
@@ -386,12 +454,13 @@ async function handleInvoicePaymentFailed(
   supabase: ServiceClient,
 ) {
   // Update invoice status
-  await supabase
+  const { error: failedInvoiceError } = await supabase
     .from("billing_invoices")
     .update({
       status: invoice.status,
     })
     .eq("stripe_invoice_id", invoice.id);
+  assertWritten(failedInvoiceError, "billing_invoices payment-failed update");
 
   // TODO: Send notification to user about failed payment
   // TODO: Implement dunning management
@@ -447,13 +516,14 @@ async function handleCustomerUpdated(
   supabase: ServiceClient,
 ) {
   // Update customer information
-  await supabase
+  const { error: customerError } = await supabase
     .from("billing_customers")
     .update({
       email: customer.email,
       name: customer.name,
     })
     .eq("stripe_customer_id", customer.id);
+  assertWritten(customerError, "billing_customers update");
 }
 
 /**
