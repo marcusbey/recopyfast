@@ -46,8 +46,12 @@ export default function DashboardLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div
+        className="flex min-h-screen items-center justify-center bg-surface-1"
+        role="status"
+        aria-label="Loading dashboard"
+      >
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
   }
@@ -70,19 +74,26 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-surface-1">
+      <a
+        href="#dashboard-main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:ring-2 focus:ring-ring"
+      >
+        Skip to content
+      </a>
+
       {/* Sidebar Navigation */}
       <DashboardNavigation userPlan={userPlan} />
 
       {/* Main Content */}
       <div className="lg:pl-64">
         {/* Header */}
-        <header className="sticky top-0 z-30 bg-white border-b border-gray-200">
-          <div className="flex items-center justify-between h-16 px-6">
+        <header className="sticky top-0 z-30 border-b border-border bg-card">
+          <div className="flex h-16 items-center justify-between px-4 sm:px-6">
             <div className="flex items-center gap-4">
-              <div className="lg:hidden w-12" />
+              <div className="w-12 lg:hidden" />
               <div>
-                <h1 className="text-xl font-semibold text-gray-900">
+                <h1 className="text-xl font-semibold text-foreground">
                   Welcome back!
                 </h1>
               </div>
@@ -96,10 +107,11 @@ export default function DashboardLayout({
                   className="relative h-10 w-10 rounded-full"
                 >
                   <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+                    <AvatarFallback className="bg-primary text-primary-foreground">
                       {getUserInitials()}
                     </AvatarFallback>
                   </Avatar>
+                  <span className="sr-only">Open account menu</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent className="w-56" align="end" forceMount>
@@ -140,7 +152,7 @@ export default function DashboardLayout({
         </header>
 
         {/* Page Content */}
-        <main className="p-6">
+        <main id="dashboard-main" className="p-4 sm:p-6">
           <Breadcrumbs />
           {children}
         </main>

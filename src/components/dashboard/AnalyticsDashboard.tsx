@@ -4,15 +4,13 @@ import React, { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { AnalyticsDashboardData, Site, PerformanceMetric } from "@/types";
+import { AnalyticsDashboardData, Site } from "@/types";
 import {
   BarChart3,
   Users,
-  MousePointer,
   Clock,
   TrendingUp,
   Download,
-  Calendar,
   Eye,
   Edit3,
   Globe,

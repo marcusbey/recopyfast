@@ -5,7 +5,7 @@ import { PresenceData } from "@/types";
 import { collaborationRealtime } from "@/lib/collaboration/realtime";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Users, Eye, Edit3, Crown, Shield, Circle } from "lucide-react";
+import { Users, Eye, Edit3, Crown, Circle } from "lucide-react";
 
 interface PresenceIndicatorProps {
   siteId: string;

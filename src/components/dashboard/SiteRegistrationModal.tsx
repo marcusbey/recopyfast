@@ -125,7 +125,7 @@ export function SiteRegistrationModal({
       }
 
       setRegistrationResult(data);
-    } catch (error) {
+    } catch {
       setErrors({ general: "An unexpected error occurred. Please try again." });
     } finally {
       setIsLoading(false);
@@ -272,7 +272,7 @@ export function SiteRegistrationModal({
                 <Button
                   type="submit"
                   disabled={isLoading}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
                 >
                   {isLoading ? (
                     <>
@@ -405,7 +405,7 @@ export function SiteRegistrationModal({
                 </Button>
                 <Button
                   onClick={handleGoToDashboard}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
                 >
                   Go to Site Dashboard
                   <ExternalLink className="w-4 h-4 ml-2" />

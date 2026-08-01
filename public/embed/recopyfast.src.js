@@ -123,6 +123,130 @@
     return div.innerHTML;
   }
 
+  // @rcf-inject:editing-rules
+  //
+  // `scripts/build-embed.mjs` replaces everything between these two markers with
+  // the compiled contents of src/lib/editingRules.core.ts — the same rules the
+  // app runs. Do not reimplement colour, contrast or backdrop logic below; edit
+  // that file instead.
+  //
+  // What follows is the unbuilt-source fallback. It deliberately *declines* to
+  // make decisions rather than guessing: a second implementation here is exactly
+  // the drift this injection exists to prevent.
+  var __rcfRules = {
+    UNAVAILABLE: true,
+    assessReadability: function () {
+      return { ratio: null, required: 4.5, scrim: null, guaranteed: null, backdrop: { color: { r: 255, g: 255, b: 255, a: 1 }, certain: false, kind: 'unknown', reason: 'rules unavailable' }, reason: 'rules unavailable' };
+    },
+    resolveAffordances: function () {
+      return {
+        backdropIsLight: true,
+        caretColor: '#1d4ed8', selectionBackground: 'rgba(59, 130, 246, 0.28)', selectionColor: 'inherit',
+        outlineColor: 'rgba(37, 99, 235, 0.9)', chromeBackground: 'rgba(15, 23, 42, 0.92)',
+        chromeText: '#e2e8f0', chromeBorder: 'rgba(255, 255, 255, 0.14)'
+      };
+    },
+    measureLayoutFloor: function (el) {
+      const cs = window.getComputedStyle(el);
+      return {
+        minHeight: parseFloat(cs.height) || 0,
+        inline: cs.display === 'inline',
+        preservesWhitespace: /^(pre|pre-wrap|break-spaces)$/.test(cs.whiteSpace),
+        writingMode: cs.writingMode, direction: cs.direction
+      };
+    },
+    readEditableText: function (el) {
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return el.value || '';
+      const raw = el.textContent || '';
+      return /^(pre|pre-wrap|break-spaces)$/.test(window.getComputedStyle(el).whiteSpace) ? raw : raw.trim();
+    },
+    hasMarkupChildren: function (el) {
+      for (let i = 0; i < el.children.length; i++) if (el.children[i].tagName !== 'BR') return true;
+      return false;
+    },
+    whenFontsReady: function () { return Promise.resolve(); }
+  };
+  // @rcf-inject-end
+
+  if (__rcfRules.UNAVAILABLE) {
+    console.error(
+      'ReCopyFast: running unbuilt source — shared editing rules were never injected. ' +
+      'Readability and geometry rules are disabled. Run: npm run build:embed'
+    );
+  }
+
+  /**
+   * Shared editing rules, compiled from src/lib/editingRules.core.ts.
+   * See the RULES block at the top of that file for what each one guarantees.
+   */
+  const Rules = __rcfRules;
+
+  /**
+   * Image upload constraints, checked client-side so an oversized file fails
+   * instantly instead of after a slow upload. The server enforces these too —
+   * this is a courtesy, not a control.
+   */
+  const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'];
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+  function validateImageFile(file) {
+    if (ACCEPTED_IMAGE_TYPES.indexOf(file.type) === -1) {
+      return 'Unsupported format (' + (file.type || 'unknown') + '). Use JPEG, PNG, WebP, GIF or AVIF.';
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      return 'Image is ' + Math.round(file.size / 1024 / 1024) + ' MB — the limit is ' +
+             Math.round(MAX_IMAGE_BYTES / 1024 / 1024) + ' MB.';
+    }
+    return null;
+  }
+
+  /**
+   * Swap an image's source without reflowing the page around it.
+   *
+   * Three things routinely break this:
+   *   - `srcset`/`sizes` and <picture><source> outrank `src`, so setting `src`
+   *     alone silently does nothing;
+   *   - the replacement's intrinsic size differs from the original's, which
+   *     resizes any <img> whose box came from its intrinsic dimensions;
+   *   - `object-fit` defaults to `fill`, which distorts a new image whose
+   *     aspect ratio differs.
+   */
+  function applyImageSource(element, url) {
+    const computed = window.getComputedStyle(element);
+    const before = { width: parseFloat(computed.width) || 0, height: parseFloat(computed.height) || 0 };
+    const objectFit = computed.objectFit;
+
+    // Responsive candidates win over src; clear them or the swap is a no-op.
+    element.removeAttribute('srcset');
+    element.removeAttribute('sizes');
+    const picture = element.parentElement;
+    if (picture && picture.tagName === 'PICTURE') {
+      Array.prototype.slice.call(picture.querySelectorAll('source')).forEach(function(source) {
+        source.remove();
+      });
+    }
+
+    element.src = url;
+
+    const pin = function() {
+      const after = window.getComputedStyle(element);
+      const w = parseFloat(after.width) || 0;
+      const h = parseFloat(after.height) || 0;
+
+      // Only intervene when the box actually moved — pinning unconditionally
+      // would override the page's own responsive rules for no reason.
+      if (before.width && before.height && (Math.abs(w - before.width) > 0.5 || Math.abs(h - before.height) > 0.5)) {
+        element.style.width = before.width + 'px';
+        element.style.height = before.height + 'px';
+        // `fill` would stretch a differently-proportioned replacement.
+        if (!objectFit || objectFit === 'fill') element.style.objectFit = 'cover';
+      }
+    };
+
+    if (element.complete) pin();
+    else element.addEventListener('load', pin, { once: true });
+  }
+
   class ReCopyFast {
     constructor() {
       this.elements = new Map();
@@ -156,6 +280,12 @@
         } else {
           this.editMode = false;
         }
+
+        // Anything measured before web fonts land describes the fallback face,
+        // and the two have different advance widths — capacity estimates and
+        // overflow checks taken now would be wrong by the difference. Capped so
+        // a font that never arrives cannot wedge edit mode.
+        await Rules.whenFontsReady(window);
 
         this.scanForContent();
 
@@ -1100,15 +1230,39 @@
       });
     }
 
+    /**
+     * Collect matches across the document *and* any open shadow roots.
+     *
+     * querySelectorAll stops at a shadow boundary, so every element inside a web
+     * component was previously invisible to the widget. Closed roots stay
+     * unreachable by design — there is no API for them.
+     */
+    queryDeep(selector, root, out) {
+      const results = out || [];
+      const scope = root || document;
+
+      Array.prototype.push.apply(results, Array.prototype.slice.call(scope.querySelectorAll(selector)));
+
+      const all = scope.querySelectorAll('*');
+      for (let i = 0; i < all.length; i++) {
+        if (all[i].shadowRoot) this.queryDeep(selector, all[i].shadowRoot, results);
+      }
+
+      return results;
+    }
+
     scanForContent() {
       const self = this;
-      const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, a.rcf-editable-link, div[data-rcf-content]';
-      const textElements = document.querySelectorAll(selector);
+      const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, ' +
+                       'a.rcf-editable-link, img, div[data-rcf-content]';
+      const textElements = this.queryDeep(selector);
 
       textElements.forEach(function(element, index) {
         if (self.shouldSkipElement(element)) return;
 
-        const text = self.getElementText(element);
+        // An <img> is identified by its source, not by text content.
+        const isImage = element.tagName === 'IMG';
+        const text = isImage ? (element.getAttribute('src') || '') : self.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
         const elementId = element.getAttribute('data-rcf-id') || 'rcf-' + SITE_ID + '-' + Date.now() + '-' + index;
@@ -1137,6 +1291,16 @@
       if (element.closest('#rcf-staging-banner')) return true;
       if (element.closest('#rcf-edit-board')) return true;
       if (element.closest('.rcf-overlay')) return true;
+      if (element.closest('[data-rcf-ignore]')) return true;
+
+      // Images carry no text, so the "has real text" test below would reject
+      // every one of them. Filter on rendered size instead: tracking pixels,
+      // spacers and tiny icons are not content anyone wants to edit.
+      if (element.tagName === 'IMG') {
+        const MIN_EDITABLE_IMAGE_PX = 48;
+        return element.offsetWidth < MIN_EDITABLE_IMAGE_PX ||
+               element.offsetHeight < MIN_EDITABLE_IMAGE_PX;
+      }
 
       const hasOnlyElements = Array.from(element.childNodes).every(function(node) {
         return node.nodeType !== Node.TEXT_NODE || !node.textContent.trim();
@@ -1152,188 +1316,57 @@
       return element.textContent;
     }
 
+    /**
+     * The editable source text.
+     *
+     * Never innerText: that returns the *rendered* string, so a heading with
+     * `text-transform: uppercase` would round-trip "Ship fast" back into the
+     * database as "SHIP FAST" and permanently destroy the author's copy. It
+     * also collapses whitespace, which mangles `white-space: pre` blocks.
+     */
     getFullElementText(element) {
-      var text = '';
-
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        text = element.value || element.placeholder || '';
-      } else {
-        text = element.textContent || element.innerText || '';
-        if (text.endsWith('...') || text.endsWith('…')) {
-          text = element.title || element.getAttribute('data-full-text') || text;
-        }
+        return (element.value || element.placeholder || '').trim();
       }
 
-      return text.trim();
-    }
+      const text = Rules.readEditableText(element);
 
-    // Capture ALL computed styles for perfect editing preservation
-    captureAllStyles(element) {
-      const computed = window.getComputedStyle(element);
-      const rect = element.getBoundingClientRect();
+      // Visually truncated copy sometimes stashes the full string out of band.
+      if (text.endsWith('...') || text.endsWith('…')) {
+        return element.title || element.getAttribute('data-full-text') || text;
+      }
 
-      return {
-        // Dimensions
-        width: rect.width,
-        height: rect.height,
-        offsetWidth: element.offsetWidth,
-        offsetHeight: element.offsetHeight,
-
-        // Position for overlay
-        top: rect.top,
-        left: rect.left,
-
-        // Typography
-        fontFamily: computed.fontFamily,
-        fontSize: computed.fontSize,
-        fontWeight: computed.fontWeight,
-        fontStyle: computed.fontStyle,
-        lineHeight: computed.lineHeight,
-        letterSpacing: computed.letterSpacing,
-        textAlign: computed.textAlign,
-        textTransform: computed.textTransform,
-        textDecoration: computed.textDecoration,
-        color: computed.color,
-        textShadow: computed.textShadow,
-        wordSpacing: computed.wordSpacing,
-        whiteSpace: computed.whiteSpace,
-        wordBreak: computed.wordBreak,
-        overflowWrap: computed.overflowWrap,
-
-        // Spacing - preserve original margins
-        padding: computed.padding,
-        paddingTop: computed.paddingTop,
-        paddingRight: computed.paddingRight,
-        paddingBottom: computed.paddingBottom,
-        paddingLeft: computed.paddingLeft,
-        margin: computed.margin,
-        marginTop: computed.marginTop,
-        marginRight: computed.marginRight,
-        marginBottom: computed.marginBottom,
-        marginLeft: computed.marginLeft,
-
-        // Background
-        background: computed.background,
-        backgroundColor: computed.backgroundColor,
-        backgroundImage: computed.backgroundImage,
-
-        // Border
-        border: computed.border,
-        borderRadius: computed.borderRadius,
-        boxShadow: computed.boxShadow,
-
-        // Transform (for animated elements)
-        transform: computed.transform,
-        transformOrigin: computed.transformOrigin,
-
-        // Animation (to pause/resume)
-        animation: computed.animation,
-        animationName: computed.animationName,
-        animationPlayState: computed.animationPlayState,
-        transition: computed.transition,
-
-        // Display
-        display: computed.display,
-        position: computed.position,
-        boxSizing: computed.boxSizing,
-        verticalAlign: computed.verticalAlign
-      };
+      return text;
     }
 
     /**
      * EDITING STYLE SYSTEM
-     * Rules for consistent, accessible editing across all backgrounds
+     *
+     * Colour parsing, alpha compositing, backdrop resolution, contrast and the
+     * geometry floor all live in src/lib/editingRules.core.ts and are compiled
+     * into this file at build time (see the @rcf-inject block above). The
+     * methods below are the widget-side adapters — they add no rules of their
+     * own, so the app and the widget cannot drift.
      */
 
-    // Parse RGB/RGBA color string to RGB values
-    parseColor(colorStr) {
-      if (!colorStr || colorStr === 'transparent' || colorStr === 'rgba(0, 0, 0, 0)') {
-        return null;
-      }
-      const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-      if (match) {
-        return {
-          r: parseInt(match[1], 10),
-          g: parseInt(match[2], 10),
-          b: parseInt(match[3], 10)
-        };
-      }
-      return null;
+    /**
+     * Should we intervene to keep this element's text readable while editing,
+     * and if so what is the smallest intervention?
+     *
+     * Returns a verdict whose `scrim` is null in the common case: text that is
+     * already legible is left completely alone, because an unnecessary scrim is
+     * a visible design change.
+     */
+    assessReadability(element) {
+      return Rules.assessReadability(element);
     }
 
-    // Calculate relative luminance (0 = black, 1 = white)
-    getLuminance(r, g, b) {
-      const sRGB = [r, g, b].map(function(v) {
-        v /= 255;
-        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-      });
-      return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
-    }
-
-    // Detect if background is light or dark by walking up the DOM
-    detectBackgroundLuminance(element) {
-      let current = element;
-      let bgColor = null;
-
-      // Walk up the DOM to find first non-transparent background
-      while (current && current !== document.body) {
-        const computed = window.getComputedStyle(current);
-        const bg = this.parseColor(computed.backgroundColor);
-        if (bg) {
-          bgColor = bg;
-          break;
-        }
-        current = current.parentElement;
-      }
-
-      // Check body background if nothing found
-      if (!bgColor) {
-        const bodyBg = this.parseColor(window.getComputedStyle(document.body).backgroundColor);
-        if (bodyBg) {
-          bgColor = bodyBg;
-        }
-      }
-
-      // Default to white (light) if no background found
-      if (!bgColor) {
-        return { isLight: true, luminance: 1, color: { r: 255, g: 255, b: 255 } };
-      }
-
-      const luminance = this.getLuminance(bgColor.r, bgColor.g, bgColor.b);
-      return {
-        isLight: luminance > 0.5,
-        luminance: luminance,
-        color: bgColor
-      };
-    }
-
-    // Get appropriate selection/highlight colors based on background
+    /**
+     * Caret / selection / outline colours for the surface this element sits on.
+     * These paint around and through the text, never replacing it.
+     */
     getEditingColors(element) {
-      const bg = this.detectBackgroundLuminance(element);
-
-      if (bg.isLight) {
-        // Light background: use dark selection highlight
-        return {
-          selectionBg: 'rgba(59, 130, 246, 0.3)',      // Blue tint
-          selectionText: 'inherit',
-          caretColor: '#1e40af',                       // Dark blue caret
-          outlineColor: 'rgba(59, 130, 246, 0.8)',    // Blue outline
-          inputBg: 'rgba(255, 255, 255, 0.95)',       // Slight white overlay for contrast
-          counterBg: 'rgba(15, 23, 42, 0.9)',
-          counterText: '#64748b'
-        };
-      } else {
-        // Dark background: use light selection highlight
-        return {
-          selectionBg: 'rgba(147, 197, 253, 0.4)',     // Light blue tint
-          selectionText: 'inherit',
-          caretColor: '#93c5fd',                       // Light blue caret
-          outlineColor: 'rgba(147, 197, 253, 0.8)',   // Light blue outline
-          inputBg: 'rgba(0, 0, 0, 0.1)',              // Slight dark overlay
-          counterBg: 'rgba(255, 255, 255, 0.9)',
-          counterText: '#374151'
-        };
-      }
+      return Rules.resolveAffordances(element);
     }
 
     // Determine element type for appropriate edit handler
@@ -1427,6 +1460,65 @@
       }
 
       return path.join(' > ');
+    }
+
+    /**
+     * Upload an image and get back a hosted URL.
+     *
+     * Contract (owned by the API agent):
+     *   POST /api/upload/image
+     *     multipart/form-data: file=<File>, siteId=<uuid>
+     *     Authorization: Bearer <site token>
+     *   -> 200 { url, width, height } | 400 | 401 | 413
+     *
+     * XMLHttpRequest rather than fetch because fetch still cannot report upload
+     * progress, and a multi-megabyte photo with no feedback reads as a hang.
+     */
+    uploadImage(file, onProgress) {
+      return new Promise(function(resolve, reject) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('siteId', SITE_ID);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', RECOPYFAST_API + '/upload/image');
+        xhr.setRequestHeader('Authorization', 'Bearer ' + SITE_TOKEN);
+        xhr.timeout = 120000;
+
+        if (xhr.upload && typeof onProgress === 'function') {
+          xhr.upload.onprogress = function(event) {
+            if (event.lengthComputable) {
+              onProgress(Math.round((event.loaded / event.total) * 100));
+            }
+          };
+        }
+
+        xhr.onload = function() {
+          let body = {};
+          try {
+            body = JSON.parse(xhr.responseText || '{}');
+          } catch (e) {
+            /* fall through to the status-based message */
+          }
+
+          if (xhr.status === 200 && body.url) {
+            resolve({ url: body.url, width: body.width, height: body.height });
+            return;
+          }
+
+          if (xhr.status === 401) reject(new Error('Not authorised to upload to this site.'));
+          else if (xhr.status === 413) reject(new Error('Image is too large for the server.'));
+          else if (xhr.status === 400) reject(new Error(body.error || 'Server rejected this file.'));
+          else if (xhr.status === 404) reject(new Error('Image uploads are not enabled yet for this deployment.'));
+          else reject(new Error(body.error || 'Upload failed (HTTP ' + xhr.status + ').'));
+        };
+
+        xhr.onerror = function() { reject(new Error('Network error during upload.')); };
+        xhr.ontimeout = function() { reject(new Error('Upload timed out.')); };
+        xhr.onabort = function() { reject(new Error('Upload cancelled.')); };
+
+        xhr.send(form);
+      });
     }
 
     async persistContentUpdate(elementId, content, extra) {
@@ -1869,10 +1961,20 @@
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
 
-      if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
-        elementData.element.value = content;
+      const target = elementData.element;
+
+      // Never overwrite what someone is actively typing.
+      if (target.getAttribute('data-rcf-editing')) return;
+
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        target.value = content;
+      } else if (target.tagName === 'IMG') {
+        // Same no-reflow swap the editor uses, so a realtime update from another
+        // session cannot resize the page under the reader.
+        applyImageSource(target, content);
+        if (data.alt !== undefined && data.alt !== null) target.alt = data.alt;
       } else {
-        elementData.element.textContent = content;
+        target.textContent = content;
       }
 
       elementData.element.classList.add('rcf-updated');
@@ -1946,10 +2048,37 @@
         }
       });
 
+      // One reusable hint node rather than a pseudo-element per target, so no
+      // editable element needs `position: relative` to anchor it.
+      let hoverHint = null;
+      const showHint = function(element) {
+        if (!hoverHint) {
+          hoverHint = document.createElement('div');
+          hoverHint.className = 'rcf-hover-hint';
+          hoverHint.textContent = '✏️ Click to edit';
+          hoverHint.setAttribute('data-rcf-ignore', '');
+          document.body.appendChild(hoverHint);
+        }
+        hoverHint.style.display = 'flex';
+
+        const r = element.getBoundingClientRect();
+        const h = hoverHint.offsetHeight || 28;
+        const w = hoverHint.offsetWidth || 120;
+        const top = r.top - h - 8 < 4 ? r.bottom + 8 : r.top - h - 8;
+        let left = r.left + r.width / 2 - w / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+        hoverHint.style.top = top + 'px';
+        hoverHint.style.left = left + 'px';
+      };
+      const hideHint = function() {
+        if (hoverHint) hoverHint.style.display = 'none';
+      };
+
       document.addEventListener('mouseover', function(e) {
         const element = e.target.closest('[data-rcf-id]');
         if (element && !element.getAttribute('data-rcf-editing')) {
           element.classList.add('rcf-hovering');
+          showHint(element);
         }
       });
 
@@ -1957,86 +2086,80 @@
         const element = e.target.closest('[data-rcf-id]');
         if (element) {
           element.classList.remove('rcf-hovering');
+          hideHint();
         }
       });
+
+      this.hideHoverHint = hideHint;
     }
 
     injectStyles() {
       const style = document.createElement('style');
       style.textContent = `
-        [data-rcf-id] {
-          position: relative;
-          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+        /*
+         * Nothing here may participate in layout.
+         *
+         * The previous version set \`position: relative\` and \`transition: all\`
+         * on every editable element the moment edit mode turned on, which moves
+         * absolutely-positioned children, creates stacking contexts across the
+         * whole page, and animates every property we subsequently touch.
+         * Outline, cursor and colour are the only safe affordances: outline is
+         * painted outside the box and never reflows anything.
+         */
         .rcf-hovering {
           cursor: pointer !important;
           outline: 2px dashed rgba(59, 130, 246, 0.6) !important;
           outline-offset: 4px !important;
-          border-radius: 8px !important;
-          box-sizing: border-box !important;
         }
-        .rcf-hovering::before {
-          content: "Click to edit";
-          position: absolute;
-          top: -44px;
-          left: 50%;
-          transform: translateX(-50%);
+        /*
+         * The hover hint used to be an ::before/::after on the element itself,
+         * which needed \`position: relative\` on every editable element to anchor
+         * it. It is now a single fixed-position node positioned from JS, so the
+         * page's own layout is never touched.
+         */
+        .rcf-hover-hint {
+          position: fixed;
+          display: flex;
+          align-items: center;
+          gap: 6px;
           background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
           color: #e2e8f0;
           padding: 6px 12px;
           border-radius: 8px;
           font-size: 12px;
           font-weight: 500;
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           white-space: nowrap;
-          z-index: 10;
-          opacity: 0;
-          animation: rcf-fadeIn 0.2s ease forwards;
+          z-index: 9998;
+          pointer-events: none;
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
           border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .rcf-hovering::after {
-          content: "✏️";
-          position: absolute;
-          top: -10px;
-          right: -10px;
-          width: 28px;
-          height: 28px;
-          background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: 12px;
-          box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-          opacity: 0;
-          animation: rcf-fadeIn 0.2s ease forwards;
-        }
+        /*
+         * EDIT AFFORDANCE — layout-neutral by construction.
+         *
+         * Everything the previous version put here changed layout: min/max
+         * width and height taken from getBoundingClientRect (which an ancestor
+         * transform has already scaled, so a scale(1.35) parent grew the element
+         * by 35% on every edit), \`overflow: hidden\` (establishes a block
+         * formatting context, so margins stop collapsing and the page shifts),
+         * \`contain: layout style\`, a forced \`white-space\`, and a border-radius
+         * override. None of that is needed: contenteditable does not resize an
+         * element, so the correct number of geometry properties to set is zero.
+         * The one floor we do apply — min-height, from computed layout px — is
+         * set inline per element in startTextEdit so it can never come from a
+         * transformed rect.
+         */
         .rcf-editing {
-          /* Lock dimensions during edit using CSS custom properties */
-          min-width: var(--rcf-lock-width) !important;
-          min-height: var(--rcf-lock-height) !important;
-          max-width: var(--rcf-lock-width) !important;
-          max-height: var(--rcf-lock-height) !important;
-
-          /* Prevent layout shift */
-          contain: layout style;
-          overflow: hidden !important;
-
-          /* Visual editing indicator */
-          outline: 2px solid #3b82f6 !important;
-          outline-offset: 2px !important;
-          border-radius: 4px !important;
-
-          /* Enable text selection in contenteditable */
           user-select: text !important;
           -webkit-user-select: text !important;
           cursor: text !important;
-
-          /* Prevent wrapping changes */
-          white-space: var(--rcf-lock-whitespace, pre-wrap) !important;
         }
-        .rcf-editing:focus {
-          outline: 2px solid #3b82f6 !important;
+        .rcf-editing:focus,
+        .rcf-editing:focus-visible {
+          /* The outline colour is set inline per element from the backdrop. */
+          outline-style: solid !important;
+          outline-width: 2px !important;
           outline-offset: 2px !important;
         }
         /* Inline edit toolbar — fixed, floats above the edited element */
@@ -2156,28 +2279,59 @@
           50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3); }
           100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-        /* Edit overlay - positioned over original element */
-        .rcf-edit-overlay {
-          outline: 2px solid #3b82f6;
-          outline-offset: 2px;
-          border-radius: 4px;
+        /*
+         * Extra scalar fields (a link's href) for the in-place renderer. Fixed
+         * to the viewport and parented to <body>, so the edited element is never
+         * wrapped or reparented to host them.
+         */
+        .rcf-field-panel {
+          position: fixed;
+          z-index: 10000;
+          min-width: 280px;
+          padding: 12px;
+          border-radius: 10px;
+          border: 1px solid transparent;
+          box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+          font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        .rcf-edit-overlay .rcf-edit-input {
+        .rcf-field-panel label {
           display: block;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin-bottom: 6px;
+          opacity: 0.75;
         }
-        .rcf-edit-overlay .rcf-edit-input:focus {
+        .rcf-field-panel input {
+          width: 100%;
+          padding: 8px 12px;
+          background: rgba(127, 127, 127, 0.12);
+          border: 1px solid transparent;
+          border-radius: 6px;
+          font-size: 13px;
           outline: none;
+          font-family: inherit;
         }
-        /* Link editing URL field */
-        .rcf-link-edit {
-          overflow: visible;
+        .rcf-field-panel input:focus {
+          border-color: rgba(59, 130, 246, 0.6);
         }
-        .rcf-url-field input:focus {
-          border-color: rgba(59, 130, 246, 0.5);
-        }
-        /* Animation indicator */
+        /* Animation indicator — fixed to the viewport, never a child of the
+           edited element (its label used to leak into the saved content). */
         .rcf-animation-indicator {
+          position: fixed;
+          transform: translateX(-50%);
           pointer-events: none;
+          z-index: 10001;
+          background: rgba(251, 191, 36, 0.22);
+          border: 1px solid rgba(251, 191, 36, 0.45);
+          color: #b45309;
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-family: ui-sans-serif, system-ui, sans-serif;
+          white-space: nowrap;
         }
         /* Form popover */
         .rcf-form-popover input:focus {
@@ -2208,118 +2362,215 @@
       document.head.appendChild(style);
     }
 
-    // Calculate max characters based on element container dimensions
+    /**
+     * Rough capacity estimate for the character counter.
+     *
+     * Uses computed layout px, not offsetWidth: offsetWidth is scaled by any
+     * ancestor transform or zoom, which would make the same paragraph report a
+     * different capacity purely because a parent was scaled.
+     *
+     * Only meaningful once web fonts have settled — a fallback face has
+     * different advance widths, so a count taken before the swap is wrong by
+     * however much the two faces differ.
+     */
     calculateMaxChars(element) {
       const CONTENT_LIMITS = {
         minChars: 50,
         maxCharsAbsolute: 2000,
-        maxCharsDefault: 500,
-        warningThreshold: 0.9
+        maxCharsDefault: 500
       };
 
       try {
         const computed = window.getComputedStyle(element);
-        const containerWidth = element.offsetWidth;
-        const containerHeight = element.offsetHeight;
+        const width = parseFloat(computed.width) || 0;
+        const height = parseFloat(computed.height) || 0;
         const fontSize = parseFloat(computed.fontSize) || 16;
         const lineHeight = parseFloat(computed.lineHeight) || fontSize * 1.2;
 
-        // Estimate characters per line (average char width ~0.5em)
-        const charsPerLine = Math.floor(containerWidth / (fontSize * 0.5));
-
-        // Estimate max lines that fit
-        const maxLines = Math.floor(containerHeight / lineHeight);
-
-        // Calculate max characters with safety margin (80%)
+        // ~0.5em average advance width is crude but this only drives a hint.
+        const charsPerLine = Math.floor(width / (fontSize * 0.5));
+        const maxLines = Math.max(1, Math.floor(height / lineHeight));
         const maxChars = Math.floor(charsPerLine * maxLines * 0.8);
 
-        // Return with reasonable min/max bounds
-        return Math.max(CONTENT_LIMITS.minChars, Math.min(maxChars || CONTENT_LIMITS.maxCharsDefault, CONTENT_LIMITS.maxCharsAbsolute));
+        return Math.max(
+          CONTENT_LIMITS.minChars,
+          Math.min(maxChars || CONTENT_LIMITS.maxCharsDefault, CONTENT_LIMITS.maxCharsAbsolute)
+        );
       } catch (e) {
         return CONTENT_LIMITS.maxCharsDefault;
       }
     }
 
-    // Check if content will overflow the element container
+    /**
+     * Would this content grow the element past its current box?
+     *
+     * The probe clone inherits the element's own white-space and width rather
+     * than being forced to `pre-wrap` at `offsetWidth`, which previously made
+     * `nowrap` and `pre` elements report overflow for content that fits.
+     */
     checkOverflow(element, newContent) {
       try {
-        const ghost = element.cloneNode(true);
-        ghost.style.cssText = 'position: absolute; visibility: hidden; overflow: visible; white-space: pre-wrap; width: ' + element.offsetWidth + 'px; height: auto; pointer-events: none;';
+        const computed = window.getComputedStyle(element);
+        const ghost = element.cloneNode(false);
+
+        ghost.removeAttribute('id');
+        ghost.removeAttribute('data-rcf-id');
+        ghost.removeAttribute('data-rcf-editing');
+        ghost.removeAttribute('data-rcf-edit-session');
+        ghost.removeAttribute('contenteditable');
+        ghost.className = '';
         ghost.textContent = newContent;
-        // Append to parentNode (not body) so inherited CSS context is preserved
-        const ghostParent = element.parentNode || document.body;
-        ghostParent.appendChild(ghost);
 
-        const isOverflowing = ghost.scrollHeight > element.offsetHeight * 1.1; // 10% tolerance
-        ghostParent.removeChild(ghost);
+        ghost.style.cssText = [
+          'position: absolute',
+          'visibility: hidden',
+          'pointer-events: none',
+          'left: -99999px',
+          'top: 0',
+          'width: ' + (parseFloat(computed.width) || 0) + 'px',
+          'height: auto',
+          'max-height: none',
+          'min-height: 0',
+          'overflow: visible',
+          'font: ' + computed.font,
+          'letter-spacing: ' + computed.letterSpacing,
+          'word-spacing: ' + computed.wordSpacing,
+          'white-space: ' + computed.whiteSpace,
+          'word-break: ' + computed.wordBreak,
+          'padding: ' + computed.padding,
+          'text-transform: ' + computed.textTransform
+        ].join('; ');
 
-        return isOverflowing;
+        const host = element.parentNode || document.body;
+        host.appendChild(ghost);
+        const grew = ghost.scrollHeight > (parseFloat(computed.height) || 0) * 1.1;
+        host.removeChild(ghost);
+
+        return grew;
       } catch (e) {
         return false;
       }
     }
 
     /**
-     * IN-PLACE CONTENTEDITABLE EDITING
-     * Instead of creating an overlay, we make the actual element editable.
-     * This eliminates layout synchronization problems completely.
+     * THE TEXT RENDERER — the only one.
+     *
+     * Every text-ish edit (plain copy, links, animated elements, buttons) runs
+     * through here. It makes the element itself contenteditable and changes
+     * nothing that participates in layout.
+     *
+     * Why in place rather than an overlay: an overlay has to re-derive every
+     * visual property the browser was already applying — font stack, size,
+     * weight, tracking, transform, decoration, alignment, direction, writing
+     * mode, blend mode, clip, inherited cascade, author !important rules — and
+     * it will always miss some. Editing the element itself means there is
+     * nothing to re-derive: the browser keeps painting exactly what it was
+     * painting. Zero delta is reachable by construction here and unreachable by
+     * construction with a substitute node.
+     *
+     * options:
+     *   fields[]         extra scalar inputs (link href) rendered in a popover
+     *   onStart(el)      pre-edit hook, may return a teardown function
+     *   payload(values)  extra body merged into the persist call
      */
-    startInlineEdit(element) {
+    startTextEdit(element, options) {
       const self = this;
+      const opts = options || {};
+
       const elementId = element.getAttribute('data-rcf-id');
       const elementData = this.elements.get(elementId);
       if (!elementData || element.getAttribute('data-rcf-editing')) return;
 
-      // Store original content for cancel (textContent is safe/sanitized)
+      // ---------------------------------------------------------------------
+      // Capture everything BEFORE mutating anything.
+      // ---------------------------------------------------------------------
+
+      // Restoring this attribute verbatim is the only teardown that cannot
+      // clobber an author's own inline styles. Blanking individual properties
+      // (the previous approach) permanently deleted any inline background,
+      // outline or caret the page had set itself.
+      const originalStyleAttr = element.getAttribute('style');
+
+      // Read the text before any hook can append UI into the element — the old
+      // animated path appended its "Animation paused" badge as a child first,
+      // so that string ended up inside the user's editable content and got
+      // saved into the database.
       const originalText = this.getFullElementText(element);
+      const hadMarkup = Rules.hasMarkupChildren(element);
 
-      // Capture dimensions and styles BEFORE making any changes
-      const rect = element.getBoundingClientRect();
+      const teardown = [];
+      if (typeof opts.onStart === 'function') {
+        const undo = opts.onStart(element);
+        if (typeof undo === 'function') teardown.push(undo);
+      }
+
       const computed = window.getComputedStyle(element);
+      const floor = Rules.measureLayoutFloor(element);
+      const verdict = Rules.assessReadability(element);
+      const colors = Rules.resolveAffordances(element);
+      const originalBoxShadow = computed.boxShadow;
 
-      // Lock dimensions using CSS custom properties (prevents resize while editing)
-      element.style.setProperty('--rcf-lock-width', rect.width + 'px');
-      element.style.setProperty('--rcf-lock-height', rect.height + 'px');
-      element.style.setProperty('--rcf-lock-whitespace', computed.whiteSpace || 'normal');
-
-      // Mark as editing
       element.setAttribute('data-rcf-editing', 'true');
       element.classList.add('rcf-editing');
       element.classList.remove('rcf-hovering');
+      if (this.hideHoverHint) this.hideHoverHint();
 
-      // Get appropriate colors based on background luminance
-      const editColors = this.getEditingColors(element);
-
-      // Generate unique ID for this edit session
-      const editSessionId = 'rcf-edit-' + Date.now();
+      const editSessionId = 'rcf-edit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
       element.setAttribute('data-rcf-edit-session', editSessionId);
 
-      // Inject dynamic selection styles
+      // ---------------------------------------------------------------------
+      // Affordances. Outline, caret and ::selection only — none of these
+      // participate in layout, so none of them can move a single glyph.
+      // ---------------------------------------------------------------------
       const selectionStyle = document.createElement('style');
       selectionStyle.id = editSessionId + '-styles';
+      const sel = '[data-rcf-edit-session="' + editSessionId + '"]';
       selectionStyle.textContent = [
-        '[data-rcf-edit-session="' + editSessionId + '"]::selection { background: ' + editColors.selectionBg + '; color: ' + editColors.selectionText + '; }',
-        '[data-rcf-edit-session="' + editSessionId + '"]::-moz-selection { background: ' + editColors.selectionBg + '; color: ' + editColors.selectionText + '; }'
+        sel + '::selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }',
+        sel + '::-moz-selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }'
       ].join('\n');
       document.head.appendChild(selectionStyle);
 
-      // Only apply background tint when the element has a concrete (non-transparent)
-      // background color. Skipping on transparent/gradient prevents contrast breakage.
-      const elementBgParsed = this.parseColor(computed.backgroundColor);
-      if (elementBgParsed !== null) {
-        element.style.backgroundColor = editColors.inputBg;
+      element.style.setProperty('outline', '2px solid ' + colors.outlineColor, 'important');
+      element.style.setProperty('outline-offset', '2px', 'important');
+      element.style.setProperty('caret-color', colors.caretColor, 'important');
+
+      // R3/R4: the author's text colour is never touched. When the text cannot
+      // be proven readable we slide the smallest possible scrim behind it, as an
+      // inset box-shadow rather than a background-color so the element's own
+      // background (gradient, image, translucent panel) still shows through and
+      // the author's border-radius is respected for free.
+      if (verdict.scrim) {
+        const scrim = 'inset 0 0 0 9999px ' + verdict.scrim;
+        element.style.setProperty(
+          'box-shadow',
+          originalBoxShadow && originalBoxShadow !== 'none' ? scrim + ', ' + originalBoxShadow : scrim,
+          'important'
+        );
       }
-      element.style.caretColor = editColors.caretColor;
 
-      // Make element contenteditable in place — no reparenting
+      // R7: a floor so an emptied element cannot collapse to nothing and yank
+      // the toolbar across the screen. Computed layout px, never a rect — a
+      // rect has already been multiplied by any ancestor transform or zoom.
+      // Deliberately no maximum: text that grows should reflow live, because
+      // that is what the page will look like once it is saved.
+      if (!floor.inline && floor.minHeight > 0) {
+        element.style.setProperty('min-height', floor.minHeight + 'px');
+      }
+
       element.setAttribute('contenteditable', 'true');
-      element.style.outline = '2px solid ' + editColors.outlineColor;
-      element.style.outlineOffset = '2px';
+      element.setAttribute('spellcheck', 'true');
+      element.setAttribute('role', 'textbox');
+      element.setAttribute('aria-multiline', floor.preservesWhitespace ? 'true' : 'false');
 
-      // Create toolbar as a fixed element appended to body (no reparent of the edited element)
+      // ---------------------------------------------------------------------
+      // Chrome: toolbar, counter and any extra fields, all fixed-position body
+      // children so the edited element is never reparented or wrapped.
+      // ---------------------------------------------------------------------
       const actionsDiv = document.createElement('div');
       actionsDiv.className = 'rcf-actions-inline';
       actionsDiv.setAttribute('data-rcf-toolbar', editSessionId);
+      actionsDiv.setAttribute('data-rcf-ignore', '');
 
       const aiBtn = document.createElement('button');
       aiBtn.className = 'rcf-btn-ai';
@@ -2343,217 +2594,291 @@
       actionsDiv.appendChild(saveBtn);
       actionsDiv.appendChild(cancelBtn);
 
-      // Create character counter (also fixed, appended to body)
-      const maxChars = self.calculateMaxChars(element);
-      const counterContainer = document.createElement('div');
-      counterContainer.className = 'rcf-char-counter-inline';
-      counterContainer.setAttribute('data-rcf-counter', editSessionId);
+      const counter = document.createElement('div');
+      counter.className = 'rcf-char-counter-inline';
+      counter.setAttribute('data-rcf-counter', editSessionId);
+      counter.setAttribute('data-rcf-ignore', '');
+      counter.style.color = colors.chromeText;
+      counter.style.background = colors.chromeBackground;
+      counter.style.border = '1px solid ' + colors.chromeBorder;
 
-      // Use adaptive colors based on background luminance
-      const isLightBg = editColors.counterBg.includes('15, 23, 42');
-      const defaultBorderColor = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-      counterContainer.style.color = editColors.counterText;
-      counterContainer.style.background = editColors.counterBg;
-      counterContainer.style.border = '1px solid ' + defaultBorderColor;
+      // Extra scalar fields (a link's href) live in their own popover instead of
+      // being nested inside a replacement element.
+      const fieldDefs = opts.fields || [];
+      const fieldInputs = [];
+      let fieldsPanel = null;
 
-      // Helper: compute toolbar position above the element using fixed viewport coords.
-      // Defined here so actionsDiv and counterContainer are already in scope.
-      const positionToolbar = function() {
-        const r = element.getBoundingClientRect();
-        const toolbarHeight = actionsDiv.offsetHeight || 44;
-        const GAP = 8;
-        let top = r.top - toolbarHeight - GAP;
-        // If toolbar would go off-screen top, flip below the element
-        if (top < 4) {
-          top = r.bottom + GAP;
-        }
-        // Center horizontally, clamped to viewport
-        const toolbarWidth = actionsDiv.offsetWidth || 200;
-        let left = r.left + r.width / 2 - toolbarWidth / 2;
-        left = Math.max(8, Math.min(left, window.innerWidth - toolbarWidth - 8));
-        actionsDiv.style.top  = top + 'px';
-        actionsDiv.style.left = left + 'px';
-      };
+      if (fieldDefs.length) {
+        fieldsPanel = document.createElement('div');
+        fieldsPanel.className = 'rcf-field-panel';
+        fieldsPanel.setAttribute('data-rcf-ignore', '');
+        fieldsPanel.style.background = colors.chromeBackground;
+        fieldsPanel.style.borderColor = colors.chromeBorder;
 
-      // Helper: compute counter position below the element
-      const positionCounter = function() {
-        const r = element.getBoundingClientRect();
-        const GAP = 4;
-        counterContainer.style.top  = (r.bottom + GAP) + 'px';
-        const counterWidth = counterContainer.offsetWidth || 80;
-        let counterLeft = r.right - counterWidth;
-        counterLeft = Math.max(8, Math.min(counterLeft, window.innerWidth - counterWidth - 8));
-        counterContainer.style.left = counterLeft + 'px';
-      };
+        fieldDefs.forEach(function(def) {
+          const label = document.createElement('label');
+          label.textContent = def.label;
+          label.style.color = colors.chromeText;
 
-      // Append both toolbar and counter to body so the edited element stays in place
+          const input = document.createElement('input');
+          input.type = def.type || 'text';
+          input.placeholder = def.placeholder || '';
+          input.value = def.get(element) || '';
+          input.style.color = colors.chromeText;
+          input.style.borderColor = colors.chromeBorder;
+
+          fieldsPanel.appendChild(label);
+          fieldsPanel.appendChild(input);
+          fieldInputs.push({ def: def, input: input, initial: input.value });
+        });
+      }
+
       document.body.appendChild(actionsDiv);
-      document.body.appendChild(counterContainer);
+      document.body.appendChild(counter);
+      if (fieldsPanel) document.body.appendChild(fieldsPanel);
 
-      // Initial positioning (done after append so offsetWidth/Height are available)
-      positionToolbar();
-      positionCounter();
+      // ---------------------------------------------------------------------
+      // Positioning. Fixed viewport coordinates, recomputed whenever anything
+      // that could move the element moves it: page or container scroll, window
+      // or visual-viewport resize, the element reflowing (ResizeObserver), and
+      // late web fonts landing.
+      // ---------------------------------------------------------------------
+      let frame = 0;
+      const reposition = function() {
+        const r = element.getBoundingClientRect();
+        const GAP = 8;
 
-      // Sanitize content - get clean text from contenteditable
-      const sanitizeContent = function() {
-        // Get text content, preserving line breaks
-        const text = element.innerText || element.textContent || '';
-        return text.trim();
+        const th = actionsDiv.offsetHeight || 44;
+        const tw = actionsDiv.offsetWidth || 200;
+        let top = r.top - th - GAP;
+        if (top < 4) top = r.bottom + GAP;
+        let left = r.left + r.width / 2 - tw / 2;
+        left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+        actionsDiv.style.top = top + 'px';
+        actionsDiv.style.left = left + 'px';
+
+        const cw = counter.offsetWidth || 80;
+        counter.style.top = (r.bottom + 4) + 'px';
+        counter.style.left = Math.max(8, Math.min(r.right - cw, window.innerWidth - cw - 8)) + 'px';
+
+        if (fieldsPanel) {
+          const fw = fieldsPanel.offsetWidth || 280;
+          const fh = fieldsPanel.offsetHeight || 90;
+          let fTop = r.bottom + 28;
+          if (fTop + fh > window.innerHeight - 8) fTop = Math.max(8, r.top - fh - 28);
+          fieldsPanel.style.top = fTop + 'px';
+          fieldsPanel.style.left = Math.max(8, Math.min(r.left, window.innerWidth - fw - 8)) + 'px';
+        }
+      };
+      const scheduleReposition = function() {
+        if (frame) return;
+        frame = requestAnimationFrame(function() {
+          frame = 0;
+          reposition();
+        });
       };
 
+      reposition();
+
+      window.addEventListener('scroll', scheduleReposition, true);
+      window.addEventListener('resize', scheduleReposition);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', scheduleReposition);
+        window.visualViewport.addEventListener('scroll', scheduleReposition);
+      }
+
+      let resizeObserver = null;
+      if (typeof ResizeObserver === 'function') {
+        resizeObserver = new ResizeObserver(scheduleReposition);
+        resizeObserver.observe(element);
+      }
+
+      // A web font landing mid-edit reflows the element under the toolbar.
+      Rules.whenFontsReady(window).then(scheduleReposition);
+
+      // ---------------------------------------------------------------------
+      // Content
+      // ---------------------------------------------------------------------
+      const sanitizeContent = function() {
+        // textContent, never innerText: innerText applies text-transform, so an
+        // uppercase heading would save back as SHOUTING and overwrite the
+        // author's real copy. It also collapses the whitespace <pre> depends on.
+        const raw = element.textContent || '';
+        return floor.preservesWhitespace ? raw : raw.trim();
+      };
+
+      let maxChars = self.calculateMaxChars(element);
       const updateCounter = function() {
         const current = sanitizeContent().length;
-        counterContainer.textContent = current + ' / ' + maxChars;
+        counter.textContent = current + ' / ' + maxChars;
 
         if (current > maxChars) {
-          counterContainer.style.color = '#ef4444';
-          counterContainer.style.background = 'rgba(239, 68, 68, 0.2)';
-          counterContainer.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          counter.style.color = '#ef4444';
+          counter.style.background = 'rgba(239, 68, 68, 0.2)';
+          counter.style.borderColor = 'rgba(239, 68, 68, 0.4)';
         } else if (current > maxChars * 0.9) {
-          counterContainer.style.color = '#f59e0b';
-          counterContainer.style.background = 'rgba(245, 158, 11, 0.2)';
-          counterContainer.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+          counter.style.color = '#f59e0b';
+          counter.style.background = 'rgba(245, 158, 11, 0.2)';
+          counter.style.borderColor = 'rgba(245, 158, 11, 0.4)';
         } else {
-          counterContainer.style.color = editColors.counterText;
-          counterContainer.style.background = editColors.counterBg;
-          counterContainer.style.borderColor = defaultBorderColor;
+          counter.style.color = colors.chromeText;
+          counter.style.background = colors.chromeBackground;
+          counter.style.borderColor = colors.chromeBorder;
         }
       };
 
+      // Recount once the real font is in play.
+      Rules.whenFontsReady(window).then(function() {
+        maxChars = self.calculateMaxChars(element);
+        updateCounter();
+      });
+
       element.addEventListener('input', updateCounter);
+      element.addEventListener('input', scheduleReposition);
       updateCounter();
 
-      // Focus and select all text
-      element.focus();
+      // preventScroll: focusing an element inside a scroll container otherwise
+      // scrolls it, which is a visible jump the user did not ask for.
+      try {
+        element.focus({ preventScroll: true });
+      } catch (e) {
+        element.focus();
+      }
+
       const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      selection.removeAllRanges();
-      selection.addRange(range);
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
 
-      // Reposition toolbar and counter on scroll or resize
-      const repositionHandler = function() {
-        positionToolbar();
-        positionCounter();
-      };
-      window.addEventListener('scroll', repositionHandler, true);
-      window.addEventListener('resize', repositionHandler);
-
-      // Track if we're in the middle of cleanup to prevent double cleanup
+      // ---------------------------------------------------------------------
+      // Lifecycle
+      // ---------------------------------------------------------------------
       let isCleaningUp = false;
 
       const cleanup = function() {
         if (isCleaningUp) return;
         isCleaningUp = true;
 
-        // Remove scroll/resize listeners
-        window.removeEventListener('scroll', repositionHandler, true);
-        window.removeEventListener('resize', repositionHandler);
+        window.removeEventListener('scroll', scheduleReposition, true);
+        window.removeEventListener('resize', scheduleReposition);
+        if (window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', scheduleReposition);
+          window.visualViewport.removeEventListener('scroll', scheduleReposition);
+        }
+        if (resizeObserver) resizeObserver.disconnect();
+        if (frame) cancelAnimationFrame(frame);
+        document.removeEventListener('mousedown', outsideClickHandler);
 
-        // Remove contenteditable
         element.removeAttribute('contenteditable');
+        element.removeAttribute('spellcheck');
+        element.removeAttribute('role');
+        element.removeAttribute('aria-multiline');
         element.removeAttribute('data-rcf-editing');
         element.removeAttribute('data-rcf-edit-session');
         element.classList.remove('rcf-editing');
 
-        // Remove dimension locks
-        element.style.removeProperty('--rcf-lock-width');
-        element.style.removeProperty('--rcf-lock-height');
-        element.style.removeProperty('--rcf-lock-whitespace');
-        element.style.outline = '';
-        element.style.outlineOffset = '';
+        // Verbatim restore — puts back exactly the inline styles the page had,
+        // including none at all.
+        if (originalStyleAttr === null) element.removeAttribute('style');
+        else element.setAttribute('style', originalStyleAttr);
 
-        // Clear only the edit-mode styles we actually set (no typography restore needed
-        // since the element was never reparented)
-        element.style.backgroundColor = '';
-        element.style.caretColor      = '';
+        [actionsDiv, counter, fieldsPanel].forEach(function(node) {
+          if (node && node.parentNode) node.parentNode.removeChild(node);
+        });
 
-        // Remove fixed toolbar and counter from body
-        if (actionsDiv.parentNode) {
-          actionsDiv.parentNode.removeChild(actionsDiv);
-        }
-        if (counterContainer.parentNode) {
-          counterContainer.parentNode.removeChild(counterContainer);
-        }
-
-        // Remove dynamic selection styles
         const dynamicStyle = document.getElementById(editSessionId + '-styles');
-        if (dynamicStyle) {
-          dynamicStyle.remove();
-        }
+        if (dynamicStyle) dynamicStyle.remove();
 
-        // Remove event listener
-        document.removeEventListener('mousedown', outsideClickHandler);
+        teardown.forEach(function(fn) {
+          try { fn(); } catch (e) { console.warn('ReCopyFast: edit teardown failed', e); }
+        });
+      };
+
+      const fieldsDirty = function() {
+        return fieldInputs.some(function(f) { return f.input.value !== f.initial; });
       };
 
       const save = async function() {
         const newContent = sanitizeContent();
+        const textChanged = newContent !== originalText;
 
-        // Check for content length limit
-        if (newContent.length > 2000) {
-          if (!confirm('Content exceeds 2000 characters. This may cause issues. Save anyway?')) {
-            return;
-          }
+        // Clicking into an element and back out must be a no-op. Rewriting
+        // textContent unconditionally flattened every <strong>/<em>/<a> the
+        // author had inside the element, so merely opening an editor destroyed
+        // their markup.
+        if (!textChanged && !fieldsDirty()) {
+          cleanup();
+          return;
         }
 
-        // Check for overflow
-        if (self.checkOverflow(element, newContent)) {
-          if (!confirm('This content may overflow the container and affect layout. Save anyway?')) {
-            return;
-          }
+        if (textChanged && newContent.length > 2000) {
+          if (!confirm('Content exceeds 2000 characters. This may cause issues. Save anyway?')) return;
         }
+        if (textChanged && hadMarkup) {
+          if (!confirm('This element contains formatting (bold, links, emphasis) that will be replaced by plain text. Continue?')) return;
+        }
+        if (textChanged && self.checkOverflow(element, newContent)) {
+          if (!confirm('This content may overflow the container and affect layout. Save anyway?')) return;
+        }
+
+        const values = {};
+        fieldInputs.forEach(function(f) { values[f.def.key] = f.input.value.trim(); });
 
         try {
-          await self.persistContentUpdate(elementId, newContent);
+          await self.persistContentUpdate(
+            elementId,
+            newContent,
+            typeof opts.payload === 'function' ? opts.payload(values) : undefined
+          );
         } catch (error) {
           alert(error.message || 'Failed to save content. Please try again.');
           return;
         }
 
-        // Update element with sanitized content (textContent removes any HTML)
-        element.textContent = newContent;
-        elementData.originalContent = newContent;
+        if (textChanged) {
+          element.textContent = newContent;
+          elementData.originalContent = newContent;
+        }
+        fieldInputs.forEach(function(f) {
+          if (f.input.value !== f.initial) f.def.set(element, f.input.value.trim());
+        });
 
         cleanup();
 
-        // Show success feedback
         element.classList.add('rcf-updated');
-        setTimeout(function() {
-          element.classList.remove('rcf-updated');
-        }, 500);
+        setTimeout(function() { element.classList.remove('rcf-updated'); }, 500);
       };
 
       const cancel = function() {
-        // Restore original content using safe textContent
-        element.textContent = originalText;
+        // textContent restore is only safe when we would otherwise be leaving
+        // edited text behind; if nothing changed, leave the DOM (and any author
+        // markup inside it) exactly as it was.
+        if (sanitizeContent() !== originalText) element.textContent = originalText;
         cleanup();
       };
 
-      // Button handlers
-      saveBtn.onclick = function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        save();
-      };
-
-      cancelBtn.onclick = function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        cancel();
-      };
-
+      saveBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); save(); };
+      cancelBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); cancel(); };
       aiBtn.onclick = function(e) {
         e.preventDefault();
         e.stopPropagation();
-        // Create a fake input element interface for AI suggestions
-        const fakeInput = {
+        self.showAISuggestions({
           get value() { return sanitizeContent(); },
-          set value(v) { element.textContent = v; updateCounter(); }
-        };
-        self.showAISuggestions(fakeInput, elementId);
+          set value(v) { element.textContent = v; updateCounter(); scheduleReposition(); }
+        }, elementId);
       };
 
-      // Keyboard handling
+      // Enter saves only where a newline would be meaningless. Multi-line is
+      // anything that already contains one, preserves whitespace, or renders
+      // taller than two lines.
+      const lineHeight = parseFloat(computed.lineHeight) || parseFloat(computed.fontSize) * 1.2 || 20;
+      const isMultiline = originalText.indexOf('\n') !== -1 ||
+                          floor.preservesWhitespace ||
+                          floor.minHeight > lineHeight * 2;
+
       element.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -2561,17 +2886,12 @@
         } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
           save();
-        } else if (e.key === 'Enter' && !e.shiftKey) {
-          // For single-line elements, Enter saves
-          const isMultiline = originalText.includes('\n') || rect.height > 60;
-          if (!isMultiline) {
-            e.preventDefault();
-            save();
-          }
+        } else if (e.key === 'Enter' && !e.shiftKey && !isMultiline) {
+          e.preventDefault();
+          save();
         }
       });
 
-      // Handle paste - sanitize pasted content
       element.addEventListener('paste', function(e) {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
@@ -2579,22 +2899,31 @@
         updateCounter();
       });
 
-      // Outside click handler
+      fieldInputs.forEach(function(f) {
+        f.input.addEventListener('keydown', function(e) {
+          if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+          else if (e.key === 'Enter') { e.preventDefault(); save(); }
+        });
+      });
+
       const outsideClickHandler = function(e) {
-        // Don't trigger on clicks within the edited element, toolbar, or counter
         if (element.contains(e.target) ||
             actionsDiv.contains(e.target) ||
-            counterContainer.contains(e.target)) {
+            counter.contains(e.target) ||
+            (fieldsPanel && fieldsPanel.contains(e.target))) {
           return;
         }
-        // Save on outside click
         save();
       };
 
-      // Delay adding the handler to prevent immediate trigger
       setTimeout(function() {
         document.addEventListener('mousedown', outsideClickHandler);
       }, 100);
+    }
+
+    /** Plain text. The default path. */
+    startInlineEdit(element) {
+      this.startTextEdit(element);
     }
 
     // Image editor modal for image elements
@@ -2611,8 +2940,13 @@
       const isImg = element.tagName.toLowerCase() === 'img';
       const currentSrc = isImg ? element.src : (element.style.backgroundImage || '').replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
       const currentAlt = isImg ? element.alt : '';
-      const currentWidth = element.offsetWidth;
-      const currentHeight = element.offsetHeight;
+      const imgComputed = window.getComputedStyle(element);
+      const currentWidth = Math.round(parseFloat(imgComputed.width) || 0);
+      const currentHeight = Math.round(parseFloat(imgComputed.height) || 0);
+
+      // Set by a successful upload; reported back so the API can store the real
+      // intrinsic size alongside the URL.
+      let uploadedDimensions = null;
 
       // Create modal overlay
       const overlay = this.createOverlay();
@@ -2726,23 +3060,81 @@
 
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
-      fileInput.accept = 'image/*';
+      fileInput.accept = ACCEPTED_IMAGE_TYPES.join(',');
       fileInput.style.display = 'none';
 
-      fileInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = function(ev) {
-            urlInput.value = ev.target.result;
-            previewImg.src = ev.target.result;
-          };
-          reader.readAsDataURL(file);
+      // Progress / status line for the upload.
+      const uploadStatus = document.createElement('div');
+      uploadStatus.style.cssText = 'margin-top: 10px; font-size: 12px; color: #94a3b8; min-height: 16px;';
+
+      const progressTrack = document.createElement('div');
+      progressTrack.style.cssText = 'margin-top: 8px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.1); overflow: hidden; display: none;';
+      const progressBar = document.createElement('div');
+      progressBar.style.cssText = 'height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.15s ease;';
+      progressTrack.appendChild(progressBar);
+
+      fileInput.addEventListener('change', async function(e) {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        // Validate before touching the network — a 20MB TIFF should fail here,
+        // not after the user has waited for the whole upload.
+        const problem = validateImageFile(file);
+        if (problem) {
+          uploadStatus.style.color = '#f87171';
+          uploadStatus.textContent = problem;
+          fileInput.value = '';
+          return;
+        }
+
+        // Keep whatever the user already had. If the upload fails they get it
+        // back rather than losing their work.
+        const previousUrl = urlInput.value;
+        const previousPreview = previewImg.src;
+
+        uploadLabel.style.pointerEvents = 'none';
+        uploadLabel.style.opacity = '0.6';
+        uploadText.textContent = 'Uploading…';
+        uploadStatus.style.color = '#94a3b8';
+        uploadStatus.textContent = file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+        progressTrack.style.display = 'block';
+        progressBar.style.width = '0%';
+
+        // Show the chosen file immediately; the object URL is revoked once the
+        // real URL lands so nothing leaks.
+        const localPreview = URL.createObjectURL(file);
+        previewImg.src = localPreview;
+
+        try {
+          const uploaded = await self.uploadImage(file, function(percent) {
+            progressBar.style.width = percent + '%';
+          });
+
+          urlInput.value = uploaded.url;
+          previewImg.src = uploaded.url;
+          uploadedDimensions = { width: uploaded.width, height: uploaded.height };
+          uploadStatus.style.color = '#34d399';
+          uploadStatus.textContent = 'Uploaded' +
+            (uploaded.width && uploaded.height ? ' — ' + uploaded.width + ' × ' + uploaded.height + ' px' : '');
+        } catch (error) {
+          urlInput.value = previousUrl;
+          previewImg.src = previousPreview;
+          uploadStatus.style.color = '#f87171';
+          uploadStatus.textContent = error.message || 'Upload failed. Your previous image is unchanged.';
+        } finally {
+          URL.revokeObjectURL(localPreview);
+          uploadLabel.style.pointerEvents = '';
+          uploadLabel.style.opacity = '';
+          uploadText.textContent = 'Upload New Image';
+          progressTrack.style.display = 'none';
+          fileInput.value = '';
         }
       });
 
       uploadLabel.appendChild(fileInput);
       uploadContainer.appendChild(uploadLabel);
+      uploadContainer.appendChild(progressTrack);
+      uploadContainer.appendChild(uploadStatus);
       modal.appendChild(uploadContainer);
 
       // Action buttons
@@ -2784,18 +3176,34 @@
           return;
         }
 
+        // A data URI would be stored verbatim in the content row and again in
+        // content_history on every subsequent edit — a 2 MB photo becomes ~2.7 MB
+        // of base64 per revision. Uploads go through /api/upload/image and come
+        // back as a URL; anything else here is a bug or a hand-pasted blob.
+        if (/^data:/i.test(newSrc)) {
+          alert('Inline image data cannot be saved. Use "Upload New Image" so the file is hosted, or paste an image URL.');
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+
         try {
           await self.persistContentUpdate(elementId, newSrc, {
             contentType: 'image',
-            alt: isImg ? altInput.value : null
+            alt: isImg ? altInput.value : null,
+            width: uploadedDimensions ? uploadedDimensions.width : undefined,
+            height: uploadedDimensions ? uploadedDimensions.height : undefined
           });
         } catch (error) {
           alert(error.message || 'Failed to save image. Please try again.');
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Changes';
           return;
         }
 
         if (isImg) {
-          element.src = newSrc;
+          applyImageSource(element, newSrc);
           if (altInput) {
             element.alt = altInput.value;
           }
@@ -2821,418 +3229,65 @@
       });
     }
 
-    // Link editing with URL field
+    /**
+     * Links: the same in-place renderer, plus an href field.
+     *
+     * This used to build a `position: fixed` overlay containing an <input
+     * style="all: inherit">. `all: inherit` also inherits `position`, so the
+     * input became fixed and its `width/height: 100%` resolved against the
+     * viewport instead of the overlay — a 1200x2029px input sitting invisibly on
+     * top of the whole page (the overlay's `overflow: hidden` hid the damage but
+     * not the mis-laid-out text inside it). Editing the <a> directly has none of
+     * these problems and inherits the author's underline, colour and font for
+     * free.
+     */
     startLinkEdit(element) {
-      const self = this;
-      const elementId = element.getAttribute('data-rcf-id');
-      const elementData = this.elements.get(elementId);
-      if (!elementData || element.getAttribute('data-rcf-editing')) return;
-
-      element.setAttribute('data-rcf-editing', 'true');
-      element.classList.add('rcf-editing');
-      element.classList.remove('rcf-hovering');
-
-      const styles = this.captureAllStyles(element);
-      const originalText = this.getFullElementText(element);
-      const originalHref = element.href || '';
-
-      // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
-      const isLightBg = editColors.counterBg.includes('15, 23, 42');
-
-      // Generate unique ID for this edit session's styles
-      const editSessionId = 'rcf-link-edit-' + Date.now();
-
-      // Inject dynamic selection styles
-      const selectionStyle = document.createElement('style');
-      selectionStyle.id = editSessionId + '-styles';
-      selectionStyle.textContent = [
-        '#' + editSessionId + '::selection { background: ' + editColors.selectionBg + '; }',
-        '#' + editSessionId + '::-moz-selection { background: ' + editColors.selectionBg + '; }'
-      ].join('\n');
-      document.head.appendChild(selectionStyle);
-
-      // Create overlay for text editing
-      const overlay = document.createElement('div');
-      overlay.className = 'rcf-edit-overlay rcf-link-edit';
-
-      // CRITICAL: overflow hidden and exact height to prevent text spillover
-      overlay.style.cssText = [
-        'position: fixed',
-        'z-index: 9999',
-        'pointer-events: auto',
-        'box-sizing: border-box',
-        'overflow: hidden',
-        'left: ' + styles.left + 'px',
-        'top: ' + styles.top + 'px',
-        'width: ' + styles.width + 'px',
-        'height: ' + styles.height + 'px',
-        'font-family: ' + styles.fontFamily,
-        'font-size: ' + styles.fontSize,
-        'font-weight: ' + styles.fontWeight,
-        'line-height: ' + styles.lineHeight,
-        'letter-spacing: ' + styles.letterSpacing,
-        'text-align: ' + styles.textAlign,
-        'color: ' + styles.color,
-        'text-decoration: ' + styles.textDecoration,
-        'background: ' + styles.background,
-        'padding: ' + styles.padding,
-        'outline: 2px solid ' + editColors.outlineColor,
-        'outline-offset: 2px'
-      ].join(' !important; ') + ' !important;';
-
-      // Text input
-      const textInput = document.createElement('input');
-      textInput.type = 'text';
-      textInput.value = originalText;
-      textInput.id = editSessionId;
-      textInput.className = 'rcf-edit-input';
-      textInput.style.cssText = [
-        'all: inherit',
-        'width: 100%',
-        'height: 100%',
-        'background: transparent',
-        'border: none',
-        'outline: none',
-        'padding: 0',
-        'margin: 0',
-        'font: inherit',
-        'color: inherit',
-        'overflow: hidden',
-        'text-overflow: ellipsis',
-        'caret-color: ' + editColors.caretColor
-      ].join(' !important; ') + ' !important;';
-
-      overlay.appendChild(textInput);
-
-      // URL input field below the text - adaptive colors based on background
-      const urlField = document.createElement('div');
-      urlField.className = 'rcf-url-field';
-      const urlFieldBg = isLightBg ? 'rgba(15, 23, 42, 0.98)' : 'rgba(255, 255, 255, 0.98)';
-      const urlFieldBorder = isLightBg ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-      urlField.style.cssText = 'position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; background: ' + urlFieldBg + '; border-radius: 10px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); border: 1px solid ' + urlFieldBorder + '; backdrop-filter: blur(20px);';
-
-      const urlLabel = document.createElement('label');
-      const urlLabelColor = isLightBg ? '#94a3b8' : '#475569';
-      urlLabel.style.cssText = 'display: block; font-size: 11px; color: ' + urlLabelColor + '; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;';
-      urlLabel.textContent = 'Link URL';
-
-      const urlInput = document.createElement('input');
-      urlInput.type = 'url';
-      urlInput.value = originalHref;
-      urlInput.placeholder = 'https://example.com';
-      const urlInputBg = isLightBg ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-      const urlInputBorder = isLightBg ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
-      const urlInputColor = isLightBg ? '#e2e8f0' : '#1e293b';
-      urlInput.style.cssText = 'width: 100%; padding: 8px 12px; background: ' + urlInputBg + '; border: 1px solid ' + urlInputBorder + '; border-radius: 6px; color: ' + urlInputColor + '; font-size: 13px; outline: none;';
-
-      urlField.appendChild(urlLabel);
-      urlField.appendChild(urlInput);
-      overlay.appendChild(urlField);
-
-      // Actions
-      const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'rcf-actions';
-
-      const saveBtn = document.createElement('button');
-      saveBtn.className = 'rcf-btn-save';
-      saveBtn.type = 'button';
-      saveBtn.textContent = '✓ Save';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'rcf-btn-cancel';
-      cancelBtn.type = 'button';
-      cancelBtn.textContent = '✕ Cancel';
-
-      actionsDiv.appendChild(saveBtn);
-      actionsDiv.appendChild(cancelBtn);
-
-      actionsDiv.style.position = 'fixed';
-      actionsDiv.style.left = (styles.left + styles.width / 2) + 'px';
-      actionsDiv.style.top = (styles.top - 56) + 'px';
-      actionsDiv.style.transform = 'translateX(-50%)';
-      actionsDiv.style.zIndex = '10000';
-
-      // Hide original element
-      const originalVisibility = element.style.visibility;
-      element.style.visibility = 'hidden';
-
-      document.body.appendChild(overlay);
-      document.body.appendChild(actionsDiv);
-      textInput.focus();
-      textInput.select();
-
-      const updatePosition = function() {
-        const newRect = element.getBoundingClientRect();
-        overlay.style.left = newRect.left + 'px';
-        overlay.style.top = newRect.top + 'px';
-        actionsDiv.style.left = (newRect.left + newRect.width / 2) + 'px';
-        actionsDiv.style.top = (newRect.top - 56) + 'px';
-      };
-
-      window.addEventListener('scroll', updatePosition, true);
-      window.addEventListener('resize', updatePosition);
-
-      const cleanup = function() {
-        element.removeAttribute('data-rcf-editing');
-        element.classList.remove('rcf-editing');
-        element.style.visibility = originalVisibility || '';
-        window.removeEventListener('scroll', updatePosition, true);
-        window.removeEventListener('resize', updatePosition);
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-        if (document.body.contains(actionsDiv)) document.body.removeChild(actionsDiv);
-        // Remove dynamic selection styles
-        const dynamicStyle = document.getElementById(editSessionId + '-styles');
-        if (dynamicStyle) dynamicStyle.remove();
-      };
-
-      const save = async function() {
-        const newText = textInput.value;
-        const newHref = urlInput.value.trim();
-
-        try {
-          await self.persistContentUpdate(elementId, newText, {
-            href: newHref
-          });
-        } catch (error) {
-          alert(error.message || 'Failed to save link. Please try again.');
-          return;
-        }
-
-        element.textContent = newText;
-        if (newHref) {
-          element.href = newHref;
-        }
-
-        elementData.originalContent = newText;
-
-        element.classList.add('rcf-updated');
-        setTimeout(function() {
-          element.classList.remove('rcf-updated');
-        }, 500);
-
-        cleanup();
-      };
-
-      saveBtn.onclick = save;
-      cancelBtn.onclick = cleanup;
-
-      textInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') cleanup();
-        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
+      this.startTextEdit(element, {
+        fields: [{
+          key: 'href',
+          label: 'Link URL',
+          type: 'url',
+          placeholder: 'https://example.com',
+          get: function(el) { return el.getAttribute('href') || ''; },
+          set: function(el, value) { if (value) el.setAttribute('href', value); }
+        }],
+        payload: function(values) { return { href: values.href }; }
       });
-
-      urlInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') cleanup();
-        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
-      });
-
-      const outsideClickHandler = function(e) {
-        if (!overlay.contains(e.target) && !actionsDiv.contains(e.target)) {
-          save();
-          document.removeEventListener('click', outsideClickHandler);
-        }
-      };
-
-      setTimeout(function() {
-        document.addEventListener('click', outsideClickHandler);
-      }, 100);
     }
 
-    // Animated element editing with pause/resume
+    /**
+     * Animated elements: the same in-place renderer, with animations paused so
+     * the caret does not slide out from under the user mid-keystroke.
+     *
+     * The paused badge is a fixed-position body child. It used to be appended
+     * *inside* the edited element, which meant its own label ("⏸ Animation
+     * paused") was part of element.textContent and got saved into the database
+     * as part of the user's copy.
+     */
     startAnimatedEdit(element) {
-      const self = this;
+      this.startTextEdit(element, {
+        onStart: function(el) {
+          el.style.setProperty('animation-play-state', 'paused', 'important');
+          el.style.setProperty('transition', 'none', 'important');
 
-      // Get adaptive colors based on background luminance FIRST
-      const editColors = this.getEditingColors(element);
-      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+          const badge = document.createElement('div');
+          badge.className = 'rcf-animation-indicator';
+          badge.setAttribute('data-rcf-ignore', '');
+          badge.textContent = '⏸ Animation paused';
 
-      // Store original animation state
-      const originalAnimation = element.style.animation;
-      const originalTransition = element.style.transition;
-      const originalAnimationPlayState = element.style.animationPlayState;
+          const r = el.getBoundingClientRect();
+          badge.style.top = Math.max(4, r.top - 30) + 'px';
+          badge.style.left = (r.left + r.width / 2) + 'px';
+          document.body.appendChild(badge);
 
-      // Pause animations
-      element.style.animation = 'none';
-      element.style.transition = 'none';
-      element.style.animationPlayState = 'paused';
-
-      // Show animation paused indicator - adaptive colors
-      const indicator = document.createElement('div');
-      indicator.className = 'rcf-animation-indicator';
-      const indicatorBg = isLightBg ? 'rgba(251, 191, 36, 0.15)' : 'rgba(251, 191, 36, 0.25)';
-      const indicatorBorder = isLightBg ? 'rgba(251, 191, 36, 0.4)' : 'rgba(251, 191, 36, 0.5)';
-      const indicatorColor = isLightBg ? '#b45309' : '#fbbf24';
-      indicator.style.cssText = 'position: absolute; top: -32px; left: 50%; transform: translateX(-50%); background: ' + indicatorBg + '; border: 1px solid ' + indicatorBorder + '; color: ' + indicatorColor + '; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-family: ui-sans-serif, system-ui, sans-serif; white-space: nowrap; z-index: 10001;';
-      indicator.textContent = '⏸ Animation paused';
-
-      const originalPosition = element.style.position;
-      element.style.position = 'relative';
-      element.appendChild(indicator);
-
-      // Store cleanup to restore animations
-      const restoreAnimations = function() {
-        element.style.animation = originalAnimation || '';
-        element.style.transition = originalTransition || '';
-        element.style.animationPlayState = originalAnimationPlayState || '';
-        element.style.position = originalPosition || '';
-        if (element.contains(indicator)) {
-          element.removeChild(indicator);
+          // Inline styles are restored wholesale by startTextEdit's teardown;
+          // only the badge needs removing here.
+          return function() {
+            if (badge.parentNode) badge.parentNode.removeChild(badge);
+          };
         }
-      };
-
-      // Use normal text editing but with animation restoration on cleanup
-      const elementId = element.getAttribute('data-rcf-id');
-      const elementData = this.elements.get(elementId);
-      if (!elementData || element.getAttribute('data-rcf-editing')) {
-        restoreAnimations();
-        return;
-      }
-
-      element.setAttribute('data-rcf-editing', 'true');
-      element.classList.add('rcf-editing');
-      element.classList.remove('rcf-hovering');
-
-      const styles = this.captureAllStyles(element);
-      const originalText = this.getFullElementText(element);
-
-      // Generate unique ID for this edit session's styles
-      const editSessionId = 'rcf-anim-edit-' + Date.now();
-
-      // Inject dynamic selection styles
-      const selectionStyle = document.createElement('style');
-      selectionStyle.id = editSessionId + '-styles';
-      selectionStyle.textContent = [
-        '#' + editSessionId + '::selection { background: ' + editColors.selectionBg + '; }',
-        '#' + editSessionId + '::-moz-selection { background: ' + editColors.selectionBg + '; }'
-      ].join('\n');
-      document.head.appendChild(selectionStyle);
-
-      // Create overlay - CRITICAL: overflow hidden and exact height
-      const overlay = document.createElement('div');
-      overlay.className = 'rcf-edit-overlay';
-
-      overlay.style.cssText = [
-        'position: fixed',
-        'z-index: 9999',
-        'pointer-events: auto',
-        'box-sizing: border-box',
-        'overflow: hidden',
-        'left: ' + styles.left + 'px',
-        'top: ' + styles.top + 'px',
-        'width: ' + styles.width + 'px',
-        'height: ' + styles.height + 'px',
-        'font-family: ' + styles.fontFamily,
-        'font-size: ' + styles.fontSize,
-        'font-weight: ' + styles.fontWeight,
-        'line-height: ' + styles.lineHeight,
-        'color: ' + styles.color,
-        'background: ' + styles.background,
-        'padding: ' + styles.padding,
-        'border-radius: ' + styles.borderRadius,
-        'outline: 2px solid ' + editColors.outlineColor,
-        'outline-offset: 2px'
-      ].join(' !important; ') + ' !important;';
-
-      const inputElement = document.createElement('textarea');
-      inputElement.value = originalText;
-      inputElement.id = editSessionId;
-      inputElement.className = 'rcf-edit-input';
-      inputElement.style.cssText = [
-        'all: inherit',
-        'width: 100%',
-        'height: 100%',
-        'background: transparent',
-        'border: none',
-        'outline: none',
-        'resize: none',
-        'overflow: hidden',
-        'caret-color: ' + editColors.caretColor
-      ].join(' !important; ') + ' !important;';
-
-      overlay.appendChild(inputElement);
-
-      const actionsDiv = document.createElement('div');
-      actionsDiv.className = 'rcf-actions';
-
-      const saveBtn = document.createElement('button');
-      saveBtn.className = 'rcf-btn-save';
-      saveBtn.textContent = '✓ Save';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'rcf-btn-cancel';
-      cancelBtn.textContent = '✕ Cancel';
-
-      actionsDiv.appendChild(saveBtn);
-      actionsDiv.appendChild(cancelBtn);
-
-      actionsDiv.style.position = 'fixed';
-      actionsDiv.style.left = (styles.left + styles.width / 2) + 'px';
-      actionsDiv.style.top = (styles.top - 56) + 'px';
-      actionsDiv.style.transform = 'translateX(-50%)';
-      actionsDiv.style.zIndex = '10000';
-
-      const originalVisibility = element.style.visibility;
-      element.style.visibility = 'hidden';
-
-      document.body.appendChild(overlay);
-      document.body.appendChild(actionsDiv);
-      inputElement.focus();
-
-      const cleanup = function() {
-        element.removeAttribute('data-rcf-editing');
-        element.classList.remove('rcf-editing');
-        element.style.visibility = originalVisibility || '';
-        if (document.body.contains(overlay)) document.body.removeChild(overlay);
-        if (document.body.contains(actionsDiv)) document.body.removeChild(actionsDiv);
-        // Remove dynamic selection styles
-        const dynamicStyle = document.getElementById(editSessionId + '-styles');
-        if (dynamicStyle) dynamicStyle.remove();
-        // Restore animations
-        restoreAnimations();
-      };
-
-      const save = async function() {
-        const newContent = inputElement.value;
-
-        try {
-          await self.persistContentUpdate(elementId, newContent);
-        } catch (error) {
-          alert(error.message || 'Failed to save content. Please try again.');
-          return;
-        }
-
-        element.textContent = newContent;
-        elementData.originalContent = newContent;
-
-        element.classList.add('rcf-updated');
-        setTimeout(function() {
-          element.classList.remove('rcf-updated');
-        }, 500);
-
-        cleanup();
-      };
-
-      saveBtn.onclick = save;
-      cancelBtn.onclick = cleanup;
-
-      inputElement.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') cleanup();
-        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save();
       });
-
-      const outsideClickHandler = function(e) {
-        if (!overlay.contains(e.target) && !actionsDiv.contains(e.target)) {
-          save();
-          document.removeEventListener('click', outsideClickHandler);
-        }
-      };
-
-      setTimeout(function() {
-        document.addEventListener('click', outsideClickHandler);
-      }, 100);
     }
-
     // Form element editing
     startFormEdit(element) {
       const self = this;
@@ -3250,7 +3305,7 @@
 
       // Get adaptive colors based on background luminance
       const editColors = this.getEditingColors(element);
-      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+      const isLightBg = editColors.backdropIsLight;
 
       // For input/textarea, edit placeholder and value
       element.setAttribute('data-rcf-editing', 'true');
@@ -3389,7 +3444,7 @@
 
       // Get adaptive colors based on background luminance
       const editColors = this.getEditingColors(element);
-      const isLightBg = editColors.counterBg.includes('15, 23, 42');
+      const isLightBg = editColors.backdropIsLight;
 
       const rect = element.getBoundingClientRect();
       const hint = document.createElement('div');

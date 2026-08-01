@@ -14,11 +14,8 @@ import {
   Key,
   TrendingUp,
   Clock,
-  Users,
   Ban,
   RefreshCw,
-  Filter,
-  Download,
 } from "lucide-react";
 
 interface SecurityEvent {

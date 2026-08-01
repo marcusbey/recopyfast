@@ -52,6 +52,38 @@
   --secondary-foreground: 240 5.9% 10%;
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 0 0% 100%;
+  --info: 217 91% 60%;
+  --info-foreground: 0 0% 100%;
+
+  /* Status tones — surface/text/border triplets for badges, pills and callouts.
+     Every status treatment in the app resolves to one of these six tones so a
+     status reads the same wherever it appears. Text values are chosen to clear
+     4.5:1 against their own surface. */
+  --tone-neutral-surface: 240 5% 96%;
+  --tone-neutral-text: 240 6% 30%;
+  --tone-neutral-border: 240 6% 88%;
+
+  --tone-info-surface: 214 95% 96%;
+  --tone-info-text: 221 83% 40%;
+  --tone-info-border: 213 92% 88%;
+
+  --tone-success-surface: 152 76% 95%;
+  --tone-success-text: 158 79% 25%;
+  --tone-success-border: 149 72% 85%;
+
+  --tone-warning-surface: 48 96% 93%;
+  --tone-warning-text: 26 90% 32%;
+  --tone-warning-border: 45 93% 82%;
+
+  --tone-danger-surface: 0 93% 96%;
+  --tone-danger-text: 0 72% 40%;
+  --tone-danger-border: 0 93% 89%;
+
+  --tone-accent-surface: 270 100% 97%;
+  --tone-accent-text: 272 72% 42%;
+  --tone-accent-border: 269 97% 90%;
 
   /* Border & Ring */
   --border: 240 5.9% 90%;
@@ -94,6 +126,34 @@
     --muted-foreground: 215 20.2% 65.1%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
+    --warning: 38 92% 55%;
+    --info: 217 91% 65%;
+
+    /* Status tones — dark mode inverts the triplet: dim translucent surface,
+       bright text. Same six names, so components need no dark: variants. */
+    --tone-neutral-surface: 240 5% 18%;
+    --tone-neutral-text: 240 5% 78%;
+    --tone-neutral-border: 240 5% 28%;
+
+    --tone-info-surface: 221 60% 18%;
+    --tone-info-text: 213 94% 78%;
+    --tone-info-border: 221 60% 30%;
+
+    --tone-success-surface: 158 60% 14%;
+    --tone-success-text: 152 76% 70%;
+    --tone-success-border: 158 55% 26%;
+
+    --tone-warning-surface: 26 70% 16%;
+    --tone-warning-text: 45 93% 68%;
+    --tone-warning-border: 30 65% 28%;
+
+    --tone-danger-surface: 0 60% 18%;
+    --tone-danger-text: 0 93% 78%;
+    --tone-danger-border: 0 60% 30%;
+
+    --tone-accent-surface: 272 55% 20%;
+    --tone-accent-text: 269 97% 82%;
+    --tone-accent-border: 272 50% 32%;
 
     /* Border & Ring */
     --border: 217.2 32.6% 17.5%;
@@ -128,6 +188,30 @@
   --color-secondary-foreground: hsl(var(--secondary-foreground));
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-info: hsl(var(--info));
+  --color-info-foreground: hsl(var(--info-foreground));
+
+  /* Status tones */
+  --color-tone-neutral-surface: hsl(var(--tone-neutral-surface));
+  --color-tone-neutral-text: hsl(var(--tone-neutral-text));
+  --color-tone-neutral-border: hsl(var(--tone-neutral-border));
+  --color-tone-info-surface: hsl(var(--tone-info-surface));
+  --color-tone-info-text: hsl(var(--tone-info-text));
+  --color-tone-info-border: hsl(var(--tone-info-border));
+  --color-tone-success-surface: hsl(var(--tone-success-surface));
+  --color-tone-success-text: hsl(var(--tone-success-text));
+  --color-tone-success-border: hsl(var(--tone-success-border));
+  --color-tone-warning-surface: hsl(var(--tone-warning-surface));
+  --color-tone-warning-text: hsl(var(--tone-warning-text));
+  --color-tone-warning-border: hsl(var(--tone-warning-border));
+  --color-tone-danger-surface: hsl(var(--tone-danger-surface));
+  --color-tone-danger-text: hsl(var(--tone-danger-text));
+  --color-tone-danger-border: hsl(var(--tone-danger-border));
+  --color-tone-accent-surface: hsl(var(--tone-accent-surface));
+  --color-tone-accent-text: hsl(var(--tone-accent-text));
+  --color-tone-accent-border: hsl(var(--tone-accent-border));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));

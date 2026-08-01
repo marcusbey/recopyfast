@@ -109,22 +109,22 @@ export function VersionPreviewDialog({
         <div className="space-y-6 py-4">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
-            <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            <div className="p-4 rounded-lg border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
               {error}
             </div>
           ) : (
             <>
               {/* Version Info */}
               <div className="flex items-center gap-3">
-                <Badge variant="outline" className="bg-gray-50">
+                <Badge variant="outline" className="bg-surface-1">
                   <FileText className="w-3 h-3 mr-1" />
                   {snapshot.length} elements in this snapshot
                 </Badge>
                 {version.description && (
-                  <span className="text-sm text-gray-600 italic">
+                  <span className="text-sm text-muted-foreground italic">
                     &ldquo;{version.description}&rdquo;
                   </span>
                 )}
@@ -135,22 +135,22 @@ export function VersionPreviewDialog({
                 {snapshot.map((element) => (
                   <div
                     key={element.element_id}
-                    className="bg-gray-50 rounded-lg border border-gray-200 p-3"
+                    className="bg-surface-1 rounded-lg border border-border p-3"
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-mono text-xs text-gray-500 truncate">
+                      <span className="font-mono text-xs text-muted-foreground truncate">
                         {element.element_id}
                       </span>
                       {element.metadata?.type && (
                         <Badge
                           variant="outline"
-                          className="text-xs bg-white border-gray-200"
+                          className="text-xs bg-card border-border"
                         >
                           {element.metadata.type}
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-gray-800 line-clamp-3">
+                    <p className="text-sm text-foreground line-clamp-3">
                       {element.current_content || element.original_content}
                     </p>
                   </div>
@@ -158,21 +158,21 @@ export function VersionPreviewDialog({
               </div>
 
               {snapshot.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
+                <div className="text-center py-8 text-muted-foreground">
                   No content elements in this snapshot
                 </div>
               )}
 
               {/* Restore Confirmation */}
               {showConfirm ? (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="bg-tone-warning-surface border border-tone-warning-border rounded-lg p-4">
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <AlertTriangle className="w-5 h-5 text-tone-warning-text flex-shrink-0 mt-0.5" />
                     <div className="flex-1">
-                      <h4 className="font-medium text-amber-800">
+                      <h4 className="font-medium text-tone-warning-text">
                         Confirm Restore
                       </h4>
-                      <p className="text-sm text-amber-700 mt-1">
+                      <p className="text-sm text-tone-warning-text mt-1">
                         This will replace all current staging content with the
                         content from version {version.versionNumber}. This
                         action can be undone by restoring another version.
@@ -190,7 +190,7 @@ export function VersionPreviewDialog({
                           size="sm"
                           onClick={handleRestore}
                           disabled={restoring}
-                          className="bg-amber-600 hover:bg-amber-700"
+                          className="bg-warning text-warning-foreground hover:bg-warning/90"
                         >
                           {restoring ? (
                             <>
@@ -209,7 +209,7 @@ export function VersionPreviewDialog({
                   </div>
                 </div>
               ) : (
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <div className="flex justify-end gap-3 pt-4 border-t border-border">
                   <Button variant="outline" onClick={() => onOpenChange(false)}>
                     Close
                   </Button>

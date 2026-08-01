@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { X, Loader2, History, ChevronDown } from "lucide-react";
 import { VersionTimelineItem, type Version } from "./VersionTimelineItem";
@@ -26,6 +26,8 @@ export function VersionHistoryPanel({
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [previewVersion, setPreviewVersion] = useState<Version | null>(null);
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const LIMIT = 20;
 
@@ -87,6 +89,21 @@ export function VersionHistoryPanel({
     }
   }, [open, fetchVersions]);
 
+  // The panel is a modal drawer, so it owes keyboard users an Escape route and
+  // a sensible starting focus — neither of which came for free here the way
+  // they do from the Radix Dialog used elsewhere.
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    closeButtonRef.current?.focus();
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
   const handleLoadMore = () => {
     fetchVersions(offset + LIMIT, true);
   };
@@ -113,22 +130,39 @@ export function VersionHistoryPanel({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — Escape provides the keyboard equivalent of clicking it. */}
       <div
-        className="fixed inset-0 bg-black/20 z-40 transition-opacity"
+        className="fixed inset-0 z-40 bg-black/40 transition-opacity"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-card shadow-2xl duration-300 animate-in slide-in-from-right"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2">
-            <History className="w-5 h-5 text-gray-600" />
-            <h2 className="font-semibold text-gray-900">Version History</h2>
+            <History
+              className="h-5 w-5 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <h2 id={titleId} className="font-semibold text-foreground">
+              Version History
+            </h2>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="w-5 h-5" />
+          <Button
+            ref={closeButtonRef}
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+          >
+            <X className="h-5 w-5" aria-hidden="true" />
+            <span className="sr-only">Close version history</span>
           </Button>
         </div>
 
@@ -136,21 +170,21 @@ export function VersionHistoryPanel({
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+              <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           ) : error ? (
-            <div className="p-4 rounded-lg bg-red-50 text-red-700 text-sm">
+            <div className="p-4 rounded-lg border border-tone-danger-border bg-tone-danger-surface text-tone-danger-text text-sm">
               {error}
             </div>
           ) : versions.length === 0 ? (
             <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <History className="w-8 h-8 text-gray-400" />
+              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                <History className="w-8 h-8 text-muted-foreground" />
               </div>
-              <h3 className="font-medium text-gray-900 mb-2">
+              <h3 className="font-medium text-foreground mb-2">
                 No version history yet
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Version history will appear here as you make changes to your
                 content.
               </p>

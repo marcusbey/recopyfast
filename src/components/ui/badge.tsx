@@ -29,6 +29,33 @@ const badgeVariants = cva(
         outline: ["text-foreground border-border", "hover:bg-accent/50"].join(
           " ",
         ),
+        // Status tones — the canonical status treatment. Each resolves to a
+        // surface/text/border triplet from globals.css, so tones stay legible
+        // in dark mode without per-call-site `dark:` variants.
+        "tone-neutral": [
+          "bg-tone-neutral-surface text-tone-neutral-text",
+          "border-tone-neutral-border",
+        ].join(" "),
+        "tone-info": [
+          "bg-tone-info-surface text-tone-info-text",
+          "border-tone-info-border",
+        ].join(" "),
+        "tone-success": [
+          "bg-tone-success-surface text-tone-success-text",
+          "border-tone-success-border",
+        ].join(" "),
+        "tone-warning": [
+          "bg-tone-warning-surface text-tone-warning-text",
+          "border-tone-warning-border",
+        ].join(" "),
+        "tone-danger": [
+          "bg-tone-danger-surface text-tone-danger-text",
+          "border-tone-danger-border",
+        ].join(" "),
+        "tone-accent": [
+          "bg-tone-accent-surface text-tone-accent-text",
+          "border-tone-accent-border",
+        ].join(" "),
         // New premium variants
         staging: [
           "border-transparent",

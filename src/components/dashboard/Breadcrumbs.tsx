@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, Home } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface BreadcrumbItem {
   label: string;
@@ -44,12 +43,16 @@ export function Breadcrumbs() {
   }
 
   return (
-    <nav className="flex items-center space-x-2 text-sm text-gray-600 mb-6">
+    <nav
+      aria-label="Breadcrumb"
+      className="mb-6 flex items-center space-x-2 text-sm text-muted-foreground"
+    >
       <Link
         href="/dashboard"
-        className="flex items-center hover:text-gray-900 transition-colors"
+        className="flex items-center rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        <Home className="w-4 h-4" />
+        <Home className="h-4 w-4" aria-hidden="true" />
+        <span className="sr-only">Dashboard home</span>
       </Link>
 
       {breadcrumbs.map((crumb, index) => {
@@ -57,13 +60,15 @@ export function Breadcrumbs() {
 
         return (
           <div key={crumb.href} className="flex items-center space-x-2">
-            <ChevronRight className="w-4 h-4 text-gray-400" />
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
             {isLast ? (
-              <span className="font-medium text-gray-900">{crumb.label}</span>
+              <span aria-current="page" className="font-medium text-foreground">
+                {crumb.label}
+              </span>
             ) : (
               <Link
                 href={crumb.href}
-                className="hover:text-gray-900 transition-colors"
+                className="rounded transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 {crumb.label}
               </Link>

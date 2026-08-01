@@ -62,8 +62,8 @@ export default function SettingsPage() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-600 mt-1">
+        <h1 className="text-3xl font-bold text-foreground">Settings</h1>
+        <p className="text-muted-foreground mt-1">
           Manage your account and preferences
         </p>
       </div>
@@ -129,9 +129,9 @@ export default function SettingsPage() {
                   placeholder="john@example.com"
                   value={email}
                   disabled
-                  className="bg-gray-50 text-gray-500 cursor-not-allowed"
+                  className="bg-surface-1 text-muted-foreground cursor-not-allowed"
                 />
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   Email cannot be changed here. Contact support if needed.
                 </p>
               </div>
@@ -174,7 +174,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Email Notifications</p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Receive updates via email
                   </p>
                 </div>
@@ -183,7 +183,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Content Edit Alerts</p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Get notified when content is edited
                   </p>
                 </div>
@@ -192,7 +192,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between py-3 border-b">
                 <div>
                   <p className="font-medium">Weekly Reports</p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Receive weekly analytics summaries
                   </p>
                 </div>
@@ -201,7 +201,7 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between py-3">
                 <div>
                   <p className="font-medium">Marketing Emails</p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Updates about new features and offers
                   </p>
                 </div>
@@ -253,7 +253,9 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">2FA Status</p>
-                    <p className="text-sm text-gray-600">Currently disabled</p>
+                    <p className="text-sm text-muted-foreground">
+                      Currently disabled
+                    </p>
                   </div>
                   <Button variant="outline">Enable 2FA</Button>
                 </div>
@@ -272,12 +274,12 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg">
+              <div className="p-4 bg-surface-1 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-medium">Production Key</p>
                   <Badge className="bg-green-100 text-green-700">Active</Badge>
                 </div>
-                <code className="text-sm text-gray-600 break-all">
+                <code className="text-sm text-muted-foreground break-all">
                   rf_prod_xxxxxxxxxxxxxxxxxxxx
                 </code>
               </div>
@@ -303,14 +305,14 @@ export default function SettingsPage() {
                 <Label>Theme</Label>
                 <div className="grid grid-cols-3 gap-4">
                   <div className="border-2 border-blue-600 rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-white rounded mb-2"></div>
+                    <div className="w-full h-20 bg-card rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">Light</p>
                   </div>
-                  <div className="border-2 border-gray-200 rounded-lg p-4 cursor-pointer">
+                  <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
                     <div className="w-full h-20 bg-gray-900 rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">Dark</p>
                   </div>
-                  <div className="border-2 border-gray-200 rounded-lg p-4 cursor-pointer">
+                  <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
                     <div className="w-full h-20 bg-gradient-to-br from-gray-900 to-gray-600 rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">System</p>
                   </div>

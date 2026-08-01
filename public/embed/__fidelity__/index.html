@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>ReCopyFast — edit-mode fidelity fixture</title>
+
+<!-- A genuinely remote webfont: exercises "styles captured before fonts load". -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #ffffff;
+    color: #111827;
+  }
+  .fx-head {
+    padding: 16px 24px; border-bottom: 1px solid #e5e7eb;
+    font-size: 13px; color: #6b7280;
+    position: sticky; top: 0; background: #fff; z-index: 5;
+  }
+  .fx-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
+  section.fx {
+    border-bottom: 1px solid #e5e7eb; border-right: 1px solid #e5e7eb;
+    padding: 14px 18px 22px;
+  }
+  section.fx > .fx-label {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: #9ca3af; margin-bottom: 10px; font-weight: 700;
+  }
+  .stage { min-height: 96px; display: flex; align-items: center; }
+
+  /* ---------------------------------------------------------------- 01 plain */
+  #fx-plain { font-size: 17px; line-height: 1.6; color: #1f2937; margin: 0; }
+
+  /* ------------------------------------------------- 02 uppercase + tracking */
+  #fx-uppercase {
+    font-size: 26px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: .22em; word-spacing: .1em; color: #0f172a; margin: 0;
+    font-variant-caps: normal;
+  }
+
+  /* -------------------------------------------------------------- 03 centred */
+  .center-wrap { width: 100%; }
+  #fx-center {
+    text-align: center; font-size: 20px; font-style: italic;
+    text-decoration: underline wavy #f59e0b; color: #334155; margin: 0;
+  }
+
+  /* --------------------------------------------------------- 04 over a photo */
+  .photo-wrap {
+    width: 100%; padding: 26px 20px; border-radius: 12px;
+    background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='400' height='200'>\
+<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>\
+<stop offset='0' stop-color='%23fde68a'/><stop offset='.5' stop-color='%2334d399'/>\
+<stop offset='1' stop-color='%230ea5e9'/></linearGradient></defs>\
+<rect width='400' height='200' fill='url(%23g)'/>\
+<circle cx='90' cy='60' r='48' fill='%23ffffff' opacity='.85'/>\
+<circle cx='300' cy='150' r='70' fill='%23111827' opacity='.55'/></svg>");
+    background-size: cover; background-position: center;
+  }
+  /* Deliberately mid-grey: unreadable over the light patches of the photo. */
+  #fx-photo { font-size: 19px; font-weight: 600; color: #9ca3af; margin: 0; background: transparent; }
+
+  /* ------------------------------------------------------ 05 over a gradient */
+  .gradient-wrap {
+    width: 100%; padding: 24px 20px; border-radius: 12px;
+    background: linear-gradient(115deg, #111827 0%, #4c1d95 55%, #db2777 100%);
+  }
+  #fx-gradient { font-size: 19px; color: #f9fafb; margin: 0; background: transparent; }
+
+  /* ------------------------------- 06 ancestor supplies the visible bg */
+  .ancestor-bg { width: 100%; padding: 22px 20px; background: #0f172a; border-radius: 12px; }
+  .ancestor-bg .mid { background: transparent; padding: 6px; }
+  #fx-ancestor { font-size: 18px; color: #e2e8f0; margin: 0; background: transparent; }
+
+  /* -------------------------------- 07 semi-transparent element bg over dark */
+  .alpha-wrap { width: 100%; padding: 20px; background: #052e16; border-radius: 12px; }
+  #fx-alpha {
+    font-size: 18px; color: #ecfdf5; margin: 0;
+    background: rgba(255, 255, 255, 0.14); padding: 12px 16px; border-radius: 8px;
+  }
+
+  /* ------------------------------------------------ 08 gradient (clipped) text */
+  #fx-cliptext {
+    font-size: 30px; font-weight: 900; margin: 0;
+    background: linear-gradient(90deg, #f43f5e, #8b5cf6, #06b6d4);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+  }
+
+  /* ------------------------------------------------------- 09 mix-blend-mode */
+  .blend-wrap {
+    width: 100%; padding: 22px 18px; border-radius: 12px;
+    background: linear-gradient(90deg, #fbbf24 0%, #1e293b 100%);
+  }
+  #fx-blend { font-size: 22px; font-weight: 800; color: #ffffff; margin: 0; mix-blend-mode: difference; }
+
+  /* ---------------------------------------------------- 10 scaled ancestor */
+  .scale-wrap { transform: scale(1.35); transform-origin: left center; }
+  #fx-scaled { font-size: 16px; color: #1e293b; margin: 0; background: #fef3c7; padding: 8px 12px; border-radius: 6px; }
+
+  /* --------------------------------------------------- 11 rotated ancestor */
+  .rotate-wrap { transform: rotate(-5deg); transform-origin: left center; }
+  #fx-rotated { font-size: 17px; color: #1e293b; margin: 0; background: #dbeafe; padding: 8px 12px; border-radius: 6px; }
+
+  /* ------------------------------------------------------------------ 12 RTL */
+  .rtl-wrap { width: 100%; direction: rtl; }
+  #fx-rtl { font-size: 20px; color: #111827; margin: 0; text-align: right; unicode-bidi: isolate; }
+
+  /* ------------------------------------------------------- 13 writing-mode */
+  .vertical-wrap { height: 150px; }
+  #fx-vertical { writing-mode: vertical-rl; text-orientation: mixed; font-size: 18px; color: #4c1d95; margin: 0; height: 140px; }
+
+  /* ----------------------------------------------------- 14 white-space: pre */
+  #fx-pre { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: #0f172a; margin: 0; background: #f1f5f9; padding: 10px 12px; border-radius: 6px; }
+
+  /* ------------------------------------------------ 15 nowrap + ellipsis */
+  .ellipsis-wrap { width: 260px; }
+  #fx-ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 17px; color: #1f2937; margin: 0; width: 260px; }
+
+  /* --------------------------------------------------- 16 -webkit-line-clamp */
+  .clamp-wrap { width: 280px; }
+  #fx-clamp {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; font-size: 15px; line-height: 1.5; color: #374151; margin: 0; width: 280px;
+  }
+
+  /* ----------------------------------------------------------- 17 web font */
+  #fx-webfont { font-family: "Playfair Display", Georgia, serif; font-size: 27px; font-weight: 700; font-style: italic; color: #111827; margin: 0; }
+
+  /* --------------------------------------------- 18 inline span in a sentence */
+  .inline-wrap { font-size: 17px; line-height: 1.7; color: #374151; }
+  #fx-inline { background: #fef08a; padding: 2px 5px; border-radius: 4px; font-weight: 700; color: #78350f; }
+
+  /* ------------------------------------------------------- 19 nested markup */
+  #fx-nested { font-size: 17px; line-height: 1.65; color: #1f2937; margin: 0; }
+  #fx-nested strong { color: #b91c1c; }
+  #fx-nested em { color: #1d4ed8; letter-spacing: .04em; }
+
+  /* ------------------------------------------ 20 author !important overrides */
+  #fx-important { font-size: 23px !important; color: #7c2d12 !important; font-weight: 800 !important; letter-spacing: .05em !important; margin: 0; }
+
+  /* ----------------------------------------------------- 21 sticky container */
+  .sticky-outer { height: 120px; overflow: auto; width: 100%; border: 1px dashed #cbd5e1; border-radius: 8px; }
+  .sticky-inner { height: 300px; padding: 10px; }
+  #fx-sticky { position: sticky; top: 0; background: #ecfeff; font-size: 17px; color: #164e63; margin: 0; padding: 8px 10px; border-radius: 6px; }
+
+  /* -------------------------------------------------- 22 scrollable overflow */
+  .scroll-outer { height: 110px; overflow: auto; width: 100%; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 10px; }
+  #fx-scrolled { font-size: 16px; color: #1f2937; margin: 60px 0 0 0; }
+
+  /* --------------------------------------------------- 23 running animation */
+  @keyframes fx-drift { from { transform: translateX(0); } to { transform: translateX(26px); } }
+  #fx-animated { animation: fx-drift 2.4s ease-in-out infinite alternate; font-size: 19px; font-weight: 700; color: #065f46; margin: 0; background: #d1fae5; padding: 8px 14px; border-radius: 8px; }
+
+  /* -------------------------------------------------- 24 light card surface */
+  #fx-lightcard { background: #eef2f7; color: #334155; font-size: 17px; margin: 0; padding: 14px 18px; border-radius: 10px; width: 100%; }
+
+  /* --------------------------------------------------------- 25 dark panel */
+  .dark-wrap { width: 100%; background: #020617; padding: 20px; border-radius: 12px; }
+  #fx-dark { color: #94a3b8; font-size: 18px; margin: 0; background: transparent; }
+
+  /* -------------------------------------------- 26 genuinely unreadable text */
+  #fx-lowcontrast { background: #9ca3af; color: #a3a9b4; font-size: 17px; margin: 0; padding: 14px 18px; border-radius: 10px; width: 100%; }
+
+  /* ------------------------------------------------------- 27 filter ancestor */
+  .filter-wrap { filter: saturate(1.8) contrast(1.1); width: 100%; }
+  #fx-filtered { background: #fee2e2; color: #7f1d1d; font-size: 17px; margin: 0; padding: 12px 16px; border-radius: 8px; }
+
+  /* ------------------------------------------------------ 28 opacity ancestor */
+  .opacity-wrap { opacity: .55; width: 100%; }
+  #fx-faded { background: #1e3a8a; color: #dbeafe; font-size: 17px; margin: 0; padding: 12px 16px; border-radius: 8px; }
+
+  /* --------------------------------------------------------------- 29 link */
+  #fx-link { font-size: 18px; color: #1d4ed8; text-decoration: underline; text-underline-offset: 3px; font-weight: 600; }
+
+  /* ------------------------------------------------------------- 30 button */
+  #fx-button { font-size: 15px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #6366f1, #a855f7); border: none; padding: 12px 22px; border-radius: 10px; letter-spacing: .03em; cursor: pointer; }
+
+  /* ---------------------------------------------------------------- 31 zoom */
+  .zoom-wrap { zoom: 1.25; width: 100%; }
+  #fx-zoomed { font-size: 16px; color: #172554; margin: 0; background: #e0e7ff; padding: 10px 14px; border-radius: 6px; }
+
+  /* ---------------------------------------------------------- 32 small text */
+  #fx-small { font-size: 11px; color: #6b7280; background: #f9fafb; margin: 0; padding: 10px 12px; border-radius: 6px; width: 100%; }
+
+  /* ------------------------------------------------------- 33 variable font */
+  #fx-variable {
+    font-family: "Playfair Display", Georgia, serif; font-size: 24px;
+    font-variation-settings: "wght" 620; font-feature-settings: "liga" 1, "kern" 1;
+    font-synthesis: none; color: #1f2937; margin: 0;
+  }
+
+  /* ------------------------------------------------------------ 34 video bg */
+  .video-wrap { position: relative; width: 100%; height: 110px; border-radius: 12px; overflow: hidden; background: #000; }
+  .video-wrap video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #fx-video { position: relative; z-index: 1; color: #f8fafc; font-size: 19px; font-weight: 700; margin: 0; padding: 40px 18px; background: transparent; }
+
+  /* -------------------------------------------------- 35 late font-family swap */
+  #fx-lateswap { font-size: 21px; color: #111827; margin: 0; }
+  body.fonts-swapped #fx-lateswap { font-family: "Playfair Display", Georgia, serif; font-size: 25px; letter-spacing: .03em; }
+
+  /* ------------------------------------------------------------- 36 image */
+  #fx-image { width: 220px; height: 120px; object-fit: cover; border-radius: 10px; display: block; }
+</style>
+</head>
+<body>
+<div class="fx-head">ReCopyFast edit-mode fidelity fixture — every block below is an editable target measured before vs. during edit.</div>
+
+<div class="fx-grid">
+  <section class="fx"><div class="fx-label">01 plain paragraph</div><div class="stage">
+    <p id="fx-plain">The quick brown fox jumps over the lazy dog near the riverbank at dawn.</p></div></section>
+
+  <section class="fx"><div class="fx-label">02 uppercase + tracking</div><div class="stage">
+    <h2 id="fx-uppercase">Built for speed</h2></div></section>
+
+  <section class="fx"><div class="fx-label">03 centred + italic + underline</div><div class="stage center-wrap">
+    <p id="fx-center">Every pixel stays exactly where it was.</p></div></section>
+
+  <section class="fx"><div class="fx-label">04 text over a photo (transparent el)</div><div class="stage">
+    <div class="photo-wrap"><p id="fx-photo">Low contrast over imagery</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">05 text over a gradient</div><div class="stage">
+    <div class="gradient-wrap"><p id="fx-gradient">Gradient backdrop, light copy</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">06 ancestor supplies background</div><div class="stage">
+    <div class="ancestor-bg"><div class="mid"><p id="fx-ancestor">Inherited dark surface</p></div></div></div></section>
+
+  <section class="fx"><div class="fx-label">07 semi-transparent element bg</div><div class="stage">
+    <div class="alpha-wrap"><p id="fx-alpha">Frosted panel over deep green</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">08 background-clip: text</div><div class="stage">
+    <h2 id="fx-cliptext">Gradient headline</h2></div></section>
+
+  <section class="fx"><div class="fx-label">09 mix-blend-mode: difference</div><div class="stage">
+    <div class="blend-wrap"><p id="fx-blend">Blended headline text</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">10 ancestor transform: scale(1.35)</div><div class="stage">
+    <div class="scale-wrap"><p id="fx-scaled">Scaled by an ancestor</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">11 ancestor transform: rotate(-5deg)</div><div class="stage">
+    <div class="rotate-wrap"><p id="fx-rotated">Rotated by an ancestor</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">12 RTL direction</div><div class="stage rtl-wrap">
+    <p id="fx-rtl">مرحبا بالعالم من هنا</p></div></section>
+
+  <section class="fx"><div class="fx-label">13 vertical writing-mode</div><div class="stage vertical-wrap">
+    <p id="fx-vertical">Vertical rhythm holds</p></div></section>
+
+  <section class="fx"><div class="fx-label">14 white-space: pre (monospace)</div><div class="stage">
+    <p id="fx-pre">line one
+  indented two
+    deeper three</p></div></section>
+
+  <section class="fx"><div class="fx-label">15 nowrap + text-overflow: ellipsis</div><div class="stage ellipsis-wrap">
+    <p id="fx-ellipsis">This sentence is far too long to fit inside its box and gets clipped</p></div></section>
+
+  <section class="fx"><div class="fx-label">16 -webkit-line-clamp: 2</div><div class="stage clamp-wrap">
+    <p id="fx-clamp">Clamped copy that runs past two lines and therefore gets truncated by the browser with an ellipsis at the end of the second visible line.</p></div></section>
+
+  <section class="fx"><div class="fx-label">17 remote web font</div><div class="stage">
+    <h2 id="fx-webfont">Elegant serif display</h2></div></section>
+
+  <section class="fx"><div class="fx-label">18 inline span mid-sentence</div><div class="stage inline-wrap">
+    <p>Pricing starts at <span id="fx-inline">nineteen dollars</span> per month, billed annually.</p></div></section>
+
+  <section class="fx"><div class="fx-label">19 nested strong / em children</div><div class="stage">
+    <p id="fx-nested">Ships with <strong>zero config</strong> and <em>instant rollback</em> included.</p></div></section>
+
+  <section class="fx"><div class="fx-label">20 author !important rules</div><div class="stage">
+    <p id="fx-important">Important beats inline</p></div></section>
+
+  <section class="fx"><div class="fx-label">21 position: sticky in a scroller</div><div class="stage">
+    <div class="sticky-outer"><div class="sticky-inner"><p id="fx-sticky">Sticky heading stays put</p></div></div></div></section>
+
+  <section class="fx"><div class="fx-label">22 inside an overflow scroller</div><div class="stage">
+    <div class="scroll-outer" id="fx-scroll-outer"><p id="fx-scrolled">Scrolled into view inside a clipped box</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">23 running keyframe animation</div><div class="stage">
+    <p id="fx-animated">Drifting animated text</p></div></section>
+
+  <section class="fx"><div class="fx-label">24 light grey card surface</div><div class="stage">
+    <p id="fx-lightcard">Soft grey card, dark slate copy</p></div></section>
+
+  <section class="fx"><div class="fx-label">25 dark panel, muted copy</div><div class="stage">
+    <div class="dark-wrap"><p id="fx-dark">Muted grey on near-black</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">26 genuinely unreadable (grey on grey)</div><div class="stage">
+    <p id="fx-lowcontrast">Barely legible before editing</p></div></section>
+
+  <section class="fx"><div class="fx-label">27 ancestor filter()</div><div class="stage">
+    <div class="filter-wrap"><p id="fx-filtered">Saturated by an ancestor filter</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">28 ancestor opacity .55</div><div class="stage">
+    <div class="opacity-wrap"><p id="fx-faded">Faded through an ancestor</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">29 editable link</div><div class="stage">
+    <a id="fx-link" class="rcf-editable-link" href="https://example.com/pricing">Read the pricing guide</a></div></section>
+
+  <section class="fx"><div class="fx-label">30 button</div><div class="stage">
+    <button id="fx-button" type="button">Start free trial</button></div></section>
+
+  <section class="fx"><div class="fx-label">31 zoom: 1.25 ancestor</div><div class="stage">
+    <div class="zoom-wrap"><p id="fx-zoomed">Zoomed container copy</p></div></div></section>
+
+  <section class="fx"><div class="fx-label">32 small text (11px)</div><div class="stage">
+    <p id="fx-small">Fine print at eleven pixels, still must stay put.</p></div></section>
+
+  <section class="fx"><div class="fx-label">33 variable font settings</div><div class="stage">
+    <p id="fx-variable">Variable weight 620</p></div></section>
+
+  <section class="fx"><div class="fx-label">34 text over a video</div><div class="stage">
+    <div class="video-wrap">
+      <video id="fx-video-el" autoplay muted loop playsinline></video>
+      <p id="fx-video">Copy over moving video</p>
+    </div></div></section>
+
+  <section class="fx"><div class="fx-label">35 late font-family swap</div><div class="stage">
+    <p id="fx-lateswap">Swaps typeface after load</p></div></section>
+
+  <section class="fx"><div class="fx-label">36 image element</div><div class="stage">
+    <img id="fx-image" alt="Placeholder landscape"
+      src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='440' height='240'><rect width='440' height='240' fill='%23334155'/><circle cx='120' cy='80' r='46' fill='%23fbbf24'/><path d='M0 240 L150 110 L260 240 Z' fill='%2310b981'/><path d='M180 240 L320 130 L440 240 Z' fill='%230ea5e9'/></svg>">
+    </div></section>
+</div>
+
+<script>
+  // A tiny generated video so the "text over video" case has real moving pixels
+  // without depending on a network asset.
+  (function () {
+    var canvas = document.createElement('canvas');
+    canvas.width = 320; canvas.height = 180;
+    var ctx = canvas.getContext('2d');
+    var t = 0;
+    function paint() {
+      t += 0.02;
+      var g = ctx.createLinearGradient(0, 0, 320, 180);
+      g.addColorStop(0, 'hsl(' + ((t * 40) % 360) + ', 80%, 60%)');
+      g.addColorStop(1, 'hsl(' + ((t * 40 + 120) % 360) + ', 80%, 30%)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, 320, 180);
+      requestAnimationFrame(paint);
+    }
+    paint();
+    var el = document.getElementById('fx-video-el');
+    if (canvas.captureStream) {
+      try { el.srcObject = canvas.captureStream(24); } catch (e) { /* headless may refuse */ }
+    }
+  })();
+
+  // Scenario 35: the page changes font-family and font-size well after load, the
+  // same way a late webfont or a hydration-time theme swap does.
+  setTimeout(function () { document.body.classList.add('fonts-swapped'); }, 1200);
+</script>
+
+<script src="../__fidelity__/harness.js"></script>
+<script
+  src="../recopyfast.js"
+  data-site-id="fidelity-fixture"
+  data-site-token="fidelity-fixture-token"
+  data-api-url="http://localhost:3000/api"
+  data-ws-url="http://localhost:4001"></script>
+</body>
+</html>

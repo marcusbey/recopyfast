@@ -87,23 +87,27 @@ function StatCard({
 }: StatCardProps) {
   return (
     <Link href={href}>
-      <Card className="border-gray-200 hover:shadow-lg transition-shadow cursor-pointer h-full">
+      <Card className="border-border hover:shadow-lg transition-shadow cursor-pointer h-full">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div className="min-w-0">
-              <p className="text-sm text-gray-600">{label}</p>
+              <p className="text-sm text-muted-foreground">{label}</p>
               {state === "loading" && (
-                <div className="h-7 w-16 bg-gray-200 rounded animate-pulse mt-1" />
+                <div className="h-7 w-16 bg-muted rounded animate-pulse mt-1" />
               )}
               {state === "error" && (
-                <p className="text-sm text-gray-500 mt-2">Unavailable</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Unavailable
+                </p>
               )}
               {state === "ready" &&
                 (value === null ? (
-                  <p className="text-sm text-gray-500 mt-2">Unavailable</p>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    Unavailable
+                  </p>
                 ) : (
                   <p
-                    className={`${valueClassName} font-bold text-gray-900 truncate`}
+                    className={`${valueClassName} font-bold text-foreground truncate`}
                   >
                     {value}
                   </p>
@@ -227,11 +231,11 @@ export default function DashboardPage() {
     <div className="space-y-6">
       {/* Welcome Section */}
       <div>
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+        <h1 className="text-3xl font-bold text-foreground mb-2">
           Welcome back
           {user?.user_metadata?.name ? `, ${user.user_metadata.name}` : ""}!
         </h1>
-        <p className="text-gray-600">
+        <p className="text-muted-foreground">
           Manage your sites and view analytics from your dashboard.
         </p>
       </div>
@@ -278,7 +282,7 @@ export default function DashboardPage() {
       {/* Sites Section — isolated so a failure here keeps the rest of the
           dashboard usable, which a route-level error.tsx cannot do. */}
       <ErrorBoundary level="section">
-        <Card className="border-gray-200">
+        <Card className="border-border">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -288,7 +292,7 @@ export default function DashboardPage() {
                 </CardDescription>
               </div>
               <Button
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
                 onClick={() => setIsModalOpen(true)}
               >
                 <Plus className="w-4 h-4 mr-2" />
@@ -325,13 +329,13 @@ export default function DashboardPage() {
 
             {sitesState === "ready" && sites.length === 0 && (
               <div className="text-center py-12">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Globe className="w-8 h-8 text-gray-400" />
+                <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Globe className="w-8 h-8 text-muted-foreground" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                <h3 className="text-lg font-semibold text-foreground mb-2">
                   No sites yet
                 </h3>
-                <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+                <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
                   Add your first site to start making your content editable with
                   AI assistance.
                 </p>
@@ -354,13 +358,13 @@ export default function DashboardPage() {
                       href="/dashboard/sites"
                       className="block"
                     >
-                      <div className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 hover:shadow-md transition-shadow">
-                        <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center flex-shrink-0">
+                      <div className="flex items-center gap-4 p-4 rounded-lg border border-border hover:shadow-md transition-shadow">
+                        <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/70 rounded-lg flex items-center justify-center flex-shrink-0">
                           <Globe className="w-5 h-5 text-white" />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
-                            <p className="font-semibold text-gray-900 truncate">
+                            <p className="font-semibold text-foreground truncate">
                               {site.name}
                             </p>
                             {site.status && (
@@ -372,15 +376,15 @@ export default function DashboardPage() {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-sm text-gray-600 truncate">
+                          <p className="text-sm text-muted-foreground truncate">
                             {site.domain}
                           </p>
                         </div>
                         <div className="text-right flex-shrink-0 hidden sm:block">
-                          <p className="text-sm font-medium text-gray-900">
+                          <p className="text-sm font-medium text-foreground">
                             {editsCount} {editsCount === 1 ? "edit" : "edits"}
                           </p>
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-muted-foreground">
                             {siteLastActivity
                               ? `${formatDistanceToNow(new Date(siteLastActivity))} ago`
                               : "No edits yet"}
@@ -410,13 +414,15 @@ export default function DashboardPage() {
       {/* Quick Actions - Navigate to different sections */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <Link href="/dashboard/sites">
-          <Card className="border-gray-200 hover:shadow-lg transition-shadow cursor-pointer h-full">
+          <Card className="border-border hover:shadow-lg transition-shadow cursor-pointer h-full">
             <CardContent className="p-6">
               <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center mb-4">
                 <Globe className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">Manage Sites</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="font-semibold text-foreground mb-2">
+                Manage Sites
+              </h3>
+              <p className="text-sm text-muted-foreground">
                 View and configure your registered websites.
               </p>
             </CardContent>
@@ -424,15 +430,15 @@ export default function DashboardPage() {
         </Link>
 
         <Link href="/dashboard/content">
-          <Card className="border-gray-200 hover:shadow-lg transition-shadow cursor-pointer h-full">
+          <Card className="border-border hover:shadow-lg transition-shadow cursor-pointer h-full">
             <CardContent className="p-6">
               <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center mb-4">
                 <FileText className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">
+              <h3 className="font-semibold text-foreground mb-2">
                 Content Library
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Browse and edit your site content.
               </p>
             </CardContent>
@@ -440,15 +446,15 @@ export default function DashboardPage() {
         </Link>
 
         <Link href="/dashboard/analytics">
-          <Card className="border-gray-200 hover:shadow-lg transition-shadow cursor-pointer h-full">
+          <Card className="border-border hover:shadow-lg transition-shadow cursor-pointer h-full">
             <CardContent className="p-6">
               <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl flex items-center justify-center mb-4">
                 <BarChart3 className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">
+              <h3 className="font-semibold text-foreground mb-2">
                 View Analytics
               </h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Monitor performance and engagement.
               </p>
             </CardContent>
@@ -456,13 +462,13 @@ export default function DashboardPage() {
         </Link>
 
         <Link href="/dashboard/settings">
-          <Card className="border-gray-200 hover:shadow-lg transition-shadow cursor-pointer h-full">
+          <Card className="border-border hover:shadow-lg transition-shadow cursor-pointer h-full">
             <CardContent className="p-6">
               <div className="w-12 h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl flex items-center justify-center mb-4">
                 <SettingsIcon className="w-6 h-6 text-white" />
               </div>
-              <h3 className="font-semibold text-gray-900 mb-2">Settings</h3>
-              <p className="text-sm text-gray-600">
+              <h3 className="font-semibold text-foreground mb-2">Settings</h3>
+              <p className="text-sm text-muted-foreground">
                 Customize your account preferences.
               </p>
             </CardContent>

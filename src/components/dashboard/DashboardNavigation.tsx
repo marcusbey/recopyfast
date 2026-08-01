@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -86,6 +86,7 @@ export function DashboardNavigation({
 }: DashboardNavigationProps) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const sidebarId = useId();
 
   const isActive = (href: string) => {
     if (href === "/dashboard") {
@@ -110,13 +111,15 @@ export function DashboardNavigation({
     return (
       <Link
         href={accessible ? item.href : "#"}
+        aria-current={active ? "page" : undefined}
+        aria-disabled={!accessible || undefined}
         className={cn(
-          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all",
-          "hover:bg-gray-100",
-          active &&
-            "bg-gradient-to-r from-blue-50 to-purple-50 text-blue-600 hover:bg-gradient-to-r hover:from-blue-50 hover:to-purple-50",
-          !active && "text-gray-700 hover:text-gray-900",
-          !accessible && "opacity-50 cursor-not-allowed",
+          "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+          active
+            ? "bg-primary/10 text-primary"
+            : "text-foreground/80 hover:bg-muted hover:text-foreground",
+          !accessible && "cursor-not-allowed opacity-50",
         )}
         onClick={(e) => {
           if (!accessible) {
@@ -127,14 +130,14 @@ export function DashboardNavigation({
           }
         }}
       >
-        <Icon className={cn("w-5 h-5", active && "text-blue-600")} />
+        <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
         <span className="flex-1">{item.label}</span>
         {item.badge && (
           <Badge variant={item.badgeVariant || "default"} className="text-xs">
             {item.badge}
           </Badge>
         )}
-        {active && <ChevronRight className="w-4 h-4" />}
+        {active && <ChevronRight className="h-4 w-4" aria-hidden="true" />}
       </Link>
     );
   };
@@ -145,41 +148,54 @@ export function DashboardNavigation({
       <Button
         variant="ghost"
         size="icon"
-        className="lg:hidden fixed top-4 left-4 z-50"
+        className="fixed left-4 top-4 z-50 lg:hidden"
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        aria-expanded={isMobileMenuOpen}
+        aria-controls={sidebarId}
       >
         {isMobileMenuOpen ? (
-          <X className="w-6 h-6" />
+          <X className="h-6 w-6" aria-hidden="true" />
         ) : (
-          <Menu className="w-6 h-6" />
+          <Menu className="h-6 w-6" aria-hidden="true" />
         )}
+        <span className="sr-only">
+          {isMobileMenuOpen ? "Close navigation" : "Open navigation"}
+        </span>
       </Button>
 
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar */}
       <nav
+        id={sidebarId}
+        aria-label="Dashboard"
         className={cn(
-          "fixed left-0 top-0 h-screen bg-white border-r border-gray-200 z-40 transition-transform duration-300",
-          "lg:translate-x-0 lg:w-64",
-          isMobileMenuOpen ? "translate-x-0 w-64" : "-translate-x-full",
+          "fixed left-0 top-0 z-40 h-screen border-r border-border bg-card transition-transform duration-300",
+          "lg:w-64 lg:translate-x-0",
+          isMobileMenuOpen ? "w-64 translate-x-0" : "-translate-x-full",
           className,
         )}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex h-full flex-col">
           {/* Logo/Brand */}
-          <div className="p-6 border-b border-gray-200">
-            <Link href="/dashboard" className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">RF</span>
+          <div className="border-b border-border p-6">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                <span className="text-sm font-bold text-primary-foreground">
+                  RF
+                </span>
               </div>
-              <span className="font-bold text-xl text-gray-900">
+              <span className="text-xl font-bold text-foreground">
                 ReCopyFast
               </span>
             </Link>
@@ -195,20 +211,18 @@ export function DashboardNavigation({
           </div>
 
           {/* Plan Badge */}
-          <div className="p-4 border-t border-gray-200">
-            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div className="border-t border-border p-4">
+            <div className="flex items-center justify-between rounded-lg bg-surface-1 p-3">
               <div>
-                <p className="text-xs text-gray-600">Current Plan</p>
-                <p className="text-sm font-semibold text-gray-900 capitalize">
+                <p className="text-xs text-muted-foreground">Current Plan</p>
+                <p className="text-sm font-semibold capitalize text-foreground">
                   {userPlan}
                 </p>
               </div>
               {userPlan === "free" && (
-                <Link href="/dashboard/billing">
-                  <Button size="sm" variant="outline" className="text-xs">
-                    Upgrade
-                  </Button>
-                </Link>
+                <Button size="sm" variant="outline" className="text-xs" asChild>
+                  <Link href="/dashboard/billing">Upgrade</Link>
+                </Button>
               )}
             </div>
           </div>

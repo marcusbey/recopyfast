@@ -65,7 +65,7 @@ describe("DashboardNavigation", () => {
       render(<DashboardNavigation />);
 
       const dashboardLink = screen.getByText("Dashboard").closest("a");
-      expect(dashboardLink).toHaveClass("text-blue-600");
+      expect(dashboardLink).toHaveAttribute("aria-current", "page");
     });
 
     it("should highlight Sites link when on sites page", () => {
@@ -73,7 +73,7 @@ describe("DashboardNavigation", () => {
       render(<DashboardNavigation />);
 
       const sitesLink = screen.getByText("Sites").closest("a");
-      expect(sitesLink).toHaveClass("text-blue-600");
+      expect(sitesLink).toHaveAttribute("aria-current", "page");
     });
 
     it("should highlight Content link when on content page", () => {
@@ -81,7 +81,7 @@ describe("DashboardNavigation", () => {
       render(<DashboardNavigation />);
 
       const contentLink = screen.getByText("Content").closest("a");
-      expect(contentLink).toHaveClass("text-blue-600");
+      expect(contentLink).toHaveAttribute("aria-current", "page");
     });
 
     it("should highlight Analytics link when on analytics page", () => {
@@ -89,7 +89,7 @@ describe("DashboardNavigation", () => {
       render(<DashboardNavigation />);
 
       const analyticsLink = screen.getByText("Analytics").closest("a");
-      expect(analyticsLink).toHaveClass("text-blue-600");
+      expect(analyticsLink).toHaveAttribute("aria-current", "page");
     });
 
     it("should highlight Settings link when on settings page", () => {
@@ -97,7 +97,7 @@ describe("DashboardNavigation", () => {
       render(<DashboardNavigation />);
 
       const settingsLink = screen.getByText("Settings").closest("a");
-      expect(settingsLink).toHaveClass("text-blue-600");
+      expect(settingsLink).toHaveAttribute("aria-current", "page");
     });
   });
 

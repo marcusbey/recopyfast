@@ -97,7 +97,7 @@ export default function TeamsPage() {
     switch (role) {
       case "owner":
         return (
-          <Badge className="bg-purple-100 text-purple-700 border-purple-200">
+          <Badge variant="tone-accent">
             <Crown className="w-3 h-3 mr-1" />
             Owner
           </Badge>
@@ -112,7 +112,7 @@ export default function TeamsPage() {
         );
       default:
         return (
-          <Badge className="bg-gray-100 text-gray-700 border-gray-200">
+          <Badge className="bg-muted text-foreground border-border">
             <Users className="w-3 h-3 mr-1" />
             Member
           </Badge>
@@ -131,13 +131,13 @@ export default function TeamsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Teams</h1>
-          <p className="text-gray-600 mt-1">
+          <h1 className="text-3xl font-bold text-foreground">Teams</h1>
+          <p className="text-muted-foreground mt-1">
             Collaborate with your team members
           </p>
         </div>
         <Button
-          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+          className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
           disabled
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -146,19 +146,21 @@ export default function TeamsPage() {
       </div>
 
       {/* Pro Feature Notice */}
-      <Card className="border-2 border-purple-200 bg-gradient-to-r from-purple-50 to-blue-50">
+      <Card className="border-2 border-primary/30 bg-primary/5">
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 bg-gradient-to-r from-purple-600 to-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/70 rounded-lg flex items-center justify-center flex-shrink-0">
               <Lock className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
-              <h3 className="font-semibold text-gray-900 mb-1">Pro Feature</h3>
-              <p className="text-gray-600 mb-4">
+              <h3 className="font-semibold text-foreground mb-1">
+                Pro Feature
+              </h3>
+              <p className="text-muted-foreground mb-4">
                 Team collaboration is available on Pro and Enterprise plans.
                 Upgrade to invite team members and manage permissions.
               </p>
-              <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
+              <Button className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70">
                 Upgrade to Pro
               </Button>
             </div>
@@ -172,8 +174,8 @@ export default function TeamsPage() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Total Members</p>
-                <p className="text-2xl font-bold text-gray-900">
+                <p className="text-sm text-muted-foreground">Total Members</p>
+                <p className="text-2xl font-bold text-foreground">
                   {members.length}
                 </p>
               </div>
@@ -186,8 +188,8 @@ export default function TeamsPage() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Active Members</p>
-                <p className="text-2xl font-bold text-gray-900">
+                <p className="text-sm text-muted-foreground">Active Members</p>
+                <p className="text-2xl font-bold text-foreground">
                   {activeCount}
                 </p>
               </div>
@@ -200,8 +202,8 @@ export default function TeamsPage() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">Pending Invites</p>
-                <p className="text-2xl font-bold text-gray-900">
+                <p className="text-sm text-muted-foreground">Pending Invites</p>
+                <p className="text-2xl font-bold text-foreground">
                   {pendingCount}
                 </p>
               </div>
@@ -253,7 +255,7 @@ export default function TeamsPage() {
               {fetchError}
             </p>
           ) : members.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center py-4">
+            <p className="text-sm text-muted-foreground text-center py-4">
               {teamId
                 ? "No team members found."
                 : "You are not a member of any team yet."}
@@ -263,17 +265,17 @@ export default function TeamsPage() {
               {members.map((member) => (
                 <div
                   key={member.id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">
+                    <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/70 rounded-full flex items-center justify-center text-white font-semibold">
                       {getMemberName(member).charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">
+                      <p className="font-medium text-foreground">
                         {getMemberName(member)}
                       </p>
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-muted-foreground">
                         {getMemberEmail(member)}
                       </p>
                     </div>
@@ -303,12 +305,12 @@ export default function TeamsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="p-4 border border-purple-200 rounded-lg">
+            <div className="p-4 rounded-lg border border-tone-accent-border">
               <div className="flex items-center gap-2 mb-2">
                 <Crown className="w-5 h-5 text-purple-600" />
-                <h4 className="font-semibold text-gray-900">Owner</h4>
+                <h4 className="font-semibold text-foreground">Owner</h4>
               </div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Full access to all features, billing, and team management
               </p>
             </div>
@@ -316,19 +318,19 @@ export default function TeamsPage() {
             <div className="p-4 border border-blue-200 rounded-lg">
               <div className="flex items-center gap-2 mb-2">
                 <Shield className="w-5 h-5 text-blue-600" />
-                <h4 className="font-semibold text-gray-900">Admin</h4>
+                <h4 className="font-semibold text-foreground">Admin</h4>
               </div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Can manage sites, content, and invite team members
               </p>
             </div>
 
-            <div className="p-4 border border-gray-200 rounded-lg">
+            <div className="p-4 border border-border rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Users className="w-5 h-5 text-gray-600" />
-                <h4 className="font-semibold text-gray-900">Member</h4>
+                <Users className="w-5 h-5 text-muted-foreground" />
+                <h4 className="font-semibold text-foreground">Member</h4>
               </div>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-muted-foreground">
                 Can view analytics and edit content on assigned sites
               </p>
             </div>

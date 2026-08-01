@@ -30,13 +30,13 @@ export default function ABTestsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">A/B Tests</h1>
-          <p className="mt-1 text-gray-600">
+          <h1 className="text-3xl font-bold text-foreground">A/B Tests</h1>
+          <p className="mt-1 text-muted-foreground">
             Test copy variations to optimize conversions
           </p>
         </div>
         <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
@@ -46,21 +46,21 @@ export default function ABTestsPage() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">A/B Tests</h1>
-          <p className="mt-1 text-gray-600">
+          <h1 className="text-3xl font-bold text-foreground">A/B Tests</h1>
+          <p className="mt-1 text-muted-foreground">
             Test copy variations to optimize conversions
           </p>
         </div>
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-                <FlaskConical className="h-8 w-8 text-gray-400" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                <FlaskConical className="h-8 w-8 text-muted-foreground" />
               </div>
-              <h3 className="mb-2 text-lg font-semibold text-gray-900">
+              <h3 className="mb-2 text-lg font-semibold text-foreground">
                 No sites found
               </h3>
-              <p className="mx-auto mb-6 max-w-sm text-gray-600">
+              <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
                 Register a site first to start running A/B tests on your copy.
               </p>
               <Button
@@ -80,8 +80,8 @@ export default function ABTestsPage() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">A/B Tests</h1>
-          <p className="mt-1 text-gray-600">
+          <h1 className="text-3xl font-bold text-foreground">A/B Tests</h1>
+          <p className="mt-1 text-muted-foreground">
             Test copy variations to optimize conversions
           </p>
         </div>

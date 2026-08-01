@@ -35,16 +35,16 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
             <AlertCircle className="w-6 h-6 text-red-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-semibold text-gray-900 mb-1">
+            <h2 className="text-lg font-semibold text-foreground mb-1">
               This page couldn&apos;t be loaded
             </h2>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="text-sm text-muted-foreground mb-6">
               Something went wrong while rendering this part of your dashboard.
               The error has been reported to our team.
             </p>
 
             {process.env.NODE_ENV === "development" && (
-              <p className="text-xs font-mono text-gray-700 break-all bg-white border border-red-200 rounded-md p-3 mb-6">
+              <p className="text-xs font-mono text-foreground break-all bg-card border border-red-200 rounded-md p-3 mb-6">
                 {error.message}
               </p>
             )}
@@ -52,7 +52,7 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
             <div className="flex flex-wrap gap-3">
               <Button
                 onClick={reset}
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
               >
                 <RefreshCcw className="w-4 h-4 mr-2" />
                 Try again
@@ -66,7 +66,7 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
             </div>
 
             {error.digest && (
-              <p className="text-xs text-gray-500 mt-6">
+              <p className="text-xs text-muted-foreground mt-6">
                 Error ID: <span className="font-mono">{error.digest}</span>
               </p>
             )}

@@ -1,8 +1,11 @@
 /**
- * ReCopyFast Editing Rules
+ * ReCopyFast Editing Rules — app-facing surface.
  *
- * This file defines the core rules and behaviors for content editing
- * to ensure consistent user experience across all demo websites.
+ * The rules themselves live in `./editingRules.core`, which is the single
+ * implementation shared with the embeddable widget: `scripts/build-embed.mjs`
+ * compiles that file straight into `public/embed/recopyfast.js`. Everything
+ * colour-, contrast- and backdrop-related in this file is a thin adapter over
+ * it, so the widget and the app can never drift apart on what "readable" means.
  *
  * CONSISTENT RULE FOR TEXT COLOR:
  * - ALWAYS preserve the original text color during editing
@@ -10,6 +13,21 @@
  * - The editing experience should match the original design exactly
  * - Users expect to see the same color they originally designed
  */
+
+import {
+  assessReadability,
+  BLACK,
+  compositeOver,
+  contrastRatio,
+  parseCssColor,
+  readEditableText,
+  relativeLuminance,
+  resolveBackdrop,
+  WHITE,
+  type Rgba,
+} from "./editingRules.core";
+
+export * from "./editingRules.core";
 
 export interface EditingRules {
   text: TextEditingRules;
@@ -283,64 +301,32 @@ export function generateUnsplashUrl(
 
 /**
  * Universal Text Color Detection Utilities
- * Shared between demo components and embed scripts
+ *
+ * These are the legacy names the app already imports. Each one now delegates to
+ * `editingRules.core`, which is the same code the embed widget runs, so there is
+ * exactly one implementation of colour parsing, alpha compositing, luminance,
+ * contrast and backdrop resolution in the product.
  */
 
-export interface ColorRGBA {
-  r: number;
-  g: number;
-  b: number;
-  a: number;
-}
+/** @deprecated Prefer `Rgba` from editingRules.core. */
+export type ColorRGBA = Rgba;
 
 /**
- * Parse color string to RGBA object
+ * Parse a colour string. Unlike the core parser this never returns null — the
+ * historical callers expect a colour, and black is the safe default.
  */
-export const parseColor = (color: string): ColorRGBA => {
-  // Handle hex colors
-  if (color.startsWith("#")) {
-    const hex = color.slice(1);
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    return { r, g, b, a: 1 };
-  }
+export const parseColor = (color: string): ColorRGBA =>
+  parseCssColor(color) ?? { r: 0, g: 0, b: 0, a: 1 };
 
-  // Handle rgb/rgba colors
-  const match = color.match(/rgba?\(([^)]+)\)/);
-  if (match) {
-    const [r, g, b, a = 1] = match[1]
-      .split(",")
-      .map((n) => parseFloat(n.trim()));
-    return { r, g, b, a };
-  }
-
-  // Handle named colors or fallback to black
-  const colorMap: Record<string, ColorRGBA> = {
-    transparent: { r: 0, g: 0, b: 0, a: 0 },
-    white: { r: 255, g: 255, b: 255, a: 1 },
-    black: { r: 0, g: 0, b: 0, a: 1 },
-  };
-
-  return colorMap[color.toLowerCase()] || { r: 0, g: 0, b: 0, a: 1 };
-};
+/** Relative luminance of a colour (WCAG 2.1). */
+export const getLuminance = (color: ColorRGBA): number =>
+  relativeLuminance(color);
 
 /**
- * Calculate luminance from RGB values
- */
-export const getLuminance = (color: ColorRGBA): number => {
-  const { r, g, b } = color;
-  const [rs, gs, bs] = [r, g, b].map((c) => {
-    const normalized = c / 255;
-    return normalized <= 0.03928
-      ? normalized / 12.92
-      : Math.pow((normalized + 0.055) / 1.055, 2.4);
-  });
-  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
-};
-
-/**
- * Calculate contrast ratio between two colors
+ * Contrast ratio between two *luminances*.
+ *
+ * Note the signature: this takes luminances, not colours, because that is what
+ * the existing callers pass. `contrastRatio(a, b)` from the core takes colours.
  */
 export const getContrastRatio = (
   luminance1: number,
@@ -352,115 +338,82 @@ export const getContrastRatio = (
 };
 
 /**
- * Get effective background color by traversing parent elements
+ * Effective background colour behind an element, compositing translucent
+ * ancestors. Falls back to white when nothing opaque is found.
  */
 export const getEffectiveBackgroundColor = (
   element: HTMLElement,
 ): ColorRGBA => {
-  let currentElement: HTMLElement | null = element;
-  const colors: ColorRGBA[] = [];
-
-  while (currentElement && currentElement !== document.body) {
-    const style = window.getComputedStyle(currentElement);
-    const bgColor = style.backgroundColor;
-
-    if (
-      bgColor &&
-      bgColor !== "rgba(0, 0, 0, 0)" &&
-      bgColor !== "transparent"
-    ) {
-      colors.push(parseColor(bgColor));
-
-      // If we hit an opaque background, we can stop
-      if (colors[colors.length - 1].a >= 1) {
-        break;
-      }
-    }
-
-    currentElement = currentElement.parentElement;
-  }
-
-  // If no background found, assume white
-  if (colors.length === 0) {
-    return { r: 255, g: 255, b: 255, a: 1 };
-  }
-
-  // Composite colors from top to bottom
-  return colors.reduce((result, color) => {
-    if (color.a >= 1) return color;
-
-    return {
-      r: Math.round(color.r * color.a + result.r * (1 - color.a)),
-      g: Math.round(color.g * color.a + result.g * (1 - color.a)),
-      b: Math.round(color.b * color.a + result.b * (1 - color.a)),
-      a: Math.min(1, color.a + result.a),
-    };
-  });
+  const backdrop = resolveBackdrop(element);
+  return backdrop.color.a >= 1
+    ? backdrop.color
+    : compositeOver(backdrop.color, WHITE);
 };
 
 /**
- * Calculate optimal text color based on background contrast
+ * Text colour that stays legible on the resolved background.
+ *
+ * The embed widget deliberately does NOT use this: recolouring text is a
+ * visible design change, so the widget keeps the author's colour and puts a
+ * scrim behind it instead (see `assessReadability`). This remains for the
+ * in-app demo surfaces that were built around it.
  */
 export const getOptimalTextColor = (element: HTMLElement): string => {
-  // Get background color from element and its parents
-  const backgroundColor = getEffectiveBackgroundColor(element);
   const computedStyle = window.getComputedStyle(element);
-
-  // Calculate luminance
-  const luminance = getLuminance(backgroundColor);
-
-  // Use original color if it has good contrast, otherwise use optimal color
   const originalColor = computedStyle.color;
-  const originalColorRGBA = parseColor(originalColor);
-  const originalLuminance = getLuminance(originalColorRGBA);
+  const verdict = assessReadability(element);
 
-  // Calculate contrast ratio
-  const originalContrast = getContrastRatio(luminance, originalLuminance);
-
-  // If original has good contrast (4.5:1 for normal text), keep it
-  if (originalContrast >= 4.5) {
+  if (verdict.ratio === null || verdict.ratio >= verdict.required) {
     return originalColor;
   }
 
-  // Otherwise, choose high contrast color
-  return luminance > 0.5 ? "#000000" : "#ffffff";
+  // Measure both candidates and take the winner rather than thresholding the
+  // background's luminance.
+  //
+  // The obvious `luminance > 0.5 ? black : white` is wrong: the luminance at
+  // which white and black give equal contrast is 0.1791 (solve
+  // (L+0.05)^2 = 0.0525), not 0.5. A 0.5 pivot therefore picks white across the
+  // whole 0.179..0.5 band — every mid-tone background. At L=0.45 that is
+  // 2.10:1, a hard WCAG AA failure, where black would have given 10.00:1.
+  // Picking the higher of the two measured ratios is exact and needs no pivot.
+  return contrastRatio(BLACK, verdict.backdrop.color) >=
+    contrastRatio(WHITE, verdict.backdrop.color)
+    ? "#000000"
+    : "#ffffff";
 };
 
 /**
  * Get text shadow for better visibility
  */
 export const getTextShadow = (textColor: string): string => {
-  const isDark =
-    textColor === "#000000" ||
-    textColor.startsWith("rgb(0") ||
-    textColor === "black";
+  const parsed = parseCssColor(textColor);
+  const isDark = parsed ? relativeLuminance(parsed) < 0.5 : false;
   return isDark
     ? "0 1px 2px rgba(255, 255, 255, 0.5)"
     : "0 1px 2px rgba(0, 0, 0, 0.5)";
 };
 
 /**
- * Get full text content including hidden overflow text
+ * Full editable text for an element.
+ *
+ * Reads `textContent`, never `innerText`: innerText returns the *rendered*
+ * string, so `text-transform: uppercase` would round-trip "Ship fast" back as
+ * "SHIP FAST" and overwrite the author's copy.
  */
 export const getFullElementText = (element: HTMLElement): string => {
-  // Try different methods to get full text
-  let text = "";
-
   if (element.tagName === "INPUT" || element.tagName === "TEXTAREA") {
     const inputElement = element as HTMLInputElement | HTMLTextAreaElement;
-    text = inputElement.value || inputElement.placeholder || "";
-  } else {
-    // Get all text content, including hidden overflow
-    text = element.textContent || element.innerText || "";
-
-    // If text seems truncated (ends with ...), try to get original
-    if (text.endsWith("...") || text.endsWith("…")) {
-      // Look for title attribute or data attributes that might contain full text
-      text = element.title || element.getAttribute("data-full-text") || text;
-    }
+    return (inputElement.value || inputElement.placeholder || "").trim();
   }
 
-  return text.trim();
+  const text = readEditableText(element);
+
+  // Visually truncated copy sometimes stashes the full string out of band.
+  if (text.endsWith("...") || text.endsWith("…")) {
+    return element.title || element.getAttribute("data-full-text") || text;
+  }
+
+  return text;
 };
 
 /**

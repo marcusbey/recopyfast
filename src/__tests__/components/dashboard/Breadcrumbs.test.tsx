@@ -36,7 +36,7 @@ describe("Breadcrumbs", () => {
       mockUsePathname.mockReturnValue("/dashboard/sites");
       const { container } = render(<Breadcrumbs />);
 
-      const homeLink = screen.getByRole("link", { name: "" });
+      const homeLink = screen.getByRole("link", { name: "Dashboard home" });
       expect(homeLink).toHaveAttribute("href", "/dashboard");
       expect(container.querySelector("svg")).toBeInTheDocument();
     });
@@ -110,7 +110,7 @@ describe("Breadcrumbs", () => {
 
       const lastCrumb = screen.getByText("123");
       expect(lastCrumb.tagName).not.toBe("A");
-      expect(lastCrumb).toHaveClass("font-medium", "text-gray-900");
+      expect(lastCrumb).toHaveClass("font-medium", "text-foreground");
     });
   });
 

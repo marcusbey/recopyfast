@@ -234,16 +234,16 @@ export default function SitesPage() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-foreground mb-2">
               My Websites
             </h1>
-            <p className="text-gray-600">
+            <p className="text-muted-foreground">
               Manage and monitor all your registered websites
             </p>
           </div>
           <Button
             onClick={() => setIsRegistrationModalOpen(true)}
-            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
           >
             <Plus className="w-4 h-4 mr-2" />
             Add New Site
@@ -253,53 +253,53 @@ export default function SitesPage() {
         {/* Stats Overview */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <Card
-            className={`border-gray-200 cursor-pointer transition-all ${
+            className={`border-border cursor-pointer transition-all ${
               filterBy === "all" ? "ring-2 ring-blue-500" : ""
             }`}
             onClick={() => setFilterBy("all")}
           >
             <CardContent className="p-4">
-              <p className="text-sm text-gray-600 mb-1">Total Sites</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm text-muted-foreground mb-1">Total Sites</p>
+              <p className="text-2xl font-bold text-foreground">
                 {statusCounts.all}
               </p>
             </CardContent>
           </Card>
           <Card
-            className={`border-gray-200 cursor-pointer transition-all ${
+            className={`border-border cursor-pointer transition-all ${
               filterBy === "active" ? "ring-2 ring-green-500" : ""
             }`}
             onClick={() => setFilterBy("active")}
           >
             <CardContent className="p-4">
-              <p className="text-sm text-gray-600 mb-1">Active</p>
+              <p className="text-sm text-muted-foreground mb-1">Active</p>
               <p className="text-2xl font-bold text-green-600">
                 {statusCounts.active}
               </p>
             </CardContent>
           </Card>
           <Card
-            className={`border-gray-200 cursor-pointer transition-all ${
+            className={`border-border cursor-pointer transition-all ${
               filterBy === "verifying" ? "ring-2 ring-yellow-500" : ""
             }`}
             onClick={() => setFilterBy("verifying")}
           >
             <CardContent className="p-4">
-              <p className="text-sm text-gray-600 mb-1">Verifying</p>
+              <p className="text-sm text-muted-foreground mb-1">Verifying</p>
               <p className="text-2xl font-bold text-yellow-600">
                 {statusCounts.verifying}
               </p>
             </CardContent>
           </Card>
           <Card
-            className={`border-gray-200 cursor-pointer transition-all ${
-              filterBy === "inactive" ? "ring-2 ring-gray-500" : ""
+            className={`border-border cursor-pointer transition-all ${
+              filterBy === "inactive" ? "ring-2 ring-muted-foreground" : ""
             }`}
             onClick={() => setFilterBy("inactive")}
           >
             <CardContent className="p-4">
-              <p className="text-sm text-gray-600 mb-1">Inactive</p>
-              <p className="text-2xl font-bold text-gray-600">
+              <p className="text-sm text-muted-foreground mb-1">Inactive</p>
+              <p className="text-2xl font-bold text-muted-foreground">
                 {statusCounts.inactive}
               </p>
             </CardContent>
@@ -309,7 +309,7 @@ export default function SitesPage() {
         {/* Search and Filter Bar */}
         <div className="flex flex-col sm:flex-row gap-4 mb-6">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
             <Input
               placeholder="Search sites by name or domain..."
               value={searchQuery}
@@ -342,7 +342,7 @@ export default function SitesPage() {
             {filterBy !== "all" && (
               <Badge
                 variant="secondary"
-                className="cursor-pointer hover:bg-gray-200"
+                className="cursor-pointer hover:bg-muted"
                 onClick={() => setFilterBy("all")}
               >
                 <Filter className="w-3 h-3 mr-1" />
@@ -375,18 +375,18 @@ export default function SitesPage() {
           </CardContent>
         </Card>
       ) : filteredAndSortedSites.length === 0 ? (
-        <Card className="border-gray-200">
+        <Card className="border-border">
           <CardContent className="p-12">
             <div className="text-center">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Globe className="w-8 h-8 text-gray-400" />
+              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
+                <Globe className="w-8 h-8 text-muted-foreground" />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-foreground mb-2">
                 {searchQuery || filterBy !== "all"
                   ? "No sites found"
                   : "No sites yet"}
               </h3>
-              <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+              <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
                 {searchQuery || filterBy !== "all"
                   ? "Try adjusting your search or filter criteria"
                   : "Add your first site to start making your content editable with AI assistance."}
@@ -394,7 +394,7 @@ export default function SitesPage() {
               {!searchQuery && filterBy === "all" && (
                 <Button
                   onClick={() => setIsRegistrationModalOpen(true)}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
                 >
                   <Plus className="w-4 h-4 mr-2" />
                   Add Your First Site

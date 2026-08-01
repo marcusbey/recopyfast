@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FileText, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import {
   ContentElementCard,
+  getContentStatus,
   type ContentElement,
 } from "@/components/dashboard/ContentElementCard";
 import { ContentFilterBar } from "@/components/dashboard/ContentFilterBar";
@@ -14,6 +15,8 @@ interface Site {
   id: string;
   name: string;
   domain: string;
+  /** Issued by /api/sites; /api/content/[siteId] rejects requests without it. */
+  siteToken?: string;
 }
 
 interface RawContentElement {
@@ -35,6 +38,19 @@ interface RawContentElement {
 }
 
 const ITEMS_PER_PAGE = 10;
+
+function PageHeader() {
+  return (
+    <div>
+      <h1 className="text-3xl font-bold tracking-tight text-foreground">
+        Content
+      </h1>
+      <p className="mt-1 text-muted-foreground">
+        Manage all editable content across your sites
+      </p>
+    </div>
+  );
+}
 
 export default function ContentPage() {
   const [sites, setSites] = useState<Site[]>([]);
@@ -72,33 +88,42 @@ export default function ContentPage() {
 
   // Fetch content for a specific site
   const fetchSiteContent = useCallback(async (site: Site) => {
-    try {
-      const res = await fetch(`/api/content/${site.id}`);
-      if (!res.ok) return [];
+    // The content route is site-token authenticated. Without this it 401s for
+    // every site. It also rejects requests whose Origin is not the customer's
+    // own domain, which the dashboard can never satisfy — see the note on
+    // fetchAllContent. A failure here must surface, not read as "no content".
+    const res = await fetch(
+      `/api/content/${site.id}?token=${encodeURIComponent(site.siteToken ?? "")}`,
+    );
 
-      const data = await res.json();
-      if (Array.isArray(data)) {
-        return data.map((item: RawContentElement) => ({
-          id: item.id,
-          siteId: item.site_id,
-          siteDomain: site.domain,
-          elementId: item.element_id,
-          selector: item.selector,
-          originalContent: item.original_content || "",
-          currentContent: item.current_content || item.original_content || "",
-          stagingContent: item.staging_content,
-          publishedContent: item.published_content,
-          language: item.language,
-          variant: item.variant,
-          metadata: item.metadata,
-          lastModified: item.updated_at || item.published_at || "",
-        }));
-      }
-      return [];
-    } catch (err) {
-      console.error(`Failed to fetch content for site ${site.id}:`, err);
-      return [];
+    if (!res.ok) {
+      const detail = await res
+        .json()
+        .then((body) => body?.error)
+        .catch(() => null);
+      throw new Error(
+        `${site.name || site.domain}: ${detail || `request failed (${res.status})`}`,
+      );
     }
+
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((item: RawContentElement) => ({
+      id: item.id,
+      siteId: item.site_id,
+      siteDomain: site.domain,
+      elementId: item.element_id,
+      selector: item.selector,
+      originalContent: item.original_content || "",
+      currentContent: item.current_content || item.original_content || "",
+      stagingContent: item.staging_content,
+      publishedContent: item.published_content,
+      language: item.language,
+      variant: item.variant,
+      metadata: item.metadata,
+      lastModified: item.updated_at || item.published_at || "",
+    }));
   }, []);
 
   // Fetch all content
@@ -115,6 +140,10 @@ export default function ContentPage() {
 
       const contentMap = new Map<string, ContentElement[]>();
 
+      // A rejected fetch propagates to the catch below and shows the real
+      // reason. Previously every failure was swallowed and the page fell
+      // through to "Register a site and add content elements to see them
+      // here" — telling a customer with content that they have none.
       await Promise.all(
         fetchedSites.map(async (site: Site) => {
           const content = await fetchSiteContent(site);
@@ -139,22 +168,6 @@ export default function ContentPage() {
   // Get all content as a flat array
   const allContent: ContentElement[] = Array.from(siteContents.values()).flat();
 
-  // Get status for filtering
-  const getStatus = (
-    element: ContentElement,
-  ): "original" | "edited" | "pending" => {
-    if (
-      element.stagingContent &&
-      element.stagingContent !== element.publishedContent
-    ) {
-      return "pending";
-    }
-    if (element.currentContent !== element.originalContent) {
-      return "edited";
-    }
-    return "original";
-  };
-
   // Filter content
   const filteredContent = allContent.filter((element) => {
     // Search filter
@@ -170,7 +183,7 @@ export default function ContentPage() {
     const matchesSite = !selectedSiteId || element.siteId === selectedSiteId;
 
     // Status filter
-    const status = getStatus(element);
+    const status = getContentStatus(element);
     const matchesStatus = selectedStatus === "all" || status === selectedStatus;
 
     return matchesSearch && matchesSite && matchesStatus;
@@ -192,14 +205,13 @@ export default function ContentPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Content</h1>
-          <p className="text-gray-600 mt-1">
-            Manage all editable content across your sites
-          </p>
-        </div>
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+        <PageHeader />
+        <div
+          className="flex items-center justify-center py-12"
+          role="status"
+          aria-label="Loading content"
+        >
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       </div>
     );
@@ -209,22 +221,20 @@ export default function ContentPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Content</h1>
-          <p className="text-gray-600 mt-1">
-            Manage all editable content across your sites
-          </p>
-        </div>
+        <PageHeader />
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
-              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-8 h-8 text-red-500" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-tone-danger-surface">
+                <FileText
+                  className="h-8 w-8 text-tone-danger-text"
+                  aria-hidden="true"
+                />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="mb-2 text-lg font-semibold text-foreground">
                 Failed to load content
               </h3>
-              <p className="text-gray-600 mb-6">{error}</p>
+              <p className="mb-6 text-muted-foreground">{error}</p>
               <Button onClick={fetchAllContent}>Try Again</Button>
             </div>
           </CardContent>
@@ -236,12 +246,7 @@ export default function ContentPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-gray-900">Content</h1>
-        <p className="text-gray-600 mt-1">
-          Manage all editable content across your sites
-        </p>
-      </div>
+      <PageHeader />
 
       {/* Filters */}
       <Card>
@@ -263,13 +268,16 @@ export default function ContentPage() {
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-8 h-8 text-gray-400" />
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                <FileText
+                  className="h-8 w-8 text-muted-foreground"
+                  aria-hidden="true"
+                />
               </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="mb-2 text-lg font-semibold text-foreground">
                 No content found
               </h3>
-              <p className="text-gray-600 mb-6 max-w-sm mx-auto">
+              <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
                 {allContent.length === 0
                   ? "Register a site and add content elements to see them here."
                   : "No content matches your current filters. Try adjusting your search or filters."}
@@ -302,8 +310,11 @@ export default function ContentPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between pt-4">
-              <p className="text-sm text-gray-600">
+            <nav
+              className="flex flex-col items-center justify-between gap-3 pt-4 sm:flex-row"
+              aria-label="Content pagination"
+            >
+              <p className="text-sm text-muted-foreground" aria-live="polite">
                 Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}-
                 {Math.min(currentPage * ITEMS_PER_PAGE, filteredContent.length)}{" "}
                 of {filteredContent.length} elements
@@ -315,10 +326,10 @@ export default function ContentPage() {
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
                 >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
                   Prev
                 </Button>
-                <span className="text-sm text-gray-600 px-2">
+                <span className="px-2 text-sm text-muted-foreground">
                   Page {currentPage} of {totalPages}
                 </span>
                 <Button
@@ -330,10 +341,10 @@ export default function ContentPage() {
                   disabled={currentPage === totalPages}
                 >
                   Next
-                  <ChevronRight className="w-4 h-4 ml-1" />
+                  <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
                 </Button>
               </div>
-            </div>
+            </nav>
           )}
         </>
       )}

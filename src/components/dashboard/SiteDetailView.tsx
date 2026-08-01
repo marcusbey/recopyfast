@@ -11,9 +11,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  StatusBadge,
+  siteStatuses,
+  type SiteStatus,
+} from "@/components/ui/status-badge";
+import {
   CheckCircle2,
-  AlertCircle,
-  Clock,
   Copy,
   ExternalLink,
   Code,
@@ -31,7 +34,7 @@ import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ShareButton } from "./ShareButton";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 
-export type SiteStatus = "active" | "inactive" | "verifying";
+export type { SiteStatus };
 
 interface SiteWithDetails extends Site {
   stats?: {
@@ -50,26 +53,36 @@ interface SiteDetailViewProps {
   onClose?: () => void;
 }
 
-const statusConfig = {
-  active: {
-    label: "Active",
-    icon: CheckCircle2,
-    className: "bg-green-100 text-green-700 border-green-200",
-    description: "Site is verified and operational",
-  },
-  inactive: {
-    label: "Inactive",
-    icon: AlertCircle,
-    className: "bg-gray-100 text-gray-700 border-gray-200",
-    description: "Site is not currently active",
-  },
-  verifying: {
-    label: "Verifying",
-    icon: Clock,
-    className: "bg-yellow-100 text-yellow-700 border-yellow-200",
-    description: "Site verification in progress",
-  },
-};
+interface StatTileProps {
+  label: string;
+  value: string | number;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+/**
+ * One tile treatment for all four stats. Each used to carry its own
+ * decorative gradient (blue/cyan, purple/pink, yellow/orange, green/emerald),
+ * which read as four unrelated statuses rather than four neutral counts.
+ */
+function StatTile({ label, value, icon: Icon }: StatTileProps) {
+  return (
+    <Card className="border-border">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="mb-1 text-sm text-muted-foreground">{label}</p>
+            <p className="truncate text-2xl font-bold text-foreground">
+              {value}
+            </p>
+          </div>
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Icon className="h-6 w-6 text-primary" aria-hidden="true" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
@@ -89,7 +102,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
       .catch(() => setActiveTestCount(0));
   }, [site.id]);
   const status = site.status || "active";
-  const StatusIcon = statusConfig[status].icon;
+  const statusDefinition = siteStatuses[status];
 
   const embedScript =
     site.embedScript ||
@@ -121,7 +134,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   return (
     <div className="space-y-6">
       {/* Site Information */}
-      <Card className="border-gray-200">
+      <Card className="border-border">
         <CardHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -132,7 +145,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
                   href={`https://${site.domain}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-700"
+                  className="text-primary transition-colors hover:text-primary/80"
                 >
                   <ExternalLink className="w-4 h-4" />
                 </a>
@@ -148,33 +161,34 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
                 <History className="w-4 h-4 mr-2" />
                 History
               </Button>
-              <Badge className={statusConfig[status].className}>
-                <StatusIcon className="w-3 h-3 mr-1" />
-                {statusConfig[status].label}
-              </Badge>
+              <StatusBadge status={statusDefinition} />
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div>
-              <p className="text-sm text-gray-600 mb-1">Status Description</p>
-              <p className="text-sm text-gray-900">
-                {statusConfig[status].description}
+              <p className="text-sm text-muted-foreground mb-1">
+                Status Description
+              </p>
+              <p className="text-sm text-foreground">
+                {statusDefinition.description}
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <p className="text-sm text-gray-600 mb-1">Created</p>
-                <p className="text-sm text-gray-900">
+                <p className="text-sm text-muted-foreground mb-1">Created</p>
+                <p className="text-sm text-foreground">
                   {formatDistanceToNow(new Date(site.created_at), {
                     addSuffix: true,
                   })}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600 mb-1">Last Updated</p>
-                <p className="text-sm text-gray-900">
+                <p className="text-sm text-muted-foreground mb-1">
+                  Last Updated
+                </p>
+                <p className="text-sm text-foreground">
                   {formatDistanceToNow(new Date(site.updated_at), {
                     addSuffix: true,
                   })}
@@ -186,85 +200,41 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
       </Card>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-gray-200">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Total Edits</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {site.stats?.edits_count || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
-                <FileText className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Page Views</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {site.stats?.views || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Content Elements</p>
-                <p className="text-2xl font-bold text-gray-900">
-                  {site.stats?.content_elements_count || 0}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-xl flex items-center justify-center">
-                <Code className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-gray-200">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-600 mb-1">Last Activity</p>
-                <p className="text-sm font-semibold text-gray-900 mt-2">
-                  {lastActivity}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
-                <Activity className="w-6 h-6 text-white" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile
+          label="Total Edits"
+          value={site.stats?.edits_count ?? 0}
+          icon={FileText}
+        />
+        <StatTile
+          label="Page Views"
+          value={site.stats?.views ?? 0}
+          icon={BarChart3}
+        />
+        <StatTile
+          label="Content Elements"
+          value={site.stats?.content_elements_count ?? 0}
+          icon={Code}
+        />
+        <StatTile label="Last Activity" value={lastActivity} icon={Activity} />
       </div>
 
       {/* A/B Testing Summary */}
-      <Card className="border-gray-200">
+      <Card className="border-border">
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-r from-violet-500 to-purple-500">
-                <FlaskConical className="h-5 w-5 text-white" />
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <FlaskConical
+                  className="h-5 w-5 text-primary"
+                  aria-hidden="true"
+                />
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-900">
+                <p className="text-sm font-medium text-foreground">
                   A/B Copy Testing
                 </p>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-muted-foreground">
                   {activeTestCount === null
                     ? "Loading..."
                     : activeTestCount === 0
@@ -273,18 +243,20 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
                 </p>
               </div>
             </div>
-            <Link href={`/dashboard/ab-tests?siteId=${site.id}`}>
-              <Button variant="outline" size="sm">
+            {/* asChild keeps this a single <a>; wrapping a <button> in a link
+                nests two interactive elements and breaks screen readers. */}
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/dashboard/ab-tests?siteId=${site.id}`}>
                 Manage Tests
-                <ArrowRight className="ml-1 h-4 w-4" />
-              </Button>
-            </Link>
+                <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
 
       {/* Embed Script */}
-      <Card className="border-gray-200">
+      <Card className="border-border">
         <CardHeader>
           <CardTitle>Embed Script</CardTitle>
           <CardDescription>
@@ -293,8 +265,8 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <code className="text-sm text-gray-800 break-all">
+            <div className="bg-surface-1 rounded-lg p-4 border border-border">
+              <code className="text-sm text-foreground break-all">
                 {embedScript}
               </code>
             </div>
@@ -317,7 +289,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
 
       {/* Site Token */}
       {site.siteToken && (
-        <Card className="border-gray-200">
+        <Card className="border-border">
           <CardHeader>
             <CardTitle>Site Token</CardTitle>
             <CardDescription>
@@ -327,8 +299,8 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                <code className="text-sm text-gray-800 break-all font-mono">
+              <div className="bg-surface-1 rounded-lg p-4 border border-border">
+                <code className="text-sm text-foreground break-all font-mono">
                   {site.siteToken}
                 </code>
               </div>
@@ -355,7 +327,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
       )}
 
       {/* Integration Status */}
-      <Card className="border-gray-200">
+      <Card className="border-border">
         <CardHeader>
           <CardTitle>Integration Status</CardTitle>
           <CardDescription>
@@ -365,22 +337,24 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         <CardContent>
           <div className="space-y-3">
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-700">Script Installation</span>
-              <Badge className="bg-green-100 text-green-700 border-green-200">
+              <span className="text-sm text-foreground">
+                Script Installation
+              </span>
+              <Badge variant="tone-success">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Verified
               </Badge>
             </div>
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-700">API Connection</span>
-              <Badge className="bg-green-100 text-green-700 border-green-200">
+              <span className="text-sm text-foreground">API Connection</span>
+              <Badge variant="tone-success">
                 <CheckCircle2 className="w-3 h-3 mr-1" />
                 Connected
               </Badge>
             </div>
             <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-gray-700">Content Elements</span>
-              <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+              <span className="text-sm text-foreground">Content Elements</span>
+              <Badge variant="tone-info">
                 {site.stats?.content_elements_count || 0} Found
               </Badge>
             </div>
