@@ -382,12 +382,29 @@
     var src = choice === 'head' ? './head-artifact.js'
             : (choice || '../recopyfast.js');
 
+    // Credentials come from the query string, never from source. With the
+    // placeholder values below the widget authenticates as nobody, so
+    // `editMode` stays false and NOTHING is ever editable — which makes every
+    // measurement compare read-state against read-state and pass vacuously.
+    //
+    // Pass real ones to measure anything meaningful:
+    //   ?siteId=<uuid>&siteToken=<siteId.issuedAt.hmac>
+    //     &rcf_staging=1&rcf_token=<staging token of a verified staging_access row>
+    //
+    // The staging token is what actually arms edit mode: the widget POSTs it to
+    // /api/staging/validate and only sets editMode when the response grants the
+    // `edit` permission. A site token alone is not enough.
+    var siteId = params.get('siteId') || 'fidelity-fixture';
+    var siteToken = params.get('siteToken') || 'fidelity-fixture-token';
+    var apiUrl = params.get('apiUrl') || 'http://localhost:3000/api';
+    var wsUrl = params.get('wsUrl') || 'http://localhost:4001';
+
     var el = document.createElement('script');
     el.src = src + (src.indexOf('?') === -1 ? '?' : '&') + 'v=' + Date.now();
-    el.setAttribute('data-site-id', 'fidelity-fixture');
-    el.setAttribute('data-site-token', 'fidelity-fixture-token');
-    el.setAttribute('data-api-url', 'http://localhost:3000/api');
-    el.setAttribute('data-ws-url', 'http://localhost:4001');
+    el.setAttribute('data-site-id', siteId);
+    el.setAttribute('data-site-token', siteToken);
+    el.setAttribute('data-api-url', apiUrl);
+    el.setAttribute('data-ws-url', wsUrl);
     window.__rcfWidgetSrc = el.src;
     document.body.appendChild(el);
   })();

@@ -453,7 +453,42 @@
     return function () { document.removeEventListener('click', handler, true); };
   }
 
+  /**
+   * Refuse to measure unless the widget is genuinely in edit mode.
+   *
+   * Edit mode is armed by POSTing a staging token to /api/staging/validate and
+   * getting the `edit` permission back. With the fixture's placeholder
+   * credentials that call fails, `editMode` stays false, and clickToEdit() is a
+   * no-op — so every scenario would compare read-state against read-state and
+   * report perfect fidelity: zero geometry drift, no typography drift, and
+   * identical contrast. All true, all meaningless.
+   *
+   * This guard exists because that false-green actually happened and was
+   * reported as a pass.
+   */
+  function assertEditModeArmed() {
+    var widget = window.ReCopyFast;
+    if (!widget) {
+      throw new Error(
+        'Widget not loaded. Nothing to measure.'
+      );
+    }
+    if (!widget.editMode) {
+      throw new Error(
+        'Widget is loaded but editMode is false, so no element can be edited ' +
+        'and every measurement would pass vacuously. Open this fixture with ' +
+        'real credentials:\n' +
+        '  ?siteId=<uuid>&siteToken=<siteId.issuedAt.hmac>' +
+        '&rcf_staging=1&rcf_token=<verified staging_access token>\n' +
+        'and serve it from the Next app (not a static file server) so ' +
+        '/api/staging/validate is reachable.'
+      );
+    }
+  }
+
   async function run(only) {
+    assertEditModeArmed();
+
     var list = only && only.length
       ? SCENARIOS.filter(function (s) { return only.indexOf(s.key) !== -1; })
       : SCENARIOS;
