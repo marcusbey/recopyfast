@@ -44,7 +44,7 @@ export function ABTestConfigForm({
               }
               min={30}
             />
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-muted-foreground">
               Minimum views per variant before declaring a winner
             </p>
           </div>

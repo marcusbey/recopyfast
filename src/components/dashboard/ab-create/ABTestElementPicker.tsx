@@ -23,7 +23,7 @@ export function ABTestElementPicker({
 }: ABTestElementPickerProps) {
   return (
     <div className="space-y-3">
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-muted-foreground">
         Select the copy element you want to test:
       </p>
       <div className="max-h-96 space-y-2 overflow-y-auto">
@@ -36,8 +36,8 @@ export function ABTestElementPicker({
                 isDisabled
                   ? "cursor-not-allowed opacity-60"
                   : selectedElement === el.elementId
-                    ? "cursor-pointer border-blue-500 bg-blue-50"
-                    : "cursor-pointer hover:bg-gray-50"
+                    ? "cursor-pointer border-primary bg-tone-info-surface"
+                    : "cursor-pointer hover:bg-surface-1"
               }`}
               onClick={() => {
                 if (!isDisabled) onSelect(el.elementId);
@@ -51,7 +51,7 @@ export function ABTestElementPicker({
                         {el.type}
                       </Badge>
                       {isDisabled && (
-                        <Badge className="bg-amber-100 text-xs text-amber-700">
+                        <Badge className="bg-tone-warning-surface text-xs text-tone-warning-text">
                           Active test running
                         </Badge>
                       )}
@@ -59,7 +59,7 @@ export function ABTestElementPicker({
                     <p className="truncate text-sm">{el.content}</p>
                   </div>
                   {selectedElement === el.elementId && !isDisabled && (
-                    <Check className="mt-1 h-4 w-4 shrink-0 text-blue-500" />
+                    <Check className="mt-1 h-4 w-4 shrink-0 text-tone-info-text" />
                   )}
                 </div>
               </CardContent>

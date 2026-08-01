@@ -103,13 +103,13 @@ export function PublishButton({
         {publishing ? (
           <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
         ) : success ? (
-          <Check className="w-4 h-4 mr-2 text-green-500" />
+          <Check className="w-4 h-4 mr-2 text-tone-success-text" />
         ) : (
           <ArrowUpCircle className="w-4 h-4 mr-2" />
         )}
         Publish
         {pendingCount > 0 && (
-          <Badge className="ml-2 bg-orange-500 text-white text-xs px-1.5 py-0">
+          <Badge className="ml-2 bg-warning text-white text-xs px-1.5 py-0">
             {pendingCount}
           </Badge>
         )}
@@ -133,7 +133,7 @@ export function PublishButton({
           </>
         ) : success ? (
           <>
-            <Check className="w-5 h-5 text-green-500" />
+            <Check className="w-5 h-5 text-tone-success-text" />
             Published!
           </>
         ) : (
@@ -141,7 +141,7 @@ export function PublishButton({
             <ArrowUpCircle className="w-5 h-5" />
             Publish to Live
             {pendingCount > 0 && (
-              <Badge className="ml-2 bg-orange-500 text-white">
+              <Badge className="ml-2 bg-warning text-white">
                 {pendingCount} change{pendingCount !== 1 ? "s" : ""}
               </Badge>
             )}
@@ -150,21 +150,21 @@ export function PublishButton({
       </Button>
 
       {error && (
-        <div className="flex items-center gap-2 text-sm text-red-600">
+        <div className="flex items-center gap-2 text-sm text-tone-danger-text">
           <AlertTriangle className="w-4 h-4" />
           {error}
         </div>
       )}
 
       {lastPublished && !error && (
-        <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <Clock className="w-3 h-3" />
           Last published: {new Date(lastPublished).toLocaleString()}
         </div>
       )}
 
       {pendingCount === 0 && !loading && !success && (
-        <p className="text-sm text-gray-500 text-center">
+        <p className="text-sm text-muted-foreground text-center">
           No pending changes to publish
         </p>
       )}

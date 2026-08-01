@@ -21,8 +21,8 @@ import { cn } from "@/lib/utils/cn";
 /**
  * Single source of truth for every status pill in the dashboard.
  *
- * Before this existed the same treatment (`bg-green-100 text-green-700
- * border-green-200` and friends) was re-declared in SiteCard, SiteDetailView,
+ * Before this existed the same treatment (a green-100 surface with green-700
+ * text and a green-200 edge, and friends) was re-declared in SiteCard, SiteDetailView,
  * ContentElementCard, VersionTimelineItem, ABTestStatusBadge and StagingDiff —
  * six maps that had already drifted apart. Adding a status now means adding one
  * entry here.

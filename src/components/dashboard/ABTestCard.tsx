@@ -29,7 +29,7 @@ export function ABTestCard({
             <h3 className="truncate text-sm font-medium">{test.name}</h3>
             <ABTestStatusBadge status={test.status} />
           </div>
-          <div className="mt-1 flex items-center gap-3 text-xs text-gray-500">
+          <div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
             <span>{variantCount} variants</span>
             {test.target_element_id && (
               <span>Target: {test.target_element_id}</span>

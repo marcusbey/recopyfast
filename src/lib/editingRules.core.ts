@@ -699,6 +699,37 @@ export interface Affordances {
  * These paint *around* and *through* the text (caret, selection, outline) and
  * never replace it, so they can be tuned freely without violating R1.
  */
+/**
+ * WCAG 2.1 non-text contrast minimum for UI components (1.4.11).
+ * The caret and the focus outline are UI, not text.
+ */
+export const AA_NON_TEXT = 3;
+
+/**
+ * Pick the first branded candidate that provably contrasts with the backdrop,
+ * falling back to plain black or white when none of them do.
+ *
+ * Two-palette thresholding is not enough here. Both brand blues sit near the
+ * middle of the luminance range, so on a mid-tone surface *neither* clears 3:1
+ * — picking "the better of the two" bottoms out at 1.93:1 around L=0.45, and
+ * the old `luminance > 0.45` split bottoms out at 1.17:1, which is an invisible
+ * caret. Black/white always clears 4.58:1 (contrast is a pure function of
+ * luminance, so that bound holds for every backdrop colour, not just greys).
+ */
+export function pickAffordanceColor(
+  candidates: string[],
+  backdrop: Rgba,
+  minRatio: number = AA_NON_TEXT,
+): string {
+  for (const candidate of candidates) {
+    const parsed = parseCssColor(candidate);
+    if (parsed && contrastRatio(parsed, backdrop) >= minRatio) return candidate;
+  }
+  return contrastRatio(BLACK, backdrop) >= contrastRatio(WHITE, backdrop)
+    ? "#000000"
+    : "#ffffff";
+}
+
 export function resolveAffordances(
   element: Element,
   view: Window = window,
@@ -706,23 +737,39 @@ export function resolveAffordances(
   const backdrop = resolveBackdrop(element, view);
   const isLight = relativeLuminance(backdrop.color) > 0.45;
 
+  // The light/dark split still selects the *palette* (which reads as more
+  // natural on a given surface), but the caret and outline are then verified
+  // against the actual backdrop and swapped out if they would be invisible.
+  // Preferring the opposite-polarity blue first keeps the brand colour whenever
+  // it works at all.
+  const caret = pickAffordanceColor(
+    isLight ? ["#1d4ed8", "#93c5fd"] : ["#93c5fd", "#1d4ed8"],
+    backdrop.color,
+  );
+  const outline = pickAffordanceColor(
+    isLight
+      ? ["rgba(37, 99, 235, 0.9)", "rgba(147, 197, 253, 0.9)"]
+      : ["rgba(147, 197, 253, 0.9)", "rgba(37, 99, 235, 0.9)"],
+    backdrop.color,
+  );
+
   return isLight
     ? {
         backdropIsLight: true,
-        caretColor: "#1d4ed8",
+        caretColor: caret,
         selectionBackground: "rgba(59, 130, 246, 0.28)",
         selectionColor: "inherit",
-        outlineColor: "rgba(37, 99, 235, 0.9)",
+        outlineColor: outline,
         chromeBackground: "rgba(15, 23, 42, 0.92)",
         chromeText: "#e2e8f0",
         chromeBorder: "rgba(255, 255, 255, 0.14)",
       }
     : {
         backdropIsLight: false,
-        caretColor: "#93c5fd",
+        caretColor: caret,
         selectionBackground: "rgba(147, 197, 253, 0.38)",
         selectionColor: "inherit",
-        outlineColor: "rgba(147, 197, 253, 0.9)",
+        outlineColor: outline,
         chromeBackground: "rgba(248, 250, 252, 0.94)",
         chromeText: "#1e293b",
         chromeBorder: "rgba(15, 23, 42, 0.14)",

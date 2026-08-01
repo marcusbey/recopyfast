@@ -25,7 +25,7 @@ describe("DashboardNavigation", () => {
     it("should render all navigation items", () => {
       render(<DashboardNavigation />);
 
-      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+      expect(screen.getByText("Overview")).toBeInTheDocument();
       expect(screen.getByText("Sites")).toBeInTheDocument();
       expect(screen.getByText("Content")).toBeInTheDocument();
       expect(screen.getByText("Analytics")).toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("DashboardNavigation", () => {
       mockUsePathname.mockReturnValue("/dashboard");
       render(<DashboardNavigation />);
 
-      const dashboardLink = screen.getByText("Dashboard").closest("a");
+      const dashboardLink = screen.getByText("Overview").closest("a");
       expect(dashboardLink).toHaveAttribute("aria-current", "page");
     });
 
@@ -169,7 +169,7 @@ describe("DashboardNavigation", () => {
     it("should have correct href attributes", () => {
       render(<DashboardNavigation />);
 
-      expect(screen.getByText("Dashboard").closest("a")).toHaveAttribute(
+      expect(screen.getByText("Overview").closest("a")).toHaveAttribute(
         "href",
         "/dashboard",
       );

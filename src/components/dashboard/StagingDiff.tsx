@@ -154,8 +154,8 @@ export function StagingDiff({
   if (loading && elements.length === 0) {
     return (
       <Card className="p-8 text-center">
-        <RefreshCw className="w-8 h-8 text-gray-400 mx-auto mb-4 animate-spin" />
-        <p className="text-gray-500">Loading staging changes...</p>
+        <RefreshCw className="w-8 h-8 text-muted-foreground mx-auto mb-4 animate-spin" />
+        <p className="text-muted-foreground">Loading staging changes...</p>
       </Card>
     );
   }
@@ -165,7 +165,7 @@ export function StagingDiff({
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Staging Changes</h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Review changes before publishing to live
           </p>
         </div>
@@ -185,28 +185,28 @@ export function StagingDiff({
       </div>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <div className="text-red-800">{error}</div>
+        <Alert className="border-tone-danger-border bg-tone-danger-surface">
+          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
+          <div className="text-tone-danger-text">{error}</div>
         </Alert>
       )}
 
       {elements.length === 0 ? (
         <Card className="p-8 text-center">
-          <CheckCircle2 className="w-12 h-12 text-green-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">
+          <CheckCircle2 className="w-12 h-12 text-tone-success-text mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-foreground mb-2">
             All caught up!
           </h3>
-          <p className="text-gray-500">
+          <p className="text-muted-foreground">
             No pending staging changes to publish.
           </p>
         </Card>
       ) : (
         <>
           {/* Selection Controls */}
-          <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg">
+          <div className="flex items-center justify-between bg-surface-1 p-4 rounded-lg">
             <div className="flex items-center gap-4">
-              <span className="text-sm text-gray-600">
+              <span className="text-sm text-muted-foreground">
                 {selectedElements.size} of {elements.length} selected
               </span>
               <Button variant="link" size="sm" onClick={selectAll}>
@@ -247,11 +247,11 @@ export function StagingDiff({
               return (
                 <Card
                   key={element.id}
-                  className={`overflow-hidden ${isSelected ? "ring-2 ring-blue-500" : ""}`}
+                  className={`overflow-hidden ${isSelected ? "ring-2 ring-ring" : ""}`}
                 >
                   {/* Header */}
                   <div
-                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                    className="p-4 flex items-center justify-between cursor-pointer hover:bg-surface-1"
                     onClick={() => toggleElementExpansion(element.elementId)}
                   >
                     <div className="flex items-center gap-4">
@@ -262,17 +262,17 @@ export function StagingDiff({
                           e.stopPropagation();
                           toggleElementSelection(element.elementId);
                         }}
-                        className="w-4 h-4 rounded border-gray-300"
+                        className="w-4 h-4 rounded border-input"
                       />
 
                       <div>
                         <div className="flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-gray-400" />
-                          <code className="text-sm font-mono bg-gray-100 px-2 py-0.5 rounded">
+                          <FileText className="w-4 h-4 text-muted-foreground" />
+                          <code className="text-sm font-mono bg-surface-2 px-2 py-0.5 rounded">
                             {element.selector}
                           </code>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           ID: {element.elementId}
                         </p>
                       </div>
@@ -280,7 +280,7 @@ export function StagingDiff({
 
                     <div className="flex items-center gap-4">
                       {element.stagingUpdatedAt && (
-                        <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
                           <History className="w-3 h-3" />
                           {formatDate(element.stagingUpdatedAt)}
                         </div>
@@ -288,21 +288,21 @@ export function StagingDiff({
 
                       <div className="flex items-center gap-2">
                         {diff.removed.length > 0 && (
-                          <Badge className="bg-red-100 text-red-700">
+                          <Badge className="bg-tone-danger-surface text-tone-danger-text">
                             -{diff.removed.length} words
                           </Badge>
                         )}
                         {diff.added.length > 0 && (
-                          <Badge className="bg-green-100 text-green-700">
+                          <Badge className="bg-tone-success-surface text-tone-success-text">
                             +{diff.added.length} words
                           </Badge>
                         )}
                       </div>
 
                       {isExpanded ? (
-                        <ChevronUp className="w-5 h-5 text-gray-400" />
+                        <ChevronUp className="w-5 h-5 text-muted-foreground" />
                       ) : (
-                        <ChevronDown className="w-5 h-5 text-gray-400" />
+                        <ChevronDown className="w-5 h-5 text-muted-foreground" />
                       )}
                     </div>
                   </div>
@@ -316,15 +316,15 @@ export function StagingDiff({
                           <div className="flex items-center gap-2 mb-3">
                             <Badge
                               variant="outline"
-                              className="text-gray-600 border-gray-300"
+                              className="text-muted-foreground border-input"
                             >
                               <Eye className="w-3 h-3 mr-1" />
                               Published
                             </Badge>
                           </div>
-                          <div className="bg-gray-50 p-3 rounded text-sm whitespace-pre-wrap">
+                          <div className="bg-surface-1 p-3 rounded text-sm whitespace-pre-wrap">
                             {element.publishedContent || (
-                              <span className="text-gray-400 italic">
+                              <span className="text-muted-foreground italic">
                                 (empty)
                               </span>
                             )}
@@ -332,16 +332,16 @@ export function StagingDiff({
                         </div>
 
                         {/* Staging Version */}
-                        <div className="p-4 bg-blue-50/30">
+                        <div className="p-4 bg-tone-info-surface/30">
                           <div className="flex items-center gap-2 mb-3">
-                            <Badge className="bg-blue-100 text-blue-700">
+                            <Badge className="bg-tone-info-surface text-tone-info-text">
                               <ArrowRight className="w-3 h-3 mr-1" />
                               Staging
                             </Badge>
                           </div>
-                          <div className="bg-white p-3 rounded text-sm whitespace-pre-wrap border border-blue-200">
+                          <div className="bg-card p-3 rounded text-sm whitespace-pre-wrap border border-tone-info-border">
                             {element.stagingContent || (
-                              <span className="text-gray-400 italic">
+                              <span className="text-muted-foreground italic">
                                 (empty)
                               </span>
                             )}
@@ -350,7 +350,7 @@ export function StagingDiff({
                       </div>
 
                       {/* Quick Actions */}
-                      <div className="px-4 py-3 bg-gray-50 border-t flex justify-end gap-2">
+                      <div className="px-4 py-3 bg-surface-1 border-t flex justify-end gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -379,11 +379,11 @@ export function StagingDiff({
                   {!isExpanded && (
                     <div className="px-4 pb-4">
                       <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div className="text-gray-500 truncate">
+                        <div className="text-muted-foreground truncate">
                           <span className="font-medium">Published:</span>{" "}
                           {truncateContent(element.publishedContent, 60)}
                         </div>
-                        <div className="text-blue-700 truncate">
+                        <div className="text-tone-info-text truncate">
                           <span className="font-medium">Staging:</span>{" "}
                           {truncateContent(element.stagingContent, 60)}
                         </div>

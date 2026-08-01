@@ -36,7 +36,7 @@ describe("Breadcrumbs", () => {
       mockUsePathname.mockReturnValue("/dashboard/sites");
       const { container } = render(<Breadcrumbs />);
 
-      const homeLink = screen.getByRole("link", { name: "Dashboard home" });
+      const homeLink = screen.getByRole("link", { name: "Dashboard" });
       expect(homeLink).toHaveAttribute("href", "/dashboard");
       expect(container.querySelector("svg")).toBeInTheDocument();
     });

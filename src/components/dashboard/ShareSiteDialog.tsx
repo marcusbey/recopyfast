@@ -189,15 +189,15 @@ export function ShareSiteDialog({
                 onClick={() => setLinkType("link")}
                 className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
                   linkType === "link"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 hover:border-gray-300"
+                    ? "border-primary bg-tone-info-surface"
+                    : "border-border hover:border-input"
                 }`}
               >
                 <Link2
-                  className={`w-5 h-5 ${linkType === "link" ? "text-blue-600" : "text-gray-400"}`}
+                  className={`w-5 h-5 ${linkType === "link" ? "text-tone-info-text" : "text-muted-foreground"}`}
                 />
                 <span
-                  className={`text-sm font-medium ${linkType === "link" ? "text-blue-700" : "text-gray-700"}`}
+                  className={`text-sm font-medium ${linkType === "link" ? "text-tone-info-text" : "text-foreground"}`}
                 >
                   Anyone with link
                 </span>
@@ -207,15 +207,15 @@ export function ShareSiteDialog({
                 onClick={() => setLinkType("invite")}
                 className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
                   linkType === "invite"
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 hover:border-gray-300"
+                    ? "border-primary bg-tone-info-surface"
+                    : "border-border hover:border-input"
                 }`}
               >
                 <Mail
-                  className={`w-5 h-5 ${linkType === "invite" ? "text-blue-600" : "text-gray-400"}`}
+                  className={`w-5 h-5 ${linkType === "invite" ? "text-tone-info-text" : "text-muted-foreground"}`}
                 />
                 <span
-                  className={`text-sm font-medium ${linkType === "invite" ? "text-blue-700" : "text-gray-700"}`}
+                  className={`text-sm font-medium ${linkType === "invite" ? "text-tone-info-text" : "text-foreground"}`}
                 >
                   Email invite
                 </span>
@@ -257,14 +257,14 @@ export function ShareSiteDialog({
                   onClick={() => togglePermission(key)}
                   className={`flex items-center gap-2 p-2 rounded-lg border transition-all ${
                     permissions.includes(key)
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-gray-200 text-gray-600 hover:border-gray-300"
+                      ? "border-primary bg-tone-info-surface text-tone-info-text"
+                      : "border-border text-muted-foreground hover:border-input"
                   }`}
                 >
                   <Icon className="w-4 h-4" />
                   <span className="text-sm font-medium">{permLabel}</span>
                   {permissions.includes(key) && (
-                    <CheckCircle2 className="w-4 h-4 ml-auto text-blue-600" />
+                    <CheckCircle2 className="w-4 h-4 ml-auto text-tone-info-text" />
                   )}
                 </button>
               ))}
@@ -278,7 +278,7 @@ export function ShareSiteDialog({
               id="expiry"
               value={expiresInDays}
               onChange={(e) => setExpiresInDays(Number(e.target.value))}
-              className="w-full h-10 px-3 rounded-lg border border-gray-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full h-10 px-3 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {EXPIRY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -301,12 +301,12 @@ export function ShareSiteDialog({
 
           {/* Error/Success messages */}
           {error && (
-            <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">
+            <div className="p-3 rounded-lg bg-tone-danger-surface text-tone-danger-text text-sm">
               {error}
             </div>
           )}
           {success && (
-            <div className="p-3 rounded-lg bg-green-50 text-green-700 text-sm flex items-center gap-2">
+            <div className="p-3 rounded-lg bg-tone-success-surface text-tone-success-text text-sm flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4" />
               {success}
             </div>
@@ -331,12 +331,12 @@ export function ShareSiteDialog({
 
           {/* Active Links Section */}
           {activeLinks.length > 0 && (
-            <div className="border-t border-gray-200 pt-6">
-              <h3 className="font-medium text-gray-900 mb-4">Active Links</h3>
+            <div className="border-t border-border pt-6">
+              <h3 className="font-medium text-foreground mb-4">Active Links</h3>
               <div className="space-y-3">
                 {loading ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
                   activeLinks.map((link) => (

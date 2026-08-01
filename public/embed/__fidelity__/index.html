@@ -362,11 +362,35 @@
 </script>
 
 <script src="../__fidelity__/harness.js"></script>
-<script
-  src="../recopyfast.js"
-  data-site-id="fidelity-fixture"
-  data-site-token="fidelity-fixture-token"
-  data-api-url="http://localhost:3000/api"
-  data-ws-url="http://localhost:4001"></script>
+<script>
+  // The widget is injected rather than hard-coded so the fixture can (a) always
+  // cache-bust and (b) load a specific artifact for comparison.
+  //
+  // Why: a stale cached /embed/recopyfast.js silently produces a *plausible but
+  // wrong* result table, which is indistinguishable from a real regression and
+  // costs a round trip to diagnose. `?v=<timestamp>` makes that impossible.
+  //
+  //   ?widget=<url>   load a specific artifact instead of the current build.
+  //
+  // To A/B the working build against the committed one:
+  //   git show HEAD:public/embed/recopyfast.js > public/embed/__fidelity__/head.js
+  //   ...then open with ?widget=./head.js  (delete head.js afterwards — a
+  //   checked-in copy of the bundle rots immediately)
+  (function () {
+    var params = new URLSearchParams(location.search);
+    var choice = params.get('widget');
+    var src = choice === 'head' ? './head-artifact.js'
+            : (choice || '../recopyfast.js');
+
+    var el = document.createElement('script');
+    el.src = src + (src.indexOf('?') === -1 ? '?' : '&') + 'v=' + Date.now();
+    el.setAttribute('data-site-id', 'fidelity-fixture');
+    el.setAttribute('data-site-token', 'fidelity-fixture-token');
+    el.setAttribute('data-api-url', 'http://localhost:3000/api');
+    el.setAttribute('data-ws-url', 'http://localhost:4001');
+    window.__rcfWidgetSrc = el.src;
+    document.body.appendChild(el);
+  })();
+</script>
 </body>
 </html>

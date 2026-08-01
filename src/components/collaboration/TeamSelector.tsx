@@ -126,13 +126,13 @@ export function TeamSelector({
   const getRoleIcon = (role: string) => {
     switch (role) {
       case "owner":
-        return <Crown className="h-3 w-3 text-yellow-500" />;
+        return <Crown className="h-3 w-3 text-tone-warning-text" />;
       case "manager":
-        return <Shield className="h-3 w-3 text-blue-500" />;
+        return <Shield className="h-3 w-3 text-tone-info-text" />;
       case "editor":
-        return <Edit3 className="h-3 w-3 text-green-500" />;
+        return <Edit3 className="h-3 w-3 text-tone-success-text" />;
       case "viewer":
-        return <Eye className="h-3 w-3 text-gray-500" />;
+        return <Eye className="h-3 w-3 text-muted-foreground" />;
       default:
         return null;
     }
@@ -141,23 +141,23 @@ export function TeamSelector({
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "owner":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-tone-warning-surface text-tone-warning-text";
       case "manager":
-        return "bg-blue-100 text-blue-800";
+        return "bg-tone-info-surface text-tone-info-text";
       case "editor":
-        return "bg-green-100 text-green-800";
+        return "bg-tone-success-surface text-tone-success-text";
       case "viewer":
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
     }
   };
 
   if (loading) {
     return (
       <div className="flex items-center gap-2">
-        <div className="animate-spin h-4 w-4 border-b-2 border-blue-600 rounded-full"></div>
-        <span className="text-sm text-gray-600">Loading teams...</span>
+        <div className="animate-spin h-4 w-4 border-b-2 border-primary rounded-full"></div>
+        <span className="text-sm text-muted-foreground">Loading teams...</span>
       </div>
     );
   }
@@ -184,10 +184,10 @@ export function TeamSelector({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-[300px]">
           {teams.length === 0 ? (
-            <div className="p-4 text-center text-gray-600">
-              <Users className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+            <div className="p-4 text-center text-muted-foreground">
+              <Users className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
               <p className="text-sm">No teams yet</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted-foreground">
                 Create your first team to get started
               </p>
             </div>
@@ -205,7 +205,7 @@ export function TeamSelector({
                       {team.role && getRoleIcon(team.role)}
                     </div>
                     {team.description && (
-                      <p className="text-xs text-gray-500 truncate max-w-[200px]">
+                      <p className="text-xs text-muted-foreground truncate max-w-[200px]">
                         {team.description}
                       </p>
                     )}
@@ -255,8 +255,8 @@ export function TeamSelector({
                 maxLength={255}
               />
             </div>
-            <div className="bg-blue-50 p-3 rounded-lg">
-              <p className="text-sm text-blue-800">
+            <div className="bg-tone-info-surface p-3 rounded-lg">
+              <p className="text-sm text-tone-info-text">
                 <strong>Free Plan:</strong> Your team can have up to 5 members.
                 You can upgrade later to add more members.
               </p>
@@ -293,13 +293,13 @@ export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
   const getRoleIcon = (role: string) => {
     switch (role) {
       case "owner":
-        return <Crown className="h-4 w-4 text-yellow-500" />;
+        return <Crown className="h-4 w-4 text-tone-warning-text" />;
       case "manager":
-        return <Shield className="h-4 w-4 text-blue-500" />;
+        return <Shield className="h-4 w-4 text-tone-info-text" />;
       case "editor":
-        return <Edit3 className="h-4 w-4 text-green-500" />;
+        return <Edit3 className="h-4 w-4 text-tone-success-text" />;
       case "viewer":
-        return <Eye className="h-4 w-4 text-gray-500" />;
+        return <Eye className="h-4 w-4 text-muted-foreground" />;
       default:
         return null;
     }
@@ -308,22 +308,22 @@ export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "owner":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-tone-warning-surface text-tone-warning-text";
       case "manager":
-        return "bg-blue-100 text-blue-800";
+        return "bg-tone-info-surface text-tone-info-text";
       case "editor":
-        return "bg-green-100 text-green-800";
+        return "bg-tone-success-surface text-tone-success-text";
       case "viewer":
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
     }
   };
 
   return (
     <Card
       className={`cursor-pointer transition-all hover:shadow-md ${
-        isSelected ? "ring-2 ring-blue-500 bg-blue-50" : ""
+        isSelected ? "ring-2 ring-ring bg-tone-info-surface" : ""
       }`}
       onClick={onClick}
     >
@@ -340,9 +340,11 @@ export function TeamCard({ team, isSelected, onClick }: TeamCardProps) {
       </CardHeader>
       <CardContent>
         {team.description && (
-          <p className="text-gray-600 text-sm mb-3">{team.description}</p>
+          <p className="text-muted-foreground text-sm mb-3">
+            {team.description}
+          </p>
         )}
-        <div className="flex items-center gap-4 text-sm text-gray-500">
+        <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-1">
             <Users className="h-4 w-4" />
             <span>{team.max_members} members max</span>

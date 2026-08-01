@@ -15,12 +15,12 @@ export function WizardStepIndicator({
     <div className="flex items-center gap-2 text-sm">
       {steps.map((step, i) => (
         <div key={step.key} className="flex items-center gap-2">
-          {i > 0 && <ArrowRight className="h-3 w-3 text-gray-300" />}
+          {i > 0 && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
           <span
             className={
               currentStep === step.key
-                ? "font-medium text-blue-600"
-                : "text-gray-400"
+                ? "font-medium text-tone-info-text"
+                : "text-muted-foreground"
             }
           >
             {step.label}

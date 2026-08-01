@@ -104,34 +104,34 @@ export function NotificationCenter({
   const getNotificationIcon = (type: NotificationType) => {
     switch (type) {
       case "invitation":
-        return <Mail className="h-4 w-4 text-blue-600" />;
+        return <Mail className="h-4 w-4 text-tone-info-text" />;
       case "permission_change":
-        return <Shield className="h-4 w-4 text-yellow-600" />;
+        return <Shield className="h-4 w-4 text-tone-warning-text" />;
       case "content_edit":
-        return <Edit className="h-4 w-4 text-green-600" />;
+        return <Edit className="h-4 w-4 text-tone-success-text" />;
       case "team_update":
-        return <Users className="h-4 w-4 text-purple-600" />;
+        return <Users className="h-4 w-4 text-tone-accent-text" />;
       case "site_shared":
-        return <Globe className="h-4 w-4 text-indigo-600" />;
+        return <Globe className="h-4 w-4 text-tone-info-text" />;
       default:
-        return <AlertCircle className="h-4 w-4 text-gray-600" />;
+        return <AlertCircle className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
   const getNotificationColor = (type: NotificationType) => {
     switch (type) {
       case "invitation":
-        return "bg-blue-50 border-blue-200";
+        return "bg-tone-info-surface border-tone-info-border";
       case "permission_change":
-        return "bg-yellow-50 border-yellow-200";
+        return "bg-tone-warning-surface border-tone-warning-border";
       case "content_edit":
-        return "bg-green-50 border-green-200";
+        return "bg-tone-success-surface border-tone-success-border";
       case "team_update":
-        return "bg-purple-50 border-purple-200";
+        return "bg-tone-accent-surface border-tone-accent-border";
       case "site_shared":
-        return "bg-indigo-50 border-indigo-200";
+        return "bg-tone-info-surface border-tone-info-border";
       default:
-        return "bg-gray-50 border-gray-200";
+        return "bg-surface-1 border-border";
     }
   };
 
@@ -177,8 +177,10 @@ export function NotificationCenter({
     return (
       <div className="flex items-center justify-center p-4">
         <div className="text-center">
-          <div className="animate-spin h-6 w-6 border-b-2 border-blue-600 rounded-full mx-auto mb-2"></div>
-          <p className="text-sm text-gray-600">Loading notifications...</p>
+          <div className="animate-spin h-6 w-6 border-b-2 border-primary rounded-full mx-auto mb-2"></div>
+          <p className="text-sm text-muted-foreground">
+            Loading notifications...
+          </p>
         </div>
       </div>
     );
@@ -189,8 +191,8 @@ export function NotificationCenter({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Bell className="h-5 w-5 text-gray-700" />
-          <h3 className="font-medium text-gray-900">Notifications</h3>
+          <Bell className="h-5 w-5 text-foreground" />
+          <h3 className="font-medium text-foreground">Notifications</h3>
           {unreadCount > 0 && <Badge variant="secondary">{unreadCount}</Badge>}
         </div>
 
@@ -199,7 +201,7 @@ export function NotificationCenter({
             variant="ghost"
             size="sm"
             onClick={markAllAsRead}
-            className="text-blue-600 hover:text-blue-700"
+            className="text-tone-info-text hover:text-tone-info-text"
           >
             <CheckCircle className="h-4 w-4 mr-1" />
             Mark all read
@@ -211,9 +213,9 @@ export function NotificationCenter({
       {notifications.length === 0 ? (
         <Card>
           <CardContent className="text-center py-8">
-            <Bell className="h-8 w-8 text-gray-400 mx-auto mb-2" />
-            <p className="text-gray-600">No notifications</p>
-            <p className="text-sm text-gray-500">
+            <Bell className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+            <p className="text-muted-foreground">No notifications</p>
+            <p className="text-sm text-muted-foreground">
               {showAll ? "You have no notifications." : "All caught up!"}
             </p>
           </CardContent>
@@ -226,7 +228,7 @@ export function NotificationCenter({
               className={`transition-all ${
                 !notification.read_at
                   ? `${getNotificationColor(notification.type)} shadow-sm`
-                  : "bg-gray-50 border-gray-200"
+                  : "bg-surface-1 border-border"
               }`}
             >
               <CardContent className="p-4">
@@ -241,20 +243,20 @@ export function NotificationCenter({
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <h4 className="font-medium text-gray-900 text-sm">
+                          <h4 className="font-medium text-foreground text-sm">
                             {notification.title}
                           </h4>
                           <Badge variant="outline" className="text-xs">
                             {formatNotificationType(notification.type)}
                           </Badge>
                           {!notification.read_at && (
-                            <div className="w-2 h-2 bg-blue-600 rounded-full"></div>
+                            <div className="w-2 h-2 bg-primary rounded-full"></div>
                           )}
                         </div>
-                        <p className="text-gray-600 text-sm">
+                        <p className="text-muted-foreground text-sm">
                           {notification.message}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-muted-foreground mt-1">
                           {formatRelativeTime(notification.created_at)}
                         </p>
                       </div>
@@ -335,7 +337,7 @@ export function NotificationBell() {
         <Button variant="ghost" size="sm" className="relative">
           <Bell className="h-5 w-5" />
           {unreadCount > 0 && (
-            <span className="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
+            <span className="absolute -top-1 -right-1 h-5 w-5 bg-destructive text-white text-xs rounded-full flex items-center justify-center">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}

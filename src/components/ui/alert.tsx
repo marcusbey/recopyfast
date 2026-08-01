@@ -5,11 +5,18 @@ import { cn } from "@/lib/utils/cn";
 const alertVariants = cva(
   "relative w-full rounded-lg border p-4 [&>svg~*]:pl-7 [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground",
   {
+    // Alerts resolve to the same six status tones as badges and status pills,
+    // so a warning looks like a warning whichever component draws it.
     variants: {
       variant: {
-        default: "bg-background text-foreground",
+        default: "border-border bg-card text-foreground",
+        info: "border-tone-info-border bg-tone-info-surface text-tone-info-text [&>svg]:text-tone-info-text",
+        success:
+          "border-tone-success-border bg-tone-success-surface text-tone-success-text [&>svg]:text-tone-success-text",
+        warning:
+          "border-tone-warning-border bg-tone-warning-surface text-tone-warning-text [&>svg]:text-tone-warning-text",
         destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+          "border-tone-danger-border bg-tone-danger-surface text-tone-danger-text [&>svg]:text-tone-danger-text",
       },
     },
     defaultVariants: {

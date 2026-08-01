@@ -138,13 +138,13 @@ export function InvitationManager() {
   const getRoleIcon = (role: string) => {
     switch (role) {
       case "owner":
-        return <Crown className="h-4 w-4 text-yellow-500" />;
+        return <Crown className="h-4 w-4 text-tone-warning-text" />;
       case "manager":
-        return <Shield className="h-4 w-4 text-blue-500" />;
+        return <Shield className="h-4 w-4 text-tone-info-text" />;
       case "editor":
-        return <Edit3 className="h-4 w-4 text-green-500" />;
+        return <Edit3 className="h-4 w-4 text-tone-success-text" />;
       case "viewer":
-        return <Eye className="h-4 w-4 text-gray-500" />;
+        return <Eye className="h-4 w-4 text-muted-foreground" />;
       default:
         return null;
     }
@@ -153,15 +153,15 @@ export function InvitationManager() {
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "owner":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-tone-warning-surface text-tone-warning-text";
       case "manager":
-        return "bg-blue-100 text-blue-800";
+        return "bg-tone-info-surface text-tone-info-text";
       case "editor":
-        return "bg-green-100 text-green-800";
+        return "bg-tone-success-surface text-tone-success-text";
       case "viewer":
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
     }
   };
 
@@ -192,8 +192,8 @@ export function InvitationManager() {
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center">
-          <div className="animate-spin h-8 w-8 border-b-2 border-blue-600 rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading invitations...</p>
+          <div className="animate-spin h-8 w-8 border-b-2 border-primary rounded-full mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading invitations...</p>
         </div>
       </div>
     );
@@ -206,14 +206,14 @@ export function InvitationManager() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="h-5 w-5 text-green-600" />
+              <CheckCircle className="h-5 w-5 text-tone-success-text" />
               Accepting Invitation
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-center">
-              <div className="animate-spin h-8 w-8 border-b-2 border-blue-600 rounded-full mx-auto mb-4"></div>
-              <p className="text-gray-600">
+              <div className="animate-spin h-8 w-8 border-b-2 border-primary rounded-full mx-auto mb-4"></div>
+              <p className="text-muted-foreground">
                 Processing your team invitation...
               </p>
             </div>
@@ -227,8 +227,8 @@ export function InvitationManager() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Mail className="h-6 w-6 text-blue-600" />
-        <h2 className="text-2xl font-bold text-gray-900">Team Invitations</h2>
+        <Mail className="h-6 w-6 text-tone-info-text" />
+        <h2 className="text-2xl font-bold text-foreground">Team Invitations</h2>
         {invitations.length > 0 && (
           <Badge variant="secondary">{invitations.length}</Badge>
         )}
@@ -249,11 +249,11 @@ export function InvitationManager() {
       {invitations.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
-            <Mail className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
+            <Mail className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-foreground mb-2">
               No pending invitations
             </h3>
-            <p className="text-gray-600">
+            <p className="text-muted-foreground">
               You don&apos;t have any pending team invitations at the moment.
             </p>
           </CardContent>
@@ -265,7 +265,7 @@ export function InvitationManager() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5 text-blue-600" />
+                    <Users className="h-5 w-5 text-tone-info-text" />
                     {invitation.team?.name || "Team Invitation"}
                   </CardTitle>
                   <div className="flex items-center gap-2">
@@ -287,7 +287,7 @@ export function InvitationManager() {
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-gray-600">
+                    <p className="text-muted-foreground">
                       <strong>{invitation.inviter?.email || "Someone"}</strong>{" "}
                       invited you to join{" "}
                       <strong>{invitation.team?.name}</strong> as a{" "}
@@ -295,7 +295,7 @@ export function InvitationManager() {
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-4 text-sm text-gray-500">
+                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
                     <div className="flex items-center gap-1">
                       <Clock className="h-4 w-4" />
                       {formatTimeRemaining(invitation.expires_at)}
@@ -359,7 +359,7 @@ export function InvitationAcceptancePage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-red-600" />
+              <AlertCircle className="h-5 w-5 text-tone-danger-text" />
               Invalid Invitation
             </CardTitle>
           </CardHeader>

@@ -36,10 +36,10 @@ export function ABTestVariantReview({
   return (
     <div className="space-y-4">
       {/* Original (control) */}
-      <Card className="border-gray-300">
+      <Card className="border-input">
         <CardContent className="p-4">
           <div className="mb-1 flex items-center gap-2">
-            <Badge className="bg-gray-100 text-gray-700">
+            <Badge className="bg-surface-2 text-foreground">
               Control (Original)
             </Badge>
           </div>
@@ -51,10 +51,10 @@ export function ABTestVariantReview({
       {variants.map((variant, index) => {
         const rationale = rationales.find((r) => r.name === variant.name);
         return (
-          <Card key={index} className="border-blue-200">
+          <Card key={index} className="border-tone-info-border">
             <CardContent className="p-4">
               <div className="mb-2 flex items-center justify-between">
-                <Badge className="bg-blue-100 text-blue-700">
+                <Badge className="bg-tone-info-surface text-tone-info-text">
                   {variant.name}
                 </Badge>
                 <Button
@@ -86,7 +86,7 @@ export function ABTestVariantReview({
                 <p className="text-sm">{variant.content}</p>
               )}
               {rationale && (
-                <p className="mt-2 text-xs italic text-gray-500">
+                <p className="mt-2 text-xs italic text-muted-foreground">
                   {rationale.rationale}
                 </p>
               )}

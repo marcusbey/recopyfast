@@ -28,11 +28,11 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
   }, [error]);
 
   return (
-    <Card className="border-red-200 bg-red-50">
+    <Card className="border-tone-danger-border bg-tone-danger-surface">
       <CardContent className="p-8">
         <div className="flex items-start space-x-4">
-          <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-            <AlertCircle className="w-6 h-6 text-red-600" />
+          <div className="w-12 h-12 bg-tone-danger-surface rounded-full flex items-center justify-center flex-shrink-0">
+            <AlertCircle className="w-6 h-6 text-tone-danger-text" />
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold text-foreground mb-1">
@@ -44,16 +44,13 @@ export default function DashboardError({ error, reset }: DashboardErrorProps) {
             </p>
 
             {process.env.NODE_ENV === "development" && (
-              <p className="text-xs font-mono text-foreground break-all bg-card border border-red-200 rounded-md p-3 mb-6">
+              <p className="text-xs font-mono text-foreground break-all bg-card border border-tone-danger-border rounded-md p-3 mb-6">
                 {error.message}
               </p>
             )}
 
             <div className="flex flex-wrap gap-3">
-              <Button
-                onClick={reset}
-                className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-              >
+              <Button onClick={reset} className="bg-primary">
                 <RefreshCcw className="w-4 h-4 mr-2" />
                 Try again
               </Button>

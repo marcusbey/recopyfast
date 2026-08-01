@@ -27,6 +27,18 @@ export interface SendResult {
   error?: string;
 }
 
+/**
+ * Is outbound mail configured at all?
+ *
+ * Callers that must not reveal whether an address exists use this to decide
+ * *before* looking anything up. A global "we cannot send mail" answer is honest
+ * and identical for every address; a per-address failure returned after a
+ * lookup would be an existence oracle.
+ */
+export function isEmailProviderConfigured(): boolean {
+  return Boolean(RESEND_API_KEY);
+}
+
 async function send(opts: {
   to: string;
   subject: string;
@@ -35,8 +47,9 @@ async function send(opts: {
 }): Promise<SendResult> {
   const resend = getClient();
   if (!resend) {
-    // No provider configured. Loud in logs, soft to the caller — staging
-    // verification simply cannot complete until RESEND_API_KEY is set.
+    // No provider configured. Loud in logs, soft to the caller — the gate fails
+    // CLOSED: callers must surface the failure rather than report a code sent.
+    // Editor access simply cannot be granted until RESEND_API_KEY is set.
     console.error(
       "[email] RESEND_API_KEY not configured — cannot send transactional email.",
     );
@@ -85,6 +98,37 @@ export async function sendStagingVerificationEmail(
       <p style="margin:0 0 16px;color:#475569">Use this code to verify your access${where}:</p>
       <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes. If you didn't request access, ignore this email.</p>
+    </div>`;
+  return send({ to: email, subject, html, text });
+}
+
+/**
+ * Deliver an editor sign-in code.
+ *
+ * The code is the second factor for edit access, so it goes here and nowhere
+ * else — never into an API response, never into a log line. `siteLabel` is
+ * omitted for hub sign-ins, where naming a site before the address is proven
+ * would confirm that the address is an editor of it.
+ */
+export async function sendEditorAccessCode(
+  email: string,
+  code: string,
+  siteLabel?: string,
+): Promise<SendResult> {
+  const where = siteLabel ? ` for ${siteLabel}` : "";
+  const subject = "Your ReCopyFast editing code";
+  const text = [
+    `Your editing code${where} is: ${code}`,
+    "",
+    "It expires in 10 minutes and can be used once.",
+    "If you didn't ask to edit, ignore this email — nothing has changed.",
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
+      <h2 style="margin:0 0 12px;font-size:18px">Your editing code</h2>
+      <p style="margin:0 0 16px;color:#475569">Enter this code to start editing${where}:</p>
+      <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
+      <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes and can be used once. If you didn't ask to edit, ignore this email — nothing has changed.</p>
     </div>`;
   return send({ to: email, subject, html, text });
 }

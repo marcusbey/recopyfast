@@ -97,8 +97,8 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="p-6">
               <div className="animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+                <div className="h-4 bg-surface-3 rounded w-3/4 mb-2"></div>
+                <div className="h-8 bg-surface-3 rounded w-1/2"></div>
               </div>
             </Card>
           ))}
@@ -110,11 +110,11 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
   if (!data) {
     return (
       <div className="text-center py-12">
-        <BarChart3 className="mx-auto h-12 w-12 text-gray-400" />
-        <h3 className="mt-2 text-sm font-medium text-gray-900">
+        <BarChart3 className="mx-auto h-12 w-12 text-muted-foreground" />
+        <h3 className="mt-2 text-sm font-medium text-foreground">
           No analytics data
         </h3>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-muted-foreground">
           Start using ReCopyFast to see analytics.
         </p>
       </div>
@@ -126,10 +126,10 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">
+          <h2 className="text-2xl font-bold text-foreground">
             Analytics Dashboard
           </h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Monitor your site performance and user engagement
           </p>
         </div>
@@ -140,7 +140,7 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
             <select
               value={selectedSite}
               onChange={(e) => setSelectedSite(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              className="px-3 py-2 border border-input rounded-md text-sm"
             >
               <option value="all">All Sites</option>
               {sites.map((site) => (
@@ -159,7 +159,7 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
               onChange={(e) =>
                 setDateRange((prev) => ({ ...prev, start: e.target.value }))
               }
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              className="px-3 py-2 border border-input rounded-md text-sm"
             />
             <input
               type="date"
@@ -167,7 +167,7 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
               onChange={(e) =>
                 setDateRange((prev) => ({ ...prev, end: e.target.value }))
               }
-              className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+              className="px-3 py-2 border border-input rounded-md text-sm"
             />
           </div>
 
@@ -198,48 +198,56 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Total Sites</p>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Total Sites
+              </p>
+              <p className="text-3xl font-bold text-foreground">
                 {data.overview.total_sites}
               </p>
             </div>
-            <Globe className="h-8 w-8 text-blue-600" />
+            <Globe className="h-8 w-8 text-tone-info-text" />
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Active Users</p>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Active Users
+              </p>
+              <p className="text-3xl font-bold text-foreground">
                 {data.overview.total_users}
               </p>
             </div>
-            <Users className="h-8 w-8 text-green-600" />
+            <Users className="h-8 w-8 text-tone-success-text" />
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Page Views</p>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Page Views
+              </p>
+              <p className="text-3xl font-bold text-foreground">
                 {data.overview.total_page_views.toLocaleString()}
               </p>
             </div>
-            <Eye className="h-8 w-8 text-purple-600" />
+            <Eye className="h-8 w-8 text-tone-accent-text" />
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Content Edits</p>
-              <p className="text-3xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Content Edits
+              </p>
+              <p className="text-3xl font-bold text-foreground">
                 {data.overview.total_edits.toLocaleString()}
               </p>
             </div>
-            <Edit3 className="h-8 w-8 text-orange-600" />
+            <Edit3 className="h-8 w-8 text-tone-warning-text" />
           </div>
         </Card>
       </div>
@@ -249,38 +257,42 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Avg Load Time</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Avg Load Time
+              </p>
+              <p className="text-2xl font-bold text-foreground">
                 {data.performance.avg_load_time}ms
               </p>
             </div>
-            <Clock className="h-6 w-6 text-blue-600" />
+            <Clock className="h-6 w-6 text-tone-info-text" />
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">Avg Edit Time</p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-sm font-medium text-muted-foreground">
+                Avg Edit Time
+              </p>
+              <p className="text-2xl font-bold text-foreground">
                 {data.performance.avg_edit_time.toFixed(0)}ms
               </p>
             </div>
-            <Activity className="h-6 w-6 text-green-600" />
+            <Activity className="h-6 w-6 text-tone-success-text" />
           </div>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-gray-600">
+              <p className="text-sm font-medium text-muted-foreground">
                 Conversion Rate
               </p>
-              <p className="text-2xl font-bold text-gray-900">
+              <p className="text-2xl font-bold text-foreground">
                 {(data.overview.conversion_rate * 100).toFixed(1)}%
               </p>
             </div>
-            <TrendingUp className="h-6 w-6 text-purple-600" />
+            <TrendingUp className="h-6 w-6 text-tone-accent-text" />
           </div>
         </Card>
       </div>
@@ -333,22 +345,22 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
               {data.top_sites.map((site, index) => (
                 <div
                   key={site.site_id}
-                  className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                  className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
                 >
                   <div className="flex items-center gap-3">
-                    <span className="text-sm font-medium text-gray-500">
+                    <span className="text-sm font-medium text-muted-foreground">
                       #{index + 1}
                     </span>
                     <div>
                       <p className="font-medium">{site.domain}</p>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-sm text-muted-foreground">
                         {site.page_views} views • {site.edits} edits
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-semibold">{site.page_views}</p>
-                    <p className="text-sm text-gray-500">page views</p>
+                    <p className="text-sm text-muted-foreground">page views</p>
                   </div>
                 </div>
               ))}
@@ -382,13 +394,15 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
               <h3 className="text-lg font-semibold mb-4">Performance Score</h3>
               <div className="flex items-center justify-center">
                 <div className="text-center">
-                  <div className="text-4xl font-bold text-green-600">
+                  <div className="text-4xl font-bold text-tone-success-text">
                     {Math.max(
                       0,
                       Math.min(100, 100 - data.performance.avg_load_time / 20),
                     ).toFixed(0)}
                   </div>
-                  <div className="text-sm text-gray-500">Performance Score</div>
+                  <div className="text-sm text-muted-foreground">
+                    Performance Score
+                  </div>
                 </div>
               </div>
             </Card>
@@ -413,7 +427,7 @@ function SimpleChart({
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-between text-sm text-gray-600">
+      <div className="flex justify-between text-sm text-muted-foreground">
         <span>{label}</span>
         <span>Last 30 days</span>
       </div>
@@ -430,7 +444,7 @@ function SimpleChart({
           />
         ))}
       </div>
-      <div className="flex justify-between text-xs text-gray-500">
+      <div className="flex justify-between text-xs text-muted-foreground">
         <span>{data[data.length - 30]?.date || "Start"}</span>
         <span>{data[data.length - 1]?.date || "End"}</span>
       </div>

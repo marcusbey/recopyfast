@@ -188,7 +188,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">API Key Management</h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Create and manage API keys for your site
           </p>
         </div>
@@ -203,29 +203,29 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       </div>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <div className="text-red-800">{error}</div>
+        <Alert className="border-tone-danger-border bg-tone-danger-surface">
+          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
+          <div className="text-tone-danger-text">{error}</div>
         </Alert>
       )}
 
       {newKey && (
-        <Card className="p-6 bg-green-50 border-green-200">
-          <h3 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
+        <Card className="p-6 bg-tone-success-surface border-tone-success-border">
+          <h3 className="text-lg font-semibold text-tone-success-text mb-4 flex items-center gap-2">
             <Key className="w-5 h-5" />
             API Key Created Successfully
           </h3>
 
-          <Alert className="border-orange-200 bg-orange-50 mb-4">
-            <AlertTriangle className="h-4 w-4 text-orange-600" />
-            <div className="text-orange-800">
+          <Alert className="border-tone-warning-border bg-tone-warning-surface mb-4">
+            <AlertTriangle className="h-4 w-4 text-tone-warning-text" />
+            <div className="text-tone-warning-text">
               <strong>Important:</strong> Store this API key securely. It will
               not be shown again.
             </div>
           </Alert>
 
           <div className="space-y-3">
-            <div className="flex items-center justify-between bg-white p-3 rounded border">
+            <div className="flex items-center justify-between bg-card p-3 rounded border">
               <code className="font-mono text-sm flex-1">
                 {showKey ? newKey : "●".repeat(newKey.length)}
               </code>
@@ -279,7 +279,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                 placeholder="My API Key"
                 className="mt-1"
               />
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 Choose a descriptive name to identify this key later.
               </p>
             </div>
@@ -355,8 +355,10 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
       <div className="grid gap-4">
         {apiKeys.length === 0 ? (
           <Card className="p-8 text-center">
-            <Key className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500 mb-4">No API keys created yet.</p>
+            <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground mb-4">
+              No API keys created yet.
+            </p>
             <Button
               onClick={() => setShowCreateForm(true)}
               className="flex items-center gap-2"
@@ -375,18 +377,18 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                     <Badge
                       className={
                         apiKey.isActive
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-800"
+                          ? "bg-tone-success-surface text-tone-success-text"
+                          : "bg-surface-2 text-foreground"
                       }
                     >
                       {apiKey.isActive ? "Active" : "Inactive"}
                     </Badge>
                   </div>
 
-                  <div className="text-sm text-gray-600 space-y-1">
+                  <div className="text-sm text-muted-foreground space-y-1">
                     <p>
                       Key:{" "}
-                      <code className="bg-gray-100 px-1 rounded">
+                      <code className="bg-surface-2 px-1 rounded">
                         {apiKey.keyPreview}
                       </code>
                     </p>
@@ -484,7 +486,9 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                         }
                         disabled={loading}
                         className={`flex items-center gap-1 ${
-                          apiKey.isActive ? "text-orange-600" : "text-green-600"
+                          apiKey.isActive
+                            ? "text-tone-warning-text"
+                            : "text-tone-success-text"
                         }`}
                       >
                         <Activity className="w-3 h-3" />
@@ -506,7 +510,7 @@ export function ApiKeyManagement({ siteId }: ApiKeyManagementProps) {
                         variant="outline"
                         onClick={() => deleteApiKey(apiKey.id)}
                         disabled={loading}
-                        className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                        className="flex items-center gap-1 text-tone-danger-text hover:text-tone-danger-text"
                       >
                         <Trash2 className="w-3 h-3" />
                         Delete

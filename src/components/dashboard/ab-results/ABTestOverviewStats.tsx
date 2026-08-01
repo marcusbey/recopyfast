@@ -18,7 +18,7 @@ export function ABTestOverviewStats({
     <div className="grid grid-cols-3 gap-4">
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Users className="h-3 w-3" />
             Participants
           </div>
@@ -29,7 +29,7 @@ export function ABTestOverviewStats({
       </Card>
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <BarChart3 className="h-3 w-3" />
             Duration
           </div>
@@ -38,7 +38,7 @@ export function ABTestOverviewStats({
       </Card>
       <Card>
         <CardContent className="p-4">
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Trophy className="h-3 w-3" />
             Best CR
           </div>

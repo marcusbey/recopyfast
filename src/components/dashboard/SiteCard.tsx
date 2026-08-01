@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/ui/icon-tile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -66,19 +67,17 @@ export function SiteCard({
     : "Never";
 
   return (
-    <Card className="group hover:shadow-lg transition-shadow duration-200 border-border">
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-start space-x-3 flex-1 min-w-0">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/70 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Globe className="w-6 h-6 text-white" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-foreground text-lg truncate">
-                {site.name}
-              </h3>
-              <div className="flex items-center space-x-2 mt-1">
-                <p className="text-sm text-muted-foreground truncate">
+    <Card variant="outline" className="group">
+      <CardContent className="px-5 pb-5 pt-5">
+        <div className="mb-4 flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <IconTile size="lg">
+              <Globe aria-hidden="true" />
+            </IconTile>
+            <div className="min-w-0 flex-1">
+              <h3 className="truncate text-title">{site.name}</h3>
+              <div className="mt-0.5 flex items-center gap-1">
+                <p className="truncate font-mono text-xs text-muted-foreground">
                   {site.domain}
                 </p>
                 <Button
@@ -89,9 +88,9 @@ export function SiteCard({
                   title="Copy domain"
                 >
                   {copied ? (
-                    <CheckCircle2 className="w-3 h-3 text-success" />
+                    <CheckCircle2 className="h-3 w-3 text-tone-success-text" />
                   ) : (
-                    <Copy className="w-3 h-3" />
+                    <Copy className="h-3 w-3" />
                   )}
                 </Button>
               </div>
@@ -130,46 +129,47 @@ export function SiteCard({
           </DropdownMenu>
         </div>
 
-        <div className="flex items-center space-x-2 mb-4">
+        <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1">
           <StatusBadge status={siteStatuses[status]} />
           <span className="text-xs text-muted-foreground">
             Last edited {lastEdited}
           </span>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
+        {/* Figures are tabular so the three columns keep their gridlines as
+            counts change; the labels sit under the numbers because the number
+            is what the eye is looking for. */}
+        <dl className="grid grid-cols-3 gap-3 border-t border-border pt-4">
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Edits</p>
-            <p className="text-lg font-semibold text-foreground">
+            <dd className="text-metric text-lg">
               {site.stats?.edits_count || 0}
-            </p>
+            </dd>
+            <dt className="text-eyebrow mt-1">Edits</dt>
           </div>
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Views</p>
-            <p className="text-lg font-semibold text-foreground">
-              {site.stats?.views || 0}
-            </p>
+            <dd className="text-metric text-lg">{site.stats?.views || 0}</dd>
+            <dt className="text-eyebrow mt-1">Views</dt>
           </div>
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Activity</p>
-            <p className="text-lg font-semibold text-foreground">
+          <div className="min-w-0">
+            <dd className="truncate text-lg font-semibold leading-none tracking-[-0.02em] text-foreground">
               {site.stats?.last_activity
                 ? formatDistanceToNow(new Date(site.stats.last_activity), {
                     addSuffix: false,
                   })
                 : "None"}
-            </p>
+            </dd>
+            <dt className="text-eyebrow mt-1">Activity</dt>
           </div>
-        </div>
+        </dl>
 
-        <div className="mt-4 flex space-x-2">
+        <div className="mt-5 flex gap-2">
           <Button
             variant="outline"
             size="sm"
             className="flex-1"
             onClick={() => onViewDetails(site.id)}
           >
-            <Eye className="w-4 h-4 mr-2" />
+            <Eye aria-hidden="true" />
             View Details
           </Button>
           <Button
@@ -178,10 +178,10 @@ export function SiteCard({
             className="flex-1"
             onClick={() => onEdit(site.id)}
           >
-            <Settings className="w-4 h-4 mr-2" />
+            <Settings aria-hidden="true" />
             Settings
           </Button>
-          <ShareButton site={site} variant="icon" className="flex-shrink-0" />
+          <ShareButton site={site} variant="icon" className="shrink-0" />
         </div>
       </CardContent>
     </Card>

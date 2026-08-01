@@ -4,12 +4,26 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 
+/**
+ * Ten variants, down from twenty-two.
+ *
+ * The removed set was every combination of a hardcoded Tailwind palette colour
+ * with a fill or an outline (emerald fills, yellow outlines with a per-call-site
+ * dark-mode override), three glow box-shadow variants, and a pair of dot
+ * variants. They were unreachable except through the tones, and they were the
+ * main reason the dashboard read as a colour chart.
+ *
+ * What survives: the four structural variants (default / secondary /
+ * destructive / outline) and the six status tones. A tone resolves to a
+ * surface / text / border triplet from globals.css, so it is legible in both
+ * themes with no `dark:` variant at the call site.
+ */
 const badgeVariants = cva(
   [
     "inline-flex items-center rounded-full border",
-    "px-2.5 py-0.5 text-xs font-semibold",
-    "transition-all duration-200",
-    "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+    "px-2 py-0.5 text-xs font-medium",
+    "transition-colors duration-200 ease-out",
+    "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
   ].join(" "),
   {
     variants: {
@@ -26,93 +40,24 @@ const badgeVariants = cva(
           "border-transparent bg-destructive text-destructive-foreground",
           "hover:bg-destructive/80",
         ].join(" "),
-        outline: ["text-foreground border-border", "hover:bg-accent/50"].join(
-          " ",
-        ),
-        // Status tones — the canonical status treatment. Each resolves to a
-        // surface/text/border triplet from globals.css, so tones stay legible
-        // in dark mode without per-call-site `dark:` variants.
-        "tone-neutral": [
-          "bg-tone-neutral-surface text-tone-neutral-text",
-          "border-tone-neutral-border",
-        ].join(" "),
-        "tone-info": [
-          "bg-tone-info-surface text-tone-info-text",
-          "border-tone-info-border",
-        ].join(" "),
-        "tone-success": [
-          "bg-tone-success-surface text-tone-success-text",
-          "border-tone-success-border",
-        ].join(" "),
-        "tone-warning": [
-          "bg-tone-warning-surface text-tone-warning-text",
-          "border-tone-warning-border",
-        ].join(" "),
-        "tone-danger": [
-          "bg-tone-danger-surface text-tone-danger-text",
-          "border-tone-danger-border",
-        ].join(" "),
-        "tone-accent": [
-          "bg-tone-accent-surface text-tone-accent-text",
-          "border-tone-accent-border",
-        ].join(" "),
-        // New premium variants
-        staging: [
-          "border-transparent",
-          "bg-gradient-to-r from-orange-500 to-amber-500",
-          "text-white",
-          "shadow-sm",
-        ].join(" "),
-        "staging-outline": [
-          "border-orange-500/50 bg-orange-500/10",
-          "text-orange-600 dark:text-orange-400",
-        ].join(" "),
-        success: ["border-transparent bg-emerald-500", "text-white"].join(" "),
-        "success-outline": [
-          "border-emerald-500/50 bg-emerald-500/10",
-          "text-emerald-600 dark:text-emerald-400",
-        ].join(" "),
-        warning: ["border-transparent bg-yellow-500", "text-black"].join(" "),
-        "warning-outline": [
-          "border-yellow-500/50 bg-yellow-500/10",
-          "text-yellow-600 dark:text-yellow-400",
-        ].join(" "),
-        info: ["border-transparent bg-blue-500", "text-white"].join(" "),
-        "info-outline": [
-          "border-blue-500/50 bg-blue-500/10",
-          "text-blue-600 dark:text-blue-400",
-        ].join(" "),
-        // Glow variants
-        "glow-primary": [
-          "border-transparent bg-primary text-primary-foreground",
-          "shadow-[0_0_10px_hsl(var(--primary)/0.5)]",
-        ].join(" "),
-        "glow-staging": [
-          "border-transparent",
-          "bg-gradient-to-r from-orange-500 to-amber-500",
-          "text-white",
-          "shadow-[0_0_10px_rgba(249,115,22,0.5)]",
-        ].join(" "),
-        "glow-success": [
-          "border-transparent bg-emerald-500 text-white",
-          "shadow-[0_0_10px_rgba(16,185,129,0.5)]",
-        ].join(" "),
-        // Dot indicator variants
-        live: [
-          "border-emerald-500/50 bg-emerald-500/10",
-          "text-emerald-600 dark:text-emerald-400",
-          "pl-2",
-        ].join(" "),
-        offline: [
-          "border-gray-500/50 bg-gray-500/10",
-          "text-gray-600 dark:text-gray-400",
-          "pl-2",
-        ].join(" "),
+        outline: "text-foreground border-border",
+        "tone-neutral":
+          "bg-tone-neutral-surface text-tone-neutral-text border-tone-neutral-border",
+        "tone-info":
+          "bg-tone-info-surface text-tone-info-text border-tone-info-border",
+        "tone-success":
+          "bg-tone-success-surface text-tone-success-text border-tone-success-border",
+        "tone-warning":
+          "bg-tone-warning-surface text-tone-warning-text border-tone-warning-border",
+        "tone-danger":
+          "bg-tone-danger-surface text-tone-danger-text border-tone-danger-border",
+        "tone-accent":
+          "bg-tone-accent-surface text-tone-accent-text border-tone-accent-border",
       },
       size: {
-        default: "px-2.5 py-0.5 text-xs",
-        sm: "px-2 py-0.5 text-[10px]",
-        lg: "px-3 py-1 text-sm",
+        default: "px-2 py-0.5 text-xs",
+        sm: "px-1.5 py-0 text-[0.6875rem]",
+        lg: "px-2.5 py-1 text-sm",
       },
     },
     defaultVariants: {
@@ -125,7 +70,9 @@ const badgeVariants = cva(
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {
+  /** Leading dot. Inherits the badge's own text colour — never a second hue. */
   dot?: boolean;
+  /** Pulses the dot. Use only for genuinely live state. */
   pulse?: boolean;
 }
 
@@ -138,32 +85,14 @@ function Badge({
   children,
   ...props
 }: BadgeProps) {
-  const showDot = dot || variant === "live" || variant === "offline";
-  const dotColor =
-    variant === "live"
-      ? "bg-emerald-500"
-      : variant === "offline"
-        ? "bg-gray-400"
-        : "bg-current";
-
   return (
     <div className={cn(badgeVariants({ variant, size }), className)} {...props}>
-      {showDot && (
-        <span className="relative mr-1.5 flex h-2 w-2">
-          {pulse && variant === "live" && (
-            <span
-              className={cn(
-                "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
-                dotColor,
-              )}
-            />
+      {dot && (
+        <span className="relative mr-1.5 flex h-1.5 w-1.5" aria-hidden="true">
+          {pulse && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-60" />
           )}
-          <span
-            className={cn(
-              "relative inline-flex h-2 w-2 rounded-full",
-              dotColor,
-            )}
-          />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
         </span>
       )}
       {children}

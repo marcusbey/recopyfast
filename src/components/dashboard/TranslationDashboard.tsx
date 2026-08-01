@@ -120,12 +120,12 @@ export default function TranslationDashboard({
     };
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-card rounded-lg shadow-md p-6">
       <div className="flex items-center gap-3 mb-6">
-        <Globe className="h-6 w-6 text-blue-600" />
+        <Globe className="h-6 w-6 text-tone-info-text" />
         <h2 className="text-xl font-semibold">AI Translation</h2>
         <div className="ml-auto">
-          <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded">
+          <span className="bg-tone-info-surface text-tone-info-text text-xs font-medium px-2.5 py-0.5 rounded">
             Powered by OpenAI
           </span>
         </div>
@@ -134,13 +134,13 @@ export default function TranslationDashboard({
       {/* Language Selection */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-foreground mb-2">
             From Language
           </label>
           <select
             value={fromLanguage}
             onChange={(e) => setFromLanguage(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
@@ -151,13 +151,13 @@ export default function TranslationDashboard({
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
+          <label className="block text-sm font-medium text-foreground mb-2">
             To Language
           </label>
           <select
             value={toLanguage}
             onChange={(e) => setToLanguage(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-input rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang.code} value={lang.code}>
@@ -174,7 +174,7 @@ export default function TranslationDashboard({
           <h3 className="text-lg font-medium">Select Content to Translate</h3>
           <button
             onClick={handleSelectAll}
-            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            className="text-tone-info-text hover:text-tone-info-text text-sm font-medium"
           >
             {selectedElements.length === contentElements.length
               ? "Deselect All"
@@ -182,21 +182,23 @@ export default function TranslationDashboard({
           </button>
         </div>
 
-        <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-md">
+        <div className="max-h-64 overflow-y-auto border border-border rounded-md">
           {contentElements.map((element) => (
             <div
               key={element.element_id}
-              className="flex items-start gap-3 p-3 border-b border-gray-100 hover:bg-gray-50"
+              className="flex items-start gap-3 p-3 border-b border-border hover:bg-surface-1"
             >
               <input
                 type="checkbox"
                 checked={selectedElements.includes(element.element_id)}
                 onChange={() => handleElementToggle(element.element_id)}
-                className="mt-1 h-4 w-4 text-blue-600 rounded border-gray-300"
+                className="mt-1 h-4 w-4 text-tone-info-text rounded border-input"
               />
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-gray-600 mb-1">{element.selector}</p>
-                <p className="text-sm text-gray-900 truncate">
+                <p className="text-sm text-muted-foreground mb-1">
+                  {element.selector}
+                </p>
+                <p className="text-sm text-foreground truncate">
                   {element.current_content}
                 </p>
               </div>
@@ -204,7 +206,7 @@ export default function TranslationDashboard({
           ))}
         </div>
 
-        <p className="text-sm text-gray-500 mt-2">
+        <p className="text-sm text-muted-foreground mt-2">
           {selectedElements.length} of {contentElements.length} elements
           selected
         </p>
@@ -215,7 +217,7 @@ export default function TranslationDashboard({
         <button
           onClick={handleTranslate}
           disabled={isTranslating || selectedElements.length === 0}
-          className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-2 bg-primary text-white px-6 py-2 rounded-md hover:bg-primary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isTranslating ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -226,7 +228,7 @@ export default function TranslationDashboard({
         </button>
 
         {fromLanguage && toLanguage && (
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted-foreground">
             {getLanguageInfo(fromLanguage).flag} →{" "}
             {getLanguageInfo(toLanguage).flag}
           </span>
@@ -235,14 +237,14 @@ export default function TranslationDashboard({
 
       {/* Status Messages */}
       {error && (
-        <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-md mb-4">
+        <div className="flex items-center gap-2 text-tone-danger-text bg-tone-danger-surface p-3 rounded-md mb-4">
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm">{error}</span>
         </div>
       )}
 
       {success && (
-        <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-md mb-4">
+        <div className="flex items-center gap-2 text-tone-success-text bg-tone-success-surface p-3 rounded-md mb-4">
           <CheckCircle className="h-4 w-4" />
           <span className="text-sm">
             Successfully translated {translationResults.length} elements to{" "}
@@ -259,22 +261,22 @@ export default function TranslationDashboard({
             {translationResults.map((result) => (
               <div
                 key={result.id}
-                className="border border-gray-200 rounded-md p-4"
+                className="border border-border rounded-md p-4"
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Original ({getLanguageInfo(fromLanguage).name})
                     </label>
-                    <p className="text-sm text-gray-900">
+                    <p className="text-sm text-foreground">
                       {result.originalText}
                     </p>
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
                       Translation ({getLanguageInfo(toLanguage).name})
                     </label>
-                    <p className="text-sm text-gray-900">
+                    <p className="text-sm text-foreground">
                       {result.translatedText}
                     </p>
                   </div>

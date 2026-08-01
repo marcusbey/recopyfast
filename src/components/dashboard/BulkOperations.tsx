@@ -308,13 +308,13 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case "completed":
-        return <CheckCircle className="h-5 w-5 text-green-600" />;
+        return <CheckCircle className="h-5 w-5 text-tone-success-text" />;
       case "failed":
-        return <XCircle className="h-5 w-5 text-red-600" />;
+        return <XCircle className="h-5 w-5 text-tone-danger-text" />;
       case "running":
-        return <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />;
+        return <Loader2 className="h-5 w-5 text-tone-info-text animate-spin" />;
       default:
-        return <Clock className="h-5 w-5 text-gray-600" />;
+        return <Clock className="h-5 w-5 text-muted-foreground" />;
     }
   };
 
@@ -325,8 +325,8 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Bulk Operations</h2>
-        <p className="text-gray-600">
+        <h2 className="text-2xl font-bold text-foreground">Bulk Operations</h2>
+        <p className="text-muted-foreground">
           Import, export, and batch update content efficiently
         </p>
       </div>
@@ -352,7 +352,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                   onChange={(e) =>
                     setImportFormat(e.target.value as "json" | "csv" | "xml")
                   }
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full mt-1 px-3 py-2 border border-input rounded-md"
                 >
                   <option value="json">JSON</option>
                   <option value="csv">CSV</option>
@@ -368,10 +368,10 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                   type="file"
                   accept={`.${importFormat},.txt`}
                   onChange={handleFileUpload}
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full mt-1 px-3 py-2 border border-input rounded-md"
                 />
                 {importFile && (
-                  <p className="text-sm text-gray-600 mt-1">
+                  <p className="text-sm text-muted-foreground mt-1">
                     Selected: {importFile.name} (
                     {(importFile.size / 1024).toFixed(1)} KB)
                   </p>
@@ -460,7 +460,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                   onChange={(e) =>
                     setExportFormat(e.target.value as "json" | "csv" | "xml")
                   }
-                  className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                  className="w-full mt-1 px-3 py-2 border border-input rounded-md"
                 >
                   <option value="json">JSON</option>
                   <option value="csv">CSV</option>
@@ -602,7 +602,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                             e.target.value,
                           )
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                        className="w-full px-3 py-2 border border-input rounded-md"
                       >
                         <option value="find_replace">Find & Replace</option>
                         <option value="append">Append</option>
@@ -696,7 +696,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
 
             <div className="space-y-3">
               {operations.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">
+                <div className="text-center py-8 text-muted-foreground">
                   <FileText className="mx-auto h-12 w-12 mb-2" />
                   <p>No operations found</p>
                 </div>
@@ -704,7 +704,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                 operations.map((operation) => (
                   <div
                     key={operation.id}
-                    className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+                    className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
                   >
                     <div className="flex items-center gap-3">
                       {getStatusIcon(operation.status)}
@@ -712,7 +712,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                         <p className="font-medium capitalize">
                           {operation.operation_type.replace("_", " ")}
                         </p>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-muted-foreground">
                           {new Date(operation.created_at).toLocaleDateString()}{" "}
                           at{" "}
                           {new Date(operation.created_at).toLocaleTimeString()}
@@ -726,7 +726,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
                         processed
                       </p>
                       {operation.failed_items > 0 && (
-                        <p className="text-sm text-red-600">
+                        <p className="text-sm text-tone-danger-text">
                           {operation.failed_items} failed
                         </p>
                       )}

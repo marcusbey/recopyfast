@@ -9,7 +9,6 @@ import EditWebsiteButton from "@/components/dashboard/EditWebsiteButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -24,12 +23,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils/cn";
 import {
   Globe,
   Plus,
   Search,
+  SearchX,
   ArrowUpDown,
-  Filter,
   Loader2,
   AlertCircle,
   X,
@@ -50,6 +54,19 @@ interface SiteWithStats extends Site {
 
 type SortOption = "name" | "date" | "activity";
 type FilterOption = "all" | SiteStatus;
+
+const STATUS_FILTERS: ReadonlyArray<{ value: FilterOption; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "verifying", label: "Verifying" },
+  { value: "inactive", label: "Inactive" },
+];
+
+const SORT_LABELS: Record<SortOption, string> = {
+  name: "Name",
+  date: "Date added",
+  activity: "Last activity",
+};
 
 export default function SitesPage() {
   const { user } = useAuth();
@@ -229,193 +246,194 @@ export default function SitesPage() {
   }
 
   return (
-    <div>
-      {/* Header Section */}
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">
-              My Websites
-            </h1>
-            <p className="text-muted-foreground">
-              Manage and monitor all your registered websites
-            </p>
-          </div>
-          <Button
-            onClick={() => setIsRegistrationModalOpen(true)}
-            className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add New Site
+    <div className="space-y-6">
+      <PageHeader
+        title="Sites"
+        description="Every domain you have connected to ReCopyFast."
+        actions={
+          <Button onClick={() => setIsRegistrationModalOpen(true)}>
+            <Plus aria-hidden="true" />
+            Add site
           </Button>
+        }
+      />
+
+      {/* These were four metric cards. They never were metrics — clicking one
+          filtered the list. Presented as a segmented filter they say what they
+          actually do, and the counts still read at a glance. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div
+          className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-surface-2 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label="Filter sites by status"
+        >
+          {STATUS_FILTERS.map((option) => {
+            const selected = filterBy === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setFilterBy(option.value)}
+                aria-pressed={selected}
+                className={cn(
+                  "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm",
+                  "transition-[color,background-color,box-shadow] duration-200 ease-out",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  selected
+                    ? "bg-card font-medium text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {option.label}
+                <span
+                  className={cn(
+                    "tabular rounded-full px-1.5 py-0.5 text-[0.6875rem] font-semibold",
+                    selected
+                      ? "bg-surface-3 text-foreground"
+                      : "bg-card/60 text-muted-foreground",
+                  )}
+                >
+                  {statusCounts[option.value]}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card
-            className={`border-border cursor-pointer transition-all ${
-              filterBy === "all" ? "ring-2 ring-blue-500" : ""
-            }`}
-            onClick={() => setFilterBy("all")}
-          >
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground mb-1">Total Sites</p>
-              <p className="text-2xl font-bold text-foreground">
-                {statusCounts.all}
-              </p>
-            </CardContent>
-          </Card>
-          <Card
-            className={`border-border cursor-pointer transition-all ${
-              filterBy === "active" ? "ring-2 ring-green-500" : ""
-            }`}
-            onClick={() => setFilterBy("active")}
-          >
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground mb-1">Active</p>
-              <p className="text-2xl font-bold text-green-600">
-                {statusCounts.active}
-              </p>
-            </CardContent>
-          </Card>
-          <Card
-            className={`border-border cursor-pointer transition-all ${
-              filterBy === "verifying" ? "ring-2 ring-yellow-500" : ""
-            }`}
-            onClick={() => setFilterBy("verifying")}
-          >
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground mb-1">Verifying</p>
-              <p className="text-2xl font-bold text-yellow-600">
-                {statusCounts.verifying}
-              </p>
-            </CardContent>
-          </Card>
-          <Card
-            className={`border-border cursor-pointer transition-all ${
-              filterBy === "inactive" ? "ring-2 ring-muted-foreground" : ""
-            }`}
-            onClick={() => setFilterBy("inactive")}
-          >
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground mb-1">Inactive</p>
-              <p className="text-2xl font-bold text-muted-foreground">
-                {statusCounts.inactive}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Search and Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="flex flex-1 gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
             <Input
-              placeholder="Search sites by name or domain..."
+              placeholder="Search by name or domain"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-9"
+              aria-label="Search sites"
             />
           </div>
 
-          <div className="flex gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <ArrowUpDown className="w-4 h-4 mr-2" />
-                  Sort: {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setSortBy("name")}>
-                  Sort by Name
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSortBy("date")}>
-                  Sort by Date
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setSortBy("activity")}>
-                  Sort by Activity
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {filterBy !== "all" && (
-              <Badge
-                variant="secondary"
-                className="cursor-pointer hover:bg-muted"
-                onClick={() => setFilterBy("all")}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              {/* The label is hidden below `sm`, and the icon is aria-hidden —
+                  without an explicit name this button is unlabelled for screen
+                  readers on mobile. */}
+              <Button
+                variant="outline"
+                className="shrink-0"
+                aria-label={`Sort sites (currently ${SORT_LABELS[sortBy].toLowerCase()})`}
               >
-                <Filter className="w-3 h-3 mr-1" />
-                {filterBy}
-                <X className="w-3 h-3 ml-1" />
-              </Badge>
-            )}
-          </div>
+                <ArrowUpDown aria-hidden="true" />
+                <span className="hidden sm:inline">{SORT_LABELS[sortBy]}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setSortBy("name")}>
+                Sort by name
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("date")}>
+                Sort by date added
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSortBy("activity")}>
+                Sort by last activity
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
       {/* Content Area */}
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+        // Cards, not a spinner: the grid keeps its shape while it fills.
+        <div
+          className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
+          role="status"
+          aria-label="Loading sites"
+        >
+          {Array.from({ length: 3 }, (_, index) => (
+            <div
+              key={index}
+              className="space-y-4 rounded-xl border border-border p-5"
+            >
+              <div className="flex items-start gap-3">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+              </div>
+              <Skeleton className="h-5 w-20 rounded-full" />
+              <div className="grid grid-cols-3 gap-3 border-t border-border pt-4">
+                {Array.from({ length: 3 }, (_, i) => (
+                  <div key={i} className="space-y-2">
+                    <Skeleton className="h-5 w-10" />
+                    <Skeleton className="h-2.5 w-12" />
+                  </div>
+                ))}
+              </div>
+              <Skeleton className="h-8 w-full" />
+            </div>
+          ))}
         </div>
       ) : error ? (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-3 text-red-800">
-              <AlertCircle className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">Error loading sites</p>
-                <p className="text-sm">{error}</p>
-              </div>
-            </div>
-            <Button onClick={fetchSites} variant="outline" className="mt-4">
-              Retry
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
+          <AlertTitle>Could not load your sites</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{error}</p>
+            <Button onClick={fetchSites} variant="outline" size="sm">
+              Try again
             </Button>
-          </CardContent>
-        </Card>
+          </AlertDescription>
+        </Alert>
       ) : filteredAndSortedSites.length === 0 ? (
-        <Card className="border-border">
-          <CardContent className="p-12">
-            <div className="text-center">
-              <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mx-auto mb-4">
-                <Globe className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
-                {searchQuery || filterBy !== "all"
-                  ? "No sites found"
-                  : "No sites yet"}
-              </h3>
-              <p className="text-muted-foreground mb-6 max-w-sm mx-auto">
-                {searchQuery || filterBy !== "all"
-                  ? "Try adjusting your search or filter criteria"
-                  : "Add your first site to start making your content editable with AI assistance."}
-              </p>
-              {!searchQuery && filterBy === "all" && (
-                <Button
-                  onClick={() => setIsRegistrationModalOpen(true)}
-                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Your First Site
-                </Button>
-              )}
-              {(searchQuery || filterBy !== "all") && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSearchQuery("");
-                    setFilterBy("all");
-                  }}
-                >
-                  Clear Filters
-                </Button>
-              )}
-            </div>
+        <Card variant="outline">
+          <CardContent className="p-0">
+            {searchQuery || filterBy !== "all" ? (
+              <EmptyState
+                icon={SearchX}
+                title="Nothing matches those filters"
+                description={
+                  searchQuery
+                    ? `No site matches “${searchQuery}”${filterBy === "all" ? "" : ` with status ${filterBy}`}.`
+                    : `You have no ${filterBy} sites.`
+                }
+                action={
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setFilterBy("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                }
+              />
+            ) : (
+              <EmptyState
+                icon={Globe}
+                title="No sites connected yet"
+                description="ReCopyFast turns a site you already have into one your team can edit in place."
+                action={
+                  <Button onClick={() => setIsRegistrationModalOpen(true)}>
+                    <Plus aria-hidden="true" />
+                    Add your first site
+                  </Button>
+                }
+                steps={[
+                  "Register the domain you want to make editable.",
+                  "Paste the one-line script tag into that site's HTML.",
+                  "Open your site and edit any text in place — changes appear here.",
+                ]}
+              />
+            )}
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredAndSortedSites.map((site) => (
             <SiteCard
               key={site.id}
@@ -454,7 +472,7 @@ export default function SitesPage() {
             </DialogDescription>
           </DialogHeader>
           {deleteError && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
               {deleteError}
             </p>
           )}

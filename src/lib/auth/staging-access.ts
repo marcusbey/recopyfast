@@ -5,6 +5,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { timingSafeEqualString } from "@/lib/auth/editor-crypto";
 import crypto from "crypto";
 
 export type StagingPermission = "view" | "edit" | "publish" | "admin";
@@ -77,6 +78,16 @@ export class StagingAccessManager {
 
       if (permError || creatorPermission?.permission !== "admin") {
         throw new Error("Only site admins can create staging access");
+      }
+
+      // Shareable links are retired — they authorised whoever opened them
+      // first. The database rejects these too
+      // (20260801100000_editor_access_2fa.sql); refusing here gives the caller a
+      // readable error instead of a constraint violation.
+      if (params.accessType === "link") {
+        throw new Error(
+          "Shareable staging links are retired. Add the person as a site editor instead.",
+        );
       }
 
       // For invite type, email is required
@@ -172,15 +183,21 @@ export class StagingAccessManager {
         };
       }
 
-      // For link-based access without email, require email capture first
+      // Retired: a 'link' row with no email let whoever opened the URL first
+      // name themselves the editor. Those rows are deactivated by
+      // 20260801100000_editor_access_2fa.sql and no new ones can be created, but
+      // refuse here too so a row that somehow survives is inert rather than
+      // self-claimable. Editors now come from site_editors — see
+      // src/lib/auth/editor-directory.ts.
       if (access.access_type === "link" && !access.email) {
         return {
-          valid: true,
+          valid: false,
           verified: false,
           permissions: [],
           email: null,
-          expiresAt: new Date(access.expires_at),
-          requiresEmail: true,
+          expiresAt: null,
+          error:
+            "This share link is no longer valid. Ask the site owner for access.",
         };
       }
 
@@ -223,66 +240,34 @@ export class StagingAccessManager {
   }
 
   /**
-   * Capture email for link-based access
+   * RETIRED — self-claim of a shared link.
+   *
+   * This was the hole: an `access_type='link'` row carries no email, so the
+   * first person to open the URL supplied their own address and authorised
+   * themselves. Anyone the link was forwarded to could do the same.
+   *
+   * Kept as an explicit refusal rather than deleted so the retirement is visible
+   * at the call site and any surviving caller fails loudly instead of silently
+   * finding a different path. Authorisation now starts in the dashboard
+   * (`site_editors`); identity is proved per session by
+   * `src/lib/auth/editor-verification.ts`.
    */
   static async captureEmail(
     token: string,
+    // Retained so existing call sites keep type-checking; deliberately unused —
+    // the address is exactly what this method must no longer accept, and
+    // logging it would record an unverified claim about a third party.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     email: string,
   ): Promise<{ success: boolean; verificationCode?: string; error?: string }> {
-    try {
-      const supabase = createServiceRoleClient();
-
-      // Find the access record
-      const { data: access, error: findError } = await supabase
-        .from("staging_access")
-        .select("*")
-        .eq("token", token)
-        .eq("is_active", true)
-        .gte("expires_at", new Date().toISOString())
-        .single();
-
-      if (findError || !access) {
-        return { success: false, error: "Invalid or expired token" };
-      }
-
-      // Only allow email capture for link-type access without email
-      if (access.access_type !== "link") {
-        return {
-          success: false,
-          error: "Cannot capture email for invite-type access",
-        };
-      }
-
-      if (access.email && access.email !== email) {
-        return { success: false, error: "Email already set for this token" };
-      }
-
-      // Generate verification code
-      const verificationCode = this.generateVerificationCode();
-      const verificationExpiresAt = new Date(
-        Date.now() + this.VERIFICATION_CODE_EXPIRY_MINUTES * 60 * 1000,
-      );
-
-      // Update with email and verification code
-      const { error: updateError } = await supabase
-        .from("staging_access")
-        .update({
-          email,
-          verification_code: verificationCode,
-          verification_expires_at: verificationExpiresAt.toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", access.id);
-
-      if (updateError) {
-        return { success: false, error: "Failed to capture email" };
-      }
-
-      return { success: true, verificationCode };
-    } catch (error) {
-      console.error("Error capturing email:", error);
-      return { success: false, error: "Failed to capture email" };
-    }
+    console.warn(
+      `[staging-access] captureEmail refused — self-claim of a shared link is retired (token ${token.slice(0, 8)}…). Add the person as a site editor instead.`,
+    );
+    return {
+      success: false,
+      error:
+        "Share links no longer grant access. Ask the site owner to add you as an editor.",
+    };
   }
 
   /**
@@ -308,8 +293,14 @@ export class StagingAccessManager {
         return { success: false, error: "Invalid or expired token" };
       }
 
-      // Check verification code
-      if (!access.verification_code || access.verification_code !== code) {
+      // Constant-time comparison. `!==` returns as soon as two characters
+      // differ, so the time it takes to reject leaks how many leading digits
+      // were right — enough, over many requests, to recover a 6-digit code one
+      // digit at a time instead of guessing all 10^6.
+      if (
+        !access.verification_code ||
+        !timingSafeEqualString(access.verification_code, code)
+      ) {
         return { success: false, error: "Invalid verification code" };
       }
 

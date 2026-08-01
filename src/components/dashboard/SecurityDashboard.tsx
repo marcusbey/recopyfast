@@ -66,10 +66,10 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
 };
 
 const SEVERITY_COLORS: Record<string, string> = {
-  low: "bg-blue-100 text-blue-800",
-  medium: "bg-yellow-100 text-yellow-800",
-  high: "bg-orange-100 text-orange-800",
-  critical: "bg-red-100 text-red-800",
+  low: "bg-tone-info-surface text-tone-info-text",
+  medium: "bg-tone-warning-surface text-tone-warning-text",
+  high: "bg-tone-warning-surface text-tone-warning-text",
+  critical: "bg-tone-danger-surface text-tone-danger-text",
 };
 
 export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
@@ -139,7 +139,8 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
   };
 
   const getSeverityBadge = (severity: string) => {
-    const colorClass = SEVERITY_COLORS[severity] || "bg-gray-100 text-gray-800";
+    const colorClass =
+      SEVERITY_COLORS[severity] || "bg-surface-2 text-foreground";
     return <Badge className={colorClass}>{severity.toUpperCase()}</Badge>;
   };
 
@@ -159,10 +160,10 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
     <Card className="p-6">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-gray-600">{title}</p>
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
           <p className="text-2xl font-bold mt-1">{value}</p>
           {description && (
-            <p className="text-xs text-gray-500 mt-1">{description}</p>
+            <p className="text-xs text-muted-foreground mt-1">{description}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -170,14 +171,14 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
             <TrendingUp
               className={`w-4 h-4 ${
                 trend === "up"
-                  ? "text-red-500"
+                  ? "text-tone-danger-text"
                   : trend === "down"
-                    ? "text-green-500"
-                    : "text-gray-500"
+                    ? "text-tone-success-text"
+                    : "text-muted-foreground"
               }`}
             />
           )}
-          <Icon className="w-8 h-8 text-gray-400" />
+          <Icon className="w-8 h-8 text-muted-foreground" />
         </div>
       </div>
     </Card>
@@ -200,7 +201,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
             <Shield className="w-6 h-6" />
             Security Dashboard
           </h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Monitor security events and system health
           </p>
         </div>
@@ -227,9 +228,9 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
       </div>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <div className="text-red-800">{error}</div>
+        <Alert className="border-tone-danger-border bg-tone-danger-surface">
+          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
+          <div className="text-tone-danger-text">{error}</div>
         </Alert>
       )}
 
@@ -287,7 +288,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                       </div>
                     ))}
                     {Object.keys(stats.eventsByType).length === 0 && (
-                      <p className="text-gray-500 text-sm">
+                      <p className="text-muted-foreground text-sm">
                         No events recorded
                       </p>
                     )}
@@ -313,7 +314,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                       ),
                     )}
                     {Object.keys(stats.eventsBySeverity).length === 0 && (
-                      <p className="text-gray-500 text-sm">
+                      <p className="text-muted-foreground text-sm">
                         No events recorded
                       </p>
                     )}
@@ -361,11 +362,11 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                           </span>
                           {getSeverityBadge(event.severity)}
                         </div>
-                        <div className="text-sm text-gray-600 space-y-1">
+                        <div className="text-sm text-muted-foreground space-y-1">
                           {event.ipAddress && (
                             <p>
                               IP:{" "}
-                              <code className="bg-gray-100 px-1 rounded">
+                              <code className="bg-surface-2 px-1 rounded">
                                 {event.ipAddress}
                               </code>
                             </p>
@@ -373,7 +374,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                           {event.endpoint && (
                             <p>
                               Endpoint:{" "}
-                              <code className="bg-gray-100 px-1 rounded">
+                              <code className="bg-surface-2 px-1 rounded">
                                 {event.endpoint}
                               </code>
                             </p>
@@ -383,7 +384,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                           )}
                         </div>
                       </div>
-                      <div className="text-right text-sm text-gray-500">
+                      <div className="text-right text-sm text-muted-foreground">
                         <Clock className="w-3 h-3 inline mr-1" />
                         {new Date(event.createdAt).toLocaleString()}
                       </div>
@@ -392,7 +393,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                 ))}
                 {events.length === 0 && (
                   <Card className="p-8 text-center">
-                    <p className="text-gray-500">
+                    <p className="text-muted-foreground">
                       No security events found for the selected filters.
                     </p>
                   </Card>
@@ -416,7 +417,7 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                       </div>
                     ))}
                     {stats.topIPs.length === 0 && (
-                      <p className="text-gray-500 text-sm">
+                      <p className="text-muted-foreground text-sm">
                         No security events recorded
                       </p>
                     )}
@@ -468,13 +469,13 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Verified</span>
-                      <Badge className="bg-green-100 text-green-800">
+                      <Badge className="bg-tone-success-surface text-tone-success-text">
                         {stats.domainVerificationStats.verified}
                       </Badge>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Pending</span>
-                      <Badge className="bg-yellow-100 text-yellow-800">
+                      <Badge className="bg-tone-warning-surface text-tone-warning-text">
                         {stats.domainVerificationStats.pending}
                       </Badge>
                     </div>
@@ -493,13 +494,13 @@ export function SecurityDashboard({ siteId }: SecurityDashboardProps) {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Active</span>
-                      <Badge className="bg-green-100 text-green-800">
+                      <Badge className="bg-tone-success-surface text-tone-success-text">
                         {stats.apiKeyStats.active}
                       </Badge>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">Recently Used</span>
-                      <Badge className="bg-blue-100 text-blue-800">
+                      <Badge className="bg-tone-info-surface text-tone-info-text">
                         {stats.apiKeyStats.recentlyUsed}
                       </Badge>
                     </div>

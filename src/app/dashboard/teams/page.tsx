@@ -105,7 +105,7 @@ export default function TeamsPage() {
       case "admin":
       case "manager":
         return (
-          <Badge className="bg-blue-100 text-blue-700 border-blue-200">
+          <Badge className="bg-tone-info-surface text-tone-info-text border-tone-info-border">
             <Shield className="w-3 h-3 mr-1" />
             Admin
           </Badge>
@@ -136,10 +136,7 @@ export default function TeamsPage() {
             Collaborate with your team members
           </p>
         </div>
-        <Button
-          className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-          disabled
-        >
+        <Button className="bg-primary" disabled>
           <Plus className="w-4 h-4 mr-2" />
           Invite Member
         </Button>
@@ -149,7 +146,7 @@ export default function TeamsPage() {
       <Card className="border-2 border-primary/30 bg-primary/5">
         <CardContent className="p-6">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/70 rounded-lg flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
               <Lock className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
@@ -160,9 +157,7 @@ export default function TeamsPage() {
                 Team collaboration is available on Pro and Enterprise plans.
                 Upgrade to invite team members and manage permissions.
               </p>
-              <Button className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70">
-                Upgrade to Pro
-              </Button>
+              <Button className="bg-primary">Upgrade to Pro</Button>
             </div>
           </div>
         </CardContent>
@@ -179,7 +174,7 @@ export default function TeamsPage() {
                   {members.length}
                 </p>
               </div>
-              <Users className="w-8 h-8 text-blue-600" />
+              <Users className="w-8 h-8 text-tone-info-text" />
             </div>
           </CardContent>
         </Card>
@@ -193,7 +188,7 @@ export default function TeamsPage() {
                   {activeCount}
                 </p>
               </div>
-              <Shield className="w-8 h-8 text-green-600" />
+              <Shield className="w-8 h-8 text-tone-success-text" />
             </div>
           </CardContent>
         </Card>
@@ -207,7 +202,7 @@ export default function TeamsPage() {
                   {pendingCount}
                 </p>
               </div>
-              <Mail className="w-8 h-8 text-yellow-600" />
+              <Mail className="w-8 h-8 text-tone-warning-text" />
             </div>
           </CardContent>
         </Card>
@@ -248,10 +243,10 @@ export default function TeamsPage() {
         <CardContent>
           {loadingTeams || loadingMembers ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+              <Loader2 className="w-6 h-6 animate-spin text-tone-info-text" />
             </div>
           ) : fetchError ? (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+            <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
               {fetchError}
             </p>
           ) : members.length === 0 ? (
@@ -268,7 +263,7 @@ export default function TeamsPage() {
                   className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary/70 rounded-full flex items-center justify-center text-white font-semibold">
+                    <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center text-white font-semibold">
                       {getMemberName(member).charAt(0).toUpperCase()}
                     </div>
                     <div>
@@ -307,7 +302,7 @@ export default function TeamsPage() {
           <div className="space-y-4">
             <div className="p-4 rounded-lg border border-tone-accent-border">
               <div className="flex items-center gap-2 mb-2">
-                <Crown className="w-5 h-5 text-purple-600" />
+                <Crown className="w-5 h-5 text-tone-accent-text" />
                 <h4 className="font-semibold text-foreground">Owner</h4>
               </div>
               <p className="text-sm text-muted-foreground">
@@ -315,9 +310,9 @@ export default function TeamsPage() {
               </p>
             </div>
 
-            <div className="p-4 border border-blue-200 rounded-lg">
+            <div className="p-4 border border-tone-info-border rounded-lg">
               <div className="flex items-center gap-2 mb-2">
-                <Shield className="w-5 h-5 text-blue-600" />
+                <Shield className="w-5 h-5 text-tone-info-text" />
                 <h4 className="font-semibold text-foreground">Admin</h4>
               </div>
               <p className="text-sm text-muted-foreground">

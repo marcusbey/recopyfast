@@ -1,284 +1,335 @@
 @import "tailwindcss";
 
-/* ============================================
+/* ============================================================================
    RECOPYFAST DESIGN SYSTEM
-   Premium Developer Tool Aesthetic
-   ============================================ */
+
+   One accent (deep teal), one grey family (cool, hue 200), two themes.
+
+   Every colour is declared once with `light-dark()`. The used value is picked
+   from the `color-scheme` property, so there is no duplicated dark-mode block
+   to drift out of sync. `color-scheme: light dark` on :root follows the OS;
+   `[data-theme="light|dark"]` pins one theme for screenshots and for the
+   Appearance setting.
+
+   Contrast: every text/surface pair below is measured, not eyeballed. Note the
+   correct light/dark pivot when picking a foreground is relative luminance
+   0.179 (where contrast-with-white equals contrast-with-black), not 0.5.
+   ========================================================================= */
 
 :root {
-  /* Core Colors - Light Mode */
-  --background: 0 0% 100%;
-  --foreground: 240 10% 3.9%;
+  color-scheme: light dark;
+}
 
-  /* Surface Colors */
-  --surface-1: 0 0% 98%;
-  --surface-2: 0 0% 96%;
-  --surface-3: 0 0% 94%;
+[data-theme="light"] {
+  color-scheme: only light;
+}
 
-  /* Sky Palette - "Breathe Easy" Theme */
+[data-theme="dark"] {
+  color-scheme: only dark;
+}
+
+:root {
+  /* --- Canvas & surfaces -------------------------------------------------
+     Off-black in dark (#0f1315), never pure #000. Off-white in light, tinted
+     with the same cool hue as the greys so nothing reads warm next to it. */
+  --canvas: light-dark(hsl(200 24% 98%), hsl(200 18% 7%));
+  --surface-card: light-dark(hsl(0 0% 100%), hsl(200 15% 10%));
+  --surface-1: light-dark(hsl(200 24% 97%), hsl(200 18% 8%));
+  --surface-2: light-dark(hsl(200 18% 94%), hsl(200 14% 14%));
+  --surface-3: light-dark(hsl(200 16% 90%), hsl(200 13% 18%));
+
+  /* --- Text ------------------------------------------------------------- */
+  --text-strong: light-dark(hsl(200 22% 11%), hsl(200 22% 96%));
+  --text-muted: light-dark(hsl(200 11% 38%), hsl(200 12% 68%));
+
+  /* --- Accent — the only chromatic brand colour in the product ----------
+     Saturation stays under 80% in both themes, per the one-accent rule. */
+  --accent-solid: light-dark(hsl(176 54% 28%), hsl(174 48% 58%));
+  --accent-on-solid: light-dark(hsl(0 0% 100%), hsl(200 30% 8%));
+
+  /* --- Lines ------------------------------------------------------------
+     Two weights: `line` is decorative (dividers, card edges); `line-strong`
+     is the boundary of an interactive control and clears 3:1 (SC 1.4.11). */
+  --line: light-dark(hsl(200 15% 87%), hsl(200 12% 21%));
+  --line-strong: light-dark(hsl(200 13% 55%), hsl(200 10% 40%));
+
+  /* --- Destructive ------------------------------------------------------- */
+  --danger-solid: light-dark(hsl(358 60% 42%), hsl(358 62% 62%));
+  --danger-on-solid: light-dark(hsl(0 0% 100%), hsl(200 30% 8%));
+
+  /* --- Status tones -----------------------------------------------------
+     Six surface/text/border triplets. Every status treatment in the app
+     resolves to one of these, so a status reads the same wherever it appears.
+     Colour here signals STATE, never category. */
+  --tone-neutral-surface: light-dark(hsl(200 18% 95%), hsl(200 12% 17%));
+  --tone-neutral-text: light-dark(hsl(200 12% 32%), hsl(200 12% 76%));
+  --tone-neutral-line: light-dark(hsl(200 15% 86%), hsl(200 12% 26%));
+
+  --tone-info-surface: light-dark(hsl(204 62% 95%), hsl(206 44% 18%));
+  --tone-info-text: light-dark(hsl(206 72% 30%), hsl(204 78% 76%));
+  --tone-info-line: light-dark(hsl(204 55% 85%), hsl(206 40% 30%));
+
+  --tone-success-surface: light-dark(hsl(162 46% 93%), hsl(166 40% 15%));
+  --tone-success-text: light-dark(hsl(166 72% 24%), hsl(162 60% 70%));
+  --tone-success-line: light-dark(hsl(162 40% 82%), hsl(166 36% 27%));
+
+  --tone-warning-surface: light-dark(hsl(42 84% 92%), hsl(30 44% 17%));
+  --tone-warning-text: light-dark(hsl(28 74% 29%), hsl(42 84% 68%));
+  --tone-warning-line: light-dark(hsl(40 70% 80%), hsl(32 40% 29%));
+
+  --tone-danger-surface: light-dark(hsl(4 76% 96%), hsl(358 40% 19%));
+  --tone-danger-text: light-dark(hsl(358 62% 39%), hsl(4 84% 76%));
+  --tone-danger-line: light-dark(hsl(4 70% 88%), hsl(358 36% 31%));
+
+  --tone-accent-surface: light-dark(hsl(176 40% 93%), hsl(178 38% 16%));
+  --tone-accent-text: light-dark(hsl(178 68% 24%), hsl(176 52% 70%));
+  --tone-accent-line: light-dark(hsl(176 34% 82%), hsl(178 34% 28%));
+
+  /* --- Shadows ----------------------------------------------------------
+     Tinted with the surface hue rather than black-at-low-opacity, so a raised
+     card sits in the same light as everything around it. */
+  --shadow-a: light-dark(hsl(200 32% 20% / 0.05), hsl(200 55% 2% / 0.34));
+  --shadow-b: light-dark(hsl(200 32% 20% / 0.07), hsl(200 55% 2% / 0.46));
+
+  /* --- Radius -----------------------------------------------------------
+     Tighter inside, softer on containers. */
+  --radius: 0.75rem;
+
+  /* --- Motion -----------------------------------------------------------
+     One easing, two durations. Transitions are limited to transform/opacity/
+     colour — never width/height/top/left. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 160ms;
+  --dur: 220ms;
+
+  /* Legacy marketing-site palette. The landing, demo, privacy and terms pages
+     are built on these; they are intentionally left untouched by the
+     dashboard redesign. */
   --sky-50: 204 100% 97%;
   --sky-100: 204 94% 94%;
   --sky-200: 201 94% 86%;
   --sky-400: 198 93% 60%;
   --sky-500: 199 89% 48%;
-
-  /* Slate Text Colors */
   --slate-600: 215 19% 35%;
   --slate-700: 215 25% 27%;
   --slate-900: 222 47% 11%;
-
-  /* Brand Colors - Electric Teal/Cyan */
-  --primary: 173 80% 40%;
-  --primary-foreground: 0 0% 100%;
-  --primary-glow: 173 80% 40%;
-
-  /* Accent - Warm Amber */
-  --accent: 38 92% 50%;
-  --accent-foreground: 0 0% 100%;
-  --accent-glow: 38 92% 50%;
-
-  /* Staging - Vibrant Orange */
-  --staging: 25 95% 53%;
-  --staging-foreground: 0 0% 100%;
-
-  /* Success - Emerald */
-  --success: 160 84% 39%;
-  --success-foreground: 0 0% 100%;
-
-  /* Semantic Colors */
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 98%;
-  --warning: 38 92% 50%;
-  --warning-foreground: 0 0% 100%;
-  --info: 217 91% 60%;
-  --info-foreground: 0 0% 100%;
-
-  /* Status tones — surface/text/border triplets for badges, pills and callouts.
-     Every status treatment in the app resolves to one of these six tones so a
-     status reads the same wherever it appears. Text values are chosen to clear
-     4.5:1 against their own surface. */
-  --tone-neutral-surface: 240 5% 96%;
-  --tone-neutral-text: 240 6% 30%;
-  --tone-neutral-border: 240 6% 88%;
-
-  --tone-info-surface: 214 95% 96%;
-  --tone-info-text: 221 83% 40%;
-  --tone-info-border: 213 92% 88%;
-
-  --tone-success-surface: 152 76% 95%;
-  --tone-success-text: 158 79% 25%;
-  --tone-success-border: 149 72% 85%;
-
-  --tone-warning-surface: 48 96% 93%;
-  --tone-warning-text: 26 90% 32%;
-  --tone-warning-border: 45 93% 82%;
-
-  --tone-danger-surface: 0 93% 96%;
-  --tone-danger-text: 0 72% 40%;
-  --tone-danger-border: 0 93% 89%;
-
-  --tone-accent-surface: 270 100% 97%;
-  --tone-accent-text: 272 72% 42%;
-  --tone-accent-border: 269 97% 90%;
-
-  /* Border & Ring */
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 173 80% 40%;
-
-  /* Card */
-  --card: 0 0% 100%;
-  --card-foreground: 240 10% 3.9%;
-
-  /* Radius */
-  --radius: 0.625rem;
-
-  /* Shadows */
-  --shadow-color: 220 3% 15%;
-  --shadow-strength: 1%;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* Core Colors - Dark Mode */
-    --background: 222 47% 5%;
-    --foreground: 210 40% 98%;
-
-    /* Surface Colors - Deep Navy/Slate */
-    --surface-1: 222 47% 8%;
-    --surface-2: 222 47% 11%;
-    --surface-3: 222 47% 14%;
-
-    /* Brand - Brighter in Dark Mode */
-    --primary: 173 80% 50%;
-    --primary-glow: 173 100% 60%;
-
-    /* Accent - More Vibrant */
-    --accent: 38 92% 55%;
-    --accent-glow: 38 100% 65%;
-
-    /* Semantic */
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --warning: 38 92% 55%;
-    --info: 217 91% 65%;
-
-    /* Status tones — dark mode inverts the triplet: dim translucent surface,
-       bright text. Same six names, so components need no dark: variants. */
-    --tone-neutral-surface: 240 5% 18%;
-    --tone-neutral-text: 240 5% 78%;
-    --tone-neutral-border: 240 5% 28%;
-
-    --tone-info-surface: 221 60% 18%;
-    --tone-info-text: 213 94% 78%;
-    --tone-info-border: 221 60% 30%;
-
-    --tone-success-surface: 158 60% 14%;
-    --tone-success-text: 152 76% 70%;
-    --tone-success-border: 158 55% 26%;
-
-    --tone-warning-surface: 26 70% 16%;
-    --tone-warning-text: 45 93% 68%;
-    --tone-warning-border: 30 65% 28%;
-
-    --tone-danger-surface: 0 60% 18%;
-    --tone-danger-text: 0 93% 78%;
-    --tone-danger-border: 0 60% 30%;
-
-    --tone-accent-surface: 272 55% 20%;
-    --tone-accent-text: 269 97% 82%;
-    --tone-accent-border: 272 50% 32%;
-
-    /* Border & Ring */
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-
-    /* Card */
-    --card: 222 47% 8%;
-    --card-foreground: 210 40% 98%;
-
-    /* Shadows - Softer in dark mode */
-    --shadow-strength: 25%;
-  }
 }
 
 @theme inline {
-  --color-background: hsl(var(--background));
-  --color-foreground: hsl(var(--foreground));
-  --color-surface-1: hsl(var(--surface-1));
-  --color-surface-2: hsl(var(--surface-2));
-  --color-surface-3: hsl(var(--surface-3));
-  --color-primary: hsl(var(--primary));
-  --color-primary-foreground: hsl(var(--primary-foreground));
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-staging: hsl(var(--staging));
-  --color-staging-foreground: hsl(var(--staging-foreground));
-  --color-success: hsl(var(--success));
-  --color-success-foreground: hsl(var(--success-foreground));
-  --color-muted: hsl(var(--muted));
-  --color-muted-foreground: hsl(var(--muted-foreground));
-  --color-secondary: hsl(var(--secondary));
-  --color-secondary-foreground: hsl(var(--secondary-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
-  --color-warning: hsl(var(--warning));
-  --color-warning-foreground: hsl(var(--warning-foreground));
-  --color-info: hsl(var(--info));
-  --color-info-foreground: hsl(var(--info-foreground));
+  --color-background: var(--canvas);
+  --color-foreground: var(--text-strong);
+  --color-card: var(--surface-card);
+  --color-card-foreground: var(--text-strong);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
 
-  /* Status tones */
-  --color-tone-neutral-surface: hsl(var(--tone-neutral-surface));
-  --color-tone-neutral-text: hsl(var(--tone-neutral-text));
-  --color-tone-neutral-border: hsl(var(--tone-neutral-border));
-  --color-tone-info-surface: hsl(var(--tone-info-surface));
-  --color-tone-info-text: hsl(var(--tone-info-text));
-  --color-tone-info-border: hsl(var(--tone-info-border));
-  --color-tone-success-surface: hsl(var(--tone-success-surface));
-  --color-tone-success-text: hsl(var(--tone-success-text));
-  --color-tone-success-border: hsl(var(--tone-success-border));
-  --color-tone-warning-surface: hsl(var(--tone-warning-surface));
-  --color-tone-warning-text: hsl(var(--tone-warning-text));
-  --color-tone-warning-border: hsl(var(--tone-warning-border));
-  --color-tone-danger-surface: hsl(var(--tone-danger-surface));
-  --color-tone-danger-text: hsl(var(--tone-danger-text));
-  --color-tone-danger-border: hsl(var(--tone-danger-border));
-  --color-tone-accent-surface: hsl(var(--tone-accent-surface));
-  --color-tone-accent-text: hsl(var(--tone-accent-text));
-  --color-tone-accent-border: hsl(var(--tone-accent-border));
-  --color-border: hsl(var(--border));
-  --color-input: hsl(var(--input));
-  --color-ring: hsl(var(--ring));
-  --color-card: hsl(var(--card));
-  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: var(--accent-solid);
+  --color-primary-foreground: var(--accent-on-solid);
 
-  /* Sky Palette Colors */
+  /* `accent` is the neutral hover/active surface (shadcn semantics), not a
+     second brand colour. Ghost and outline controls hover onto this. */
+  --color-accent: var(--surface-2);
+  --color-accent-foreground: var(--text-strong);
+
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--text-muted);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--text-strong);
+
+  --color-destructive: var(--danger-solid);
+  --color-destructive-foreground: var(--danger-on-solid);
+
+  /* Semantic aliases resolve to the tone system so status colour is
+     consistent whether it is drawn as a dot, a bar or a badge. */
+  --color-success: var(--tone-success-text);
+  --color-success-foreground: var(--tone-success-surface);
+  --color-warning: var(--tone-warning-text);
+  --color-warning-foreground: var(--tone-warning-surface);
+  --color-info: var(--tone-info-text);
+  --color-info-foreground: var(--tone-info-surface);
+  --color-staging: var(--tone-warning-text);
+  --color-staging-foreground: var(--tone-warning-surface);
+
+  --color-tone-neutral-surface: var(--tone-neutral-surface);
+  --color-tone-neutral-text: var(--tone-neutral-text);
+  --color-tone-neutral-border: var(--tone-neutral-line);
+  --color-tone-info-surface: var(--tone-info-surface);
+  --color-tone-info-text: var(--tone-info-text);
+  --color-tone-info-border: var(--tone-info-line);
+  --color-tone-success-surface: var(--tone-success-surface);
+  --color-tone-success-text: var(--tone-success-text);
+  --color-tone-success-border: var(--tone-success-line);
+  --color-tone-warning-surface: var(--tone-warning-surface);
+  --color-tone-warning-text: var(--tone-warning-text);
+  --color-tone-warning-border: var(--tone-warning-line);
+  --color-tone-danger-surface: var(--tone-danger-surface);
+  --color-tone-danger-text: var(--tone-danger-text);
+  --color-tone-danger-border: var(--tone-danger-line);
+  --color-tone-accent-surface: var(--tone-accent-surface);
+  --color-tone-accent-text: var(--tone-accent-text);
+  --color-tone-accent-border: var(--tone-accent-line);
+
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--accent-solid);
+
+  /* Marketing palette (unchanged) */
   --color-sky-50: hsl(var(--sky-50));
   --color-sky-100: hsl(var(--sky-100));
   --color-sky-200: hsl(var(--sky-200));
   --color-sky-400: hsl(var(--sky-400));
   --color-sky-500: hsl(var(--sky-500));
-
-  /* Slate Text Colors */
   --color-slate-600: hsl(var(--slate-600));
   --color-slate-700: hsl(var(--slate-700));
   --color-slate-900: hsl(var(--slate-900));
 
+  /* Fonts are injected by next/font in src/app/layout.tsx. */
   --font-sans:
-    "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    var(--font-instrument-sans), -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
-  --font-mono:
-    "Geist Mono", "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-  --font-display:
-    "Cal Sans", "Geist Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 4px);
-  --radius-xl: calc(var(--radius) + 8px);
-  --radius-2xl: calc(var(--radius) + 16px);
+  --radius-xs: calc(var(--radius) - 8px);
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 10px);
+
+  --shadow-2xs: 0 1px 1px var(--shadow-a);
+  --shadow-xs: 0 1px 2px var(--shadow-a);
+  --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+  --shadow-md: 0 2px 4px -1px var(--shadow-a), 0 4px 10px -2px var(--shadow-b);
+  --shadow-lg: 0 4px 8px -2px var(--shadow-a), 0 12px 24px -6px var(--shadow-b);
+  --shadow-xl:
+    0 8px 16px -4px var(--shadow-a), 0 24px 48px -12px var(--shadow-b);
 }
 
-/* ============================================
-   BASE STYLES
-   ============================================ */
+/* ============================================================================
+   BASE
+   ========================================================================= */
 
 * {
-  border-color: hsl(var(--border));
+  border-color: var(--line);
 }
 
 body {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background: var(--canvas);
+  color: var(--text-strong);
   font-family: var(--font-sans);
   font-feature-settings:
     "rlig" 1,
-    "calt" 1;
+    "calt" 1,
+    "ss01" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Selection styling */
 ::selection {
-  background: hsl(var(--primary) / 0.3);
-  color: hsl(var(--foreground));
+  background: color-mix(in oklab, var(--accent-solid) 24%, transparent);
+  color: var(--text-strong);
 }
 
-/* Focus visible styles */
+/* Visible focus is a requirement, not a nicety. The double ring keeps the
+   indicator legible on both light cards and dark surfaces. */
 :focus-visible {
-  outline: 2px solid hsl(var(--ring));
+  outline: 2px solid var(--accent-solid);
   outline-offset: 2px;
 }
 
-/* ============================================
-   ANIMATION KEYFRAMES
-   ============================================ */
+/* ============================================================================
+   TYPOGRAPHY
+
+   Display sizes get negative tracking; small labels get positive tracking.
+   Weight carries hierarchy (400/500/600) instead of jumping 400 -> 700.
+   ========================================================================= */
+
+.text-display {
+  font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.023em;
+  color: var(--text-strong);
+}
+
+.text-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.012em;
+  color: var(--text-strong);
+}
+
+.text-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Numbers in a data view must not change width as they change value. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.text-metric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text-strong);
+}
+
+/* ============================================================================
+   INTERACTION STATES
+
+   Only transform / opacity / colour are animated — all GPU-composited or
+   cheap. Never width, height, top or left.
+   ========================================================================= */
+
+.pressable {
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out),
+    background-color var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    color var(--dur) var(--ease-out);
+}
+
+.pressable:active {
+  transform: translateY(1px);
+}
+
+/* A row or tile that is itself a link. Lifts on hover, settles on press. */
+.surface-interactive {
+  transition:
+    transform var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out),
+    background-color var(--dur) var(--ease-out);
+}
+
+.surface-interactive:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent-solid) 32%, var(--line));
+  box-shadow: var(--shadow-md);
+}
+
+.surface-interactive:active {
+  transform: translateY(0) scale(0.995);
+  box-shadow: var(--shadow-xs);
+}
+
+/* ============================================================================
+   SKELETONS
+
+   Shaped like the content they stand in for, not a generic spinner.
+   ========================================================================= */
 
 @keyframes shimmer {
   0% {
@@ -289,308 +340,46 @@ body {
   }
 }
 
-@keyframes pulse-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 20px hsl(var(--primary-glow) / 0.3);
-  }
-  50% {
-    box-shadow: 0 0 40px hsl(var(--primary-glow) / 0.5);
-  }
-}
-
-@keyframes float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-5px);
-  }
-}
-
-@keyframes slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes slide-down {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes scale-in {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes spin-slow {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes bounce-subtle {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-3px);
-  }
-}
-
-@keyframes wiggle {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  25% {
-    transform: rotate(-3deg);
-  }
-  75% {
-    transform: rotate(3deg);
-  }
-}
-
-@keyframes scroll {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(calc(-100% / 3));
-  }
-}
-
-@keyframes gradient-shift {
-  0%,
-  100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-}
-
-/* ============================================
-   ANIMATION UTILITY CLASSES
-   ============================================ */
-
-.animate-shimmer {
-  animation: shimmer 2s linear infinite;
+.skeleton {
   background: linear-gradient(
     90deg,
-    hsl(var(--muted)) 0%,
-    hsl(var(--surface-2)) 50%,
-    hsl(var(--muted)) 100%
+    var(--surface-2) 0%,
+    var(--surface-3) 50%,
+    var(--surface-2) 100%
   );
   background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: calc(var(--radius) - 3px);
 }
 
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
+/* ============================================================================
+   SCROLLBAR
+   ========================================================================= */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
 }
 
-.animate-float {
-  animation: float 3s ease-in-out infinite;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.animate-slide-up {
-  animation: slide-up 0.4s ease-out forwards;
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--text-muted) 32%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
 }
 
-.animate-slide-down {
-  animation: slide-down 0.4s ease-out forwards;
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--text-muted) 55%, transparent);
+  background-clip: content-box;
 }
 
-.animate-scale-in {
-  animation: scale-in 0.3s ease-out forwards;
-}
-
-.animate-fade-in {
-  animation: fade-in 0.3s ease-out forwards;
-}
-
-.animate-spin-slow {
-  animation: spin-slow 8s linear infinite;
-}
-
-.animate-bounce-subtle {
-  animation: bounce-subtle 2s ease-in-out infinite;
-}
-
-.animate-wiggle {
-  animation: wiggle 0.5s ease-in-out;
-}
-
-.animate-scroll {
-  animation: scroll 45s linear infinite;
-  will-change: transform;
-}
-
-.animate-gradient {
-  animation: gradient-shift 6s ease infinite;
-  background-size: 200% 200%;
-}
-
-/* Pause animation on hover */
-.animate-scroll:hover {
-  animation-play-state: paused;
-}
-
-/* Ensure smooth scrolling and prevent layout shifts */
-.animate-scroll * {
-  backface-visibility: hidden;
-  transform: translateZ(0);
-}
-
-/* Stagger children animations */
-.stagger-children > * {
-  opacity: 0;
-  animation: slide-up 0.4s ease-out forwards;
-}
-
-.stagger-children > *:nth-child(1) {
-  animation-delay: 0ms;
-}
-.stagger-children > *:nth-child(2) {
-  animation-delay: 50ms;
-}
-.stagger-children > *:nth-child(3) {
-  animation-delay: 100ms;
-}
-.stagger-children > *:nth-child(4) {
-  animation-delay: 150ms;
-}
-.stagger-children > *:nth-child(5) {
-  animation-delay: 200ms;
-}
-.stagger-children > *:nth-child(6) {
-  animation-delay: 250ms;
-}
-.stagger-children > *:nth-child(7) {
-  animation-delay: 300ms;
-}
-.stagger-children > *:nth-child(8) {
-  animation-delay: 350ms;
-}
-
-/* ============================================
-   GLASS MORPHISM UTILITIES
-   ============================================ */
-
-.glass {
-  background: hsl(var(--card) / 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid hsl(var(--border) / 0.5);
-}
-
-.glass-strong {
-  background: hsl(var(--card) / 0.95);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid hsl(var(--border) / 0.8);
-}
-
-.glass-subtle {
-  background: hsl(var(--card) / 0.6);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid hsl(var(--border) / 0.3);
-}
-
-/* ============================================
-   GLOW UTILITIES
-   ============================================ */
-
-.glow-primary {
-  box-shadow:
-    0 0 20px hsl(var(--primary-glow) / 0.3),
-    0 0 60px hsl(var(--primary-glow) / 0.1);
-}
-
-.glow-accent {
-  box-shadow:
-    0 0 20px hsl(var(--accent-glow) / 0.3),
-    0 0 60px hsl(var(--accent-glow) / 0.1);
-}
-
-.glow-staging {
-  box-shadow:
-    0 0 20px hsl(var(--staging) / 0.4),
-    0 0 60px hsl(var(--staging) / 0.2);
-}
-
-.glow-success {
-  box-shadow:
-    0 0 20px hsl(var(--success) / 0.3),
-    0 0 60px hsl(var(--success) / 0.1);
-}
-
-/* ============================================
-   GRADIENT UTILITIES
-   ============================================ */
-
-.gradient-primary {
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(173 80% 30%));
-}
-
-.gradient-accent {
-  background: linear-gradient(135deg, hsl(var(--accent)), hsl(25 95% 45%));
-}
-
-.gradient-staging {
-  background: linear-gradient(135deg, hsl(var(--staging)), hsl(35 92% 55%));
-}
-
-.gradient-mesh {
-  background:
-    radial-gradient(at 40% 20%, hsl(var(--primary) / 0.3) 0px, transparent 50%),
-    radial-gradient(at 80% 0%, hsl(var(--accent) / 0.2) 0px, transparent 50%),
-    radial-gradient(at 0% 50%, hsl(var(--primary) / 0.2) 0px, transparent 50%),
-    radial-gradient(at 80% 50%, hsl(var(--accent) / 0.1) 0px, transparent 50%),
-    radial-gradient(
-      at 0% 100%,
-      hsl(var(--primary) / 0.15) 0px,
-      transparent 50%
-    ),
-    hsl(var(--background));
-}
-
-/* ============================================
-   NOISE & TEXTURE
-   ============================================ */
+/* ============================================================================
+   TEXTURE — used by the marketing hero's WebGL backdrop only.
+   ========================================================================= */
 
 .noise {
   position: relative;
@@ -606,73 +395,9 @@ body {
   mix-blend-mode: overlay;
 }
 
-/* ============================================
-   INTERACTIVE UTILITIES
-   ============================================ */
-
-.hover-lift {
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.hover-lift:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px hsl(var(--shadow-color) / var(--shadow-strength));
-}
-
-.hover-subtle {
-  transition: background-color 0.2s ease;
-}
-
-.hover-subtle:hover {
-  background-color: hsl(var(--foreground) / 0.05);
-}
-
-.hover-glow:hover {
-  box-shadow: 0 0 30px hsl(var(--primary-glow) / 0.4);
-}
-
-.press-effect {
-  transition: transform 0.1s ease;
-}
-
-.press-effect:active {
-  transform: scale(0.98);
-}
-
-/* ============================================
-   SCROLLBAR STYLING
-   ============================================ */
-
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: hsl(var(--surface-1));
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.3);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
-}
-
-/* ============================================
-   RESPONSIVE ANIMATIONS
-   ============================================ */
-
-@media (max-width: 768px) {
-  .animate-scroll {
-    animation-duration: 35s;
-  }
-}
+/* ============================================================================
+   REDUCED MOTION
+   ========================================================================= */
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -683,85 +408,9 @@ body {
     transition-duration: 0.01ms !important;
   }
 
-  .animate-scroll {
-    animation-duration: 120s;
+  .surface-interactive:hover,
+  .pressable:active,
+  .surface-interactive:active {
+    transform: none;
   }
-}
-
-/* ============================================
-   COMPONENT UTILITIES
-   ============================================ */
-
-/* Status dot */
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-.status-dot.online {
-  background: hsl(var(--success));
-  box-shadow: 0 0 8px hsl(var(--success) / 0.5);
-}
-
-.status-dot.staging {
-  background: hsl(var(--staging));
-  box-shadow: 0 0 8px hsl(var(--staging) / 0.5);
-}
-
-.status-dot.offline {
-  background: hsl(var(--muted-foreground));
-  animation: none;
-}
-
-/* Code block styling */
-.code-block {
-  font-family: var(--font-mono);
-  background: hsl(var(--surface-2));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-  padding: 1rem;
-  overflow-x: auto;
-}
-
-/* Badge glow */
-.badge-glow {
-  position: relative;
-}
-
-.badge-glow::before {
-  content: "";
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  background: inherit;
-  filter: blur(8px);
-  opacity: 0.5;
-  z-index: -1;
-}
-
-/* Skeleton loading */
-.skeleton {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted)) 0%,
-    hsl(var(--surface-2)) 50%,
-    hsl(var(--muted)) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s linear infinite;
-  border-radius: var(--radius);
-}
-
-/* Focus ring for accessibility */
-.focus-ring {
-  outline: none;
-}
-
-.focus-ring:focus-visible {
-  ring: 2px;
-  ring-color: hsl(var(--ring));
-  ring-offset: 2px;
-  ring-offset-color: hsl(var(--background));
 }

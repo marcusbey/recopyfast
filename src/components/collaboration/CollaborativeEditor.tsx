@@ -300,13 +300,13 @@ export function CollaborativeEditor({
   const getUserIcon = (role: string) => {
     switch (role) {
       case "owner":
-        return <Crown className="h-3 w-3 text-yellow-500" />;
+        return <Crown className="h-3 w-3 text-tone-warning-text" />;
       case "manager":
-        return <Shield className="h-3 w-3 text-blue-500" />;
+        return <Shield className="h-3 w-3 text-tone-info-text" />;
       case "editor":
-        return <Edit3 className="h-3 w-3 text-green-500" />;
+        return <Edit3 className="h-3 w-3 text-tone-success-text" />;
       case "viewer":
-        return <Eye className="h-3 w-3 text-gray-500" />;
+        return <Eye className="h-3 w-3 text-muted-foreground" />;
       default:
         return null;
     }
@@ -318,9 +318,9 @@ export function CollaborativeEditor({
     return (
       <div
         key={presence.userId}
-        className="flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
+        className="flex items-center gap-1 px-2 py-1 bg-tone-info-surface text-tone-info-text text-xs rounded-full"
       >
-        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+        <div className="w-2 h-2 bg-info rounded-full animate-pulse"></div>
         {presence.userName || presence.userEmail}
       </div>
     );
@@ -389,7 +389,7 @@ export function CollaborativeEditor({
 
           {presenceList.length > 0 && (
             <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-gray-500" />
+              <Users className="h-4 w-4 text-muted-foreground" />
               <div className="flex items-center gap-1">
                 {presenceList.map(getPresenceIndicator).filter(Boolean)}
               </div>
@@ -447,18 +447,20 @@ export function CollaborativeEditor({
           <div
             ref={editorRef}
             className={`min-h-[200px] p-4 prose prose-sm max-w-none focus:outline-none ${
-              isEditing ? "border-2 border-blue-500 bg-blue-50" : "bg-gray-50"
+              isEditing
+                ? "border-2 border-primary bg-tone-info-surface"
+                : "bg-surface-1"
             }`}
           />
         </CardContent>
       </Card>
 
       {/* Status Bar */}
-      <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
+      <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
         <div>
           {isEditing ? (
             <span className="flex items-center gap-1">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <div className="w-2 h-2 bg-success rounded-full animate-pulse"></div>
               Editing
             </span>
           ) : (

@@ -161,14 +161,14 @@ export function SiteRegistrationModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[600px] bg-white border border-gray-200 rounded-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[600px] bg-card border border-border rounded-2xl max-h-[90vh] overflow-y-auto">
         {!registrationResult ? (
           <>
             <DialogHeader>
-              <DialogTitle className="text-2xl font-bold text-gray-900">
+              <DialogTitle className="text-2xl font-bold text-foreground">
                 Register New Site
               </DialogTitle>
-              <DialogDescription className="text-gray-600">
+              <DialogDescription className="text-muted-foreground">
                 Add a new website to start making your content editable with AI
                 assistance.
               </DialogDescription>
@@ -178,18 +178,18 @@ export function SiteRegistrationModal({
               {errors.general && (
                 <Alert
                   variant="destructive"
-                  className="bg-red-50 border-red-200"
+                  className="bg-tone-danger-surface border-tone-danger-border"
                 >
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription className="text-red-800">
+                  <AlertDescription className="text-tone-danger-text">
                     {errors.general}
                   </AlertDescription>
                 </Alert>
               )}
 
               <div className="space-y-2">
-                <Label htmlFor="name" className="text-gray-900 font-medium">
-                  Website Name <span className="text-red-500">*</span>
+                <Label htmlFor="name" className="text-foreground font-medium">
+                  Website Name <span className="text-tone-danger-text">*</span>
                 </Label>
                 <Input
                   id="name"
@@ -203,19 +203,19 @@ export function SiteRegistrationModal({
                   }}
                   className={
                     errors.name
-                      ? "border-red-500 focus-visible:ring-red-500"
+                      ? "border-destructive focus-visible:ring-destructive"
                       : ""
                   }
                   disabled={isLoading}
                 />
                 {errors.name && (
-                  <p className="text-sm text-red-500">{errors.name}</p>
+                  <p className="text-sm text-tone-danger-text">{errors.name}</p>
                 )}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="domain" className="text-gray-900 font-medium">
-                  Website URL <span className="text-red-500">*</span>
+                <Label htmlFor="domain" className="text-foreground font-medium">
+                  Website URL <span className="text-tone-danger-text">*</span>
                 </Label>
                 <Input
                   id="domain"
@@ -229,15 +229,17 @@ export function SiteRegistrationModal({
                   }}
                   className={
                     errors.domain
-                      ? "border-red-500 focus-visible:ring-red-500"
+                      ? "border-destructive focus-visible:ring-destructive"
                       : ""
                   }
                   disabled={isLoading}
                 />
                 {errors.domain && (
-                  <p className="text-sm text-red-500">{errors.domain}</p>
+                  <p className="text-sm text-tone-danger-text">
+                    {errors.domain}
+                  </p>
                 )}
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-muted-foreground">
                   Enter your website&apos;s domain name (e.g., example.com)
                 </p>
               </div>
@@ -245,9 +247,10 @@ export function SiteRegistrationModal({
               <div className="space-y-2">
                 <Label
                   htmlFor="description"
-                  className="text-gray-900 font-medium"
+                  className="text-foreground font-medium"
                 >
-                  Description <span className="text-gray-500">(Optional)</span>
+                  Description{" "}
+                  <span className="text-muted-foreground">(Optional)</span>
                 </Label>
                 <Input
                   id="description"
@@ -272,7 +275,7 @@ export function SiteRegistrationModal({
                 <Button
                   type="submit"
                   disabled={isLoading}
-                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
+                  className="bg-primary"
                 >
                   {isLoading ? (
                     <>
@@ -289,33 +292,33 @@ export function SiteRegistrationModal({
         ) : (
           <>
             <DialogHeader>
-              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Check className="w-6 h-6 text-green-600" />
+              <div className="w-12 h-12 bg-tone-success-surface rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check className="w-6 h-6 text-tone-success-text" />
               </div>
-              <DialogTitle className="text-2xl font-bold text-gray-900 text-center">
+              <DialogTitle className="text-2xl font-bold text-foreground text-center">
                 Site Registered Successfully!
               </DialogTitle>
-              <DialogDescription className="text-gray-600 text-center">
+              <DialogDescription className="text-muted-foreground text-center">
                 Your website has been registered. Follow the steps below to
                 integrate ReCopyFast.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-6 mt-6">
-              <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                <h3 className="font-semibold text-gray-900">Site Details</h3>
+              <div className="bg-surface-1 rounded-lg p-4 space-y-2">
+                <h3 className="font-semibold text-foreground">Site Details</h3>
                 <div className="space-y-1 text-sm">
-                  <p className="text-gray-600">
+                  <p className="text-muted-foreground">
                     <span className="font-medium">Name:</span>{" "}
                     {registrationResult.site.name}
                   </p>
-                  <p className="text-gray-600">
+                  <p className="text-muted-foreground">
                     <span className="font-medium">Domain:</span>{" "}
                     {registrationResult.site.domain}
                   </p>
-                  <p className="text-gray-600">
+                  <p className="text-muted-foreground">
                     <span className="font-medium">Site ID:</span>{" "}
-                    <code className="bg-white px-2 py-0.5 rounded text-xs border border-gray-200">
+                    <code className="bg-card px-2 py-0.5 rounded text-xs border border-border">
                       {registrationResult.site.id}
                     </code>
                   </p>
@@ -323,22 +326,22 @@ export function SiteRegistrationModal({
               </div>
 
               <div className="space-y-3">
-                <h3 className="font-semibold text-gray-900">
+                <h3 className="font-semibold text-foreground">
                   Integration Instructions
                 </h3>
 
                 <div className="space-y-2">
-                  <p className="text-sm text-gray-600 font-medium">
+                  <p className="text-sm text-muted-foreground font-medium">
                     Step 1: Copy the embed script
                   </p>
                   <div className="relative">
-                    <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-xs overflow-x-auto">
+                    <pre className="bg-foreground text-foreground p-4 rounded-lg text-xs overflow-x-auto">
                       <code>{registrationResult.embedScript}</code>
                     </pre>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="absolute top-2 right-2 bg-white hover:bg-gray-100"
+                      className="absolute top-2 right-2 bg-card hover:bg-surface-2"
                       onClick={handleCopyScript}
                     >
                       {copied ? (
@@ -357,12 +360,12 @@ export function SiteRegistrationModal({
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm text-gray-600 font-medium">
+                  <p className="text-sm text-muted-foreground font-medium">
                     Step 2: Add the script to your website
                   </p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Paste the script tag in your HTML, just before the closing{" "}
-                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">
+                    <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
                       &lt;/body&gt;
                     </code>{" "}
                     tag.
@@ -370,27 +373,27 @@ export function SiteRegistrationModal({
                 </div>
 
                 <div className="space-y-2">
-                  <p className="text-sm text-gray-600 font-medium">
+                  <p className="text-sm text-muted-foreground font-medium">
                     Step 3: Mark elements as editable
                   </p>
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Add the{" "}
-                    <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">
+                    <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
                       data-recopyfast-editable
                     </code>{" "}
                     attribute to any HTML element you want to make editable.
                   </p>
-                  <pre className="bg-gray-900 text-gray-100 p-3 rounded-lg text-xs overflow-x-auto">
+                  <pre className="bg-foreground text-foreground p-3 rounded-lg text-xs overflow-x-auto">
                     <code>{`<h1 data-recopyfast-editable>Your Editable Heading</h1>`}</code>
                   </pre>
                 </div>
 
-                <Alert className="bg-blue-50 border-blue-200">
-                  <AlertDescription className="text-blue-800 text-sm">
+                <Alert className="bg-tone-info-surface border-tone-info-border">
+                  <AlertDescription className="text-tone-info-text text-sm">
                     <strong>Need help?</strong> Visit your{" "}
                     <a
                       href="/dashboard/sites"
-                      className="underline hover:text-blue-900"
+                      className="underline hover:text-tone-info-text"
                     >
                       site dashboard
                     </a>{" "}
@@ -399,14 +402,11 @@ export function SiteRegistrationModal({
                 </Alert>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+              <div className="flex justify-end gap-3 pt-4 border-t border-border">
                 <Button variant="outline" onClick={handleClose}>
                   Close
                 </Button>
-                <Button
-                  onClick={handleGoToDashboard}
-                  className="bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70"
-                >
+                <Button onClick={handleGoToDashboard} className="bg-primary">
                   Go to Site Dashboard
                   <ExternalLink className="w-4 h-4 ml-2" />
                 </Button>

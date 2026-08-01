@@ -35,7 +35,7 @@ export default function ABTestCreateFlow({
       <WizardStepIndicator steps={WIZARD_STEPS} currentStep={wizard.step} />
 
       {wizard.error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+        <div className="rounded-lg border border-tone-danger-border bg-tone-danger-surface p-3 text-sm text-tone-danger-text">
           {wizard.error}
         </div>
       )}

@@ -15,14 +15,14 @@ export default function ABTestResults({ testId }: ABTestResultsProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className="py-12 text-center text-sm text-gray-500">
+      <div className="py-12 text-center text-sm text-muted-foreground">
         Failed to load test results
       </div>
     );
@@ -32,7 +32,7 @@ export default function ABTestResults({ testId }: ABTestResultsProps) {
 
   if (!statistics.variant_stats?.length) {
     return (
-      <div className="flex items-center justify-center py-12 text-sm text-gray-500">
+      <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
         No variant performance data yet
       </div>
     );

@@ -109,7 +109,7 @@ export function PresenceIndicator({
       .slice(0, 2);
 
     return (
-      <div className="w-6 h-6 rounded-full bg-blue-500 text-white text-xs font-medium flex items-center justify-center border-2 border-white">
+      <div className="w-6 h-6 rounded-full bg-info text-white text-xs font-medium flex items-center justify-center border-2 border-white">
         {initials}
       </div>
     );
@@ -130,13 +130,13 @@ export function PresenceIndicator({
   const getActivityColor = (status: string) => {
     switch (status) {
       case "active":
-        return "bg-green-500";
+        return "bg-success";
       case "recent":
-        return "bg-yellow-500";
+        return "bg-warning";
       case "idle":
-        return "bg-gray-400";
+        return "bg-muted-foreground";
       default:
-        return "bg-gray-400";
+        return "bg-muted-foreground";
     }
   };
 
@@ -158,8 +158,10 @@ export function PresenceIndicator({
 
   if (!isConnected) {
     return (
-      <div className={`flex items-center gap-2 text-gray-500 ${className}`}>
-        <Circle className="h-4 w-4 fill-gray-300" />
+      <div
+        className={`flex items-center gap-2 text-muted-foreground ${className}`}
+      >
+        <Circle className="h-4 w-4 fill-muted-foreground/40" />
         <span className="text-sm">Offline</span>
       </div>
     );
@@ -167,8 +169,10 @@ export function PresenceIndicator({
 
   if (relevantPresence.length === 0) {
     return (
-      <div className={`flex items-center gap-2 text-gray-500 ${className}`}>
-        <Circle className="h-4 w-4 fill-green-500" />
+      <div
+        className={`flex items-center gap-2 text-muted-foreground ${className}`}
+      >
+        <Circle className="h-4 w-4 fill-tone-success-text" />
         <span className="text-sm">Online (alone)</span>
       </div>
     );
@@ -190,13 +194,13 @@ export function PresenceIndicator({
             </div>
           ))}
           {relevantPresence.length > 3 && (
-            <div className="w-6 h-6 rounded-full bg-gray-200 border-2 border-white text-xs font-medium flex items-center justify-center">
+            <div className="w-6 h-6 rounded-full bg-surface-3 border-2 border-white text-xs font-medium flex items-center justify-center">
               +{relevantPresence.length - 3}
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-1 text-sm text-gray-600">
+        <div className="flex items-center gap-1 text-sm text-muted-foreground">
           <Users className="h-4 w-4" />
           <span>{relevantPresence.length + 1} online</span>
         </div>
@@ -210,7 +214,7 @@ export function PresenceIndicator({
       <CardContent className="p-4">
         <div className="space-y-4">
           <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-gray-600" />
+            <Users className="h-5 w-5 text-muted-foreground" />
             <h3 className="font-medium">Who&apos;s Online</h3>
             <Badge variant="secondary">{relevantPresence.length + 1}</Badge>
           </div>
@@ -218,7 +222,7 @@ export function PresenceIndicator({
           {/* Currently editing users */}
           {editingUsers.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1">
                 <Edit3 className="h-4 w-4" />
                 Currently Editing
               </h4>
@@ -230,13 +234,13 @@ export function PresenceIndicator({
                   >
                     <div className="relative">
                       {getUserAvatar(presence)}
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border border-white animate-pulse" />
+                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-success rounded-full border border-white animate-pulse" />
                     </div>
                     <div className="flex-1">
                       <p className="text-sm font-medium">
                         {presence.userName || presence.userEmail}
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-muted-foreground">
                         Editing • {formatLastSeen(presence.lastActivity)}
                       </p>
                     </div>
@@ -253,7 +257,7 @@ export function PresenceIndicator({
           {/* Viewing users */}
           {viewingUsers.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+              <h4 className="text-sm font-medium text-foreground mb-2 flex items-center gap-1">
                 <Eye className="h-4 w-4" />
                 Viewing
               </h4>
@@ -275,7 +279,7 @@ export function PresenceIndicator({
                       <p className="text-sm font-medium">
                         {presence.userName || presence.userEmail}
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p className="text-xs text-muted-foreground">
                         {formatLastSeen(presence.lastActivity)}
                       </p>
                     </div>
@@ -293,14 +297,14 @@ export function PresenceIndicator({
           <div className="border-t pt-3">
             <div className="flex items-center gap-3">
               <div className="relative">
-                <div className="w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-medium flex items-center justify-center border-2 border-white">
+                <div className="w-6 h-6 rounded-full bg-primary text-white text-xs font-medium flex items-center justify-center border-2 border-white">
                   You
                 </div>
-                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border border-white" />
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-success rounded-full border border-white" />
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">You</p>
-                <p className="text-xs text-gray-500">Active now</p>
+                <p className="text-xs text-muted-foreground">Active now</p>
               </div>
               <Badge variant="default" size="sm">
                 <Crown className="h-3 w-3 mr-1" />
@@ -324,14 +328,14 @@ export function CursorIndicator({ presence, position }: CursorIndicatorProps) {
   const getUserColor = (userId: string) => {
     // Generate a consistent color based on user ID
     const colors = [
-      "bg-red-500",
-      "bg-blue-500",
-      "bg-green-500",
-      "bg-yellow-500",
-      "bg-purple-500",
-      "bg-pink-500",
-      "bg-indigo-500",
-      "bg-teal-500",
+      "bg-destructive",
+      "bg-info",
+      "bg-success",
+      "bg-warning",
+      "bg-primary",
+      "bg-primary",
+      "bg-info",
+      "bg-primary",
     ];
 
     let hash = 0;

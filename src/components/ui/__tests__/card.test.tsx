@@ -102,8 +102,12 @@ describe("Card Components", () => {
       const header = screen.getByTestId("header");
       expect(header.className).toContain("flex");
       expect(header.className).toContain("flex-col");
-      expect(header.className).toContain("space-y-1.5");
-      expect(header.className).toContain("p-6");
+      expect(header.className).toContain("space-y-1");
+      // Optical, not mathematical: the top inset is larger than the bottom to
+      // compensate for the cap height of the title.
+      expect(header.className).toContain("px-6");
+      expect(header.className).toContain("pt-5");
+      expect(header.className).toContain("pb-4");
     });
 
     it("should merge custom className", () => {
@@ -144,10 +148,13 @@ describe("Card Components", () => {
       render(<CardTitle data-testid="title">Title</CardTitle>);
 
       const title = screen.getByTestId("title");
+      // The semantic contract: a real heading element carrying the text. Exact
+      // leading/tracking utilities are visual-design choices and are asserted
+      // by the contrast/typography checks, not here.
+      expect(title.tagName).toBe("H3");
+      expect(title).toHaveTextContent("Title");
       expect(title.className).toContain("text-xl");
       expect(title.className).toContain("font-semibold");
-      expect(title.className).toContain("leading-none");
-      expect(title.className).toContain("tracking-tight");
     });
 
     it("should merge custom className", () => {
@@ -257,7 +264,8 @@ describe("Card Components", () => {
       render(<CardContent data-testid="content">Content</CardContent>);
 
       const content = screen.getByTestId("content");
-      expect(content.className).toContain("p-6");
+      expect(content.className).toContain("px-6");
+      expect(content.className).toContain("pb-5");
       expect(content.className).toContain("pt-0");
     });
 
@@ -270,7 +278,7 @@ describe("Card Components", () => {
 
       const content = screen.getByTestId("content");
       expect(content.className).toContain("custom-content");
-      expect(content.className).toContain("p-6");
+      expect(content.className).toContain("px-6");
     });
 
     it("should forward ref correctly", () => {
@@ -301,7 +309,8 @@ describe("Card Components", () => {
       const footer = screen.getByTestId("footer");
       expect(footer.className).toContain("flex");
       expect(footer.className).toContain("items-center");
-      expect(footer.className).toContain("p-6");
+      expect(footer.className).toContain("px-6");
+      expect(footer.className).toContain("pb-5");
       expect(footer.className).toContain("pt-0");
     });
 

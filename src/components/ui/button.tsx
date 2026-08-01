@@ -6,86 +6,60 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils/cn";
 import { Loader2 } from "lucide-react";
 
+/**
+ * Six variants, one accent.
+ *
+ * The previous set carried nine, six of which were decoration: `gradient`,
+ * `glow`, `glass`, plus hardcoded orange/emerald `staging` and `success` fills.
+ * None were referenced outside this file. Colour on a button now means one of
+ * three things — this is the primary action, this destroys something, or this
+ * is neither.
+ */
 const buttonVariants = cva(
   [
-    // Base styles
     "inline-flex items-center justify-center gap-2 whitespace-nowrap",
-    "rounded-lg text-sm font-medium",
-    // Focus & accessibility
-    "ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-    // Disabled state
+    "rounded-md text-sm font-medium",
+    // Focus is visible, always. This is an accessibility requirement.
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "disabled:pointer-events-none disabled:opacity-50",
-    // Icon sizing
     "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-    // Transitions
-    "transition-all duration-200 ease-out",
-    // Active press effect
-    "active:scale-[0.98]",
+    // Only colour, shadow and transform animate — all cheap to composite.
+    "transition-[color,background-color,border-color,box-shadow,transform] duration-200 ease-out",
+    "active:translate-y-px",
   ].join(" "),
   {
     variants: {
       variant: {
         default: [
-          "bg-primary text-primary-foreground",
-          "hover:bg-primary/90",
-          "shadow-sm hover:shadow-md",
+          "bg-primary text-primary-foreground shadow-xs",
+          "hover:bg-primary/90 hover:shadow-sm",
         ].join(" "),
         destructive: [
-          "bg-destructive text-destructive-foreground",
-          "hover:bg-destructive/90",
-          "shadow-sm hover:shadow-md",
+          "bg-destructive text-destructive-foreground shadow-xs",
+          "hover:bg-destructive/90 hover:shadow-sm",
         ].join(" "),
         outline: [
-          "border border-input bg-background",
-          "hover:bg-accent/50 hover:text-accent-foreground hover:border-accent",
+          "border border-input bg-card text-foreground",
+          "hover:bg-accent hover:text-accent-foreground",
         ].join(" "),
         secondary: [
           "bg-secondary text-secondary-foreground",
           "hover:bg-secondary/80",
         ].join(" "),
-        ghost: ["hover:bg-accent/50 hover:text-accent-foreground"].join(" "),
-        link: ["text-primary underline-offset-4", "hover:underline"].join(" "),
-        // New premium variants
-        gradient: [
-          "bg-gradient-to-r from-primary to-primary/80",
-          "text-primary-foreground",
-          "hover:from-primary/90 hover:to-primary/70",
-          "shadow-md hover:shadow-lg",
-          "border-0",
-        ].join(" "),
-        glow: [
-          "bg-primary text-primary-foreground",
-          "hover:bg-primary/90",
-          "shadow-[0_0_20px_hsl(var(--primary)/0.3)]",
-          "hover:shadow-[0_0_30px_hsl(var(--primary)/0.5)]",
-        ].join(" "),
-        staging: [
-          "bg-gradient-to-r from-orange-500 to-amber-500",
-          "text-white",
-          "hover:from-orange-600 hover:to-amber-600",
-          "shadow-md hover:shadow-lg",
-          "border-0",
-        ].join(" "),
-        success: [
-          "bg-emerald-500 text-white",
-          "hover:bg-emerald-600",
-          "shadow-sm hover:shadow-md",
-        ].join(" "),
-        glass: [
-          "bg-white/10 backdrop-blur-md",
-          "text-foreground",
-          "border border-white/20",
-          "hover:bg-white/20",
-        ].join(" "),
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
       },
+      // Heights stay at a 40px default: these controls are used at 390px wide
+      // as well as on desktop, and a 36px target is below what a thumb wants.
+      // Density comes from type and spacing, not from shrinking hit areas.
       size: {
         default: "h-10 px-4 py-2",
-        sm: "h-8 rounded-md px-3 text-xs",
-        lg: "h-12 rounded-lg px-8 text-base",
-        xl: "h-14 rounded-xl px-10 text-lg font-semibold",
+        sm: "h-8 rounded-sm px-3 text-xs",
+        lg: "h-12 rounded-lg px-6 text-[0.9375rem]",
+        xl: "h-14 rounded-xl px-8 text-base",
         icon: "h-10 w-10",
-        "icon-sm": "h-8 w-8",
-        "icon-lg": "h-12 w-12",
+        "icon-sm": "h-8 w-8 rounded-sm",
+        "icon-lg": "h-12 w-12 rounded-lg",
       },
     },
     defaultVariants: {
@@ -128,18 +102,19 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         disabled={isDisabled}
+        aria-busy={loading || undefined}
         {...props}
       >
         {loading ? (
           <>
-            <Loader2 className="animate-spin" />
+            <Loader2 className="animate-spin" aria-hidden="true" />
             <span className="opacity-70">{children}</span>
           </>
         ) : (
           <>
-            {leftIcon && <span className="mr-1">{leftIcon}</span>}
+            {leftIcon}
             {children}
-            {rightIcon && <span className="ml-1">{rightIcon}</span>}
+            {rightIcon}
           </>
         )}
       </Comp>

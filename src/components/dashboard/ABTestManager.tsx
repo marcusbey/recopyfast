@@ -22,7 +22,7 @@ export default function ABTestManager({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -32,7 +32,7 @@ export default function ABTestManager({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">A/B Copy Tests</h2>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             Test copy variations to optimize conversions
           </p>
         </div>
@@ -45,11 +45,11 @@ export default function ABTestManager({
       {tests.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
-            <FlaskConical className="mb-3 h-10 w-10 text-gray-300" />
-            <p className="mb-1 text-sm font-medium text-gray-600">
+            <FlaskConical className="mb-3 h-10 w-10 text-muted-foreground" />
+            <p className="mb-1 text-sm font-medium text-muted-foreground">
               No A/B tests yet
             </p>
-            <p className="mb-4 text-xs text-gray-400">
+            <p className="mb-4 text-xs text-muted-foreground">
               AI will generate optimized copy variants for you
             </p>
             <Button onClick={onCreateTest} size="sm" variant="outline">

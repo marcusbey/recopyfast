@@ -189,7 +189,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
   const getStatusBadge = (verification: DomainVerification) => {
     if (verification.isVerified) {
       return (
-        <Badge className="bg-green-100 text-green-800">
+        <Badge className="bg-tone-success-surface text-tone-success-text">
           <CheckCircle className="w-3 h-3 mr-1" />
           Verified
         </Badge>
@@ -199,7 +199,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
     const isExpired = new Date(verification.expiresAt) <= new Date();
     if (isExpired) {
       return (
-        <Badge className="bg-red-100 text-red-800">
+        <Badge className="bg-tone-danger-surface text-tone-danger-text">
           <XCircle className="w-3 h-3 mr-1" />
           Expired
         </Badge>
@@ -207,7 +207,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
     }
 
     return (
-      <Badge className="bg-yellow-100 text-yellow-800">
+      <Badge className="bg-tone-warning-surface text-tone-warning-text">
         <Clock className="w-3 h-3 mr-1" />
         Pending
       </Badge>
@@ -221,7 +221,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Domain Verification</h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Verify domain ownership to enable secure embeds
           </p>
         </div>
@@ -236,24 +236,24 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
       </div>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <div className="text-red-800">{error}</div>
+        <Alert className="border-tone-danger-border bg-tone-danger-surface">
+          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
+          <div className="text-tone-danger-text">{error}</div>
         </Alert>
       )}
 
       {instructions && (
-        <Card className="p-6 bg-blue-50 border-blue-200">
-          <h3 className="text-lg font-semibold text-blue-900 mb-4">
+        <Card className="p-6 bg-tone-info-surface border-tone-info-border">
+          <h3 className="text-lg font-semibold text-tone-info-text mb-4">
             Verification Instructions
           </h3>
 
           {instructions.type === "dns" ? (
             <div className="space-y-3">
-              <p className="text-blue-800">
+              <p className="text-tone-info-text">
                 Add the following TXT record to your domain&apos;s DNS settings:
               </p>
-              <div className="bg-blue-100 p-3 rounded font-mono text-sm flex items-center justify-between">
+              <div className="bg-tone-info-surface p-3 rounded font-mono text-sm flex items-center justify-between">
                 <span>{instructions.record}</span>
                 <Button
                   size="sm"
@@ -265,17 +265,17 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                   Copy
                 </Button>
               </div>
-              <p className="text-sm text-blue-700">
+              <p className="text-sm text-tone-info-text">
                 DNS changes may take up to 24 hours to propagate. You can check
                 verification status after making the changes.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              <p className="text-blue-800">
+              <p className="text-tone-info-text">
                 Upload the verification file to your domain&apos;s web server:
               </p>
-              <div className="bg-blue-100 p-3 rounded">
+              <div className="bg-tone-info-surface p-3 rounded">
                 <div className="flex items-center justify-between mb-2">
                   <strong>File: /.well-known/{instructions.filename}</strong>
                   <Button
@@ -293,11 +293,11 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                     Download
                   </Button>
                 </div>
-                <pre className="text-xs bg-white p-2 rounded">
+                <pre className="text-xs bg-card p-2 rounded">
                   {instructions.content}
                 </pre>
               </div>
-              <p className="text-sm text-blue-700">
+              <p className="text-sm text-tone-info-text">
                 Make sure the file is accessible at:
                 https://yourdomain.com/.well-known/{instructions.filename}
               </p>
@@ -342,13 +342,13 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                   <TabsTrigger value="file">File Upload</TabsTrigger>
                 </TabsList>
                 <TabsContent value="dns" className="mt-3">
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Add a TXT record to your domain&apos;s DNS settings. This
                     method is recommended for most users.
                   </p>
                 </TabsContent>
                 <TabsContent value="file" className="mt-3">
-                  <p className="text-sm text-gray-600">
+                  <p className="text-sm text-muted-foreground">
                     Upload a verification file to your website. Requires access
                     to your web server.
                   </p>
@@ -376,7 +376,9 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
       <div className="grid gap-4">
         {verifications.length === 0 ? (
           <Card className="p-8 text-center">
-            <p className="text-gray-500">No domain verifications yet.</p>
+            <p className="text-muted-foreground">
+              No domain verifications yet.
+            </p>
             <Button onClick={() => setShowAddForm(true)} className="mt-4">
               Add Your First Domain
             </Button>
@@ -396,7 +398,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                     </Badge>
                   </div>
 
-                  <div className="text-sm text-gray-600 space-y-1">
+                  <div className="text-sm text-muted-foreground space-y-1">
                     <p>
                       Created:{" "}
                       {new Date(verification.createdAt).toLocaleDateString()}
@@ -440,7 +442,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
                     variant="outline"
                     onClick={() => deleteVerification(verification.id)}
                     disabled={loading}
-                    className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                    className="flex items-center gap-1 text-tone-danger-text hover:text-tone-danger-text"
                   >
                     <Trash2 className="w-3 h-3" />
                     Delete
@@ -450,9 +452,9 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
 
               {isExpired(verification.expiresAt) &&
                 !verification.isVerified && (
-                  <Alert className="mt-4 border-orange-200 bg-orange-50">
-                    <AlertTriangle className="h-4 w-4 text-orange-600" />
-                    <div className="text-orange-800">
+                  <Alert className="mt-4 border-tone-warning-border bg-tone-warning-surface">
+                    <AlertTriangle className="h-4 w-4 text-tone-warning-text" />
+                    <div className="text-tone-warning-text">
                       This verification has expired. Please create a new
                       verification to verify this domain.
                     </div>

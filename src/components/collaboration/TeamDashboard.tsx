@@ -189,13 +189,13 @@ export function TeamDashboard({
   const getRoleIcon = (role: string) => {
     switch (role) {
       case "owner":
-        return <Crown className="h-4 w-4 text-yellow-500" />;
+        return <Crown className="h-4 w-4 text-tone-warning-text" />;
       case "manager":
-        return <Shield className="h-4 w-4 text-blue-500" />;
+        return <Shield className="h-4 w-4 text-tone-info-text" />;
       case "editor":
-        return <Edit3 className="h-4 w-4 text-green-500" />;
+        return <Edit3 className="h-4 w-4 text-tone-success-text" />;
       case "viewer":
-        return <Eye className="h-4 w-4 text-gray-500" />;
+        return <Eye className="h-4 w-4 text-muted-foreground" />;
       default:
         return null;
     }
@@ -204,15 +204,15 @@ export function TeamDashboard({
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case "owner":
-        return "bg-yellow-100 text-yellow-800";
+        return "bg-tone-warning-surface text-tone-warning-text";
       case "manager":
-        return "bg-blue-100 text-blue-800";
+        return "bg-tone-info-surface text-tone-info-text";
       case "editor":
-        return "bg-green-100 text-green-800";
+        return "bg-tone-success-surface text-tone-success-text";
       case "viewer":
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
       default:
-        return "bg-gray-100 text-gray-800";
+        return "bg-surface-2 text-foreground";
     }
   };
 
@@ -224,8 +224,8 @@ export function TeamDashboard({
     return (
       <div className="flex items-center justify-center p-8">
         <div className="text-center">
-          <div className="animate-spin h-8 w-8 border-b-2 border-blue-600 rounded-full mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading team data...</p>
+          <div className="animate-spin h-8 w-8 border-b-2 border-primary rounded-full mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading team data...</p>
         </div>
       </div>
     );
@@ -236,9 +236,9 @@ export function TeamDashboard({
       {/* Team Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">{team.name}</h1>
+          <h1 className="text-3xl font-bold text-foreground">{team.name}</h1>
           {team.description && (
-            <p className="text-gray-600 mt-1">{team.description}</p>
+            <p className="text-muted-foreground mt-1">{team.description}</p>
           )}
           <div className="flex items-center gap-4 mt-2">
             <Badge variant="outline">
@@ -283,7 +283,7 @@ export function TeamDashboard({
                         e.target.value as "viewer" | "editor" | "manager",
                       )
                     }
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
                   >
                     <option value="viewer">Viewer - Can view content</option>
                     <option value="editor">Editor - Can edit content</option>
@@ -352,7 +352,7 @@ export function TeamDashboard({
                     className="flex items-center justify-between p-4 border rounded-lg"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center">
+                      <div className="w-10 h-10 bg-surface-3 rounded-full flex items-center justify-center">
                         {member.user?.raw_user_meta_data?.avatar_url ? (
                           <img
                             src={member.user.raw_user_meta_data.avatar_url}
@@ -360,7 +360,7 @@ export function TeamDashboard({
                             className="w-10 h-10 rounded-full"
                           />
                         ) : (
-                          <span className="text-gray-600 font-medium">
+                          <span className="text-muted-foreground font-medium">
                             {member.user?.email?.[0]?.toUpperCase()}
                           </span>
                         )}
@@ -373,10 +373,10 @@ export function TeamDashboard({
                           </p>
                           {getRoleIcon(member.role)}
                         </div>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-muted-foreground">
                           {member.user?.email}
                         </p>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-muted-foreground">
                           Joined{" "}
                           {new Date(member.joined_at).toLocaleDateString()}
                         </p>
@@ -422,7 +422,7 @@ export function TeamDashboard({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               onClick={() => handleRemoveMember(member.id)}
-                              className="text-red-600"
+                              className="text-tone-danger-text"
                             >
                               <Trash2 className="h-4 w-4 mr-2" />
                               Remove from team
@@ -449,7 +449,7 @@ export function TeamDashboard({
               </CardHeader>
               <CardContent>
                 {invitations.length === 0 ? (
-                  <p className="text-gray-600 text-center py-8">
+                  <p className="text-muted-foreground text-center py-8">
                     No pending invitations
                   </p>
                 ) : (
@@ -461,7 +461,7 @@ export function TeamDashboard({
                       >
                         <div>
                           <p className="font-medium">{invitation.email}</p>
-                          <p className="text-sm text-gray-600">
+                          <p className="text-sm text-muted-foreground">
                             Invited as {invitation.role} • Expires{" "}
                             {new Date(
                               invitation.expires_at,
@@ -488,7 +488,7 @@ export function TeamDashboard({
             </CardHeader>
             <CardContent>
               {activities.length === 0 ? (
-                <p className="text-gray-600 text-center py-8">
+                <p className="text-muted-foreground text-center py-8">
                   No recent activity
                 </p>
               ) : (
@@ -498,14 +498,14 @@ export function TeamDashboard({
                       key={activity.id}
                       className="flex items-start gap-3 p-4 border rounded-lg"
                     >
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                        <Activity className="h-4 w-4 text-blue-600" />
+                      <div className="w-8 h-8 bg-tone-info-surface rounded-full flex items-center justify-center">
+                        <Activity className="h-4 w-4 text-tone-info-text" />
                       </div>
                       <div className="flex-1">
                         <p className="font-medium">
                           {formatActivityAction(activity.action)}
                         </p>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-muted-foreground">
                           {activity.user?.email || "System"} •
                           {new Date(activity.created_at).toLocaleString()}
                         </p>
@@ -557,7 +557,7 @@ export function TeamDashboard({
                   </div>
                   <div>
                     <Label>Billing Plan</Label>
-                    <p className="text-sm text-gray-600 capitalize">
+                    <p className="text-sm text-muted-foreground capitalize">
                       {team.billing_plan} plan - {team.max_members} members max
                     </p>
                   </div>

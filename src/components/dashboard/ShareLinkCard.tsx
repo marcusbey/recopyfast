@@ -66,26 +66,28 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
     : `Expires ${format(new Date(link.expiresAt), "MMM d")}`;
 
   return (
-    <div className="bg-gray-50 rounded-lg border border-gray-200 p-4">
+    <div className="bg-surface-1 rounded-lg border border-border p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-tone-info-surface flex items-center justify-center flex-shrink-0">
             {link.type === "invite" ? (
-              <Mail className="w-4 h-4 text-blue-600" />
+              <Mail className="w-4 h-4 text-tone-info-text" />
             ) : (
-              <Link2 className="w-4 h-4 text-blue-600" />
+              <Link2 className="w-4 h-4 text-tone-info-text" />
             )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-gray-900 truncate">
+            <p className="font-medium text-foreground truncate">
               {link.label || link.email || "Shareable link"}
             </p>
             <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs text-gray-500">{expiresText}</span>
+              <span className="text-xs text-muted-foreground">
+                {expiresText}
+              </span>
               {link.email && !link.emailVerified && (
                 <Badge
                   variant="outline"
-                  className="text-xs bg-amber-50 text-amber-700 border-amber-200"
+                  className="text-xs bg-tone-warning-surface text-tone-warning-text border-tone-warning-border"
                 >
                   Pending
                 </Badge>
@@ -93,7 +95,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
               {isExpired && (
                 <Badge
                   variant="outline"
-                  className="text-xs bg-red-50 text-red-700 border-red-200"
+                  className="text-xs bg-tone-danger-surface text-tone-danger-text border-tone-danger-border"
                 >
                   Expired
                 </Badge>
@@ -111,7 +113,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
             className="h-8 px-2"
           >
             {copied ? (
-              <CheckCircle2 className="w-4 h-4 text-green-600" />
+              <CheckCircle2 className="w-4 h-4 text-tone-success-text" />
             ) : (
               <Copy className="w-4 h-4" />
             )}
@@ -121,7 +123,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
             size="sm"
             onClick={handleRevoke}
             disabled={revoking}
-            className="h-8 px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+            className="h-8 px-2 text-tone-danger-text hover:text-tone-danger-text hover:bg-tone-danger-surface"
           >
             <Trash2 className="w-4 h-4" />
           </Button>
@@ -135,7 +137,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
             <Badge
               key={perm}
               variant="outline"
-              className="text-xs bg-white border-gray-200 text-gray-600"
+              className="text-xs bg-card border-border text-muted-foreground"
             >
               <Icon className="w-3 h-3 mr-1" />
               {perm.charAt(0).toUpperCase() + perm.slice(1)}
@@ -145,7 +147,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
       </div>
 
       {link.lastUsedAt && (
-        <p className="text-xs text-gray-400 mt-2">
+        <p className="text-xs text-muted-foreground mt-2">
           Last used{" "}
           {formatDistanceToNow(new Date(link.lastUsedAt), { addSuffix: true })}
         </p>

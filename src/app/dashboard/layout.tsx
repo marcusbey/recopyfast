@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { User, LogOut, Settings } from "lucide-react";
 
 export default function DashboardLayout({
@@ -44,14 +45,32 @@ export default function DashboardLayout({
     }
   }, [user]);
 
+  // A skeleton in the shape of the shell, so the page does not flash from a
+  // centred spinner into a two-column layout.
   if (loading) {
     return (
       <div
-        className="flex min-h-screen items-center justify-center bg-surface-1"
+        className="min-h-screen bg-background"
         role="status"
         aria-label="Loading dashboard"
       >
-        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-primary" />
+        <div className="hidden lg:block">
+          <div className="fixed left-0 top-0 h-screen w-64 border-r border-border bg-card p-4">
+            <Skeleton className="mb-8 h-8 w-32" />
+            <div className="space-y-2">
+              {Array.from({ length: 8 }, (_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="lg:pl-64">
+          <div className="h-16 border-b border-border bg-card" />
+          <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 sm:p-6 lg:p-8">
+            <Skeleton className="h-9 w-56" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -60,10 +79,8 @@ export default function DashboardLayout({
     return null;
   }
 
-  const getUserInitials = () => {
-    const name = user.user_metadata?.name || user.email || "User";
-    return name.charAt(0).toUpperCase();
-  };
+  const displayName = user.user_metadata?.name || user.email || "User";
+  const getUserInitials = () => displayName.charAt(0).toUpperCase();
 
   const handleSignOut = async () => {
     try {
@@ -74,40 +91,35 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen bg-surface-1">
+    <div className="min-h-screen bg-background">
       <a
         href="#dashboard-main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-lg focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:ring-2 focus:ring-ring"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:ring-2 focus:ring-ring"
       >
         Skip to content
       </a>
 
-      {/* Sidebar Navigation */}
       <DashboardNavigation userPlan={userPlan} />
 
-      {/* Main Content */}
       <div className="lg:pl-64">
-        {/* Header */}
-        <header className="sticky top-0 z-30 border-b border-border bg-card">
-          <div className="flex h-16 items-center justify-between px-4 sm:px-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 lg:hidden" />
-              <div>
-                <h1 className="text-xl font-semibold text-foreground">
-                  Welcome back!
-                </h1>
-              </div>
+        {/* The header carries location (breadcrumbs), not a greeting. It used
+            to read "Welcome back!" on every screen, directly above each page's
+            own h1 — two competing titles saying nothing about where you are. */}
+        <header className="sticky top-0 z-30 border-b border-border bg-card/85 backdrop-blur-md">
+          <div className="mx-auto flex h-16 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="w-10 shrink-0 lg:hidden" />
+              <Breadcrumbs />
             </div>
 
-            {/* User Menu */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="relative h-10 w-10 rounded-full"
+                  className="relative h-9 w-9 shrink-0 rounded-full p-0"
                 >
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback className="bg-primary text-primary-foreground">
+                  <Avatar className="h-9 w-9">
+                    <AvatarFallback className="bg-surface-2 text-sm font-semibold text-foreground">
                       {getUserInitials()}
                     </AvatarFallback>
                   </Avatar>
@@ -117,10 +129,10 @@ export default function DashboardLayout({
               <DropdownMenuContent className="w-56" align="end" forceMount>
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">
-                      {user.user_metadata?.name || "User"}
+                    <p className="truncate text-sm font-medium leading-none">
+                      {user.user_metadata?.name || "Your account"}
                     </p>
-                    <p className="text-xs leading-none text-muted-foreground">
+                    <p className="truncate text-xs leading-none text-muted-foreground">
                       {user.email}
                     </p>
                   </div>
@@ -128,13 +140,13 @@ export default function DashboardLayout({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <a href="/dashboard/settings" className="cursor-pointer">
-                    <Settings className="mr-2 h-4 w-4" />
+                    <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Settings</span>
                   </a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
                   <a href="/dashboard/billing" className="cursor-pointer">
-                    <User className="mr-2 h-4 w-4" />
+                    <User className="mr-2 h-4 w-4" aria-hidden="true" />
                     <span>Billing</span>
                   </a>
                 </DropdownMenuItem>
@@ -143,7 +155,7 @@ export default function DashboardLayout({
                   onClick={handleSignOut}
                   className="cursor-pointer"
                 >
-                  <LogOut className="mr-2 h-4 w-4" />
+                  <LogOut className="mr-2 h-4 w-4" aria-hidden="true" />
                   <span>Log out</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -151,9 +163,13 @@ export default function DashboardLayout({
           </div>
         </header>
 
-        {/* Page Content */}
-        <main id="dashboard-main" className="p-4 sm:p-6">
-          <Breadcrumbs />
+        {/* A measure. Without a max-width the stat row stretched to whatever the
+            monitor was, and 1600px-wide cards holding a two-digit number is not
+            a layout. */}
+        <main
+          id="dashboard-main"
+          className="mx-auto w-full max-w-[1180px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
+        >
           {children}
         </main>
       </div>

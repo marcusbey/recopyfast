@@ -222,7 +222,7 @@ export function StagingAccessManager({
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Staging Access</h2>
-          <p className="text-gray-600">
+          <p className="text-muted-foreground">
             Manage who can view and edit your staging environment
           </p>
         </div>
@@ -237,24 +237,24 @@ export function StagingAccessManager({
       </div>
 
       {error && (
-        <Alert className="border-red-200 bg-red-50">
-          <AlertTriangle className="h-4 w-4 text-red-600" />
-          <div className="text-red-800">{error}</div>
+        <Alert className="border-tone-danger-border bg-tone-danger-surface">
+          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
+          <div className="text-tone-danger-text">{error}</div>
         </Alert>
       )}
 
       {newStagingUrl && (
-        <Card className="p-6 bg-green-50 border-green-200">
-          <h3 className="text-lg font-semibold text-green-900 mb-4 flex items-center gap-2">
+        <Card className="p-6 bg-tone-success-surface border-tone-success-border">
+          <h3 className="text-lg font-semibold text-tone-success-text mb-4 flex items-center gap-2">
             <Check className="w-5 h-5" />
             Staging Access Created
           </h3>
 
           <div className="space-y-3">
-            <p className="text-green-800">
+            <p className="text-tone-success-text">
               Share this URL with the person who needs access:
             </p>
-            <div className="flex items-center gap-2 bg-white p-3 rounded border">
+            <div className="flex items-center gap-2 bg-card p-3 rounded border">
               <code className="font-mono text-sm flex-1 break-all">
                 {newStagingUrl}
               </code>
@@ -273,9 +273,9 @@ export function StagingAccessManager({
               </Button>
             </div>
 
-            <Alert className="border-blue-200 bg-blue-50">
-              <Mail className="h-4 w-4 text-blue-600" />
-              <div className="text-blue-800">
+            <Alert className="border-tone-info-border bg-tone-info-surface">
+              <Mail className="h-4 w-4 text-tone-info-text" />
+              <div className="text-tone-info-text">
                 The recipient will need to verify their email before they can
                 make edits.
               </div>
@@ -330,7 +330,7 @@ export function StagingAccessManager({
                   placeholder="user@example.com"
                   className="mt-1"
                 />
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-muted-foreground mt-1">
                   Only this email can use the staging link.
                 </p>
               </div>
@@ -349,7 +349,7 @@ export function StagingAccessManager({
                 }
                 className="mt-1"
               />
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 A friendly name to identify this access.
               </p>
             </div>
@@ -379,7 +379,7 @@ export function StagingAccessManager({
                   </Button>
                 ))}
               </div>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 Select the permissions for this access.
               </p>
             </div>
@@ -391,7 +391,7 @@ export function StagingAccessManager({
                 id="expiry"
                 value={expiresInDays}
                 onChange={(e) => setExpiresInDays(parseInt(e.target.value))}
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2"
+                className="mt-1 w-full rounded-md border border-input px-3 py-2"
               >
                 <option value={1}>1 day</option>
                 <option value={3}>3 days</option>
@@ -429,8 +429,10 @@ export function StagingAccessManager({
       <div className="grid gap-4">
         {accessList.length === 0 ? (
           <Card className="p-8 text-center">
-            <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <p className="text-gray-500 mb-4">No staging access granted yet.</p>
+            <Users className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground mb-4">
+              No staging access granted yet.
+            </p>
             <Button
               onClick={() => setShowCreateForm(true)}
               className="flex items-center gap-2"
@@ -447,9 +449,9 @@ export function StagingAccessManager({
                   <div className="flex items-center gap-3 mb-2">
                     <div className="flex items-center gap-2">
                       {access.access_type === "invite" ? (
-                        <Mail className="w-4 h-4 text-gray-500" />
+                        <Mail className="w-4 h-4 text-muted-foreground" />
                       ) : (
-                        <Link2 className="w-4 h-4 text-gray-500" />
+                        <Link2 className="w-4 h-4 text-muted-foreground" />
                       )}
                       <h3 className="text-lg font-semibold">
                         {access.label || access.email || "Shareable Link"}
@@ -460,9 +462,9 @@ export function StagingAccessManager({
                       className={
                         access.is_active
                           ? new Date(access.expires_at) > new Date()
-                            ? "bg-green-100 text-green-800"
-                            : "bg-orange-100 text-orange-800"
-                          : "bg-gray-100 text-gray-800"
+                            ? "bg-tone-success-surface text-tone-success-text"
+                            : "bg-tone-warning-surface text-tone-warning-text"
+                          : "bg-surface-2 text-foreground"
                       }
                     >
                       {!access.is_active
@@ -475,13 +477,13 @@ export function StagingAccessManager({
                     </Badge>
                   </div>
 
-                  <div className="text-sm text-gray-600 space-y-1">
+                  <div className="text-sm text-muted-foreground space-y-1">
                     {access.email && (
                       <p className="flex items-center gap-2">
                         <Mail className="w-3 h-3" />
                         {access.email}
                         {access.email_verified && (
-                          <Check className="w-3 h-3 text-green-600" />
+                          <Check className="w-3 h-3 text-tone-success-text" />
                         )}
                       </p>
                     )}
@@ -505,7 +507,7 @@ export function StagingAccessManager({
                     </div>
 
                     {access.last_used_at && (
-                      <p className="text-xs text-gray-400 mt-2">
+                      <p className="text-xs text-muted-foreground mt-2">
                         Last used:{" "}
                         {new Date(access.last_used_at).toLocaleString()}
                       </p>
@@ -548,7 +550,7 @@ export function StagingAccessManager({
                       variant="outline"
                       onClick={() => revokeAccess(access.id)}
                       disabled={loading}
-                      className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                      className="flex items-center gap-1 text-tone-danger-text hover:text-tone-danger-text"
                     >
                       <Trash2 className="w-3 h-3" />
                       Revoke

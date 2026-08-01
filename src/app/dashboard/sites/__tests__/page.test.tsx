@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SitesPage from "../page";
 
@@ -93,9 +99,9 @@ describe("SitesPage", () => {
     render(<SitesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("My Websites")).toBeInTheDocument();
+      expect(screen.getByText("Sites")).toBeInTheDocument();
       expect(
-        screen.getByText("Manage and monitor all your registered websites"),
+        screen.getByText("Every domain you have connected to ReCopyFast."),
       ).toBeInTheDocument();
     });
   });
@@ -115,8 +121,9 @@ describe("SitesPage", () => {
   it("displays loading state initially", () => {
     const { container } = render(<SitesPage />);
 
-    // Lucide renders a bare <svg> with no img role, so match the spinner class.
-    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+    // The redesign replaced the bare spinner with skeletons announced via
+    // role="status". Assert the accessible loading affordance, not a class name.
+    expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByTestId("site-card-site-1")).not.toBeInTheDocument();
   });
 
@@ -135,11 +142,13 @@ describe("SitesPage", () => {
       expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
     });
 
-    // Click on "Active" filter card
-    const activeCard = screen.getByText("Active").closest(".cursor-pointer");
-    if (activeCard) {
-      fireEvent.click(activeCard);
-    }
+    // The status filters are a real button group (aria-pressed) rather than
+    // clickable cards, so query by role instead of a styling class.
+    fireEvent.click(
+      within(
+        screen.getByRole("group", { name: /filter sites by status/i }),
+      ).getByRole("button", { name: /^Active/ }),
+    );
 
     await waitFor(() => {
       // Should only show active site
@@ -155,9 +164,7 @@ describe("SitesPage", () => {
       expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText(
-      "Search sites by name or domain...",
-    );
+    const searchInput = screen.getByPlaceholderText("Search by name or domain");
     fireEvent.change(searchInput, { target: { value: "example1" } });
 
     await waitFor(() => {
@@ -175,9 +182,9 @@ describe("SitesPage", () => {
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByText(/Sort:/i));
+    await user.click(screen.getByRole("button", { name: /^Sort sites/i }));
 
-    await user.click(await screen.findByText("Sort by Name"));
+    await user.click(await screen.findByText("Sort by name"));
 
     // Sites should be reordered alphabetically
     await waitFor(() => {
@@ -195,20 +202,20 @@ describe("SitesPage", () => {
     render(<SitesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("No sites yet")).toBeInTheDocument();
+      expect(screen.getByText("No sites connected yet")).toBeInTheDocument();
       expect(
         screen.getByText(
-          "Add your first site to start making your content editable with AI assistance.",
+          "ReCopyFast turns a site you already have into one your team can edit in place.",
         ),
       ).toBeInTheDocument();
     });
   });
 
-  it('displays "Add New Site" button', async () => {
+  it('displays "Add site" button', async () => {
     render(<SitesPage />);
 
     await waitFor(() => {
-      const addButtons = screen.getAllByText("Add New Site");
+      const addButtons = screen.getAllByText("Add site");
       expect(addButtons.length).toBeGreaterThan(0);
     });
   });
@@ -262,8 +269,8 @@ describe("SitesPage", () => {
     render(<SitesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Error loading sites")).toBeInTheDocument();
-      expect(screen.getByText("Retry")).toBeInTheDocument();
+      expect(screen.getByText("Could not load your sites")).toBeInTheDocument();
+      expect(screen.getByText("Try again")).toBeInTheDocument();
     });
   });
 
@@ -275,7 +282,7 @@ describe("SitesPage", () => {
     render(<SitesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText("Retry")).toBeInTheDocument();
+      expect(screen.getByText("Try again")).toBeInTheDocument();
     });
 
     // Mock successful response for retry
@@ -284,7 +291,7 @@ describe("SitesPage", () => {
       json: async () => ({ sites: mockSites }),
     });
 
-    const retryButton = screen.getByText("Retry");
+    const retryButton = screen.getByText("Try again");
     fireEvent.click(retryButton);
 
     await waitFor(() => {
@@ -300,18 +307,16 @@ describe("SitesPage", () => {
     });
 
     // Set a search query
-    const searchInput = screen.getByPlaceholderText(
-      "Search sites by name or domain...",
-    );
+    const searchInput = screen.getByPlaceholderText("Search by name or domain");
     // Clear Filters only renders in the empty state, so filter everything out.
     fireEvent.change(searchInput, { target: { value: "no-such-site" } });
 
     await waitFor(() => {
-      expect(screen.getByText("Clear Filters")).toBeInTheDocument();
+      expect(screen.getByText("Clear filters")).toBeInTheDocument();
     });
 
     // Click clear filters
-    const clearButton = screen.getByText("Clear Filters");
+    const clearButton = screen.getByText("Clear filters");
     fireEvent.click(clearButton);
 
     await waitFor(() => {

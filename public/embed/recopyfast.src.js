@@ -2504,11 +2504,48 @@
         if (typeof undo === 'function') teardown.push(undo);
       }
 
+      /*
+       * Neutralise element-level compositing that makes the painted result
+       * unknowable, BEFORE assessing readability.
+       *
+       * `mix-blend-mode` blends the element's whole rendering — background,
+       * scrim and glyphs together — with whatever is behind it, so a scrim
+       * cannot rescue it. Under `difference`, white text over a dark scrim
+       * paints as |255-B| against |20-B|; at B around 137 those converge to
+       * 118 vs 117 and the text vanishes no matter how opaque the scrim is.
+       * The same applies to a `filter` on the element itself: it transforms the
+       * scrim along with everything else, so `invert(1)` turns a darkening
+       * scrim into a lightening one.
+       *
+       * Both are therefore switched off for the duration of the edit. That is a
+       * visible change, and it is the deliberate trade: while the user is
+       * actively typing, being able to read the text wins over reproducing an
+       * effect whose painted result we cannot predict — and cannot honestly
+       * claim a contrast ratio for. Restored wholesale by the style-attribute
+       * restore in cleanup().
+       *
+       * An ancestor's blend/filter is left alone: it transforms the element and
+       * its backdrop together, and resolveBackdrop still reports it as
+       * uncertain so the scrim is solved for the worst case.
+       */
+      const preEdit = window.getComputedStyle(element);
+      // Read to primitives first — getComputedStyle returns a LIVE view, so
+      // holding the object and reading it later gives post-mutation values.
+      const preEditBlend = String(preEdit.mixBlendMode || 'normal');
+      const preEditFilter = String(preEdit.filter || 'none');
+
+      if (preEditBlend !== 'normal') {
+        element.style.setProperty('mix-blend-mode', 'normal', 'important');
+      }
+      if (preEditFilter !== 'none') {
+        element.style.setProperty('filter', 'none', 'important');
+      }
+
       const computed = window.getComputedStyle(element);
       const floor = Rules.measureLayoutFloor(element);
       const verdict = Rules.assessReadability(element);
       const colors = Rules.resolveAffordances(element);
-      const originalBoxShadow = computed.boxShadow;
+      const originalBoxShadow = String(computed.boxShadow);
 
       element.setAttribute('data-rcf-editing', 'true');
       element.classList.add('rcf-editing');
@@ -2757,10 +2794,16 @@
       // Lifecycle
       // ---------------------------------------------------------------------
       let isCleaningUp = false;
+      let unloadGuard = null;
 
       const cleanup = function() {
         if (isCleaningUp) return;
         isCleaningUp = true;
+
+        if (unloadGuard) {
+          window.removeEventListener('beforeunload', unloadGuard);
+          unloadGuard = null;
+        }
 
         window.removeEventListener('scroll', scheduleReposition, true);
         window.removeEventListener('resize', scheduleReposition);
@@ -2800,6 +2843,23 @@
       const fieldsDirty = function() {
         return fieldInputs.some(function(f) { return f.input.value !== f.initial; });
       };
+
+      /*
+       * Editing happens on the customer's own page, where a stray link click,
+       * a router push or a form submit can navigate away mid-edit and silently
+       * discard everything typed since the editor opened. The browser's own
+       * confirmation is the only thing that can interrupt a navigation, and it
+       * only fires if a handler is registered while the work is actually dirty.
+       */
+      unloadGuard = function(event) {
+        if (isCleaningUp) return undefined;
+        if (sanitizeContent() === originalText && !fieldsDirty()) return undefined;
+        event.preventDefault();
+        // Legacy browsers require returnValue to be set for the prompt to show.
+        event.returnValue = '';
+        return '';
+      };
+      window.addEventListener('beforeunload', unloadGuard);
 
       const save = async function() {
         const newContent = sanitizeContent();

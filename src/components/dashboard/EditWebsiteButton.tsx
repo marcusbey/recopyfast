@@ -159,10 +159,11 @@ export default function EditWebsiteButton({
   };
 
   const variantClasses = {
-    primary: "bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500",
-    secondary: "bg-gray-600 hover:bg-gray-700 text-white focus:ring-gray-500",
+    primary: "bg-primary hover:bg-primary text-white focus:ring-ring",
+    secondary:
+      "bg-muted-foreground hover:bg-foreground text-white focus:ring-ring",
     outline:
-      "border border-blue-600 text-blue-600 hover:bg-blue-50 focus:ring-blue-500",
+      "border border-primary text-tone-info-text hover:bg-tone-info-surface focus:ring-ring",
   };
 
   return (
@@ -220,10 +221,10 @@ export default function EditWebsiteButton({
 
       {/* Error display */}
       {error && (
-        <div className="absolute top-full left-0 mt-2 p-3 bg-red-50 border border-red-200 rounded-md shadow-sm z-10 min-w-max">
+        <div className="absolute top-full left-0 mt-2 p-3 bg-tone-danger-surface border border-tone-danger-border rounded-md shadow-sm z-10 min-w-max">
           <div className="flex items-center">
             <svg
-              className="w-4 h-4 text-red-400 mr-2"
+              className="w-4 h-4 text-tone-danger-text mr-2"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -235,11 +236,11 @@ export default function EditWebsiteButton({
                 d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <span className="text-sm text-red-600">{error}</span>
+            <span className="text-sm text-tone-danger-text">{error}</span>
           </div>
           <button
             onClick={() => setError(null)}
-            className="absolute top-1 right-1 text-red-400 hover:text-red-600"
+            className="absolute top-1 right-1 text-tone-danger-text hover:text-tone-danger-text"
           >
             <svg
               className="w-4 h-4"
@@ -260,10 +261,10 @@ export default function EditWebsiteButton({
 
       {/* Permission indicator for non-editors */}
       {!canEdit && (
-        <div className="absolute top-full left-0 mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded-md shadow-sm z-10">
+        <div className="absolute top-full left-0 mt-2 p-2 bg-tone-warning-surface border border-tone-warning-border rounded-md shadow-sm z-10">
           <div className="flex items-center">
             <svg
-              className="w-4 h-4 text-yellow-400 mr-2"
+              className="w-4 h-4 text-tone-warning-text mr-2"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -275,7 +276,9 @@ export default function EditWebsiteButton({
                 d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
               />
             </svg>
-            <span className="text-xs text-yellow-600">View-only access</span>
+            <span className="text-xs text-tone-warning-text">
+              View-only access
+            </span>
           </div>
         </div>
       )}
@@ -314,32 +317,36 @@ export function ActiveEditSessions({ siteId }: { siteId: string }) {
   if (loading) {
     return (
       <div className="animate-pulse">
-        <div className="h-4 bg-gray-200 rounded w-32"></div>
+        <div className="h-4 bg-surface-3 rounded w-32"></div>
       </div>
     );
   }
 
   if (sessions.length === 0) {
-    return <div className="text-sm text-gray-500">No active edit sessions</div>;
+    return (
+      <div className="text-sm text-muted-foreground">
+        No active edit sessions
+      </div>
+    );
   }
 
   return (
     <div className="space-y-2">
-      <div className="text-sm font-medium text-gray-700">
+      <div className="text-sm font-medium text-foreground">
         Active Edit Sessions ({sessions.length})
       </div>
       {sessions.map((session) => (
         <div
           key={session.id}
-          className="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded"
+          className="flex items-center justify-between p-2 bg-tone-success-surface border border-tone-success-border rounded"
         >
           <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 bg-green-400 rounded-full"></div>
-            <span className="text-sm text-green-700">
+            <div className="w-2 h-2 bg-success rounded-full"></div>
+            <span className="text-sm text-tone-success-text">
               Expires in {session.timeRemainingMinutes} minutes
             </span>
           </div>
-          <div className="text-xs text-green-600">
+          <div className="text-xs text-tone-success-text">
             {session.permissions.join(", ")}
           </div>
         </div>

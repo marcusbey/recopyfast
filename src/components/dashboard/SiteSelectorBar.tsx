@@ -21,9 +21,9 @@ export function SiteSelectorBar({
 
   return (
     <div className="flex items-center gap-3">
-      <label className="text-sm font-medium text-gray-700">Site:</label>
+      <label className="text-sm font-medium text-foreground">Site:</label>
       <select
-        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm"
+        className="rounded-md border border-input px-3 py-1.5 text-sm"
         value={selectedSiteId}
         onChange={(e) => onSiteChange(e.target.value)}
       >

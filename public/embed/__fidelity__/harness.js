@@ -264,6 +264,14 @@
       required: required,
       fontSizePx: fontSizePx,
       /**
+       * Element-level blend/filter must be OFF while editing. Both transform
+       * the element's whole painted result — scrim included — so any contrast
+       * number measured from CSS values while they are active is fiction.
+       * Recorded so the gate can prove the neutralisation actually happened.
+       */
+      mixBlendMode: String(cs.mixBlendMode || 'normal'),
+      elementFilter: String(cs.filter || 'none'),
+      /**
        * THE INVARIANT.
        *
        * effective = the ratio the user actually gets. For a backdrop CSS can
@@ -278,7 +286,13 @@
         ? (bg.kind === 'solid' ? ratio : guaranteed)
         : null,
       notApplicable: (fg && fg.a > 0.5) ? null : 'text is not painted (transparent / background-clip: text)',
-      text: node.value !== undefined ? node.value : (node.textContent || '')
+      text: node.value !== undefined ? node.value : (node.textContent || ''),
+      // Deterministic restoration state — unlike position, these do not move on
+      // their own, so they can be compared for exact equality.
+      styleAttr: el.getAttribute('style'),
+      className: el.className,
+      editAttrs: ['contenteditable', 'data-rcf-editing', 'data-rcf-edit-session', 'spellcheck', 'role']
+        .filter(function (a) { return el.hasAttribute(a); })
     };
   }
 
@@ -298,6 +312,13 @@
       scrimApplied: during.hasScrim,
       bgKind: before.bgKind,
       required: during.required,
+      blendBefore: before.mixBlendMode,
+      blendDuring: during.mixBlendMode,
+      filterBefore: before.elementFilter,
+      filterDuring: during.elementFilter,
+      // A contrast figure is only trustworthy if nothing is transforming the
+      // element's painted output while we measure it.
+      contrastMeasurable: during.mixBlendMode === 'normal' && during.elementFilter === 'none',
       effectiveRead: before.effective,
       effectiveEdit: during.effective,
       notApplicable: during.notApplicable,
@@ -385,13 +406,51 @@
     var after = snapshot(el);
     var d = diff(before, during);
     d.key = scenario.key;
-    // Tolerance, not equality: an element with a running keyframe animation is
-    // in a different position on every frame, so exact equality would report a
-    // false violation for a renderer that behaved perfectly.
-    d.restored = Math.abs(after.box.x - before.box.x) <= 1 &&
-                 Math.abs(after.box.y - before.box.y) <= 1 &&
-                 (after.text || '').trim() === (before.text || '').trim();
+    /**
+     * Restoration is asserted on state, not position.
+     *
+     * An element with a running keyframe animation sits somewhere different on
+     * every frame — the fixture's animated paragraph drifts ~7px unprompted in
+     * the time these two samples are taken — so a position comparison reports a
+     * false violation for a renderer that behaved perfectly. Read-vs-edit
+     * position is already covered by maxShift; what cancel must restore is
+     * state, and that is exactly comparable.
+     */
+    d.restored = (after.text || '').trim() === (before.text || '').trim() &&
+                 after.styleAttr === before.styleAttr &&
+                 after.className === before.className &&
+                 after.editAttrs.length === 0;
+    // Restoration of blend/filter is checked here, where `after` is in scope.
+    d.blendRestored = after.mixBlendMode === before.mixBlendMode;
+    d.filterRestored = after.elementFilter === before.elementFilter;
+    d.restoreDetail = {
+      text: (after.text || '').trim() === (before.text || '').trim(),
+      styleAttr: after.styleAttr === before.styleAttr,
+      className: after.className === before.className,
+      leftoverAttrs: after.editAttrs
+    };
     return d;
+  }
+
+  /**
+   * Synthetic clicks on an <a href> perform the anchor's default action, so a
+   * link the widget has NOT registered (and therefore does not preventDefault)
+   * navigates the page and destroys the run's execution context mid-sweep —
+   * which reads as "Execution context was destroyed" and forces the whole
+   * sweep to be run in small batches.
+   *
+   * The harness suppresses anchor navigation for the duration of a run so the
+   * measurement can never be terminated by the thing it is measuring. This is
+   * scoped to the sweep and removed afterwards; it does not mask the product
+   * behaviour, which is asserted separately by linkNavigationBlocked below.
+   */
+  function suppressAnchorNavigation() {
+    var handler = function (event) {
+      var anchor = event.target.closest && event.target.closest('a[href]');
+      if (anchor) event.preventDefault();
+    };
+    document.addEventListener('click', handler, true);
+    return function () { document.removeEventListener('click', handler, true); };
   }
 
   async function run(only) {
@@ -399,11 +458,33 @@
       ? SCENARIOS.filter(function (s) { return only.indexOf(s.key) !== -1; })
       : SCENARIOS;
 
-    var results = [];
-    for (var i = 0; i < list.length; i++) {
-      results.push(await measureOne(list[i]));
+    var release = suppressAnchorNavigation();
+    try {
+      var results = [];
+      for (var i = 0; i < list.length; i++) {
+        results.push(await measureOne(list[i]));
+      }
+      return results;
+    } finally {
+      release();
     }
-    return results;
+  }
+
+  /**
+   * Does the widget itself stop an editable link from navigating when clicked?
+   * Run WITHOUT the suppression above, so it measures the product, not the
+   * harness. Returns true when the widget cancelled the default action.
+   */
+  function linkNavigationBlocked(id) {
+    var anchor = document.getElementById(id || 'fx-link');
+    if (!anchor) return null;
+    var event = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+    anchor.dispatchEvent(event);
+    var blocked = event.defaultPrevented;
+    (document.activeElement || document.body).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    );
+    return { registered: anchor.hasAttribute('data-rcf-id'), defaultPrevented: blocked };
   }
 
   function table(results) {
@@ -457,6 +538,14 @@
       if (r.renderer !== 'in-place') {
         violations.push(r.key + ': rendered by a substitute node (' + r.renderer + ')');
       }
+      if (r.contrastMeasurable === false) {
+        violations.push(r.key + ': contrast unmeasurable during edit — mix-blend-mode "' +
+          r.blendDuring + '", filter "' + r.filterDuring + '" still active');
+      }
+      if (r.blendRestored === false || r.filterRestored === false) {
+        violations.push(r.key + ': blend/filter not restored — blend "' + r.blendBefore +
+          '"->"' + r.blendDuring + '", filter "' + r.filterBefore + '"->"' + r.filterDuring + '"');
+      }
       if (r.invariantHolds === false && r.effectiveEdit < r.required - 0.01) {
         violations.push(r.key + ': CONTRAST ' + r.effectiveEdit + ':1 in edit mode, needs ' + r.required + ':1');
       }
@@ -464,7 +553,7 @@
         violations.push(r.key + ': CONTRAST REGRESSED ' + r.effectiveRead + ' -> ' + r.effectiveEdit);
       }
       if (!r.restored) {
-        violations.push(r.key + ': element not restored after cancel');
+        violations.push(r.key + ': not restored after cancel — ' + JSON.stringify(r.restoreDetail));
       }
     });
 
@@ -482,6 +571,7 @@
     run: run,
     table: table,
     assert: assert,
+    linkNavigationBlocked: linkNavigationBlocked,
     snapshot: function (key) {
       var s = SCENARIOS.filter(function (x) { return x.key === key; })[0];
       return s ? snapshot(document.getElementById(s.id)) : null;

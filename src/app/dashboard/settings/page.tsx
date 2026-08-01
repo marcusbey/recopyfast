@@ -103,12 +103,12 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {saveError && (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
                   {saveError}
                 </p>
               )}
               {saveSuccess && (
-                <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-md px-3 py-2">
                   Profile saved successfully.
                 </p>
               )}
@@ -277,7 +277,9 @@ export default function SettingsPage() {
               <div className="p-4 bg-surface-1 rounded-lg">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-medium">Production Key</p>
-                  <Badge className="bg-green-100 text-green-700">Active</Badge>
+                  <Badge className="bg-tone-success-surface text-tone-success-text">
+                    Active
+                  </Badge>
                 </div>
                 <code className="text-sm text-muted-foreground break-all">
                   rf_prod_xxxxxxxxxxxxxxxxxxxx
@@ -304,16 +306,16 @@ export default function SettingsPage() {
               <div className="space-y-2">
                 <Label>Theme</Label>
                 <div className="grid grid-cols-3 gap-4">
-                  <div className="border-2 border-blue-600 rounded-lg p-4 cursor-pointer">
+                  <div className="border-2 border-primary rounded-lg p-4 cursor-pointer">
                     <div className="w-full h-20 bg-card rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">Light</p>
                   </div>
                   <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-gray-900 rounded mb-2"></div>
+                    <div className="w-full h-20 bg-foreground rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">Dark</p>
                   </div>
                   <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-gradient-to-br from-gray-900 to-gray-600 rounded mb-2"></div>
+                    <div className="w-full h-20 bg-foreground rounded mb-2"></div>
                     <p className="text-sm font-medium text-center">System</p>
                   </div>
                 </div>

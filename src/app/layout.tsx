@@ -1,9 +1,27 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 
-const inter = Inter({ subsets: ["latin"] });
+/**
+ * Instrument Sans carries the UI. It is a grotesque with more character than
+ * the Inter default it replaces — narrower, with a distinctive single-storey
+ * `g` and open apertures that hold up at 12–13px in dense tables.
+ *
+ * JetBrains Mono is reserved for machine-generated strings: site tokens,
+ * element IDs, embed snippets. It is never used for prose.
+ */
+const instrumentSans = Instrument_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-instrument-sans",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-jetbrains-mono",
+});
 
 /**
  * Canonical origin used to build absolute SEO URLs.
@@ -88,8 +106,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html
+      lang="en"
+      className={`${instrumentSans.variable} ${jetbrainsMono.variable}`}
+    >
+      <body className="font-sans">
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
