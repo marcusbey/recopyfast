@@ -1,5 +1,5 @@
 import { server } from "../setup";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, passthrough } from "msw";
 
 // Additional auth-specific handlers for testing edge cases
 export const authTestHandlers = [
@@ -33,55 +33,6 @@ export const authTestHandlers = [
       },
       message: "Email confirmed successfully",
     });
-  }),
-
-  // Password strength check
-  http.post("/api/auth/check-password-strength", async ({ request }) => {
-    const body = (await request.json()) as { password: string };
-
-    const password = body.password;
-    const strength = {
-      score: 0,
-      feedback: [] as string[],
-    };
-
-    if (password.length < 8) {
-      strength.feedback.push("Password should be at least 8 characters long");
-    } else {
-      strength.score += 1;
-    }
-
-    if (!/[A-Z]/.test(password)) {
-      strength.feedback.push(
-        "Password should contain at least one uppercase letter",
-      );
-    } else {
-      strength.score += 1;
-    }
-
-    if (!/[a-z]/.test(password)) {
-      strength.feedback.push(
-        "Password should contain at least one lowercase letter",
-      );
-    } else {
-      strength.score += 1;
-    }
-
-    if (!/[0-9]/.test(password)) {
-      strength.feedback.push("Password should contain at least one number");
-    } else {
-      strength.score += 1;
-    }
-
-    if (!/[^A-Za-z0-9]/.test(password)) {
-      strength.feedback.push(
-        "Password should contain at least one special character",
-      );
-    } else {
-      strength.score += 1;
-    }
-
-    return HttpResponse.json({ strength });
   }),
 
   // Two-factor authentication
@@ -141,33 +92,6 @@ export const authTestHandlers = [
         },
         updated_at: new Date().toISOString(),
       },
-    });
-  }),
-
-  // Change password
-  http.post("/api/auth/change-password", async ({ request }) => {
-    const body = (await request.json()) as {
-      currentPassword: string;
-      newPassword: string;
-    };
-
-    if (body.currentPassword !== "current-password") {
-      return HttpResponse.json(
-        { error: "Current password is incorrect" },
-        { status: 400 },
-      );
-    }
-
-    if (body.newPassword.length < 8) {
-      return HttpResponse.json(
-        { error: "New password must be at least 8 characters long" },
-        { status: 400 },
-      );
-    }
-
-    return HttpResponse.json({
-      success: true,
-      message: "Password changed successfully",
     });
   }),
 ];
@@ -267,7 +191,7 @@ export const authTestUtils = {
         server.use(
           http.all("*", async (req) => {
             await new Promise((resolve) => setTimeout(resolve, 2000));
-            return req.passthrough();
+            return passthrough();
           }),
         );
         break;

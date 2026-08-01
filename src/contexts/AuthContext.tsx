@@ -5,12 +5,39 @@ import { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 
+/** Optional extras callers can attach to a magic-link request. */
+interface MagicLinkOptions {
+  /**
+   * Same-origin path to land on after the link is consumed. Used to honour
+   * the `redirectedFrom` query param that `src/middleware.ts` sets when it
+   * bounces an unauthenticated user off a protected route.
+   */
+  next?: string;
+  /** Display name captured at signup, stored on the user metadata. */
+  name?: string;
+}
+
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  signInWithMagicLink: (email: string) => Promise<void>;
+  signInWithMagicLink: (
+    email: string,
+    options?: MagicLinkOptions,
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
+}
+
+/**
+ * Only allow same-origin relative paths through to `emailRedirectTo`, so a
+ * crafted `?redirectedFrom=` cannot turn a magic link into an open redirect.
+ */
+function sanitizeNextPath(value: string | undefined): string | null {
+  if (!value) return null;
+  if (!value.startsWith("/")) return null;
+  if (value.startsWith("//")) return null;
+  if (value.startsWith("/\\")) return null;
+  return value;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -49,14 +76,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, [supabase.auth]);
 
-  const signInWithMagicLink = async (email: string) => {
+  const signInWithMagicLink = async (
+    email: string,
+    options?: MagicLinkOptions,
+  ) => {
     try {
+      const next = sanitizeNextPath(options?.next);
+      const callbackUrl = new URL("/auth/callback", window.location.origin);
+      if (next) callbackUrl.searchParams.set("next", next);
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: callbackUrl.toString(),
           data: {
             source: "magic-link",
+            ...(options?.name ? { name: options.name } : {}),
           },
         },
       });

@@ -3,344 +3,143 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LoginForm } from "../LoginForm";
 import { useAuth } from "@/contexts/AuthContext";
-import { useRouter } from "next/navigation";
 
-// Mock Next.js router
-jest.mock("next/navigation", () => ({
-  useRouter: jest.fn(),
-}));
-
-// Mock the useAuth hook
 jest.mock("@/contexts/AuthContext", () => ({
   useAuth: jest.fn(),
 }));
 
-// Mock auth context
-const mockAuthContext = {
-  user: null,
-  loading: false,
-  signIn: jest.fn(),
-  signUp: jest.fn(),
-  signOut: jest.fn(),
-  refreshSession: jest.fn(),
-};
+const signInWithMagicLink = jest.fn();
 
-const AuthProviderWrapper = ({ children }: { children: React.ReactNode }) => (
-  <div>{children}</div>
-);
+function setSearch(search: string) {
+  window.history.replaceState({}, "", `/login${search}`);
+}
 
-describe("LoginForm", () => {
-  const mockOnSuccess = jest.fn();
-  const mockOnSwitchToSignup = jest.fn();
-  const mockRouter = { push: jest.fn() };
-
+describe("LoginForm — magic link only", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    (useRouter as jest.Mock).mockReturnValue(mockRouter);
-    (useAuth as jest.Mock).mockReturnValue(mockAuthContext);
+    signInWithMagicLink.mockResolvedValue(undefined);
+    (useAuth as jest.Mock).mockReturnValue({
+      user: null,
+      loading: false,
+      signInWithMagicLink,
+      signOut: jest.fn(),
+      refreshSession: jest.fn(),
+    });
+    setSearch("");
   });
 
-  it("renders login form with all fields", () => {
-    render(
-      <AuthProviderWrapper>
-        <LoginForm
-          onSuccess={mockOnSuccess}
-          onSwitchToSignup={mockOnSwitchToSignup}
-        />
-      </AuthProviderWrapper>,
-    );
+  it("renders an email field and no password field", () => {
+    render(<LoginForm />);
 
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(screen.getByLabelText("Password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
-    expect(screen.getByText("Don't have an account?")).toBeInTheDocument();
+    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
   });
 
-  it("validates email format", async () => {
+  it("offers no password-recovery escape hatch", () => {
+    render(<LoginForm />);
+
+    expect(
+      screen.queryByRole("link", { name: /forgot password/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("sends a magic link for the entered email", async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
+    render(<LoginForm />);
 
-    const emailInput = screen.getByLabelText("Email");
-    const submitButton = screen.getByRole("button", { name: "Sign In" });
-
-    // Test invalid email
-    await user.type(emailInput, "invalid-email");
-    await user.click(submitButton);
-
-    // HTML5 validation should prevent form submission
-    expect(emailInput).toBeInvalid();
-    expect(mockAuthContext.signIn).not.toHaveBeenCalled();
-  });
-
-  it("requires both email and password", async () => {
-    const user = userEvent.setup();
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
-
-    const submitButton = screen.getByRole("button", { name: "Sign In" });
-
-    // Try to submit empty form
-    await user.click(submitButton);
-
-    expect(mockAuthContext.signIn).not.toHaveBeenCalled();
-  });
-
-  it("handles successful login", async () => {
-    const user = userEvent.setup();
-    mockAuthContext.signIn.mockResolvedValueOnce(undefined);
-
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
-
-    // Fill in form
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
-
-    // Submit form
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await user.type(screen.getByLabelText(/email address/i), "a@example.com");
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     await waitFor(() => {
-      expect(mockAuthContext.signIn).toHaveBeenCalledWith(
-        "test@example.com",
-        "password123",
-      );
-      expect(mockOnSuccess).toHaveBeenCalled();
+      expect(signInWithMagicLink).toHaveBeenCalledWith("a@example.com", {
+        next: undefined,
+      });
     });
   });
 
-  it("handles login errors", async () => {
+  it("trims surrounding whitespace off the email", async () => {
     const user = userEvent.setup();
-    const errorMessage = "Invalid credentials";
-    mockAuthContext.signIn.mockRejectedValueOnce(new Error(errorMessage));
+    render(<LoginForm />);
 
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
+    await user.type(
+      screen.getByLabelText(/email address/i),
+      "  spaced@example.com  ",
     );
-
-    // Fill in form
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "wrongpassword");
-
-    // Submit form
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(errorMessage)).toBeInTheDocument();
-      expect(mockOnSuccess).not.toHaveBeenCalled();
+      expect(signInWithMagicLink).toHaveBeenCalledWith("spaced@example.com", {
+        next: undefined,
+      });
     });
   });
 
-  it("shows loading state during login", async () => {
+  it("forwards redirectedFrom so the link lands on the intended route", async () => {
     const user = userEvent.setup();
+    setSearch("?redirectedFrom=%2Fdashboard%2Fbilling");
+    render(<LoginForm />);
 
-    // Create a promise that we can control
-    let resolveLogin: () => void;
-    const loginPromise = new Promise<void>((resolve) => {
-      resolveLogin = resolve;
-    });
-    mockAuthContext.signIn.mockReturnValueOnce(loginPromise);
-
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
-
-    // Fill in form
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
-
-    // Submit form
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
-
-    // Check loading state
-    expect(screen.getByText("Signing in...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /signing in/i })).toBeDisabled();
-
-    // Resolve the login
-    resolveLogin!();
+    await user.type(screen.getByLabelText(/email address/i), "a@example.com");
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Sign In" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Sign In" }),
-      ).not.toBeDisabled();
+      expect(signInWithMagicLink).toHaveBeenCalledWith("a@example.com", {
+        next: "/dashboard/billing",
+      });
     });
   });
 
-  it("calls onSwitchToSignup when signup link is clicked", async () => {
+  it("confirms the link was sent rather than closing silently", async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSwitchToSignup={mockOnSwitchToSignup} />
-      </AuthProviderWrapper>,
-    );
+    render(<LoginForm />);
 
-    await user.click(screen.getByRole("button", { name: "Sign up" }));
+    await user.type(screen.getByLabelText(/email address/i), "a@example.com");
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
-    expect(mockOnSwitchToSignup).toHaveBeenCalled();
+    expect(await screen.findByText(/check your email/i)).toBeInTheDocument();
+    expect(screen.getByText("a@example.com")).toBeInTheDocument();
   });
 
-  it("clears error when user starts typing", async () => {
+  it("lets the user go back and correct a mistyped address", async () => {
     const user = userEvent.setup();
-    mockAuthContext.signIn.mockRejectedValueOnce(
-      new Error("Invalid credentials"),
+    render(<LoginForm />);
+
+    await user.type(
+      screen.getByLabelText(/email address/i),
+      "typo@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
+    await screen.findByText(/check your email/i);
+
+    await user.click(
+      screen.getByRole("button", { name: /try different email/i }),
     );
 
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
-
-    // Fill in form and submit to trigger error
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "wrongpassword");
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
-
-    // Wait for error to appear
-    await waitFor(() => {
-      expect(screen.getByText("Invalid credentials")).toBeInTheDocument();
-    });
-
-    // Start typing in email field - clear first, then type
-    const emailInput = screen.getByLabelText("Email");
-    await user.clear(emailInput);
-    await user.type(emailInput, "newemail@test.com");
-
-    // Try submitting again to trigger the error clearing
-    const submitButton = screen.getByRole("button", { name: "Sign In" });
-    await user.click(submitButton);
-
-    // Error should be cleared on new submission
-    await waitFor(() => {
-      expect(screen.queryByText("Invalid credentials")).not.toBeInTheDocument();
-    });
+    expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
   });
 
-  it("has proper input icons", () => {
-    render(
-      <AuthProviderWrapper>
-        <LoginForm />
-      </AuthProviderWrapper>,
-    );
-
-    // Check for Mail icon
-    const emailContainer = screen.getByLabelText("Email").parentElement;
-    expect(emailContainer?.querySelector("svg")).toBeInTheDocument();
-
-    // Check for Lock icon
-    const passwordContainer = screen.getByLabelText("Password").parentElement;
-    expect(passwordContainer?.querySelector("svg")).toBeInTheDocument();
-  });
-
-  it("supports keyboard navigation", async () => {
+  it("surfaces an error when sending the link fails", async () => {
     const user = userEvent.setup();
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
+    signInWithMagicLink.mockRejectedValueOnce(new Error("rate limit exceeded"));
+    render(<LoginForm />);
 
-    // Tab through form elements
-    await user.tab();
-    expect(screen.getByLabelText("Email")).toHaveFocus();
+    await user.type(screen.getByLabelText(/email address/i), "a@example.com");
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
-    await user.tab();
-    expect(screen.getByLabelText("Password")).toHaveFocus();
-
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Sign In" })).toHaveFocus();
-
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Sign up" })).toHaveFocus();
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText(/check your email/i)).not.toBeInTheDocument();
   });
 
-  it("submits form on Enter key", async () => {
+  it("rejects an empty email without calling the auth layer", async () => {
     const user = userEvent.setup();
-    mockAuthContext.signIn.mockResolvedValueOnce(undefined);
+    render(<LoginForm />);
 
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
+    await user.type(screen.getByLabelText(/email address/i), "   ");
+    const submit = screen.getByRole("button", { name: /send magic link/i });
 
-    // Fill in form
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
-
-    // Press Enter while in password field
-    await user.keyboard("{Enter}");
-
-    await waitFor(() => {
-      expect(mockAuthContext.signIn).toHaveBeenCalledWith(
-        "test@example.com",
-        "password123",
-      );
-    });
-  });
-
-  it("prevents form submission when loading", async () => {
-    const user = userEvent.setup();
-
-    // Make signIn hang
-    mockAuthContext.signIn.mockImplementation(() => new Promise(() => {}));
-
-    render(
-      <AuthProviderWrapper>
-        <LoginForm onSuccess={mockOnSuccess} />
-      </AuthProviderWrapper>,
-    );
-
-    // Fill in form and submit
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
-
-    // Try to submit again while loading - use the disabled submit button
-    await user.click(screen.getByRole("button", { name: /signing in/i }));
-
-    // Should only be called once
-    expect(mockAuthContext.signIn).toHaveBeenCalledTimes(1);
-  });
-
-  it("has proper ARIA labels for accessibility", () => {
-    render(
-      <AuthProviderWrapper>
-        <LoginForm />
-      </AuthProviderWrapper>,
-    );
-
-    expect(screen.getByLabelText("Email")).toHaveAttribute("type", "email");
-    expect(screen.getByLabelText("Email")).toHaveAttribute("required");
-    expect(screen.getByLabelText("Email")).toHaveAttribute(
-      "placeholder",
-      "you@example.com",
-    );
-
-    expect(screen.getByLabelText("Password")).toHaveAttribute(
-      "type",
-      "password",
-    );
-    expect(screen.getByLabelText("Password")).toHaveAttribute("required");
-    expect(screen.getByLabelText("Password")).toHaveAttribute(
-      "placeholder",
-      "••••••••",
-    );
+    // Whitespace-only input leaves the button disabled, so the request can
+    // never be issued in the first place.
+    expect(submit).toBeDisabled();
+    expect(signInWithMagicLink).not.toHaveBeenCalled();
   });
 });

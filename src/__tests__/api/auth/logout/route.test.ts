@@ -23,7 +23,7 @@ describe("/api/auth/logout - POST", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCreateClient.mockResolvedValue(
-      mockSupabase as ReturnType<typeof createClient>,
+      mockSupabase as unknown as Awaited<ReturnType<typeof createClient>>,
     );
   });
 

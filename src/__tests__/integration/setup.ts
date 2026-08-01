@@ -4,106 +4,8 @@ import { http, HttpResponse } from "msw";
 // Authentication handlers
 const authHandlers = [
   // Auth signup
-  http.post("/api/auth/signup", async ({ request }) => {
-    const body = (await request.json()) as {
-      email: string;
-      password: string;
-      metadata?: any;
-    };
-
-    // Validation errors
-    if (!body.email || !body.password) {
-      return HttpResponse.json(
-        { error: "Email and password are required" },
-        { status: 400 },
-      );
-    }
-
-    if (body.email === "existing@example.com") {
-      return HttpResponse.json(
-        { error: "User already registered" },
-        { status: 400 },
-      );
-    }
-
-    if (!body.email.includes("@")) {
-      return HttpResponse.json(
-        { error: "Invalid email format" },
-        { status: 400 },
-      );
-    }
-
-    if (body.password.length < 6) {
-      return HttpResponse.json(
-        { error: "Password should be at least 6 characters" },
-        { status: 400 },
-      );
-    }
-
-    return HttpResponse.json({
-      user: {
-        id: "new-user-id",
-        email: body.email,
-        app_metadata: {},
-        user_metadata: body.metadata || {},
-        created_at: new Date().toISOString(),
-      },
-      message: "Check your email to confirm your account",
-    });
-  }),
 
   // Auth login
-  http.post("/api/auth/login", async ({ request }) => {
-    const body = (await request.json()) as { email: string; password: string };
-
-    if (!body.email || !body.password) {
-      return HttpResponse.json(
-        { error: "Email and password are required" },
-        { status: 400 },
-      );
-    }
-
-    if (
-      body.email === "wrong@example.com" ||
-      body.password === "wrongpassword"
-    ) {
-      return HttpResponse.json(
-        { error: "Invalid email or password" },
-        { status: 401 },
-      );
-    }
-
-    if (body.email === "locked@example.com") {
-      return HttpResponse.json(
-        {
-          error:
-            "Account has been locked due to multiple failed login attempts",
-        },
-        { status: 403 },
-      );
-    }
-
-    const user = {
-      id: "user-123",
-      email: body.email,
-      email_confirmed_at: new Date().toISOString(),
-      app_metadata: { provider: "email" },
-      user_metadata: { name: "Test User" },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    return HttpResponse.json({
-      user,
-      session: {
-        access_token: "mock-access-token",
-        refresh_token: "mock-refresh-token",
-        expires_in: 3600,
-        expires_at: Date.now() + 3600000,
-        user,
-      },
-    });
-  }),
 
   // Auth logout
   http.post("/api/auth/logout", async () => {
@@ -151,8 +53,11 @@ const authHandlers = [
   http.post("/api/auth/check-role", async ({ request }) => {
     const body = (await request.json()) as { requiredRole: string };
 
-    // Mock role checking - default user role is 'user'
-    const userRole = "user";
+    // Mock role checking - default user role is 'user'. Read through a helper so
+    // control-flow analysis does not narrow it back to the literal, which would
+    // make the `!== "admin"` check below a TS2367 "no overlap" error.
+    const asRole = (role: "user" | "admin") => role;
+    const userRole = asRole("user");
 
     if (body.requiredRole === "admin" && userRole !== "admin") {
       return HttpResponse.json(
@@ -162,14 +67,6 @@ const authHandlers = [
     }
 
     return HttpResponse.json({ hasAccess: true });
-  }),
-
-  // Password reset
-  http.post("/api/auth/password-reset", () => {
-    return HttpResponse.json(
-      { error: "Too many requests. Please try again later." },
-      { status: 429 },
-    );
   }),
 ];
 
@@ -290,12 +187,14 @@ export const handlers = [
       context?: string;
     };
 
-    // Simulate validation error
+    // Simulate validation error. An empty `elements` array is rejected too —
+    // the real route requires a non-empty batch.
     if (
       !body.siteId ||
       !body.fromLanguage ||
       !body.toLanguage ||
-      !body.elements
+      !Array.isArray(body.elements) ||
+      body.elements.length === 0
     ) {
       return HttpResponse.json(
         {
