@@ -149,14 +149,19 @@ describe("SiteDetailView", () => {
     expect(screen.getByText("Integration Status")).toBeInTheDocument();
     expect(screen.getByText("Script Installation")).toBeInTheDocument();
     expect(screen.getByText("API Connection")).toBeInTheDocument();
-    expect(screen.getByText("Content Elements")).toBeInTheDocument();
+    // "Content Elements" labels both the stats tile and the integration row.
+    expect(screen.getAllByText("Content Elements")).toHaveLength(2);
   });
 
   it("displays external link to site", () => {
     render(<SiteDetailView site={mockSite} />);
 
-    const link = screen.getByRole("link");
-    expect(link).toHaveAttribute("href", "https://example.com");
+    // The view also renders a "Manage Tests" link, so select the site link by href.
+    const link = screen
+      .getAllByRole("link")
+      .find((a) => a.getAttribute("href") === "https://example.com")!;
+
+    expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });

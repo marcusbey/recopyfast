@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from("content_elements")
       .select(
-        "id, element_id, selector, current_content, language, variant, metadata, updated_at",
+        "id, element_id, selector, published_content, original_content, language, variant, metadata, updated_at",
       )
       .eq("site_id", siteId)
       .eq("language", language)
@@ -110,7 +110,11 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
-        data: contentElements || [],
+        data: (contentElements || []).map((element) => ({
+          ...element,
+          current_content:
+            element.published_content ?? element.original_content ?? "",
+        })),
         meta: {
           count: contentElements?.length || 0,
           site_id: siteId,
@@ -216,7 +220,7 @@ export async function POST(req: NextRequest) {
     // Check if content element exists
     const { data: existingElement } = await supabase
       .from("content_elements")
-      .select("id, current_content")
+      .select("id, published_content")
       .eq("site_id", site_id)
       .eq("element_id", element_id)
       .eq("language", language || "en")
@@ -229,6 +233,7 @@ export async function POST(req: NextRequest) {
       const { data, error: updateError } = await supabase
         .from("content_elements")
         .update({
+          published_content: sanitizedContent,
           current_content: sanitizedContent,
           metadata: metadata || {},
           updated_at: new Date().toISOString(),
@@ -250,6 +255,7 @@ export async function POST(req: NextRequest) {
           element_id,
           selector: `[data-element-id="${element_id}"]`, // Default selector
           original_content: sanitizedContent,
+          published_content: sanitizedContent,
           current_content: sanitizedContent,
           language: language || "en",
           variant: variant || "default",

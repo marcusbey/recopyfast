@@ -52,7 +52,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Blocking gates first (lint → type-check → build), then non-blocking tests.
+      # Blocking gates first (audit → lint → type-check → build), then non-blocking tests.
+
+      # ── Step 0: Dependency vulnerabilities (BLOCKING) ─────────────────────
+      # Production dependency tree only — dev-only advisories do not ship to
+      # users and would otherwise block every PR on unrelated tooling churn.
+      # The tree is currently clean; `overrides` in package.json pin `sharp`
+      # and `postcss` above the versions Next transitively depends on.
+      - name: Audit production dependencies (blocking)
+        run: npm run audit:prod
 
       # ── Step 1: Lint (BLOCKING) ───────────────────────────────────────────
       - name: Lint (ESLint)
@@ -78,6 +86,84 @@ jobs:
       - name: Test (Jest – CI mode, non-blocking)
         continue-on-error: true
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
+
+  # ─── Playwright end-to-end tests ───────────────────────────────────────────
+  # Verified green locally: 29 passed, 2 skipped, 0 failed (2026-07-31).
+  #
+  # These drive a real browser against a real `next build && next start`, so they
+  # need a real Supabase project — placeholder credentials make the API routes
+  # fail and the specs that touch /api/health and /api/content go red for the
+  # wrong reason. The job therefore self-skips until a staging Supabase project
+  # is wired up as repo secrets, and is BLOCKING once it does run.
+  #
+  # To enable: add repo secrets E2E_SUPABASE_URL, E2E_SUPABASE_ANON_KEY,
+  # E2E_SUPABASE_SERVICE_ROLE_KEY pointing at a throwaway staging project.
+  #
+  # The 2 skipped specs (share-edit-publish) need seeded site + staging-token
+  # fixtures that do not exist yet — see e2e/share-edit-publish.spec.ts.
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      PLAYWRIGHT_BASE_URL: "http://localhost:3000"
+      CI: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Skip if E2E Supabase secrets are not configured
+        id: guard
+        run: |
+          if [ -z "${{ secrets.E2E_SUPABASE_URL }}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::E2E_SUPABASE_URL secret not set — skipping E2E job."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js 20
+        if: steps.guard.outputs.configured == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Install Playwright browsers
+        if: steps.guard.outputs.configured == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        if: steps.guard.outputs.configured == 'true'
+        run: npm run build
+
+      - name: Start production server
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          npm run start &
+          npx wait-on http://localhost:3000 --timeout 120000
+
+      - name: Run Playwright tests (blocking)
+        if: steps.guard.outputs.configured == 'true'
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: ${{ always() && steps.guard.outputs.configured == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   # ─── Separate job: full TypeScript check incl. tests ───────────────────────
   # Production app code is already gated (blocking) in the ci job above. This job

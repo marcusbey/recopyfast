@@ -111,7 +111,7 @@ describe("/api/sites/register - POST", () => {
       apiKey: "raw-api-key",
       siteToken: "signed-site-token",
       embedScript:
-        '<script src="https://recopyfast.com/embed/recopyfast.js" data-site-id="site-123" data-site-token="signed-site-token"></script>',
+        '<script src="https://recopyfast.com/embed/recopyfast.js" data-site-id="site-123" data-site-token="signed-site-token" data-api-url="https://recopyfast.com/api" data-ws-url="http://localhost:4001"></script>',
     });
 
     // Verify database calls

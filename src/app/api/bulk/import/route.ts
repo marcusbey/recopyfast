@@ -308,6 +308,7 @@ async function importContentElements(
         element_id: element.element_id!,
         selector: element.selector!,
         original_content: sanitizedOriginalContent,
+        published_content: sanitizedCurrentContent,
         current_content: sanitizedCurrentContent,
         language: element.language || "en",
         variant: element.variant || "default",

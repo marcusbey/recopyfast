@@ -11,7 +11,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import {
+  SUBSCRIPTION_PLANS,
+  getPlanCyclePrice,
+  getPlanDisplayPrice,
+  type BillingPeriod,
+  type PaidPlanId,
+} from "@/lib/stripe/plans";
+import { useCheckout } from "./useCheckout";
 
 interface UpgradeDialogProps {
   open: boolean;
@@ -20,71 +27,115 @@ interface UpgradeDialogProps {
   onSuccess: () => void;
 }
 
+const PLANS = [
+  { id: "starter" as const, data: SUBSCRIPTION_PLANS.STARTER },
+  { id: "pro" as const, data: SUBSCRIPTION_PLANS.PRO },
+  { id: "enterprise" as const, data: SUBSCRIPTION_PLANS.ENTERPRISE },
+];
+
+const BILLING_PERIODS: ReadonlyArray<{ id: BillingPeriod; label: string }> = [
+  { id: "monthly", label: "Monthly" },
+  { id: "yearly", label: "Yearly (save ~17%)" },
+];
+
 export function UpgradeDialog({
   open,
   onOpenChange,
   currentPlan,
   onSuccess,
 }: UpgradeDialogProps) {
-  const [selectedPlan, setSelectedPlan] = useState<
-    "starter" | "pro" | "enterprise"
-  >("pro");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<PaidPlanId>("pro");
+  const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
+  const [isChangingPlan, setIsChangingPlan] = useState(false);
+  const [planChangeError, setPlanChangeError] = useState<string | null>(null);
+  const [actionUrl, setActionUrl] = useState<string | null>(null);
 
-  const plans = [
-    { id: "starter" as const, data: SUBSCRIPTION_PLANS.STARTER },
-    { id: "pro" as const, data: SUBSCRIPTION_PLANS.PRO },
-    { id: "enterprise" as const, data: SUBSCRIPTION_PLANS.ENTERPRISE },
-  ];
+  const { startCheckout, isRedirecting, error: checkoutError } = useCheckout();
 
-  const handleUpgrade = async () => {
+  const hasSubscription = Boolean(currentPlan) && currentPlan !== "free";
+  const isBusy = isRedirecting || isChangingPlan;
+  const error = planChangeError ?? checkoutError;
+  const selectedPlanData =
+    SUBSCRIPTION_PLANS[
+      selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
+    ];
+
+  /**
+   * No subscription yet → hand off to Stripe Checkout.
+   * Already subscribed → change the plan in place so Stripe prorates it.
+   */
+  const handleSubmit = async () => {
+    if (isBusy) {
+      return;
+    }
+
+    setPlanChangeError(null);
+    setActionUrl(null);
+
+    if (!hasSubscription) {
+      await startCheckout({
+        intent: "subscription",
+        planId: selectedPlan,
+        billingPeriod,
+      });
+      return;
+    }
+
+    setIsChangingPlan(true);
+
     try {
-      setLoading(true);
-      setError(null);
-
       const response = await fetch("/api/billing/subscription", {
-        method: !currentPlan || currentPlan === "free" ? "POST" : "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          planId: selectedPlan,
-        }),
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planId: selectedPlan, billingPeriod }),
       });
 
+      const data = await response.json().catch(() => null);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to upgrade plan");
+        throw new Error(data?.error || "Failed to change plan");
       }
 
-      const data = await response.json();
-
-      // Handle payment confirmation if needed
-      if (data.clientSecret) {
-        // In a real implementation, you would use Stripe Elements here
-        alert(
-          "Payment confirmation required. Please complete the payment process.",
-        );
+      // Stripe could not collect the prorated charge without a 3DS challenge or
+      // a working card. Send the customer to the hosted invoice to finish.
+      if (data?.requiresAction && data?.hostedInvoiceUrl) {
+        setActionUrl(data.hostedInvoiceUrl);
+        onSuccess();
         return;
       }
 
       onSuccess();
       onOpenChange(false);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An error occurred");
+      setPlanChangeError(
+        err instanceof Error
+          ? err.message
+          : "We could not change your plan. Please try again.",
+      );
     } finally {
-      setLoading(false);
+      setIsChangingPlan(false);
     }
+  };
+
+  const submitLabel = () => {
+    if (isRedirecting) return "Redirecting to Stripe…";
+    if (isChangingPlan) return "Updating your plan…";
+    return hasSubscription
+      ? `Switch to ${selectedPlanData.name}`
+      : `Continue to payment — $${getPlanCyclePrice(selectedPlan, billingPeriod)}`;
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>Upgrade Your Plan</DialogTitle>
+          <DialogTitle>
+            {hasSubscription ? "Change Your Plan" : "Choose Your Plan"}
+          </DialogTitle>
           <DialogDescription>
-            Choose a plan that fits your needs and unlock powerful features.
+            {hasSubscription
+              ? "Switch plans at any time. Stripe prorates the difference and charges your card on file straight away."
+              : "Pick a plan and complete payment on Stripe's secure checkout page."}
           </DialogDescription>
         </DialogHeader>
 
@@ -95,114 +146,149 @@ export function UpgradeDialog({
             </Alert>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {plans.map((plan) => (
-              <div
-                key={plan.id}
-                className={`p-6 border-2 rounded-lg cursor-pointer transition-all ${
-                  selectedPlan === plan.id
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-200 hover:border-gray-300"
-                }`}
-                onClick={() => setSelectedPlan(plan.id)}
+          {actionUrl && (
+            <Alert className="border-amber-200 bg-amber-50">
+              <p className="text-amber-800">
+                Your plan was changed, but the prorated charge still needs
+                confirmation — your bank asked for verification, or the card was
+                declined.
+              </p>
+              <a
+                href={actionUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-2 inline-block font-medium text-amber-900 underline"
               >
-                <div className="flex justify-between items-start mb-4">
-                  <div>
-                    <h3 className="text-xl font-semibold">{plan.data.name}</h3>
-                    <p className="text-gray-600 mt-1">
-                      {plan.data.description}
-                    </p>
-                  </div>
-                  {selectedPlan === plan.id && (
-                    <Badge className="bg-blue-500">Selected</Badge>
-                  )}
-                </div>
+                Complete the payment on Stripe
+              </a>
+            </Alert>
+          )}
 
-                <div className="mb-4">
-                  <span className="text-3xl font-bold">${plan.data.price}</span>
-                  <span className="text-gray-600">/month</span>
-                </div>
-
-                <ul className="space-y-2">
-                  {plan.data.features.map((feature, index) => (
-                    <li key={index} className="flex items-center text-sm">
-                      <svg
-                        className="w-4 h-4 text-green-500 mr-2"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div
+            role="radiogroup"
+            aria-label="Billing period"
+            className="inline-flex rounded-lg border p-1"
+          >
+            {BILLING_PERIODS.map((period) => (
+              <button
+                key={period.id}
+                type="button"
+                role="radio"
+                aria-checked={billingPeriod === period.id}
+                onClick={() => setBillingPeriod(period.id)}
+                disabled={isBusy}
+                className={`rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+                  billingPeriod === period.id
+                    ? "bg-blue-500 text-white"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                {period.label}
+              </button>
             ))}
           </div>
 
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="font-medium mb-2">What&apos;s Included:</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-              <div>
-                <h5 className="font-medium text-blue-600">AI Features</h5>
-                <p className="text-gray-600">
-                  Smart content suggestions, auto-translations, and AI-powered
-                  optimizations
-                </p>
-              </div>
-              <div>
-                <h5 className="font-medium text-blue-600">Collaboration</h5>
-                <p className="text-gray-600">
-                  Team management, real-time editing, and permission controls
-                </p>
-              </div>
-              <div>
-                <h5 className="font-medium text-blue-600">Priority Support</h5>
-                <p className="text-gray-600">
-                  Faster response times and dedicated support channels
-                </p>
-              </div>
-              <div>
-                <h5 className="font-medium text-blue-600">
-                  Advanced Analytics
-                </h5>
-                <p className="text-gray-600">
-                  Detailed insights, conversion tracking, and performance
-                  metrics
-                </p>
-              </div>
-            </div>
+          <div
+            role="radiogroup"
+            aria-label="Subscription plan"
+            className="grid grid-cols-1 md:grid-cols-3 gap-6"
+          >
+            {PLANS.map((plan) => {
+              const isSelected = selectedPlan === plan.id;
+              const isCurrent = currentPlan === plan.id;
+
+              return (
+                <button
+                  key={plan.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  onClick={() => setSelectedPlan(plan.id)}
+                  disabled={isBusy}
+                  className={`p-6 border-2 rounded-lg text-left transition-all disabled:opacity-60 ${
+                    isSelected
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-gray-200 hover:border-gray-300"
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="text-xl font-semibold">
+                        {plan.data.name}
+                      </h3>
+                      <p className="text-gray-600 mt-1">
+                        {plan.data.description}
+                      </p>
+                    </div>
+                    {isCurrent ? (
+                      <Badge variant="secondary">Current</Badge>
+                    ) : (
+                      isSelected && (
+                        <Badge className="bg-blue-500">Selected</Badge>
+                      )
+                    )}
+                  </div>
+
+                  <div className="mb-4">
+                    <span className="text-3xl font-bold">
+                      ${getPlanDisplayPrice(plan.id, billingPeriod)}
+                    </span>
+                    <span className="text-gray-600">/month</span>
+                    {billingPeriod === "yearly" && (
+                      <p className="text-sm text-gray-500 mt-1">
+                        Billed ${getPlanCyclePrice(plan.id, "yearly")} once a
+                        year
+                      </p>
+                    )}
+                  </div>
+
+                  <ul className="space-y-2">
+                    {plan.data.features.map((feature) => (
+                      <li key={feature} className="flex items-center text-sm">
+                        <svg
+                          className="w-4 h-4 text-green-500 mr-2 shrink-0"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                          aria-hidden="true"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                        {feature}
+                      </li>
+                    ))}
+                  </ul>
+                </button>
+              );
+            })}
           </div>
 
           <div className="text-xs text-gray-500 space-y-1">
-            <p>• Cancel anytime - no long-term contracts</p>
-            <p>• 14-day free trial for new subscribers</p>
-            <p>• Prorated billing when upgrading mid-cycle</p>
-            <p>• Secure payment processing by Stripe</p>
+            <p>• Cancel anytime — no long-term contracts</p>
+            <p>• Prorated billing when you change plans mid-cycle</p>
+            <p>
+              • Card details are handled entirely by Stripe — we never see them
+            </p>
           </div>
 
           <div className="flex gap-3 pt-4 border-t">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={loading}
+              disabled={isBusy}
               className="flex-1"
             >
               Cancel
             </Button>
             <Button
-              onClick={handleUpgrade}
-              disabled={loading}
+              onClick={handleSubmit}
+              disabled={isBusy || currentPlan === selectedPlan}
               className="flex-1"
             >
-              {loading
-                ? "Processing..."
-                : `Upgrade to ${SUBSCRIPTION_PLANS[selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS].name}`}
+              {submitLabel()}
             </Button>
           </div>
         </div>

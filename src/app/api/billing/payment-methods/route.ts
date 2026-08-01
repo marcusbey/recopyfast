@@ -1,17 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { stripe } from "@/lib/stripe/config";
-import { createOrGetCustomer } from "@/lib/stripe/customer";
+import {
+  listPaymentMethods,
+  setDefaultPaymentMethod,
+} from "@/lib/stripe/payment-methods";
+import { getCustomerByUserId } from "@/lib/stripe/customer";
+
+/**
+ * Payment methods are read straight from Stripe.
+ *
+ * Cards are attached by Stripe Checkout (subscription / setup mode), so there is
+ * no reliable moment for us to mirror them into `billing_payment_methods`
+ * ourselves — and the Stripe webhook does not sync that table. Treating Stripe
+ * as the source of truth keeps the list correct no matter how a card arrived.
+ */
 
 /**
  * GET /api/billing/payment-methods
- * Get user's payment methods
  */
 export async function GET() {
   try {
     const supabase = await createClient();
 
-    // Get the current user
     const {
       data: { user },
       error: authError,
@@ -20,45 +31,17 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get customer
-    const { data: customer } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("user_id", user.id)
-      .single();
-
+    const customer = await getCustomerByUserId(user.id);
     if (!customer) {
       return NextResponse.json({ paymentMethods: [] });
     }
 
-    // Get payment methods from Stripe
-    const paymentMethods = await stripe.paymentMethods.list({
-      customer: customer.stripe_customer_id,
-      type: "card",
-    });
+    const paymentMethods = await listPaymentMethods(
+      customer.id,
+      customer.stripe_customer_id,
+    );
 
-    // Get payment methods from our database
-    const { data: dbPaymentMethods } = await supabase
-      .from("payment_methods")
-      .select("*")
-      .eq("customer_id", customer.id)
-      .order("created_at", { ascending: false });
-
-    // Merge Stripe and database data
-    const combinedPaymentMethods = paymentMethods.data.map((pm) => {
-      const dbPm = dbPaymentMethods?.find(
-        (dbPm) => dbPm.stripe_payment_method_id === pm.id,
-      );
-      return {
-        id: pm.id,
-        type: pm.type,
-        card: pm.card,
-        is_default: dbPm?.is_default || false,
-        created: pm.created,
-      };
-    });
-
-    return NextResponse.json({ paymentMethods: combinedPaymentMethods });
+    return NextResponse.json({ paymentMethods });
   } catch (error: unknown) {
     console.error("Error fetching payment methods:", error);
     return NextResponse.json(
@@ -70,13 +53,16 @@ export async function GET() {
 
 /**
  * POST /api/billing/payment-methods
- * Add a new payment method
+ * Body: { paymentMethodId, setAsDefault? }
+ *
+ * Makes a card the customer's default for invoices and for their subscription.
+ * Used both by the "Set default" button and by the return leg of the
+ * setup-mode Checkout flow that adds a new card.
  */
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
 
-    // Get the current user
     const {
       data: { user },
       error: authError,
@@ -86,78 +72,54 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { paymentMethodId, setAsDefault } = body;
+    const { paymentMethodId, setAsDefault = true } = body;
 
-    if (!paymentMethodId) {
+    if (typeof paymentMethodId !== "string" || !paymentMethodId) {
       return NextResponse.json(
         { error: "Payment method ID is required" },
         { status: 400 },
       );
     }
 
-    // Create or get customer
-    const { customer, stripeCustomer } = await createOrGetCustomer(
-      user.id,
-      user.email!,
-      user.user_metadata?.name,
-    );
+    const customer = await getCustomerByUserId(user.id);
+    if (!customer) {
+      return NextResponse.json(
+        { error: "No billing customer found for this account" },
+        { status: 404 },
+      );
+    }
 
-    // Attach payment method to customer
-    await stripe.paymentMethods.attach(paymentMethodId, {
-      customer: stripeCustomer.id,
-    });
-
-    // Get the payment method details
     const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
 
-    // Save to our database
-    const { data: newPaymentMethod, error } = await supabase
-      .from("payment_methods")
-      .insert({
-        customer_id: customer.id,
-        stripe_payment_method_id: paymentMethodId,
-        type: paymentMethod.type,
-        brand: paymentMethod.card?.brand,
-        last4: paymentMethod.card?.last4,
-        exp_month: paymentMethod.card?.exp_month,
-        exp_year: paymentMethod.card?.exp_year,
-        is_default: setAsDefault || false,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      // Rollback: detach payment method
-      await stripe.paymentMethods.detach(paymentMethodId);
-      throw new Error(`Failed to save payment method: ${error.message}`);
+    // Ownership check: never let one user point at another user's card.
+    if (paymentMethod.customer !== customer.stripe_customer_id) {
+      return NextResponse.json(
+        { error: "Payment method not found" },
+        { status: 404 },
+      );
     }
 
-    // Set as default if requested
     if (setAsDefault) {
-      // Remove default from other payment methods
-      await supabase
-        .from("payment_methods")
-        .update({ is_default: false })
-        .eq("customer_id", customer.id)
-        .neq("id", newPaymentMethod.id);
-
-      // Update customer's default payment method in Stripe
-      await stripe.customers.update(stripeCustomer.id, {
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
-      });
+      await setDefaultPaymentMethod(
+        customer.stripe_customer_id,
+        paymentMethodId,
+      );
     }
 
-    return NextResponse.json({ paymentMethod: newPaymentMethod });
+    const paymentMethods = await listPaymentMethods(
+      customer.id,
+      customer.stripe_customer_id,
+    );
+
+    return NextResponse.json({ paymentMethods });
   } catch (error: unknown) {
-    console.error("Error adding payment method:", error);
+    console.error("Error updating payment method:", error);
     return NextResponse.json(
       {
         error:
           error instanceof Error
             ? error.message
-            : "Failed to add payment method",
+            : "Failed to update payment method",
       },
       { status: 500 },
     );
@@ -165,14 +127,12 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * DELETE /api/billing/payment-methods
- * Remove a payment method
+ * DELETE /api/billing/payment-methods?paymentMethodId=pm_...
  */
 export async function DELETE(req: NextRequest) {
   try {
     const supabase = await createClient();
 
-    // Get the current user
     const {
       data: { user },
       error: authError,
@@ -181,8 +141,9 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const url = new URL(req.url);
-    const paymentMethodId = url.searchParams.get("paymentMethodId");
+    const paymentMethodId = new URL(req.url).searchParams.get(
+      "paymentMethodId",
+    );
 
     if (!paymentMethodId) {
       return NextResponse.json(
@@ -191,41 +152,51 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Get the payment method from our database
-    const { data: paymentMethod } = await supabase
-      .from("payment_methods")
-      .select("*")
-      .eq("stripe_payment_method_id", paymentMethodId)
-      .single();
-
-    if (!paymentMethod) {
+    const customer = await getCustomerByUserId(user.id);
+    if (!customer) {
       return NextResponse.json(
         { error: "Payment method not found" },
         { status: 404 },
       );
     }
 
-    // Check if this is the default payment method
-    if (paymentMethod.is_default) {
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+
+    if (paymentMethod.customer !== customer.stripe_customer_id) {
+      return NextResponse.json(
+        { error: "Payment method not found" },
+        { status: 404 },
+      );
+    }
+
+    const paymentMethods = await listPaymentMethods(
+      customer.id,
+      customer.stripe_customer_id,
+    );
+    const target = paymentMethods.find((pm) => pm.id === paymentMethodId);
+
+    // Removing the default card would leave renewals with nothing to charge.
+    if (target?.is_default && paymentMethods.length > 1) {
       return NextResponse.json(
         {
           error:
-            "Cannot delete default payment method. Set another as default first.",
+            "Cannot remove your default payment method. Set another card as default first.",
         },
         { status: 400 },
       );
     }
 
-    // Detach from Stripe
+    // Detaching in Stripe is the whole operation. The legacy
+    // `billing_payment_methods` mirror is not read anywhere and is writable
+    // only by the service role, so there is nothing to clean up here.
     await stripe.paymentMethods.detach(paymentMethodId);
 
-    // Remove from our database
-    await supabase
-      .from("payment_methods")
-      .delete()
-      .eq("stripe_payment_method_id", paymentMethodId);
+    const remaining = await listPaymentMethods(
+      customer.id,
+      customer.stripe_customer_id,
+    );
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, paymentMethods: remaining });
   } catch (error: unknown) {
     console.error("Error removing payment method:", error);
     return NextResponse.json(

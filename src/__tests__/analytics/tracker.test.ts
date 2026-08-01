@@ -129,7 +129,7 @@ describe("AnalyticsTracker", () => {
         },
       ];
 
-      const mockSiteAnalytics = [];
+      const mockSiteAnalytics: Array<Record<string, unknown>> = [];
       const mockPerformanceData = [
         {
           metric_type: "load_time",

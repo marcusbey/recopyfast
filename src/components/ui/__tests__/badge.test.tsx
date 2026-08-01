@@ -44,7 +44,7 @@ describe("Badge Component", () => {
       expect(badge.className).toContain("py-0.5");
       expect(badge.className).toContain("text-xs");
       expect(badge.className).toContain("font-semibold");
-      expect(badge.className).toContain("transition-colors");
+      expect(badge.className).toContain("transition-all");
     });
 
     it("should apply focus styles", () => {

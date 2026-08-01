@@ -17,7 +17,7 @@ export async function createOrGetCustomer(
 
   // Check if customer already exists in our database
   const { data: existingCustomer } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("user_id", userId)
     .single();
@@ -44,7 +44,7 @@ export async function createOrGetCustomer(
 
   // Save customer to our database
   const { data: newCustomer, error } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .insert({
       user_id: userId,
       stripe_customer_id: stripeCustomer.id,
@@ -72,7 +72,7 @@ export async function updateCustomer(
 
   // Get the customer
   const { data: customer, error: fetchError } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("id", customerId)
     .single();
@@ -86,7 +86,7 @@ export async function updateCustomer(
 
   // Update our database
   const { data: updatedCustomer, error } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .update(updates)
     .eq("id", customerId)
     .select()
@@ -108,7 +108,7 @@ export async function getCustomerByUserId(
   const supabase = await createClient();
 
   const { data: customer } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("user_id", userId)
     .single();
@@ -124,7 +124,7 @@ export async function deleteCustomer(customerId: string): Promise<void> {
 
   // Get the customer
   const { data: customer, error: fetchError } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .select("*")
     .eq("id", customerId)
     .single();
@@ -138,7 +138,7 @@ export async function deleteCustomer(customerId: string): Promise<void> {
 
   // Delete from our database (cascade will handle related records)
   const { error } = await supabase
-    .from("customers")
+    .from("billing_customers")
     .delete()
     .eq("id", customerId);
 

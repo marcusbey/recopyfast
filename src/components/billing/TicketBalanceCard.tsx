@@ -10,13 +10,11 @@ import type { Tickets, TicketTransaction } from "@/types/billing";
 interface TicketBalanceCardProps {
   tickets?: Tickets;
   recentTransactions: TicketTransaction[];
-  onUpdate: () => void;
 }
 
 export function TicketBalanceCard({
   tickets,
   recentTransactions,
-  onUpdate,
 }: TicketBalanceCardProps) {
   const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
 
@@ -146,7 +144,6 @@ export function TicketBalanceCard({
       <PurchaseTicketsDialog
         open={showPurchaseDialog}
         onOpenChange={setShowPurchaseDialog}
-        onSuccess={onUpdate}
       />
     </Card>
   );

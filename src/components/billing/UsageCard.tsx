@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
 import type { Subscription, PlanLimits } from "@/types/billing";
 
 interface UsageCardProps {

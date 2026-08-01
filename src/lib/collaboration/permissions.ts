@@ -15,6 +15,18 @@ export class CollaborationPermissions {
     this.supabase = createClient();
   }
 
+  private sitePermissionToTeamRole(permission: string): TeamRole {
+    switch (permission) {
+      case "admin":
+        return "owner";
+      case "edit":
+        return "editor";
+      case "view":
+      default:
+        return "viewer";
+    }
+  }
+
   /**
    * Check if a user has permission to perform an action on a team
    */
@@ -71,19 +83,21 @@ export class CollaborationPermissions {
       // Check direct site permissions
       const { data: sitePermission } = await client
         .from("site_permissions")
-        .select("role")
+        .select("permission")
         .eq("site_id", siteId)
         .eq("user_id", userId)
         .single();
 
-      if (
-        sitePermission &&
-        requiredRoles.includes(sitePermission.role as TeamRole)
-      ) {
-        return {
-          hasPermission: true,
-          userRole: sitePermission.role as TeamRole,
-        };
+      if (sitePermission) {
+        const siteRole = this.sitePermissionToTeamRole(
+          sitePermission.permission as string,
+        );
+        if (requiredRoles.includes(siteRole)) {
+          return {
+            hasPermission: true,
+            userRole: siteRole,
+          };
+        }
       }
 
       // Check team-based site permissions
@@ -91,7 +105,7 @@ export class CollaborationPermissions {
         .from("site_permissions")
         .select(
           `
-          role,
+          permission,
           team:teams!site_permissions_team_id_fkey(
             team_members!inner(role)
           )
@@ -106,7 +120,9 @@ export class CollaborationPermissions {
         } | null;
         if (permissionTeam?.team_members?.[0]) {
           const userTeamRole = permissionTeam.team_members[0].role as TeamRole;
-          const siteRole = permission.role as TeamRole;
+          const siteRole = this.sitePermissionToTeamRole(
+            permission.permission as string,
+          );
 
           // User must have sufficient role in team AND site permission must allow the required roles
           if (

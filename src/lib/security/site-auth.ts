@@ -24,7 +24,7 @@ export function normalizeDomain(domain: string) {
       trimmed.startsWith("http") ? trimmed : `https://${trimmed}`,
     );
     return url.hostname.toLowerCase();
-  } catch (error) {
+  } catch {
     throw new Error("Invalid domain");
   }
 }
@@ -33,7 +33,7 @@ function parseOrigin(originHeader?: string | null) {
   if (!originHeader) return null;
   try {
     return new URL(originHeader).hostname.toLowerCase();
-  } catch (error) {
+  } catch {
     return null;
   }
 }

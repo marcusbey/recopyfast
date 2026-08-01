@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import { NextRequest } from "next/server";
-import { GET, POST, PUT, DELETE } from "@/app/api/billing/subscription/route";
+import { GET, PUT, DELETE } from "@/app/api/billing/subscription/route";
 
 // Mock Supabase client
 jest.mock("@/lib/supabase/server", () => ({
@@ -17,14 +17,12 @@ jest.mock("@/lib/supabase/server", () => ({
 // Mock Stripe functions
 jest.mock("@/lib/stripe/subscription", () => ({
   getUserSubscription: jest.fn(),
-  createSubscription: jest.fn(),
   updateSubscription: jest.fn(),
   cancelSubscription: jest.fn(),
 }));
 
 import {
   getUserSubscription,
-  createSubscription,
   updateSubscription,
   cancelSubscription,
 } from "@/lib/stripe/subscription";
@@ -67,113 +65,111 @@ describe("/api/billing/subscription", () => {
     });
   });
 
-  describe("POST", () => {
-    it("should create a new subscription", async () => {
-      const mockSubscription = {
-        id: "sub-123",
-        plan_id: "pro",
-        status: "active",
-      };
-
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (createSubscription as jest.Mock).mockResolvedValue({
-        subscription: mockSubscription,
+  /**
+   * There is no POST on this route any more. Buying a first subscription goes
+   * through Stripe Checkout (POST /api/billing/checkout with
+   * `{ intent: "subscription" }`), because creating it server-side left
+   * `incomplete` rows that Stripe auto-cancelled. The former POST block of this
+   * suite was removed with it; PUT below covers plan changes on an existing
+   * subscription.
+   */
+  describe("PUT", () => {
+    const putRequest = (body: unknown) =>
+      new NextRequest("http://localhost:3000/api/billing/subscription", {
+        method: "PUT",
+        body: JSON.stringify(body),
       });
 
-      const request = new NextRequest(
-        "http://localhost:3000/api/billing/subscription",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            planId: "pro",
-            paymentMethodId: "pm_test_123",
-          }),
+    it("should change the plan on an existing subscription", async () => {
+      const result = {
+        subscription: {
+          id: "sub-123",
+          plan_id: "enterprise",
+          status: "active",
         },
-      );
+        requiresAction: false,
+        hostedInvoiceUrl: null,
+      };
+      (updateSubscription as jest.Mock).mockResolvedValue(result);
 
-      const response = await POST(request);
+      const response = await PUT(putRequest({ planId: "enterprise" }));
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data.subscription).toEqual(mockSubscription);
-      expect(createSubscription).toHaveBeenCalledWith(
-        "test-user-id",
-        "test@example.com",
-        "pro",
-        "pm_test_123",
-      );
+      expect(data).toEqual(result);
+      // billingPeriod defaults to monthly when the caller omits it.
+      expect(updateSubscription).toHaveBeenCalledWith("test-user-id", {
+        planId: "enterprise",
+        billingPeriod: "monthly",
+      });
     });
 
-    it("should reject invalid plan IDs", async () => {
-      const request = new NextRequest(
-        "http://localhost:3000/api/billing/subscription",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            planId: "invalid-plan",
-          }),
-        },
-      );
+    it("should pass a yearly billing period through", async () => {
+      (updateSubscription as jest.Mock).mockResolvedValue({
+        subscription: { id: "sub-123" },
+        requiresAction: false,
+        hostedInvoiceUrl: null,
+      });
 
-      const response = await POST(request);
+      await PUT(putRequest({ planId: "pro", billingPeriod: "yearly" }));
+
+      expect(updateSubscription).toHaveBeenCalledWith("test-user-id", {
+        planId: "pro",
+        billingPeriod: "yearly",
+      });
+    });
+
+    it("should surface a required 3DS action to the caller", async () => {
+      (updateSubscription as jest.Mock).mockResolvedValue({
+        subscription: { id: "sub-123" },
+        requiresAction: true,
+        hostedInvoiceUrl: "https://invoice.stripe.com/i/test",
+      });
+
+      const response = await PUT(putRequest({ planId: "pro" }));
+      const data = await response.json();
+
+      expect(data.requiresAction).toBe(true);
+      expect(data.hostedInvoiceUrl).toBe("https://invoice.stripe.com/i/test");
+    });
+
+    it("should reject an unknown plan id", async () => {
+      const response = await PUT(putRequest({ planId: "invalid-plan" }));
       const data = await response.json();
 
       expect(response.status).toBe(400);
       expect(data.error).toBe("Invalid plan ID");
+      expect(updateSubscription).not.toHaveBeenCalled();
     });
 
-    it("should reject users with existing active subscription", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue({
-        status: "active",
-      });
+    it("should reject the free plan, which cannot be purchased", async () => {
+      const response = await PUT(putRequest({ planId: "free" }));
 
-      const request = new NextRequest(
-        "http://localhost:3000/api/billing/subscription",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            planId: "pro",
-          }),
-        },
+      expect(response.status).toBe(400);
+      expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it("should reject an unknown billing period", async () => {
+      const response = await PUT(
+        putRequest({ planId: "pro", billingPeriod: "weekly" }),
       );
-
-      const response = await POST(request);
       const data = await response.json();
 
       expect(response.status).toBe(400);
-      expect(data.error).toBe("User already has an active subscription");
+      expect(data.error).toBe("Invalid billing period");
+      expect(updateSubscription).not.toHaveBeenCalled();
     });
-  });
 
-  describe("PUT", () => {
-    it("should update existing subscription", async () => {
-      const mockSubscription = {
-        id: "sub-123",
-        plan_id: "enterprise",
-        status: "active",
-      };
-
-      (updateSubscription as jest.Mock).mockResolvedValue(mockSubscription);
-
-      const request = new NextRequest(
-        "http://localhost:3000/api/billing/subscription",
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            planId: "enterprise",
-          }),
-        },
+    it("should return 500 with the underlying reason when the change fails", async () => {
+      (updateSubscription as jest.Mock).mockRejectedValue(
+        new Error("No active subscription found"),
       );
 
-      const response = await PUT(request);
+      const response = await PUT(putRequest({ planId: "pro" }));
       const data = await response.json();
 
-      expect(response.status).toBe(200);
-      expect(data.subscription).toEqual(mockSubscription);
-      expect(updateSubscription).toHaveBeenCalledWith("test-user-id", {
-        planId: "enterprise",
-        paymentMethodId: undefined,
-      });
+      expect(response.status).toBe(500);
+      expect(data.error).toBe("No active subscription found");
     });
   });
 

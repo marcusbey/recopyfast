@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import { InvoiceHistoryCard } from "./InvoiceHistoryCard";
 import { TicketBalanceCard } from "./TicketBalanceCard";
 import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
+import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
 import type { BillingDashboardData } from "@/types/billing";
 
 export function BillingDashboard() {
@@ -19,13 +20,10 @@ export function BillingDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const response = await fetch("/api/billing/dashboard");
 
       if (!response.ok) {
@@ -41,11 +39,15 @@ export function BillingDashboard() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSubscriptionUpdate = () => {
-    fetchDashboardData();
-  };
+  useEffect(() => {
+    void fetchDashboardData();
+  }, [fetchDashboardData]);
+
+  const handleSubscriptionUpdate = useCallback(() => {
+    void fetchDashboardData();
+  }, [fetchDashboardData]);
 
   if (loading) {
     return (
@@ -95,13 +97,13 @@ export function BillingDashboard() {
           >
             {currentPlan.toUpperCase()} PLAN
           </Badge>
-          {!isPaidPlan && (
-            <Button onClick={() => setShowUpgradeDialog(true)}>
-              Upgrade Plan
-            </Button>
-          )}
+          <Button onClick={() => setShowUpgradeDialog(true)}>
+            {isPaidPlan ? "Change Plan" : "Choose a Plan"}
+          </Button>
         </div>
       </div>
+
+      <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="lg:col-span-2 space-y-6">
@@ -111,7 +113,6 @@ export function BillingDashboard() {
           />
           <PaymentMethodsCard
             paymentMethods={dashboardData?.paymentMethods || []}
-            customerId={dashboardData?.customer?.id}
             onUpdate={handleSubscriptionUpdate}
           />
           <InvoiceHistoryCard invoices={dashboardData?.invoices || []} />
@@ -121,7 +122,6 @@ export function BillingDashboard() {
           <TicketBalanceCard
             tickets={dashboardData?.tickets}
             recentTransactions={dashboardData?.recentTransactions || []}
-            onUpdate={handleSubscriptionUpdate}
           />
           <UsageCard
             currentUsage={

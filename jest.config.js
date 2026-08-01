@@ -34,10 +34,10 @@ const customJestConfig = {
       statements: 80,
     },
   },
-  testMatch: [
-    '<rootDir>/src/**/__tests__/**/*.{js,jsx,ts,tsx}',
-    '<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}',
-  ],
+  // Only *.test.* / *.spec.* are suites. The previous
+  // `src/**/__tests__/**/*.{js,jsx,ts,tsx}` pattern also swept up shared
+  // helpers (e.g. integration/setup.ts) and failed them as empty suites.
+  testMatch: ['<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}'],
 }
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async

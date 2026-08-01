@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SiteCard } from "../SiteCard";
 import type { Site } from "@/types";
 
@@ -85,29 +86,25 @@ describe("SiteCard", () => {
   });
 
   it("opens dropdown menu and calls onDelete", async () => {
+    // Radix's dropdown trigger opens on pointerdown, which fireEvent.click does
+    // not dispatch — userEvent drives the full pointer sequence.
+    const user = userEvent.setup();
     render(<SiteCard site={mockSite} {...mockHandlers} />);
 
-    // Find and click the menu trigger button
-    const menuButton = screen.getByRole("button", { name: /open menu/i });
-    fireEvent.click(menuButton);
+    await user.click(screen.getByRole("button", { name: /open menu/i }));
 
-    // Wait for menu to appear and click delete
-    await waitFor(() => {
-      const deleteButton = screen.getByText("Delete Site");
-      expect(deleteButton).toBeInTheDocument();
-      fireEvent.click(deleteButton);
-    });
+    const deleteButton = await screen.findByText("Delete Site");
+    await user.click(deleteButton);
 
     expect(mockHandlers.onDelete).toHaveBeenCalledWith("test-site-id");
   });
 
   it("copies domain to clipboard when copy button is clicked", async () => {
-    // Mock clipboard API
-    Object.assign(navigator, {
-      clipboard: {
-        writeText: jest.fn().mockResolvedValue(undefined),
-      },
-    });
+    // Once any test in this file has called userEvent.setup(), navigator.clipboard
+    // is a getter-only stub, so Object.assign no longer works — spy on it instead.
+    const writeText = jest
+      .spyOn(navigator.clipboard, "writeText")
+      .mockResolvedValue(undefined);
 
     render(<SiteCard site={mockSite} {...mockHandlers} />);
 
@@ -122,8 +119,10 @@ describe("SiteCard", () => {
     fireEvent.click(copyButtons[0]);
 
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("example.com");
+      expect(writeText).toHaveBeenCalledWith("example.com");
     });
+
+    writeText.mockRestore();
   });
 
   it("renders with different status types", () => {
@@ -147,6 +146,7 @@ describe("SiteCard", () => {
 
     render(<SiteCard site={siteWithoutStats} {...mockHandlers} />);
 
-    expect(screen.getByText("0")).toBeInTheDocument(); // Default edits_count
+    // Both the edits and views counters fall back to 0.
+    expect(screen.getAllByText("0")).toHaveLength(2);
   });
 });

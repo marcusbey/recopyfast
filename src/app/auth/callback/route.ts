@@ -1,22 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
-
-/**
- * Validate the `next` redirect target so it can only be a same-origin
- * relative path.  Rules:
- *   - Must start with a single '/'
- *   - Must NOT start with '//' (protocol-relative URL — cross-origin)
- *   - Must NOT start with '/\' (IE-era cross-origin bypass)
- * Anything else falls back to '/dashboard'.
- */
-function sanitizeNext(value: string | null): string {
-  const fallback = "/dashboard";
-  if (!value) return fallback;
-  if (!value.startsWith("/")) return fallback;
-  if (value.startsWith("//")) return fallback;
-  if (value.startsWith("/\\")) return fallback;
-  return value;
-}
+import { sanitizeNext } from "../sanitize-next";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -29,6 +13,10 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    // The exchange fails when the link is expired, already consumed, or was
+    // opened in a different browser than the one that requested it (the PKCE
+    // code verifier lives in a cookie). Log it rather than losing the reason.
+    console.error("[auth] exchangeCodeForSession failed", error.message);
   }
 
   // Return the user to an error page with instructions

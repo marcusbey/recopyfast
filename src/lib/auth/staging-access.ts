@@ -230,7 +230,7 @@ export class StagingAccessManager {
     email: string,
   ): Promise<{ success: boolean; verificationCode?: string; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase
@@ -293,7 +293,7 @@ export class StagingAccessManager {
     code: string,
   ): Promise<{ success: boolean; access?: StagingAccess; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase
@@ -358,7 +358,7 @@ export class StagingAccessManager {
     error?: string;
   }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase

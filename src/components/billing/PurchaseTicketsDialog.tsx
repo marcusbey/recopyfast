@@ -12,72 +12,41 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
+import { TICKET_CONFIG } from "@/lib/stripe/plans";
+import { useCheckout } from "./useCheckout";
 
+/**
+ * There is no `onSuccess` here: the purchase completes on Stripe's page, and
+ * the wallet is refreshed by CheckoutStatusBanner once the customer is
+ * redirected back and the webhook has credited the tickets.
+ */
 interface PurchaseTicketsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
 }
+
+const TICKETS_PER_PACK = TICKET_CONFIG.TICKETS_PER_PURCHASE;
+const PRICE_PER_PACK =
+  TICKET_CONFIG.TICKETS_PER_PURCHASE * TICKET_CONFIG.PRICE_PER_TICKET;
+const MAX_PACKS = TICKET_CONFIG.MAX_PACKS_PER_PURCHASE;
 
 export function PurchaseTicketsDialog({
   open,
   onOpenChange,
-  onSuccess,
 }: PurchaseTicketsDialogProps) {
   const [quantity, setQuantity] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { startCheckout, isRedirecting, error } = useCheckout();
 
-  const ticketsPerPack = 10;
-  const pricePerPack = 5;
-  const totalTickets = quantity * ticketsPerPack;
-  const totalPrice = quantity * pricePerPack;
+  const totalTickets = quantity * TICKETS_PER_PACK;
+  const totalPrice = quantity * PRICE_PER_PACK;
 
-  const handlePurchase = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch("/api/billing/tickets", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          quantity,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to purchase tickets");
-      }
-
-      const data = await response.json();
-
-      // Handle payment confirmation if needed
-      if (
-        data.paymentIntent &&
-        data.paymentIntent.status === "requires_confirmation"
-      ) {
-        // In a real implementation, you would use Stripe Elements here
-        // For now, we'll assume the payment is handled externally
-        alert(
-          "Payment confirmation required. Please complete the payment process.",
-        );
-        return;
-      }
-
-      onSuccess();
-      onOpenChange(false);
+  const handleQuantityChange = (value: string) => {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
       setQuantity(1);
-    } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to purchase tickets",
-      );
-    } finally {
-      setLoading(false);
+      return;
     }
+    setQuantity(Math.min(MAX_PACKS, Math.max(1, parsed)));
   };
 
   return (
@@ -104,15 +73,15 @@ export function PurchaseTicketsDialog({
               id="quantity"
               type="number"
               min="1"
-              max="100"
+              max={MAX_PACKS}
               value={quantity}
-              onChange={(e) =>
-                setQuantity(Math.max(1, parseInt(e.target.value) || 1))
-              }
+              disabled={isRedirecting}
+              onChange={(e) => handleQuantityChange(e.target.value)}
               placeholder="1"
             />
             <p className="text-sm text-gray-600">
-              Each pack contains {ticketsPerPack} tickets for ${pricePerPack}
+              Each pack contains {TICKETS_PER_PACK} tickets for $
+              {PRICE_PER_PACK}
             </p>
           </div>
 
@@ -135,23 +104,26 @@ export function PurchaseTicketsDialog({
             <p>• 1 ticket = 1 AI suggestion or translation</p>
             <p>• Tickets never expire</p>
             <p>• Unused tickets are refunded if features fail</p>
+            <p>• Payment is completed on Stripe&apos;s secure checkout page</p>
           </div>
 
           <div className="flex gap-3 pt-4">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
-              disabled={loading}
+              disabled={isRedirecting}
               className="flex-1"
             >
               Cancel
             </Button>
             <Button
-              onClick={handlePurchase}
-              disabled={loading}
+              onClick={() => startCheckout({ intent: "tickets", quantity })}
+              disabled={isRedirecting}
               className="flex-1"
             >
-              {loading ? "Processing..." : `Purchase $${totalPrice}`}
+              {isRedirecting
+                ? "Redirecting to Stripe…"
+                : `Purchase $${totalPrice}`}
             </Button>
           </div>
         </div>

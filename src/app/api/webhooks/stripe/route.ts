@@ -63,7 +63,10 @@ export async function POST(req: NextRequest) {
 
   if (idempotencyError) {
     console.error("Idempotency check failed:", idempotencyError.message);
-    // Fail open: continue processing rather than blocking on a DB error.
+    return NextResponse.json(
+      { error: "Webhook idempotency check failed" },
+      { status: 500 },
+    );
   } else if (existingEvent) {
     console.log(
       `Stripe event ${event.id} already processed — skipping (idempotent).`,

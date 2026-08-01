@@ -23,7 +23,7 @@ interface EditSession {
 
 interface EditWebsiteButtonProps {
   site: Site;
-  userPermissions: ("view" | "edit" | "admin")[];
+  userPermissions: ("view" | "edit" | "publish" | "admin")[];
   className?: string;
   variant?: "primary" | "secondary" | "outline";
   size?: "sm" | "md" | "lg";
@@ -83,7 +83,9 @@ export default function EditWebsiteButton({
       }
 
       // Success! Open website with edit token
-      const editUrl = `https://${site.domain}?rcf_edit_token=${data.session.token}`;
+      const editUrl =
+        data.editUrl ||
+        `https://${site.domain}?rcf_edit_token=${data.session.token}`;
 
       // Show success message
       showSuccessNotification(data.session);

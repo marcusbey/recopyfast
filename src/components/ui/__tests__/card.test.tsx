@@ -36,7 +36,7 @@ describe("Card Components", () => {
       render(<Card data-testid="card">Content</Card>);
 
       const card = screen.getByTestId("card");
-      expect(card.className).toContain("rounded-lg");
+      expect(card.className).toContain("rounded-xl");
       expect(card.className).toContain("border");
       expect(card.className).toContain("bg-card");
       expect(card.className).toContain("text-card-foreground");
@@ -52,7 +52,7 @@ describe("Card Components", () => {
 
       const card = screen.getByTestId("card");
       expect(card.className).toContain("custom-class");
-      expect(card.className).toContain("rounded-lg");
+      expect(card.className).toContain("rounded-xl");
     });
 
     it("should forward HTML attributes", () => {
@@ -144,7 +144,7 @@ describe("Card Components", () => {
       render(<CardTitle data-testid="title">Title</CardTitle>);
 
       const title = screen.getByTestId("title");
-      expect(title.className).toContain("text-2xl");
+      expect(title.className).toContain("text-xl");
       expect(title.className).toContain("font-semibold");
       expect(title.className).toContain("leading-none");
       expect(title.className).toContain("tracking-tight");
@@ -159,7 +159,7 @@ describe("Card Components", () => {
 
       const title = screen.getByTestId("title");
       expect(title.className).toContain("custom-title");
-      expect(title.className).toContain("text-2xl");
+      expect(title.className).toContain("text-xl");
     });
 
     it("should forward ref correctly", () => {

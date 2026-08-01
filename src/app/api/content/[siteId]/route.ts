@@ -103,7 +103,7 @@ export async function GET(
     const transformedContent = (contentElements || []).map((element) => ({
       ...element,
       current_content:
-        element.published_content || element.original_content || "",
+        element.published_content ?? element.original_content ?? "",
     }));
 
     return withCors(NextResponse.json(transformedContent), allowedOrigin);
@@ -185,17 +185,20 @@ export async function POST(
         selector: data.selector,
         original_content: sanitizedContent,
         current_content: sanitizedContent,
+        published_content: sanitizedContent,
         language: "en",
         variant: "default",
         metadata: { type: data.type },
       };
     });
 
-    // Upsert content elements
+    // Insert newly discovered elements only. Existing rows may already carry
+    // published edits, so content discovery must not overwrite published_content.
     const { error } = await supabase
       .from("content_elements")
       .upsert(contentElements, {
         onConflict: "site_id,element_id,language,variant",
+        ignoreDuplicates: true,
       });
 
     if (error) {
@@ -222,25 +225,6 @@ export async function PUT(
 ) {
   try {
     const { siteId } = await params;
-    const {
-      elementId,
-      content,
-      language = "en",
-      variant = "default",
-    } = await request.json();
-
-    // Server-side content length validation
-    if (content && content.length > MAX_CONTENT_LENGTH) {
-      return NextResponse.json(
-        {
-          error: `Content exceeds maximum length of ${MAX_CONTENT_LENGTH} characters`,
-        },
-        { status: 400 },
-      );
-    }
-
-    const sanitizedContent = sanitizeIncomingContent(content);
-    const supabase = createServiceRoleClient();
     const token = extractToken(request);
     const origin = request.headers.get("origin");
     const referer = request.headers.get("referer");
@@ -271,27 +255,16 @@ export async function PUT(
       );
     }
 
-    // Update content element
-    const { error } = await supabase
-      .from("content_elements")
-      .update({ current_content: sanitizedContent })
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant);
-
-    if (error) {
-      console.error("Error updating content:", error);
-      return withCors(
-        NextResponse.json(
-          { error: "Failed to update content" },
-          { status: 500 },
-        ),
-        allowedOrigin,
-      );
-    }
-
-    return withCors(NextResponse.json({ success: true }), allowedOrigin);
+    return withCors(
+      NextResponse.json(
+        {
+          error:
+            "Live content updates must use /api/staging/content and publish explicitly",
+        },
+        { status: 403 },
+      ),
+      allowedOrigin,
+    );
   } catch (error) {
     console.error("Error in content update:", error);
     return NextResponse.json(

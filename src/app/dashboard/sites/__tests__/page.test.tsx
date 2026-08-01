@@ -1,14 +1,15 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import SitesPage from "../page";
 
 // Mock the auth context
+// The returned object must be stable: the page refetches on `[user]`, so a new
+// object per render would retrigger the effect on every render.
+const mockAuthValue = {
+  user: { id: "test-user-id", email: "test@example.com" },
+};
 jest.mock("@/contexts/AuthContext", () => ({
-  useAuth: jest.fn(() => ({
-    user: {
-      id: "test-user-id",
-      email: "test@example.com",
-    },
-  })),
+  useAuth: jest.fn(() => mockAuthValue),
 }));
 
 // Mock the components
@@ -112,9 +113,11 @@ describe("SitesPage", () => {
   });
 
   it("displays loading state initially", () => {
-    render(<SitesPage />);
+    const { container } = render(<SitesPage />);
 
-    expect(screen.getByRole("img", { hidden: true })).toBeInTheDocument(); // Loader2 icon
+    // Lucide renders a bare <svg> with no img role, so match the spinner class.
+    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(screen.queryByTestId("site-card-site-1")).not.toBeInTheDocument();
   });
 
   it("displays status counts correctly", async () => {
@@ -171,11 +174,10 @@ describe("SitesPage", () => {
       expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
     });
 
-    const sortButton = screen.getByText(/Sort:/i);
-    fireEvent.click(sortButton);
+    const user = userEvent.setup();
+    await user.click(screen.getByText(/Sort:/i));
 
-    const sortByNameOption = screen.getByText("Sort by Name");
-    fireEvent.click(sortByNameOption);
+    await user.click(await screen.findByText("Sort by Name"));
 
     // Sites should be reordered alphabetically
     await waitFor(() => {
@@ -301,7 +303,8 @@ describe("SitesPage", () => {
     const searchInput = screen.getByPlaceholderText(
       "Search sites by name or domain...",
     );
-    fireEvent.change(searchInput, { target: { value: "example1" } });
+    // Clear Filters only renders in the empty state, so filter everything out.
+    fireEvent.change(searchInput, { target: { value: "no-such-site" } });
 
     await waitFor(() => {
       expect(screen.getByText("Clear Filters")).toBeInTheDocument();

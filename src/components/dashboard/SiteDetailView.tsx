@@ -29,6 +29,7 @@ import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ShareButton } from "./ShareButton";
+import { buildEmbedScript } from "@/lib/sites/embed-script";
 
 export type SiteStatus = "active" | "inactive" | "verifying";
 
@@ -90,10 +91,12 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   const status = site.status || "active";
   const StatusIcon = statusConfig[status].icon;
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
   const embedScript =
     site.embedScript ||
-    `<script src="${appUrl}/embed/recopyfast.js" data-site-id="${site.id}" data-site-token="${site.siteToken || "YOUR_SITE_TOKEN"}"></script>`;
+    buildEmbedScript({
+      siteId: site.id,
+      siteToken: site.siteToken || "YOUR_SITE_TOKEN",
+    });
 
   const handleCopyScript = async () => {
     await navigator.clipboard.writeText(embedScript);

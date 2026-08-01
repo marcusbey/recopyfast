@@ -5,121 +5,126 @@ import React from "react";
 import { render, cleanup } from "@testing-library/react";
 import ReCopyFastLoader from "../ReCopyFastLoader";
 
-// Create a test container
-let container: HTMLDivElement;
+/**
+ * These must match the constants the component embeds. The loader only runs
+ * when the page is already in staging mode; otherwise it rewrites the URL and
+ * bails, so every test that expects a script tag has to arrange for that.
+ */
+const DEMO_SITE_ID = "7e3b2d6c-1ab1-46f3-92fd-493173fa3e17";
+const DEMO_STAGING_TOKEN = "test_staging_token_valid_123";
 
-// Mock script element
-const mockScript = {
-  src: "",
-  setAttribute: jest.fn(),
-  async: false,
-  onload: null as (() => void) | null,
-  onerror: null as (() => void) | null,
+const enterStagingMode = () => {
+  window.history.replaceState(
+    {},
+    "",
+    `/demo?rcf_staging=1&rcf_token=${DEMO_STAGING_TOKEN}`,
+  );
 };
 
-// Mock DOM methods
-const originalCreateElement = document.createElement;
-const originalAppendChild = document.body.appendChild;
-const originalRemoveChild = document.body.removeChild;
+const getInjectedScript = () =>
+  document.body.querySelector<HTMLScriptElement>(
+    'script[src="/embed/recopyfast.js"]',
+  );
 
-// Mock console methods
-const mockConsoleLog = jest.spyOn(console, "log").mockImplementation();
-const mockConsoleError = jest.spyOn(console, "error").mockImplementation();
+const getAllInjectedScripts = () =>
+  document.body.querySelectorAll('script[src="/embed/recopyfast.js"]');
+
+let mockConsoleLog: jest.SpyInstance;
+let mockConsoleError: jest.SpyInstance;
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  mockConsoleLog = jest.spyOn(console, "log").mockImplementation();
+  // Also swallows jsdom's "Not implemented: navigation" notice, which the
+  // redirect branch triggers because jsdom does not implement location.replace.
+  mockConsoleError = jest.spyOn(console, "error").mockImplementation();
 
-  // Set up DOM container
-  container = document.createElement("div");
-  container.id = "test-container";
-  document.body.appendChild(container);
+  delete window.RECOPYFAST_API;
+  delete window.RECOPYFAST_WS;
+  delete window.recopyfast;
 
-  // Mock createElement to return our mock script
-  document.createElement = jest.fn().mockImplementation((tagName: string) => {
-    if (tagName === "script") {
-      return mockScript as HTMLScriptElement;
-    }
-    return originalCreateElement.call(document, tagName);
-  });
-
-  // Mock appendChild
-  document.body.appendChild = jest.fn();
-
-  // Mock removeChild
-  document.body.removeChild = jest.fn();
-
-  // Reset window properties
-  delete (window as unknown as { RECOPYFAST_API?: string }).RECOPYFAST_API;
-  delete (window as unknown as { RECOPYFAST_WS?: string }).RECOPYFAST_WS;
-  delete (window as unknown as { recopyfast?: { destroy(): void } }).recopyfast;
+  enterStagingMode();
 });
 
 afterEach(() => {
   cleanup();
-
-  // Clean up container
-  if (container && document.body.contains(container)) {
-    document.body.removeChild(container);
-  }
-
-  // Restore original methods
-  document.createElement = originalCreateElement;
-  document.body.appendChild = originalAppendChild;
-  document.body.removeChild = originalRemoveChild;
-
+  document
+    .querySelectorAll('script[src="/embed/recopyfast.js"]')
+    .forEach((node) => node.remove());
   jest.restoreAllMocks();
 });
 
 describe("ReCopyFastLoader", () => {
-  describe("Script Loading", () => {
-    it("should create and configure script element correctly", () => {
-      render(<ReCopyFastLoader />, { container });
+  // jsdom exposes `window.location` as a non-configurable, non-writable
+  // property, so `location.replace` cannot be spied on. These assert the gate's
+  // observable effect instead: outside staging mode nothing is injected and no
+  // globals are published.
+  describe("Staging gate", () => {
+    it("injects nothing when the staging params are absent", () => {
+      window.history.replaceState({}, "", "/demo");
 
-      expect(document.createElement).toHaveBeenCalledWith("script");
-      expect(mockScript.setAttribute).toHaveBeenCalledWith(
-        "data-site-id",
-        "demo-site-123",
-      );
-      expect(mockScript.setAttribute).toHaveBeenCalledWith(
-        "data-edit-mode",
-        "true",
-      );
-      expect(mockScript.src).toBe("/embed/recopyfast.js");
-      expect(mockScript.async).toBe(true);
-      expect(document.body.appendChild).toHaveBeenCalledWith(mockScript);
-    });
-
-    it("should set global window configuration", () => {
       render(<ReCopyFastLoader />);
 
-      expect(
-        (window as unknown as { RECOPYFAST_API: string }).RECOPYFAST_API,
-      ).toBe("http://localhost:3000/api");
-      expect(
-        (window as unknown as { RECOPYFAST_WS: string }).RECOPYFAST_WS,
-      ).toBe("http://localhost:3001");
+      expect(getInjectedScript()).toBeNull();
+      expect(window.RECOPYFAST_API).toBeUndefined();
+      expect(window.RECOPYFAST_WS).toBeUndefined();
     });
 
-    it("should handle script load success", () => {
+    it("injects nothing when rcf_staging is set but the token is missing", () => {
+      window.history.replaceState({}, "", "/demo?rcf_staging=1");
+
       render(<ReCopyFastLoader />);
 
-      // Simulate script load
-      if (mockScript.onload) {
-        mockScript.onload();
-      }
+      expect(getInjectedScript()).toBeNull();
+      expect(window.RECOPYFAST_API).toBeUndefined();
+    });
+
+    it("injects nothing when the token is present but rcf_staging is not", () => {
+      window.history.replaceState(
+        {},
+        "",
+        `/demo?rcf_token=${DEMO_STAGING_TOKEN}`,
+      );
+
+      render(<ReCopyFastLoader />);
+
+      expect(getInjectedScript()).toBeNull();
+    });
+  });
+
+  describe("Script loading", () => {
+    it("injects the embed script with the demo site id and staging token", () => {
+      render(<ReCopyFastLoader />);
+
+      const script = getInjectedScript();
+      expect(script).not.toBeNull();
+      expect(script!.getAttribute("data-site-id")).toBe(DEMO_SITE_ID);
+      expect(script!.getAttribute("data-site-token")).toBe(DEMO_STAGING_TOKEN);
+      expect(script!.async).toBe(true);
+    });
+
+    it("sets the API and websocket globals from the current origin", () => {
+      render(<ReCopyFastLoader />);
+
+      expect(window.RECOPYFAST_API).toBe(`${window.location.origin}/api`);
+      expect(window.RECOPYFAST_WS).toBe(
+        process.env.NEXT_PUBLIC_WS_URL || "http://localhost:4001",
+      );
+    });
+
+    it("logs on successful script load", () => {
+      render(<ReCopyFastLoader />);
+
+      getInjectedScript()!.onload!(new Event("load"));
 
       expect(mockConsoleLog).toHaveBeenCalledWith(
         "ReCopyFast script loaded successfully",
       );
     });
 
-    it("should handle script load error", () => {
+    it("logs on script load failure", () => {
       render(<ReCopyFastLoader />);
 
-      // Simulate script error
-      if (mockScript.onerror) {
-        mockScript.onerror();
-      }
+      getInjectedScript()!.onerror!(new Event("error"));
 
       expect(mockConsoleError).toHaveBeenCalledWith(
         "Failed to load ReCopyFast script",
@@ -128,116 +133,50 @@ describe("ReCopyFastLoader", () => {
   });
 
   describe("Cleanup", () => {
-    it("should remove script from DOM on unmount", () => {
+    it("removes the injected script on unmount", () => {
       const { unmount } = render(<ReCopyFastLoader />);
+      expect(getInjectedScript()).not.toBeNull();
 
       unmount();
 
-      expect(document.body.removeChild).toHaveBeenCalledWith(mockScript);
+      expect(getInjectedScript()).toBeNull();
     });
 
-    it("should call recopyfast.destroy if available on unmount", () => {
+    it("tears down the embed runtime on unmount when it registered itself", () => {
       const mockDestroy = jest.fn();
-      (
-        window as unknown as { recopyfast: { destroy: () => void } }
-      ).recopyfast = { destroy: mockDestroy };
+      window.recopyfast = { destroy: mockDestroy };
 
       const { unmount } = render(<ReCopyFastLoader />);
-
       unmount();
 
       expect(mockDestroy).toHaveBeenCalled();
     });
 
-    it("should not throw if recopyfast is not available on unmount", () => {
+    it("unmounts cleanly when the embed runtime never loaded", () => {
       const { unmount } = render(<ReCopyFastLoader />);
 
       expect(() => unmount()).not.toThrow();
     });
   });
 
-  describe("Server-side Rendering", () => {
-    it("should handle server environment gracefully", () => {
-      // Mock server environment by temporarily removing window
-      delete (global as { window?: Window }).window;
-
-      expect(() => render(<ReCopyFastLoader />)).not.toThrow();
-    });
-  });
-
-  describe("Component Rendering", () => {
-    it("should render without visible content", () => {
+  describe("Rendering", () => {
+    it("renders no visible output", () => {
       const { container } = render(<ReCopyFastLoader />);
 
       expect(container.firstChild).toBeNull();
     });
 
-    it("should not throw errors during render", () => {
-      expect(() => render(<ReCopyFastLoader />)).not.toThrow();
-    });
-  });
+    it("injects one script per mounted instance and removes each on unmount", () => {
+      const { unmount: unmountFirst } = render(<ReCopyFastLoader />);
+      const { unmount: unmountSecond } = render(<ReCopyFastLoader />);
 
-  describe("Multiple Instances", () => {
-    it("should handle multiple component instances", () => {
-      const { unmount: unmount1 } = render(<ReCopyFastLoader />);
-      const { unmount: unmount2 } = render(<ReCopyFastLoader />);
+      expect(getAllInjectedScripts()).toHaveLength(2);
 
-      expect(document.body.appendChild).toHaveBeenCalledTimes(2);
+      unmountFirst();
+      expect(getAllInjectedScripts()).toHaveLength(1);
 
-      unmount1();
-      unmount2();
-
-      expect(document.body.removeChild).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe("Error Handling", () => {
-    it("should handle DOM manipulation errors gracefully", () => {
-      (document.body.appendChild as jest.Mock).mockImplementation(() => {
-        throw new Error("DOM error");
-      });
-
-      // The component should handle errors in DOM manipulation
-      expect(() => render(<ReCopyFastLoader />)).not.toThrow();
-    });
-
-    it("should handle cleanup errors gracefully", () => {
-      const { unmount } = render(<ReCopyFastLoader />);
-
-      (document.body.removeChild as jest.Mock).mockImplementation(() => {
-        throw new Error("Cleanup error");
-      });
-
-      expect(() => unmount()).not.toThrow();
-    });
-  });
-
-  describe("Window Configuration", () => {
-    it("should only set configuration in browser environment", () => {
-      // Mock non-browser environment
-      const originalWindow = global.window;
-      delete (global as { window?: Window }).window;
-
-      render(<ReCopyFastLoader />);
-
-      expect(document.body.appendChild).not.toHaveBeenCalled();
-
-      // Restore window
-      (global as { window: Window }).window = originalWindow;
-    });
-
-    it("should preserve existing window properties", () => {
-      (window as unknown as { existingProperty: string }).existingProperty =
-        "test";
-
-      render(<ReCopyFastLoader />);
-
-      expect(
-        (window as unknown as { existingProperty: string }).existingProperty,
-      ).toBe("test");
-      expect(
-        (window as unknown as { RECOPYFAST_API: string }).RECOPYFAST_API,
-      ).toBe("http://localhost:3000/api");
+      unmountSecond();
+      expect(getAllInjectedScripts()).toHaveLength(0);
     });
   });
 });

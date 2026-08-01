@@ -32,6 +32,19 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# runtime logs — winston writes here at runtime; never commit them
+/logs/
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e-screenshots/
+
+# agent tooling scratch
+/.omc/
 
 # vercel
 .vercel

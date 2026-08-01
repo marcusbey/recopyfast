@@ -4,50 +4,77 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  extractEditorToken,
+  validateEditorAccess,
+} from "@/lib/auth/editor-access";
+import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { token, siteId }: { token: string; siteId: string } = body;
+    const { token, siteId }: { token?: string; siteId: string } = body;
 
-    if (!token || !siteId) {
-      return NextResponse.json(
-        { error: "Missing token or siteId" },
-        { status: 400 },
+    if (!siteId) {
+      return withPublicCors(
+        NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
+        request,
       );
     }
 
-    const result = await StagingAccessManager.validateStagingAccess(
-      token,
+    const editorToken =
+      extractEditorToken(request, body as Record<string, unknown>) ||
+      (token ? { kind: "staging" as const, token } : null);
+
+    if (!editorToken) {
+      return withPublicCors(
+        NextResponse.json({ error: "Missing token" }, { status: 400 }),
+        request,
+      );
+    }
+
+    const result = await validateEditorAccess({
       siteId,
-    );
+      token: editorToken,
+      allowUnverified: true,
+    });
 
     if (!result.valid) {
-      return NextResponse.json(
-        {
-          valid: false,
-          error: result.error || "Invalid staging token",
-        },
-        { status: 401 },
+      return withPublicCors(
+        NextResponse.json(
+          {
+            valid: false,
+            error: result.error || "Invalid editor token",
+          },
+          { status: result.status || 401 },
+        ),
+        request,
       );
     }
 
     // Token is valid but may need email or verification
-    return NextResponse.json({
-      valid: true,
-      verified: result.verified,
-      permissions: result.permissions,
-      email: result.email,
-      expiresAt: result.expiresAt?.toISOString(),
-      requiresEmail: result.requiresEmail,
-      requiresVerification: result.requiresVerification,
-    });
+    return withPublicCors(
+      NextResponse.json({
+        valid: true,
+        kind: result.access?.kind,
+        verified: result.access?.verified,
+        permissions: result.access?.permissions || [],
+        email: result.access?.email,
+        expiresAt: result.access?.expiresAt?.toISOString(),
+        requiresEmail: result.requiresEmail,
+        requiresVerification: result.requiresVerification,
+      }),
+      request,
+    );
   } catch (error) {
     console.error("Error validating staging token:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
+    return withPublicCors(
+      NextResponse.json({ error: "Internal server error" }, { status: 500 }),
+      request,
     );
   }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return publicOptions(request, "POST,OPTIONS");
 }

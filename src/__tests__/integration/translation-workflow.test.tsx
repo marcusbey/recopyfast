@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
+import { http, HttpResponse } from "msw";
 import { server, mockFetch } from "./setup";
 import TranslationDashboard from "@/components/dashboard/TranslationDashboard";
 
@@ -333,13 +334,16 @@ describe("Translation Workflow Integration", () => {
         />,
       );
 
-      // Try to translate without selecting elements
-      fireEvent.click(screen.getByText("Translate with AI"));
+      // The button is disabled until at least one element is selected, so the
+      // click is inert rather than surfacing a validation error.
+      const translateButton = screen.getByText("Translate with AI");
+      expect(translateButton).toBeDisabled();
 
-      // Should show error message
+      fireEvent.click(translateButton);
+
       expect(
-        screen.getByText("Please select at least one element to translate"),
-      ).toBeInTheDocument();
+        screen.queryByText("Please select at least one element to translate"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -388,9 +392,9 @@ describe("Translation Workflow Integration", () => {
       // Step 7: Verify results structure
       expect(screen.getByText("Translation Results")).toBeInTheDocument();
 
-      // Should show original and translated text sections
-      expect(screen.getByText("Original (English)")).toBeInTheDocument();
-      expect(screen.getByText("Translation (German)")).toBeInTheDocument();
+      // One "Original"/"Translation" label per result row.
+      expect(screen.getAllByText("Original (English)")).toHaveLength(2);
+      expect(screen.getAllByText("Translation (German)")).toHaveLength(2);
     });
 
     it("should handle multiple translation requests in sequence", async () => {
@@ -424,7 +428,9 @@ describe("Translation Workflow Integration", () => {
       });
 
       // Should show latest translation results
-      expect(screen.getByText("Translation (French)")).toBeInTheDocument();
+      expect(
+        screen.getAllByText("Translation (French)").length,
+      ).toBeGreaterThan(0);
     });
 
     it("should maintain state during error recovery", async () => {
@@ -440,10 +446,22 @@ describe("Translation Workflow Integration", () => {
       fireEvent.click(checkboxes[0]);
       fireEvent.click(checkboxes[1]);
 
-      // First attempt with error language
-      const toLanguageSelect = screen.getByDisplayValue("🇪🇸 Spanish");
-      fireEvent.change(toLanguageSelect, { target: { value: "error-lang" } });
+      // Make the next translation call fail. The component only offers its
+      // supported languages, so the failure has to come from the server rather
+      // than from an out-of-range option value.
+      server.use(
+        http.post(
+          "/api/ai/translate",
+          () =>
+            HttpResponse.json(
+              { error: "Translation service unavailable" },
+              { status: 500 },
+            ),
+          { once: true },
+        ),
+      );
 
+      const toLanguageSelect = screen.getByDisplayValue("🇪🇸 Spanish");
       fireEvent.click(screen.getByText("Translate with AI"));
 
       await waitFor(() => {

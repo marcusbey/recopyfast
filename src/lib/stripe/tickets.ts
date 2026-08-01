@@ -1,72 +1,14 @@
-import { stripe, TICKET_CONFIG } from "./config";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { createOrGetCustomer } from "./customer";
-import type {
-  Tickets,
-  TicketTransaction,
-  TicketPurchaseRequest,
-} from "@/types/billing";
+import { TICKET_CONFIG } from "./plans";
+import type { Tickets, TicketTransaction } from "@/types/billing";
 
 /**
- * Purchase tickets for pay-per-use features.
- *
- * IMPORTANT: Tickets are credited ONLY via the webhook (payment_intent.succeeded)
- * to avoid double-crediting. This function creates the PaymentIntent and returns
- * immediately — the webhook will call addTicketsToUser once Stripe confirms the
- * payment, guarded by the UNIQUE(stripe_payment_intent_id) constraint.
+ * Ticket purchases are started with a Stripe Checkout Session — see
+ * `createCheckoutSession` in `./checkout`. Nothing in this module charges a
+ * card; the wallet is credited only by `addTicketsToUser` from the
+ * `payment_intent.succeeded` webhook.
  */
-export async function purchaseTickets(
-  userId: string,
-  email: string,
-  request: TicketPurchaseRequest,
-): Promise<{
-  paymentIntent: import("stripe").Stripe.PaymentIntent;
-  tickets: Tickets;
-}> {
-  const supabase = await createClient();
-
-  // Create or get customer
-  const { customer } = await createOrGetCustomer(userId, email);
-
-  // Calculate total amount
-  const totalAmount = Math.round(
-    request.quantity *
-      TICKET_CONFIG.TICKETS_PER_PURCHASE *
-      TICKET_CONFIG.PRICE_PER_TICKET *
-      100,
-  ); // in cents
-  const totalTickets = request.quantity * TICKET_CONFIG.TICKETS_PER_PURCHASE;
-
-  // Create payment intent. Tickets will be credited by the Stripe webhook
-  // (payment_intent.succeeded) — NOT here — to prevent double-crediting.
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: totalAmount,
-    currency: "usd",
-    customer: customer.stripe_customer_id,
-    payment_method: request.paymentMethodId,
-    confirmation_method: "manual",
-    confirm: true,
-    return_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/billing`,
-    metadata: {
-      user_id: userId,
-      ticket_quantity: totalTickets.toString(),
-      type: "ticket_purchase",
-    },
-  });
-
-  // DO NOT call addTicketsToUser here. The webhook handles crediting so that
-  // tickets are added exactly once, even if the client retries this request.
-
-  // Get current ticket balance (may not yet reflect the pending payment)
-  const { data: tickets } = await supabase
-    .from("tickets")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
-
-  return { paymentIntent, tickets: tickets! };
-}
 
 /**
  * Add tickets to user's balance.

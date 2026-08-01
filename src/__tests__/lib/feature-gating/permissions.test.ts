@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "@jest/globals";
 import {
   canCreateWebsite,
   canUseAIFeatures,
@@ -6,22 +6,38 @@ import {
   consumeFeatureUsage,
 } from "@/lib/feature-gating/permissions";
 
-// Mock Supabase client
+/**
+ * Supabase query-builder stub.
+ *
+ * `canCreateWebsite` awaits the result of `.from().select().eq()` directly
+ * (there is no `.single()` in the chain), so every terminal link has to be
+ * thenable. `setCount` controls what that await resolves to.
+ */
+let queryCount: number | null = 0;
+const mockInsert = jest.fn();
+
+const makeQuery = () => {
+  const query: Record<string, unknown> = {
+    then: (resolve: (value: { count: number | null }) => unknown) =>
+      Promise.resolve({ count: queryCount, data: [], error: null }).then(
+        resolve,
+      ),
+  };
+  for (const method of ["select", "eq", "neq", "gte", "order", "limit"]) {
+    query[method] = jest.fn(() => query);
+  }
+  query.insert = mockInsert;
+  return query;
+};
+
 const mockSupabase = {
-  from: jest.fn().mockReturnThis(),
-  select: jest.fn().mockReturnThis(),
-  eq: jest.fn().mockReturnThis(),
-  neq: jest.fn().mockReturnThis(),
-  single: jest.fn(),
-  insert: jest.fn(),
-  rpc: jest.fn(),
+  from: jest.fn(() => makeQuery()),
 };
 
 jest.mock("@/lib/supabase/server", () => ({
-  createClient: jest.fn().mockResolvedValue(mockSupabase),
+  createClient: jest.fn(() => Promise.resolve(mockSupabase)),
 }));
 
-// Mock Stripe functions
 jest.mock("@/lib/stripe/subscription", () => ({
   getUserSubscription: jest.fn(),
 }));
@@ -31,36 +47,77 @@ jest.mock("@/lib/stripe/tickets", () => ({
   consumeTickets: jest.fn(),
 }));
 
+jest.mock("@/lib/credits/system", () => {
+  const actual = jest.requireActual("@/lib/credits/system");
+  return {
+    ...actual,
+    getUserCreditBalance: jest.fn(),
+    hasEnoughCredits: jest.fn(),
+    consumeCredits: jest.fn(),
+  };
+});
+
 import { getUserSubscription } from "@/lib/stripe/subscription";
-import { getUserTicketBalance, consumeTickets } from "@/lib/stripe/tickets";
+import { getUserTicketBalance } from "@/lib/stripe/tickets";
+import {
+  getUserCreditBalance,
+  consumeCredits,
+  CREDIT_COSTS,
+} from "@/lib/credits/system";
+
+const asMock = (fn: unknown) => fn as jest.Mock;
+
+const creditBalance = (total: number) => ({
+  included: total,
+  purchased: 0,
+  total,
+  usedThisMonth: 0,
+});
 
 describe("Feature Gating Permissions", () => {
   const testUserId = "test-user-id";
 
   beforeEach(() => {
     jest.clearAllMocks();
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
+    queryCount = 0;
+    mockInsert.mockResolvedValue({ error: null });
   });
 
   describe("canCreateWebsite", () => {
-    it("should allow website creation for pro plan with unlimited websites", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue({
-        plan_id: "pro",
-      });
-
-      mockSupabase.single.mockResolvedValue({ count: 5 });
+    it("allows creation on enterprise, which has an unlimited website quota", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "enterprise" });
+      queryCount = 5;
 
       const result = await canCreateWebsite(testUserId);
 
       expect(result.allowed).toBe(true);
     });
 
-    it("should allow website creation for free plan within limit", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      mockSupabase.single.mockResolvedValue({ count: 0 });
+    it("allows creation on pro while under the 3-website quota", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      queryCount = 2;
+
+      const result = await canCreateWebsite(testUserId);
+
+      expect(result.allowed).toBe(true);
+      expect(result.currentLimit).toBe(2);
+      expect(result.maxLimit).toBe(3);
+    });
+
+    it("denies creation on pro once the 3-website quota is used up", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      queryCount = 3;
+
+      const result = await canCreateWebsite(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("limit of 3 websites");
+    });
+
+    it("allows creation on starter, which permits exactly one website", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "starter" });
+      queryCount = 0;
 
       const result = await canCreateWebsite(testUserId);
 
@@ -69,23 +126,23 @@ describe("Feature Gating Permissions", () => {
       expect(result.maxLimit).toBe(1);
     });
 
-    it("should deny website creation for free plan at limit", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      mockSupabase.single.mockResolvedValue({ count: 1 });
+    it("denies creation with no subscription, since the free fallback allows zero websites", async () => {
+      asMock(getUserSubscription).mockResolvedValue(null);
+      queryCount = 0;
 
       const result = await canCreateWebsite(testUserId);
 
       expect(result.allowed).toBe(false);
       expect(result.upgradeRequired).toBe(true);
-      expect(result.reason).toContain("limit of 1 website");
+      expect(result.maxLimit).toBe(0);
+      expect(result.reason).toContain("limit of 0 websites");
     });
   });
 
   describe("canUseAIFeatures", () => {
-    it("should allow AI features for pro plan", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue({
-        plan_id: "pro",
-      });
+    it("allows AI on pro when the credit balance covers the cost", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
 
       const result = await canUseAIFeatures(testUserId);
 
@@ -93,44 +150,42 @@ describe("Feature Gating Permissions", () => {
       expect(result.requiresTickets).toBeFalsy();
     });
 
-    it("should allow AI features for free plan with sufficient tickets", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (getUserTicketBalance as jest.Mock).mockResolvedValue(5);
-
-      const result = await canUseAIFeatures(testUserId, 2);
-
-      expect(result.allowed).toBe(true);
-      expect(result.requiresTickets).toBe(true);
-      expect(result.ticketsRequired).toBe(2);
-    });
-
-    it("should deny AI features for free plan without tickets", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (getUserTicketBalance as jest.Mock).mockResolvedValue(0);
+    it("denies AI when the plan has no AI entitlement", async () => {
+      asMock(getUserSubscription).mockResolvedValue(null);
 
       const result = await canUseAIFeatures(testUserId, 1);
 
       expect(result.allowed).toBe(false);
       expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("Pro or Enterprise subscription");
+      expect(getUserCreditBalance).not.toHaveBeenCalled();
+    });
+
+    it("denies AI on pro when the credit balance is short", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(1));
+
+      const result = await canUseAIFeatures(testUserId, 5);
+
+      expect(result.allowed).toBe(false);
       expect(result.requiresTickets).toBe(true);
-      expect(result.reason).toContain("require a Pro or Enterprise plan");
+      expect(result.ticketsRequired).toBe(5);
+      expect(result.reason).toContain("Insufficient credits");
     });
   });
 
   describe("canUseTranslation", () => {
-    it("should allow translations for pro plan", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue({
-        plan_id: "pro",
-      });
+    it("allows translation on pro, which has an unlimited translation quota", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
 
       const result = await canUseTranslation(testUserId);
 
       expect(result.allowed).toBe(true);
     });
 
-    it("should allow translations for free plan with tickets", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (getUserTicketBalance as jest.Mock).mockResolvedValue(3);
+    it("allows translation without a plan when the user holds tickets", async () => {
+      asMock(getUserSubscription).mockResolvedValue(null);
+      asMock(getUserTicketBalance).mockResolvedValue(3);
 
       const result = await canUseTranslation(testUserId);
 
@@ -138,56 +193,86 @@ describe("Feature Gating Permissions", () => {
       expect(result.requiresTickets).toBe(true);
       expect(result.ticketsRequired).toBe(1);
     });
+
+    it("denies translation without a plan and without tickets", async () => {
+      asMock(getUserSubscription).mockResolvedValue(null);
+      asMock(getUserTicketBalance).mockResolvedValue(0);
+
+      const result = await canUseTranslation(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("Pro or Enterprise plan");
+    });
   });
 
   describe("consumeFeatureUsage", () => {
-    it("should consume tickets for free plan AI usage", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (getUserTicketBalance as jest.Mock).mockResolvedValue(5);
-      (consumeTickets as jest.Mock).mockResolvedValue(true);
-
-      mockSupabase.insert.mockResolvedValue({ error: null });
+    it("consumes credits and records usage for an AI suggestion", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
+      asMock(consumeCredits).mockResolvedValue({ success: true });
 
       const result = await consumeFeatureUsage(testUserId, "ai_suggestion", {
         context: "test",
       });
 
       expect(result.success).toBe(true);
-      expect(consumeTickets).toHaveBeenCalledWith(
+      expect(consumeCredits).toHaveBeenCalledWith(
         testUserId,
-        1,
-        "ai_suggestion usage",
+        CREDIT_COSTS.AI_SUGGESTION,
+        "ai_suggestion",
+        { context: "test" },
       );
-      expect(mockSupabase.insert).toHaveBeenCalledWith({
+      expect(mockInsert).toHaveBeenCalledWith({
         user_id: testUserId,
         feature_type: "ai_suggestion",
         count: 1,
-        metadata: { context: "test" },
+        metadata: {
+          context: "test",
+          credits_used: CREDIT_COSTS.AI_SUGGESTION,
+        },
       });
     });
 
-    it("should not consume tickets for pro plan usage", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue({
-        plan_id: "pro",
-      });
+    it("charges the higher translation credit cost", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      asMock(consumeCredits).mockResolvedValue({ success: true });
 
-      mockSupabase.insert.mockResolvedValue({ error: null });
-
-      const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
+      const result = await consumeFeatureUsage(testUserId, "translation");
 
       expect(result.success).toBe(true);
-      expect(consumeTickets).not.toHaveBeenCalled();
-      expect(mockSupabase.insert).toHaveBeenCalled();
+      expect(consumeCredits).toHaveBeenCalledWith(
+        testUserId,
+        CREDIT_COSTS.AI_TRANSLATION,
+        "translation",
+        undefined,
+      );
     });
 
-    it("should fail when insufficient tickets", async () => {
-      (getUserSubscription as jest.Mock).mockResolvedValue(null);
-      (getUserTicketBalance as jest.Mock).mockResolvedValue(0);
+    it("fails without consuming credits when the plan lacks AI access", async () => {
+      asMock(getUserSubscription).mockResolvedValue(null);
 
       const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("require a Pro or Enterprise plan");
+      expect(result.error).toContain("Pro or Enterprise subscription");
+      expect(consumeCredits).not.toHaveBeenCalled();
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it("surfaces the error when credit consumption fails", async () => {
+      asMock(getUserSubscription).mockResolvedValue({ plan_id: "pro" });
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
+      asMock(consumeCredits).mockResolvedValue({
+        success: false,
+        error: "Insufficient credits",
+      });
+
+      const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Insufficient credits");
+      expect(mockInsert).not.toHaveBeenCalled();
     });
   });
 });

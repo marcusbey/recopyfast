@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import { getUserTickets } from "@/lib/stripe/tickets";
-import type { BillingDashboardData } from "@/types/billing";
+import { listPaymentMethods } from "@/lib/stripe/payment-methods";
+import type { BillingDashboardData, PaymentMethod } from "@/types/billing";
 
 /**
  * GET /api/billing/dashboard
@@ -23,7 +24,7 @@ export async function GET() {
 
     // Get customer information
     const { data: customer } = await supabase
-      .from("customers")
+      .from("billing_customers")
       .select("*")
       .eq("user_id", user.id)
       .single();
@@ -31,16 +32,24 @@ export async function GET() {
     // Get subscription
     const subscription = await getUserSubscription(user.id);
 
-    // Get payment methods
-    const { data: paymentMethods } = await supabase
-      .from("payment_methods")
-      .select("*")
-      .eq("customer_id", customer?.id)
-      .order("created_at", { ascending: false });
+    // Payment methods come from Stripe, which is authoritative — cards are
+    // attached by Checkout and never mirrored into our tables.
+    let paymentMethods: PaymentMethod[] = [];
+    if (customer) {
+      try {
+        paymentMethods = await listPaymentMethods(
+          customer.id,
+          customer.stripe_customer_id,
+        );
+      } catch (stripeError: unknown) {
+        // A Stripe outage should degrade the cards panel, not the whole page.
+        console.error("Failed to list payment methods:", stripeError);
+      }
+    }
 
     // Get recent invoices
     const { data: invoices } = await supabase
-      .from("invoices")
+      .from("billing_invoices")
       .select("*")
       .eq("customer_id", customer?.id)
       .order("created_at", { ascending: false })
@@ -104,7 +113,7 @@ export async function GET() {
     const dashboardData: BillingDashboardData = {
       customer: customer || undefined,
       subscription: subscription || undefined,
-      paymentMethods: paymentMethods || [],
+      paymentMethods,
       invoices: invoices || [],
       tickets: tickets || undefined,
       recentTransactions: recentTransactions || [],

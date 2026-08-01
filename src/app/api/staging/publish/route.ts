@@ -1,233 +1,216 @@
 /**
  * Staging Publish API
  * POST: Publish staging content to live
+ * GET: Preview pending staging changes
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  requireEditorPermission,
+  validateEditorTokenFromRequest,
+} from "@/lib/auth/editor-access";
+import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+
+type PublishRpcRow = {
+  element_id: string;
+  content: string | null;
+};
+
+function extractElementIds(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  const elementIds = value.filter(
+    (elementId): elementId is string => typeof elementId === "string",
+  );
+  return elementIds.length > 0 ? elementIds : null;
+}
+
+async function getAuthenticatedUserAccess(siteId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return null;
+  }
+
+  const { data: permission, error } = await supabase
+    .from("site_permissions")
+    .select("permission")
+    .eq("site_id", siteId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (error || !permission) {
+    return null;
+  }
+
+  return {
+    user,
+    permission: permission.permission as string,
+    canView: true,
+    canPublish: ["admin", "owner", "publish"].includes(
+      permission.permission as string,
+    ),
+  };
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const serviceClient = createServiceRoleClient();
-
-    // Get authenticated user OR staging token
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    const body = await request.json();
-    const {
-      siteId,
-      elementIds,
-      stagingToken,
-    }: {
-      siteId: string;
-      elementIds?: string[];
-      stagingToken?: string;
-    } = body;
+    const body = (await request.json()) as Record<string, unknown>;
+    const siteId = typeof body.siteId === "string" ? body.siteId : "";
 
     if (!siteId) {
-      return NextResponse.json({ error: "Missing siteId" }, { status: 400 });
+      return withPublicCors(
+        NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
+        request,
+      );
     }
 
+    const authenticatedAccess = await getAuthenticatedUserAccess(siteId);
     let publisherEmail: string | null = null;
     let publisherId: string | null = null;
 
-    // Check authorization: either authenticated user with admin/publish permission
-    // OR staging token with publish permission
-    if (user) {
-      // Check if user has publish permission on the site
-      const { data: permission, error: permError } = await supabase
-        .from("site_permissions")
-        .select("permission")
-        .eq("site_id", siteId)
-        .eq("user_id", user.id)
-        .single();
-
-      if (permError || !["admin", "owner"].includes(permission?.permission)) {
-        return NextResponse.json(
-          { error: "Publish permission required" },
-          { status: 403 },
+    if (authenticatedAccess) {
+      if (!authenticatedAccess.canPublish) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Publish permission required" },
+            { status: 403 },
+          ),
+          request,
         );
       }
 
-      publisherEmail = user.email || null;
-      publisherId = user.id;
-    } else if (stagingToken) {
-      // Validate staging token with publish permission
-      const validation = await StagingAccessManager.validateStagingAccess(
-        stagingToken,
-        siteId,
-      );
-
-      if (!validation.valid || !validation.verified) {
-        return NextResponse.json(
-          { error: "Invalid or unverified staging token" },
-          { status: 401 },
-        );
-      }
-
-      const hasPublishPermission =
-        validation.permissions.includes("publish") ||
-        validation.permissions.includes("admin");
-
-      if (!hasPublishPermission) {
-        return NextResponse.json(
-          { error: "Publish permission required" },
-          { status: 403 },
-        );
-      }
-
-      publisherEmail = validation.email;
+      publisherEmail = authenticatedAccess.user.email || null;
+      publisherId = authenticatedAccess.user.id;
     } else {
-      return NextResponse.json(
-        { error: "Authentication required" },
-        { status: 401 },
-      );
-    }
-
-    // Get elements to publish
-    let query = serviceClient
-      .from("content_elements")
-      .select("id, element_id, staging_content, published_content")
-      .eq("site_id", siteId)
-      .not("staging_content", "is", null);
-
-    if (elementIds && elementIds.length > 0) {
-      query = query.in("element_id", elementIds);
-    }
-
-    const { data: elementsToPublish, error: fetchError } = await query;
-
-    if (fetchError) {
-      console.error("Error fetching elements to publish:", fetchError);
-      return NextResponse.json(
-        { error: "Failed to fetch elements" },
-        { status: 500 },
-      );
-    }
-
-    if (!elementsToPublish || elementsToPublish.length === 0) {
-      return NextResponse.json({
-        success: true,
-        published: 0,
-        message: "No staging changes to publish",
+      const validation = await validateEditorTokenFromRequest({
+        request,
+        siteId,
+        body,
       });
+
+      if (!validation.valid || !validation.access) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: validation.error || "Authentication required" },
+            { status: validation.status || 401 },
+          ),
+          request,
+        );
+      }
+
+      if (!requireEditorPermission(validation.access, "publish")) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Publish permission required" },
+            { status: 403 },
+          ),
+          request,
+        );
+      }
+
+      publisherEmail =
+        validation.access.email ||
+        validation.access.userId ||
+        validation.access.kind;
+      publisherId = validation.access.userId || null;
     }
 
-    // Filter to only elements with actual changes
-    const changedElements = elementsToPublish.filter(
-      (el) => el.staging_content !== el.published_content,
+    const elementIds = extractElementIds(body.elementIds);
+    const serviceClient = createServiceRoleClient();
+    const { data, error } = await serviceClient.rpc(
+      "publish_staging_content_atomic",
+      {
+        p_site_id: siteId,
+        p_element_ids: elementIds,
+        p_published_by: publisherId,
+        p_user_email: publisherEmail || "unknown",
+      },
     );
 
-    if (changedElements.length === 0) {
-      return NextResponse.json({
+    if (error) {
+      console.error("Error publishing staging content:", error);
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Failed to publish staging content" },
+          { status: 500 },
+        ),
+        request,
+      );
+    }
+
+    const publishedRows = (data || []) as PublishRpcRow[];
+
+    return withPublicCors(
+      NextResponse.json({
         success: true,
-        published: 0,
-        message: "No staging changes to publish",
-      });
-    }
-
-    // Publish each changed element
-    const publishedAt = new Date().toISOString();
-    const publishResults: { elementId: string; success: boolean }[] = [];
-
-    for (const element of changedElements) {
-      // Record in staging history before publishing
-      await serviceClient.from("staging_history").insert({
-        content_element_id: element.id,
-        previous_content: element.published_content,
-        new_content: element.staging_content,
-        user_email: publisherEmail || "unknown",
-        action: "publish",
-      });
-
-      // Update element: copy staging to published
-      const { error: updateError } = await serviceClient
-        .from("content_elements")
-        .update({
-          published_content: element.staging_content,
-          published_at: publishedAt,
-          published_by: publisherId,
-          updated_at: publishedAt,
-        })
-        .eq("id", element.id);
-
-      publishResults.push({
-        elementId: element.element_id,
-        success: !updateError,
-      });
-
-      if (updateError) {
-        console.error(
-          `Error publishing element ${element.element_id}:`,
-          updateError,
-        );
-      }
-    }
-
-    const successCount = publishResults.filter((r) => r.success).length;
-
-    return NextResponse.json({
-      success: true,
-      published: successCount,
-      total: changedElements.length,
-      results: publishResults,
-      publishedAt,
-      publishedBy: publisherEmail,
-    });
+        published: publishedRows.length,
+        elements: publishedRows,
+        publishedBy: publisherEmail,
+      }),
+      request,
+    );
   } catch (error) {
     console.error("Error in publish:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
+    return withPublicCors(
+      NextResponse.json({ error: "Internal server error" }, { status: 500 }),
+      request,
     );
   }
 }
 
-/**
- * GET: Get publishing preview - shows what would be published
- */
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
-
-    // Get authenticated user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { searchParams } = new URL(request.url);
-    const siteId = searchParams.get("siteId");
+    const siteId = request.nextUrl.searchParams.get("siteId");
 
     if (!siteId) {
-      return NextResponse.json(
-        { error: "Missing siteId parameter" },
-        { status: 400 },
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Missing siteId parameter" },
+          { status: 400 },
+        ),
+        request,
       );
     }
 
-    // Check if user has permission to view
-    const { data: permission, error: permError } = await supabase
-      .from("site_permissions")
-      .select("permission")
-      .eq("site_id", siteId)
-      .eq("user_id", user.id)
-      .single();
+    let canPublish = false;
+    const authenticatedAccess = await getAuthenticatedUserAccess(siteId);
 
-    if (permError || !permission) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    if (authenticatedAccess) {
+      canPublish = authenticatedAccess.canPublish;
+    } else {
+      const validation = await validateEditorTokenFromRequest({
+        request,
+        siteId,
+      });
+
+      if (!validation.valid || !validation.access) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: validation.error || "Unauthorized" },
+            { status: validation.status || 401 },
+          ),
+          request,
+        );
+      }
+
+      if (!requireEditorPermission(validation.access, "view")) {
+        return withPublicCors(
+          NextResponse.json({ error: "Access denied" }, { status: 403 }),
+          request,
+        );
+      }
+
+      canPublish = requireEditorPermission(validation.access, "publish");
     }
 
-    // Get elements with staging changes
     const serviceClient = createServiceRoleClient();
     const { data: elementsWithChanges, error: fetchError } = await serviceClient
       .from("content_elements")
@@ -239,13 +222,15 @@ export async function GET(request: NextRequest) {
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);
-      return NextResponse.json(
-        { error: "Failed to fetch staging changes" },
-        { status: 500 },
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Failed to fetch staging changes" },
+          { status: 500 },
+        ),
+        request,
       );
     }
 
-    // Filter to only elements with actual changes
     const changedElements = (elementsWithChanges || [])
       .filter((el) => el.staging_content !== el.published_content)
       .map((el) => ({
@@ -258,17 +243,24 @@ export async function GET(request: NextRequest) {
         metadata: el.metadata,
       }));
 
-    return NextResponse.json({
-      success: true,
-      pendingChanges: changedElements.length,
-      elements: changedElements,
-      canPublish: ["admin", "owner"].includes(permission.permission),
-    });
+    return withPublicCors(
+      NextResponse.json({
+        success: true,
+        pendingChanges: changedElements.length,
+        elements: changedElements,
+        canPublish,
+      }),
+      request,
+    );
   } catch (error) {
     console.error("Error in publish preview:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
+    return withPublicCors(
+      NextResponse.json({ error: "Internal server error" }, { status: 500 }),
+      request,
     );
   }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return publicOptions(request, "GET,POST,OPTIONS");
 }

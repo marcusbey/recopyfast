@@ -37,6 +37,16 @@ jest.mock("crypto", () => ({
   timingSafeEqual: jest.fn((a, b) => a.toString() === b.toString()),
 }));
 
+/** The `permission` column on site_permissions. */
+type SitePermissionLevel = "view" | "edit" | "admin";
+
+/**
+ * Identity helper. A `const x: SitePermissionLevel = "edit"` is narrowed back to
+ * the literal by control-flow analysis, which makes `x === "admin"` a TS2367
+ * "no overlap" error. Going through a function keeps the union type.
+ */
+const permission = (level: SitePermissionLevel): SitePermissionLevel => level;
+
 describe("/api/api-keys", () => {
   const authenticatedUser = {
     id: "test-user-id",
@@ -67,7 +77,7 @@ describe("/api/api-keys", () => {
     });
 
     it("should reject users with edit-only permission", () => {
-      const userPermission = "edit";
+      const userPermission = permission("edit");
       const canCreateKeys = userPermission === "admin";
 
       expect(canCreateKeys).toBe(false);
@@ -138,7 +148,7 @@ describe("/api/api-keys", () => {
     });
 
     it("should reject delete from edit-only users", () => {
-      const userPermission = "edit";
+      const userPermission = permission("edit");
       const canDelete = userPermission === "admin";
 
       expect(canDelete).toBe(false);

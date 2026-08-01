@@ -5,10 +5,81 @@ import { AuthProvider } from "@/contexts/AuthContext";
 
 const inter = Inter({ subsets: ["latin"] });
 
+/**
+ * Canonical origin used to build absolute SEO URLs.
+ *
+ * Resolution order: the explicitly configured app URL, then Vercel's stable
+ * production domain, then the per-deployment URL, then the dev fallback.
+ * Vercel exposes its URL vars as bare hostnames, but this project's `.env`
+ * sets `VERCEL_URL` with a scheme, so both shapes are accepted.
+ */
+function resolveSiteUrl(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL ||
+    "http://localhost:3000";
+
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+
+  return withScheme.replace(/\/+$/, "");
+}
+
+const SITE_NAME = "ReCopyFast";
+const SITE_TITLE = "ReCopyFast - Universal CMS Layer";
+const SITE_DESCRIPTION =
+  "Transform any website into an editable platform with a simple script tag";
+
 export const metadata: Metadata = {
-  title: "ReCopyFast - Universal CMS Layer",
-  description:
-    "Transform any website into an editable platform with a simple script tag",
+  // Without this, every relative OG/Twitter image URL resolves against
+  // localhost in production.
+  metadataBase: new URL(resolveSiteUrl()),
+  title: {
+    default: SITE_TITLE,
+    template: `%s | ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    "CMS",
+    "headless CMS",
+    "website editing",
+    "content management",
+    "no-code",
+    "script tag",
+    "live editing",
+  ],
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  // NOTE: do not add an `icons` field here. Next.js skips the file-based
+  // `icon.tsx` / `apple-icon.tsx` routes whenever `metadata.icons` is set
+  // (see the `if (!resolvedMetadata.icons)` guard in Next's resolve-metadata),
+  // which would silently drop the generated icons.
 };
 
 export default function RootLayout({

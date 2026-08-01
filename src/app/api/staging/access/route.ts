@@ -12,6 +12,7 @@ import {
   AccessType,
 } from "@/lib/auth/staging-access";
 import { sendStagingVerificationEmail } from "@/lib/email/resend";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,6 +27,19 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Invite-type access sends an email to an address the caller supplies, so an
+    // unthrottled endpoint is an open mail relay for spam and a way to burn the
+    // sending domain's reputation. Fails CLOSED.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_DOMAIN_VERIFY",
+      endpoint: "staging/access",
+      identifier: user.id,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message: "Too many staging invites. Please try again shortly.",
+    });
+    if (limited) return limited;
 
     const body = await request.json();
     const {

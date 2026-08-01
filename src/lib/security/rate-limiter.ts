@@ -98,12 +98,61 @@ export class MemoryRateLimiter {
   }
 }
 
+/** Max time to wait for the TCP handshake before giving up on Redis. */
+const REDIS_CONNECT_TIMEOUT_MS = 2000;
+
+/** Max time to wait for a single rate-limit command round trip. */
+const REDIS_COMMAND_TIMEOUT_MS = 1500;
+
 /**
- * Redis-based rate limiter for production
+ * Reject a promise if it has not settled within `timeoutMs`.
+ * A serverless invocation has a hard execution budget — a rate-limit check must
+ * never be the thing that consumes it. Without this, an unreachable-but-not-yet
+ * -refused Redis host stalls every request until the platform kills the function.
+ */
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Redis-based rate limiter for production.
+ *
+ * Serverless lifecycle notes (Vercel functions):
+ *  - The client is created lazily and cached on the module singleton so warm
+ *    invocations in the same isolate reuse one TCP connection. Cold starts pay
+ *    a new handshake; that is inherent to node-redis over TCP.
+ *  - Connection state is read from `client.isOpen` rather than a hand-maintained
+ *    boolean. The previous flag desynced whenever an 'error' event fired without
+ *    the socket actually closing, which made connect() either double-open or
+ *    skip connecting entirely.
+ *  - Concurrent checkLimit() calls in one isolate share a single in-flight
+ *    connect promise instead of each racing to open their own socket.
+ *  - A client that fails to connect is discarded so the next invocation builds a
+ *    fresh one instead of reusing a permanently broken socket.
+ *
+ * Callers decide the failure policy. checkLimit() throws when Redis is
+ * unreachable; it does NOT silently allow. See `enforceRateLimit` in
+ * `@/lib/api/rate-limit` for the fail-open/fail-closed decision per endpoint.
  */
 export class RedisRateLimiter {
   private client: ReturnType<typeof createClient> | null = null;
-  private isConnected = false;
+  private connecting: Promise<void> | null = null;
   private readonly resolvedUrl?: string;
 
   constructor(redisUrl?: string) {
@@ -129,34 +178,63 @@ export class RedisRateLimiter {
 
       this.client = createClient({
         url: this.resolvedUrl ?? "redis://localhost:6379",
+        socket: {
+          connectTimeout: REDIS_CONNECT_TIMEOUT_MS,
+          // Do not retry forever inside a function invocation. One retry, then
+          // surface the failure to the caller so it can apply its policy.
+          reconnectStrategy: (retries) =>
+            retries > 1 ? new Error("Redis unreachable") : 200,
+        },
       });
 
+      // node-redis emits 'error' for both connection and command failures. An
+      // unhandled 'error' on an EventEmitter crashes the process, so this
+      // listener is mandatory even though the promise rejection is what we act on.
       this.client.on("error", (err) => {
         console.error("Redis Client Error:", err);
-        this.isConnected = false;
-      });
-
-      this.client.on("connect", () => {
-        console.log("Redis Client Connected");
-        this.isConnected = true;
       });
     }
     return this.client;
   }
 
+  /** Discard a broken client so the next call builds a fresh one. */
+  private resetClient(): void {
+    const client = this.client;
+    this.client = null;
+    this.connecting = null;
+    if (!client) return;
+    try {
+      client.destroy();
+    } catch {
+      // The socket is already gone; nothing left to clean up.
+    }
+  }
+
   async connect(): Promise<void> {
     const client = this.ensureClient();
-    if (!this.isConnected) {
-      await client.connect();
-      this.isConnected = true;
+    if (client.isOpen) return;
+
+    // Collapse concurrent connects in the same isolate onto one handshake.
+    if (!this.connecting) {
+      this.connecting = withTimeout(
+        client.connect().then(() => undefined),
+        REDIS_CONNECT_TIMEOUT_MS,
+        "Redis connect",
+      ).finally(() => {
+        this.connecting = null;
+      });
+    }
+
+    try {
+      await this.connecting;
+    } catch (error) {
+      this.resetClient();
+      throw error;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.isConnected && this.client) {
-      await this.client.disconnect();
-      this.isConnected = false;
-    }
+    this.resetClient();
   }
 
   private generateKey(config: RateLimitConfig): string {
@@ -180,7 +258,18 @@ export class RedisRateLimiter {
     pipeline.expire(key, Math.ceil(config.windowMs / 1000));
     pipeline.ttl(key);
 
-    const results = await pipeline.exec();
+    let results: unknown[] | null;
+    try {
+      results = await withTimeout(
+        pipeline.exec(),
+        REDIS_COMMAND_TIMEOUT_MS,
+        "Redis rate-limit pipeline",
+      );
+    } catch (error) {
+      // A timed-out or failed command usually means the socket is unusable.
+      this.resetClient();
+      throw error;
+    }
 
     if (!results || results.length < 3) {
       throw new Error("Redis pipeline execution failed");

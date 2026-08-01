@@ -99,6 +99,13 @@ describe("Content Sanitizer", () => {
     });
   });
 
+  /**
+   * `sanitizeJSONData` is deliberately `unknown` in / `unknown` out, so assertions
+   * need a narrowed view of the result. One documented helper beats scattering
+   * casts across every expectation.
+   */
+  const sanitizedAs = <T>(data: unknown): T => sanitizeJSONData(data) as T;
+
   describe("sanitizeJSONData", () => {
     it("should sanitize nested JSON objects", () => {
       const input = {
@@ -110,7 +117,11 @@ describe("Content Sanitizer", () => {
         tags: ["<script>alert(1)</script>", "safe-tag"],
       };
 
-      const result = sanitizeJSONData(input);
+      const result = sanitizedAs<{
+        title: string;
+        content: { html: string };
+        tags: string[];
+      }>(input);
 
       expect(result.title).not.toContain("<script>");
       expect(result.content.html).not.toContain("onclick");
@@ -124,7 +135,7 @@ describe("Content Sanitizer", () => {
         "safe content",
         { unsafe: "<script>test</script>" },
       ];
-      const result = sanitizeJSONData(input);
+      const result = sanitizedAs<[string, string, { unsafe: string }]>(input);
 
       expect(result[0]).not.toContain("<script>");
       expect(result[1]).toBe("safe content");
@@ -133,7 +144,11 @@ describe("Content Sanitizer", () => {
 
     it("should preserve null and undefined values", () => {
       const input = { a: null, b: undefined, c: "test" };
-      const result = sanitizeJSONData(input);
+      const result = sanitizedAs<{
+        a: null;
+        b: undefined;
+        c: string;
+      }>(input);
 
       expect(result.a).toBeNull();
       expect(result.b).toBeUndefined();

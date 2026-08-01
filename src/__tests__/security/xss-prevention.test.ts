@@ -165,18 +165,19 @@ describe("XSS Prevention", () => {
   // Additional: sanitizeJSONData recursive sanitization
   describe("Deep nested sanitization", () => {
     it("should sanitize deeply nested objects (10 levels)", () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let obj: any = { value: '<script>alert("deep")</script>' };
+      let obj: Record<string, unknown> = {
+        value: '<script>alert("deep")</script>',
+      };
       for (let i = 0; i < 10; i++) {
         obj = { nested: obj };
       }
 
-      const result = sanitizeJSONData(obj);
-
-      // Traverse to the deepest level
-      let current = result;
+      // sanitizeJSONData is `unknown` in / `unknown` out; narrow it to walk the
+      // nesting in assertions.
+      type Nested = { nested?: Nested; value?: string };
+      let current = sanitizeJSONData(obj) as Nested;
       for (let i = 0; i < 10; i++) {
-        current = current.nested;
+        current = current.nested as Nested;
       }
 
       expect(current.value).not.toContain("<script>");
@@ -200,7 +201,9 @@ describe("XSS Prevention", () => {
         ],
       };
 
-      const result = sanitizeJSONData(data);
+      const result = sanitizeJSONData(data) as {
+        items: [string, string, { name: string }];
+      };
 
       expect(result.items[0]).not.toContain("<script>");
       expect(result.items[1]).toBe("safe content");

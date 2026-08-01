@@ -310,6 +310,7 @@ async function processBulkUpdates(
         const { error: updateError } = await supabase
           .from("content_elements")
           .update({
+            published_content: sanitizedNewContent,
             current_content: sanitizedNewContent,
             updated_at: new Date().toISOString(),
           })

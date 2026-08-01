@@ -1,197 +1,153 @@
-import { stripe, SUBSCRIPTION_PLANS } from "./config";
+import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
-import { createOrGetCustomer } from "./customer";
-import type { Subscription, SubscriptionUpdateRequest } from "@/types/billing";
+import {
+  SUBSCRIPTION_PLANS,
+  getPaidPlan,
+  type BillingPeriod,
+  type PaidPlanId,
+} from "./plans";
+import type { Subscription } from "@/types/billing";
 
 /**
- * Create a new subscription.
- * Trial period is NOT taken from the client request — it is derived server-side
- * from plan config (currently 0 for all paid plans; extend SUBSCRIPTION_PLANS if
- * you want per-plan trials).
+ * Statuses that count as "the user currently has this plan". Mirrors the set
+ * `getUserSubscription` selects on.
  */
-export async function createSubscription(
-  userId: string,
-  email: string,
-  planId: "starter" | "pro" | "enterprise",
-  paymentMethodId?: string,
-): Promise<{ subscription: Subscription; clientSecret?: string }> {
-  const supabase = await createClient();
+const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
 
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
-  if (!plan.priceId) {
-    throw new Error("Invalid plan selected");
-  }
+/**
+ * Shape actually stored in `billing_subscriptions`. The migration names two
+ * columns differently from the `Subscription` TS type (`plan` vs `plan_id`,
+ * `cancel_at` timestamp vs `cancel_at_period_end` boolean), so every read goes
+ * through `toSubscription` to produce the shape the UI and feature gating
+ * expect.
+ */
+interface SubscriptionRow {
+  id: string;
+  user_id: string;
+  customer_id: string;
+  stripe_subscription_id: string;
+  plan: string;
+  status: string;
+  current_period_start: string;
+  current_period_end: string;
+  cancel_at: string | null;
+  canceled_at: string | null;
+  trial_start: string | null;
+  trial_end: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
-  // Create or get customer
-  const { customer, stripeCustomer } = await createOrGetCustomer(userId, email);
-
-  // Attach payment method if provided
-  if (paymentMethodId) {
-    await stripe.paymentMethods.attach(paymentMethodId, {
-      customer: stripeCustomer.id,
-    });
-
-    // Set as default payment method
-    await stripe.customers.update(stripeCustomer.id, {
-      invoice_settings: {
-        default_payment_method: paymentMethodId,
-      },
-    });
-  }
-
-  // Create subscription in Stripe — trial days are derived server-side only.
-  // Currently all plans have 0 trial days; add a trialDays field to
-  // SUBSCRIPTION_PLANS config if per-plan trials are needed.
-  const subscriptionParams: import("stripe").Stripe.SubscriptionCreateParams = {
-    customer: stripeCustomer.id,
-    items: [{ price: plan.priceId }],
-    metadata: {
-      user_id: userId,
-      plan_id: planId,
-    },
+function toSubscription(row: SubscriptionRow): Subscription {
+  return {
+    ...row,
+    plan_id: row.plan as Subscription["plan_id"],
+    status: row.status as Subscription["status"],
+    cancel_at_period_end: Boolean(row.cancel_at),
+    canceled_at: row.canceled_at ?? undefined,
+    trial_start: row.trial_start ?? undefined,
+    trial_end: row.trial_end ?? undefined,
   };
+}
 
-  // If no payment method, require payment confirmation
-  if (!paymentMethodId) {
-    subscriptionParams.payment_behavior = "default_incomplete";
-    subscriptionParams.payment_settings = {
-      save_default_payment_method: "on_subscription",
-    };
-    subscriptionParams.expand = ["latest_invoice.payment_intent"];
-  }
+export interface SubscriptionChangeRequest {
+  planId: PaidPlanId;
+  billingPeriod?: BillingPeriod;
+}
 
-  const stripeSubscription =
-    await stripe.subscriptions.create(subscriptionParams);
-
-  // Save subscription to our database.
-  // Column mapping (migration → code):
-  //   plan           (not plan_id)
-  //   cancel_at      (not cancel_at_period_end; migration stores the timestamp)
-  const { data: newSubscription, error } = await supabase
-    .from("billing_subscriptions")
-    .insert({
-      user_id: userId,
-      customer_id: customer.id,
-      stripe_subscription_id: stripeSubscription.id,
-      plan: planId,
-      status: stripeSubscription.status,
-      current_period_start: new Date(
-        (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
-      ).toISOString(),
-      current_period_end: new Date(
-        (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
-      ).toISOString(),
-      cancel_at: stripeSubscription.cancel_at
-        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
-        : null,
-      trial_start: stripeSubscription.trial_start
-        ? new Date(stripeSubscription.trial_start * 1000).toISOString()
-        : null,
-      trial_end: stripeSubscription.trial_end
-        ? new Date(stripeSubscription.trial_end * 1000).toISOString()
-        : null,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    // Rollback: cancel the Stripe subscription
-    await stripe.subscriptions.cancel(stripeSubscription.id);
-    throw new Error(`Failed to create subscription: ${error.message}`);
-  }
-
-  // Extract client secret if payment confirmation is needed
-  let clientSecret: string | undefined;
-  if (
-    stripeSubscription.latest_invoice &&
-    typeof stripeSubscription.latest_invoice === "object"
-  ) {
-    const latestInvoice =
-      stripeSubscription.latest_invoice as unknown as Record<string, unknown>;
-    const paymentIntent = latestInvoice?.payment_intent as
-      | { client_secret?: string | null }
-      | null
-      | undefined;
-    if (paymentIntent && typeof paymentIntent === "object") {
-      clientSecret = paymentIntent.client_secret ?? undefined;
-    }
-  }
-
-  return { subscription: newSubscription as Subscription, clientSecret };
+export interface SubscriptionChangeResult {
+  subscription: Subscription;
+  /**
+   * True when Stripe could not collect the proration charge without further
+   * input (3DS challenge or a declined card). `hostedInvoiceUrl` is where the
+   * customer completes it.
+   */
+  requiresAction: boolean;
+  hostedInvoiceUrl: string | null;
 }
 
 /**
- * Update an existing subscription
+ * Change the plan on an existing subscription.
+ *
+ * New subscriptions do NOT go through here — they go through Stripe Checkout
+ * (see `./checkout`). This path is only for a customer who already has a live
+ * subscription and a payment method on file.
+ *
+ * `always_invoice` bills the prorated difference immediately rather than
+ * deferring it to the next cycle, so an upgrade is paid for at the moment it is
+ * granted. If that charge needs a 3DS challenge or the card is declined, Stripe
+ * leaves the invoice `open` and we hand the customer its hosted payment page.
  */
 export async function updateSubscription(
   userId: string,
-  updates: SubscriptionUpdateRequest,
-): Promise<Subscription> {
+  updates: SubscriptionChangeRequest,
+): Promise<SubscriptionChangeResult> {
   const supabase = await createClient();
 
-  // Get current subscription
   const { data: currentSubscription, error: fetchError } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .eq("status", "active")
-    .single();
+    .in("status", LIVE_SUBSCRIPTION_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
     throw new Error("No active subscription found");
   }
 
-  const plan =
-    SUBSCRIPTION_PLANS[
-      updates.planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
-    ];
-  if (!plan.priceId) {
-    throw new Error("Invalid plan selected");
+  const billingPeriod = updates.billingPeriod ?? "monthly";
+  const plan = getPaidPlan(updates.planId);
+  const priceId =
+    billingPeriod === "yearly" ? plan.yearlyPriceId : plan.priceId;
+
+  if (!priceId) {
+    throw new Error(
+      `No Stripe price configured for the ${plan.name} plan (${billingPeriod}).`,
+    );
   }
 
-  // Update payment method if provided
-  if (updates.paymentMethodId) {
-    const { data: customer } = await supabase
-      .from("billing_customers")
-      .select("stripe_customer_id")
-      .eq("id", currentSubscription.customer_id)
-      .single();
-
-    if (customer) {
-      await stripe.paymentMethods.attach(updates.paymentMethodId, {
-        customer: customer.stripe_customer_id,
-      });
-
-      await stripe.customers.update(customer.stripe_customer_id, {
-        invoice_settings: {
-          default_payment_method: updates.paymentMethodId,
-        },
-      });
-    }
-  }
-
-  // Update subscription in Stripe
   const existingSubscription = await stripe.subscriptions.retrieve(
     currentSubscription.stripe_subscription_id,
   );
+  const currentItem = existingSubscription.items.data[0];
+
+  if (!currentItem) {
+    throw new Error("Subscription has no billable items");
+  }
+
+  if (currentItem.price.id === priceId) {
+    throw new Error("You are already on this plan");
+  }
+
   const stripeSubscription = await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
-      items: [
-        {
-          id: existingSubscription.items.data[0].id,
-          price: plan.priceId,
-        },
-      ],
-      proration_behavior: "create_prorations",
+      items: [{ id: currentItem.id, price: priceId }],
+      proration_behavior: "always_invoice",
+      // Keep metadata in sync so webhook-driven writes record the new plan.
       metadata: {
+        ...existingSubscription.metadata,
+        user_id: userId,
         plan_id: updates.planId,
+        billing_period: billingPeriod,
       },
+      expand: ["latest_invoice"],
     },
   );
 
-  // Update subscription in our database
+  // An invoice still `open` after the update means Stripe could not collect:
+  // either SCA/3DS is required or the card was declined. The hosted invoice
+  // page handles both (challenge flow + "use a different card").
+  const latestInvoice = stripeSubscription.latest_invoice;
+  const openInvoice =
+    latestInvoice &&
+    typeof latestInvoice === "object" &&
+    latestInvoice.status === "open"
+      ? latestInvoice
+      : null;
+
   const { data: updatedSubscription, error } = await supabase
     .from("billing_subscriptions")
     .update({
@@ -209,13 +165,19 @@ export async function updateSubscription(
     })
     .eq("id", currentSubscription.id)
     .select()
-    .single();
+    .single<SubscriptionRow>();
 
-  if (error) {
-    throw new Error(`Failed to update subscription: ${error.message}`);
+  if (error || !updatedSubscription) {
+    throw new Error(
+      `Failed to update subscription: ${error?.message ?? "unknown error"}`,
+    );
   }
 
-  return updatedSubscription as Subscription;
+  return {
+    subscription: toSubscription(updatedSubscription),
+    requiresAction: openInvoice !== null,
+    hostedInvoiceUrl: openInvoice?.hosted_invoice_url ?? null,
+  };
 }
 
 /**
@@ -232,8 +194,10 @@ export async function cancelSubscription(
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .eq("status", "active")
-    .single();
+    .in("status", LIVE_SUBSCRIPTION_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
     throw new Error("No active subscription found");
@@ -265,13 +229,15 @@ export async function cancelSubscription(
     })
     .eq("id", currentSubscription.id)
     .select()
-    .single();
+    .single<SubscriptionRow>();
 
-  if (error) {
-    throw new Error(`Failed to update subscription: ${error.message}`);
+  if (error || !updatedSubscription) {
+    throw new Error(
+      `Failed to update subscription: ${error?.message ?? "unknown error"}`,
+    );
   }
 
-  return updatedSubscription as Subscription;
+  return toSubscription(updatedSubscription);
 }
 
 /**
@@ -287,7 +253,9 @@ export async function reactivateSubscription(
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .single();
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single<SubscriptionRow>();
 
   if (fetchError || !currentSubscription) {
     throw new Error("No subscription found");
@@ -314,17 +282,20 @@ export async function reactivateSubscription(
     })
     .eq("id", currentSubscription.id)
     .select()
-    .single();
+    .single<SubscriptionRow>();
 
-  if (error) {
-    throw new Error(`Failed to reactivate subscription: ${error.message}`);
+  if (error || !updatedSubscription) {
+    throw new Error(
+      `Failed to reactivate subscription: ${error?.message ?? "unknown error"}`,
+    );
   }
 
-  return updatedSubscription as Subscription;
+  return toSubscription(updatedSubscription);
 }
 
 /**
- * Get user's current subscription
+ * Get user's current subscription, normalised to the `Subscription` shape
+ * (`plan_id` / `cancel_at_period_end`) the UI and feature gating read.
  */
 export async function getUserSubscription(
   userId: string,
@@ -335,12 +306,12 @@ export async function getUserSubscription(
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
-    .in("status", ["active", "trialing", "past_due"])
+    .in("status", LIVE_SUBSCRIPTION_STATUSES)
     .order("created_at", { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle<SubscriptionRow>();
 
-  return subscription as Subscription | null;
+  return subscription ? toSubscription(subscription) : null;
 }
 
 /**
@@ -366,13 +337,11 @@ export async function checkFeatureAccess(
     );
   }
 
-  // The DB column is `plan`; the TS type declares it as `plan_id` (legacy mismatch).
-  // At runtime the object returned from Supabase carries the actual DB column name.
-  const planKey = (
-    (subscription as unknown as { plan?: string }).plan ?? subscription.plan_id
-  ).toUpperCase() as keyof typeof SUBSCRIPTION_PLANS;
+  // getUserSubscription normalises the DB `plan` column onto `plan_id`.
+  const planKey =
+    subscription.plan_id.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS;
 
-  const plan = SUBSCRIPTION_PLANS[planKey];
+  const plan = SUBSCRIPTION_PLANS[planKey] ?? SUBSCRIPTION_PLANS.FREE;
 
   switch (feature) {
     case "aiFeatures":

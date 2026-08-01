@@ -40,6 +40,16 @@ function buildTestToken(siteId: string, apiKey: string): string {
   return `${payload}.${signature}`;
 }
 
+/** The `permission` column on site_permissions. */
+type SitePermissionLevel = "view" | "edit" | "admin";
+
+/**
+ * Identity helper. A `const x: SitePermissionLevel = "edit"` is narrowed back to
+ * the literal by control-flow analysis, which makes `x === "admin"` a TS2367
+ * "no overlap" error. Going through a function keeps the union type.
+ */
+const permission = (level: SitePermissionLevel): SitePermissionLevel => level;
+
 describe("WebSocket Server", () => {
   const testSiteId = "site-123";
   const testApiKey = "test-api-key";
@@ -296,7 +306,7 @@ describe("WebSocket Server", () => {
     });
 
     it("should allow edit users to restore versions", () => {
-      const userPermission = "edit";
+      const userPermission = permission("edit");
       const canRestore = ["edit", "admin"].includes(userPermission);
       expect(canRestore).toBe(true);
     });
@@ -305,13 +315,13 @@ describe("WebSocket Server", () => {
   // WS-018: activate-theme requires admin permission
   describe("WS-018: Theme activation permission", () => {
     it("should require admin permission for theme activation", () => {
-      const userPermission = "edit";
+      const userPermission = permission("edit");
       const canActivateTheme = userPermission === "admin";
       expect(canActivateTheme).toBe(false);
     });
 
     it("should allow admin users to activate themes", () => {
-      const userPermission = "admin";
+      const userPermission = permission("admin");
       const canActivateTheme = userPermission === "admin";
       expect(canActivateTheme).toBe(true);
     });
@@ -327,7 +337,7 @@ describe("WebSocket Server", () => {
     });
 
     it("should block edit-only users from publishing", () => {
-      const userPermission = "edit";
+      const userPermission = permission("edit");
       const canPublish = ["publish", "admin"].includes(userPermission);
       expect(canPublish).toBe(false);
     });

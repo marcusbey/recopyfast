@@ -259,11 +259,65 @@ async function validateStagingAccess(stagingToken, siteId) {
   }
 }
 
+function normalizePermissions(rawPermissions) {
+  const permissions = new Set(Array.isArray(rawPermissions) ? rawPermissions : []);
+  if (permissions.has('admin')) {
+    permissions.add('publish');
+    permissions.add('edit');
+    permissions.add('view');
+  }
+  if (permissions.has('publish')) {
+    permissions.add('edit');
+    permissions.add('view');
+  }
+  if (permissions.has('edit')) {
+    permissions.add('view');
+  }
+  return ['view', 'edit', 'publish', 'admin'].filter(permission => permissions.has(permission));
+}
+
+async function validateEditSessionAccess(editToken, siteId) {
+  if (!supabaseEnabled || !editToken) {
+    return { valid: false };
+  }
+
+  try {
+    const { data: session, error } = await supabase
+      .from('edit_sessions')
+      .select('*')
+      .eq('token', editToken)
+      .eq('site_id', siteId)
+      .eq('is_active', true)
+      .gte('expires_at', new Date().toISOString())
+      .single();
+
+    if (error || !session) {
+      return { valid: false, error: 'Invalid or expired edit session' };
+    }
+
+    await supabase
+      .from('edit_sessions')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('id', session.id);
+
+    return {
+      valid: true,
+      verified: true,
+      userId: session.user_id,
+      permissions: normalizePermissions(session.permissions),
+      sessionId: session.id
+    };
+  } catch (error) {
+    console.error('Edit session validation error:', error);
+    return { valid: false, error: 'Validation failed' };
+  }
+}
+
 // Socket.io connection handling
 io.on('connection', async (socket) => {
   console.log('New connection:', socket.id);
 
-  const { siteId, editMode, token, stagingMode, stagingToken } = socket.handshake.query;
+  const { siteId, editMode, token, stagingMode, stagingToken, editToken } = socket.handshake.query;
   const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
   const isStaging = stagingMode === 'true' || stagingMode === true;
 
@@ -312,23 +366,26 @@ io.on('connection', async (socket) => {
       siteRecord = site;
       socket.data.siteToken = token;
 
-      // Validate staging access if in staging mode
-      if (isStaging && stagingToken) {
-        const stagingAccess = await validateStagingAccess(stagingToken, siteId);
+      // Validate editor access if in staging/edit mode
+      if (isStaging && (stagingToken || editToken)) {
+        const stagingAccess = stagingToken
+          ? await validateStagingAccess(stagingToken, siteId)
+          : await validateEditSessionAccess(editToken, siteId);
 
         if (!stagingAccess.valid) {
-          socket.emit('auth-error', { error: stagingAccess.error || 'Invalid staging access' });
+          socket.emit('auth-error', { error: stagingAccess.error || 'Invalid editor access' });
           socket.disconnect();
           return;
         }
 
         socket.data.isStaging = true;
         socket.data.stagingToken = stagingToken;
-        socket.data.stagingEmail = stagingAccess.email;
-        socket.data.stagingPermissions = stagingAccess.permissions;
-        socket.data.stagingAccessId = stagingAccess.accessId;
+        socket.data.editToken = editToken;
+        socket.data.stagingEmail = stagingAccess.email || stagingAccess.userId || 'unknown';
+        socket.data.stagingPermissions = normalizePermissions(stagingAccess.permissions);
+        socket.data.stagingAccessId = stagingAccess.accessId || null;
 
-        console.log(`Staging connection for site ${siteId} by ${stagingAccess.email}`);
+        console.log(`Editor connection for site ${siteId} by ${socket.data.stagingEmail}`);
       }
     } catch (error) {
       console.error('Site verification failed:', error);
@@ -382,6 +439,7 @@ io.on('connection', async (socket) => {
           selector: elementData.selector,
           original_content: safeContent,
           current_content: safeContent,
+          published_content: safeContent,
           language: 'en',
           variant: 'default',
           metadata: { 
@@ -397,7 +455,8 @@ io.on('connection', async (socket) => {
           const { error } = await supabase
             .from('content_elements')
             .upsert(contentElements, {
-              onConflict: 'site_id,element_id,language,variant'
+              onConflict: 'site_id,element_id,language,variant',
+              ignoreDuplicates: true
             });
           
           if (error) {
@@ -423,7 +482,12 @@ io.on('connection', async (socket) => {
   });
   
   // Handle content updates from dashboard or staging
-  socket.on('content-update', async (data) => {
+  socket.on('content-update', async (data, ack) => {
+    const reply = (payload) => {
+      if (typeof ack === 'function') {
+        ack(payload);
+      }
+    };
     const isStaging = socket.data.isStaging;
     console.log(`Content update for site ${siteId} (${isStaging ? 'staging' : 'live'}):`, data.elementId);
 
@@ -432,42 +496,38 @@ io.on('connection', async (socket) => {
 
       if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
         socket.emit('auth-error', { error: 'Invalid site token' });
+        reply({ ok: false, error: 'Invalid site token' });
         return;
       }
 
-      // Check staging edit permission
-      if (isStaging) {
-        const permissions = socket.data.stagingPermissions || [];
-        const hasEditPermission = permissions.includes('edit') ||
-                                   permissions.includes('publish') ||
-                                   permissions.includes('admin');
-        if (!hasEditPermission) {
-          socket.emit('update-error', { error: 'Edit permission required' });
-          return;
-        }
+      if (!isStaging) {
+        socket.emit('update-error', {
+          error: 'Live updates must be saved through staging and published explicitly'
+        });
+        reply({ ok: false, error: 'Live updates must be saved through staging and published explicitly' });
+        return;
+      }
+
+      const permissions = socket.data.stagingPermissions || [];
+      const hasEditPermission = permissions.includes('edit') ||
+                                 permissions.includes('publish') ||
+                                 permissions.includes('admin');
+      if (!hasEditPermission) {
+        socket.emit('update-error', { error: 'Edit permission required' });
+        reply({ ok: false, error: 'Edit permission required' });
+        return;
       }
 
       const sanitizedContent = sanitizeContent(content);
       const now = new Date().toISOString();
 
       // Update database (if Supabase is enabled)
-      if (supabaseEnabled) {
-        let updateData;
-
-        if (isStaging) {
-          // Staging mode: write to staging_content
-          updateData = {
+      if (supabaseEnabled && !data.persisted) {
+        const updateData = {
             staging_content: sanitizedContent,
             staging_updated_at: now,
             updated_at: now
-          };
-        } else {
-          // Live mode: write to current_content (legacy support)
-          updateData = {
-            current_content: sanitizedContent,
-            updated_at: now
-          };
-        }
+        };
 
         const { error } = await supabase
           .from('content_elements')
@@ -480,6 +540,7 @@ io.on('connection', async (socket) => {
         if (error) {
           console.error('Error updating content:', error);
           socket.emit('update-error', { error: 'Failed to save content' });
+          reply({ ok: false, error: 'Failed to save content' });
           return;
         }
 
@@ -505,7 +566,7 @@ io.on('connection', async (socket) => {
           }
         }
       } else {
-        console.log(`Content update for site ${siteId}, element ${elementId} - not persisted (Supabase disabled)`);
+        console.log(`Content update for site ${siteId}, element ${elementId} - persistence skipped (${data.persisted ? 'already persisted' : 'Supabase disabled'})`);
       }
 
       // Broadcast to appropriate room
@@ -538,9 +599,12 @@ io.on('connection', async (socket) => {
         isStaging
       });
 
+      reply({ ok: true });
+
     } catch (error) {
       console.error('Error processing content update:', error);
       socket.emit('update-error', { error: 'Internal server error' });
+      reply({ ok: false, error: 'Internal server error' });
     }
   });
   
@@ -629,7 +693,11 @@ io.on('connection', async (socket) => {
               updated_at: now
             };
           } else {
-            updateData = { current_content: sanitizedContent };
+            updateData = {
+              published_content: sanitizedContent,
+              current_content: sanitizedContent,
+              updated_at: now
+            };
           }
 
           await supabase
@@ -983,33 +1051,29 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      const publishedAt = new Date().toISOString();
+      const filteredElementIds = Array.isArray(elementIds)
+        ? elementIds.filter(elementId => typeof elementId === 'string')
+        : null;
 
-      // Get elements to publish
-      let query = supabase
-        .from('content_elements')
-        .select('id, element_id, staging_content, published_content')
-        .eq('site_id', siteId)
-        .not('staging_content', 'is', null);
+      const { data: publishedRows, error: publishError } = await supabase.rpc(
+        'publish_staging_content_atomic',
+        {
+          p_site_id: siteId,
+          p_element_ids: filteredElementIds && filteredElementIds.length > 0 ? filteredElementIds : null,
+          p_published_by: null,
+          p_user_email: socket.data.stagingEmail || 'unknown'
+        }
+      );
 
-      if (elementIds && elementIds.length > 0) {
-        query = query.in('element_id', elementIds);
-      }
-
-      const { data: elementsToPublish, error: fetchError } = await query;
-
-      if (fetchError) {
-        console.error('Error fetching elements to publish:', fetchError);
-        socket.emit('publish-error', { error: 'Failed to fetch elements' });
+      if (publishError) {
+        console.error('Error publishing staging content:', publishError);
+        socket.emit('publish-error', { error: 'Failed to publish staging content' });
         return;
       }
 
-      // Filter to only changed elements
-      const changedElements = (elementsToPublish || []).filter(
-        el => el.staging_content !== el.published_content
-      );
+      const rows = publishedRows || [];
 
-      if (changedElements.length === 0) {
+      if (rows.length === 0) {
         socket.emit('publish-success', {
           published: 0,
           message: 'No staging changes to publish'
@@ -1017,45 +1081,19 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      // Publish each element
-      let successCount = 0;
-      for (const element of changedElements) {
-        // Record history
-        await supabase.from('staging_history').insert({
-          content_element_id: element.id,
-          staging_access_id: socket.data.stagingAccessId || null,
-          previous_content: element.published_content,
-          new_content: element.staging_content,
-          user_email: socket.data.stagingEmail || 'unknown',
-          action: 'publish'
+      for (const element of rows) {
+        io.to(`site:${siteId}`).emit('content-update', {
+          elementId: element.element_id,
+          content: element.content
         });
-
-        // Update published content
-        const { error: updateError } = await supabase
-          .from('content_elements')
-          .update({
-            published_content: element.staging_content,
-            published_at: publishedAt,
-            updated_at: publishedAt
-          })
-          .eq('id', element.id);
-
-        if (!updateError) {
-          successCount++;
-
-          // Broadcast to live site viewers
-          io.to(`site:${siteId}`).emit('content-update', {
-            elementId: element.element_id,
-            content: element.staging_content
-          });
-        }
       }
 
-      console.log(`Published ${successCount}/${changedElements.length} elements for site ${siteId}`);
+      const publishedAt = new Date().toISOString();
+      console.log(`Published ${rows.length} elements for site ${siteId}`);
 
       socket.emit('publish-success', {
-        published: successCount,
-        total: changedElements.length,
+        published: rows.length,
+        total: rows.length,
         publishedAt,
         publishedBy: socket.data.stagingEmail
       });
@@ -1063,7 +1101,7 @@ io.on('connection', async (socket) => {
       // Notify dashboard
       io.to(`dashboard:${siteId}`).emit('content-published', {
         siteId,
-        count: successCount,
+        count: rows.length,
         publishedBy: socket.data.stagingEmail,
         publishedAt
       });

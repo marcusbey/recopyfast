@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
-  createSubscription,
   updateSubscription,
   cancelSubscription,
-  reactivateSubscription,
   getUserSubscription,
 } from "@/lib/stripe/subscription";
+import { isBillingPeriod, isPaidPlanId } from "@/lib/stripe/plans";
 
 /**
  * GET /api/billing/subscription
@@ -38,71 +37,21 @@ export async function GET() {
 }
 
 /**
- * POST /api/billing/subscription
- * Create a new subscription.
+ * There is no POST here.
  *
- * Accepted body fields: { planId, paymentMethodId }
- * The `trialDays` field is intentionally NOT accepted from the client —
- * trial periods are derived server-side from plan configuration only.
+ * A first subscription is bought through Stripe Checkout — POST
+ * /api/billing/checkout with `{ intent: "subscription" }`. Creating the
+ * subscription server-side produced `incomplete` rows that Stripe auto-cancelled
+ * ~23h later because no client ever confirmed the payment.
  */
-export async function POST(req: NextRequest) {
-  try {
-    const supabase = await createClient();
-
-    // Get the current user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const body = await req.json();
-    // Destructure only the fields we accept; trialDays is explicitly excluded
-    // so a client cannot grant themselves a free trial.
-    const { planId, paymentMethodId } = body;
-
-    // Validate plan
-    if (!planId || !["starter", "pro", "enterprise"].includes(planId)) {
-      return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
-    }
-
-    // Check if user already has an active subscription
-    const existingSubscription = await getUserSubscription(user.id);
-    if (existingSubscription && existingSubscription.status === "active") {
-      return NextResponse.json(
-        { error: "User already has an active subscription" },
-        { status: 400 },
-      );
-    }
-
-    // trialDays is NOT forwarded — createSubscription no longer accepts it.
-    const result = await createSubscription(
-      user.id,
-      user.email!,
-      planId,
-      paymentMethodId,
-    );
-
-    return NextResponse.json(result);
-  } catch (error: unknown) {
-    console.error("Error creating subscription:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Failed to create subscription",
-      },
-      { status: 500 },
-    );
-  }
-}
 
 /**
  * PUT /api/billing/subscription
- * Update an existing subscription
+ * Change the plan on an existing subscription (prorated, charged immediately).
+ *
+ * Returns { subscription, requiresAction, hostedInvoiceUrl }. When
+ * `requiresAction` is true the customer must finish a 3DS challenge or supply a
+ * different card at `hostedInvoiceUrl`.
  */
 export async function PUT(req: NextRequest) {
   try {
@@ -118,19 +67,25 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { planId, paymentMethodId } = body;
+    const { planId, billingPeriod = "monthly" } = body;
 
-    // Validate plan
-    if (!planId || !["starter", "pro", "enterprise"].includes(planId)) {
+    if (!isPaidPlanId(planId)) {
       return NextResponse.json({ error: "Invalid plan ID" }, { status: 400 });
     }
 
-    const subscription = await updateSubscription(user.id, {
+    if (!isBillingPeriod(billingPeriod)) {
+      return NextResponse.json(
+        { error: "Invalid billing period" },
+        { status: 400 },
+      );
+    }
+
+    const result = await updateSubscription(user.id, {
       planId,
-      paymentMethodId,
+      billingPeriod,
     });
 
-    return NextResponse.json({ subscription });
+    return NextResponse.json(result);
   } catch (error: unknown) {
     console.error("Error updating subscription:", error);
     return NextResponse.json(

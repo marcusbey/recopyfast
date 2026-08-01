@@ -101,6 +101,14 @@ export async function middleware(request: NextRequest) {
         connectSrc.add(`wss://${host}`);
         connectSrc.add(`https://${host}`);
       }
+      // Keep the scheme as configured too. Socket.io opens its handshake over
+      // plain HTTP polling before upgrading, so a local `http://host:4001` WS
+      // URL needs http:/ws: allowed or the connection dies at the first XHR.
+      // Only in dev — production env values are https/wss and stay that way.
+      if (isDev && (protocol === "http:" || protocol === "ws:")) {
+        connectSrc.add(`http://${host}`);
+        connectSrc.add(`ws://${host}`);
+      }
     } catch {
       // ignore malformed env values
     }
@@ -113,6 +121,10 @@ export async function middleware(request: NextRequest) {
   const csp = [
     "default-src 'self'",
     scriptSrc,
+    // Browsers fall back to script-src when script-src-elem is absent, so this
+    // is not a tightening — it just stops the fallback from being implicit, and
+    // makes the "which directive blocked me" console message unambiguous.
+    scriptSrc.replace("script-src", "script-src-elem"),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' https:",
@@ -120,6 +132,9 @@ export async function middleware(request: NextRequest) {
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
+    // CSP equivalent of the X-Frame-Options: DENY header set above. Kept in
+    // sync with it; frame-ancestors is what modern browsers actually honour.
+    "frame-ancestors 'none'",
   ].join("; ");
 
   response.headers.set("Content-Security-Policy", csp);
