@@ -171,15 +171,11 @@ if (missingVars.length === 0 && invalidUrls.length === 0) {
   console.warn('  Set up Supabase credentials in .env.local to enable persistence');
 }
 
-// Build the CORS allowlist from environment variables.
-// ALLOWED_ORIGINS is a comma-separated list of trusted origins (e.g. embed domains).
-// NEXT_PUBLIC_APP_URL is always implicitly trusted.
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-const allowedOrigins = new Set([appUrl, ...extraOrigins]);
+// NOTE: ALLOWED_ORIGINS is intentionally no longer consulted for socket CORS.
+// See the comment on the Server() construction below — the origin allowlist was
+// gating a multi-tenant widget on a static env list, which silently broke every
+// customer whose domain was not in it. Authorisation is the HMAC site token plus
+// the per-site registered-domain check in the connection handler.
 
 // A static origin allowlist cannot work here. The widget runs on EVERY
 // customer's own domain, so a fixed list would mean adding each new customer to
@@ -199,22 +195,26 @@ const allowedOrigins = new Set([appUrl, ...extraOrigins]);
 // cookie — the site token travels in the handshake query. Setting
 // ALLOWED_ORIGINS still pins the server to a hard list for operators who want
 // to lock a deployment down.
-const hasExplicitAllowlist = extraOrigins.length > 0;
-
+// The CORS layer is deliberately NOT the gate.
+//
+// Every customer embeds the widget on their own domain, so the set of legitimate
+// origins is the set of registered sites — it lives in the database and changes
+// whenever someone signs up. Expressing that as an env allowlist would mean a
+// redeploy per customer, and any origin missing from the list fails in the most
+// confusing way possible: the socket is refused, sendContentMap() never runs, no
+// content element is ever registered, and every save dies with
+// "Content element not found" while the widget looks connected and healthy.
+//
+// Authorisation happens in the connection handler below, which is where it
+// belongs: the socket presents an HMAC site token, the server looks that site up
+// and rejects the connection unless the request host matches that site's
+// REGISTERED domain. That check is per-site and cannot be satisfied by simply
+// arriving from an approved origin, so it is strictly stronger than a list.
+//
+// Credentials stay off: nothing here authenticates by cookie.
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      if (!hasExplicitAllowlist) {
-        callback(null, true);
-        return;
-      }
-      if (origin && allowedOrigins.has(origin)) {
-        callback(null, true);
-      } else {
-        console.warn(`CORS: rejected origin "${origin}" (ALLOWED_ORIGINS is set)`);
-        callback(new Error('Origin not allowed'), false);
-      }
-    },
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: false
   }
