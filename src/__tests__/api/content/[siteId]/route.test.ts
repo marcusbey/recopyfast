@@ -25,7 +25,18 @@ const mockSanitizeIncomingContent =
     typeof sanitizeIncomingContent
   >;
 
-const mockServiceClient = {
+type MockServiceClient = {
+  from: jest.Mock;
+  select: jest.Mock;
+  eq: jest.Mock;
+  single: jest.Mock;
+  upsert: jest.Mock;
+  update: jest.Mock;
+};
+
+// Annotated explicitly: the chain methods return the object itself, which
+// TypeScript cannot infer from a self-referential initializer (TS7022).
+const mockServiceClient: MockServiceClient = {
   from: jest.fn(() => mockServiceClient),
   select: jest.fn(() => mockServiceClient),
   eq: jest.fn(() => mockServiceClient),
@@ -98,7 +109,9 @@ describe("/api/content/[siteId]", () => {
         },
       });
 
-      const response = await GET(request, { params: { siteId: "site-123" } });
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -126,7 +139,9 @@ describe("/api/content/[siteId]", () => {
         },
       );
 
-      const response = await GET(request, { params: { siteId: "site-123" } });
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
 
       expect(response.status).toBe(200);
       expect(mockServiceClient.eq).toHaveBeenNthCalledWith(2, "language", "es");
@@ -152,7 +167,9 @@ describe("/api/content/[siteId]", () => {
         },
       });
 
-      const response = await GET(request, { params: { siteId: "site-123" } });
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -165,7 +182,9 @@ describe("/api/content/[siteId]", () => {
       );
 
       const request = new NextRequest("http://localhost/api/content/site-123");
-      const response = await GET(request, { params: { siteId: "site-123" } });
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(401);
@@ -194,7 +213,9 @@ describe("/api/content/[siteId]", () => {
         body: JSON.stringify(mockContentMap),
       });
 
-      const response = await POST(request, { params: { siteId: "site-123" } });
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(200);
@@ -209,7 +230,10 @@ describe("/api/content/[siteId]", () => {
             element_id: "header-1",
           }),
         ]),
-        { onConflict: "site_id,element_id,language,variant" },
+        {
+          onConflict: "site_id,element_id,language,variant",
+          ignoreDuplicates: true,
+        },
       );
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
         "https://example.com",
@@ -230,7 +254,9 @@ describe("/api/content/[siteId]", () => {
         body: JSON.stringify(mockContentMap),
       });
 
-      const response = await POST(request, { params: { siteId: "site-123" } });
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(404);
@@ -250,7 +276,9 @@ describe("/api/content/[siteId]", () => {
         body: JSON.stringify(mockContentMap),
       });
 
-      const response = await POST(request, { params: { siteId: "site-123" } });
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
       const data = await response.json();
 
       expect(response.status).toBe(500);
@@ -259,13 +287,13 @@ describe("/api/content/[siteId]", () => {
   });
 
   describe("PUT", () => {
-    it("should update content element", async () => {
-      const request = new NextRequest("http://localhost/api/content/site-123", {
+    // PUT no longer writes to live content. Callers must go through
+    // /api/staging/content and publish explicitly, so an authorized request now
+    // gets a 403 explaining the new flow rather than a 200.
+    const putRequest = (headers: Record<string, string>) =>
+      new NextRequest("http://localhost/api/content/site-123", {
         method: "PUT",
-        headers: {
-          Authorization: "Bearer token",
-          Origin: "https://example.com",
-        },
+        headers,
         body: JSON.stringify({
           elementId: "header-1",
           content: "Updated content",
@@ -274,49 +302,70 @@ describe("/api/content/[siteId]", () => {
         }),
       });
 
-      mockServiceClient.update.mockReturnValueOnce({
-        eq: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            eq: jest.fn().mockResolvedValue({ error: null }),
-          }),
+    it("should refuse direct live updates and point at the staging flow", async () => {
+      const response = await PUT(
+        putRequest({
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
         }),
-      } as unknown as typeof mockServiceClient);
-
-      const response = await PUT(request, { params: { siteId: "site-123" } });
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
       const data = await response.json();
 
-      expect(response.status).toBe(200);
-      expect(data).toEqual({ success: true });
-      expect(mockSanitizeIncomingContent).toHaveBeenCalledWith(
-        "Updated content",
+      expect(response.status).toBe(403);
+      expect(data.error).toBe(
+        "Live content updates must use /api/staging/content and publish explicitly",
+      );
+      // Nothing is written and no content is sanitized on this path.
+      expect(mockServiceClient.update).not.toHaveBeenCalled();
+      expect(mockSanitizeIncomingContent).not.toHaveBeenCalled();
+    });
+
+    it("should echo the allowed origin on the refusal so browsers can read it", async () => {
+      const response = await PUT(
+        putRequest({
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+        "https://example.com",
       );
     });
 
-    it("should return 500 when update fails", async () => {
-      mockServiceClient.update.mockReturnValueOnce({
-        eq: jest.fn().mockReturnValue({
-          eq: jest.fn().mockReturnValue({
-            eq: jest.fn().mockResolvedValue({ error: { message: "DB error" } }),
-          }),
-        }),
-      } as unknown as typeof mockServiceClient);
+    it("should return 401 when the site token is rejected", async () => {
+      mockAuthorizeSiteRequest.mockRejectedValueOnce(
+        new Error("Invalid token"),
+      );
 
-      const request = new NextRequest("http://localhost/api/content/site-123", {
-        method: "PUT",
-        headers: {
-          Authorization: "Bearer token",
-        },
-        body: JSON.stringify({
-          elementId: "header-1",
-          content: "Updated content",
-        }),
-      });
-
-      const response = await PUT(request, { params: { siteId: "site-123" } });
+      const response = await PUT(
+        putRequest({ Authorization: "Bearer bad-token" }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
       const data = await response.json();
 
-      expect(response.status).toBe(500);
-      expect(data.error).toBe("Failed to update content");
+      expect(response.status).toBe(401);
+      expect(data.error).toBe("Invalid token");
+    });
+
+    it("should return 403 when the origin is rejected", async () => {
+      mockAuthorizeSiteRequest.mockRejectedValueOnce(
+        new Error("Origin not allowed"),
+      );
+
+      const response = await PUT(
+        putRequest({
+          Authorization: "Bearer token",
+          Origin: "https://malicious.com",
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(data.error).toBe("Origin not allowed");
     });
   });
 
@@ -330,7 +379,7 @@ describe("/api/content/[siteId]", () => {
       });
 
       const response = await OPTIONS(request, {
-        params: { siteId: "site-123" },
+        params: Promise.resolve({ siteId: "site-123" }),
       });
 
       expect(response.status).toBe(204);
@@ -352,7 +401,7 @@ describe("/api/content/[siteId]", () => {
       });
 
       const response = await OPTIONS(request, {
-        params: { siteId: "site-123" },
+        params: Promise.resolve({ siteId: "site-123" }),
       });
       const data = await response.json();
 

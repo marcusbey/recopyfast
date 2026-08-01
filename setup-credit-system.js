@@ -4,9 +4,19 @@ const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
 
-// Supabase configuration
-const supabaseUrl = 'https://uexwowziiigweobgpmtk.supabase.co';
-const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVleHdvd3ppaWlnd2VvYmdwbXRrIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1NTA1ODU5OSwiZXhwIjoyMDcwNjM0NTk5fQ.ikJLtjIWBMvX7ruF41qxSxHx8x-C5NoT8LJpxrTa2Rs';
+// Supabase configuration. Read from the environment — never hardcode the
+// service_role key: it bypasses Row Level Security, so a copy in the repo is a
+// full database compromise.
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  console.error(
+    'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. ' +
+      'Set them in your environment before running this script.'
+  );
+  process.exit(1);
+}
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 

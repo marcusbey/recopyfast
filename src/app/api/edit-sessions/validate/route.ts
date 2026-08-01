@@ -4,7 +4,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { EditSessionManager } from "@/lib/auth/edit-sessions";
+import {
+  extractEditorToken,
+  validateEditorAccess,
+} from "@/lib/auth/editor-access";
+import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,39 +16,44 @@ export async function POST(request: NextRequest) {
     const { token, siteId } = body;
 
     if (!token || !siteId) {
-      return NextResponse.json(
-        { error: "Token and site ID are required" },
-        { status: 400 },
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Token and site ID are required" },
+          { status: 400 },
+        ),
+        request,
       );
     }
 
-    // Get client IP for validation
-    const ipAddress =
-      request.headers.get("x-forwarded-for") ||
-      request.headers.get("x-real-ip") ||
-      "unknown";
-
-    // Validate edit session
-    const editSession = await EditSessionManager.validateEditSession({
+    const editorToken = extractEditorToken(
+      request,
+      body as Record<string, unknown>,
+    ) || {
+      kind: "edit-session" as const,
       token,
+    };
+    const result = await validateEditorAccess({
       siteId,
-      ipAddress,
+      token: editorToken,
     });
 
-    if (!editSession) {
-      return NextResponse.json(
-        {
-          valid: false,
-          error: "Invalid or expired edit session",
-          requiresAuth: true,
-        },
-        { status: 401 },
+    if (!result.valid || !result.access) {
+      return withPublicCors(
+        NextResponse.json(
+          {
+            valid: false,
+            error: result.error || "Invalid or expired edit session",
+            requiresAuth: true,
+          },
+          { status: result.status || 401 },
+        ),
+        request,
       );
     }
 
     // Check if session is expiring soon (within 30 minutes)
     const now = Date.now();
-    const expiresAt = editSession.expires_at.getTime();
+    const expiresAt = result.access.expiresAt?.getTime() || Date.now();
     const timeRemaining = expiresAt - now;
     const isExpiringSoon = timeRemaining < 30 * 60 * 1000; // 30 minutes
     const timeRemainingMinutes = Math.max(
@@ -52,28 +61,38 @@ export async function POST(request: NextRequest) {
       Math.floor(timeRemaining / (60 * 1000)),
     );
 
-    return NextResponse.json({
-      valid: true,
-      session: {
-        id: editSession.id,
-        siteId: editSession.site_id,
-        userId: editSession.user_id,
-        permissions: editSession.permissions,
-        expiresAt: editSession.expires_at,
-        isExpiringSoon,
-        timeRemainingMinutes,
-      },
-      message: "Edit session is valid",
-    });
+    return withPublicCors(
+      NextResponse.json({
+        valid: true,
+        session: {
+          id: result.access.editSessionId,
+          siteId: result.access.siteId,
+          userId: result.access.userId,
+          permissions: result.access.permissions,
+          expiresAt: result.access.expiresAt,
+          isExpiringSoon,
+          timeRemainingMinutes,
+        },
+        message: "Edit session is valid",
+      }),
+      request,
+    );
   } catch (error) {
     console.error("Error validating edit session:", error);
-    return NextResponse.json(
-      {
-        valid: false,
-        error: "Internal server error",
-        requiresAuth: true,
-      },
-      { status: 500 },
+    return withPublicCors(
+      NextResponse.json(
+        {
+          valid: false,
+          error: "Internal server error",
+          requiresAuth: true,
+        },
+        { status: 500 },
+      ),
+      request,
     );
   }
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return publicOptions(request, "POST,OPTIONS");
 }

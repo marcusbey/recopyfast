@@ -2,21 +2,39 @@ import { createServerClient } from "@supabase/ssr";
 import { Webhook, WebhookDelivery } from "@/types";
 import crypto from "crypto";
 
-export class WebhookManager {
-  private supabase;
+type WebhookRow = Pick<
+  Webhook,
+  | "id"
+  | "site_id"
+  | "url"
+  | "events"
+  | "secret"
+  | "failure_count"
+  | "max_failures"
+>;
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+export class WebhookManager {
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
+
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**
@@ -137,7 +155,7 @@ export class WebhookManager {
       }
 
       // Trigger each webhook
-      const deliveryPromises = webhooks.map((webhook) =>
+      const deliveryPromises = (webhooks as WebhookRow[]).map((webhook) =>
         this.deliverWebhook(
           webhook,
           params.eventType,
@@ -156,7 +174,7 @@ export class WebhookManager {
    * Deliver webhook to a specific endpoint
    */
   private async deliverWebhook(
-    webhook: Webhook,
+    webhook: WebhookRow,
     eventType: string,
     payload: Record<string, unknown>,
     metadata?: Record<string, unknown>,
@@ -236,7 +254,7 @@ export class WebhookManager {
    * Handle webhook delivery failure
    */
   private async handleWebhookFailure(
-    webhook: Webhook,
+    webhook: WebhookRow,
     delivery: Partial<WebhookDelivery>,
   ): Promise<void> {
     const newFailureCount = webhook.failure_count + 1;
@@ -270,7 +288,7 @@ export class WebhookManager {
    * Retry webhook delivery
    */
   private async retryWebhook(
-    webhook: Webhook,
+    webhook: WebhookRow,
     originalDelivery: Partial<WebhookDelivery>,
   ): Promise<void> {
     if (!originalDelivery.payload || !originalDelivery.event_type) {

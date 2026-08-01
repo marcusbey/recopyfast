@@ -1,0 +1,11 @@
+# Keep the image clean and avoid clobbering the `npm ci` install with the host's
+# node_modules (which may contain platform-mismatched native binaries).
+node_modules
+npm-debug.log
+.env
+.env.*
+*.log
+fly.toml
+Dockerfile
+.dockerignore
+README.md

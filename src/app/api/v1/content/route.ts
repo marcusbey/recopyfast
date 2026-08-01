@@ -6,12 +6,15 @@ import {
   RATE_LIMIT_CONFIGS,
 } from "@/lib/api/rate-limiter";
 import { analytics } from "@/lib/analytics/tracker";
+import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
 export async function GET(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -53,8 +56,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== siteId) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== siteId) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from("content_elements")
       .select(
-        "id, element_id, selector, current_content, language, variant, metadata, updated_at",
+        "id, element_id, selector, published_content, original_content, language, variant, metadata, updated_at",
       )
       .eq("site_id", siteId)
       .eq("language", language)
@@ -101,13 +104,17 @@ export async function GET(req: NextRequest) {
       statusCode: 200,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return NextResponse.json(
       {
-        data: contentElements || [],
+        data: (contentElements || []).map((element) => ({
+          ...element,
+          current_content:
+            element.published_content ?? element.original_content ?? "",
+        })),
         meta: {
           count: contentElements?.length || 0,
           site_id: siteId,
@@ -138,7 +145,9 @@ export async function POST(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -185,8 +194,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== site_id) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== site_id) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },
@@ -205,10 +214,13 @@ export async function POST(req: NextRequest) {
       },
     );
 
+    // Sanitize user-supplied content before any DB write
+    const sanitizedContent = sanitizeHTML(content, "RICH_TEXT");
+
     // Check if content element exists
     const { data: existingElement } = await supabase
       .from("content_elements")
-      .select("id, current_content")
+      .select("id, published_content")
       .eq("site_id", site_id)
       .eq("element_id", element_id)
       .eq("language", language || "en")
@@ -221,7 +233,8 @@ export async function POST(req: NextRequest) {
       const { data, error: updateError } = await supabase
         .from("content_elements")
         .update({
-          current_content: content,
+          published_content: sanitizedContent,
+          current_content: sanitizedContent,
           metadata: metadata || {},
           updated_at: new Date().toISOString(),
         })
@@ -241,8 +254,9 @@ export async function POST(req: NextRequest) {
           site_id,
           element_id,
           selector: `[data-element-id="${element_id}"]`, // Default selector
-          original_content: content,
-          current_content: content,
+          original_content: sanitizedContent,
+          published_content: sanitizedContent,
+          current_content: sanitizedContent,
           language: language || "en",
           variant: variant || "default",
           metadata: metadata || {},
@@ -264,8 +278,8 @@ export async function POST(req: NextRequest) {
       statusCode: 200,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return NextResponse.json(
@@ -304,7 +318,9 @@ export async function DELETE(req: NextRequest) {
   try {
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
-    if (!valid) {
+    // Narrow apiKey to non-undefined for the rest of the handler: a valid result
+    // always carries the key, but the type allows undefined.
+    if (!valid || !apiKey) {
       return NextResponse.json(
         { error: error || "Invalid API key" },
         { status: 401 },
@@ -330,8 +346,8 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Verify API key has access to site
-    if (apiKey.site_id && apiKey.site_id !== siteId) {
+    // Verify API key has access to site (strict: key must be bound to this site)
+    if (!apiKey.site_id || apiKey.site_id !== siteId) {
       return NextResponse.json(
         { error: "API key does not have access to this site" },
         { status: 403 },
@@ -368,8 +384,8 @@ export async function DELETE(req: NextRequest) {
       statusCode: 204,
       responseTime:
         Date.now() - parseInt(req.headers.get("x-start-time") || "0"),
-      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] || req.ip,
-      userAgent: req.headers.get("user-agent"),
+      ipAddress: req.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
+      userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
     return new NextResponse(null, { status: 204 });

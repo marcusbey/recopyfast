@@ -144,7 +144,8 @@ async function executeSqlDirect(sql: string): Promise<boolean> {
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${supabaseServiceKey}`,
-              'apikey': supabaseServiceKey
+              // supabaseServiceKey is guaranteed non-undefined by the guard at line 26-31
+              'apikey': supabaseServiceKey as string
             },
             body: JSON.stringify({ sql: statement })
           });

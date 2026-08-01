@@ -197,7 +197,9 @@ class SystemStatusMonitor {
       if (typeof process.cpuUsage === "function") {
         try {
           const cpuUsage = process.cpuUsage();
-          const loadAverage = process.loadavg?.() || [];
+          const loadAvgFn = (process as unknown as { loadavg?: () => number[] })
+            .loadavg;
+          const loadAverage = loadAvgFn ? loadAvgFn() : [];
 
           metrics.cpu = {
             usage: Math.round(

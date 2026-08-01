@@ -159,8 +159,8 @@ export async function POST(request: NextRequest) {
           transformedContent.push({
             elementId: element.element_id,
             originalContent: currentContent,
-            transformedContent:
-              suggestion.text || suggestion.content || currentContent,
+            // generateContentSuggestion returns AIResponse<string[]>; each element is already the text
+            transformedContent: suggestion || currentContent,
           });
           totalTokensUsed += result.tokensUsed || 0;
         }

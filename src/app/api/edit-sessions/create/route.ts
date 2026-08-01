@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { EditSessionManager } from "@/lib/auth/edit-sessions";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,6 +25,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Each call mints a bearer token that grants edit access to a live site.
+    // Cap issuance per user so a compromised session cannot farm long-lived
+    // tokens in bulk. Fails CLOSED — token minting is a privileged operation.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_CONTENT_EDIT",
+      endpoint: "edit-sessions/create",
+      identifier: user.id,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message: "Too many edit sessions created. Please try again shortly.",
+    });
+    if (limited) return limited;
+
     const body = await request.json();
     const { siteId, permissions = ["edit"], durationHours = 2 } = body;
 
@@ -35,13 +49,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate permissions array
-    const validPermissions = ["view", "edit", "admin"];
+    const validPermissions = ["view", "edit", "publish", "admin"];
     if (
       !Array.isArray(permissions) ||
       !permissions.every((p) => validPermissions.includes(p))
     ) {
       return NextResponse.json(
-        { error: "Invalid permissions. Must be array of: view, edit, admin" },
+        {
+          error:
+            "Invalid permissions. Must be array of: view, edit, publish, admin",
+        },
         { status: 400 },
       );
     }
@@ -69,7 +86,7 @@ export async function POST(request: NextRequest) {
     const editSession = await EditSessionManager.createEditSession({
       siteId,
       userId: user.id,
-      permissions: permissions as ("view" | "edit" | "admin")[],
+      permissions: permissions as ("view" | "edit" | "publish" | "admin")[],
       durationHours,
       ipAddress,
       userAgent,
@@ -101,7 +118,7 @@ export async function POST(request: NextRequest) {
         expiresAt: editSession.expires_at,
         site: site || null,
       },
-      editUrl: `${site?.domain}?rcf_edit_token=${editSession.token}`,
+      editUrl: `https://${site?.domain}?rcf_edit_token=${editSession.token}`,
       message: "Edit session created successfully",
     });
   } catch (error) {

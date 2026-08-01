@@ -19,8 +19,7 @@ jest.mock("@/contexts/AuthContext", () => ({
 const mockAuthContext = {
   user: null,
   loading: false,
-  signIn: jest.fn(),
-  signUp: jest.fn(),
+  signInWithMagicLink: jest.fn(),
   signOut: jest.fn(),
   refreshSession: jest.fn(),
 };
@@ -49,7 +48,7 @@ describe("AuthModal", () => {
     expect(screen.getByText("Welcome to ReCopyFast")).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Sign in to your account or create a new one to get started",
+        "Get instant access with a magic link sent to your email",
       ),
     ).toBeInTheDocument();
   });
@@ -122,9 +121,9 @@ describe("AuthModal", () => {
     expect(signUpTab).toHaveAttribute("data-state", "inactive");
   });
 
-  it("calls onClose when form submission is successful", async () => {
+  it("stays open after sending so the user can read the confirmation", async () => {
     const user = userEvent.setup();
-    mockAuthContext.signIn.mockResolvedValueOnce(undefined);
+    mockAuthContext.signInWithMagicLink.mockResolvedValueOnce(undefined);
 
     render(
       <AuthProviderWrapper>
@@ -132,16 +131,16 @@ describe("AuthModal", () => {
       </AuthProviderWrapper>,
     );
 
-    // Fill in login form
-    await user.type(screen.getByLabelText("Email"), "test@example.com");
-    await user.type(screen.getByLabelText("Password"), "password123");
+    await user.type(
+      screen.getByLabelText(/email address/i),
+      "test@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: /send magic link/i }));
 
-    // Submit form
-    await user.click(screen.getByRole("button", { name: "Sign In" }));
-
-    await waitFor(() => {
-      expect(mockOnClose).toHaveBeenCalled();
-    });
+    // Closing here would hide the "check your email" instruction the user
+    // still has to act on, so the modal deliberately stays open.
+    expect(await screen.findByText(/check your email/i)).toBeInTheDocument();
+    expect(mockOnClose).not.toHaveBeenCalled();
   });
 
   it('switches to signup tab when "Sign up" link is clicked in login form', async () => {
@@ -241,7 +240,7 @@ describe("AuthModal", () => {
     );
 
     // Since there's no auto-focus implemented, let's test that the email input is focusable
-    const emailInput = screen.getByLabelText("Email");
+    const emailInput = screen.getByLabelText(/email address/i);
     expect(emailInput).toBeInTheDocument();
 
     // Test that we can manually focus on the email input using user event

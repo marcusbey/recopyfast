@@ -4,7 +4,10 @@
  */
 
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import crypto from "crypto";
+
+type EditPermission = "view" | "edit" | "publish" | "admin";
 
 export interface EditSession {
   id: string;
@@ -12,7 +15,7 @@ export interface EditSession {
   user_id: string;
   token: string;
   expires_at: Date;
-  permissions: ("view" | "edit" | "admin")[];
+  permissions: EditPermission[];
   ip_address?: string;
   user_agent?: string;
   created_at: Date;
@@ -21,7 +24,7 @@ export interface EditSession {
 export interface CreateEditSessionParams {
   siteId: string;
   userId: string;
-  permissions: ("view" | "edit" | "admin")[];
+  permissions: EditPermission[];
   durationHours?: number;
   ipAddress?: string;
   userAgent?: string;
@@ -119,7 +122,7 @@ export class EditSessionManager {
     params: ValidateEditSessionParams,
   ): Promise<EditSession | null> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find active session
       const { data: session, error } = await supabase
@@ -276,12 +279,12 @@ export class EditSessionManager {
   /**
    * Expand permission level to include all allowed permissions
    */
-  private static expandPermissions(
-    permission: string,
-  ): ("view" | "edit" | "admin")[] {
+  private static expandPermissions(permission: string): EditPermission[] {
     switch (permission) {
       case "admin":
-        return ["view", "edit", "admin"];
+        return ["view", "edit", "publish", "admin"];
+      case "publish":
+        return ["view", "edit", "publish"];
       case "edit":
         return ["view", "edit"];
       case "view":
@@ -296,9 +299,17 @@ export class EditSessionManager {
    */
   static hasPermission(
     session: EditSession,
-    permission: "view" | "edit" | "admin",
+    permission: EditPermission,
   ): boolean {
-    return session.permissions.includes(permission);
+    return this.expandPermissions(
+      session.permissions.includes("admin")
+        ? "admin"
+        : session.permissions.includes("publish")
+          ? "publish"
+          : session.permissions.includes("edit")
+            ? "edit"
+            : "view",
+    ).includes(permission);
   }
 
   /**

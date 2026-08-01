@@ -9,12 +9,28 @@ jest.mock("@/lib/ai/openai-service", () => ({
 }));
 jest.mock("@/lib/supabase/server");
 
-import { NextRequest } from "next/server";
+jest.mock("@/lib/feature-gating/permissions", () => ({
+  consumeFeatureUsage: jest.fn(),
+}));
+
+jest.mock("@/lib/api/rate-limit", () => ({
+  enforceRateLimit: jest.fn(),
+  getClientIp: jest.fn(() => "127.0.0.1"),
+}));
+
+import { NextRequest, NextResponse } from "next/server";
 import { POST } from "@/app/api/ai/translate/route";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
+import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
+
+const TEST_USER = { id: "user-123", email: "user@example.com" };
 
 const mockSupabase = {
+  auth: {
+    getUser: jest.fn(),
+  },
   from: jest.fn().mockReturnThis(),
   select: jest.fn().mockReturnThis(),
   eq: jest.fn().mockReturnThis(),
@@ -26,13 +42,34 @@ const mockCreateClient = createClient as jest.MockedFunction<
   typeof createClient
 >;
 const mockAiService = aiService as jest.Mocked<typeof aiService>;
+const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
+const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
+
+/** sites.id is a UUID column; the route rejects anything that is not one. */
+const VALID_SITE_ID = "7e3b2d6c-1ab1-46f3-92fd-493173fa3e17";
+
+/**
+ * The route makes two `.single()` calls before it does any work: the site
+ * lookup, then the caller's `site_permissions` row. Queue both.
+ */
+const allowSiteAccess = () => {
+  mockSupabase.single
+    .mockResolvedValueOnce({ data: { id: VALID_SITE_ID }, error: null })
+    .mockResolvedValueOnce({ data: { permission: "edit" }, error: null });
+};
 
 describe("/api/ai/translate - POST", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCreateClient.mockResolvedValue(
-      mockSupabase as ReturnType<typeof createClient>,
+      mockSupabase as unknown as Awaited<ReturnType<typeof createClient>>,
     );
+    mockSupabase.auth.getUser.mockResolvedValue({
+      data: { user: TEST_USER },
+      error: null,
+    });
+    mockEnforceRateLimit.mockResolvedValue(null);
+    mockConsumeFeatureUsage.mockResolvedValue({ success: true });
   });
 
   it("should successfully translate elements", async () => {
@@ -54,11 +91,7 @@ describe("/api/ai/translate - POST", () => {
       },
     ];
 
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service
     mockAiService.batchTranslate.mockResolvedValueOnce({
@@ -73,7 +106,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: mockElements,
@@ -104,7 +137,7 @@ describe("/api/ai/translate - POST", () => {
     expect(mockSupabase.upsert).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
-          site_id: "site-123",
+          site_id: VALID_SITE_ID,
           element_id: "header-1",
           original_content: "Welcome to our website",
           current_content: "Bienvenido a nuestro sitio web",
@@ -122,41 +155,184 @@ describe("/api/ai/translate - POST", () => {
   });
 
   it("should return 400 when required fields are missing", async () => {
+    // The route validates field-by-field and names the offending field, rather
+    // than returning one catch-all message for any missing input.
     const testCases = [
-      { siteId: "site-123", fromLanguage: "en", toLanguage: "es" }, // missing elements
-      { fromLanguage: "en", toLanguage: "es", elements: [] }, // missing siteId
-      { siteId: "site-123", toLanguage: "es", elements: [] }, // missing fromLanguage
-      { siteId: "site-123", fromLanguage: "en", elements: [] }, // missing toLanguage
+      {
+        body: { siteId: VALID_SITE_ID, fromLanguage: "en", toLanguage: "es" },
+        error: 'Field "elements" must be a non-empty array',
+      },
+      {
+        body: { fromLanguage: "en", toLanguage: "es", elements: [] },
+        error: 'Field "siteId" must be a valid UUID',
+      },
+      {
+        body: { siteId: VALID_SITE_ID, toLanguage: "es", elements: [] },
+        error: 'Field "fromLanguage" is required and must be a string',
+      },
+      {
+        body: { siteId: VALID_SITE_ID, fromLanguage: "en", elements: [] },
+        error: 'Field "toLanguage" is required and must be a string',
+      },
     ];
 
     for (const testCase of testCases) {
       const request = new NextRequest("http://localhost/api/ai/translate", {
         method: "POST",
-        body: JSON.stringify(testCase),
+        body: JSON.stringify(testCase.body),
       });
 
       const response = await POST(request);
       const data = await response.json();
 
       expect(response.status).toBe(400);
-      expect(data).toEqual({
-        error:
-          "Missing required fields: siteId, fromLanguage, toLanguage, elements",
-      });
+      expect(data).toEqual({ error: testCase.error });
     }
   });
 
-  it("should return 404 when site not found", async () => {
-    // Mock site verification failure
-    mockSupabase.single.mockResolvedValueOnce({
-      data: null,
+  it("should reject a siteId that is not a UUID", async () => {
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        siteId: "site-123",
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: [{ id: "test", text: "test" }],
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data).toEqual({ error: 'Field "siteId" must be a valid UUID' });
+  });
+
+  it("should reject a batch larger than the per-request element cap", async () => {
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        siteId: VALID_SITE_ID,
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: Array.from({ length: 101 }, (_, i) => ({
+          id: `el-${i}`,
+          text: "text",
+        })),
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(data).toEqual({
+      error: 'Field "elements" must contain at most 100 items',
+    });
+  });
+
+  it("should return 401 when there is no authenticated user", async () => {
+    mockSupabase.auth.getUser.mockResolvedValue({
+      data: { user: null },
       error: null,
     });
 
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "non-existent-site",
+        siteId: VALID_SITE_ID,
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: [{ id: "test", text: "test" }],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Unauthorized" });
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 when the caller holds no permission on the site", async () => {
+    mockSupabase.single
+      .mockResolvedValueOnce({ data: { id: VALID_SITE_ID }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        siteId: VALID_SITE_ID,
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: [{ id: "test", text: "test" }],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    // A caller without a permission row must never reach the paid model call.
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 when the plan quota rejects the translation", async () => {
+    allowSiteAccess();
+    mockConsumeFeatureUsage.mockResolvedValue({
+      success: false,
+      error: "Translation features require a Pro or Enterprise plan",
+    });
+
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        siteId: VALID_SITE_ID,
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: [{ id: "test", text: "test" }],
+      }),
+    });
+
+    const response = await POST(request);
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.requiresUpgrade).toBe(true);
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+  });
+
+  it("should short-circuit when the IP rate limiter rejects the request", async () => {
+    mockEnforceRateLimit.mockResolvedValueOnce(
+      NextResponse.json({ error: "Too many requests" }, { status: 429 }),
+    );
+
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        siteId: VALID_SITE_ID,
+        fromLanguage: "en",
+        toLanguage: "es",
+        elements: [{ id: "test", text: "test" }],
+      }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(429);
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("should return 404 when site not found", async () => {
+    // Site lookup misses; the permission lookup is never reached.
+    mockSupabase.single.mockResolvedValueOnce({ data: null, error: null });
+
+    const request = new NextRequest("http://localhost/api/ai/translate", {
+      method: "POST",
+      body: JSON.stringify({
+        // Well-formed but unknown — otherwise the UUID check rejects it at 400
+        // and this never exercises the "site not found" path it claims to test.
+        siteId: "99999999-8888-4777-a666-555555555555",
         fromLanguage: "en",
         toLanguage: "es",
         elements: [{ id: "test", text: "test" }],
@@ -173,11 +349,7 @@ describe("/api/ai/translate - POST", () => {
   });
 
   it("should return 500 when AI service fails", async () => {
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service failure
     mockAiService.batchTranslate.mockResolvedValueOnce({
@@ -188,7 +360,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: [{ id: "test", text: "test" }],
@@ -215,11 +387,7 @@ describe("/api/ai/translate - POST", () => {
       },
     ];
 
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service success
     mockAiService.batchTranslate.mockResolvedValueOnce({
@@ -236,7 +404,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: mockElements,
@@ -258,11 +426,7 @@ describe("/api/ai/translate - POST", () => {
   it("should handle translation without context", async () => {
     const mockElements = [{ id: "test", text: "Hello" }];
 
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service
     mockAiService.batchTranslate.mockResolvedValueOnce({
@@ -277,7 +441,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: mockElements,
@@ -296,27 +460,11 @@ describe("/api/ai/translate - POST", () => {
     );
   });
 
-  it("should handle empty elements array", async () => {
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
-
-    // Mock AI service
-    mockAiService.batchTranslate.mockResolvedValueOnce({
-      success: true,
-      data: [],
-      tokensUsed: 0,
-    });
-
-    // Mock database upsert
-    mockSupabase.upsert.mockResolvedValueOnce({ error: null });
-
+  it("should reject an empty elements array instead of calling the model", async () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: [],
@@ -326,13 +474,11 @@ describe("/api/ai/translate - POST", () => {
     const response = await POST(request);
     const data = await response.json();
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
     expect(data).toEqual({
-      success: true,
-      translations: [],
-      tokensUsed: 0,
-      message: "Successfully translated 0 elements to es",
+      error: 'Field "elements" must be a non-empty array',
     });
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
   });
 
   it("should handle malformed JSON", async () => {
@@ -344,18 +490,16 @@ describe("/api/ai/translate - POST", () => {
     const response = await POST(request);
     const data = await response.json();
 
-    expect(response.status).toBe(500);
+    // A body the client got wrong is a 400, not a 500. This previously fell
+    // through to the catch-all handler and reported a server fault.
+    expect(response.status).toBe(400);
     expect(data).toEqual({
-      error: "Internal server error",
+      error: "Request body must be valid JSON",
     });
   });
 
   it("should handle unsupported language codes", async () => {
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service failure for unsupported language
     mockAiService.batchTranslate.mockResolvedValueOnce({
@@ -366,7 +510,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "xyz",
         elements: [{ id: "test", text: "test" }],
@@ -383,11 +527,7 @@ describe("/api/ai/translate - POST", () => {
   });
 
   it("should handle AI service exception", async () => {
-    // Mock site verification
-    mockSupabase.single.mockResolvedValueOnce({
-      data: { id: "site-123" },
-      error: null,
-    });
+    allowSiteAccess();
 
     // Mock AI service throwing an exception
     mockAiService.batchTranslate.mockRejectedValueOnce(
@@ -397,7 +537,7 @@ describe("/api/ai/translate - POST", () => {
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
       body: JSON.stringify({
-        siteId: "site-123",
+        siteId: VALID_SITE_ID,
         fromLanguage: "en",
         toLanguage: "es",
         elements: [{ id: "test", text: "test" }],

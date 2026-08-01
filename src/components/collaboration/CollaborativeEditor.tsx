@@ -4,7 +4,12 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Editor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { Placeholder } from "@tiptap/extension-placeholder";
-import { ContentElement, PresenceData, CollaborativeEdit } from "@/types";
+import {
+  ContentElement,
+  PresenceData,
+  CollaborativeEdit,
+  EditConflict,
+} from "@/types";
 import { collaborationRealtime } from "@/lib/collaboration/realtime";
 import { CollaborationPermissions } from "@/lib/collaboration/permissions";
 import { Card, CardContent } from "@/components/ui/card";
@@ -46,13 +51,18 @@ export function CollaborativeEditor({
   const [userRole, setUserRole] = useState<string>("viewer");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [conflict, setConflict] = useState<any>(null);
+  const [conflict, setConflict] = useState<EditConflict | null>(null);
   const [connected, setConnected] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const permissions = useRef(new CollaborationPermissions());
   const lastContent = useRef(contentElement.current_content);
   const isRemoteUpdate = useRef(false);
+  // Refs that mirror the corresponding state so TipTap callbacks (which close
+  // over the initial render) always see the current value without needing to
+  // be re-created on every state change.
+  const isEditingRef = useRef(false);
+  const sessionTokenRef = useRef<string | null>(null);
 
   // Initialize editor
   useEffect(() => {
@@ -66,7 +76,13 @@ export function CollaborativeEditor({
       ],
       content: contentElement.current_content,
       onUpdate: ({ editor }) => {
-        if (!isRemoteUpdate.current && isEditing && sessionToken) {
+        // Use refs so this closure always reads the latest values regardless
+        // of when it was captured relative to React state updates.
+        if (
+          !isRemoteUpdate.current &&
+          isEditingRef.current &&
+          sessionTokenRef.current
+        ) {
           const content = editor.getHTML();
           lastContent.current = content;
 
@@ -79,7 +95,7 @@ export function CollaborativeEditor({
         }
       },
       onSelectionUpdate: ({ editor }) => {
-        if (isEditing && sessionToken) {
+        if (isEditingRef.current && sessionTokenRef.current) {
           const { from, to } = editor.state.selection;
           collaborationRealtime.updateCursor(
             contentElement.id,
@@ -137,7 +153,7 @@ export function CollaborativeEditor({
       setPresenceList(users.filter((p) => p.userId !== userId));
     };
 
-    const handleEditConflict = (conflictData: any) => {
+    const handleEditConflict = (conflictData: EditConflict) => {
       if (conflictData.elementId === contentElement.id) {
         setConflict(conflictData);
       }
@@ -210,6 +226,9 @@ export function CollaborativeEditor({
 
       setSessionToken(token);
       setIsEditing(true);
+      // Keep refs in sync so the TipTap callbacks see current values immediately.
+      sessionTokenRef.current = token;
+      isEditingRef.current = true;
 
       // Enable editor
       editor?.setEditable(true);
@@ -237,6 +256,9 @@ export function CollaborativeEditor({
 
       setIsEditing(false);
       setSessionToken(null);
+      // Keep refs in sync so the TipTap callbacks stop firing immediately.
+      isEditingRef.current = false;
+      sessionTokenRef.current = null;
 
       // Disable editor
       editor?.setEditable(false);

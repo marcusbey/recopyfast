@@ -8,7 +8,7 @@ interface UseFloatingPositionOptions {
   toolbarHeight?: number;
   toolbarWidth?: number;
   offset?: number;
-  containerRef?: React.RefObject<HTMLElement>;
+  containerRef?: React.RefObject<HTMLElement | null>;
 }
 
 interface UseFloatingPositionReturn {

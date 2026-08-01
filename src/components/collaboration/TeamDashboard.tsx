@@ -278,7 +278,11 @@ export function TeamDashboard({
                   <select
                     id="role"
                     value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value as any)}
+                    onChange={(e) =>
+                      setInviteRole(
+                        e.target.value as "viewer" | "editor" | "manager",
+                      )
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="viewer">Viewer - Can view content</option>

@@ -30,7 +30,7 @@ interface ServiceCheck {
   status: "ok" | "error" | "timeout";
   latency?: number;
   error?: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 interface MemoryMetrics {
@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
     ]);
 
     // Process results
-    const checks: any = {
+    const checks: HealthStatus["checks"] = {
       database:
         database.status === "fulfilled"
           ? database.value
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
     // Determine overall health status
     const statuses = Object.values(checks)
       .filter(Boolean)
-      .map((check: any) => check.status);
+      .map((check: ServiceCheck) => check.status);
 
     let overallStatus: "healthy" | "degraded" | "unhealthy" = "healthy";
     if (statuses.includes("error")) {
@@ -292,7 +292,14 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// Support HEAD requests for uptime monitoring
+// Support HEAD requests for uptime monitoring.
+// A HEAD probe must reflect real readiness: if the database is unreachable the
+// instance cannot serve traffic, so return 503 and let the load balancer / uptime
+// monitor route around it. A bare 200 would mask a hard outage.
 export async function HEAD() {
-  return new NextResponse(null, { status: 200 });
+  const db = await checkDatabase();
+  return new NextResponse(null, {
+    status: db.status === "ok" ? 200 : 503,
+    headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
+  });
 }

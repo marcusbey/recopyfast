@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Mail, Lock, User, CheckCircle } from "lucide-react";
+import { Loader2, Mail, User } from "lucide-react";
+import { getAuthErrorMessage, logAuthError } from "./auth-errors";
 
 interface SignupFormProps {
   onSuccess?: () => void;
@@ -21,19 +22,37 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  const inFlightRef = useRef(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlightRef.current) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Enter your email address to continue.");
+      return;
+    }
+
+    inFlightRef.current = true;
     setError(null);
     setIsLoading(true);
 
     try {
-      await signInWithMagicLink(email);
+      // The name field was previously collected and thrown away; pass it
+      // through so it lands on the user's metadata at signup.
+      await signInWithMagicLink(trimmedEmail, {
+        name: name.trim() || undefined,
+      });
+      // Deliberately not calling `onSuccess` here: in `AuthModal` that closes
+      // the dialog, which would hide the "check your email" confirmation the
+      // user still needs to read.
       setSuccess(true);
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to send magic link",
-      );
+      logAuthError("signup magic link", err);
+      setError(getAuthErrorMessage(err));
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -49,7 +68,7 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
             Check your email
           </h3>
           <p className="text-gray-600 text-sm">
-            We've sent a magic link to{" "}
+            We&apos;ve sent a magic link to{" "}
             <span className="font-medium text-gray-900">{email}</span>
           </p>
           <p className="text-gray-500 text-xs">
@@ -130,7 +149,7 @@ export function SignupForm({ onSuccess, onSwitchToLogin }: SignupFormProps) {
       </Button>
 
       <div className="text-center text-sm text-gray-500">
-        <p>We'll send you a secure link to create your account</p>
+        <p>We&apos;ll send you a secure link to create your account</p>
       </div>
 
       <div className="text-center text-sm">

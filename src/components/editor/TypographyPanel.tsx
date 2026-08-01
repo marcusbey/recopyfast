@@ -62,10 +62,44 @@ export default function TypographyPanel({
     onChange({ letterSpacing: `${e.target.value}em` });
   };
 
-  // Parse letter spacing for input
-  const letterSpacingValue = parseFloat(
-    styles.letterSpacing?.replace("em", "") || "0",
-  );
+  // ---------------------------------------------------------------------------
+  // Parse letter spacing for the slider.
+  // computedStyle returns px (e.g. "1.6px") but the slider operates in em.
+  // Convert px → em using the current font size when needed.
+  // ---------------------------------------------------------------------------
+  const parsedFontSizePx = parseFloat(styles.fontSize || "16");
+  const effectiveFontSizePx =
+    Number.isFinite(parsedFontSizePx) && parsedFontSizePx > 0
+      ? parsedFontSizePx
+      : 16;
+
+  const rawLetterSpacing = styles.letterSpacing || "0em";
+  const letterSpacingValue = (() => {
+    if (rawLetterSpacing.endsWith("em")) {
+      return parseFloat(rawLetterSpacing) || 0;
+    }
+    // Assume px — convert to em
+    const px = parseFloat(rawLetterSpacing) || 0;
+    return px / effectiveFontSizePx;
+  })();
+
+  // ---------------------------------------------------------------------------
+  // Parse line height for the slider (min 1, max 3, unitless ratio).
+  // computedStyle returns px (e.g. "24px") so convert px → ratio when needed.
+  // ---------------------------------------------------------------------------
+  const rawLineHeight = styles.lineHeight || "1.5";
+  const lineHeightValue = (() => {
+    if (rawLineHeight.endsWith("px")) {
+      const px = parseFloat(rawLineHeight) || 0;
+      const ratio = px / effectiveFontSizePx;
+      // Clamp to slider range [1, 3]
+      return Math.min(3, Math.max(1, ratio));
+    }
+    // Already a unitless ratio or "normal"
+    const ratio = parseFloat(rawLineHeight);
+    if (!Number.isFinite(ratio)) return 1.5;
+    return Math.min(3, Math.max(1, ratio));
+  })();
 
   return (
     <AnimatePresence>
@@ -171,14 +205,14 @@ export default function TypographyPanel({
                       min="1"
                       max="3"
                       step="0.1"
-                      value={parseFloat(styles.lineHeight || "1.5")}
+                      value={lineHeightValue}
                       onChange={handleLineHeightChange}
                       className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
                     <div className="flex justify-between text-xs text-gray-500 mt-1">
                       <span>1</span>
                       <span className="text-gray-300">
-                        {styles.lineHeight || "1.5"}
+                        {lineHeightValue.toFixed(1)}
                       </span>
                       <span>3</span>
                     </div>

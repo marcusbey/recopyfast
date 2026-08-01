@@ -5,7 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
 import type { Subscription } from "@/types/billing";
 
 interface SubscriptionCardProps {
@@ -19,22 +19,15 @@ export function SubscriptionCard({
 }: SubscriptionCardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
 
   const currentPlan = subscription?.plan_id || "free";
   const planData =
     SUBSCRIPTION_PLANS[
       currentPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
-    ];
+    ] ?? SUBSCRIPTION_PLANS.FREE;
 
   const handleCancelSubscription = async () => {
-    if (
-      !confirm(
-        "Are you sure you want to cancel your subscription? Your plan will remain active until the end of your billing period.",
-      )
-    ) {
-      return;
-    }
-
     try {
       setLoading(true);
       setError(null);
@@ -48,9 +41,12 @@ export function SubscriptionCard({
         throw new Error(errorData.error || "Failed to cancel subscription");
       }
 
+      setIsConfirmingCancel(false);
       onUpdate();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to cancel subscription",
+      );
     } finally {
       setLoading(false);
     }
@@ -71,8 +67,12 @@ export function SubscriptionCard({
       }
 
       onUpdate();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to reactivate subscription",
+      );
     } finally {
       setLoading(false);
     }
@@ -172,23 +172,49 @@ export function SubscriptionCard({
         </div>
 
         {subscription && subscription.status === "active" && (
-          <div className="flex gap-3 pt-4 border-t">
+          <div className="pt-4 border-t">
             {subscription.cancel_at_period_end ? (
               <Button
                 onClick={handleReactivateSubscription}
                 disabled={loading}
-                className="flex-1"
+                className="w-full"
               >
                 {loading ? "Processing..." : "Reactivate Subscription"}
               </Button>
+            ) : isConfirmingCancel ? (
+              <div className="space-y-3">
+                <p className="text-sm text-gray-700">
+                  Cancel your subscription? You keep access until{" "}
+                  {formatDate(subscription.current_period_end)}, and you will
+                  not be charged again.
+                </p>
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => setIsConfirmingCancel(false)}
+                    disabled={loading}
+                    className="flex-1"
+                  >
+                    Keep Subscription
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleCancelSubscription}
+                    disabled={loading}
+                    className="flex-1"
+                  >
+                    {loading ? "Cancelling..." : "Confirm Cancellation"}
+                  </Button>
+                </div>
+              </div>
             ) : (
               <Button
-                onClick={handleCancelSubscription}
+                onClick={() => setIsConfirmingCancel(true)}
                 disabled={loading}
                 variant="outline"
-                className="flex-1"
+                className="w-full"
               >
-                {loading ? "Processing..." : "Cancel Subscription"}
+                Cancel Subscription
               </Button>
             )}
           </div>

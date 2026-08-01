@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
+import {
+  webhookManager,
+  WEBHOOK_EVENTS,
+  WebhookEventType,
+} from "@/lib/webhooks/manager";
 
 export async function GET(req: NextRequest) {
   try {
@@ -74,7 +78,7 @@ export async function POST(req: NextRequest) {
     // Validate events
     const validEvents = Object.values(WEBHOOK_EVENTS);
     const invalidEvents = events.filter(
-      (event: string) => !validEvents.includes(event as any),
+      (event: string) => !validEvents.includes(event as WebhookEventType),
     );
 
     if (invalidEvents.length > 0) {
@@ -204,7 +208,7 @@ export async function PUT(req: NextRequest) {
     if (updates.events && Array.isArray(updates.events)) {
       const validEvents = Object.values(WEBHOOK_EVENTS);
       const invalidEvents = updates.events.filter(
-        (event: string) => !validEvents.includes(event as any),
+        (event: string) => !validEvents.includes(event as WebhookEventType),
       );
 
       if (invalidEvents.length > 0) {

@@ -17,21 +17,13 @@ jest.mock("@/lib/supabase/server", () => ({
   createServerClient: jest.fn(() => Promise.resolve(mockSupabase)),
 }));
 
-// Mock NextResponse
-const mockJson = jest.fn();
-jest.mock("next/server", () => ({
-  NextResponse: {
-    json: mockJson,
-  },
-}));
+// NOTE: `next/server` is mocked globally in jest.setup.js, which supplies both
+// NextRequest and NextResponse. A local mock here used to shadow it with only
+// NextResponse, which broke `new NextRequest(...)`.
 
 describe("/api/teams", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockJson.mockImplementation((data, options) => ({
-      json: () => Promise.resolve(data),
-      status: options?.status || 200,
-    }));
   });
 
   describe("GET /api/teams", () => {
@@ -76,10 +68,8 @@ describe("/api/teams", () => {
       const request = new NextRequest("http://localhost/api/teams");
       const response = await GET(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
     });
 
     it("should handle database errors", async () => {
@@ -100,10 +90,10 @@ describe("/api/teams", () => {
       const request = new NextRequest("http://localhost/api/teams");
       const response = await GET(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { error: "Failed to fetch teams" },
-        { status: 500 },
-      );
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Failed to fetch teams",
+      });
     });
   });
 
@@ -140,10 +130,10 @@ describe("/api/teams", () => {
 
       const response = await POST(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { team: expect.objectContaining({ name: "New Team" }) },
-        { status: 201 },
-      );
+      expect(response.status).toBe(201);
+      await expect(response.json()).resolves.toEqual({
+        team: expect.objectContaining({ name: "New Team" }),
+      });
     });
 
     it("should validate team name", async () => {
@@ -162,10 +152,10 @@ describe("/api/teams", () => {
 
       const response = await POST(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { error: "Team name is required" },
-        { status: 400 },
-      );
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Team name is required",
+      });
     });
 
     it("should validate team name length", async () => {
@@ -186,10 +176,10 @@ describe("/api/teams", () => {
 
       const response = await POST(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { error: "Team name must be less than 100 characters" },
-        { status: 400 },
-      );
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: "Team name must be less than 100 characters",
+      });
     });
 
     it("should handle team creation errors", async () => {
@@ -218,10 +208,10 @@ describe("/api/teams", () => {
 
       const response = await POST(request);
 
-      expect(mockJson).toHaveBeenCalledWith(
-        { error: "Failed to create team" },
-        { status: 500 },
-      );
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toEqual({
+        error: "Failed to create team",
+      });
     });
 
     it("should trim team name and description", async () => {

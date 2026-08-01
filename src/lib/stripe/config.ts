@@ -1,13 +1,52 @@
 import Stripe from "stripe";
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+let _stripe: Stripe | null = null;
+
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = STRIPE_CONFIG.SECRET_KEY;
+    if (!key) {
+      throw new Error("Stripe secret key is not set in environment variables");
+    }
+    _stripe = new Stripe(key, {
+      apiVersion: STRIPE_CONFIG.API_VERSION,
+      typescript: true,
+    });
+  }
+  return _stripe;
 }
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2024-12-18.acacia",
-  typescript: true,
+// Lazy proxy: defers client construction (and the missing-key throw) until first
+// use. Constructing at module scope crashed Vercel's "Collecting page data" phase
+// for any route importing this file when STRIPE_SECRET_KEY is unset at build time.
+// All existing `stripe.x.y(...)` call sites keep working unchanged.
+export const stripe = new Proxy({} as Stripe, {
+  get(_target, prop, receiver) {
+    const client = getStripe();
+    const value = Reflect.get(client, prop, receiver);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
 });
+
+// Plan/ticket configuration lives in ./plans so client components can import it
+// without pulling the Node Stripe SDK into the browser bundle. Re-exported here
+// to keep existing `@/lib/stripe/config` imports working.
+export {
+  SUBSCRIPTION_PLANS,
+  TICKET_CONFIG,
+  PAID_PLAN_IDS,
+  isPaidPlanId,
+  isBillingPeriod,
+  getPaidPlan,
+  getPlanDisplayPrice,
+  getPlanCyclePrice,
+} from "./plans";
+export type {
+  BillingPeriod,
+  PaidPlanId,
+  SubscriptionPlan,
+  SubscriptionPlanData,
+} from "./plans";
 
 export const STRIPE_CONFIG = {
   PUBLISHABLE_KEY:
@@ -23,85 +62,5 @@ export const STRIPE_CONFIG = {
       ? process.env.STRIPE_WEBHOOK_SECRET_LIVE!
       : process.env.STRIPE_WEBHOOK_SECRET!,
   CURRENCY: "usd",
-  API_VERSION: "2024-12-18.acacia" as const,
+  API_VERSION: "2025-07-30.basil" as const,
 } as const;
-
-// Subscription plans configuration
-export const SUBSCRIPTION_PLANS = {
-  FREE: {
-    id: "free",
-    name: "Free",
-    description: "1 website, basic editing only, no AI features",
-    price: 0,
-    priceId: null,
-    features: ["1 website", "Basic content editing", "Community support"],
-    limits: {
-      websites: 1,
-      collaborators: 0,
-      aiFeatures: false,
-      translations: 0,
-    },
-  },
-  PRO: {
-    id: "pro",
-    name: "Pro",
-    description: "Unlimited websites, AI features, 5 collaborators",
-    price: 29,
-    priceId:
-      process.env.NODE_ENV === "production"
-        ? process.env.STRIPE_PRO_PRICE_ID_LIVE!
-        : process.env.STRIPE_PRO_PRICE_ID!,
-    features: [
-      "Unlimited websites",
-      "AI-powered suggestions",
-      "Translation support",
-      "5 collaborators",
-      "Priority support",
-      "Advanced analytics",
-    ],
-    limits: {
-      websites: -1, // unlimited
-      collaborators: 5,
-      aiFeatures: true,
-      translations: -1, // unlimited
-    },
-  },
-  ENTERPRISE: {
-    id: "enterprise",
-    name: "Enterprise",
-    description: "Unlimited everything, white-label, priority support",
-    price: 99,
-    priceId:
-      process.env.NODE_ENV === "production"
-        ? process.env.STRIPE_ENTERPRISE_PRICE_ID_LIVE!
-        : process.env.STRIPE_ENTERPRISE_PRICE_ID!,
-    features: [
-      "Everything in Pro",
-      "Unlimited collaborators",
-      "White-label solution",
-      "Custom integrations",
-      "Dedicated support",
-      "SLA guarantee",
-    ],
-    limits: {
-      websites: -1, // unlimited
-      collaborators: -1, // unlimited
-      aiFeatures: true,
-      translations: -1, // unlimited
-    },
-  },
-} as const;
-
-// Ticket system configuration
-export const TICKET_CONFIG = {
-  PRICE_PER_TICKET: 0.5, // $0.50 per ticket
-  TICKETS_PER_PURCHASE: 10, // $5 for 10 tickets
-  PRICE_ID:
-    process.env.NODE_ENV === "production"
-      ? process.env.STRIPE_TICKETS_PRICE_ID_LIVE!
-      : process.env.STRIPE_TICKETS_PRICE_ID!,
-} as const;
-
-export type SubscriptionPlan = keyof typeof SUBSCRIPTION_PLANS;
-export type SubscriptionPlanData =
-  (typeof SUBSCRIPTION_PLANS)[SubscriptionPlan];

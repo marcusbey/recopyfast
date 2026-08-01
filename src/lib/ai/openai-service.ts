@@ -1,9 +1,17 @@
 import OpenAI from "openai";
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy singleton — instantiated on first use so the module can be imported
+// during Vercel's "Collecting page data" phase without OPENAI_API_KEY being set.
+let _openaiClient: OpenAI | null = null;
+
+function getOpenAIClient(): OpenAI {
+  if (!_openaiClient) {
+    _openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+  }
+  return _openaiClient;
+}
 
 export interface TranslationRequest {
   text: string;
@@ -17,6 +25,20 @@ export interface ContentSuggestionRequest {
   context: string;
   tone?: "professional" | "casual" | "marketing" | "technical";
   goal?: "improve" | "shorten" | "expand" | "optimize";
+}
+
+export interface ABVariantRequest {
+  originalText: string;
+  context: string;
+  elementType: string;
+  tone?: string;
+  numVariants?: number;
+}
+
+export interface ABVariantResult {
+  name: string;
+  content: string;
+  rationale: string;
 }
 
 export interface AIResponse<T> {
@@ -45,7 +67,7 @@ export class OpenAIService {
     try {
       const prompt = this.buildTranslationPrompt(request);
 
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -91,7 +113,7 @@ export class OpenAIService {
     try {
       const prompt = this.buildContentSuggestionPrompt(request);
 
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -193,7 +215,7 @@ export class OpenAIService {
    */
   async detectLanguage(text: string): Promise<AIResponse<string>> {
     try {
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
@@ -229,6 +251,75 @@ export class OpenAIService {
         success: false,
         error:
           error instanceof Error ? error.message : "Language detection failed",
+      };
+    }
+  }
+
+  /**
+   * Generate A/B test copy variants for conversion optimization
+   */
+  async generateABVariants(
+    request: ABVariantRequest,
+  ): Promise<AIResponse<ABVariantResult[]>> {
+    try {
+      const numVariants = request.numVariants || 3;
+
+      const completion = await getOpenAIClient().chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert CRO (Conversion Rate Optimization) copywriter. Generate ${numVariants} alternative copy variations for A/B testing. Each variant should test a different psychological angle (urgency, social proof, benefit-focused, curiosity, etc.) while maintaining the same intent and approximate length as the original.
+
+Return a JSON array where each element has:
+- "name": A short descriptive name for the variant (e.g., "Urgency-Focused", "Social Proof")
+- "content": The alternative copy text
+- "rationale": A brief explanation of why this variant might outperform the original
+
+Return ONLY valid JSON, no markdown formatting.`,
+          },
+          {
+            role: "user",
+            content: `Original copy: "${request.originalText}"
+
+Element type: <${request.elementType}> tag
+Context: ${request.context}
+${request.tone ? `Desired tone: ${request.tone}` : ""}
+
+Generate ${numVariants} conversion-optimized variants.`,
+          },
+        ],
+        temperature: 0.8,
+        max_tokens: 1500,
+        response_format: { type: "json_object" },
+      });
+
+      const responseText = completion.choices[0]?.message?.content?.trim();
+
+      if (!responseText) {
+        throw new Error("No response received from OpenAI");
+      }
+
+      const parsed = JSON.parse(responseText);
+      const variants: ABVariantResult[] = parsed.variants || parsed;
+
+      if (!Array.isArray(variants) || variants.length === 0) {
+        throw new Error("Invalid response format from AI");
+      }
+
+      return {
+        success: true,
+        data: variants.slice(0, numVariants),
+        tokensUsed: completion.usage?.total_tokens,
+      };
+    } catch (error) {
+      console.error("AB variant generation error:", error);
+      return {
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "AB variant generation failed",
       };
     }
   }

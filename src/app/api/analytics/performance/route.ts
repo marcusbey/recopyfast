@@ -1,42 +1,120 @@
 import { NextRequest, NextResponse } from "next/server";
-import { analytics, getClientInfo } from "@/lib/analytics/tracker";
-import { createServerClient } from "@supabase/ssr";
+import { analytics } from "@/lib/analytics/tracker";
+import { createClient } from "@/lib/supabase/server";
+import {
+  authorizeIngestRequest,
+  authorizeSiteReadAccess,
+} from "@/lib/security/ingest-auth";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  optionalMetadata,
+  readJsonObject,
+  requireEnum,
+  requireFiniteNumber,
+  requireUuid,
+} from "@/lib/api/validation";
+import type { PerformanceMetric } from "@/types";
+
+/**
+ * Performance metric ingest — same trust model as /api/analytics/track: public
+ * by design for the embed script, but every write must be bound to a site the
+ * caller can prove access to. See @/lib/security/ingest-auth.
+ */
+
+const METRIC_TYPES = [
+  "load_time",
+  "edit_time",
+  "api_response_time",
+] as const satisfies readonly PerformanceMetric["metric_type"][];
+
+/** Metrics are durations in ms; anything outside this range is not a real timing. */
+const MIN_METRIC_VALUE = 0;
+const MAX_METRIC_VALUE = 24 * 60 * 60 * 1000;
+
+const MAX_METRICS_PAGE_SIZE = 1000;
+
+function withCors(response: NextResponse): NextResponse {
+  response.headers.set("Access-Control-Allow-Origin", "*");
+  response.headers.set(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type, X-Site-Token",
+  );
+  response.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  return response;
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { siteId, metricType, value, metadata } = body;
-
-    if (!siteId || !metricType || typeof value !== "number") {
-      return NextResponse.json(
-        { error: "Missing required fields: siteId, metricType, value" },
-        { status: 400 },
+    const body = await readJsonObject(req);
+    if (!body.ok) {
+      return withCors(
+        NextResponse.json({ error: body.error }, { status: 400 }),
       );
     }
 
-    // Validate metric type
-    const validMetricTypes = ["load_time", "edit_time", "api_response_time"];
-    if (!validMetricTypes.includes(metricType)) {
-      return NextResponse.json(
-        { error: "Invalid metric type" },
-        { status: 400 },
+    const siteId = requireUuid(body.value, "siteId");
+    if (!siteId.ok) {
+      return withCors(
+        NextResponse.json({ error: siteId.error }, { status: 400 }),
       );
     }
 
-    // Track the performance metric
+    const auth = await authorizeIngestRequest(req, siteId.value);
+    if (!auth.ok) {
+      return withCors(
+        NextResponse.json({ error: auth.error }, { status: auth.status }),
+      );
+    }
+
+    const limited = await enforceRateLimit(req, {
+      limit: "API_CONTENT",
+      endpoint: "analytics/performance",
+      identifier: siteId.value,
+      identifierType: "api_key",
+      onStoreFailure: "allow",
+      message: "Performance ingest rate limit exceeded for this site.",
+    });
+    if (limited) return withCors(limited);
+
+    const metricType = requireEnum(body.value, "metricType", METRIC_TYPES);
+    if (!metricType.ok) {
+      return withCors(
+        NextResponse.json({ error: metricType.error }, { status: 400 }),
+      );
+    }
+
+    const value = requireFiniteNumber(body.value, "value", {
+      min: MIN_METRIC_VALUE,
+      max: MAX_METRIC_VALUE,
+    });
+    if (!value.ok) {
+      return withCors(
+        NextResponse.json({ error: value.error }, { status: 400 }),
+      );
+    }
+
+    const metadata = optionalMetadata(body.value);
+    if (!metadata.ok) {
+      return withCors(
+        NextResponse.json({ error: metadata.error }, { status: 400 }),
+      );
+    }
+
     await analytics.trackPerformance({
-      siteId,
-      metricType,
-      value,
-      metadata,
+      siteId: siteId.value,
+      metricType: metricType.value,
+      value: value.value,
+      metadata: metadata.value,
     });
 
-    return NextResponse.json({ success: true });
+    return withCors(NextResponse.json({ success: true }));
   } catch (error) {
     console.error("Performance tracking error:", error);
-    return NextResponse.json(
-      { error: "Failed to track performance" },
-      { status: 500 },
+    return withCors(
+      NextResponse.json(
+        { error: "Failed to track performance" },
+        { status: 500 },
+      ),
     );
   }
 }
@@ -44,54 +122,55 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const siteId = searchParams.get("siteId");
-    const metricType = searchParams.get("metricType");
+    const siteIdParam = searchParams.get("siteId");
+    const metricTypeParam = searchParams.get("metricType");
     const startDate = searchParams.get("startDate");
     const endDate = searchParams.get("endDate");
 
-    if (!siteId) {
+    if (!siteIdParam) {
       return NextResponse.json(
         { error: "Missing required parameter: siteId" },
         { status: 400 },
       );
     }
 
-    // Verify user has access to site
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get: (name: string) => req.cookies.get(name)?.value,
-          set: () => {},
-          remove: () => {},
-        },
-      },
-    );
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const siteId = requireUuid({ siteId: siteIdParam }, "siteId");
+    if (!siteId.ok) {
+      return NextResponse.json({ error: siteId.error }, { status: 400 });
     }
 
-    const { data: permission } = await supabase
-      .from("site_permissions")
-      .select("id")
-      .eq("site_id", siteId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (!permission) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    const auth = await authorizeSiteReadAccess(siteId.value);
+    if (!auth.ok) {
+      return NextResponse.json({ error: auth.error }, { status: auth.status });
     }
 
-    // Build query
+    const limited = await enforceRateLimit(req, {
+      limit: "USER_GENERAL",
+      endpoint: "analytics/performance:read",
+      identifier: auth.userId!,
+      identifierType: "user",
+      onStoreFailure: "allow",
+    });
+    if (limited) return limited;
+
+    let metricType: PerformanceMetric["metric_type"] | undefined;
+    if (metricTypeParam) {
+      const parsed = requireEnum(
+        { metricType: metricTypeParam },
+        "metricType",
+        METRIC_TYPES,
+      );
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      metricType = parsed.value;
+    }
+
+    const supabase = await createClient();
     let query = supabase
       .from("performance_metrics")
       .select("*")
-      .eq("site_id", siteId)
+      .eq("site_id", siteId.value)
       .order("recorded_at", { ascending: false });
 
     if (metricType) {
@@ -106,7 +185,7 @@ export async function GET(req: NextRequest) {
       query = query.lte("recorded_at", endDate);
     }
 
-    const { data: metrics, error } = await query.limit(1000);
+    const { data: metrics, error } = await query.limit(MAX_METRICS_PAGE_SIZE);
 
     if (error) {
       throw error;
@@ -141,4 +220,8 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+export async function OPTIONS() {
+  return withCors(new NextResponse(null, { status: 204 }));
 }

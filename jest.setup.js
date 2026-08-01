@@ -27,26 +27,11 @@ if (typeof global.BroadcastChannel === 'undefined') {
   }
 }
 
-// MSW Setup for Integration Tests
-let server
-if (process.env.NODE_ENV === 'test') {
-  try {
-    const { server: mswServer } = require('./src/__tests__/integration/setup')
-    server = mswServer
-    
-    // Start server before all tests
-    beforeAll(() => server?.listen())
-    
-    // Reset handlers after each test  
-    afterEach(() => server?.resetHandlers())
-    
-    // Clean up after all tests
-    afterAll(() => server?.close())
-  } catch (error) {
-    // MSW setup not available, continue without it
-    console.warn('MSW setup not available for integration tests')
-  }
-}
+// NOTE: MSW is deliberately NOT started here. Starting it globally makes
+// @mswjs/interceptors replace `globalThis.fetch` in `beforeAll`, which runs
+// *after* a suite's module body — clobbering every `global.fetch = jest.fn()`
+// set at the top of a test file. Suites that want MSW call `server.listen()`
+// themselves (see src/__tests__/integration/*).
 
 // Polyfill URL and URLSearchParams for Node.js compatibility  
 if (typeof global.URL === 'undefined') {

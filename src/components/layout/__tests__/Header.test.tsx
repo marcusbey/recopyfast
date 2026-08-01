@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Header } from "../Header";
 import { useAuth } from "@/contexts/AuthContext";
@@ -86,12 +86,22 @@ describe("Header", () => {
 
     render(<Header />);
 
-    expect(screen.getByText("Features")).toBeInTheDocument();
-    expect(screen.getByText("Pricing")).toBeInTheDocument();
-    expect(screen.getByText("Live Demo")).toBeInTheDocument();
-
-    const demoLink = screen.getByRole("link", { name: "Live Demo" });
-    expect(demoLink).toHaveAttribute("href", "/demo");
+    expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
+      "href",
+      "#features",
+    );
+    expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
+      "href",
+      "#pricing",
+    );
+    expect(screen.getByRole("link", { name: "Demo" })).toHaveAttribute(
+      "href",
+      "/demo",
+    );
+    expect(screen.getByRole("link", { name: "Blog" })).toHaveAttribute(
+      "href",
+      "/blog",
+    );
   });
 
   it("shows loading skeleton when auth is loading", () => {
@@ -124,7 +134,12 @@ describe("Header", () => {
 
     render(<Header />);
 
-    expect(screen.getByRole("button", { name: "Sign In" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /^sign in$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /get started/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows UserMenu when user is authenticated", () => {
@@ -139,10 +154,12 @@ describe("Header", () => {
 
     render(<Header />);
 
-    // UserMenu renders a button with user initial
-    const userMenuButton = screen.getByRole("button");
-    expect(userMenuButton).toBeInTheDocument();
-    expect(screen.getByText("T")).toBeInTheDocument(); // First letter of email
+    // UserMenu renders a trigger showing the first letter of the email.
+    expect(screen.getByText("T")).toBeInTheDocument();
+    // The signed-out CTAs are gone.
+    expect(
+      screen.queryByRole("button", { name: /get started/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens AuthModal when Sign In button is clicked", async () => {
@@ -158,14 +175,14 @@ describe("Header", () => {
 
     render(<Header />);
 
-    const signInButton = screen.getByRole("button", { name: "Sign In" });
+    const signInButton = screen.getByRole("button", { name: /^sign in$/i });
     await user.click(signInButton);
 
     // Check if modal is opened
     expect(screen.getByText("Welcome to ReCopyFast")).toBeInTheDocument();
   });
 
-  it("has proper sticky header styling", () => {
+  it("pins the header to the top of the viewport", () => {
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
       loading: false,
@@ -178,10 +195,10 @@ describe("Header", () => {
     render(<Header />);
 
     const header = screen.getByRole("banner");
-    expect(header).toHaveClass("sticky", "top-0", "z-50");
+    expect(header).toHaveClass("fixed", "top-0", "z-50");
   });
 
-  it("has proper backdrop blur effect", () => {
+  it("applies the blurred background only after scrolling past the threshold", () => {
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
       loading: false,
@@ -194,7 +211,19 @@ describe("Header", () => {
     render(<Header />);
 
     const header = screen.getByRole("banner");
-    expect(header).toHaveClass("backdrop-blur");
+    expect(header).toHaveClass("bg-transparent");
+    expect(header.className).not.toContain("backdrop-blur");
+
+    act(() => {
+      Object.defineProperty(window, "scrollY", {
+        value: 100,
+        configurable: true,
+      });
+      fireEvent.scroll(window);
+    });
+
+    expect(header).toHaveClass("backdrop-blur-xl");
+    expect(header.className).not.toContain("bg-transparent");
   });
 
   it("hides navigation on mobile", () => {
@@ -226,15 +255,16 @@ describe("Header", () => {
 
     render(<Header />);
 
-    // Tab through header elements
     await user.tab();
     expect(screen.getByRole("link", { name: /ReCopyFast/i })).toHaveFocus();
 
-    await user.tab();
-    expect(screen.getByText("Live Demo").closest("a")).toHaveFocus();
+    for (const name of ["Features", "Pricing", "Demo", "Blog"]) {
+      await user.tab();
+      expect(screen.getByRole("link", { name })).toHaveFocus();
+    }
 
     await user.tab();
-    expect(screen.getByRole("button", { name: "Sign In" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^sign in$/i })).toHaveFocus();
 
     // Open modal with Enter key
     await user.keyboard("{Enter}");

@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { ABTest, ABTestVariant } from "@/types";
 
+interface ABTestVariantInput {
+  content_element_id: string;
+  variant_name: string;
+  content: string;
+  traffic_percentage: number;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -140,7 +147,7 @@ export async function POST(req: NextRequest) {
 
     // Validate traffic percentages
     const totalTraffic = variants.reduce(
-      (sum: number, v: any) => sum + (v.traffic_percentage || 0),
+      (sum: number, v: ABTestVariantInput) => sum + (v.traffic_percentage || 0),
       0,
     );
     if (totalTraffic !== 100) {
@@ -172,7 +179,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Create variants
-    const variantInserts = variants.map((variant: any) => ({
+    const variantInserts = variants.map((variant: ABTestVariantInput) => ({
       test_id: test.id,
       content_element_id: variant.content_element_id,
       variant_name: variant.variant_name,

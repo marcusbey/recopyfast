@@ -387,16 +387,14 @@ export function SiteRegistrationModal({
 
                 <Alert className="bg-blue-50 border-blue-200">
                   <AlertDescription className="text-blue-800 text-sm">
-                    <strong>Need help?</strong> Check out our{" "}
+                    <strong>Need help?</strong> Visit your{" "}
                     <a
-                      href="/docs/integration"
+                      href="/dashboard/sites"
                       className="underline hover:text-blue-900"
-                      target="_blank"
-                      rel="noopener noreferrer"
                     >
-                      integration guide
+                      site dashboard
                     </a>{" "}
-                    for more details.
+                    to manage your integration.
                   </AlertDescription>
                 </Alert>
               </div>

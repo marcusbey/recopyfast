@@ -2,8 +2,8 @@
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
-import type { Subscription } from "@/types/billing";
+import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
+import type { Subscription, PlanLimits } from "@/types/billing";
 
 interface UsageCardProps {
   currentUsage: {
@@ -17,8 +17,11 @@ interface UsageCardProps {
 
 export function UsageCard({ currentUsage, subscription }: UsageCardProps) {
   const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+  // Cast to a shape with PlanLimits (number fields) to avoid as-const literal
+  // narrowing that makes comparisons like `!== 1` report "no overlap".
+  const plan = SUBSCRIPTION_PLANS[
+    planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
+  ] as { name: string; limits: PlanLimits };
 
   const getUsageStatus = (current: number, limit: number) => {
     if (limit === -1) return "unlimited";

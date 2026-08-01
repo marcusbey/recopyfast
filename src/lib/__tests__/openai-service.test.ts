@@ -193,10 +193,12 @@ describe("OpenAIService", () => {
 
       expect(result.success).toBe(true);
       expect(result.data).toHaveLength(2);
+      // batchTranslate now reports the per-element token spend alongside the text.
       expect(result.data?.[0]).toEqual({
         id: "1",
         originalText: "Hello",
         translatedText: "Translated",
+        tokensUsed: 30,
         success: true,
       });
     });

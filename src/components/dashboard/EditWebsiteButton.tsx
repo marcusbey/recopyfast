@@ -14,9 +14,16 @@ interface Site {
   name: string;
 }
 
+interface EditSession {
+  token: string;
+  expiresAt: string;
+  permissions: string[];
+  siteId: string;
+}
+
 interface EditWebsiteButtonProps {
   site: Site;
-  userPermissions: ("view" | "edit" | "admin")[];
+  userPermissions: ("view" | "edit" | "publish" | "admin")[];
   className?: string;
   variant?: "primary" | "secondary" | "outline";
   size?: "sm" | "md" | "lg";
@@ -76,22 +83,26 @@ export default function EditWebsiteButton({
       }
 
       // Success! Open website with edit token
-      const editUrl = `https://${site.domain}?rcf_edit_token=${data.session.token}`;
+      const editUrl =
+        data.editUrl ||
+        `https://${site.domain}?rcf_edit_token=${data.session.token}`;
 
       // Show success message
       showSuccessNotification(data.session);
 
       // Open in new tab
       window.open(editUrl, "_blank");
-    } catch (err: any) {
+    } catch (err) {
       console.error("Edit session creation error:", err);
-      setError(err.message || "Failed to create edit session");
+      setError(
+        err instanceof Error ? err.message : "Failed to create edit session",
+      );
     } finally {
       setIsCreatingSession(false);
     }
   };
 
-  const showSuccessNotification = (session: any) => {
+  const showSuccessNotification = (session: EditSession) => {
     // Create a temporary notification
     const notification = document.createElement("div");
     notification.style.cssText = `
@@ -272,9 +283,16 @@ export default function EditWebsiteButton({
   );
 }
 
+interface ActiveSession {
+  id: string;
+  siteId: string;
+  timeRemainingMinutes: number;
+  permissions: string[];
+}
+
 // Helper component for displaying active sessions
 export function ActiveEditSessions({ siteId }: { siteId: string }) {
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadActiveSessions = async () => {
@@ -282,7 +300,9 @@ export function ActiveEditSessions({ siteId }: { siteId: string }) {
       const response = await fetch("/api/edit-sessions/active");
       if (response.ok) {
         const data = await response.json();
-        setSessions(data.sessions.filter((s: any) => s.siteId === siteId));
+        setSessions(
+          (data.sessions as ActiveSession[]).filter((s) => s.siteId === siteId),
+        );
       }
     } catch (error) {
       console.error("Failed to load active sessions:", error);

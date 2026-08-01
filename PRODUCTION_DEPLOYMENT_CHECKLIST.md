@@ -23,7 +23,7 @@ OPENAI_API_KEY=sk-proj-...
 # Stripe API (Production keys)
 STRIPE_SECRET_KEY=sk_live_51RyZ33RhSIDUA9ar...
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_51RyZ33RhSIDUA9ar...
-STRIPE_WEBHOOK_SECRET=whsec_hVtLxmdXdqsWhfVWw3SfDjt9dx21VuUB
+STRIPE_WEBHOOK_SECRET=whsec_...
 
 # Stripe Price IDs (Update after creating products)
 STRIPE_PRO_PRICE_ID=price_xxxxx_pro_monthly
@@ -31,7 +31,7 @@ STRIPE_ENTERPRISE_PRICE_ID=price_xxxxx_enterprise_monthly
 STRIPE_TICKETS_PRICE_ID=price_xxxxx_credits_oneTime
 
 # Redis
-REDIS_URL=redis://default:ejCZY3G9M11V37Q72lto1eURBgfseyT2@redis-11062.c326.us-east-1-3.ec2.redns.redis-cloud.com:11062
+REDIS_URL=redis://default:<password>@<host>:<port>
 
 # Security
 ALLOWED_ORIGINS=https://recopyfa.st,https://www.recopyfa.st

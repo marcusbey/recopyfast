@@ -81,6 +81,7 @@ export const SANITIZATION_CONFIGS = {
     ALLOWED_TAGS: ["p", "br", "strong", "em", "span"],
     ALLOWED_ATTR: ["class"],
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed"],
+    KEEP_CONTENT: true, // preserve text content when stripping forbidden tags (e.g. <script>text</script> → "text")
     STRIP_EMPTY: true,
   },
 
@@ -125,7 +126,12 @@ export function sanitizeHTML(
     // Configure DOMPurify
     createDOMPurify.clearConfig();
 
-    const sanitized = createDOMPurify.sanitize(content, sanitizationConfig);
+    const sanitized = createDOMPurify.sanitize(
+      content,
+      sanitizationConfig as unknown as Parameters<
+        typeof createDOMPurify.sanitize
+      >[1],
+    );
 
     return sanitized;
   } catch (error) {
@@ -170,8 +176,22 @@ export function validateAndSanitizeInput(input: unknown): string {
       timestamp: new Date().toISOString(),
     });
 
-    // Return sanitized version
-    return sanitizeHTML(stringInput, "BASIC_TEXT");
+    // Strip all HTML tags (preserving their text content) then neutralise
+    // dangerous URI schemes and HTML-encode the result so it is safe to embed
+    // anywhere. We cannot use DOMPurify here because DOMPurify intentionally
+    // drops the *content* of <script> tags, which would produce an empty
+    // string for inputs like `<script>alert(1)</script>`.
+    const textContent = stringInput
+      .replace(/<[^>]*>/g, "") // strip tags, keep text nodes
+      .replace(/javascript\s*:/gi, "javascript&#x3A;") // neutralise JS URIs
+      .replace(/vbscript\s*:/gi, "vbscript&#x3A;"); // neutralise VBS URIs
+    return textContent
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#x27;")
+      .replace(/\//g, "&#x2F;");
   }
 
   // For non-HTML content, just sanitize basic patterns
@@ -186,7 +206,7 @@ export function validateAndSanitizeInput(input: unknown): string {
 /**
  * Sanitize JSON data recursively
  */
-export function sanitizeJSONData(data: any): any {
+export function sanitizeJSONData(data: unknown): unknown {
   if (data === null || data === undefined) {
     return data;
   }
@@ -200,9 +220,10 @@ export function sanitizeJSONData(data: any): any {
   }
 
   if (typeof data === "object") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sanitized: any = {};
-    for (const [key, value] of Object.entries(data)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(
+      data as Record<string, unknown>,
+    )) {
       // Sanitize both key and value
       const sanitizedKey = validateAndSanitizeInput(key);
       sanitized[sanitizedKey] = sanitizeJSONData(value);

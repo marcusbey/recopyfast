@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 
 interface TeamSelectorProps {
-  selectedTeam?: Team;
+  selectedTeam?: Team & { role?: string };
   onTeamSelect: (team: Team) => void;
   onCreateTeam?: (team: Team) => void;
 }
@@ -60,7 +60,9 @@ export function TeamSelector({
         const { teams } = await response.json();
 
         // Add user role from team_members data
-        const teamsWithRoles = teams.map((team: any) => ({
+        const teamsWithRoles = (
+          teams as (Team & { team_members?: { role: string }[] })[]
+        ).map((team) => ({
           ...team,
           role: team.team_members?.[0]?.role || "member",
         }));

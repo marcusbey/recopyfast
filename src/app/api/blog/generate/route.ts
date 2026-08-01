@@ -1,6 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+/**
+ * Checks whether the incoming request is authorised to trigger blog generation.
+ *
+ * Two accepted paths:
+ *  1. Cron / server-to-server: `Authorization: Bearer <CRON_SECRET>`
+ *     (used by /api/cron/generate-blog-post which has no user session)
+ *  2. Interactive admin: a valid Supabase session whose user either has
+ *     server-managed `app_metadata.role === "admin"` (set via the Supabase Admin
+ *     SDK) OR whose email is listed in the comma-separated ADMIN_EMAILS env var.
+ *     user_metadata is caller-writable and is never trusted for authorization.
+ *
+ * Fails closed: if CRON_SECRET is unset the bearer path is disabled.
+ */
+async function isAuthorised(request: NextRequest): Promise<boolean> {
+  // --- Path 1: CRON_SECRET bearer token ---
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = request.headers.get("authorization");
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+    return true;
+  }
+
+  // --- Path 2: Authenticated admin user via Supabase session ---
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+
+    if (error || !user) return false;
+
+    // Check ADMIN_EMAILS allowlist (comma-separated env var)
+    const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (user.email && adminEmails.includes(user.email.toLowerCase())) {
+      return true;
+    }
+
+    // Trust ONLY server-managed app_metadata for role. user_metadata is caller-writable
+    // (any authenticated user can set it via PATCH /api/auth/profile or Supabase
+    // auth.updateUser), so reading role from user_metadata is a privilege-escalation vector.
+    if (user.app_metadata?.role === "admin") {
+      return true;
+    }
+  } catch {
+    // Any error means we cannot confirm authorisation — deny
+  }
+
+  return false;
+}
+
 const CONTENT_TOPICS = [
   {
     category: "ai-tools",
@@ -108,6 +162,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  // Auth gate: cron bearer token OR authenticated admin user required
+  if (!(await isAuthorised(request))) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { topic, category, targetKeywords } = await request.json();
 

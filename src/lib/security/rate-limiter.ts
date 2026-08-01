@@ -46,13 +46,17 @@ export class MemoryRateLimiter {
 
     const key = this.generateKey(config);
     const now = Date.now();
-    const windowStart = now;
-    const windowEnd = now + config.windowMs;
+    // Anchor the window to a fixed wall-clock boundary (not to the first request).
+    // This mirrors RedisRateLimiter so dev (memory) and prod (redis) enforce the
+    // SAME limit. Anchoring to first-hit let a caller drift the window forward with
+    // every request and sustain ~2x the intended rate across boundaries.
+    const windowStart = Math.floor(now / config.windowMs) * config.windowMs;
+    const windowEnd = windowStart + config.windowMs;
 
     let info = this.requests.get(key);
 
-    if (!info || now > info.windowEnd) {
-      // Create new window
+    if (!info || now >= info.windowEnd) {
+      // Start of a fresh fixed window
       info = {
         requests: 1,
         windowStart,
@@ -94,40 +98,143 @@ export class MemoryRateLimiter {
   }
 }
 
+/** Max time to wait for the TCP handshake before giving up on Redis. */
+const REDIS_CONNECT_TIMEOUT_MS = 2000;
+
+/** Max time to wait for a single rate-limit command round trip. */
+const REDIS_COMMAND_TIMEOUT_MS = 1500;
+
 /**
- * Redis-based rate limiter for production
+ * Reject a promise if it has not settled within `timeoutMs`.
+ * A serverless invocation has a hard execution budget — a rate-limit check must
+ * never be the thing that consumes it. Without this, an unreachable-but-not-yet
+ * -refused Redis host stalls every request until the platform kills the function.
+ */
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+  });
+
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Redis-based rate limiter for production.
+ *
+ * Serverless lifecycle notes (Vercel functions):
+ *  - The client is created lazily and cached on the module singleton so warm
+ *    invocations in the same isolate reuse one TCP connection. Cold starts pay
+ *    a new handshake; that is inherent to node-redis over TCP.
+ *  - Connection state is read from `client.isOpen` rather than a hand-maintained
+ *    boolean. The previous flag desynced whenever an 'error' event fired without
+ *    the socket actually closing, which made connect() either double-open or
+ *    skip connecting entirely.
+ *  - Concurrent checkLimit() calls in one isolate share a single in-flight
+ *    connect promise instead of each racing to open their own socket.
+ *  - A client that fails to connect is discarded so the next invocation builds a
+ *    fresh one instead of reusing a permanently broken socket.
+ *
+ * Callers decide the failure policy. checkLimit() throws when Redis is
+ * unreachable; it does NOT silently allow. See `enforceRateLimit` in
+ * `@/lib/api/rate-limit` for the fail-open/fail-closed decision per endpoint.
  */
 export class RedisRateLimiter {
-  private client: ReturnType<typeof createClient>;
-  private isConnected = false;
+  private client: ReturnType<typeof createClient> | null = null;
+  private connecting: Promise<void> | null = null;
+  private readonly resolvedUrl?: string;
 
   constructor(redisUrl?: string) {
-    this.client = createClient({
-      url: redisUrl || process.env.REDIS_URL || "redis://localhost:6379",
-    });
+    // Store the URL but DO NOT construct the Redis client here. createClient()
+    // parses the URL synchronously, so constructing it at module-import time
+    // would throw during `next build` page-data collection whenever a route
+    // imports this module with a placeholder/invalid REDIS_URL. The client is
+    // created lazily on first connect() instead.
+    this.resolvedUrl = redisUrl ?? process.env.REDIS_URL;
+  }
 
-    this.client.on("error", (err) => {
-      console.error("Redis Client Error:", err);
-      this.isConnected = false;
-    });
+  private ensureClient(): ReturnType<typeof createClient> {
+    if (!this.client) {
+      // In production a missing REDIS_URL means rate limiting would silently
+      // fall back to a local Redis that does not exist on Vercel. Fail fast
+      // so the misconfiguration is caught at first use rather than ignored.
+      if (!this.resolvedUrl && process.env.NODE_ENV === "production") {
+        throw new Error(
+          "REDIS_URL environment variable is required in production. " +
+            "Rate limiting cannot be initialised without a Redis connection.",
+        );
+      }
 
-    this.client.on("connect", () => {
-      console.log("Redis Client Connected");
-      this.isConnected = true;
-    });
+      this.client = createClient({
+        url: this.resolvedUrl ?? "redis://localhost:6379",
+        socket: {
+          connectTimeout: REDIS_CONNECT_TIMEOUT_MS,
+          // Do not retry forever inside a function invocation. One retry, then
+          // surface the failure to the caller so it can apply its policy.
+          reconnectStrategy: (retries) =>
+            retries > 1 ? new Error("Redis unreachable") : 200,
+        },
+      });
+
+      // node-redis emits 'error' for both connection and command failures. An
+      // unhandled 'error' on an EventEmitter crashes the process, so this
+      // listener is mandatory even though the promise rejection is what we act on.
+      this.client.on("error", (err) => {
+        console.error("Redis Client Error:", err);
+      });
+    }
+    return this.client;
+  }
+
+  /** Discard a broken client so the next call builds a fresh one. */
+  private resetClient(): void {
+    const client = this.client;
+    this.client = null;
+    this.connecting = null;
+    if (!client) return;
+    try {
+      client.destroy();
+    } catch {
+      // The socket is already gone; nothing left to clean up.
+    }
   }
 
   async connect(): Promise<void> {
-    if (!this.isConnected) {
-      await this.client.connect();
+    const client = this.ensureClient();
+    if (client.isOpen) return;
+
+    // Collapse concurrent connects in the same isolate onto one handshake.
+    if (!this.connecting) {
+      this.connecting = withTimeout(
+        client.connect().then(() => undefined),
+        REDIS_CONNECT_TIMEOUT_MS,
+        "Redis connect",
+      ).finally(() => {
+        this.connecting = null;
+      });
+    }
+
+    try {
+      await this.connecting;
+    } catch (error) {
+      this.resetClient();
+      throw error;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.isConnected) {
-      await this.client.disconnect();
-      this.isConnected = false;
-    }
+    this.resetClient();
   }
 
   private generateKey(config: RateLimitConfig): string {
@@ -145,20 +252,31 @@ export class RedisRateLimiter {
     const windowEnd = windowStart + config.windowMs;
 
     // Use Redis pipeline for atomic operations
-    const pipeline = this.client.multi();
+    const pipeline = this.client!.multi();
 
     pipeline.incr(key);
     pipeline.expire(key, Math.ceil(config.windowMs / 1000));
     pipeline.ttl(key);
 
-    const results = await pipeline.exec();
+    let results: unknown[] | null;
+    try {
+      results = await withTimeout(
+        pipeline.exec(),
+        REDIS_COMMAND_TIMEOUT_MS,
+        "Redis rate-limit pipeline",
+      );
+    } catch (error) {
+      // A timed-out or failed command usually means the socket is unusable.
+      this.resetClient();
+      throw error;
+    }
 
     if (!results || results.length < 3) {
       throw new Error("Redis pipeline execution failed");
     }
 
-    const requests = results[0] as number;
-    const ttl = results[2] as number;
+    const requests = Number(results[0]);
+    const ttl = Number(results[2]);
 
     const allowed = requests <= config.maxRequests;
     const remaining = Math.max(0, config.maxRequests - requests);
@@ -175,20 +293,20 @@ export class RedisRateLimiter {
   async resetLimit(config: RateLimitConfig): Promise<void> {
     await this.connect();
     const key = this.generateKey(config);
-    await this.client.del(key);
+    await this.client!.del(key);
   }
 
   async clearAll(): Promise<void> {
     await this.connect();
-    const keys = await this.client.keys("rate_limit:*");
+    const keys = await this.client!.keys("rate_limit:*");
     if (keys.length > 0) {
-      await this.client.del(keys);
+      await this.client!.del(keys);
     }
   }
 
   async getStats(): Promise<{ totalKeys: number; activeWindows: number }> {
     await this.connect();
-    const keys = await this.client.keys("rate_limit:*");
+    const keys = await this.client!.keys("rate_limit:*");
     return {
       totalKeys: keys.length,
       activeWindows: keys.length,

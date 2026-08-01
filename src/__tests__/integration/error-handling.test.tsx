@@ -298,7 +298,10 @@ describe("Error Handling Integration", () => {
       };
 
       return (
-        <form onSubmit={handleSubmit} data-testid="validation-form">
+        // `noValidate` because this form does its own validation: without it
+        // jsdom's native constraint validation blocks submit for the invalid
+        // `type="email"` value, so handleSubmit never runs and no errors render.
+        <form onSubmit={handleSubmit} noValidate data-testid="validation-form">
           <div>
             <input
               type="text"
@@ -516,7 +519,7 @@ describe("Error Handling Integration", () => {
       return (
         <div data-testid="success-state">
           <div data-testid="data-display">
-            Data loaded: {data?.length || 0} items
+            Data loaded: {(data as unknown[] | null)?.length || 0} items
           </div>
         </div>
       );
@@ -621,7 +624,7 @@ describe("Error Handling Integration", () => {
     it("should handle missing browser features gracefully", () => {
       // Mock missing clipboard API
       const originalClipboard = navigator.clipboard;
-      delete (navigator as Record<string, unknown>).clipboard;
+      delete (navigator as unknown as Record<string, unknown>).clipboard;
 
       const MockClipboardComponent = () => {
         const [message, setMessage] = React.useState("");
@@ -658,7 +661,8 @@ describe("Error Handling Integration", () => {
       );
 
       // Restore clipboard API
-      (navigator as Record<string, unknown>).clipboard = originalClipboard;
+      (navigator as unknown as Record<string, unknown>).clipboard =
+        originalClipboard;
     });
 
     it("should handle WebSocket connection failures", () => {

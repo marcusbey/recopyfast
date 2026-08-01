@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   Globe,
   FileText,
+  FlaskConical,
   BarChart3,
   Users,
   Settings,
@@ -43,6 +44,11 @@ const navItems: NavItem[] = [
     label: "Content",
     href: "/dashboard/content",
     icon: FileText,
+  },
+  {
+    label: "A/B Tests",
+    href: "/dashboard/ab-tests",
+    icon: FlaskConical,
   },
   {
     label: "Analytics",
@@ -90,12 +96,9 @@ export function DashboardNavigation({
 
   const canAccessItem = (item: NavItem) => {
     if (!item.requiresPlan) return true;
+    // "enterprise" early-return; after it TypeScript narrows userPlan to "free"|"pro"
     if (userPlan === "enterprise") return true;
-    if (
-      item.requiresPlan === "pro" &&
-      (userPlan === "pro" || userPlan === "enterprise")
-    )
-      return true;
+    if (item.requiresPlan === "pro" && userPlan === "pro") return true;
     return false;
   };
 

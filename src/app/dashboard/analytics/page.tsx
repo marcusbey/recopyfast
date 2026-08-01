@@ -2,11 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
-
-interface Site {
-  id: string;
-  domain: string;
-}
+import type { Site } from "@/types";
 
 export default function AnalyticsPage() {
   const [sites, setSites] = useState<Site[]>([]);

@@ -1,13 +1,16 @@
 /**
- * Global Error Boundary Component
- * Catches React errors and displays user-friendly error messages
+ * Widget-level error boundary.
+ *
+ * App Router `error.tsx` files replace the whole route segment, so they cannot
+ * keep the rest of a page alive when a single panel fails. Wrap that panel in
+ * this boundary instead. Errors are reported to Sentry here because a caught
+ * error never reaches Sentry's global handler.
  */
 
 "use client";
 
 import React, { Component, ReactNode } from "react";
 import * as Sentry from "@sentry/nextjs";
-import { logger } from "@/lib/monitoring/logger";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, RefreshCcw, Home } from "lucide-react";
 
@@ -63,13 +66,13 @@ export class ErrorBoundary extends Component<Props, State> {
     const { onError, level = "component" } = this.props;
     const { errorId } = this.state;
 
-    // Log error
-    logger.error("React Error Boundary caught error", error, undefined, {
-      component: "ErrorBoundary",
-      errorId,
-      level,
-      componentStack: errorInfo.componentStack,
-    });
+    // Runs in the browser, so the winston logger (Node-only) is not available —
+    // the console keeps the stack visible locally, Sentry is the durable record.
+    console.error(
+      `React Error Boundary caught error [${level}:${errorId}]`,
+      error,
+      errorInfo.componentStack,
+    );
 
     // Report to Sentry
     Sentry.withScope((scope) => {
@@ -206,44 +209,4 @@ export class ErrorBoundary extends Component<Props, State> {
 
     return children;
   }
-}
-
-// Async Error Boundary for handling async errors
-export function AsyncErrorBoundary({
-  children,
-  fallback,
-}: {
-  children: ReactNode;
-  fallback?: ReactNode;
-}) {
-  return (
-    <ErrorBoundary
-      fallback={fallback}
-      level="component"
-      onError={(error) => {
-        // Check if it's an async error
-        if (error.message.includes("async")) {
-          logger.error("Async error in component", error);
-        }
-      }}
-    >
-      {children}
-    </ErrorBoundary>
-  );
-}
-
-// HOC for wrapping components with error boundary
-export function withErrorBoundary<P extends object>(
-  Component: React.ComponentType<P>,
-  errorBoundaryProps?: Omit<Props, "children">,
-) {
-  const WrappedComponent = (props: P) => (
-    <ErrorBoundary {...errorBoundaryProps}>
-      <Component {...props} />
-    </ErrorBoundary>
-  );
-
-  WrappedComponent.displayName = `withErrorBoundary(${Component.displayName || Component.name})`;
-
-  return WrappedComponent;
 }

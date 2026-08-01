@@ -102,16 +102,17 @@ describe("Collaboration Components Integration", () => {
         />,
       );
 
+      // The dashboard shows a spinner until members/invitations/activity land,
+      // so wait for the loaded state before asserting on the header.
+      await waitFor(() => {
+        expect(screen.getByText("Team Members (2)")).toBeInTheDocument();
+      });
+
       // Check team header
       expect(screen.getByText("Test Team")).toBeInTheDocument();
       expect(screen.getByText("A test team")).toBeInTheDocument();
       expect(screen.getByText("2 / 5 members")).toBeInTheDocument();
       expect(screen.getByText("free plan")).toBeInTheDocument();
-
-      // Wait for data to load
-      await waitFor(() => {
-        expect(screen.getByText("Team Members (2)")).toBeInTheDocument();
-      });
 
       // Check member display
       expect(screen.getByText("Team Owner")).toBeInTheDocument();
@@ -222,15 +223,24 @@ describe("Collaboration Components Integration", () => {
           }),
       });
 
+      const user = userEvent.setup();
       render(
         <TeamSelector onTeamSelect={onTeamSelect} onCreateTeam={jest.fn()} />,
       );
 
+      // With no `selectedTeam` prop the trigger keeps its placeholder; the
+      // observable effect of loading is that the first team is auto-selected.
       await waitFor(() => {
-        expect(screen.getByText("Test Team")).toBeInTheDocument();
+        expect(onTeamSelect).toHaveBeenCalledWith(
+          expect.objectContaining({ id: mockTeam.id, role: "owner" }),
+        );
       });
 
       expect(fetch).toHaveBeenCalledWith("/api/teams");
+
+      // The loaded team is listed once the dropdown is opened.
+      await user.click(screen.getByRole("button", { name: /Select Team/i }));
+      expect(await screen.findByText("Test Team")).toBeInTheDocument();
     });
 
     it("should create a new team", async () => {

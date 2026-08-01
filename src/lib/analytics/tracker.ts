@@ -7,21 +7,43 @@ import {
   AnalyticsDashboardData,
 } from "@/types";
 
-export class AnalyticsTracker {
-  private supabase;
+/**
+ * Subset of UserActivityLog columns returned by the dashboard SELECT query.
+ * Only the three columns actually selected from user_activity_logs are present;
+ * keeping a narrow type avoids fabricating fields that were never fetched.
+ */
+type ActivityRow = Pick<
+  UserActivityLog,
+  "action_type" | "user_id" | "site_id" | "timestamp"
+>;
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+/** Subset of performance_metrics columns selected by the dashboard query. */
+type PerformanceRow = Pick<PerformanceMetric, "metric_type" | "value"> & {
+  recorded_at?: string;
+};
+
+export class AnalyticsTracker {
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
+
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**
@@ -118,13 +140,16 @@ export class AnalyticsTracker {
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const endDate = dateRange?.end || new Date().toISOString();
 
-      // Get overview statistics
-      const { data: activityData } = await this.supabase
+      // Get overview statistics — select all columns used by calculateTrends/calculateTopSites
+      const { data: activityRaw } = await this.supabase
         .from("user_activity_logs")
-        .select("action_type, user_id, site_id")
+        .select("action_type, user_id, site_id, timestamp")
         .gte("timestamp", startDate)
         .lte("timestamp", endDate)
         .eq(siteId ? "site_id" : "id", siteId || "");
+      // Supabase infers a loose row type from the select string; cast to the
+      // precise picked type — all four selected columns match ActivityRow exactly.
+      const activityData = activityRaw as ActivityRow[] | null;
 
       // Get site analytics
       const { data: siteAnalytics } = await this.supabase
@@ -153,12 +178,15 @@ export class AnalyticsTracker {
       ).size;
       const uniqueSites = new Set(activityData?.map((a) => a.site_id)).size;
 
+      // Guard against performanceData being null/undefined: default numerator to 0
+      // so the division always produces a number rather than undefined/NaN.
+      const typedPerformanceData = (performanceData || []) as PerformanceRow[];
+      const loadTimeRows = typedPerformanceData.filter(
+        (p) => p.metric_type === "load_time",
+      );
       const avgLoadTime =
-        performanceData
-          ?.filter((p) => p.metric_type === "load_time")
-          .reduce((sum, p) => sum + p.value, 0) /
-        (performanceData?.filter((p) => p.metric_type === "load_time").length ||
-          1);
+        loadTimeRows.reduce((sum, p) => sum + p.value, 0) /
+        (loadTimeRows.length || 1);
 
       // Calculate trends (group by date)
       const trendData = this.calculateTrends(activityData || []);
@@ -179,12 +207,16 @@ export class AnalyticsTracker {
         top_sites: topSites,
         performance: {
           avg_load_time: Number(avgLoadTime.toFixed(2)),
-          avg_edit_time:
-            performanceData
-              ?.filter((p) => p.metric_type === "edit_time")
-              .reduce((sum, p) => sum + p.value, 0) /
-              (performanceData?.filter((p) => p.metric_type === "edit_time")
-                .length || 1) || 0,
+          avg_edit_time: (() => {
+            // Guard against performanceData being null/undefined; default to 0.
+            const editRows = typedPerformanceData.filter(
+              (p) => p.metric_type === "edit_time",
+            );
+            return (
+              editRows.reduce((sum, p) => sum + p.value, 0) /
+                (editRows.length || 1) || 0
+            );
+          })(),
           error_rate: 0, // Calculate from error logs
         },
       };
@@ -197,7 +229,7 @@ export class AnalyticsTracker {
   /**
    * Calculate trends from activity data
    */
-  private calculateTrends(activityData: UserActivityLog[]) {
+  private calculateTrends(activityData: ActivityRow[]) {
     const dateMap = new Map();
 
     // Process activity data
@@ -231,7 +263,7 @@ export class AnalyticsTracker {
   /**
    * Calculate top sites from activity data
    */
-  private calculateTopSites(activityData: UserActivityLog[]) {
+  private calculateTopSites(activityData: ActivityRow[]) {
     const siteMap = new Map();
 
     activityData.forEach((activity) => {
@@ -458,9 +490,12 @@ export class ClientAnalytics {
 
 // Middleware helper function
 export function getClientInfo(req: NextRequest) {
+  // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
   const forwarded = req.headers.get("x-forwarded-for");
-  const ipAddress = forwarded ? forwarded.split(",")[0] : req.ip;
-  const userAgent = req.headers.get("user-agent");
+  const ipAddress = forwarded
+    ? forwarded.split(",")[0]
+    : (req.headers.get("x-real-ip") ?? undefined);
+  const userAgent = req.headers.get("user-agent") ?? undefined;
 
   return {
     ipAddress,

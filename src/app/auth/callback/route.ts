@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
+import { sanitizeNext } from "../sanitize-next";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = sanitizeNext(searchParams.get("next"));
 
   if (code) {
     const supabase = await createClient();
@@ -12,6 +13,10 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    // The exchange fails when the link is expired, already consumed, or was
+    // opened in a different browser than the one that requested it (the PKCE
+    // code verifier lives in a cookie). Log it rather than losing the reason.
+    console.error("[auth] exchangeCodeForSession failed", error.message);
   }
 
   // Return the user to an error page with instructions

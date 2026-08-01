@@ -3,9 +3,41 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const crypto = require('crypto');
+const path = require('path');
 const createDOMPurify = require('dompurify');
 const { JSDOM } = require('jsdom');
-require('dotenv').config({ path: '../.env.local' });
+
+// Crash safety: log and exit so the platform (Fly.io, Docker, PM2, etc.)
+// can restart the process.  Without these handlers an unhandled rejection
+// silently kills the event loop with no diagnostic output.
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] uncaughtException – restarting process:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] unhandledRejection – restarting process:', reason);
+  process.exit(1);
+});
+
+// ENV LOADING: resolve paths absolutely so the server works whether it is
+// started from the repo root, the server/ directory, or inside a container
+// where only process.env is populated.  We try several candidate paths in
+// order of preference and fall back gracefully if none exist.
+const envCandidates = [
+  path.resolve(__dirname, '.env.local'),         // server/.env.local
+  path.resolve(__dirname, '..', '.env.local'),   // repo-root/.env.local (dev)
+  path.resolve(__dirname, '.env'),               // server/.env
+  path.resolve(__dirname, '..', '.env'),         // repo-root/.env
+];
+for (const envPath of envCandidates) {
+  const result = require('dotenv').config({ path: envPath });
+  if (!result.error) {
+    console.log(`✓ Loaded env from ${envPath}`);
+    break;
+  }
+}
+// If none of the files exist, process.env values already set by the container
+// runtime (Fly secrets, Docker --env, etc.) are used as-is – no error thrown.
 
 const app = express();
 const httpServer = createServer(app);
@@ -71,18 +103,42 @@ function parseHost(header) {
   }
 }
 
+/** Maximum token lifetime: 90 days in seconds (mirrors site-auth.ts). */
+const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
+
+/**
+ * Verify a site token produced by buildSiteToken() on the HTTP side.
+ * Token format: "<siteId>.<issuedAtUnixSeconds>.<hmac-sha256-hex>"
+ *
+ * Checks performed (matching verifySiteTokenSignature in site-auth.ts):
+ *  1. Three-part structure
+ *  2. siteId claim matches expected
+ *  3. issuedAt is a digit-only unix timestamp
+ *  4. Token is not older than 90 days
+ *  5. Token is not future-dated (allows 60 s clock skew)
+ *  6. HMAC signature is valid (timing-safe compare)
+ */
 function verifySiteToken(siteId, apiKey, token) {
   if (!token) return false;
   const parts = token.split('.');
   if (parts.length !== 3) return false;
 
-  const [tokenSiteId, issuedAt, signature] = parts;
+  const [tokenSiteId, issuedAtStr, signature] = parts;
   if (tokenSiteId !== siteId) return false;
-  if (!/^[0-9]+$/.test(issuedAt)) return false;
+  if (!/^[0-9]+$/.test(issuedAtStr)) return false;
+
+  const issuedAtSeconds = parseInt(issuedAtStr, 10);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  // Reject tokens older than 90 days
+  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
+
+  // Reject future-dated tokens (allow 60 s of clock skew)
+  if (issuedAtSeconds > nowSeconds + 60) return false;
 
   const expectedSignature = crypto
     .createHmac('sha256', apiKey)
-    .update(`${tokenSiteId}.${issuedAt}`)
+    .update(`${tokenSiteId}.${issuedAtStr}`)
     .digest('hex');
 
   try {
@@ -115,16 +171,33 @@ if (missingVars.length === 0 && invalidUrls.length === 0) {
   console.warn('  Set up Supabase credentials in .env.local to enable persistence');
 }
 
+// Build the CORS allowlist from environment variables.
+// ALLOWED_ORIGINS is a comma-separated list of trusted origins (e.g. embed domains).
+// NEXT_PUBLIC_APP_URL is always implicitly trusted.
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+const extraOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([appUrl, ...extraOrigins]);
+
 // Initialize Socket.io with CORS
 const io = new Server(httpServer, {
   cors: {
     origin: (origin, callback) => {
-      // Allow requests without origin (e.g., mobile apps) for development
+      // Requests without an Origin header (e.g. same-origin server-to-server calls
+      // or certain native clients) are rejected when credentials are enabled to
+      // avoid inadvertently granting cross-site access.
       if (!origin) {
-        callback(null, true);
+        callback(new Error('Missing Origin header'), false);
         return;
       }
-      callback(null, true);
+      if (allowedOrigins.has(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`CORS: rejected origin "${origin}"`);
+        callback(new Error('Origin not allowed'), false);
+      }
     },
     methods: ['GET', 'POST'],
     credentials: true
@@ -186,11 +259,65 @@ async function validateStagingAccess(stagingToken, siteId) {
   }
 }
 
+function normalizePermissions(rawPermissions) {
+  const permissions = new Set(Array.isArray(rawPermissions) ? rawPermissions : []);
+  if (permissions.has('admin')) {
+    permissions.add('publish');
+    permissions.add('edit');
+    permissions.add('view');
+  }
+  if (permissions.has('publish')) {
+    permissions.add('edit');
+    permissions.add('view');
+  }
+  if (permissions.has('edit')) {
+    permissions.add('view');
+  }
+  return ['view', 'edit', 'publish', 'admin'].filter(permission => permissions.has(permission));
+}
+
+async function validateEditSessionAccess(editToken, siteId) {
+  if (!supabaseEnabled || !editToken) {
+    return { valid: false };
+  }
+
+  try {
+    const { data: session, error } = await supabase
+      .from('edit_sessions')
+      .select('*')
+      .eq('token', editToken)
+      .eq('site_id', siteId)
+      .eq('is_active', true)
+      .gte('expires_at', new Date().toISOString())
+      .single();
+
+    if (error || !session) {
+      return { valid: false, error: 'Invalid or expired edit session' };
+    }
+
+    await supabase
+      .from('edit_sessions')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('id', session.id);
+
+    return {
+      valid: true,
+      verified: true,
+      userId: session.user_id,
+      permissions: normalizePermissions(session.permissions),
+      sessionId: session.id
+    };
+  } catch (error) {
+    console.error('Edit session validation error:', error);
+    return { valid: false, error: 'Validation failed' };
+  }
+}
+
 // Socket.io connection handling
 io.on('connection', async (socket) => {
   console.log('New connection:', socket.id);
 
-  const { siteId, editMode, token, stagingMode, stagingToken } = socket.handshake.query;
+  const { siteId, editMode, token, stagingMode, stagingToken, editToken } = socket.handshake.query;
   const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
   const isStaging = stagingMode === 'true' || stagingMode === true;
 
@@ -239,23 +366,26 @@ io.on('connection', async (socket) => {
       siteRecord = site;
       socket.data.siteToken = token;
 
-      // Validate staging access if in staging mode
-      if (isStaging && stagingToken) {
-        const stagingAccess = await validateStagingAccess(stagingToken, siteId);
+      // Validate editor access if in staging/edit mode
+      if (isStaging && (stagingToken || editToken)) {
+        const stagingAccess = stagingToken
+          ? await validateStagingAccess(stagingToken, siteId)
+          : await validateEditSessionAccess(editToken, siteId);
 
         if (!stagingAccess.valid) {
-          socket.emit('auth-error', { error: stagingAccess.error || 'Invalid staging access' });
+          socket.emit('auth-error', { error: stagingAccess.error || 'Invalid editor access' });
           socket.disconnect();
           return;
         }
 
         socket.data.isStaging = true;
         socket.data.stagingToken = stagingToken;
-        socket.data.stagingEmail = stagingAccess.email;
-        socket.data.stagingPermissions = stagingAccess.permissions;
-        socket.data.stagingAccessId = stagingAccess.accessId;
+        socket.data.editToken = editToken;
+        socket.data.stagingEmail = stagingAccess.email || stagingAccess.userId || 'unknown';
+        socket.data.stagingPermissions = normalizePermissions(stagingAccess.permissions);
+        socket.data.stagingAccessId = stagingAccess.accessId || null;
 
-        console.log(`Staging connection for site ${siteId} by ${stagingAccess.email}`);
+        console.log(`Editor connection for site ${siteId} by ${socket.data.stagingEmail}`);
       }
     } catch (error) {
       console.error('Site verification failed:', error);
@@ -309,6 +439,7 @@ io.on('connection', async (socket) => {
           selector: elementData.selector,
           original_content: safeContent,
           current_content: safeContent,
+          published_content: safeContent,
           language: 'en',
           variant: 'default',
           metadata: { 
@@ -324,7 +455,8 @@ io.on('connection', async (socket) => {
           const { error } = await supabase
             .from('content_elements')
             .upsert(contentElements, {
-              onConflict: 'site_id,element_id,language,variant'
+              onConflict: 'site_id,element_id,language,variant',
+              ignoreDuplicates: true
             });
           
           if (error) {
@@ -350,7 +482,12 @@ io.on('connection', async (socket) => {
   });
   
   // Handle content updates from dashboard or staging
-  socket.on('content-update', async (data) => {
+  socket.on('content-update', async (data, ack) => {
+    const reply = (payload) => {
+      if (typeof ack === 'function') {
+        ack(payload);
+      }
+    };
     const isStaging = socket.data.isStaging;
     console.log(`Content update for site ${siteId} (${isStaging ? 'staging' : 'live'}):`, data.elementId);
 
@@ -359,42 +496,38 @@ io.on('connection', async (socket) => {
 
       if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
         socket.emit('auth-error', { error: 'Invalid site token' });
+        reply({ ok: false, error: 'Invalid site token' });
         return;
       }
 
-      // Check staging edit permission
-      if (isStaging) {
-        const permissions = socket.data.stagingPermissions || [];
-        const hasEditPermission = permissions.includes('edit') ||
-                                   permissions.includes('publish') ||
-                                   permissions.includes('admin');
-        if (!hasEditPermission) {
-          socket.emit('update-error', { error: 'Edit permission required' });
-          return;
-        }
+      if (!isStaging) {
+        socket.emit('update-error', {
+          error: 'Live updates must be saved through staging and published explicitly'
+        });
+        reply({ ok: false, error: 'Live updates must be saved through staging and published explicitly' });
+        return;
+      }
+
+      const permissions = socket.data.stagingPermissions || [];
+      const hasEditPermission = permissions.includes('edit') ||
+                                 permissions.includes('publish') ||
+                                 permissions.includes('admin');
+      if (!hasEditPermission) {
+        socket.emit('update-error', { error: 'Edit permission required' });
+        reply({ ok: false, error: 'Edit permission required' });
+        return;
       }
 
       const sanitizedContent = sanitizeContent(content);
       const now = new Date().toISOString();
 
       // Update database (if Supabase is enabled)
-      if (supabaseEnabled) {
-        let updateData;
-
-        if (isStaging) {
-          // Staging mode: write to staging_content
-          updateData = {
+      if (supabaseEnabled && !data.persisted) {
+        const updateData = {
             staging_content: sanitizedContent,
             staging_updated_at: now,
             updated_at: now
-          };
-        } else {
-          // Live mode: write to current_content (legacy support)
-          updateData = {
-            current_content: sanitizedContent,
-            updated_at: now
-          };
-        }
+        };
 
         const { error } = await supabase
           .from('content_elements')
@@ -407,6 +540,7 @@ io.on('connection', async (socket) => {
         if (error) {
           console.error('Error updating content:', error);
           socket.emit('update-error', { error: 'Failed to save content' });
+          reply({ ok: false, error: 'Failed to save content' });
           return;
         }
 
@@ -432,7 +566,7 @@ io.on('connection', async (socket) => {
           }
         }
       } else {
-        console.log(`Content update for site ${siteId}, element ${elementId} - not persisted (Supabase disabled)`);
+        console.log(`Content update for site ${siteId}, element ${elementId} - persistence skipped (${data.persisted ? 'already persisted' : 'Supabase disabled'})`);
       }
 
       // Broadcast to appropriate room
@@ -465,21 +599,39 @@ io.on('connection', async (socket) => {
         isStaging
       });
 
+      reply({ ok: true });
+
     } catch (error) {
       console.error('Error processing content update:', error);
       socket.emit('update-error', { error: 'Internal server error' });
+      reply({ ok: false, error: 'Internal server error' });
     }
   });
   
   // Handle dashboard connections
   socket.on('join-dashboard', (data) => {
     const { siteId: dashboardSiteId, userId } = data;
+
+    // Authorization: the dashboard room must match the site id that was
+    // authenticated during the handshake.  Allowing arbitrary room joins
+    // would let any authenticated socket subscribe to another site's events.
+    if (!dashboardSiteId || dashboardSiteId !== siteId) {
+      socket.emit('auth-error', {
+        error: 'Unauthorized: dashboard site id does not match authenticated site'
+      });
+      console.warn(
+        `join-dashboard rejected: socket ${socket.id} authenticated for site "${siteId}" ` +
+        `requested dashboard for site "${dashboardSiteId}"`
+      );
+      return;
+    }
+
     socket.join(`dashboard:${dashboardSiteId}`);
-    
+
     if (userId) {
       userConnections.set(socket.id, userId);
     }
-    
+
     console.log(`Dashboard user joined for site ${dashboardSiteId}`);
   });
   
@@ -541,7 +693,11 @@ io.on('connection', async (socket) => {
               updated_at: now
             };
           } else {
-            updateData = { current_content: sanitizedContent };
+            updateData = {
+              published_content: sanitizedContent,
+              current_content: sanitizedContent,
+              updated_at: now
+            };
           }
 
           await supabase
@@ -895,33 +1051,29 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      const publishedAt = new Date().toISOString();
+      const filteredElementIds = Array.isArray(elementIds)
+        ? elementIds.filter(elementId => typeof elementId === 'string')
+        : null;
 
-      // Get elements to publish
-      let query = supabase
-        .from('content_elements')
-        .select('id, element_id, staging_content, published_content')
-        .eq('site_id', siteId)
-        .not('staging_content', 'is', null);
+      const { data: publishedRows, error: publishError } = await supabase.rpc(
+        'publish_staging_content_atomic',
+        {
+          p_site_id: siteId,
+          p_element_ids: filteredElementIds && filteredElementIds.length > 0 ? filteredElementIds : null,
+          p_published_by: null,
+          p_user_email: socket.data.stagingEmail || 'unknown'
+        }
+      );
 
-      if (elementIds && elementIds.length > 0) {
-        query = query.in('element_id', elementIds);
-      }
-
-      const { data: elementsToPublish, error: fetchError } = await query;
-
-      if (fetchError) {
-        console.error('Error fetching elements to publish:', fetchError);
-        socket.emit('publish-error', { error: 'Failed to fetch elements' });
+      if (publishError) {
+        console.error('Error publishing staging content:', publishError);
+        socket.emit('publish-error', { error: 'Failed to publish staging content' });
         return;
       }
 
-      // Filter to only changed elements
-      const changedElements = (elementsToPublish || []).filter(
-        el => el.staging_content !== el.published_content
-      );
+      const rows = publishedRows || [];
 
-      if (changedElements.length === 0) {
+      if (rows.length === 0) {
         socket.emit('publish-success', {
           published: 0,
           message: 'No staging changes to publish'
@@ -929,45 +1081,19 @@ io.on('connection', async (socket) => {
         return;
       }
 
-      // Publish each element
-      let successCount = 0;
-      for (const element of changedElements) {
-        // Record history
-        await supabase.from('staging_history').insert({
-          content_element_id: element.id,
-          staging_access_id: socket.data.stagingAccessId || null,
-          previous_content: element.published_content,
-          new_content: element.staging_content,
-          user_email: socket.data.stagingEmail || 'unknown',
-          action: 'publish'
+      for (const element of rows) {
+        io.to(`site:${siteId}`).emit('content-update', {
+          elementId: element.element_id,
+          content: element.content
         });
-
-        // Update published content
-        const { error: updateError } = await supabase
-          .from('content_elements')
-          .update({
-            published_content: element.staging_content,
-            published_at: publishedAt,
-            updated_at: publishedAt
-          })
-          .eq('id', element.id);
-
-        if (!updateError) {
-          successCount++;
-
-          // Broadcast to live site viewers
-          io.to(`site:${siteId}`).emit('content-update', {
-            elementId: element.element_id,
-            content: element.staging_content
-          });
-        }
       }
 
-      console.log(`Published ${successCount}/${changedElements.length} elements for site ${siteId}`);
+      const publishedAt = new Date().toISOString();
+      console.log(`Published ${rows.length} elements for site ${siteId}`);
 
       socket.emit('publish-success', {
-        published: successCount,
-        total: changedElements.length,
+        published: rows.length,
+        total: rows.length,
         publishedAt,
         publishedBy: socket.data.stagingEmail
       });
@@ -975,7 +1101,7 @@ io.on('connection', async (socket) => {
       // Notify dashboard
       io.to(`dashboard:${siteId}`).emit('content-published', {
         siteId,
-        count: successCount,
+        count: rows.length,
         publishedBy: socket.data.stagingEmail,
         publishedAt
       });
@@ -984,6 +1110,34 @@ io.on('connection', async (socket) => {
       console.error('Error publishing content:', error);
       socket.emit('publish-error', { error: 'Internal server error' });
     }
+  });
+
+  // Handle A/B test status changes (emitted by API when test activated/completed)
+  socket.on('ab-test-status-change', async (data) => {
+    const { testId, status, siteId: testSiteId } = data;
+
+    // Authorization: the authenticated handshake siteId is the only authoritative
+    // source. A client must not broadcast to another tenant's rooms by supplying a
+    // different siteId in the payload.
+    if (testSiteId && testSiteId !== siteId) {
+      socket.emit('auth-error', { message: 'Cannot modify A/B tests for another site' });
+      return;
+    }
+    const targetSiteId = siteId;
+
+    console.log(`A/B test ${testId} status changed to ${status} for site ${targetSiteId}`);
+
+    // Broadcast to all live site connections
+    io.to(`site:${targetSiteId}`).emit('ab-test-update', {
+      test_id: testId,
+      status: status
+    });
+
+    // Also notify dashboard
+    io.to(`dashboard:${targetSiteId}`).emit('ab-test-update', {
+      test_id: testId,
+      status: status
+    });
   });
 
   // Handle disconnection

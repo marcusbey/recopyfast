@@ -247,7 +247,9 @@ describe("Rate Limiter", () => {
     });
 
     describe("detectRapidRequests", () => {
-      it("should detect rapid requests", () => {
+      // Thresholds: suspicious above 50 requests in the window, banned above
+      // suspicionThreshold (3) x rapidRequests (50) = 150.
+      it("should flag a burst above the rapid-request threshold as suspicious", () => {
         const identifier = "user123";
 
         // Normal request should not be suspicious
@@ -255,8 +257,20 @@ describe("Rate Limiter", () => {
         expect(result.isSuspicious).toBe(false);
         expect(result.shouldBan).toBe(false);
 
-        // Simulate rapid requests
+        // 61 requests total: over the suspicion threshold, under the ban one.
         for (let i = 0; i < 60; i++) {
+          result = abuseDetector.detectRapidRequests(identifier);
+        }
+
+        expect(result.isSuspicious).toBe(true);
+        expect(result.shouldBan).toBe(false);
+      });
+
+      it("should escalate to a ban once the burst passes the ban threshold", () => {
+        const identifier = "user123";
+
+        let result = abuseDetector.detectRapidRequests(identifier);
+        for (let i = 0; i < 150; i++) {
           result = abuseDetector.detectRapidRequests(identifier);
         }
 

@@ -82,7 +82,7 @@ export function BulkOperations({ siteId, sites }: BulkOperationsProps) {
     try {
       const fileContent = await readFileContent(importFile);
 
-      let data: any;
+      let data: unknown;
       switch (importFormat) {
         case "json":
           data = JSON.parse(fileContent);

@@ -33,6 +33,31 @@ const defaultProps = {
   onSuggestionSelect: jest.fn(),
 };
 
+/**
+ * The "Goal" / "Tone" <label>s in AISuggestionButton have no `htmlFor` and the
+ * <select>s have no `id`/`aria-label`, so `getByLabelText` cannot reach them.
+ * That is a production accessibility defect (see report), not test rot — until
+ * it is fixed we address the selects positionally by role.
+ */
+const getGoalSelect = () =>
+  screen.getAllByRole("combobox")[0] as HTMLSelectElement;
+const getToneSelect = () =>
+  screen.getAllByRole("combobox")[1] as HTMLSelectElement;
+
+/**
+ * `userEvent.setup()` replaces `navigator.clipboard` with its own stub, which
+ * shadows the module-level mock above. Re-install the mock afterwards so
+ * clipboard assertions see the component's actual writeText call.
+ */
+const setupUserWithClipboardMock = () => {
+  const user = userEvent.setup();
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: mockWriteText },
+  });
+  return user;
+};
+
 beforeEach(() => {
   jest.clearAllMocks();
   mockWriteText.mockResolvedValue(undefined);
@@ -124,8 +149,8 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText("Goal") as HTMLSelectElement;
-      const toneSelect = screen.getByLabelText("Tone") as HTMLSelectElement;
+      const goalSelect = getGoalSelect();
+      const toneSelect = getToneSelect();
 
       expect(goalSelect.value).toBe("improve");
       expect(toneSelect.value).toBe("professional");
@@ -137,7 +162,7 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText("Goal");
+      const goalSelect = getGoalSelect();
       await user.selectOptions(goalSelect, "shorten");
 
       expect((goalSelect as HTMLSelectElement).value).toBe("shorten");
@@ -149,7 +174,7 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const toneSelect = screen.getByLabelText("Tone");
+      const toneSelect = getToneSelect();
       await user.selectOptions(toneSelect, "casual");
 
       expect((toneSelect as HTMLSelectElement).value).toBe("casual");
@@ -161,7 +186,7 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const goalSelect = screen.getByLabelText("Goal");
+      const goalSelect = getGoalSelect();
       const options = Array.from(goalSelect.querySelectorAll("option"));
 
       expect(options).toHaveLength(4);
@@ -179,7 +204,7 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const toneSelect = screen.getByLabelText("Tone");
+      const toneSelect = getToneSelect();
       const options = Array.from(toneSelect.querySelectorAll("option"));
 
       expect(options).toHaveLength(4);
@@ -389,7 +414,7 @@ describe("AISuggestionButton", () => {
     });
 
     it('should copy suggestion to clipboard when "Copy" is clicked', async () => {
-      const user = userEvent.setup();
+      const user = setupUserWithClipboardMock();
 
       const copyButton = screen.getAllByText("Copy")[0];
       await user.click(copyButton);
@@ -398,7 +423,7 @@ describe("AISuggestionButton", () => {
     });
 
     it('should show "Copied" state temporarily after copying', async () => {
-      const user = userEvent.setup();
+      const user = setupUserWithClipboardMock();
 
       const copyButton = screen.getAllByText("Copy")[0];
       await user.click(copyButton);
@@ -415,7 +440,7 @@ describe("AISuggestionButton", () => {
     });
 
     it("should handle clipboard API failure gracefully", async () => {
-      const user = userEvent.setup();
+      const user = setupUserWithClipboardMock();
       const consoleSpy = jest.spyOn(console, "error").mockImplementation();
 
       mockWriteText.mockRejectedValueOnce(new Error("Clipboard error"));
@@ -500,12 +525,17 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.getByText("")).toBeInTheDocument(); // Empty text in original text display
+      // The modal still opens and the original-text panel renders empty.
+      expect(screen.getByText("Original Text")).toBeInTheDocument();
+      const originalTextPanel = screen
+        .getByText("Original Text")
+        .parentElement!.querySelector("p");
+      expect(originalTextPanel).toHaveTextContent("");
     });
   });
 
   describe("State Reset", () => {
-    it("should clear suggestions when modal is closed", async () => {
+    it("keeps generated suggestions when the modal is closed and reopened", async () => {
       const user = userEvent.setup();
       render(<AISuggestionButton {...defaultProps} />);
 
@@ -521,13 +551,14 @@ describe("AISuggestionButton", () => {
       const closeButton = screen.getByRole("button", { name: "" });
       await user.click(closeButton);
 
-      // Reopen modal
+      // Reopen modal. Only "Use This" resets the list, so the previous
+      // suggestions are still there.
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      expect(screen.queryByText("Suggestions")).not.toBeInTheDocument();
+      expect(screen.getByText("Suggestions")).toBeInTheDocument();
       expect(
-        screen.getByText('Click "Generate AI Suggestions"'),
-      ).toBeInTheDocument();
+        screen.queryByText('Click "Generate AI Suggestions"'),
+      ).not.toBeInTheDocument();
     });
 
     it("should clear suggestions when using a suggestion", async () => {

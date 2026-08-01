@@ -50,9 +50,13 @@ export function withApiMonitoring(
 
     // Create request context for logging
     const requestContext: LogContext = {
-      ...createRequestContext(
-        req as Parameters<typeof createRequestContext>[0],
-      ),
+      ...createRequestContext({
+        headers: Object.fromEntries(req.headers.entries()),
+        ip:
+          req.headers.get("x-real-ip") ??
+          req.headers.get("x-forwarded-for") ??
+          undefined,
+      }),
       requestId,
       method: req.method,
       url: req.url,
@@ -96,23 +100,11 @@ export function withApiMonitoring(
     // Track active request
     systemMonitor.trackActiveRequest(1);
 
-    // Start Sentry transaction
-    let transaction;
-    if (config.monitoring.sentry.enabled) {
-      transaction = Sentry.startTransaction({
-        name: operationName,
-        op: "http.server",
-        data: {
-          "http.method": req.method,
-          "http.url": req.url,
-          "http.user_agent": requestMetadata.userAgent,
-        },
-      });
-      Sentry.getCurrentScope().setSpan(transaction);
-    }
-
     let response: NextResponse;
-    let responseMetadata: ResponseMetadata;
+    let responseMetadata: ResponseMetadata = {
+      statusCode: 500,
+      duration: 0,
+    };
 
     try {
       // Log request start
@@ -127,8 +119,23 @@ export function withApiMonitoring(
         );
       }
 
-      // Execute the actual handler
-      response = await handler(req, context);
+      // Execute the actual handler (wrap in Sentry span if enabled)
+      if (config.monitoring.sentry.enabled) {
+        response = await Sentry.startSpan(
+          {
+            name: operationName,
+            op: "http.server",
+            attributes: {
+              "http.method": req.method,
+              "http.url": req.url,
+              "http.user_agent": requestMetadata.userAgent ?? "",
+            },
+          },
+          () => handler(req, context),
+        );
+      } else {
+        response = await handler(req, context);
+      }
 
       // Calculate response time
       const duration = Date.now() - startTime;
@@ -175,13 +182,6 @@ export function withApiMonitoring(
             cached: responseMetadata.cached,
           },
         });
-      }
-
-      // Set Sentry transaction status
-      if (transaction) {
-        transaction.setHttpStatus(response.status);
-        transaction.setData("http.response.status_code", response.status);
-        transaction.setStatus(response.status < 400 ? "ok" : "internal_error");
       }
 
       return response;
@@ -236,10 +236,7 @@ export function withApiMonitoring(
         });
       }
 
-      // Set Sentry transaction error status
-      if (transaction) {
-        transaction.setStatus("internal_error");
-        transaction.setData("error", error.message);
+      if (config.monitoring.sentry.enabled) {
         Sentry.captureException(error);
       }
 
@@ -255,11 +252,6 @@ export function withApiMonitoring(
 
       // Track active request completion
       systemMonitor.trackActiveRequest(-1);
-
-      // Finish Sentry transaction
-      if (transaction) {
-        transaction.finish();
-      }
     }
   };
 }

@@ -211,7 +211,7 @@ export function PresenceIndicator({
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Users className="h-5 w-5 text-gray-600" />
-            <h3 className="font-medium">Who's Online</h3>
+            <h3 className="font-medium">Who&apos;s Online</h3>
             <Badge variant="secondary">{relevantPresence.length + 1}</Badge>
           </div>
 

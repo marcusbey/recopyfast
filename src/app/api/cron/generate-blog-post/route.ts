@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret to prevent unauthorized access
+    // Verify cron secret to prevent unauthorized access (fail-closed when unset)
+    const cronSecret = process.env.CRON_SECRET;
     const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -22,13 +23,14 @@ export async function GET(request: NextRequest) {
 
     const { suggestion } = await topicResponse.json();
 
-    // Generate blog post
+    // Generate blog post — forward the CRON_SECRET so the auth gate passes
     const generateResponse = await fetch(
       `${process.env.NEXT_PUBLIC_APP_URL}/api/blog/generate`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${cronSecret}`,
         },
         body: JSON.stringify({
           topic: suggestion.topic,

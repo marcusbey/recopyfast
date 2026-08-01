@@ -77,16 +77,64 @@ export async function middleware(request: NextRequest) {
   );
 
   // Content Security Policy
+  // In development keep 'unsafe-eval' so Next.js HMR / React DevTools work.
+  // In production drop it to prevent arbitrary code execution.
+  const isDev = process.env.NODE_ENV !== "production";
+  const scriptSrc = isDev
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'";
+
+  // connect-src must allowlist every origin the client opens XHR/fetch/WebSocket to,
+  // or the browser silently blocks them. 'self' alone breaks Supabase (REST + wss
+  // realtime), the Socket.io server, and Sentry ingest. Derive the exact origins
+  // from env so we don't widen the policy to a blanket https:/wss:.
+  const connectSrc = new Set<string>(["'self'"]);
+  const addOrigin = (raw?: string) => {
+    if (!raw) return;
+    try {
+      const { protocol, host } = new URL(raw);
+      // Supabase exposes REST over https and realtime over wss on the same host.
+      if (protocol === "https:" || protocol === "http:") {
+        connectSrc.add(`https://${host}`);
+        connectSrc.add(`wss://${host}`);
+      } else if (protocol === "wss:" || protocol === "ws:") {
+        connectSrc.add(`wss://${host}`);
+        connectSrc.add(`https://${host}`);
+      }
+      // Keep the scheme as configured too. Socket.io opens its handshake over
+      // plain HTTP polling before upgrading, so a local `http://host:4001` WS
+      // URL needs http:/ws: allowed or the connection dies at the first XHR.
+      // Only in dev — production env values are https/wss and stay that way.
+      if (isDev && (protocol === "http:" || protocol === "ws:")) {
+        connectSrc.add(`http://${host}`);
+        connectSrc.add(`ws://${host}`);
+      }
+    } catch {
+      // ignore malformed env values
+    }
+  };
+  addOrigin(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  addOrigin(process.env.NEXT_PUBLIC_WS_URL);
+  addOrigin(process.env.NEXT_PUBLIC_SENTRY_DSN);
+  if (isDev) connectSrc.add("ws://localhost:*");
+
   const csp = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Note: unsafe-eval might be needed for Next.js dev
+    scriptSrc,
+    // Browsers fall back to script-src when script-src-elem is absent, so this
+    // is not a tightening — it just stops the fallback from being implicit, and
+    // makes the "which directive blocked me" console message unambiguous.
+    scriptSrc.replace("script-src", "script-src-elem"),
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' https:",
-    "connect-src 'self'",
+    `connect-src ${Array.from(connectSrc).join(" ")}`,
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
+    // CSP equivalent of the X-Frame-Options: DENY header set above. Kept in
+    // sync with it; frame-ancestors is what modern browsers actually honour.
+    "frame-ancestors 'none'",
   ].join("; ");
 
   response.headers.set("Content-Security-Policy", csp);
@@ -101,9 +149,11 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder
-     * - api routes (handled separately)
+     * - public static assets
+     *
+     * API routes ARE included so they receive security headers
+     * (X-Content-Type-Options, X-Frame-Options, etc.).
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api/).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

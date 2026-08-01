@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkExportPayload } from "@/types";
 
+interface ExportedContentElement {
+  id: string;
+  site_id: string;
+  element_id: string;
+  selector: string;
+  original_content: string | null;
+  current_content: string | null;
+  language: string;
+  variant: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body: BulkExportPayload = await req.json();
@@ -154,7 +168,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function generateCSV(contentElements: any[]): string {
+function generateCSV(contentElements: ExportedContentElement[]): string {
   if (contentElements.length === 0) return "";
 
   // CSV headers
@@ -190,7 +204,7 @@ function generateCSV(contentElements: any[]): string {
   return [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
 }
 
-function generateXML(contentElements: any[]): string {
+function generateXML(contentElements: ExportedContentElement[]): string {
   const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>\n';
   const rootStart = "<content_elements>\n";
   const rootEnd = "</content_elements>";

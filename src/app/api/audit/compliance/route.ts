@@ -57,14 +57,20 @@ export async function POST(req: NextRequest) {
         );
       }
     } else {
-      // For global reports, check if user is admin
-      const { data: userProfile } = await supabase
-        .from("auth.users")
-        .select("raw_user_meta_data")
-        .eq("id", user.id)
-        .single();
+      // For global reports, check if user is admin.
+      // raw_user_meta_data is caller-writable and MUST NOT be used for authz.
+      // Trust only app_metadata (server-managed) and ADMIN_EMAILS env-var allowlist.
+      const adminEmails = (process.env.ADMIN_EMAILS ?? "")
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
 
-      if (userProfile?.raw_user_meta_data?.role !== "admin") {
+      const isGlobalAdmin =
+        (user.email != null &&
+          adminEmails.includes(user.email.toLowerCase())) ||
+        user.app_metadata?.role === "admin";
+
+      if (!isGlobalAdmin) {
         return NextResponse.json(
           { error: "Admin privileges required" },
           { status: 403 },
@@ -147,14 +153,19 @@ export async function GET(req: NextRequest) {
       query = query.eq("report_type", reportType);
     }
 
-    // Limit to user's reports if not admin
-    const { data: userProfile } = await supabase
-      .from("auth.users")
-      .select("raw_user_meta_data")
-      .eq("id", user.id)
-      .single();
+    // Limit to user's reports if not admin.
+    // raw_user_meta_data is caller-writable; trust only app_metadata + ADMIN_EMAILS.
+    const adminEmailsGet = (process.env.ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
 
-    if (userProfile?.raw_user_meta_data?.role !== "admin") {
+    const isAdminGet =
+      (user.email != null &&
+        adminEmailsGet.includes(user.email.toLowerCase())) ||
+      user.app_metadata?.role === "admin";
+
+    if (!isAdminGet) {
       query = query.eq("generated_by", user.id);
     }
 

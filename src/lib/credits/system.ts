@@ -5,6 +5,7 @@ export const CREDIT_COSTS = {
   AI_SUGGESTION: 1, // 1 credit per AI suggestion
   AI_TRANSLATION: 5, // 5 credits per translation (more expensive)
   BULK_AI_OPERATION: 10, // 10 credits for bulk operations
+  AB_TEST_GENERATION: 3, // 3 credits per A/B test generation
 } as const;
 
 // Credit packages configuration
@@ -115,7 +116,7 @@ export async function consumeCredits(
   userId: string,
   credits: number,
   operation: string,
-  metadata?: Record<string, any>,
+  metadata?: Record<string, unknown>,
 ): Promise<{ success: boolean; error?: string; remainingCredits?: number }> {
   const supabase = await createClient();
   const balance = await getUserCreditBalance(userId);
@@ -231,7 +232,7 @@ export async function getCreditUsageHistory(
     id: string;
     credits_used: number;
     operation: string;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
     created_at: string;
   }>
 > {

@@ -1,0 +1,61 @@
+# fly.toml – RecopyFast Socket.io server on Fly.io
+# ---------------------------------------------------------------------------
+# This file lives in server/ ON PURPOSE: `fly deploy` uses the directory of
+# fly.toml as the Docker build context, and server/Dockerfile is written for a
+# server/-rooted context (it COPYs server/package.json and runs `node index.js`).
+# Deploying from repo root would put index.js at /app/server/index.js and break
+# the CMD.
+#
+# Deploy:
+#   cd server
+#   fly launch --no-deploy            # first time: creates the app on Fly
+#   fly secrets set \
+#     NEXT_PUBLIC_SUPABASE_URL=... \
+#     SUPABASE_SERVICE_ROLE_KEY=... \
+#     ALLOWED_ORIGINS=https://app.recopyfast.com
+#   fly deploy
+#
+# Note: site tokens are HMAC-signed with each site's API key (read from the DB
+# via the service-role key) — there is no separate token-secret env var.
+# ---------------------------------------------------------------------------
+
+app            = "recopyfast-ws"   # change to your chosen Fly app name
+primary_region = "iad"             # change to the region closest to your users
+
+[build]
+  dockerfile = "Dockerfile"        # relative to this file (server/)
+
+[env]
+  # Non-secret runtime defaults – override sensitive values with `fly secrets set`.
+  WS_PORT  = "4001"
+  NODE_ENV = "production"
+
+[[services]]
+  internal_port = 4001
+  protocol      = "tcp"
+
+  # Fly terminates TLS and forwards plain HTTP/WS to the app.
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port     = 443
+
+  [[services.ports]]
+    handlers = ["http"]
+    port     = 80
+
+  # Health check – Socket.io server exposes GET /health
+  [[services.http_checks]]
+    interval     = 15000   # ms between checks
+    timeout      = 5000
+    grace_period = "10s"
+    method       = "GET"
+    path         = "/health"
+    protocol     = "http"
+
+[checks]
+  # TCP check as a fallback (runs even before the HTTP server is up)
+  [checks.tcp]
+    type     = "tcp"
+    port     = 4001
+    interval = "30s"
+    timeout  = "5s"

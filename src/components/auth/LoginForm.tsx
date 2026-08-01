@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Mail, Lock } from "lucide-react";
+import { Loader2, Mail } from "lucide-react";
+import { getAuthErrorMessage, logAuthError } from "./auth-errors";
 
 interface LoginFormProps {
   onSuccess?: () => void;
@@ -19,20 +20,48 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLinkSent, setIsLinkSent] = useState(false);
+  const [redirectedFrom, setRedirectedFrom] = useState<string | undefined>();
+
+  const inFlightRef = useRef(false);
+
+  // Read the query string after mount rather than with `useSearchParams`.
+  // `AuthModal` renders this form from `Header`, which sits on every page, so
+  // `useSearchParams` here would force a Suspense boundary around the whole
+  // app to keep static prerendering working.
+  //
+  // `redirectedFrom` is set by `src/middleware.ts` when it bounces an
+  // unauthenticated user off a protected route; carrying it through the magic
+  // link lands them where they were headed instead of on the dashboard.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setRedirectedFrom(params.get("redirectedFrom") ?? undefined);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlightRef.current) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError("Enter your email address to continue.");
+      return;
+    }
+
+    inFlightRef.current = true;
     setError(null);
     setIsLoading(true);
 
     try {
-      await signInWithMagicLink(email);
+      await signInWithMagicLink(trimmedEmail, { next: redirectedFrom });
+      // Deliberately not calling `onSuccess` here: in `AuthModal` that closes
+      // the dialog, which would hide the "check your email" confirmation the
+      // user still needs to read.
       setIsLinkSent(true);
     } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : "Failed to send magic link",
-      );
+      logAuthError("signInWithMagicLink", err);
+      setError(getAuthErrorMessage(err));
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -48,8 +77,8 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
             Check your email
           </h3>
           <p className="text-gray-600 text-sm">
-            We've sent a magic link to{" "}
-            <span className="font-medium text-gray-900">{email}</span>
+            We&apos;ve sent a magic link to{" "}
+            <span className="font-medium text-gray-900">{email.trim()}</span>
           </p>
           <p className="text-gray-500 text-xs">
             Click the link in your email to sign in. You can close this window.
@@ -68,14 +97,16 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" noValidate>
       <div className="space-y-2">
         <Label htmlFor="email">Email address</Label>
         <div className="relative">
           <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input
             id="email"
+            name="email"
             type="email"
+            autoComplete="email"
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -96,7 +127,7 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
         type="submit"
         size="lg"
         className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200 border-0"
-        disabled={isLoading || !email}
+        disabled={isLoading || !email.trim()}
       >
         {isLoading ? (
           <>
@@ -112,7 +143,7 @@ export function LoginForm({ onSuccess, onSwitchToSignup }: LoginFormProps) {
       </Button>
 
       <div className="text-center text-sm text-gray-500">
-        <p>We'll send you a secure link to sign in instantly</p>
+        <p>We&apos;ll send you a secure link to sign in instantly</p>
       </div>
 
       <div className="text-center text-sm">

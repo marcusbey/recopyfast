@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest } from "next/server";
+import { createHash } from "crypto";
 
 interface RateLimitConfig {
   windowMs: number; // Time window in milliseconds
@@ -15,20 +16,27 @@ interface RateLimitResult {
 }
 
 export class APIRateLimiter {
-  private supabase;
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**
@@ -42,7 +50,7 @@ export class APIRateLimiter {
       // Get API key with rate limit settings
       const { data: apiKey, error } = await this.supabase
         .from("api_keys")
-        .select("rate_limit, is_active")
+        .select("rate_limit, rate_limit_per_minute, is_active")
         .eq("id", apiKeyId)
         .single();
 
@@ -55,7 +63,11 @@ export class APIRateLimiter {
         };
       }
 
-      const maxRequests = config?.maxRequests || apiKey.rate_limit || 1000;
+      const maxRequests =
+        config?.maxRequests ||
+        apiKey.rate_limit_per_minute ||
+        apiKey.rate_limit ||
+        1000;
       const windowMs = config?.windowMs || 60 * 60 * 1000; // 1 hour default
 
       return await this.checkLimit(
@@ -103,9 +115,10 @@ export class APIRateLimiter {
   }
 
   /**
-   * Generic rate limit checker
+   * Generic rate limit checker.
+   * Public: createRateLimitMiddleware drives it directly with a custom key.
    */
-  private async checkLimit(
+  async checkLimit(
     key: string,
     maxRequests: number,
     windowMs: number,
@@ -247,7 +260,10 @@ export function createRateLimitMiddleware(config: RateLimitConfig) {
  */
 function getDefaultKey(req: NextRequest): string {
   const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded ? forwarded.split(",")[0] : req.ip || "unknown";
+  // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
+  const ip = forwarded
+    ? forwarded.split(",")[0]
+    : req.headers.get("x-real-ip") || "unknown";
   return `ip:${ip}`;
 }
 
@@ -281,9 +297,7 @@ export async function validateAPIKey(req: NextRequest): Promise<{
       return { valid: false, error: "API key required" };
     }
 
-    // Hash the API key for lookup (assuming keys are stored hashed)
-    // In production, use proper hashing
-    const keyHash = Buffer.from(apiKeyValue).toString("base64");
+    const keyHash = createHash("sha256").update(apiKeyValue).digest("hex");
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -319,7 +333,21 @@ export async function validateAPIKey(req: NextRequest): Promise<{
       .update({ last_used_at: new Date().toISOString() })
       .eq("id", apiKey.id);
 
-    return { valid: true, apiKey };
+    const scopes = Array.isArray(apiKey.scopes) ? apiKey.scopes : [];
+
+    return {
+      valid: true,
+      apiKey: {
+        id: apiKey.id,
+        site_id: apiKey.site_id,
+        permissions: {
+          content_read: scopes.includes("read") || scopes.includes("write"),
+          content_write: scopes.includes("write"),
+        },
+        rate_limit: apiKey.rate_limit_per_minute || apiKey.rate_limit || 1000,
+        expires_at: apiKey.expires_at,
+      },
+    };
   } catch (error) {
     console.error("API key validation error:", error);
     return { valid: false, error: "Internal error" };

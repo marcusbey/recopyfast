@@ -3,20 +3,27 @@ import { NextRequest } from "next/server";
 import { AuditLog } from "@/types";
 
 export class AuditLogger {
-  private supabase;
+  private _supabase: ReturnType<typeof createServerClient> | null = null;
 
-  constructor() {
-    this.supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
+  // Lazy: construct the Supabase client on first use, not at instantiation. This
+  // module exports a singleton at import time, and createServerClient throws on
+  // empty url/key — which crashed Vercel's "Collecting page data" build phase when
+  // Supabase env vars are absent. Deferring avoids the import-time throw.
+  private get supabase() {
+    if (!this._supabase) {
+      this._supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          cookies: {
+            get: () => "",
+            set: () => {},
+            remove: () => {},
+          },
         },
-      },
-    );
+      );
+    }
+    return this._supabase;
   }
 
   /**
@@ -402,7 +409,7 @@ export class AuditLogger {
     logs: AuditLog[],
     reportType: string,
   ): Record<string, unknown> {
-    const metrics: Record<string, any> = {
+    const metrics: Record<string, unknown> = {
       data_retention_compliance: true,
       access_control_violations: logs.filter(
         (log) => log.action.includes("unauthorized") || !log.success,
@@ -452,9 +459,12 @@ export function createAuditMiddleware() {
     const startTime = Date.now();
 
     // Extract client info
+    // NextRequest no longer exposes .ip (removed in Next 15+); derive from headers.
     const forwarded = req.headers.get("x-forwarded-for");
-    const ipAddress = forwarded ? forwarded.split(",")[0] : req.ip;
-    const userAgent = req.headers.get("user-agent");
+    const ipAddress = forwarded
+      ? forwarded.split(",")[0]
+      : (req.headers.get("x-real-ip") ?? undefined);
+    const userAgent = req.headers.get("user-agent") ?? undefined;
 
     // Add logger to request context (if your framework supports it)
     // req.auditLogger = auditLogger;

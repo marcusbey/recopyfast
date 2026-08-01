@@ -11,6 +11,8 @@ import {
   StagingPermission,
   AccessType,
 } from "@/lib/auth/staging-access";
+import { sendStagingVerificationEmail } from "@/lib/email/resend";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +27,19 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // Invite-type access sends an email to an address the caller supplies, so an
+    // unthrottled endpoint is an open mail relay for spam and a way to burn the
+    // sending domain's reputation. Fails CLOSED.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_DOMAIN_VERIFY",
+      endpoint: "staging/access",
+      identifier: user.id,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message: "Too many staging invites. Please try again shortly.",
+    });
+    if (limited) return limited;
 
     const body = await request.json();
     const {
@@ -119,8 +134,23 @@ export async function POST(request: NextRequest) {
       result.access.token,
     );
 
-    // TODO: Send verification email for invite type
-    // For now, return the verification code (in production, this would be emailed)
+    // The verification code is a shared secret gating staging access. Deliver it
+    // only via email — returning it here would let any caller self-verify and bypass
+    // email ownership. For invite-type access we email it now.
+    if (type === "invite" && email && result.verificationCode) {
+      const mail = await sendStagingVerificationEmail(
+        email,
+        result.verificationCode,
+        result.access.label ?? undefined,
+      );
+      if (!mail.sent) {
+        console.error(
+          "Staging invite created but verification email failed:",
+          mail.error,
+        );
+        // Non-fatal: the access exists and the code can be resent. Surface a hint.
+      }
+    }
 
     return NextResponse.json({
       success: true,
@@ -135,8 +165,6 @@ export async function POST(request: NextRequest) {
       },
       stagingUrl,
       token: result.access.token,
-      // In production, don't return this - send via email instead
-      verificationCode: result.verificationCode,
     });
   } catch (error) {
     console.error("Error creating staging access:", error);

@@ -230,7 +230,7 @@ export class StagingAccessManager {
     email: string,
   ): Promise<{ success: boolean; verificationCode?: string; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase
@@ -293,7 +293,7 @@ export class StagingAccessManager {
     code: string,
   ): Promise<{ success: boolean; access?: StagingAccess; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase
@@ -351,11 +351,14 @@ export class StagingAccessManager {
   /**
    * Resend verification code
    */
-  static async resendVerificationCode(
-    token: string,
-  ): Promise<{ success: boolean; verificationCode?: string; error?: string }> {
+  static async resendVerificationCode(token: string): Promise<{
+    success: boolean;
+    verificationCode?: string;
+    email?: string;
+    error?: string;
+  }> {
     try {
-      const supabase = await createClient();
+      const supabase = createServiceRoleClient();
 
       // Find the access record
       const { data: access, error: findError } = await supabase
@@ -397,7 +400,7 @@ export class StagingAccessManager {
         return { success: false, error: "Failed to resend code" };
       }
 
-      return { success: true, verificationCode };
+      return { success: true, verificationCode, email: access.email };
     } catch (error) {
       console.error("Error resending verification code:", error);
       return { success: false, error: "Failed to resend code" };
@@ -505,7 +508,10 @@ export class StagingAccessManager {
    * Generate a 6-digit verification code
    */
   private static generateVerificationCode(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    // crypto.randomInt is uniform and unpredictable. Math.random() is a non-CSPRNG
+    // whose output can be reconstructed from prior values — unacceptable for a code
+    // that gates access to staging content.
+    return crypto.randomInt(100000, 1000000).toString();
   }
 
   /**
