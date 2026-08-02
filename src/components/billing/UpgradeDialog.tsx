@@ -25,7 +25,8 @@ import { useCheckout } from "./useCheckout";
 interface UpgradeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  currentPlan: string;
+  /** Plan in force, or null when the account has none. */
+  currentPlan: string | null;
   /** Plan catalogue, resolved server-side from the `plans` table. */
   catalogue: PlanCatalogue;
   onSuccess: () => void;
@@ -43,7 +44,8 @@ export function UpgradeDialog({
   catalogue,
   onSuccess,
 }: UpgradeDialogProps) {
-  // Only paid plans are selectable; `free` is the absence of a subscription.
+  // Only paid plans are ever selectable, so a `free` row still sitting in the
+  // catalogue for grandfathered accounts cannot be bought.
   const plans = sellablePlans(catalogue).filter((plan) =>
     isPaidPlanId(plan.id),
   );
@@ -55,7 +57,9 @@ export function UpgradeDialog({
 
   const { startCheckout, isRedirecting, error: checkoutError } = useCheckout();
 
-  const hasSubscription = Boolean(currentPlan) && currentPlan !== "free";
+  // No plan means no Stripe subscription to prorate, so the submit below has to
+  // open Checkout rather than change a plan in place.
+  const hasSubscription = currentPlan !== null && currentPlan !== "free";
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);

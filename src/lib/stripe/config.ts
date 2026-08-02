@@ -44,7 +44,7 @@ export {
   getPlanCatalogue,
   getSubscriptionPlans,
   getSubscriptionPlan,
-  getPlanForSubscriber,
+  findPlanById,
   getPlanDisplayPrice,
   getPlanCyclePrice,
   getOneTimeProduct,

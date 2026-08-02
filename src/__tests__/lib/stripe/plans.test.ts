@@ -30,7 +30,7 @@ import {
   getPlanCatalogue,
   getPlanCyclePrice,
   getPlanDisplayPrice,
-  getPlanForSubscriber,
+  findPlanById,
   isPaidPlanId,
   PAID_PLAN_IDS,
   resolveOneTimePriceId,
@@ -314,11 +314,21 @@ describe("plan catalogue loader", () => {
       );
     });
 
-    it("falls back to free for a retired plan id on an old subscription row", async () => {
-      const plan = await getPlanForSubscriber("enterprise");
-
-      expect(plan.id).toBe("free");
+    it("resolves a seeded plan id to its catalogue row", async () => {
+      expect((await findPlanById("pro"))?.id).toBe("pro");
     });
+
+    it.each([
+      ["a retired plan id on an old subscription row", "enterprise"],
+      ["no plan id at all", null],
+    ])(
+      "returns null for %s rather than falling back to free",
+      async (_l, id) => {
+        // The fallback used to be `free`, which meant a plan nobody sells and a
+        // plan that no longer exists both kept conferring access.
+        await expect(findPlanById(id)).resolves.toBeNull();
+      },
+    );
   });
 
   describe("price helpers", () => {
@@ -446,18 +456,18 @@ describe("findSubscriptionPlan", () => {
     ["a typo", "prro"],
     ["null", null],
     ["undefined", undefined],
-  ])("falls back to free for %s rather than returning undefined", (_l, id) => {
-    expect(findSubscriptionPlan(catalogue, id)?.id).toBe("free");
+  ])("returns undefined for %s rather than falling back to free", (_l, id) => {
+    // It used to answer `free` here, which is why an account that had never
+    // paid rendered as being on a plan. The caller now has to say what it
+    // shows someone who is on none.
+    expect(findSubscriptionPlan(catalogue, id)).toBeUndefined();
   });
 
-  it("returns undefined only when the catalogue itself has no free plan", () => {
-    // Nothing sensible is left to render at that point, and the caller must
-    // show an error rather than a plausible-looking wrong plan.
-    const broken = {
-      ...catalogue,
-      subscriptions: [catalogue.subscriptions[1]],
-    };
-    expect(findSubscriptionPlan(broken, "enterprise")).toBeUndefined();
+  it("still resolves a grandfathered free row while one is seeded", () => {
+    // Existing `billing_subscriptions.plan = 'free'` rows have to keep
+    // resolving until the data question about them is settled; what changed is
+    // that nothing new arrives at that id by fallback.
+    expect(findSubscriptionPlan(catalogue, "free")?.id).toBe("free");
   });
 });
 

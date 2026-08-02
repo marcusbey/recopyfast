@@ -86,10 +86,40 @@ export function BillingDashboard() {
   }
 
   // The plan in force counts lifetime entitlements, not just subscriptions, so
-  // it comes from the server rather than from the subscription row.
+  // it comes from the server rather than from the subscription row. Null means
+  // the account has not paid; there is no free plan for it to be on.
   const currentPlan = dashboardData.effectivePlanId;
-  const isPaidPlan = currentPlan !== "free";
   const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
+
+  // This is the whole page for an unpaid account. Every other dashboard route
+  // redirects here (see src/middleware.ts), so it has to stand on its own
+  // rather than assume the reader arrived by choice.
+  if (currentPlan === null) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="mx-auto max-w-lg p-8 text-center">
+          <h1 className="mb-2 text-2xl font-bold">Choose a plan to continue</h1>
+          <p className="mb-6 text-gray-600">
+            ReCopyFast needs an active subscription before your sites, editors
+            and AI credits become available.
+          </p>
+          <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
+            See plans
+          </Button>
+        </Card>
+
+        <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
+
+        <UpgradeDialog
+          open={showUpgradeDialog}
+          onOpenChange={setShowUpgradeDialog}
+          currentPlan={null}
+          catalogue={dashboardData.catalogue}
+          onSuccess={handleSubscriptionUpdate}
+        />
+      </div>
+    );
+  }
 
   if (!plan) {
     return (
@@ -117,14 +147,11 @@ export function BillingDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Badge
-            variant={isPaidPlan ? "default" : "secondary"}
-            className="text-sm"
-          >
+          <Badge variant="default" className="text-sm">
             {currentPlan.toUpperCase()} PLAN
           </Badge>
           <Button onClick={() => setShowUpgradeDialog(true)}>
-            {isPaidPlan ? "Change Plan" : "Choose a Plan"}
+            Change Plan
           </Button>
         </div>
       </div>

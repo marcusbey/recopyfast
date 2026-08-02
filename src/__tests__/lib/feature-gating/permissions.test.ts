@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import {
+  canAddCollaborator,
   canCreateWebsite,
   canUseAIFeatures,
   canUseTranslation,
@@ -57,6 +58,7 @@ jest.mock("@/lib/credits/system", () => {
 });
 
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import type { Entitlement } from "@/lib/billing/entitlements";
 import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
 import {
   getUserCreditBalance,
@@ -71,9 +73,9 @@ const asMock = (fn: unknown) => fn as jest.Mock;
  * loaded so a gate regression cannot hide behind a catalogue change.
  */
 const plan = (overrides: Partial<SubscriptionPlan> = {}): SubscriptionPlan => ({
-  id: "free",
-  name: "Free",
-  description: "No active subscription",
+  id: "starter",
+  name: "Starter",
+  description: "",
   price: 0,
   yearlyPrice: 0,
   features: [],
@@ -90,13 +92,21 @@ const plan = (overrides: Partial<SubscriptionPlan> = {}): SubscriptionPlan => ({
   ...overrides,
 });
 
-const FREE_PLAN = plan();
+const NO_LIMITS = plan().limits;
+
+/** What `getEffectivePlan` hands a gate for a user who is on a plan. */
+const entitled = (subscriptionPlan: SubscriptionPlan): Entitlement => ({
+  entitled: true,
+  planId: subscriptionPlan.id,
+  plan: subscriptionPlan,
+});
+
+/** ...and for one who is on none. There is no free plan to stand in for it. */
+const UNENTITLED: Entitlement = { entitled: false, planId: null, plan: null };
 
 const STARTER_PLAN = plan({
-  id: "starter",
-  name: "Starter",
   price: 9,
-  limits: { ...FREE_PLAN.limits, websites: 1 },
+  limits: { ...NO_LIMITS, websites: 1 },
 });
 
 const PRO_PLAN = plan({
@@ -139,7 +149,7 @@ describe("Feature Gating Permissions", () => {
 
   describe("canCreateWebsite", () => {
     it("allows creation on a plan with an unlimited website quota", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(UNLIMITED_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(UNLIMITED_PLAN));
       queryCount = 5;
 
       const result = await canCreateWebsite(testUserId);
@@ -148,7 +158,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("allows creation on pro while under its included website quota", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       queryCount = 2;
 
       const result = await canCreateWebsite(testUserId);
@@ -159,7 +169,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("quotes the overage price once pro's included websites are used up", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       queryCount = 5;
 
       const result = await canCreateWebsite(testUserId);
@@ -172,7 +182,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("allows creation on starter, which permits exactly one website", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(STARTER_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
       queryCount = 0;
 
       const result = await canCreateWebsite(testUserId);
@@ -182,22 +192,22 @@ describe("Feature Gating Permissions", () => {
       expect(result.maxLimit).toBe(1);
     });
 
-    it("denies creation with no subscription, since the free fallback allows zero websites", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(FREE_PLAN);
-      queryCount = 0;
+    it("denies creation on a plan whose website quota is used up", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      queryCount = 1;
 
       const result = await canCreateWebsite(testUserId);
 
       expect(result.allowed).toBe(false);
       expect(result.upgradeRequired).toBe(true);
-      expect(result.maxLimit).toBe(0);
-      expect(result.reason).toContain("limit of 0 websites");
+      expect(result.maxLimit).toBe(1);
+      expect(result.reason).toContain("limit of 1 website");
     });
   });
 
   describe("canUseAIFeatures", () => {
     it("allows AI on pro when the credit balance covers the cost", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
 
       const result = await canUseAIFeatures(testUserId);
@@ -207,7 +217,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("denies AI when the plan has no AI entitlement", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(FREE_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
 
       const result = await canUseAIFeatures(testUserId, 1);
 
@@ -218,7 +228,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("denies AI on pro when the credit balance is short", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(1));
 
       const result = await canUseAIFeatures(testUserId, 5);
@@ -232,15 +242,15 @@ describe("Feature Gating Permissions", () => {
 
   describe("canUseTranslation", () => {
     it("allows translation on pro, which has an unlimited translation quota", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
 
       const result = await canUseTranslation(testUserId);
 
       expect(result.allowed).toBe(true);
     });
 
-    it("allows translation without a plan when the wallet holds credits", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(FREE_PLAN);
+    it("allows translation on a plan with no included allowance when the wallet holds credits", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(3));
 
       const result = await canUseTranslation(testUserId);
@@ -250,8 +260,8 @@ describe("Feature Gating Permissions", () => {
       expect(result.creditsRequired).toBe(1);
     });
 
-    it("denies translation without a plan and without credits", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(FREE_PLAN);
+    it("denies translation with no included allowance and no credits", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(0));
 
       const result = await canUseTranslation(testUserId);
@@ -264,7 +274,7 @@ describe("Feature Gating Permissions", () => {
 
   describe("consumeFeatureUsage", () => {
     it("consumes credits and records usage for an AI suggestion", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
       asMock(consumeCredits).mockResolvedValue({ success: true });
 
@@ -291,7 +301,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("charges the higher translation credit cost", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       asMock(consumeCredits).mockResolvedValue({ success: true });
 
       const result = await consumeFeatureUsage(testUserId, "translation");
@@ -306,7 +316,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("fails without consuming credits when the plan lacks AI access", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(FREE_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
 
       const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
 
@@ -317,7 +327,7 @@ describe("Feature Gating Permissions", () => {
     });
 
     it("surfaces the error when credit consumption fails", async () => {
-      asMock(getEffectivePlan).mockResolvedValue(PRO_PLAN);
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
       asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
       asMock(consumeCredits).mockResolvedValue({
         success: false,
@@ -328,6 +338,66 @@ describe("Feature Gating Permissions", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Insufficient credits");
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * An account with no plan. Previously this state did not exist: an
+   * unsubscribed user resolved to the `free` row, and every gate quietly
+   * evaluated that row's limits instead of asking whether they had paid.
+   */
+  describe("an account with no plan", () => {
+    beforeEach(() => {
+      asMock(getEffectivePlan).mockResolvedValue(UNENTITLED);
+    });
+
+    it("cannot create a website, and is not asked how many it already has", async () => {
+      const result = await canCreateWebsite(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toBe(
+        "This account has no active plan. Choose a plan to continue.",
+      );
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it("cannot add a collaborator", async () => {
+      const result = await canAddCollaborator(testUserId, "site-1");
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("no active plan");
+    });
+
+    it("cannot use AI, and the wallet is not consulted", async () => {
+      const result = await canUseAIFeatures(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("no active plan");
+      expect(getUserCreditBalance).not.toHaveBeenCalled();
+    });
+
+    it("cannot translate even holding purchased credits", async () => {
+      // Credits are an add-on to a plan, not a substitute for one. The balance
+      // is not spent and not lost — it becomes spendable again on subscribing.
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(500));
+
+      const result = await canUseTranslation(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("no active plan");
+    });
+
+    it("consumes nothing and records no usage", async () => {
+      const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("no active plan");
+      expect(consumeCredits).not.toHaveBeenCalled();
       expect(mockInsert).not.toHaveBeenCalled();
     });
   });

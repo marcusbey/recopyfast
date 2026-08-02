@@ -1,85 +1,81 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { getPlanForSubscriber } from "@/lib/stripe/plans";
-import type { SubscriptionPlan, SubscriptionPlanId } from "@/lib/stripe/plans";
+import { findPlanById } from "@/lib/stripe/plans";
+import type { SubscriptionPlan } from "@/lib/stripe/plans";
+import { readEffectivePlanId } from "./effective-plan";
 
 /**
- * Which plan's entitlements a user actually has.
+ * Which plan's entitlements a user actually has — or that they have none.
  *
- * Two things can grant a plan and they are stored separately:
- *
- *   * `billing_subscriptions` — a recurring Stripe subscription with a period
- *     and a renewal date.
- *   * `plan_entitlements` — a permanent grant from a one-time purchase
- *     (Lifetime Pro) or a support comp. No period, never renews, never lapses.
- *
- * Every feature gate needs the union of the two, so it resolves through here
- * instead of reading `billing_subscriptions.plan` directly. A lifetime customer
- * has no subscription row at all; reading only that table would gate them to
- * free the moment they finished paying $199.
+ * There is no free plan. An account that has never paid is *unentitled*, which
+ * is a state of its own and not a plan whose limits happen to be zero. Every
+ * feature gate resolves through here rather than reading
+ * `billing_subscriptions.plan` directly, because a lifetime customer has no
+ * subscription row at all and reading only that table would strand them the
+ * moment they finished paying $199.
  */
 
-/** Statuses that count as "the user currently has this plan". */
-const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+/**
+ * The plan in force for a user, or the explicit absence of one.
+ *
+ * Modelled as a discriminated union rather than as a zero-limit plan object,
+ * because at a call site those two are indistinguishable. `getEffectivePlan`
+ * used to end in a `?? "free"` fallback that handed every gate a real
+ * `SubscriptionPlan` whose limits were all zero, so "has not paid" and "is on a
+ * plan that includes nothing" read identically — a gate that forgot to check
+ * entitlement worked anyway, by accident, and would have started granting
+ * access the day someone edited the free row's limits.
+ *
+ * `plan` and `planId` are `null` on the unentitled branch, so
+ * `entitlement.plan.limits` does not compile until the caller has narrowed on
+ * `entitled`. That is the point: the compiler finds the call sites, not grep.
+ */
+export type Entitlement =
+  | {
+      readonly entitled: true;
+      readonly planId: string;
+      readonly plan: SubscriptionPlan;
+    }
+  | { readonly entitled: false; readonly planId: null; readonly plan: null };
+
+/** The single unentitled value, so callers can compare against it directly. */
+export const UNENTITLED: Entitlement = {
+  entitled: false,
+  planId: null,
+  plan: null,
+};
 
 /**
- * The plan id in force for a user, or "free".
+ * The raw plan id recorded for a user, or `null` when there is none.
  *
- * An entitlement wins over a subscription: someone who bought Lifetime Pro and
- * later starts a Starter subscription should keep Pro, and a lifetime grant can
- * never be downgraded by a lapsed card.
+ * The query lives in ./effective-plan so `src/middleware.ts` can ask the same
+ * question with its own request-scoped client.
  */
 export async function getEffectivePlanId(
   userId: string,
-): Promise<SubscriptionPlanId | string> {
-  const supabase = await createClient();
-
-  const { data: entitlement, error: entitlementError } = await supabase
-    .from("plan_entitlements")
-    .select("plan_id")
-    .eq("user_id", userId)
-    .is("revoked_at", null)
-    .order("granted_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan_id: string }>();
-
-  // A read failure here must not silently downgrade a paying customer to free,
-  // so it is surfaced rather than swallowed.
-  if (entitlementError) {
-    throw new Error(
-      `Failed to read plan entitlements: ${entitlementError.message}`,
-    );
-  }
-
-  if (entitlement) {
-    return entitlement.plan_id;
-  }
-
-  const { data: subscription, error: subscriptionError } = await supabase
-    .from("billing_subscriptions")
-    .select("plan")
-    .eq("user_id", userId)
-    .in("status", LIVE_SUBSCRIPTION_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan: string }>();
-
-  if (subscriptionError) {
-    throw new Error(
-      `Failed to read billing subscriptions: ${subscriptionError.message}`,
-    );
-  }
-
-  return subscription?.plan ?? "free";
+): Promise<string | null> {
+  return readEffectivePlanId(await createClient(), userId);
 }
 
 /**
- * The full plan config in force for a user. Unknown ids resolve to `free`.
+ * The full plan config in force for a user, or `UNENTITLED`.
+ *
+ * A plan id with no active catalogue row — one retired years ago, or one
+ * switched off — is unentitled too. It used to fall back to `free`, which is
+ * how a plan that no longer exists kept conferring access.
  */
-export async function getEffectivePlan(
-  userId: string,
-): Promise<SubscriptionPlan> {
-  return getPlanForSubscriber(await getEffectivePlanId(userId));
+export async function getEffectivePlan(userId: string): Promise<Entitlement> {
+  const planId = await getEffectivePlanId(userId);
+  if (planId === null) {
+    return UNENTITLED;
+  }
+
+  const plan = await findPlanById(planId);
+  if (!plan) {
+    return UNENTITLED;
+  }
+
+  return { entitled: true, planId, plan };
 }
 
 export interface GrantEntitlementResult {

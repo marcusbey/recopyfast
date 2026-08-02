@@ -1,8 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import {
-  getEffectivePlan,
-  getEffectivePlanId,
-} from "@/lib/billing/entitlements";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 import {
   getUserCreditBalance,
   consumeCredits,
@@ -15,6 +12,12 @@ import {
  * Every allowance read here comes from the `plans` table via
  * `getEffectivePlan`, which resolves lifetime entitlements as well as live
  * subscriptions. Nothing in this file hardcodes what a plan includes.
+ *
+ * An account with no plan is denied outright, before any quota arithmetic.
+ * There is no free tier to fall through to: `getEffectivePlan` returns an
+ * `Entitlement`, and the union does not expose `.limits` until the caller has
+ * checked `entitled`, so every gate below has to say what it does about a user
+ * who has not paid.
  */
 
 export interface FeaturePermission {
@@ -29,6 +32,24 @@ export interface FeaturePermission {
 
 /** `-1` in a plan limit means unlimited. */
 const UNLIMITED = -1;
+
+/**
+ * The single denial for an account with no plan.
+ *
+ * Every gate returns this rather than a feature-specific message, because the
+ * answer is the same regardless of what was asked for and the remedy is the
+ * same too. `upgradeRequired` sends the UI to the plan picker.
+ *
+ * Purchased credits do not buy their way past it. Credits are an add-on to a
+ * plan, not a substitute for one, and nothing is destroyed by the denial — a
+ * wallet balance survives untouched and is spendable again the moment the
+ * account has a plan.
+ */
+const NO_PLAN: FeaturePermission = {
+  allowed: false,
+  reason: "This account has no active plan. Choose a plan to continue.",
+  upgradeRequired: true,
+};
 
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
 
@@ -66,9 +87,13 @@ async function countOwnedSites(
 export async function canCreateWebsite(
   userId: string,
 ): Promise<FeaturePermission> {
-  const supabase = await createClient();
-  const plan = await getEffectivePlan(userId);
+  const entitlement = await getEffectivePlan(userId);
+  if (!entitlement.entitled) {
+    return NO_PLAN;
+  }
+  const { plan } = entitlement;
 
+  const supabase = await createClient();
   const currentWebsites = await countOwnedSites(supabase, userId);
   const websiteLimit = plan.limits.websites;
 
@@ -109,9 +134,13 @@ export async function canAddCollaborator(
   userId: string,
   siteId: string,
 ): Promise<FeaturePermission> {
-  const supabase = await createClient();
-  const plan = await getEffectivePlan(userId);
+  const entitlement = await getEffectivePlan(userId);
+  if (!entitlement.entitled) {
+    return NO_PLAN;
+  }
+  const { plan } = entitlement;
 
+  const supabase = await createClient();
   const { count: currentCollaborators } = await supabase
     .from("site_permissions")
     .select("*", { count: "exact", head: true })
@@ -158,7 +187,11 @@ export async function canUseAIFeatures(
   userId: string,
   creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION,
 ): Promise<FeaturePermission> {
-  const plan = await getEffectivePlan(userId);
+  const entitlement = await getEffectivePlan(userId);
+  if (!entitlement.entitled) {
+    return NO_PLAN;
+  }
+  const { plan } = entitlement;
 
   if (!plan.limits.aiFeatures) {
     return {
@@ -188,8 +221,12 @@ export async function canUseAIFeatures(
 export async function canUseTranslation(
   userId: string,
 ): Promise<FeaturePermission> {
-  const plan = await getEffectivePlan(userId);
-  const translationLimit = plan.limits.translations;
+  const entitlement = await getEffectivePlan(userId);
+  if (!entitlement.entitled) {
+    return NO_PLAN;
+  }
+
+  const translationLimit = entitlement.plan.limits.translations;
 
   if (translationLimit === 0) {
     // Plans with no included translation allowance can still pay per use out
@@ -273,8 +310,7 @@ export async function consumeFeatureUsage(
  */
 export async function getUserUsageLimits(userId: string) {
   const supabase = await createClient();
-  const planId = await getEffectivePlanId(userId);
-  const plan = await getEffectivePlan(userId);
+  const entitlement = await getEffectivePlan(userId);
   const creditBalance = await getUserCreditBalance(userId);
 
   const websiteCount = await countOwnedSites(supabase, userId);
@@ -300,11 +336,15 @@ export async function getUserUsageLimits(userId: string) {
       .reduce((total, u) => total + u.count, 0) || 0;
 
   return {
-    plan: {
-      id: planId,
-      name: plan.name,
-      limits: plan.limits,
-    },
+    // Null rather than a stand-in plan, so a caller rendering "you are on the
+    // X plan" has to decide what to say to someone who is on none.
+    plan: entitlement.entitled
+      ? {
+          id: entitlement.planId,
+          name: entitlement.plan.name,
+          limits: entitlement.plan.limits,
+        }
+      : null,
     current: {
       websites: websiteCount,
       aiUsage,

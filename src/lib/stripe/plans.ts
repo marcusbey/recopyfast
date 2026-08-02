@@ -379,19 +379,22 @@ export async function getSubscriptionPlan(
 }
 
 /**
- * The plan a subscription row or entitlement names, falling back to `free`.
+ * The active catalogue row a subscription or entitlement names, or null.
  *
  * Takes a plain string because `billing_subscriptions.plan` is free text at the
  * database level — a plan retired years ago can still be sitting in an old row.
+ * Such a row resolves to null rather than to `free`: there is no free plan to
+ * fall back to, and inventing one is how an account that had never paid ended
+ * up holding a real-looking SubscriptionPlan.
  */
-export async function getPlanForSubscriber(
+export async function findPlanById(
   planId: string | null | undefined,
-): Promise<SubscriptionPlan> {
+): Promise<SubscriptionPlan | null> {
+  if (!planId) {
+    return null;
+  }
   const plans = await getSubscriptionPlans();
-  return (
-    plans.find((plan) => plan.id === planId) ??
-    (await getSubscriptionPlan("free"))
-  );
+  return plans.find((plan) => plan.id === planId) ?? null;
 }
 
 /**

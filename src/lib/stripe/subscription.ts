@@ -2,12 +2,11 @@ import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
 import {
   getPaidPlan,
-  getPlanForSubscriber,
   resolveStripePriceId,
   type BillingPeriod,
   type PaidPlanId,
 } from "./plans";
-import { getEffectivePlanId } from "@/lib/billing/entitlements";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 import type { Subscription } from "@/types/billing";
 
 /**
@@ -314,9 +313,9 @@ export async function getUserSubscription(
 /**
  * Check if user has access to a feature based on the plan in force.
  *
- * Resolved through `getEffectivePlanId` rather than `billing_subscriptions`
- * alone so a Lifetime Pro customer — who has an entitlement and no subscription
- * — is not gated to the free plan's limits.
+ * Resolved through `getEffectivePlan` rather than `billing_subscriptions` alone
+ * so a Lifetime Pro customer — who has an entitlement and no subscription — is
+ * not gated out. An account with no plan has access to nothing.
  */
 export async function checkFeatureAccess(
   userId: string,
@@ -326,7 +325,11 @@ export async function checkFeatureAccess(
     | "collaborators"
     | "translations",
 ): Promise<boolean> {
-  const plan = await getPlanForSubscriber(await getEffectivePlanId(userId));
+  const entitlement = await getEffectivePlan(userId);
+  if (!entitlement.entitled) {
+    return false;
+  }
+  const { plan } = entitlement;
 
   switch (feature) {
     case "aiFeatures":

@@ -1,8 +1,42 @@
 import { createServerClient } from "@supabase/ssr";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
+import { readEffectivePlanId } from "@/lib/billing/effective-plan";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
+
+/**
+ * The one page an account without a plan can still reach.
+ *
+ * It is where Stripe Checkout returns to — on success *and* on cancel — so it
+ * cannot be gated: at the moment a customer comes back from a successful
+ * payment the webhook has usually not landed yet, and they are still
+ * unentitled. Gating it would bounce them off their own receipt and lose the
+ * `session_id` the page reconciles against. It is also the way out of an
+ * abandoned checkout.
+ */
+const CHECKOUT_PATH = "/dashboard/billing";
+
+/**
+ * Is this session's account without a plan?
+ *
+ * Fails open. A Supabase blip must not lock a paying customer out of their own
+ * dashboard, and this gate is routing, not authorisation — every API route and
+ * feature gate resolves entitlement independently, so the worst a false
+ * negative here costs is a rendered shell with nothing behind it.
+ */
+async function isUnentitled(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<boolean> {
+  try {
+    return (await readEffectivePlanId(supabase, userId)) === null;
+  } catch (error) {
+    console.error("[middleware] entitlement check failed", error);
+    return false;
+  }
+}
 
 export async function middleware(request: NextRequest) {
   // This middleware now focuses on auth and page-level security
@@ -64,6 +98,34 @@ export async function middleware(request: NextRequest) {
   // Redirect to dashboard if accessing auth routes while logged in
   if (isAuthRoute && user) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  // Signing up does not make an account usable — paying does. An authenticated
+  // session with no plan gets one destination, the checkout page, and typing a
+  // dashboard URL does not get round it.
+  //
+  // Only page routes are gated. API routes are under /api and enforce their own
+  // entitlement, so they never reach this branch and never pay for the query.
+  if (
+    user &&
+    isProtectedRoute &&
+    !request.nextUrl.pathname.startsWith(CHECKOUT_PATH) &&
+    (await isUnentitled(supabase, user.id))
+  ) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = CHECKOUT_PATH;
+    redirectUrl.search = "";
+    redirectUrl.searchParams.set("checkout", "required");
+    redirectUrl.searchParams.set("redirectedFrom", request.nextUrl.pathname);
+
+    // Carry over any refreshed session cookie. `supabase.auth.getUser()` above
+    // can rotate the token, and dropping the new one here would sign the user
+    // out on the way to being asked to pay.
+    const redirect = NextResponse.redirect(redirectUrl);
+    for (const cookie of supabaseResponse.cookies.getAll()) {
+      redirect.cookies.set(cookie);
+    }
+    return redirect;
   }
 
   // Add security headers to all responses

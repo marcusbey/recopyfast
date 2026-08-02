@@ -112,17 +112,22 @@ export interface PlanCatalogue {
 }
 
 /**
- * The plan a subscriber is on, falling back to `free` for unknown ids — an id
- * retired years ago can still be sitting in an old subscription row.
+ * The plan a subscriber is on, or undefined when the catalogue holds no active
+ * row for that id — including when there is no id at all, which is what an
+ * account that has not paid resolves to.
+ *
+ * The client-side mirror of `findPlanById` in ./plans, and it dropped the same
+ * `free` fallback for the same reason: "no plan" is a state the caller has to
+ * render, not one to paper over with a plan object.
  */
 export function findSubscriptionPlan(
   catalogue: PlanCatalogue,
   planId: string | null | undefined,
 ): SubscriptionPlan | undefined {
-  return (
-    catalogue.subscriptions.find((plan) => plan.id === planId) ??
-    catalogue.subscriptions.find((plan) => plan.id === "free")
-  );
+  if (!planId) {
+    return undefined;
+  }
+  return catalogue.subscriptions.find((plan) => plan.id === planId);
 }
 
 export function findOneTimeProduct(

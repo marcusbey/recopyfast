@@ -66,9 +66,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Check plan allows A/B testing
-    const plan = await getEffectivePlan(user.id);
+    const entitlement = await getEffectivePlan(user.id);
 
-    if (!plan.limits.abTesting) {
+    if (!entitlement.entitled) {
+      return NextResponse.json(
+        {
+          error: "This account has no active plan. Choose a plan to continue.",
+          upgrade_required: true,
+        },
+        { status: 403 },
+      );
+    }
+
+    if (!entitlement.plan.limits.abTesting) {
       return NextResponse.json(
         {
           error: "A/B testing requires a Pro plan",

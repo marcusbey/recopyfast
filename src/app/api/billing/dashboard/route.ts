@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import { getCreditWallet, getCreditTransactions } from "@/lib/credits/system";
 import { getPlanCatalogue } from "@/lib/stripe/plans";
-import { getEffectivePlanId } from "@/lib/billing/entitlements";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { listPaymentMethods } from "@/lib/stripe/payment-methods";
 import type { BillingDashboardData, PaymentMethod } from "@/types/billing";
 
@@ -116,9 +116,13 @@ export async function GET() {
     // The catalogue ships with the dashboard payload so the client components
     // render prices, limits and feature lists from the database without each
     // one fetching the plans separately.
-    const [catalogue, effectivePlanId] = await Promise.all([
+    // `entitlement.planId` is null for an account that has not paid, and for
+    // one whose recorded plan no longer has an active catalogue row. Either way
+    // the client renders the unentitled state; neither is an error, and this
+    // route used to 500 on both because resolving the plan threw.
+    const [catalogue, entitlement] = await Promise.all([
       getPlanCatalogue(),
-      getEffectivePlanId(user.id),
+      getEffectivePlan(user.id),
     ]);
 
     const dashboardData: BillingDashboardData = {
@@ -130,7 +134,7 @@ export async function GET() {
       recentTransactions,
       currentUsage,
       catalogue,
-      effectivePlanId,
+      effectivePlanId: entitlement.planId,
     };
 
     return NextResponse.json(dashboardData);

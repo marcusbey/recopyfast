@@ -122,8 +122,15 @@ export async function getUserCreditBalance(
 
   // Resolved through the entitlement layer so a Lifetime Pro customer, who has
   // no billing_subscriptions row at all, still gets Pro's included credits.
-  const plan = await getEffectivePlan(userId);
-  const includedCredits = plan.limits.monthlyCredits;
+  //
+  // No plan means no included allowance, and reading the balance must still
+  // work: an unentitled user has a wallet like anyone else, and the credits in
+  // it were paid for. This read is on the path the billing dashboard takes, so
+  // throwing here would turn "you have not subscribed" into a 500.
+  const entitlement = await getEffectivePlan(userId);
+  const includedCredits = entitlement.entitled
+    ? entitlement.plan.limits.monthlyCredits
+    : 0;
 
   // NOTE: `plan` is the column name on billing_subscriptions, not `plan_id`.
   // Only the period boundary is needed here; the plan itself came from above.

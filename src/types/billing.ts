@@ -145,8 +145,11 @@ export interface BillingDashboardData {
    * copy — see src/lib/stripe/plans.ts.
    */
   catalogue: PlanCatalogue;
-  /** Plan in force, counting lifetime entitlements as well as subscriptions. */
-  effectivePlanId: string;
+  /**
+   * Plan in force, counting lifetime entitlements as well as subscriptions.
+   * Null when the account has none — there is no free plan to report instead.
+   */
+  effectivePlanId: string | null;
 }
 
 // Subscription management
