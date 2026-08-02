@@ -31,11 +31,19 @@ STRIPE_ENTERPRISE_PRICE_ID=price_xxxxx_enterprise_monthly
 STRIPE_TICKETS_PRICE_ID=price_xxxxx_credits_oneTime
 
 # Redis
-REDIS_URL=redis://default:<password>@<host>:<port>
+# NOTE: `rediss://`, not `redis://`. Upstash is TLS-only and the plain scheme
+# fails in a way that surfaces as a rate limiter outage, not a connection error.
+REDIS_URL=rediss://default:<password>@<host>:<port>
 
 # Security
 ALLOWED_ORIGINS=https://recopyfa.st,https://www.recopyfa.st
-CRON_SECRET=fCanCdKf+OMGi2CqDjrwLMzTDfeX7NX3OHfRXl2v6so=
+CRON_SECRET=<generate: openssl rand -base64 32>
+# ^ NEVER commit a real value here. The previous one was committed in full to
+# this public repository and had to be rotated. It guards /api/blog/generate
+# and both cron routes, so anyone reading it could trigger AI generation
+# against our OpenAI billing. Vercel injects this as
+# `Authorization: Bearer $CRON_SECRET` on scheduled invocations, so rotating
+# the env var rotates both sides at once.
 
 # Monitoring (Optional but recommended)
 NEXT_PUBLIC_SENTRY_DSN=
