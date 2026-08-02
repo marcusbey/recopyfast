@@ -1,11 +1,8 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  DashboardNavigation,
-  isDashboardPlan,
-  type DashboardPlan,
-} from "@/components/dashboard/DashboardNavigation";
+import { DashboardNavigation } from "@/components/dashboard/DashboardNavigation";
+import type { EntitlementSummary } from "@/types/billing";
 import { Breadcrumbs } from "@/components/dashboard/Breadcrumbs";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -30,7 +27,9 @@ export default function DashboardLayout({
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [userPlan, setUserPlan] = useState<DashboardPlan>("free");
+  const [entitlement, setEntitlement] = useState<EntitlementSummary | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!loading && !user) {
@@ -44,10 +43,32 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!user) return;
-    // user_metadata is client-writable in Supabase, so an unrecognised value
-    // must fall back to free rather than being trusted into the nav gate.
-    const plan = user.user_metadata?.plan;
-    setUserPlan(isDashboardPlan(plan) ? plan : "free");
+
+    // This used to read `user.user_metadata.plan`. Nothing in the codebase
+    // ever wrote that key, so it was always undefined and every account —
+    // Pro subscribers included — fell back to "free": the sidebar told a
+    // paying customer they were on the free plan and disabled the Pro links
+    // they had bought. It was also the wrong source in principle, since
+    // user_metadata is client-writable and would have let anyone unlock their
+    // own navigation by editing it.
+    const controller = new AbortController();
+
+    fetch("/api/billing/entitlement", { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: EntitlementSummary | null) => {
+        if (data) setEntitlement(data);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        // Leave it null. The nav treats unknown as entitled, so a failed read
+        // shows a customer their full navigation rather than locking them out
+        // of a product they pay for. Middleware still gates every route.
+        console.error("[dashboard] entitlement lookup failed:", error);
+      });
+
+    return () => controller.abort();
   }, [user]);
 
   // A skeleton in the shape of the shell, so the page does not flash from a
@@ -104,7 +125,7 @@ export default function DashboardLayout({
         Skip to content
       </a>
 
-      <DashboardNavigation userPlan={userPlan} />
+      <DashboardNavigation entitlement={entitlement} />
 
       <div className="lg:pl-64">
         {/* The header carries location (breadcrumbs), not a greeting. It used

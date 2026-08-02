@@ -11,6 +11,27 @@ import type {
 // already import billing types from one place keep working.
 export type { PlanLimits, SubscriptionPlan as PlanData };
 
+/**
+ * The dashboard shell's view of what an account is entitled to.
+ *
+ * Served by `GET /api/billing/entitlement`. It mirrors the three states of
+ * `Entitlement` in `@/lib/billing/effective-plan` without carrying the plan
+ * object, because the shell only needs to know what to render.
+ *
+ * It lives here rather than beside the route so client components can import
+ * the type without pulling that module — and its server-only Supabase client —
+ * into the browser bundle.
+ *
+ * Presentation only. Every decision about what may actually happen resolves
+ * entitlement server-side; a client can lie about what it draws, never about
+ * what the server allows.
+ */
+export interface EntitlementSummary {
+  kind: "plan" | "credits" | "none";
+  planId: PaidPlanId | null;
+  planName: string | null;
+}
+
 export interface Customer {
   id: string;
   user_id: string;

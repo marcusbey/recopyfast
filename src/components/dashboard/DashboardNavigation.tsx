@@ -18,13 +18,15 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { PaidPlanId } from "@/lib/stripe/plan-types";
+import type { EntitlementSummary } from "@/types/billing";
 
 interface NavItem {
   label: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
-  requiresPlan?: DashboardPlan;
+  requiresPlan?: PaidPlanId;
 }
 
 interface NavGroup {
@@ -64,33 +66,30 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+/** Ordered weakest to strongest. Items unlock at or above the rank they ask for. */
+const PLAN_RANK: Record<PaidPlanId, number> = {
+  starter: 1,
+  pro: 2,
+};
+
 /**
- * Plans that gate navigation. Kept as a literal union rather than read from the
- * plan catalogue because it is a compile-time contract between this list and
- * the `requiresPlan` on each item, not a pricing decision.
+ * The only destination an account entitled to nothing can actually reach.
+ * `src/middleware.ts` bounces such a session off every other dashboard route
+ * back to here, which is why the rest of the nav must not be offered to them.
  */
-export type DashboardPlan = "free" | "starter" | "pro";
-
-const DASHBOARD_PLANS: readonly DashboardPlan[] = [
-  "free",
-  "starter",
-  "pro",
-] as const;
-
-export function isDashboardPlan(value: unknown): value is DashboardPlan {
-  return (
-    typeof value === "string" &&
-    (DASHBOARD_PLANS as readonly string[]).includes(value)
-  );
-}
+const CHECKOUT_HREF = "/dashboard/billing";
 
 interface DashboardNavigationProps {
-  userPlan?: DashboardPlan;
+  /**
+   * What the account is entitled to, or `null` while it is still being
+   * fetched. Presentation only — the server decides what may actually happen.
+   */
+  entitlement?: EntitlementSummary | null;
   className?: string;
 }
 
 export function DashboardNavigation({
-  userPlan = "free",
+  entitlement = null,
   className,
 }: DashboardNavigationProps) {
   const pathname = usePathname();
@@ -104,18 +103,45 @@ export function DashboardNavigation({
     return pathname.startsWith(href);
   };
 
-  // Ordered weakest to strongest: an item is accessible when the customer's
-  // plan ranks at or above the one it requires.
-  const PLAN_RANK: Record<DashboardPlan, number> = {
-    free: 0,
-    starter: 1,
-    pro: 2,
-  };
+  // Unknown while loading. Treated as entitled on purpose: a paying customer
+  // must not watch their own navigation appear greyed out for a moment on
+  // every page load. The cost of being wrong for that moment is a link that
+  // redirects; the cost of the opposite is telling a subscriber they have
+  // nothing.
+  const isLockedOut = entitlement?.kind === "none";
 
   const canAccessItem = (item: NavItem) => {
+    // Nothing but checkout is reachable, so nothing else may be offered.
+    // Every other item would bounce straight back here, and a sidebar of
+    // links that all return you to where you started reads as a broken app
+    // rather than as a paywall.
+    if (isLockedOut) return item.href === CHECKOUT_HREF;
+
     if (!item.requiresPlan) return true;
-    return PLAN_RANK[userPlan] >= PLAN_RANK[item.requiresPlan];
+
+    // Credits buy metered usage, never plan capabilities. A credit holder is
+    // let into the dashboard by middleware but still cannot reach a
+    // plan-gated destination.
+    if (!entitlement || entitlement.planId === null) {
+      return entitlement === null;
+    }
+
+    return PLAN_RANK[entitlement.planId] >= PLAN_RANK[item.requiresPlan];
   };
+
+  const planLabel = (() => {
+    if (entitlement === null) return "—";
+    switch (entitlement.kind) {
+      case "plan":
+        return entitlement.planName ?? "Active plan";
+      // Honest about what they hold. "Free" was the old label and it now names
+      // a retired plan nobody is on.
+      case "credits":
+        return "Credits only";
+      case "none":
+        return "No plan";
+    }
+  })();
 
   const NavLink = ({ item }: { item: NavItem }) => {
     const active = isActive(item.href);
@@ -249,13 +275,19 @@ export function DashboardNavigation({
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-eyebrow">Plan</p>
-                  <p className="mt-1 text-sm font-medium capitalize text-foreground">
-                    {userPlan}
+                  <p className="mt-1 truncate text-sm font-medium text-foreground">
+                    {planLabel}
                   </p>
                 </div>
-                {userPlan === "free" && (
+                {/* Only offered when there is something to buy. It used to
+                    render for everyone, because the plan it read was always
+                    undefined — so a Pro subscriber was invited to upgrade
+                    from a plan they were not on. */}
+                {entitlement !== null && entitlement.kind !== "plan" && (
                   <Button size="sm" variant="outline" asChild>
-                    <Link href="/dashboard/billing">Upgrade</Link>
+                    <Link href={CHECKOUT_HREF}>
+                      {entitlement.kind === "none" ? "Choose plan" : "Upgrade"}
+                    </Link>
                   </Button>
                 )}
               </div>
