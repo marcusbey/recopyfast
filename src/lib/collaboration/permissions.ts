@@ -8,6 +8,40 @@ export interface PermissionCheck {
   reason?: string;
 }
 
+/** The values `site_permissions.permission` is allowed to take. */
+export type SitePermissionLevel = "view" | "edit" | "admin";
+
+/**
+ * Collapse a collaboration role onto the column authorisation actually reads.
+ *
+ * `site_permissions` carries both a `role` and a `permission` column, but only
+ * `permission` is consulted — by `user_has_site_permission` in the RLS helpers,
+ * by `checkSitePermission` below, and by every admin gate in /api/staging/* and
+ * /api/editor/*. A row written with `role` alone grants nothing anywhere, which
+ * is exactly the bug this exists to close: sharing appeared to succeed, fired a
+ * notification, and left the recipient with no access at all.
+ *
+ * The mapping is lossy, and deliberately so. `permission` has three levels
+ * (CHECK constraint: view|edit|admin) against four roles, so `manager` and
+ * `owner` both land on `admin` — a manager is someone who may manage the site,
+ * and `admin` is the only level that permits managing. The consequence worth
+ * knowing is that the inverse mapping (`sitePermissionToTeamRole`) renders both
+ * back as `owner`, so a manager reads as an owner after a round trip. Widening
+ * the CHECK constraint to carry a distinct `manager` level is the real fix and
+ * is a schema change beyond this repair.
+ */
+export function teamRoleToSitePermission(role: TeamRole): SitePermissionLevel {
+  switch (role) {
+    case "owner":
+    case "manager":
+      return "admin";
+    case "editor":
+      return "edit";
+    case "viewer":
+      return "view";
+  }
+}
+
 export class CollaborationPermissions {
   private supabase: Promise<SupabaseClient>;
 

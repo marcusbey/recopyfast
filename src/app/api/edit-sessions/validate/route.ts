@@ -8,6 +8,7 @@ import {
   extractEditorToken,
   validateEditorAccess,
 } from "@/lib/auth/editor-access";
+import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 export async function POST(request: NextRequest) {
@@ -35,6 +36,10 @@ export async function POST(request: NextRequest) {
     const result = await validateEditorAccess({
       siteId,
       token: editorToken,
+      // `extractEditorToken` resolves a body `token` field to a STAGING token,
+      // so this route can receive either kind. Pass the fingerprint so the
+      // staging case is bound rather than silently exempt.
+      device: readStagingDeviceFingerprint(request),
     });
 
     if (!result.valid || !result.access) {

@@ -36,6 +36,19 @@ export interface ValidateEditSessionParams {
   ipAddress?: string;
 }
 
+/**
+ * Absolute ceiling on how long one edit session may live, measured from when it
+ * was first issued — not from the last extension.
+ *
+ * MAX_DURATION_HOURS caps a *single* grant of time. Without this second, absolute
+ * bound, /api/edit-sessions/extend could be called every 23 hours forever, so a
+ * token that leaked once (the editUrl lands in browser history, a shared screen,
+ * a pasted link) stayed valid indefinitely. The session token carries no origin
+ * binding, no device binding, and its IP check deliberately does not reject, so
+ * elapsed time is the only thing that reliably retires it.
+ */
+export const MAX_SESSION_LIFETIME_HOURS = 24;
+
 export class EditSessionManager {
   private static readonly DEFAULT_DURATION_HOURS = 2;
   private static readonly MAX_DURATION_HOURS = 24;
@@ -187,15 +200,32 @@ export class EditSessionManager {
     userId: string,
   ): Promise<boolean> {
     try {
-      const supabase = await createClient();
+      // Service-role, not the user-scoped client. `edit_sessions` has SELECT and
+      // INSERT policies but no UPDATE policy
+      // (20250817000000_complete_database_setup.sql:480-483), so the previous
+      // user-scoped update matched zero rows, returned no error, and reported
+      // success — revocation silently did nothing. The `.eq("user_id", …)`
+      // filter below is what actually authorises this, and it is now load-bearing
+      // rather than decorative.
+      const supabase = createServiceRoleClient();
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("edit_sessions")
         .update({ is_active: false, revoked_at: new Date().toISOString() })
         .eq("id", sessionId)
-        .eq("user_id", userId);
+        .eq("user_id", userId)
+        .eq("is_active", true)
+        .select("id");
 
-      return !error;
+      if (error) {
+        console.error("Error revoking edit session:", error.message);
+        return false;
+      }
+
+      // Zero rows means the session does not exist, is already revoked, or
+      // belongs to someone else. Reporting that honestly is what lets the caller
+      // return 404 instead of pretending a revocation happened.
+      return (data?.length ?? 0) > 0;
     } catch (error) {
       console.error("Error revoking edit session:", error);
       return false;

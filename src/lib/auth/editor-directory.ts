@@ -12,6 +12,7 @@ import {
   normalizePermissions,
   type EditorPermission,
 } from "@/lib/auth/editor-access";
+import { revokeAllGrantsForEditor } from "@/lib/auth/editor-grants";
 
 export interface SiteEditor {
   id: string;
@@ -196,24 +197,18 @@ export async function revokeSiteEditor(params: {
     return { revoked: false, grantsKilled: 0 };
   }
 
-  const { data: killed, error: grantError } = await supabase
-    .from("editor_device_grants")
-    .update({ revoked_at: now, revoked_reason: "editor_revoked" })
-    .eq("site_editor_id", params.siteEditorId)
-    .is("revoked_at", null)
-    .select("id");
+  // Delegated rather than repeated inline: this is the same sweep
+  // `revokeAllGrantsForEditor` performs, and keeping one implementation means
+  // "remove an editor" and an operator-initiated sign-out cannot drift apart.
+  // It logs its own failures and reports 0 when the sweep does not land — the
+  // editor is revoked either way, so access is already denied; the leftover rows
+  // only mislead the dashboard's device count.
+  const grantsKilled = await revokeAllGrantsForEditor(
+    params.siteEditorId,
+    "editor_revoked",
+  );
 
-  if (grantError) {
-    // The editor is already revoked, so access is denied either way; log loudly
-    // because the leftover rows are misleading in the dashboard's device list.
-    console.error(
-      "[editor-directory] editor revoked but grant sweep failed:",
-      grantError.message,
-    );
-    return { revoked: true, grantsKilled: 0 };
-  }
-
-  return { revoked: true, grantsKilled: killed?.length ?? 0 };
+  return { revoked: true, grantsKilled };
 }
 
 /** Editors of a site, for the dashboard. Includes revoked rows for audit. */

@@ -54,11 +54,17 @@ export const GRANT_REFRESH_THRESHOLD_MS = 24 * 60 * 60 * 1000;
  *
  * Two tabs on the same site share one localStorage entry, and only one of them
  * receives the replacement token. Without a grace window the other tab is logged
- * out mid-edit. Sixty seconds is far longer than the gap between a refresh and
- * the sibling tab's next call, and far shorter than any useful window for
- * someone replaying a token they copied.
+ * out mid-edit.
+ *
+ * Sixty seconds was too tight by a wide margin. Background tabs have their
+ * timers throttled to minutes, a suspended laptop stops firing them entirely,
+ * and a phone that loses signal in a lift comes back whenever it comes back —
+ * so "the sibling tab's next call" is routinely minutes, not seconds, away.
+ * Five minutes covers the ordinary cases without making rotation meaningless;
+ * beyond it the token is refused, which is now a recoverable outcome rather
+ * than a destructive one (see the replay note in `validateDeviceGrant`).
  */
-export const GRANT_ROTATION_GRACE_MS = 60 * 1000;
+export const GRANT_ROTATION_GRACE_MS = 5 * 60 * 1000;
 
 interface GrantPayload {
   /** editor_device_grants.id */
@@ -79,6 +85,7 @@ export type GrantRejection =
   | "unknown"
   | "revoked"
   | "replayed"
+  | "raced"
   | "editor_revoked"
   | "site_mismatch"
   | "origin_mismatch"
@@ -112,12 +119,25 @@ export interface DeviceContext {
  * The precise reason is safe to return — the caller already knows which token,
  * origin and browser it used — and the widget needs to tell "ask for a code"
  * apart from "you are not an editor here, hide the pencil entirely".
+ *
+ * `refresh` means "the credential you presented is stale, but you are probably
+ * still signed in — re-read the stored grant and retry once before prompting".
+ * It exists because the common cause of a superseded token is a sibling tab
+ * having rotated it, and that tab wrote the replacement to the same
+ * localStorage entry this one is reading. Sending the user to a code prompt in
+ * that situation is a needless interruption. Fall back to `verify` if the retry
+ * is also refused.
  */
-export function nextActionFor(reason: GrantRejection): "verify" | "hide" {
+export function nextActionFor(
+  reason: GrantRejection,
+): "verify" | "hide" | "refresh" {
   switch (reason) {
     case "editor_revoked":
     case "site_mismatch":
       return "hide";
+    case "replayed":
+    case "raced":
+      return "refresh";
     default:
       return "verify";
   }
@@ -266,12 +286,37 @@ export async function validateDeviceGrant(params: {
       // A sibling tab refreshed moments ago and this request still carries the
       // old token. Expected; let it through, it will pick up the new one.
     } else if (row.revoked_reason === "rotated") {
-      // A grant that was replaced long ago is being presented again. The
-      // legitimate holder moved on, so this is a copy. Kill the whole lineage
-      // rather than just this token — the copier may hold newer ones too.
-      await revokeAllGrantsForEditor(row.site_editor_id, "replay");
+      // A grant that was replaced some time ago is being presented again.
+      //
+      // This used to revoke every grant for the editor, on the theory that a
+      // late replay means the token was copied. That inference does not hold,
+      // and acting on it was worse than the thing it defended against:
+      //
+      //   - It fires during ordinary use. A tab whose timers were throttled, a
+      //     laptop resumed from sleep, a phone off the network — each comes back
+      //     holding the token it had, which is now superseded. The user is
+      //     signed out on every device, mid-edit, for having left a tab open.
+      //   - It is a denial-of-service primitive. The trigger is a single
+      //     unauthenticated request carrying a token that is, by construction,
+      //     already useless. Anyone who obtains one expired-by-rotation
+      //     token — a screenshot, a shared machine, synced storage — can sign an
+      //     editor out of everything on demand, repeatedly.
+      //   - It buys little even when the inference is right. Rotation has
+      //     already made this token worthless: it is refused here, and it cannot
+      //     mint a successor. A thief holding the *current* token is unaffected
+      //     by the sweep except that they, like the victim, must re-verify — and
+      //     they can re-steal.
+      //
+      // So the response is proportionate to what we actually know: this one
+      // token is dead. The holder re-reads the credential their sibling tab
+      // wrote and carries on. Lineage-wide revocation still exists and is still
+      // the right answer for a *deliberate* trigger — an owner revoking an
+      // editor (`revokeSiteEditor`) or an operator acting on the log line
+      // below — but it is no longer driven by a signal that fires on its own.
       console.warn(
-        `[editor-grants] replayed grant ${row.id} — revoked all grants for editor ${row.site_editor_id}`,
+        `[editor-grants] superseded grant ${row.id} replayed for editor ${row.site_editor_id} ` +
+          `(rotated ${Math.round((Date.now() - revokedAt) / 1000)}s ago). Refusing this token only. ` +
+          `Repeated occurrences across different devices are worth investigating.`,
       );
       return { valid: false, reason: "replayed" };
     } else {
@@ -367,6 +412,41 @@ export async function refreshDeviceGrant(params: {
 
   const supabase = createServiceRoleClient();
 
+  // Claim the right to rotate BEFORE minting.
+  //
+  // This conditional update is the serialisation point. Validation is a read,
+  // so two tabs refreshing at the same moment both passed it; previously both
+  // then minted, and only one won this update. That forked the lineage: one
+  // token became two live grants, the loser's replacement was never recorded as
+  // superseding anything, and the "was this token replaced?" question that
+  // replay detection asks had two answers. Claiming first means exactly one
+  // caller proceeds to mint.
+  const { data: claimed, error: claimError } = await supabase
+    .from("editor_device_grants")
+    .update({
+      revoked_at: new Date().toISOString(),
+      revoked_reason: "rotated",
+    })
+    .eq("id", validation.grant.grantId)
+    .is("revoked_at", null)
+    .select("id");
+
+  if (claimError) {
+    console.error(
+      "[editor-grants] could not claim grant for rotation:",
+      claimError.message,
+    );
+    return { ok: false, reason: "error" };
+  }
+
+  if (!claimed || claimed.length === 0) {
+    // Lost the race — a sibling refreshed this same token moments ago and has
+    // already written the replacement to the shared storage this caller reads.
+    // Nothing to do but tell it to pick that up; minting a second grant here is
+    // exactly the fork this claim exists to prevent.
+    return { ok: false, reason: "raced" };
+  }
+
   const issued = await issueDeviceGrant({
     siteEditorId: validation.grant.siteEditorId,
     siteId: validation.grant.siteId,
@@ -375,30 +455,46 @@ export async function refreshDeviceGrant(params: {
     rotatedFrom: validation.grant.grantId,
   });
 
-  if (!issued) return { ok: false, reason: "error" };
+  if (!issued) {
+    // Minting failed after the claim succeeded, so the holder is currently
+    // holding a token we just marked superseded and has no replacement. Undo the
+    // claim rather than leave them locked out of a session they were entitled to
+    // keep — the original ordering (mint first) existed for exactly this reason,
+    // and this compensating write preserves that guarantee while keeping the
+    // serialisation the claim buys us.
+    const { error: rollbackError } = await supabase
+      .from("editor_device_grants")
+      .update({ revoked_at: null, revoked_reason: null })
+      .eq("id", validation.grant.grantId)
+      .eq("revoked_reason", "rotated");
 
-  // Supersede only after the replacement exists, so a failure here leaves the
-  // holder with a working credential rather than none.
-  const { error } = await supabase
-    .from("editor_device_grants")
-    .update({
-      revoked_at: new Date().toISOString(),
-      revoked_reason: "rotated",
-    })
-    .eq("id", validation.grant.grantId)
-    .is("revoked_at", null);
+    if (rollbackError) {
+      // Now the holder really is stuck, and silence would make it look like a
+      // transient mint failure instead of a revoked credential.
+      console.error(
+        `[editor-grants] mint failed AND rollback failed for grant ${validation.grant.grantId} — ` +
+          `holder must re-verify:`,
+        rollbackError.message,
+      );
+    }
 
-  if (error) {
-    console.error(
-      "[editor-grants] could not supersede old grant:",
-      error.message,
-    );
+    return { ok: false, reason: "error" };
   }
 
   return { ok: true, grant: issued.grant, expiresAt: issued.expiresAt };
 }
 
-/** Kill every live grant for an editor. Used by revocation and replay detection. */
+/**
+ * Kill every live grant for an editor. Returns the number actually revoked.
+ *
+ * Deliberate triggers only: an owner removing an editor, or an operator acting
+ * on a replay warning. It is no longer wired to replay detection itself — see
+ * the long note in `validateDeviceGrant` for why an automatic trigger on that
+ * signal was a denial-of-service primitive rather than a defence.
+ *
+ * The `replay` reason remains available for an operator-initiated sweep in
+ * response to that log line; nothing in the request path reaches it.
+ */
 export async function revokeAllGrantsForEditor(
   siteEditorId: string,
   reason: "editor_revoked" | "replay" | "manual",

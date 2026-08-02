@@ -8,6 +8,7 @@ import {
   extractEditorToken,
   validateEditorAccess,
 } from "@/lib/auth/editor-access";
+import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 export async function POST(request: NextRequest) {
@@ -37,6 +38,9 @@ export async function POST(request: NextRequest) {
       siteId,
       token: editorToken,
       allowUnverified: true,
+      // This is the widget's boot check, and the point at which a forwarded URL
+      // must be told to verify rather than handed someone else's session.
+      device: readStagingDeviceFingerprint(request),
     });
 
     if (!result.valid) {

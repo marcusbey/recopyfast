@@ -6,6 +6,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { timingSafeEqualString } from "@/lib/auth/editor-crypto";
+import {
+  checkStagingDeviceBinding,
+  type StagingDeviceFingerprint,
+} from "@/lib/auth/staging-device";
 import crypto from "crypto";
 
 export type StagingPermission = "view" | "edit" | "publish" | "admin";
@@ -157,6 +161,7 @@ export class StagingAccessManager {
   static async validateStagingAccess(
     token: string,
     siteId: string,
+    device?: StagingDeviceFingerprint,
   ): Promise<ValidateStagingAccessResult> {
     try {
       // Use service role client to bypass RLS for public token validation
@@ -203,6 +208,41 @@ export class StagingAccessManager {
 
       // Check if email is verified
       if (!access.email_verified) {
+        return {
+          valid: true,
+          verified: false,
+          permissions: [],
+          email: access.email,
+          expiresAt: new Date(access.expires_at),
+          requiresVerification: true,
+        };
+      }
+
+      // The flag alone is not enough — it is permanent, and the token it hangs
+      // off travels in a URL. Re-check that this request comes from the device
+      // that actually entered the code, recently enough to still be trusted.
+      // Without this, forwarding the URL forwards the authorisation. See the
+      // module header of src/lib/auth/staging-device.ts.
+      //
+      // A caller that supplies no fingerprint is refused rather than exempted:
+      // "I did not bring evidence" must not be a stronger position than
+      // bringing the wrong evidence.
+      const binding = checkStagingDeviceBinding(
+        {
+          userAgentHash: access.verified_user_agent_hash ?? null,
+          verifiedAt: access.verified_at ?? null,
+        },
+        device ?? {
+          userAgentHash: "",
+          originHash: "",
+          ipPrefix: null,
+        },
+      );
+
+      if (!binding.ok) {
+        console.warn(
+          `[staging-access] verified token presented from an unbound device (${binding.reason}, site ${siteId}) — re-verification required`,
+        );
         return {
           valid: true,
           verified: false,
@@ -276,6 +316,7 @@ export class StagingAccessManager {
   static async verifyEmail(
     token: string,
     code: string,
+    device?: StagingDeviceFingerprint,
   ): Promise<{ success: boolean; access?: StagingAccess; error?: string }> {
     try {
       const supabase = createServiceRoleClient();
@@ -312,13 +353,24 @@ export class StagingAccessManager {
         return { success: false, error: "Verification code expired" };
       }
 
-      // Mark as verified
+      // Mark as verified AND bind the result to the device that did it.
+      //
+      // These are written together on purpose: `email_verified` without a
+      // fingerprint is precisely the state that let a forwarded URL inherit
+      // someone else's verification, so the flag must never exist on its own.
+      // A caller that supplied no fingerprint records an empty binding, which
+      // `checkStagingDeviceBinding` treats as unbound and refuses — the row
+      // fails closed rather than becoming a bearer credential again.
       const { data: updatedAccess, error: updateError } = await supabase
         .from("staging_access")
         .update({
           email_verified: true,
           verification_code: null,
           verification_expires_at: null,
+          verified_user_agent_hash: device?.userAgentHash ?? null,
+          verified_origin_hash: device?.originHash ?? null,
+          verified_ip_prefix: device?.ipPrefix ?? null,
+          verified_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq("id", access.id)
@@ -326,6 +378,10 @@ export class StagingAccessManager {
         .single();
 
       if (updateError) {
+        console.error(
+          "[staging-access] verified but could not persist device binding:",
+          updateError.message,
+        );
         return { success: false, error: "Failed to verify email" };
       }
 
@@ -336,6 +392,47 @@ export class StagingAccessManager {
     } catch (error) {
       console.error("Error verifying email:", error);
       return { success: false, error: "Verification failed" };
+    }
+  }
+
+  /**
+   * The address a resend would mail, resolved without sending anything.
+   *
+   * Exists so the resend endpoint can rate-limit on the *recipient* rather than
+   * only on the token. One person can hold several invites across sites, and an
+   * attacker holding two tokens for the same address would otherwise get two
+   * independent budgets and double the mail they can aim at that inbox. The
+   * address is the thing being protected, so the address is what the limit is
+   * keyed on.
+   *
+   * Returns null for an unknown, revoked or expired token. The caller must treat
+   * that as "no recipient bucket to charge" and still apply its per-IP limit —
+   * never as permission to skip limiting.
+   */
+  static async getResendRecipient(token: string): Promise<string | null> {
+    try {
+      const supabase = createServiceRoleClient();
+
+      const { data: access, error } = await supabase
+        .from("staging_access")
+        .select("email")
+        .eq("token", token)
+        .eq("is_active", true)
+        .gte("expires_at", new Date().toISOString())
+        .maybeSingle();
+
+      if (error) {
+        console.error(
+          "[staging-access] resend recipient lookup failed:",
+          error.message,
+        );
+        return null;
+      }
+
+      return access?.email ?? null;
+    } catch (error) {
+      console.error("[staging-access] resend recipient lookup threw:", error);
+      return null;
     }
   }
 

@@ -4,6 +4,10 @@ import {
   StagingAccessManager,
   type StagingPermission,
 } from "@/lib/auth/staging-access";
+import {
+  readStagingDeviceFingerprint,
+  type StagingDeviceFingerprint,
+} from "@/lib/auth/staging-device";
 
 export type EditorAccessKind = "staging" | "edit-session";
 export type EditorPermission = "view" | "edit" | "publish" | "admin";
@@ -121,13 +125,26 @@ export async function validateEditorAccess({
   siteId,
   token,
   allowUnverified = false,
+  device,
 }: {
   siteId: string;
   token: EditorToken;
   allowUnverified?: boolean;
+  /**
+   * Fingerprint of the presenting browser. Required in practice for staging
+   * tokens: a verified staging row is only honoured for the device that
+   * verified it, so omitting this forces re-verification rather than granting
+   * access. Ignored for edit-session tokens, which carry no device binding.
+   */
+  device?: StagingDeviceFingerprint;
 }): Promise<EditorAccessValidation> {
   if (token.kind === "staging") {
-    return validateStagingEditorAccess(siteId, token.token, allowUnverified);
+    return validateStagingEditorAccess(
+      siteId,
+      token.token,
+      allowUnverified,
+      device,
+    );
   }
 
   return validateEditSessionAccess(siteId, token.token);
@@ -137,10 +154,12 @@ async function validateStagingEditorAccess(
   siteId: string,
   token: string,
   allowUnverified: boolean,
+  device?: StagingDeviceFingerprint,
 ): Promise<EditorAccessValidation> {
   const result = await StagingAccessManager.validateStagingAccess(
     token,
     siteId,
+    device,
   );
 
   if (!result.valid) {
@@ -254,7 +273,15 @@ export async function validateEditorTokenFromRequest({
     } satisfies EditorAccessValidation;
   }
 
-  return validateEditorAccess({ siteId, token, allowUnverified });
+  // Every route that authenticates by token goes through here, so deriving the
+  // fingerprint at this one point is what makes the staging device binding
+  // impossible to forget at an individual call site.
+  return validateEditorAccess({
+    siteId,
+    token,
+    allowUnverified,
+    device: readStagingDeviceFingerprint(request),
+  });
 }
 
 export type { StagingPermission };

@@ -9,6 +9,8 @@ import {
   rateLimiter,
   createRateLimitConfig,
 } from "@/lib/security/rate-limiter";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { sendStagingVerificationEmail } from "@/lib/email/resend";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
@@ -33,6 +35,46 @@ async function verifyAttemptAllowed(token: string): Promise<boolean> {
     console.error("Verify rate-limit check failed:", err);
     return false;
   }
+}
+
+/**
+ * Throttle resends on both axes that matter.
+ *
+ * A resend mails a code to an address the *caller does not choose* — it is
+ * whoever the token was issued to. Unthrottled, anyone holding a staging token
+ * (forwarded link, leaked Referer, shared-machine history) can loop this
+ * endpoint and aim an unbounded stream of mail at a named person's inbox while
+ * burning the sending domain's reputation and the Resend quota.
+ *
+ * Same shape as `limitCodeRequests` in src/lib/auth/editor-request.ts: per
+ * recipient, because the inbox is the thing under attack, AND per IP, so one
+ * source cannot walk a set of tokens. Both fail CLOSED — losing Redis must not
+ * remove the only control standing between an attacker and an editor's inbox,
+ * and resends are low-volume enough that refusing during an outage costs little.
+ */
+async function limitResendRequests(
+  request: NextRequest,
+  recipient: string | null,
+): Promise<NextResponse | null> {
+  if (recipient) {
+    const perRecipient = await enforceRateLimit(request, {
+      limit: "USER_DOMAIN_VERIFY",
+      endpoint: "staging/verify:resend-recipient",
+      identifier: recipient.toLowerCase(),
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message: "Too many codes requested for this address. Try again shortly.",
+    });
+    if (perRecipient) return perRecipient;
+  }
+
+  return enforceRateLimit(request, {
+    limit: "IP_AUTH",
+    endpoint: "staging/verify:resend-ip",
+    identifierType: "ip",
+    onStoreFailure: "deny",
+    message: "Too many code requests. Try again shortly.",
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -154,7 +196,15 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const result = await StagingAccessManager.verifyEmail(token, code);
+      // Bind the result to the browser that passed the check. This request is
+      // the only moment we know a human with access to the invited inbox is
+      // present, so it is the only honest moment to record what that device
+      // looks like.
+      const result = await StagingAccessManager.verifyEmail(
+        token,
+        code,
+        readStagingDeviceFingerprint(request),
+      );
 
       if (!result.success) {
         return withPublicCors(
@@ -179,6 +229,14 @@ export async function POST(request: NextRequest) {
     }
 
     if (actionType === "resend") {
+      // Resolve the recipient BEFORE sending so the limit can be keyed on the
+      // inbox under attack. A null recipient (unknown/revoked/expired token)
+      // still falls through to the per-IP limit below — it is not a bypass.
+      const recipient = await StagingAccessManager.getResendRecipient(token);
+
+      const limited = await limitResendRequests(request, recipient);
+      if (limited) return withPublicCors(limited, request);
+
       // Resend verification code
       const result = await StagingAccessManager.resendVerificationCode(token);
 

@@ -1,7 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { ShareSitePayload, TeamRole } from "@/types";
-import { CollaborationPermissions } from "@/lib/collaboration/permissions";
+import {
+  CollaborationPermissions,
+  teamRoleToSitePermission,
+} from "@/lib/collaboration/permissions";
+
+/**
+ * Resolve a user's email and display name.
+ *
+ * `auth.users` is not exposed over PostgREST, so the previous
+ * `.from("auth.users")` calls could only ever fail — the POST path 404'd every
+ * user-targeted share before reaching the insert, and the GET path dropped its
+ * embed. The Admin API is the supported way to read that table, and it requires
+ * the service-role key, hence the separate client.
+ */
+async function resolveUserIdentity(
+  userId: string,
+): Promise<{ email: string; name: string } | null> {
+  const service = createServiceRoleClient();
+  const { data, error } = await service.auth.admin.getUserById(userId);
+
+  if (error || !data?.user?.email) {
+    if (error) {
+      console.error("Error resolving target user:", error.message);
+    }
+    return null;
+  }
+
+  const metadata = data.user.user_metadata as
+    | Record<string, unknown>
+    | undefined;
+  const name = typeof metadata?.name === "string" ? metadata.name : null;
+
+  return { email: data.user.email, name: name ?? data.user.email };
+}
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
@@ -68,26 +102,23 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    let targetIdentifier = "";
+    // Only the display name is used (in the notification body and the success
+    // message). A parallel `targetIdentifier` was assigned in both branches and
+    // never read.
     let targetName = "";
 
     if (body.userId) {
       // Verify user exists
-      const { data: targetUser, error: userError } = await supabase
-        .from("auth.users")
-        .select("email, raw_user_meta_data")
-        .eq("id", body.userId)
-        .single();
+      const targetUser = await resolveUserIdentity(body.userId);
 
-      if (userError || !targetUser) {
+      if (!targetUser) {
         return NextResponse.json(
           { error: "Target user not found" },
           { status: 404 },
         );
       }
 
-      targetIdentifier = targetUser.email;
-      targetName = targetUser.raw_user_meta_data?.name || targetUser.email;
+      targetName = targetUser.name;
 
       // Check if user already has permissions
       const { data: existingPermission } = await supabase
@@ -118,7 +149,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         );
       }
 
-      targetIdentifier = body.teamId;
       targetName = targetTeam.name;
 
       // Check if team already has permissions
@@ -137,13 +167,19 @@ export async function POST(request: NextRequest, context: RouteContext) {
       }
     }
 
-    // Create site permission
+    // Create site permission.
+    //
+    // `permission` is written alongside `role` and is the one that matters:
+    // every authorisation check in the codebase reads `permission` and none read
+    // `role`. Writing only `role` left the recipient with a row that looked like
+    // access in the UI and granted nothing in practice.
     const { data: sitePermission, error } = await supabase
       .from("site_permissions")
       .insert({
         site_id: siteId,
         user_id: body.userId || null,
         team_id: body.teamId || null,
+        permission: teamRoleToSitePermission(body.role),
         role: body.role,
         granted_by: user.id,
       })
@@ -245,16 +281,14 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get site permissions
+    // `auth.users` cannot be embedded — PostgREST does not expose that schema,
+    // so the previous embed made this whole query fail. Teams still embed
+    // normally; user identities are resolved separately through the Admin API.
     const { data: sitePermissions, error } = await supabase
       .from("site_permissions")
       .select(
         `
         *,
-        user:auth.users!site_permissions_user_id_fkey(
-          email,
-          raw_user_meta_data
-        ),
         team:teams!site_permissions_team_id_fkey(
           name,
           description
@@ -271,7 +305,41 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json({ permissions: sitePermissions });
+    const rows = sitePermissions ?? [];
+    const userIds = Array.from(
+      new Set(
+        rows
+          .map((row) => row.user_id)
+          .filter((id): id is string => typeof id === "string"),
+      ),
+    );
+
+    // One lookup per distinct user. The Admin API has no batch-by-id call, and a
+    // site's permission list is small enough that this stays cheap; if it ever
+    // is not, the fix is a profiles table, not a wider query here.
+    const identities = new Map<string, { email: string; name: string }>();
+    for (const userId of userIds) {
+      const identity = await resolveUserIdentity(userId);
+      if (identity) {
+        identities.set(userId, identity);
+      } else {
+        // A permission row pointing at a deleted user is real and must not blank
+        // the whole response — surface the row without an identity instead.
+        console.warn(
+          `Site permission references a user that could not be resolved: ${userId}`,
+        );
+      }
+    }
+
+    const permissionsWithUsers = rows.map((row) => ({
+      ...row,
+      user:
+        typeof row.user_id === "string"
+          ? (identities.get(row.user_id) ?? null)
+          : null,
+    }));
+
+    return NextResponse.json({ permissions: permissionsWithUsers });
   } catch (error) {
     console.error("Error in site permissions GET:", error);
     return NextResponse.json(
