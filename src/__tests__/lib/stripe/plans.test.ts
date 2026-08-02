@@ -453,7 +453,10 @@ describe("findSubscriptionPlan", () => {
   it("returns undefined only when the catalogue itself has no free plan", () => {
     // Nothing sensible is left to render at that point, and the caller must
     // show an error rather than a plausible-looking wrong plan.
-    const broken = { ...catalogue, subscriptions: [catalogue.subscriptions[1]] };
+    const broken = {
+      ...catalogue,
+      subscriptions: [catalogue.subscriptions[1]],
+    };
     expect(findSubscriptionPlan(broken, "enterprise")).toBeUndefined();
   });
 });

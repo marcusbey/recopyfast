@@ -133,7 +133,9 @@ describe("plan constraint and credit collapse migration", () => {
     expect(constraintSql).toContain("WHERE t.balance > 0");
     // Re-runnable, and the synthetic key can never collide with a real Stripe
     // payment intent (always prefixed `pi_`).
-    expect(constraintSql).toContain("ON CONFLICT (stripe_payment_intent_id) DO NOTHING");
+    expect(constraintSql).toContain(
+      "ON CONFLICT (stripe_payment_intent_id) DO NOTHING",
+    );
     expect(constraintSql).toContain("'migrated_wallet_'");
   });
 
