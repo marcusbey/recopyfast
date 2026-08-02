@@ -228,15 +228,30 @@ describe("Feature Gating Permissions", () => {
       expect(result.requiresCredits).toBeFalsy();
     });
 
-    it("denies AI when the plan has no AI entitlement", async () => {
+    it("allows AI on a plan without an AI allowance when credits cover it", async () => {
+      // A Starter subscriber paying with credits. This used to deny outright,
+      // which left them worse off at AI than someone with no plan at all.
       asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(20));
+
+      const result = await canUseAIFeatures(testUserId, 1);
+
+      expect(result.allowed).toBe(true);
+    });
+
+    it("tells a plan without an AI allowance to buy credits, not to upgrade", async () => {
+      // The remedy is a credit pack: this plan has no allowance to refill, so
+      // waiting for a renewal would never produce one.
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(0));
 
       const result = await canUseAIFeatures(testUserId, 1);
 
       expect(result.allowed).toBe(false);
-      expect(result.upgradeRequired).toBe(true);
-      expect(result.reason).toContain("Pro subscription");
-      expect(getUserCreditBalance).not.toHaveBeenCalled();
+      expect(result.requiresCredits).toBe(true);
+      expect(result.reason).toContain("does not include AI credits");
+      expect(result.reason).toContain("Buy credits");
+      expect(result.reason).not.toContain("Pro subscription");
     });
 
     it("denies AI on pro when the credit balance is short", async () => {
@@ -327,13 +342,14 @@ describe("Feature Gating Permissions", () => {
       );
     });
 
-    it("fails without consuming credits when the plan lacks AI access", async () => {
+    it("fails without consuming credits when the wallet cannot cover it", async () => {
       asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(0));
 
       const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("Pro subscription");
+      expect(result.error).toContain("does not include AI credits");
       expect(consumeCredits).not.toHaveBeenCalled();
       expect(mockInsert).not.toHaveBeenCalled();
     });
@@ -485,6 +501,73 @@ describe("Feature Gating Permissions", () => {
       expect(result.allowed).toBe(false);
       expect(result.upgradeRequired).toBe(true);
       expect(result.reason).toContain("needs a plan");
+    });
+  });
+
+  /**
+   * Paying us must never leave you worse off than not paying us.
+   *
+   * Starter includes no AI allowance, so while the AI gate denied on that flag
+   * before reaching the wallet, a Starter subscriber holding credits was
+   * refused AI that someone with no plan and the same credits was granted.
+   * These compare the two side by side rather than asserting each in isolation,
+   * because the defect was a relationship between them, not a wrong answer in
+   * either one.
+   */
+  describe("a subscriber is never worse off than a non-subscriber", () => {
+    const withCredits = (n: number) =>
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(n));
+
+    async function bothWays(
+      gate: (userId: string) => Promise<{ allowed: boolean }>,
+      credits: number,
+    ) {
+      withCredits(credits);
+
+      asMock(getEffectivePlan).mockResolvedValue(CREDIT_HOLDER);
+      const noPlan = await gate(testUserId);
+
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      const starter = await gate(testUserId);
+
+      return { noPlan: noPlan.allowed, starter: starter.allowed };
+    }
+
+    it("grants AI to both a credit holder and a Starter subscriber alike", async () => {
+      const { noPlan, starter } = await bothWays(canUseAIFeatures, 20);
+
+      expect(noPlan).toBe(true);
+      expect(starter).toBe(true);
+    });
+
+    it("grants translation to both alike", async () => {
+      const { noPlan, starter } = await bothWays(canUseTranslation, 20);
+
+      expect(noPlan).toBe(true);
+      expect(starter).toBe(true);
+    });
+
+    it("refuses both alike on an empty wallet", async () => {
+      const ai = await bothWays(canUseAIFeatures, 0);
+      const translation = await bothWays(canUseTranslation, 0);
+
+      expect(ai.noPlan).toBe(false);
+      expect(ai.starter).toBe(false);
+      expect(translation.noPlan).toBe(false);
+      expect(translation.starter).toBe(false);
+    });
+
+    it("still gives the subscriber the site the credit holder does not get", async () => {
+      // The comparison only runs one way. Parity on metered features must not
+      // become parity on quotas — Starter bought a site, credits did not.
+      withCredits(20);
+      queryCount = 0;
+
+      asMock(getEffectivePlan).mockResolvedValue(entitled(STARTER_PLAN));
+      expect((await canCreateWebsite(testUserId)).allowed).toBe(true);
+
+      asMock(getEffectivePlan).mockResolvedValue(CREDIT_HOLDER);
+      expect((await canCreateWebsite(testUserId)).allowed).toBe(false);
     });
   });
 });

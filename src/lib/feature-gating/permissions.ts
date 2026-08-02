@@ -200,7 +200,14 @@ export async function canAddCollaborator(
 }
 
 /**
- * Check if user can use AI features
+ * Check if user can use AI features.
+ *
+ * AI is metered, so a credit balance is sufficient on its own whatever plan the
+ * holder is on. The plan's `aiFeatures` flag used to be checked first and deny
+ * outright, which left a paying Starter subscriber worse off at AI than someone
+ * with no plan and a wallet. That inversion is what this ordering removes: the
+ * balance decides, and the flag only shapes what we say when the balance is
+ * short.
  */
 export async function canUseAIFeatures(
   userId: string,
@@ -212,29 +219,33 @@ export async function canUseAIFeatures(
     return NO_ENTITLEMENT;
   }
 
-  // AI is metered in credits, so a plan's `aiFeatures` flag is what decides
-  // whether the *plan* includes it. A credit holder has no plan to consult and
-  // is spending what they bought, which is the whole of the entitlement.
+  const creditBalance = await getUserCreditBalance(userId);
+
+  if (creditBalance.total >= creditsRequired) {
+    return { allowed: true };
+  }
+
+  // Out of credits, and what to do about it depends on where more would come
+  // from. A plan that includes AI grants an allowance that refills next period;
+  // one that does not never will, so the remedy there is to buy a pack rather
+  // than to wait for a renewal that was never coming.
   if (entitlement.kind === "plan" && !entitlement.plan.limits.aiFeatures) {
     return {
       allowed: false,
-      reason: "AI features require a Pro subscription",
-      upgradeRequired: true,
-    };
-  }
-
-  const creditBalance = await getUserCreditBalance(userId);
-
-  if (creditBalance.total < creditsRequired) {
-    return {
-      allowed: false,
-      reason: `Insufficient credits. You need ${creditsRequired} credits but only have ${creditBalance.total}.`,
+      reason:
+        `Your ${entitlement.plan.name} plan does not include AI credits. ` +
+        `Buy credits to use AI features — this costs ${creditsRequired} and you have ${creditBalance.total}.`,
       requiresCredits: true,
       creditsRequired,
     };
   }
 
-  return { allowed: true };
+  return {
+    allowed: false,
+    reason: `Insufficient credits. You need ${creditsRequired} credits but only have ${creditBalance.total}.`,
+    requiresCredits: true,
+    creditsRequired,
+  };
 }
 
 /**
