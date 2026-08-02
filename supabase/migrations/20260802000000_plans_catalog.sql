@@ -160,9 +160,29 @@ $$;
 CREATE INDEX IF NOT EXISTS idx_plans_kind_active_sort
   ON plans(kind, is_active, sort_order);
 
+-- 20250817000000 defines this and is recorded as applied against production,
+-- but the function is not there: the only `update_updated_at_column` in that
+-- database lives in the `storage` schema, which is Supabase's own and not this
+-- one. Somewhere the migration history was backfilled rather than replayed, so
+-- "an earlier migration created it" cannot be relied on.
+--
+-- Recreating it here costs nothing where it already exists — CREATE OR REPLACE
+-- with an identical body is a no-op — and is the difference between this
+-- migration applying and aborting on a database whose history lies. It is
+-- schema-qualified for the same reason the mismatch was hard to see: an
+-- unqualified reference resolves through search_path, and there is a
+-- same-named function one schema away.
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 DROP TRIGGER IF EXISTS update_plans_updated_at ON plans;
 CREATE TRIGGER update_plans_updated_at BEFORE UPDATE ON plans
-  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
 ALTER TABLE plans ENABLE ROW LEVEL SECURITY;
 
