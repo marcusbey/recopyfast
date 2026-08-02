@@ -65,6 +65,18 @@
 > **Not QA any more, deliberately deferred:** P0-1 (widget has no client for the
 > magic-code system), P0-2 (no enrollment UI), ~15 orphaned components. These are
 > builds, not fixes, and want a fresh session.
+>
+> **Sections 4 and 5 (Dashboard/UI, Accessibility) are now closed** except for
+> P4. Both were almost entirely `[~]` in this register while commits
+> `0bbb3de` ("make the dashboard's controls do what they appear to do") and
+> `db677b0` ("rebuild /demo, and give the landing page a spine") had already
+> fixed nearly everything they flagged. Reconciled against the code below, with
+> file:line evidence per item. The one accessibility item that was still
+> genuinely open after that reconciliation — the landing page's demo text
+> being mouse-only to edit — has since been fixed and test-covered
+> (`EditableText.tsx`, see section 5). The only thing left open in either
+> section is P4's ~15 orphaned components, and that is a deferred build, not
+> a fix.
 
 
 ## 🔵 NEXT TASK — remove the free plan (decided, not started)
@@ -171,9 +183,14 @@ site. Both verified directly, not just by reading.
   consequence of stable ids: the probe set is byte-identical across loads, so
   `(site_id, element_id, language, variant)` now collides and the upsert
   matches instead of inserting a fresh row set per page view.
-- [ ] **Why it shipped:** the only e2e covering the loop hand-writes
-  `data-rcf-id` into its fixture — a condition that never holds on a real site —
-  and is skipped unless `RUN_RECOPYFAST_CORE_E2E=1`.
+- [~] **Why it shipped:** the hand-authored-fixture problem is fixed —
+  `e2e/share-edit-publish.spec.ts` no longer pre-seeds `data-rcf-id`; the id is
+  now read off the DOM after the widget assigns it, with the comment there
+  explaining why: a real customer page never carries the attribute
+  (`e2e/share-edit-publish.spec.ts:27-31, 100-111`). What is still true: the
+  suite remains `test.skip`'d unless `RUN_RECOPYFAST_CORE_E2E=1`
+  (`share-edit-publish.spec.ts:13-16`), so the core loop still has no coverage
+  in a default run — only against a disposable Supabase project on demand.
 
 ## 2. Editor auth — two systems, neither complete
 
@@ -211,9 +228,31 @@ site. Both verified directly, not just by reading.
   no caller. Share writes `staging_access` instead. An invited person requests a
   code, none is ever sent, and it is indistinguishable from a broken inbox.
   **Deferred — build, not fix.**
-- [ ] **P2 `request-code` leaks editor existence via latency** — the recognised
-  branch makes a blocking call to Resend before returning the neutral response.
-  Still open, out of scope so far.
+- [x] **P2 `request-code` leaks editor existence via latency.** Fixed: both
+  branches now return `NEUTRAL_RESPONSE` from the same `return` statement
+  (`src/app/api/editor/request-code/route.ts:137`), and the two operations
+  that only the recognised branch used to do — minting a code (a DB write)
+  and mailing it (a Resend round trip) — are deferred to Next's `after()`
+  (`route.ts:108-130`), which runs once the response has already been
+  committed. A recognised and an unrecognised request now do the same amount
+  of work before the caller sees anything.
+- [x] **New, not previously recorded: a sharper status-code oracle on the same
+  route.** Reading the fix surfaced a second leak the latency finding didn't
+  cover: the old code answered a distinct 503 `code_unavailable` when
+  `issueVerificationCode` returned null, and that line was reachable only for
+  a *recognised* address — no timing statistics needed, one request confirmed
+  the address. Closed by the same `after()` move: a mint failure inside the
+  deferred callback can now only `console.error`, never shape the response
+  (`route.ts:117-121`). Regression-tested, not just reasoned about:
+  `src/__tests__/api/editor/request-code/route.test.ts` (11 tests) — asserts
+  recognised/unrecognised responses are `toEqual` on status and body, that the
+  route never awaits the mint/send before responding (a test that would hang
+  if it did), that `after()` fires only for a recognised address, and that
+  invoking the captured deferred callback actually mints+sends and still logs
+  on either failure. The three address-independent branches (malformed email,
+  mail-provider-unconfigured, rate limit) are asserted unchanged. `npx jest
+  src/__tests__/api/editor/request-code/route.test.ts` → 11/11 pass; `tsc`
+  and `eslint` clean on both files.
 - [ ] **Optional, needs a migration:** durable replay telemetry. Removing the
   automatic lineage revoke removed its visibility too; the only trace now is a
   log line. Persisting replay counts on the grant row would make "is this editor
@@ -241,9 +280,16 @@ site. Both verified directly, not just by reading.
   the webhook. **Blocked on the migration** for the `tickets` carry-over; see
   the header. Not a regression from this deploy — balances read
   `credit_purchases` before it too, so `tickets` money was already invisible.
-- [ ] **H6 Plan limits are decorative** — still open. No `enforcePlanLimit`-style
-  caller exists; `src/app/api/sites/route.ts` has no count check. A $9 customer
-  can still create unlimited sites.
+- [ ] **H6 Plan limits are decorative** — status unclear, flagged rather than
+  closed. Site creation actually lives at `POST /api/sites/register`, not
+  `src/app/api/sites/route.ts` (that file only exports `GET`), and it now calls
+  `canCreateWebsite(user.id)` from `src/lib/feature-gating/permissions.ts`
+  before writing a row, with a comment there describing this as the fix for
+  exactly this defect (`src/app/api/sites/register/route.ts:87-104`). Not
+  marked `[x]`: `feature-gating/permissions.ts` is one of the files another
+  agent is actively rewriting for this session's free-plan removal, so its
+  current behaviour cannot be treated as settled. Re-check once that work
+  lands.
 - [x] **H8 Refunds and chargebacks revoke nothing.** Fixed: `charge.refunded`
   and `charge.dispute.created` both route to `handleMoneyReturned`, which claws
   back only unspent credits so a customer who already spent them is not driven
@@ -260,35 +306,129 @@ site. Both verified directly, not just by reading.
 
 ## 4. Dashboard / UI
 
-- [~] P0 Analytics export hits a route that does not exist; failure swallowed.
-- [~] P0 A/B wizard can never list an element (unauthenticated fetch → 401 →
-  empty, with no empty state).
+- [x] P0 Analytics export hits a route that does not exist; failure swallowed.
+  Fixed: `GET /api/analytics/export` now exists
+  (`src/app/api/analytics/export/route.ts`), authorised identically to the read
+  path (`authorizeSiteReadAccess`/`requireAuthenticatedUser`, lines 109-115),
+  CSV output RFC-4180 quoted and formula-injection guarded (lines 30-42).
+  `AnalyticsDashboard.tsx` no longer swallows a failed export into
+  `console.error` — `exportError` is set and rendered
+  (`AnalyticsDashboard.tsx:99-136, 294-301`).
+- [x] P0 A/B wizard can never list an element (unauthenticated fetch → 401 →
+  empty, with no empty state). Fixed: content elements are now read from
+  `GET /api/sites/[siteId]/content-elements` via `useContentElements`
+  (`src/hooks/useContentElements.ts:34`), a session-authorised route distinct
+  from the token/Origin-gated embed endpoint. `ABTestElementPicker.tsx` has
+  real loading, error-with-retry and empty states (lines 38-79), and the list
+  itself is a keyboard-operable `radiogroup` (lines 84-119, Space/Enter
+  activate).
 - [x] P0 `/sites` is auth-gated but has no page → 404 behind an auth gate.
   Fixed by removing the gate rather than inventing a page: site management lives
   at `/dashboard/sites`, nothing links to `/sites`, and gating it only turned a
   404 into a login redirect that led nowhere. Live `/sites` is now a plain 404.
-- [~] P1 Dead buttons with no handler: Update Password, Enable 2FA, Generate API
-  Key, theme tiles, Save Preferences, Save Appearance, Invite Member, Send
-  Invite, remove-member, 6 blog category filters, Load More, newsletter
-  Subscribe, 2 demo CTAs.
-- [~] P1 Registration modal documents `data-recopyfast-editable`, an attribute
+- [x] P1 Dead buttons with no handler. Verified one by one:
+  - Update Password / Enable 2FA — the password card is deleted outright (this
+    is a magic-link product; `recovery` is excluded from allowed OTP types) and
+    replaced with an honest "Sign-in Method" card; fake 2FA is gone
+    (`src/app/dashboard/settings/page.tsx:332-370`).
+  - Generate API Key — `ApiKeysPanel.tsx` now calls the real
+    `POST /api/api-keys` and reveals the plaintext key exactly once
+    (`src/components/settings/ApiKeysPanel.tsx:90-115, 185-194`).
+  - Theme tiles / Save Appearance — `ThemePicker.tsx` is a keyboard-operable
+    radiogroup that applies and persists on click; the Appearance tab has no
+    save button on purpose because there is nothing left for one to do
+    (`settings/page.tsx:386-389`, `ThemePicker.tsx:20-62`).
+  - Save Preferences — wired to `PATCH /api/auth/profile` with a validated
+    whitelist (`settings/page.tsx:131-159`).
+  - Invite Member / Send Invite / remove-member — all real now:
+    `handleInvite` posts to `/api/teams/{id}/invitations`, `handleRemoveMember`
+    deletes via `/api/teams/{id}/members`, both routes exist
+    (`src/app/dashboard/teams/page.tsx:127-184`,
+    `src/app/api/teams/[teamId]/{invitations,members}/route.ts`).
+  - 6 blog category filters — `BlogPostList.tsx` derives categories from the
+    posts and filters live; no pill can lead to an empty page
+    (`src/components/blog/BlogPostList.tsx:29-42`).
+  - Load More — `VersionHistoryPanel.tsx`'s Load More is wired to
+    `fetchVersions(offset, append: true)` with real `hasMore`/`loadingMore`
+    state (`VersionHistoryPanel.tsx:190-220`); the blog's own load-more was
+    removed outright rather than wired, since three posts need no pagination.
+  - Newsletter Subscribe — deleted; there was no subscriber table or endpoint,
+    so the form silently discarded every address (`src/app/blog/page.tsx`,
+    comment at the CTA).
+  - 2 demo CTAs — confirmed not a bug, not "fixed": they have no handler on
+    purpose, because the widget's selector includes `button` and they are live
+    edit targets inside the mock customer site.
+- [x] P1 Registration modal documents `data-recopyfast-editable`, an attribute
   the widget ignores — following the instructions literally yields nothing.
-- [~] P1 The embed snippet renders invisible (`bg-foreground text-foreground`).
-- [~] P3 Sign-in drops the redirect destination (`next` vs `redirectedFrom`).
-- [~] P3 Integration Status is hardcoded "Verified"/"Connected".
-- [~] P3 Header `#features`/`#pricing` are dead on every non-home page.
-- [~] P3 Analytics chart bars unstyled (dynamic Tailwind class names).
-- [~] P3 Share dialog defaults to a retired link type; the DB rejects it and the
-  admin is told they lack permission on their own site.
+  Fixed: the modal now documents the attribute the widget actually honours
+  (`src/components/dashboard/SiteRegistrationModal.tsx`), with a regression
+  test locking it in (`SiteRegistrationModal.test.tsx:382`).
+- [x] P1 The embed snippet renders invisible (`bg-foreground text-foreground`).
+  Fixed — `bg-surface-2 text-foreground` now, with the old bug preserved only
+  as an explanatory code comment (`SiteRegistrationModal.tsx:321-326`).
+- [x] P3 Sign-in drops the redirect destination (`next` vs `redirectedFrom`).
+  Fixed: `redirectedFrom` is the consistent param end to end
+  (`src/middleware.ts:60`, `AuthContext.tsx`, `dashboard/layout.tsx:37`).
+- [x] P3 Integration Status is hardcoded "Verified"/"Connected". Fixed: both
+  rows now derive from `hasReportedContent` (whether the site has ever posted a
+  content element back), not a constant
+  (`src/components/dashboard/SiteDetailView.tsx:92, 352-378`).
+- [x] P3 Header `#features`/`#pricing` are dead on every non-home page. Fixed:
+  both links are now `/#features` and `/#pricing`
+  (`src/components/layout/Header.tsx:58, 68`), which navigate to the homepage
+  and land on the anchor from any page, rather than a bare fragment that only
+  worked from `/`.
+- [x] P3 Analytics chart bars unstyled (dynamic Tailwind class names). Fixed: a
+  literal `CHART_BAR_CLASSES` map replaces the interpolated class name Tailwind
+  could never see at build time (`AnalyticsDashboard.tsx:528-533`).
+- [x] P3 Share dialog defaults to a retired link type; the DB rejects it and the
+  admin is told they lack permission on their own site. Fixed: default is now
+  `"invite"`, with a comment explaining the old default's failure mode
+  (`ShareSiteDialog.tsx:55-58`).
 - [ ] P4 ~15 orphaned components with zero importers, several backing live API
-  routes that are therefore UI-unreachable.
+  routes that are therefore UI-unreachable. Still accurate — spot-checked
+  `BulkOperations.tsx` and `ApiKeyManagement.tsx`, both zero importers today.
 
 ## 5. Accessibility
 
-- [~] 7 unlabelled icon-only buttons.
-- [~] 3 mouse-only controls (A/B element picker, landing demo text, theme tiles).
-- [~] 5 unassociated form labels.
-- [~] 2 modals without a working focus trap.
+- [x] 7 unlabelled icon-only buttons. Every icon-only `Button` found carries an
+  accessible name now: `ShareButton.tsx:31` (sr-only "Share"),
+  `VersionHistoryPanel.tsx:157` (sr-only "Close version history"),
+  `DashboardNavigation.tsx:187-189` (sr-only "Open/Close navigation"),
+  `SiteCard.tsx:108` (sr-only "Open menu"), `ApiKeysPanel.tsx:232`
+  (`aria-label="Delete API key …"`), `teams/page.tsx:444`
+  (`aria-label="Remove … from the team"`), `ShareLinkCard.tsx:113,127`
+  (`aria-label` on copy/revoke).
+- [x] 3 mouse-only controls (A/B element picker, landing demo text, theme
+  tiles). A/B element picker is a keyboard `radiogroup` (Space/Enter activate,
+  `ABTestElementPicker.tsx:96-118`) and theme tiles are native `<button>`s in a
+  `radiogroup` (`ThemePicker.tsx:40-45`). Landing demo text was the last of
+  the three, fixed separately from the `0bbb3de` sweep: its read-mode element
+  (`src/components/landing/demo/EditableText.tsx`) is now `role="button"`,
+  `tabIndex={0}`, with an `onKeyDown` for Enter/Space (Space's default scroll
+  suppressed via `preventDefault`), and an `aria-label` that states the
+  affordance (`"Edit: <copy>"`) rather than exposing only the raw copy as the
+  accessible name. The two CTA-styled ids (`"cta"`, `*-btn`) share this
+  component and were checked specifically — they open the editor on
+  activation like any other editable text, so making them focusable does not
+  add a dead stop to the tab order. Driven by keyboard end to end, not just
+  attribute-asserted: `src/components/landing/demo/__tests__/EditableText.test.tsx`
+  tabs to the control, presses Enter (and separately Space), and asserts focus
+  actually lands in the opened `<textarea>` — 4 tests, `npx jest
+  src/components/landing/demo/__tests__/EditableText.test.tsx` passes; `tsc`
+  and `eslint` clean on both files.
+- [x] 5 unassociated form labels. Sampled every input/label pair touched by the
+  sweep; all use `useId()` with matching `htmlFor`/`id`:
+  `AnalyticsDashboard.tsx:52-54,208-254` (site/date filters),
+  `ApiKeysPanel.tsx:54-55,165,243` (site select, key name),
+  `teams/page.tsx:74-75,351,364` (invite email, role),
+  `settings/page.tsx` (notification checkboxes,
+  ``htmlFor={`notification-${option.key}`}``), `ShareSiteDialog.tsx:239,286,303`
+  (email, expiry, label).
+- [x] 2 modals without a working focus trap. Fixed: `useFocusTrap.ts` is a new
+  hook (traps Tab, closes on Esc, restores focus on unmount), used by
+  `VersionHistoryPanel.tsx:8,32` and the demo's replace-image modal in
+  `EditableImage.tsx:6,47`.
 
 ---
 
