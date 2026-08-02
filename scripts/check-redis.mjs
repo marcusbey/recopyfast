@@ -45,6 +45,18 @@ async function resolveUrl() {
   return null;
 }
 
+/** Reject if `operation` has not settled in `ms`, so no step can hang the run. */
+function withDeadline(operation, ms, label) {
+  let timer;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+  });
+  return Promise.race([operation, deadline]).finally(() => clearTimeout(timer));
+}
+
 const steps = [];
 function record(name, ok, detail) {
   steps.push({ name, ok, detail });
@@ -91,16 +103,38 @@ async function main() {
   }
 
   const client = createClient({ url, socket: { connectTimeout: 5000 } });
-  client.on("error", () => {
+  let lastSocketError = null;
+  client.on("error", (err) => {
     // Handled via the awaited promises below; an unhandled 'error' event on the
     // EventEmitter would crash the process before this script can report.
+    // Retained because a rejected AUTH surfaces here, not on the connect promise.
+    lastSocketError = err;
   });
 
   try {
-    await client.connect();
+    // `socket.connectTimeout` only bounds the TCP/TLS handshake. A host that
+    // accepts the connection and then never answers AUTH — which is exactly what
+    // a wrong password against Upstash looks like — leaves connect() pending
+    // forever. This script must always terminate: it is meant to be run in CI.
+    await withDeadline(client.connect(), 10_000, "connect + auth");
     record("connect + auth", true);
   } catch (error) {
-    record("connect + auth", false, error.message);
+    const detail = lastSocketError?.message ?? error.message;
+    record("connect + auth", false, detail);
+    if (/timed out/.test(error.message)) {
+      console.error(
+        "\nThe host accepted the TCP connection but never completed AUTH.\n" +
+          "That is what a WRONG PASSWORD looks like against Upstash.\n" +
+          "An Upstash REST token is NOT the TCP password — copy the rediss://\n" +
+          "string from the database's Connect tab instead.",
+      );
+    }
+    // destroy() is synchronous and throws on an unopened client; it is not a promise.
+    try {
+      client.destroy();
+    } catch {
+      // Socket never opened — nothing to tear down.
+    }
     process.exit(1);
   }
 
