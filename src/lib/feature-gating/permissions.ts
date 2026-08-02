@@ -143,6 +143,64 @@ export async function canCreateWebsite(
 }
 
 /**
+ * Whose plan a seat on this site is charged to.
+ *
+ * Ownership is an `admin` row in site_permissions, the same definition
+ * `countOwnedSites` uses — `sites` has no owner column.
+ *
+ * Throws rather than defaulting, for the same reason the site count does: a
+ * lookup that failed must not be read as "nobody owns this, let it through".
+ */
+async function resolveSiteOwnerId(
+  supabase: SupabaseLike,
+  siteId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("site_permissions")
+    .select("user_id")
+    .eq("site_id", siteId)
+    .eq("permission", "admin")
+    .limit(1)
+    .maybeSingle<{ user_id: string }>();
+
+  if (error) {
+    throw new Error(`Failed to resolve site owner: ${error.message}`);
+  }
+
+  return data?.user_id ?? null;
+}
+
+/**
+ * Can another collaborator be added to this site?
+ *
+ * Charged to the site's **owner**, not to whoever is doing the sharing. A
+ * manager may share a site they do not own, so billing the actor would let a
+ * Starter owner hand a Pro manager the ability to invite without limit — the
+ * seats would land on the Starter site and be paid for by nobody.
+ *
+ * Falls back to the actor when no owner row exists. That is a data
+ * inconsistency rather than a permitted state, and the actor is already known
+ * to hold manager or owner rights on the site, so it is the closest available
+ * payer — but it is logged, because a site with no owner is a bug worth
+ * seeing.
+ */
+export async function canShareSite(
+  siteId: string,
+  actingUserId: string,
+): Promise<FeaturePermission> {
+  const supabase = await createClient();
+  const ownerId = await resolveSiteOwnerId(supabase, siteId);
+
+  if (!ownerId) {
+    console.error(
+      `[feature-gating] site ${siteId} has no admin row; charging the seat to the acting user instead`,
+    );
+  }
+
+  return canAddCollaborator(ownerId ?? actingUserId, siteId);
+}
+
+/**
  * Check if user can add collaborators
  */
 export async function canAddCollaborator(

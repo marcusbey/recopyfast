@@ -6,6 +6,7 @@ import {
   CollaborationPermissions,
   teamRoleToSitePermission,
 } from "@/lib/collaboration/permissions";
+import { canShareSite } from "@/lib/feature-gating/permissions";
 
 /**
  * Resolve a user's email and display name.
@@ -165,6 +166,27 @@ export async function POST(request: NextRequest, context: RouteContext) {
           { status: 400 },
         );
       }
+    }
+
+    // Seats are a plan quota, and until now nothing checked it. Starter sells
+    // zero collaborators and Pro sells five; both were unlimited in practice,
+    // because the limit was declared in the plans table and never read on the
+    // one path that creates a seat.
+    //
+    // Checked here rather than in the UI: a limit enforced only in a component
+    // is not a limit. Charged to the site owner, not to the sharer — see
+    // canShareSite.
+    const seatQuota = await canShareSite(siteId, user.id);
+    if (!seatQuota.allowed) {
+      return NextResponse.json(
+        {
+          error: seatQuota.reason ?? "Collaborator limit reached",
+          upgradeRequired: seatQuota.upgradeRequired ?? false,
+          currentLimit: seatQuota.currentLimit,
+          maxLimit: seatQuota.maxLimit,
+        },
+        { status: 403 },
+      );
     }
 
     // Create site permission.
