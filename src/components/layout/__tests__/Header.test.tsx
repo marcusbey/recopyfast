@@ -212,7 +212,7 @@ describe("Header", () => {
 
     const header = screen.getByRole("banner");
     expect(header).toHaveClass("bg-transparent");
-    expect(header.className).not.toContain("backdrop-blur");
+    expect(header.className).not.toContain("glass-sheet");
 
     act(() => {
       Object.defineProperty(window, "scrollY", {
@@ -222,7 +222,11 @@ describe("Header", () => {
       fireEvent.scroll(window);
     });
 
-    expect(header).toHaveClass("backdrop-blur-xl");
+    // The frosted treatment moved from `backdrop-blur-xl` to the `.glass-sheet`
+    // primitive in globals.css, which carries the blur, the saturation boost and
+    // the lit top edge together. The behaviour under test is unchanged: the
+    // header is transparent over the hero and frosted once scrolled past it.
+    expect(header).toHaveClass("glass-sheet");
     expect(header.className).not.toContain("bg-transparent");
   });
 

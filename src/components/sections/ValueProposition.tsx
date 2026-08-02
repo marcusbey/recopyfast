@@ -2,7 +2,7 @@
 
 import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
-import { Clock, DollarSign, Frown, ArrowRight, Sparkles } from "lucide-react";
+import { Clock, DollarSign, Frown, ArrowRight } from "lucide-react";
 
 const painPoints = [
   {
@@ -50,7 +50,7 @@ export default function ValueProposition() {
   return (
     <section
       ref={ref}
-      className="py-32 px-6 bg-white/80 backdrop-blur-sm relative overflow-hidden"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
     >
       <div className="max-w-6xl mx-auto relative z-10">
         {/* Section header */}
@@ -129,10 +129,9 @@ export default function ValueProposition() {
             transition={{ duration: 0.5, delay: 0.6 }}
             className="flex justify-center lg:flex-col items-center gap-2"
           >
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-sky-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-sky-500/25">
-              <ArrowRight className="w-7 h-7 text-white rotate-90 lg:rotate-0" />
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-sky-600">
+              <ArrowRight className="h-7 w-7 rotate-90 text-white lg:rotate-0" />
             </div>
-            <Sparkles className="w-5 h-5 text-sky-500 animate-pulse" />
           </motion.div>
 
           {/* After */}

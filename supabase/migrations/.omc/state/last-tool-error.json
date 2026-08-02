@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"ls -la supabase/migrations/20260801200000_missing_base_tables.sql 2>/dev/null && echo \\\"=== structure ===\\\" && grep -cE \\\"CREATE TABLE IF NOT EXISTS\\\" supabase/migrations/20260801200000_mi...",
+  "error": "Exit code 1",
+  "timestamp": "2026-08-01T20:32:10.136Z",
+  "retry_count": 1
+}

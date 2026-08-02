@@ -12,19 +12,14 @@ export default function FinalCTA() {
   return (
     <section
       ref={ref}
-      className="relative py-32 px-6 bg-gradient-to-b from-white/80 to-sky-50/80 backdrop-blur-sm overflow-hidden"
+      className="glass-sheet relative overflow-hidden border-t border-white/40 py-32 px-6"
     >
-      {/* Background effects */}
-      <div className="absolute inset-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[600px] bg-gradient-radial from-sky-200/50 via-transparent to-transparent rounded-full blur-3xl" />
-      </div>
-
       <div className="max-w-4xl mx-auto relative z-10 text-center">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={isInView ? { opacity: 1, scale: 1 } : {}}
           transition={{ duration: 0.6 }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-sky-200 bg-white/80 backdrop-blur-sm mb-8 shadow-sm"
+          className="glass mb-8 inline-flex items-center gap-2 rounded-full px-4 py-2"
         >
           <Zap className="w-4 h-4 text-amber-500" />
           <span className="text-sm text-slate-600">
@@ -40,9 +35,7 @@ export default function FinalCTA() {
         >
           Ready to take control
           <br />
-          <span className="bg-gradient-to-r from-sky-500 via-sky-400 to-emerald-400 bg-clip-text text-transparent">
-            of your content?
-          </span>
+          <span className="text-sky-700">of your content?</span>
         </motion.h2>
 
         <motion.p
@@ -63,10 +56,10 @@ export default function FinalCTA() {
         >
           <Link
             href="/signup"
-            className="group relative inline-flex items-center gap-2 px-10 py-5 bg-sky-500 text-white font-semibold rounded-full overflow-hidden transition-all hover:bg-sky-600 hover:scale-105 text-lg shadow-lg shadow-sky-500/25"
+            className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-sky-700"
           >
-            <span className="relative z-10">Start your free trial</span>
-            <ArrowRight className="relative z-10 w-5 h-5 transition-transform group-hover:translate-x-1" />
+            <span>Start your free trial</span>
+            <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
           </Link>
 
           <Link

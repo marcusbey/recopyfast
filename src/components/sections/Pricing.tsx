@@ -65,7 +65,7 @@ export default function Pricing() {
     <section
       id="pricing"
       ref={ref}
-      className="py-32 px-6 bg-transparent relative overflow-hidden"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
     >
       {/* Subtle background */}
       <div className="absolute inset-0">
@@ -138,7 +138,7 @@ export default function Pricing() {
               {/* Badge */}
               {plan.badge && (
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                  <span className="px-4 py-1.5 bg-gradient-to-r from-sky-500 to-emerald-500 text-white text-sm font-semibold rounded-full shadow-lg">
+                  <span className="rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white">
                     {plan.badge}
                   </span>
                 </div>
@@ -201,7 +201,7 @@ export default function Pricing() {
                 }
                 className={`block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all ${
                   plan.highlight
-                    ? "bg-gradient-to-r from-sky-500 to-emerald-500 text-white hover:shadow-lg hover:shadow-sky-500/25"
+                    ? "pressable bg-sky-600 text-white hover:bg-sky-700"
                     : "bg-sky-50 text-sky-700 hover:bg-sky-100"
                 }`}
               >

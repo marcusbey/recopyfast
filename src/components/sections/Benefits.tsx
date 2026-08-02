@@ -9,62 +9,73 @@ import {
   Wand2,
   History,
   Shield,
+  Languages,
+  FlaskConical,
 } from "lucide-react";
 
-const benefits = [
+/**
+ * The two capabilities that are genuinely hard to copy, and that the page never
+ * mentioned before this. Both are shipped: translation runs through
+ * `POST /api/ai/translate` (batched, writes the translated strings straight back
+ * to the content table), and the variant loop runs `POST /api/ab-tests/generate`
+ * → the embed buckets each visitor → `POST /api/ab-tests/track` → the results
+ * route scores it and a cron closes the test out.
+ *
+ * Every claim below traces to one of those routes. Nothing here is aspirational.
+ */
+const headline = [
+  {
+    icon: Languages,
+    eyebrow: "Translate",
+    title: "Every string on the site, in another language",
+    description:
+      "Pick a language and translate the whole site in one pass — not string by string. Translations are written back as real content, so they stay editable afterwards.",
+  },
+  {
+    icon: FlaskConical,
+    eyebrow: "Test",
+    title: "Find out which words actually win",
+    description:
+      "Generate variants of a headline, split your traffic across them, and let the test call it. Views, clicks and conversions are attributed per variant, and the winner stays live on its own.",
+    isSignal: true,
+  },
+];
+
+const supporting = [
   {
     icon: MousePointerClick,
     title: "Click. Edit. Done.",
     description:
-      "No login dashboards, no complex interfaces. Just click any text on your live website and start typing. Changes go live instantly.",
-    accent: "from-sky-500 to-cyan-500",
-    stops: ["#0ea5e9", "#06b6d4"] as const,
-    highlight: "bg-sky-500/10",
+      "Click any text on your live site and type. No dashboard to learn.",
   },
   {
     icon: Wand2,
     title: "AI that writes like you",
     description:
-      "Get intelligent suggestions that match your brand voice. Improve headlines, fix grammar, or translate to 12+ languages with one click.",
-    accent: "from-purple-500 to-pink-500",
-    stops: ["#a855f7", "#ec4899"] as const,
-    highlight: "bg-purple-500/10",
+      "Rewrite any string for a tone and a goal, without leaving the page.",
   },
   {
     icon: Users2,
-    title: "Your whole team, empowered",
+    title: "Your whole team",
     description:
-      "Marketing, product, support — everyone can update content without developer handoffs. Role-based permissions keep everything organized.",
-    accent: "from-emerald-500 to-teal-500",
-    stops: ["#10b981", "#14b8a6"] as const,
-    highlight: "bg-emerald-500/10",
+      "Role-based permissions, plus revocable edit access for contractors.",
   },
   {
     icon: Globe2,
     title: "Works everywhere",
-    description:
-      "React, Vue, WordPress, Webflow, static HTML — it doesn't matter. One script tag works with any website technology.",
-    accent: "from-orange-500 to-amber-500",
-    stops: ["#f97316", "#f59e0b"] as const,
-    highlight: "bg-orange-500/10",
+    description: "React, Vue, WordPress, Webflow, static HTML. One script tag.",
   },
   {
     icon: History,
     title: "Never lose a word",
     description:
-      "Every change is tracked with full version history. Made a mistake? Roll back to any previous version in seconds.",
-    accent: "from-indigo-500 to-violet-500",
-    stops: ["#6366f1", "#8b5cf6"] as const,
-    highlight: "bg-indigo-500/10",
+      "Full version history on every string. Roll back at any point.",
   },
   {
     icon: Shield,
     title: "Secure by default",
     description:
-      "Scoped API keys, per-site permissions, and encrypted content in transit and at rest. Every edit is attributed and logged.",
-    accent: "from-slate-500 to-zinc-500",
-    stops: ["#64748b", "#71717a"] as const,
-    highlight: "bg-slate-500/10",
+      "Scoped API keys, per-site permissions, and an audit log of every edit.",
   },
 ];
 
@@ -80,94 +91,81 @@ export default function Benefits() {
       // This is the features section, so it takes the anchor, matching how
       // Pricing.tsx:66 already carries id="pricing".
       id="features"
-      className="py-32 px-6 bg-white/60 backdrop-blur-sm relative overflow-hidden"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
     >
-      {/* Decorative elements */}
-      <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-sky-200 to-transparent" />
-      <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-sky-200 to-transparent" />
-
-      <div className="max-w-6xl mx-auto relative z-10">
-        {/* Section header */}
+      <div className="relative z-10 mx-auto max-w-6xl">
+        {/* Left-aligned on purpose. Four sections above this one open with a
+            centered eyebrow-over-headline-over-subhead stack; repeating it a
+            fifth time is most of why the page read as a template. */}
         <motion.div
-          initial={{ opacity: 0, y: 40 }}
+          initial={{ opacity: 0, y: 32 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
-          transition={{ duration: 0.8 }}
-          className="text-center mb-20"
+          transition={{ duration: 0.7 }}
+          className="mb-16 max-w-2xl"
         >
-          <span className="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-sky-600 bg-sky-50 rounded-full mb-6">
-            Why teams love it
-          </span>
-          <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-slate-900 tracking-tight mb-6">
-            Built for speed,
-            <br />
-            <span className="bg-gradient-to-r from-sky-500 to-emerald-500 bg-clip-text text-transparent">
-              designed for everyone
-            </span>
+          <span className="text-eyebrow">Features</span>
+          <h2 className="mt-4 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+            Changing the words is the easy part
           </h2>
-          <p className="text-xl text-slate-600 max-w-2xl mx-auto">
-            Everything you need to manage website content without touching code
+          <p className="mt-5 text-lg leading-relaxed text-slate-700">
+            Knowing which words to use is the hard part. ReCopyFast does both.
           </p>
         </motion.div>
 
-        {/* Benefits grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {benefits.map((benefit, i) => (
+        {/* The two differentiated capabilities, at twice the size of everything
+            else. Deliberately unequal weighting — six identical cards told a
+            visitor that all six mattered the same, which was never true. */}
+        <div className="mb-20 grid gap-6 md:grid-cols-2">
+          {headline.map((item, i) => (
             <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 40 }}
+              key={item.title}
+              initial={{ opacity: 0, y: 32 }}
               animate={isInView ? { opacity: 1, y: 0 } : {}}
-              transition={{ duration: 0.6, delay: 0.1 * i }}
-              className="group relative bg-white rounded-3xl p-8 border border-sky-100 hover:border-sky-200 transition-all duration-300 hover:shadow-xl hover:shadow-sky-100/50"
+              transition={{ duration: 0.6, delay: 0.1 + i * 0.1 }}
+              className="surface-interactive rounded-3xl border border-white/60 bg-white/70 p-9"
             >
-              {/* Icon */}
               <div
-                className={`w-14 h-14 rounded-2xl ${benefit.highlight} flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300`}
+                className={`mb-6 flex h-12 w-12 items-center justify-center rounded-2xl ${
+                  item.isSignal ? "bg-emerald-600" : "bg-sky-600"
+                }`}
               >
-                <benefit.icon
-                  className={`w-7 h-7 bg-gradient-to-br ${benefit.accent} bg-clip-text`}
-                  style={{
-                    stroke: `url(#gradient-${i})`,
-                  }}
-                />
-                <svg width="0" height="0">
-                  <defs>
-                    <linearGradient
-                      id={`gradient-${i}`}
-                      x1="0%"
-                      y1="0%"
-                      x2="100%"
-                      y2="100%"
-                    >
-                      {/*
-                        These stops used to build their class names at runtime
-                        from `accent` (e.g. "from-cyan-500" -> "text-cyan-500").
-                        Tailwind v4 extracts class names by scanning source
-                        text, so a name assembled at runtime is never emitted —
-                        7 of the 12 required utilities existed nowhere in the
-                        stylesheet. stopColor then fell through to
-                        `currentColor`, so most icons rendered the same flat
-                        colour and card 5 (indigo->violet) had neither stop.
-                        Literal colour values cannot be purged.
-                      */}
-                      <stop offset="0%" stopColor={benefit.stops[0]} />
-                      <stop offset="100%" stopColor={benefit.stops[1]} />
-                    </linearGradient>
-                  </defs>
-                </svg>
+                <item.icon className="h-6 w-6 text-white" />
               </div>
-
-              {/* Content */}
-              <h3 className="text-xl font-bold text-slate-900 mb-3">
-                {benefit.title}
+              <span
+                className={`text-eyebrow ${
+                  item.isSignal ? "text-emerald-700" : "text-sky-700"
+                }`}
+              >
+                {item.eyebrow}
+              </span>
+              <h3 className="mt-3 text-2xl font-bold leading-snug text-slate-900">
+                {item.title}
               </h3>
-              <p className="text-slate-600 leading-relaxed">
-                {benefit.description}
+              <p className="mt-4 leading-relaxed text-slate-700">
+                {item.description}
               </p>
+            </motion.div>
+          ))}
+        </div>
 
-              {/* Hover accent line */}
-              <div
-                className={`absolute bottom-0 left-8 right-8 h-0.5 bg-gradient-to-r ${benefit.accent} transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 rounded-full`}
-              />
+        {/* Everything else, compressed. These are table stakes — real, worth
+            listing, not worth a card each. */}
+        <div className="grid gap-x-10 gap-y-9 border-t border-slate-900/10 pt-14 sm:grid-cols-2 lg:grid-cols-3">
+          {supporting.map((item, i) => (
+            <motion.div
+              key={item.title}
+              initial={{ opacity: 0, y: 20 }}
+              animate={isInView ? { opacity: 1, y: 0 } : {}}
+              transition={{ duration: 0.5, delay: 0.3 + i * 0.06 }}
+              className="flex gap-4"
+            >
+              <item.icon className="mt-0.5 h-5 w-5 flex-shrink-0 text-sky-700" />
+              <div>
+                <h3 className="font-semibold text-slate-900">{item.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                  {item.description}
+                </p>
+              </div>
             </motion.div>
           ))}
         </div>

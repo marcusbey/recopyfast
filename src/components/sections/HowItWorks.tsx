@@ -55,7 +55,7 @@ export default function HowItWorks() {
   return (
     <section
       ref={ref}
-      className="py-32 px-6 bg-transparent relative overflow-hidden"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
     >
       {/* Decorative line */}
       <div className="absolute left-1/2 top-0 bottom-0 w-px bg-gradient-to-b from-transparent via-sky-200 to-transparent hidden lg:block" />
@@ -95,10 +95,10 @@ export default function HowItWorks() {
               {/* Content side */}
               <div className="flex-1 max-w-xl">
                 <div className="flex items-center gap-4 mb-6">
-                  <span className="text-5xl font-bold bg-gradient-to-br from-sky-500 to-emerald-500 bg-clip-text text-transparent">
+                  <span className="text-5xl font-bold text-sky-700">
                     {step.number}
                   </span>
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-sky-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-sky-500/20">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-600">
                     <step.icon className="w-7 h-7 text-white" />
                   </div>
                 </div>
@@ -135,7 +135,6 @@ export default function HowItWorks() {
               <div className="flex-1 w-full max-w-xl">
                 <div className="relative">
                   {/* Glow effect */}
-                  <div className="absolute -inset-4 bg-gradient-to-r from-sky-500/20 to-emerald-500/20 rounded-3xl blur-2xl opacity-50" />
 
                   {/* Code block */}
                   <div className="relative bg-slate-900 rounded-2xl p-6 shadow-2xl border border-sky-200/20">
@@ -181,7 +180,7 @@ export default function HowItWorks() {
               <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
             </span>
             <span className="font-semibold text-emerald-700">
-              Average setup time: 4 minutes 32 seconds
+              Average setup time: 3 minutes 32 seconds
             </span>
           </div>
         </motion.div>

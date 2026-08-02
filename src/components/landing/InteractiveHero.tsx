@@ -1,353 +1,99 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  Wand2,
-  Sparkles,
-  CheckCircle,
-  ArrowRight,
-  ChevronLeft,
-  ChevronRight,
-  Utensils,
-  Car,
-  Coffee,
-  Edit3,
-  Save,
-  X,
-  Image,
-  Code,
-  Zap,
-} from "lucide-react";
-import {
-  DEFAULT_EDITING_RULES,
-  getTextEditingStyles,
-  generateUnsplashUrl,
-  TEXT_EDITING_CONSISTENCY_RULES,
-  getOptimalTextColor,
-  getTextShadow,
-  getFullElementText,
-  UNSPLASH_CATEGORIES,
-} from "@/lib/editingRules";
-import {
-  FloatingEditorToolbar,
-  ElementTagBadge,
-  UnsavedChangesBar,
-} from "@/components/editor";
+import { useEffect, useRef, useState } from "react";
+import type { ComponentType } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { CheckCircle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { FloatingEditorToolbar, UnsavedChangesBar } from "@/components/editor";
 import { useFloatingPosition } from "@/lib/hooks/useFloatingPosition";
-import type { TypographyStyles, PendingChange } from "@/types/editor";
+import type { PendingChange, TypographyStyles } from "@/types/editor";
+import BellaVistaSite from "./demo/BellaVistaSite";
+import BrowserChrome from "./demo/BrowserChrome";
+import EditableImage from "./demo/EditableImage";
+import EditableText from "./demo/EditableText";
+import PremiumAutoSpaSite from "./demo/PremiumAutoSpaSite";
+import SweetDreamsSite from "./demo/SweetDreamsSite";
+import { demoSites } from "./demo/demoSites";
+import type {
+  DemoSite,
+  DemoSiteRenderProps,
+  EditableText as EditableTextModel,
+} from "./demo/types";
 
-interface EditableText {
-  id: string;
-  text: string;
-  isEditing: boolean;
-  originalText: string;
-}
+const SITE_LAYOUTS: Record<string, ComponentType<DemoSiteRenderProps>> = {
+  restaurant: BellaVistaSite,
+  carwash: PremiumAutoSpaSite,
+  bakery: SweetDreamsSite,
+};
 
-interface DemoSite {
-  id: string;
-  name: string;
-  theme: string;
-  icon: React.ComponentType<{ className?: string }>;
-  background: string;
-  textColor: string;
-  accentColor: string;
-  editableTexts: EditableText[];
-}
+const DEFAULT_STYLES: TypographyStyles = {
+  fontSize: "1rem",
+  fontWeight: "400",
+  color: "#000000",
+  textAlign: "left",
+};
 
-const demoSites: DemoSite[] = [
-  {
-    id: "restaurant",
-    name: "Bella Vista Restaurant",
-    theme: "restaurant",
-    icon: Utensils,
-    background: "bg-gradient-to-br from-amber-50 to-orange-50",
-    textColor: "text-amber-900",
-    accentColor: "from-amber-600 to-orange-600",
-    editableTexts: [
-      {
-        id: "headline",
-        text: "Authentic Italian Cuisine",
-        isEditing: false,
-        originalText: "Authentic Italian Cuisine",
-      },
-      {
-        id: "subheading",
-        text: "Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.",
-        isEditing: false,
-        originalText:
-          "Experience the finest Italian dishes made with fresh, locally-sourced ingredients in the heart of downtown.",
-      },
-      {
-        id: "cta",
-        text: "Book Your Table",
-        isEditing: false,
-        originalText: "Book Your Table",
-      },
-      {
-        id: "about-title",
-        text: "Our Story",
-        isEditing: false,
-        originalText: "Our Story",
-      },
-      {
-        id: "about-text",
-        text: "Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.",
-        isEditing: false,
-        originalText:
-          "Founded in 1952 by the Rossi family, Bella Vista has been serving authentic Italian cuisine for three generations. Our chefs bring traditional recipes from Sicily and Tuscany to your table.",
-      },
-      {
-        id: "menu-title",
-        text: "Today's Specials",
-        isEditing: false,
-        originalText: "Today's Specials",
-      },
-      {
-        id: "special-1",
-        text: "Truffle Risotto with Wild Mushrooms - $28",
-        isEditing: false,
-        originalText: "Truffle Risotto with Wild Mushrooms - $28",
-      },
-      {
-        id: "special-2",
-        text: "Osso Buco alla Milanese - $32",
-        isEditing: false,
-        originalText: "Osso Buco alla Milanese - $32",
-      },
-      {
-        id: "feature-1-title",
-        text: "Fresh Pasta",
-        isEditing: false,
-        originalText: "Fresh Pasta",
-      },
-      {
-        id: "feature-1-desc",
-        text: "Made daily with authentic Italian recipes",
-        isEditing: false,
-        originalText: "Made daily with authentic Italian recipes",
-      },
-      {
-        id: "feature-2-title",
-        text: "Fine Wine",
-        isEditing: false,
-        originalText: "Fine Wine",
-      },
-      {
-        id: "feature-2-desc",
-        text: "Curated selection from Italian vineyards",
-        isEditing: false,
-        originalText: "Curated selection from Italian vineyards",
-      },
-      {
-        id: "learn-more-btn",
-        text: "Learn More",
-        isEditing: false,
-        originalText: "Learn More",
-      },
-    ],
+/** Matches `--ease-out` in globals.css. */
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+/**
+ * Direction-aware slide. `custom` carries +1 (moved forward) or -1 (moved
+ * back); it is derived from the index delta at the call site, so the tab
+ * buttons and the arrows both slide the way the user actually travelled.
+ *
+ * Exit only travels 35% while enter travels the full width — the outgoing site
+ * reads as being pushed off rather than racing away, which is what stops a
+ * sub-half-second transition from feeling twitchy.
+ */
+const slideVariants = {
+  enter: (direction: number) => ({
+    x: direction >= 0 ? "100%" : "-100%",
+    opacity: 0,
+  }),
+  center: {
+    x: "0%",
+    opacity: 1,
+    transition: { duration: 0.26, ease: EASE },
   },
-  {
-    id: "carwash",
-    name: "Premium Auto Spa",
-    theme: "carwash",
-    icon: Car,
-    background: "bg-gradient-to-br from-blue-50 to-cyan-50",
-    textColor: "text-blue-900",
-    accentColor: "from-blue-600 to-cyan-600",
-    editableTexts: [
-      {
-        id: "headline",
-        text: "Premium Car Detailing",
-        isEditing: false,
-        originalText: "Premium Car Detailing",
-      },
-      {
-        id: "subheading",
-        text: "Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.",
-        isEditing: false,
-        originalText:
-          "Professional car wash and detailing services that make your vehicle shine like new with eco-friendly products.",
-      },
-      {
-        id: "cta",
-        text: "Schedule Service",
-        isEditing: false,
-        originalText: "Schedule Service",
-      },
-      {
-        id: "services-title",
-        text: "Our Services",
-        isEditing: false,
-        originalText: "Our Services",
-      },
-      {
-        id: "service-desc",
-        text: "From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.",
-        isEditing: false,
-        originalText:
-          "From basic washes to full ceramic coating, we offer comprehensive automotive care services. All work comes with our 100% satisfaction guarantee.",
-      },
-      {
-        id: "pricing-title",
-        text: "Service Packages",
-        isEditing: false,
-        originalText: "Service Packages",
-      },
-      {
-        id: "package-1",
-        text: "Express Wash - Interior vacuum, exterior wash - $25",
-        isEditing: false,
-        originalText: "Express Wash - Interior vacuum, exterior wash - $25",
-      },
-      {
-        id: "package-2",
-        text: "Premium Detail - Full detail, wax, tire shine - $85",
-        isEditing: false,
-        originalText: "Premium Detail - Full detail, wax, tire shine - $85",
-      },
-      // Additional Car Wash Service Cards
-      {
-        id: "basic-wash-title",
-        text: "Basic Wash",
-        isEditing: false,
-        originalText: "Basic Wash",
-      },
-      {
-        id: "basic-wash-desc",
-        text: "Quick exterior wash with tire shine",
-        isEditing: false,
-        originalText: "Quick exterior wash with tire shine",
-      },
-      {
-        id: "premium-detail-title",
-        text: "Premium Detail",
-        isEditing: false,
-        originalText: "Premium Detail",
-      },
-      {
-        id: "premium-detail-desc",
-        text: "Full interior & exterior detailing",
-        isEditing: false,
-        originalText: "Full interior & exterior detailing",
-      },
-      {
-        id: "ceramic-coating-title",
-        text: "Ceramic Coating",
-        isEditing: false,
-        originalText: "Ceramic Coating",
-      },
-      {
-        id: "ceramic-coating-desc",
-        text: "Long-lasting paint protection",
-        isEditing: false,
-        originalText: "Long-lasting paint protection",
-      },
-      {
-        id: "satisfaction-title",
-        text: "100% Satisfaction",
-        isEditing: false,
-        originalText: "100% Satisfaction",
-      },
-      {
-        id: "satisfaction-subtitle",
-        text: "Guaranteed",
-        isEditing: false,
-        originalText: "Guaranteed",
-      },
-      {
-        id: "view-pricing-btn",
-        text: "View Pricing",
-        isEditing: false,
-        originalText: "View Pricing",
-      },
-    ],
-  },
-  {
-    id: "bakery",
-    name: "Sweet Dreams Bakery",
-    theme: "bakery",
-    icon: Coffee,
-    background: "bg-gradient-to-br from-pink-50 to-rose-50",
-    textColor: "text-rose-900",
-    accentColor: "from-pink-600 to-rose-600",
-    editableTexts: [
-      {
-        id: "headline",
-        text: "Freshly Baked Daily",
-        isEditing: false,
-        originalText: "Freshly Baked Daily",
-      },
-      {
-        id: "subheading",
-        text: "Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.",
-        isEditing: false,
-        originalText:
-          "Artisan breads, pastries, and cakes made with love and the finest ingredients since 1985.",
-      },
-      {
-        id: "cta",
-        text: "Order Online",
-        isEditing: false,
-        originalText: "Order Online",
-      },
-      {
-        id: "tradition-title",
-        text: "Family Tradition",
-        isEditing: false,
-        originalText: "Family Tradition",
-      },
-      {
-        id: "tradition-text",
-        text: "Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.",
-        isEditing: false,
-        originalText:
-          "Three generations of baking expertise brings you authentic European recipes. Every loaf, pastry, and cake is made from scratch using traditional methods.",
-      },
-      {
-        id: "hours-title",
-        text: "Visit Us Today",
-        isEditing: false,
-        originalText: "Visit Us Today",
-      },
-      {
-        id: "hours-1",
-        text: "Monday - Friday: 6:00 AM - 7:00 PM",
-        isEditing: false,
-        originalText: "Monday - Friday: 6:00 AM - 7:00 PM",
-      },
-      {
-        id: "hours-2",
-        text: "Saturday - Sunday: 7:00 AM - 6:00 PM",
-        isEditing: false,
-        originalText: "Saturday - Sunday: 7:00 AM - 6:00 PM",
-      },
-      // Contact Information
-      {
-        id: "contact-address",
-        text: "📍 123 Main Street, Downtown",
-        isEditing: false,
-        originalText: "📍 123 Main Street, Downtown",
-      },
-      {
-        id: "contact-phone",
-        text: "📞 (555) 123-4567",
-        isEditing: false,
-        originalText: "📞 (555) 123-4567",
-      },
-    ],
-  },
-];
+  exit: (direction: number) => ({
+    x: direction >= 0 ? "-35%" : "35%",
+    opacity: 0,
+    transition: { duration: 0.16, ease: EASE },
+  }),
+};
+
+/** `prefers-reduced-motion` fallback: no travel, just a short cross-fade. */
+const fadeVariants = {
+  enter: { opacity: 0 },
+  center: { opacity: 1, transition: { duration: 0.16 } },
+  exit: { opacity: 0, transition: { duration: 0.12 } },
+};
 
 export default function InteractiveHero() {
   const [currentSite, setCurrentSite] = useState(0);
-  const [editableTexts, setEditableTexts] = useState<EditableText[]>(
-    demoSites[0].editableTexts,
+  const [slideDirection, setSlideDirection] = useState(0);
+
+  /**
+   * Copy is held per site rather than as one flat list, for two reasons: the
+   * slide leaves the outgoing site on screen for ~180ms after the index has
+   * already moved on, and a visitor who edits the restaurant, looks at the
+   * bakery and comes back expects to find their edit still there.
+   */
+  const [textsBySite, setTextsBySite] = useState<
+    Record<string, EditableTextModel[]>
+  >(() =>
+    Object.fromEntries(demoSites.map((site) => [site.id, site.editableTexts])),
   );
-  const [optimalColors, setOptimalColors] = useState<Record<string, string>>(
-    {},
-  );
-  const [textShadows, setTextShadows] = useState<Record<string, string>>({});
+  /** Chosen photo per `siteId:slot`. Absent means "the slot's first photo". */
+  const [imageSources, setImageSources] = useState<Record<string, string>>({});
+
+  // Transient per-click capture, cleared whenever the site changes.
+  const [preservedColors, setPreservedColors] = useState<
+    Record<string, string>
+  >({});
+  const [preservedShadows, setPreservedShadows] = useState<
+    Record<string, string>
+  >({});
   const [originalHeights, setOriginalHeights] = useState<
     Record<string, number>
   >({});
@@ -355,11 +101,7 @@ export default function InteractiveHero() {
     {},
   );
 
-  const [isAutoDemo, setIsAutoDemo] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
-  const [showDemoWidget, setShowDemoWidget] = useState(false);
-
-  // New editor state for Framer-like UI
   const [selectedElementId, setSelectedElementId] = useState<string | null>(
     null,
   );
@@ -372,9 +114,17 @@ export default function InteractiveHero() {
   const [pendingChanges, setPendingChanges] = useState<
     Map<string, PendingChange>
   >(new Map());
-  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Floating toolbar position
+  const containerRef = useRef<HTMLDivElement>(null);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** What the element said when editing started, so Esc can put it back. */
+  const editStartText = useRef<{ id: string; text: string } | null>(null);
+
+  const prefersReducedMotion = useReducedMotion();
+  const currentSiteData = demoSites[currentSite];
+  const editableTexts = textsBySite[currentSiteData.id] ?? [];
+  const hasUnsavedChanges = pendingChanges.size > 0;
+
   const { position: toolbarPosition } = useFloatingPosition({
     elementBounds: selectedElementBounds,
     toolbarHeight: 48,
@@ -383,50 +133,134 @@ export default function InteractiveHero() {
     containerRef,
   });
 
-  const currentSiteData = demoSites[currentSite];
+  useEffect(
+    () => () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    },
+    [],
+  );
 
-  // Check if there are unsaved changes
-  const hasUnsavedChanges = pendingChanges.size > 0;
-
-  // Get current element styles or default
-  const getCurrentStyles = (elementId: string): TypographyStyles => {
-    return (
-      elementStyles[elementId] || {
-        fontSize: "1rem",
-        fontWeight: "400",
-        color: "#000000",
-        textAlign: "left",
-      }
+  const flashSuccess = () => {
+    setShowSuccessAnimation(true);
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = setTimeout(
+      () => setShowSuccessAnimation(false),
+      1800,
     );
   };
 
-  // Handle element selection for new editor UI
-  const handleElementSelect = (id: string, element: HTMLElement) => {
-    const bounds = element.getBoundingClientRect();
-    const computedStyle = window.getComputedStyle(element);
-    const tagName = element.tagName.toLowerCase();
-
-    setSelectedElementId(id);
-    setSelectedElementBounds(bounds);
-    setSelectedElementTag(tagName);
-
-    // Initialize styles from computed style if not already set
-    if (!elementStyles[id]) {
-      setElementStyles((prev) => ({
-        ...prev,
-        [id]: {
-          fontSize: computedStyle.fontSize,
-          fontWeight: computedStyle.fontWeight,
-          color: computedStyle.color,
-          textAlign: computedStyle.textAlign as TypographyStyles["textAlign"],
-          lineHeight: computedStyle.lineHeight,
-          letterSpacing: computedStyle.letterSpacing,
-        },
-      }));
-    }
+  const clearSelection = () => {
+    setSelectedElementId(null);
+    setSelectedElementBounds(null);
+    setSelectedElementTag("");
+    editStartText.current = null;
   };
 
-  // Handle style changes from toolbar
+  const updateCurrentTexts = (
+    update: (texts: EditableTextModel[]) => EditableTextModel[],
+  ) => {
+    setTextsBySite((prev) => ({
+      ...prev,
+      [currentSiteData.id]: update(prev[currentSiteData.id] ?? []),
+    }));
+  };
+
+  // --- Site switching ------------------------------------------------------
+
+  const goToSite = (index: number, direction?: number) => {
+    if (index === currentSite) return;
+
+    setSlideDirection(direction ?? Math.sign(index - currentSite));
+    setCurrentSite(index);
+
+    // Typography tweaks and the per-click box capture are scoped to the site
+    // that was on screen; element ids repeat across sites, so carrying them
+    // over would apply one site's headline styling to another's.
+    setElementStyles({});
+    setPendingChanges(new Map());
+    setOriginalWidths({});
+    setOriginalHeights({});
+    setPreservedColors({});
+    setPreservedShadows({});
+    updateCurrentTexts((texts) =>
+      texts.map((item) => ({ ...item, isEditing: false })),
+    );
+    clearSelection();
+  };
+
+  const nextSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
+  const prevSite = () =>
+    goToSite((currentSite - 1 + demoSites.length) % demoSites.length, -1);
+
+  // --- Editing -------------------------------------------------------------
+
+  /**
+   * Selects an element and puts it into edit mode.
+   *
+   * The read-mode box is measured here, before React swaps in the edit branch,
+   * because that measurement is the only thing keeping the element from
+   * resizing the moment it is clicked.
+   */
+  const handleElementActivate = (id: string, element: HTMLElement) => {
+    const computed = window.getComputedStyle(element);
+
+    setSelectedElementId(id);
+    setSelectedElementBounds(element.getBoundingClientRect());
+    setSelectedElementTag(element.tagName.toLowerCase());
+
+    setElementStyles((prev) =>
+      prev[id]
+        ? prev
+        : {
+            ...prev,
+            [id]: {
+              fontSize: computed.fontSize,
+              fontWeight: computed.fontWeight,
+              color: computed.color,
+              textAlign: computed.textAlign as TypographyStyles["textAlign"],
+              lineHeight: computed.lineHeight,
+              letterSpacing: computed.letterSpacing,
+            },
+          },
+    );
+
+    // `getBoundingClientRect()`, not `offsetWidth`/`offsetHeight`: those round
+    // to whole pixels, so pinning them to a box that actually measures 200.67px
+    // wide made it 201px in edit mode — a third of a pixel of drift that shows
+    // up as a shimmer on click.
+    const box = element.getBoundingClientRect();
+    setOriginalWidths((prev) => ({ ...prev, [id]: box.width }));
+    setOriginalHeights((prev) => ({ ...prev, [id]: box.height }));
+    setPreservedColors((prev) => ({ ...prev, [id]: computed.color }));
+    setPreservedShadows((prev) => ({ ...prev, [id]: "inherit" }));
+
+    // Read the copy back out of the rendered line divs. They are tagged with
+    // `data-line` so selection chrome — the tag badge, the underline, the
+    // hover pencil — can never leak into the text being edited.
+    const rendered = Array.from(
+      element.querySelectorAll<HTMLElement>("[data-line]"),
+    )
+      .map((line) => line.textContent?.trim() ?? "")
+      .join("\n");
+    const fallback = editableTexts.find((item) => item.id === id)?.text ?? "";
+    const fullText = rendered.trim() ? rendered : fallback;
+
+    editStartText.current = { id, text: fullText };
+    updateCurrentTexts((texts) =>
+      texts.map((item) =>
+        item.id === id
+          ? { ...item, text: fullText, isEditing: true }
+          : { ...item, isEditing: false },
+      ),
+    );
+  };
+
+  const handleTextChange = (id: string, newText: string) => {
+    updateCurrentTexts((texts) =>
+      texts.map((item) => (item.id === id ? { ...item, text: newText } : item)),
+    );
+  };
+
   const handleStylesChange = (styles: Partial<TypographyStyles>) => {
     if (!selectedElementId) return;
 
@@ -435,18 +269,11 @@ export default function InteractiveHero() {
     );
     if (!currentItem) return;
 
-    // Use functional updater to avoid reading stale closure snapshot of
-    // elementStyles on rapid slider events.
+    // Functional updater so rapid slider events never read a stale snapshot.
     setElementStyles((prev) => {
-      const existingStyles: TypographyStyles = prev[selectedElementId] ?? {
-        fontSize: "1rem",
-        fontWeight: "400",
-        color: "#000000",
-        textAlign: "left",
-      };
+      const existingStyles = prev[selectedElementId] ?? DEFAULT_STYLES;
       const mergedStyles: TypographyStyles = { ...existingStyles, ...styles };
 
-      // Track as pending change using the freshly merged styles.
       setPendingChanges((prevChanges) => {
         const existingChange = prevChanges.get(selectedElementId);
         const newMap = new Map(prevChanges);
@@ -463,73 +290,65 @@ export default function InteractiveHero() {
     });
   };
 
-  // Handle save from toolbar
-  const handleToolbarSave = () => {
-    if (selectedElementId) {
-      handleTextSave(selectedElementId);
-    }
-    setSelectedElementId(null);
-    setSelectedElementBounds(null);
+  /** Leave edit mode, keeping whatever was typed. */
+  const commitEdit = () => {
+    updateCurrentTexts((texts) =>
+      texts.map((item) => ({ ...item, isEditing: false })),
+    );
+    if (selectedElementId) flashSuccess();
+    clearSelection();
   };
 
-  // Handle delete/cancel from toolbar
-  const handleToolbarDelete = () => {
-    if (selectedElementId) {
-      // Revert to original
-      const pendingChange = pendingChanges.get(selectedElementId);
-      if (pendingChange) {
-        setEditableTexts((prev) =>
-          prev.map((item) =>
-            item.id === selectedElementId
-              ? { ...item, text: pendingChange.original, isEditing: false }
-              : item,
-          ),
-        );
-        if (pendingChange.originalStyles) {
-          setElementStyles((prev) => ({
-            ...prev,
-            [selectedElementId]: pendingChange.originalStyles!,
-          }));
-        }
-      }
+  /** Leave edit mode, putting the copy and styling back as they were. */
+  const cancelEdit = () => {
+    const snapshot = editStartText.current;
+    const pendingChange = selectedElementId
+      ? pendingChanges.get(selectedElementId)
+      : undefined;
+
+    updateCurrentTexts((texts) =>
+      texts.map((item) =>
+        snapshot && item.id === snapshot.id
+          ? { ...item, text: snapshot.text, isEditing: false }
+          : { ...item, isEditing: false },
+      ),
+    );
+
+    if (selectedElementId && pendingChange?.originalStyles) {
+      setElementStyles((prev) => ({
+        ...prev,
+        [selectedElementId]: pendingChange.originalStyles!,
+      }));
     }
-    setSelectedElementId(null);
-    setSelectedElementBounds(null);
+
+    clearSelection();
   };
 
-  // Handle save all changes
   const handleSaveAllChanges = () => {
     setPendingChanges(new Map());
-    setShowSuccessAnimation(true);
-    setTimeout(() => setShowSuccessAnimation(false), 2000);
+    flashSuccess();
   };
 
-  // Handle discard all changes
   const handleDiscardAllChanges = () => {
-    // Revert all pending changes
     pendingChanges.forEach((change, id) => {
-      setEditableTexts((prev) =>
-        prev.map((item) =>
+      updateCurrentTexts((texts) =>
+        texts.map((item) =>
           item.id === id ? { ...item, text: change.original } : item,
         ),
       );
       if (change.originalStyles) {
-        setElementStyles((prev) => ({
-          ...prev,
-          [id]: change.originalStyles!,
-        }));
+        setElementStyles((prev) => ({ ...prev, [id]: change.originalStyles! }));
       }
     });
     setPendingChanges(new Map());
-    setSelectedElementId(null);
-    setSelectedElementBounds(null);
+    clearSelection();
   };
 
-  // Click outside handler for deselection
+  // Clicking anywhere that is not an editable element or the editor chrome
+  // ends the edit rather than stranding an open textarea with no toolbar.
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as HTMLElement;
-      // Don't deselect if clicking on toolbar or editable element
       if (
         target.closest("[data-editable-id]") ||
         target.closest("[data-editor-toolbar]") ||
@@ -537,778 +356,98 @@ export default function InteractiveHero() {
       ) {
         return;
       }
-      setSelectedElementId(null);
-      setSelectedElementBounds(null);
+      setTextsBySite((prev) => {
+        const texts = prev[currentSiteData.id] ?? [];
+        if (!texts.some((item) => item.isEditing)) return prev;
+        return {
+          ...prev,
+          [currentSiteData.id]: texts.map((item) => ({
+            ...item,
+            isEditing: false,
+          })),
+        };
+      });
+      clearSelection();
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [currentSiteData.id]);
 
-  // Function to determine text color based on theme and context
-  const getTextColor = (elementId: string) => {
-    const theme = currentSiteData.theme;
+  // --- Rendering -----------------------------------------------------------
 
-    // Hero section elements (headline, subheading on hero backgrounds)
-    if (elementId === "headline" || elementId === "subheading") {
-      if (theme === "restaurant") {
-        return "text-white"; // White text on dark restaurant hero
-      } else if (theme === "carwash") {
-        return "text-white"; // White text on blue gradient hero
-      } else if (theme === "bakery") {
-        return "text-rose-900"; // Dark text on light pink background
-      }
-    }
-
-    // Title elements in content sections
-    if (elementId.includes("title")) {
-      if (theme === "restaurant") {
-        return "text-amber-900"; // Dark amber on light backgrounds
-      } else if (theme === "carwash") {
-        return "text-gray-900"; // Dark text on light backgrounds
-      } else if (theme === "bakery") {
-        return "text-rose-900"; // Dark rose on light backgrounds
-      }
-    }
-
-    // Body text elements
-    if (theme === "restaurant") {
-      return "text-amber-800";
-    } else if (theme === "carwash") {
-      return "text-gray-700";
-    } else if (theme === "bakery") {
-      return "text-rose-800";
-    }
-
-    return "text-gray-800"; // Default fallback
-  };
-
-  const nextSite = () => {
-    const newSiteIndex = (currentSite + 1) % demoSites.length;
-    setCurrentSite(newSiteIndex);
-    setEditableTexts(demoSites[newSiteIndex].editableTexts);
-  };
-
-  const prevSite = () => {
-    const newSiteIndex =
-      (currentSite - 1 + demoSites.length) % demoSites.length;
-    setCurrentSite(newSiteIndex);
-    setEditableTexts(demoSites[newSiteIndex].editableTexts);
-  };
-
-  const handleTextClick = (id: string) => {
-    // CLEAR RULE: Always preserve original text color and formatting
-    const element = document.querySelector(
-      `[data-editable-id="${id}"]`,
-    ) as HTMLElement;
-    if (element) {
-      const computedStyle = window.getComputedStyle(element);
-      // Store the original color to preserve it during editing
-      const originalColor = computedStyle.color;
-      // Capture the original box before switching to edit mode.
-      //
-      // Width matters as much as height. The edit wrapper sits in a centred
-      // flex column, where a block child is sized shrink-to-fit; the textarea
-      // inside it asks for `w-full`, which resolves against that shrink-to-fit
-      // parent and so falls back to the textarea's intrinsic `cols` width. The
-      // subheading collapsed from 672px to 265px on click for exactly this
-      // reason. Pinning the measured width removes the circular dependency.
-      const originalHeight = element.offsetHeight;
-      const originalWidth = element.offsetWidth;
-      setOptimalColors((prev) => ({ ...prev, [id]: originalColor }));
-      setTextShadows((prev) => ({ ...prev, [id]: "inherit" }));
-      setOriginalHeights((prev) => ({ ...prev, [id]: originalHeight }));
-      setOriginalWidths((prev) => ({ ...prev, [id]: originalWidth }));
-
-      // Get only the main text content, excluding tooltips and other UI elements
-      const textDivs = element.querySelectorAll("div");
-      let fullText = "";
-      if (textDivs.length > 0) {
-        // Get text from the content divs, not from tooltips or UI elements
-        fullText = Array.from(textDivs)
-          .map((div) => div.textContent?.trim())
-          .filter((text) => text && text !== "Click to edit")
-          .join("\n");
-      }
-
-      // Fallback to finding the item text from state if DOM parsing fails
-      if (!fullText) {
-        const currentItem = editableTexts.find((item) => item.id === id);
-        fullText = currentItem?.text || "";
-      }
-
-      setEditableTexts((prev) =>
-        prev.map((item) => {
-          if (item.id === id) {
-            return { ...item, text: fullText, isEditing: true };
-          }
-          return { ...item, isEditing: false };
-        }),
+  /**
+   * The render callbacks a site layout receives. Built from an explicit `site`
+   * rather than from `currentSiteData` so the outgoing slide keeps resolving
+   * its own copy and photos while it animates away.
+   */
+  const buildRenderProps = (site: DemoSite): DemoSiteRenderProps => ({
+    text: (id) => {
+      const item = (textsBySite[site.id] ?? []).find(
+        (candidate) => candidate.id === id,
       );
-    } else {
-      setEditableTexts((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? { ...item, isEditing: true }
-            : { ...item, isEditing: false },
-        ),
-      );
-    }
-  };
+      if (!item) return null;
 
-  const handleTextChange = (id: string, newText: string) => {
-    setEditableTexts((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, text: newText } : item)),
-    );
-  };
-
-  const handleTextSave = (id: string) => {
-    setEditableTexts((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, isEditing: false } : item,
-      ),
-    );
-
-    // Show success animation
-    setShowSuccessAnimation(true);
-    setTimeout(() => setShowSuccessAnimation(false), 2000);
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent, id: string) => {
-    if (e.key === "Enter") {
-      handleTextSave(id);
-    }
-    if (e.key === "Escape") {
-      // Reset to original text
-      setEditableTexts((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? { ...item, text: item.originalText, isEditing: false }
-            : item,
-        ),
-      );
-    }
-  };
-
-  const runAutoDemo = () => {
-    setIsAutoDemo(true);
-    const demoSequence = [
-      {
-        id: "headline",
-        newText: "Transform Any Website Instantly",
-        delay: 1000,
-      },
-      {
-        id: "subheading",
-        newText: "AI-powered content editing with real-time collaboration.",
-        delay: 2000,
-      },
-      { id: "cta", newText: "Try AI Magic Now", delay: 3000 },
-    ];
-
-    demoSequence.forEach(({ id, newText, delay }) => {
-      setTimeout(() => {
-        setEditableTexts((prev) =>
-          prev.map((item) =>
-            item.id === id ? { ...item, text: newText, isEditing: true } : item,
-          ),
-        );
-
-        setTimeout(() => {
-          setEditableTexts((prev) =>
-            prev.map((item) =>
-              item.id === id ? { ...item, isEditing: false } : item,
-            ),
-          );
-          setShowSuccessAnimation(true);
-          setTimeout(() => setShowSuccessAnimation(false), 500);
-        }, 800);
-      }, delay);
-    });
-
-    setTimeout(() => setIsAutoDemo(false), 5000);
-  };
-
-  const EditableImageComponent = ({
-    src,
-    alt,
-    className,
-    imageType,
-  }: {
-    src: string;
-    alt: string;
-    className: string;
-    imageType: string;
-  }) => {
-    const [isHovering, setIsHovering] = useState(false);
-    const [showImageModal, setShowImageModal] = useState(false);
-    const [imagePrompt, setImagePrompt] = useState("");
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [currentImageSrc, setCurrentImageSrc] = useState(src);
-
-    const handleImageReplace = (newSrc: string) => {
-      // Animate image replacement with smooth transition
-      const imgElement = document.querySelector(
-        `img[src="${currentImageSrc}"]`,
-      ) as HTMLImageElement;
-      if (imgElement) {
-        // Create smooth fade transition
-        imgElement.style.transition =
-          "opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease";
-        imgElement.style.opacity = "0";
-        imgElement.style.transform = "scale(0.95) rotateY(10deg)";
-
-        setTimeout(() => {
-          imgElement.src = newSrc;
-          imgElement.style.opacity = "1";
-          imgElement.style.transform = "scale(1) rotateY(0deg)";
-
-          // Add success animation effect with green glow
-          imgElement.style.boxShadow =
-            "0 0 40px rgba(16, 185, 129, 0.6), 0 0 80px rgba(16, 185, 129, 0.3)";
-          setTimeout(() => {
-            imgElement.style.boxShadow = "";
-          }, 1500);
-        }, 400);
-      }
-
-      setCurrentImageSrc(newSrc);
-      setShowImageModal(false);
-      setImagePrompt("");
-      setShowSuccessAnimation(true);
-      setTimeout(() => setShowSuccessAnimation(false), 3000);
-    };
-
-    const generateRandomImage = () => {
-      const dimensions = imageType === "hero" ? "1200x600" : "800x600";
-      const newImage = generateUnsplashUrl(
-        imageType as keyof typeof UNSPLASH_CATEGORIES,
-        800,
-        600,
-      );
-      handleImageReplace(newImage);
-    };
-
-    const generateFromPrompt = async () => {
-      if (!imagePrompt.trim()) return;
-
-      setIsGenerating(true);
-      try {
-        // For demo purposes, generate a themed Unsplash URL based on prompt keywords
-        const keywords = imagePrompt.toLowerCase();
-        let category = imageType;
-
-        if (
-          keywords.includes("food") ||
-          keywords.includes("dish") ||
-          keywords.includes("meal")
-        ) {
-          category = "food";
-        } else if (
-          keywords.includes("car") ||
-          keywords.includes("vehicle") ||
-          keywords.includes("auto")
-        ) {
-          category = "car";
-        } else if (
-          keywords.includes("bakery") ||
-          keywords.includes("bread") ||
-          keywords.includes("cake")
-        ) {
-          category = "bakery";
-        }
-
-        // Create a more specific URL with prompt keywords
-        const promptFormatted = imagePrompt.replace(/\s+/g, ",");
-        const dimensions = imageType === "hero" ? "1200x600" : "800x600";
-        const newImage = `https://source.unsplash.com/${dimensions}/?${promptFormatted}&${Date.now()}`;
-
-        handleImageReplace(newImage);
-      } catch (error) {
-        console.error("Error generating image:", error);
-        // Fallback to random image
-        generateRandomImage();
-      } finally {
-        setIsGenerating(false);
-      }
-    };
-
-    return (
-      <>
-        <div
-          className="relative group overflow-visible"
-          onMouseEnter={() => setIsHovering(true)}
-          onMouseLeave={() => setIsHovering(false)}
-        >
-          <motion.img
-            src={currentImageSrc}
-            alt={alt}
-            className={`${className} transition-all duration-500 group-hover:scale-105 group-hover:shadow-2xl hover:brightness-110`}
-            whileHover={{
-              scale: 1.05,
-              rotateY: 5,
-              rotateX: 2,
-              filter: "brightness(1.1)",
-            }}
-            whileTap={{ scale: 0.98 }}
-            transition={{
-              type: "spring",
-              stiffness: 400,
-              damping: 20,
-              duration: 0.3,
-            }}
-            style={{
-              transformStyle: "preserve-3d",
-              backfaceVisibility: "hidden",
-              transform: "translateZ(0)", // Force GPU layer to prevent text rendering issues
-            }}
-          />
-
-          {isHovering && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, backdropFilter: "blur(0px)" }}
-              animate={{
-                opacity: 1,
-                scale: 1,
-                backdropFilter: "blur(4px)",
-              }}
-              exit={{
-                opacity: 0,
-                scale: 0.9,
-                backdropFilter: "blur(0px)",
-              }}
-              className="absolute inset-0 bg-gradient-to-t from-black/70 via-purple-500/10 to-transparent flex items-center justify-center cursor-pointer rounded-lg backdrop-blur-sm"
-              onClick={() => setShowImageModal(true)}
-              whileHover={{
-                background:
-                  "linear-gradient(to top, rgba(0,0,0,0.8), rgba(147,51,234,0.2), transparent)",
-              }}
-              transition={{ duration: 0.3 }}
-            >
-              <motion.div
-                className="bg-white/95 backdrop-blur-sm text-gray-900 px-6 py-3 rounded-xl flex items-center gap-3 hover:bg-white transition-all shadow-lg border border-white/20 hover:border-blue-300"
-                whileHover={{
-                  y: -4,
-                  boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
-                  background: "rgba(255,255,255,0.98)",
-                }}
-                whileTap={{ scale: 0.98 }}
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{
-                  type: "spring",
-                  stiffness: 400,
-                  damping: 15,
-                  delay: 0.1,
-                }}
-              >
-                <motion.div
-                  className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-500 rounded-lg flex items-center justify-center"
-                  whileHover={{
-                    rotate: 360,
-                    background: "linear-gradient(45deg, #8b5cf6, #06b6d4)",
-                  }}
-                  transition={{ duration: 0.6 }}
-                >
-                  <Image className="w-4 h-4 text-white" />
-                </motion.div>
-                <span className="font-medium">Edit Image</span>
-                <div className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
-                  AI Powered
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </div>
-
-        {/* Image Editing Modal */}
-        <AnimatePresence>
-          {showImageModal && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
-              onClick={() => setShowImageModal(false)}
-            >
-              <motion.div
-                initial={{ scale: 0.95, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.95, opacity: 0, y: 20 }}
-                className="bg-white rounded-3xl p-8 max-w-lg w-full mx-4 shadow-2xl backdrop-blur-sm border border-gray-100"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-8">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl flex items-center justify-center">
-                      <Image className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-gray-900">
-                        Edit Image
-                      </h3>
-                      <p className="text-sm text-gray-500">
-                        AI-powered image generation
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setShowImageModal(false)}
-                    className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                {/* Current Image Preview */}
-                <div className="mb-8 relative overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
-                  <img
-                    src={currentImageSrc}
-                    alt={alt}
-                    className="w-full h-auto max-h-48 object-contain"
-                  />
-                  <div className="absolute top-3 right-3 bg-black/50 text-white text-xs px-2 py-1 rounded-full">
-                    Current
-                  </div>
-                </div>
-
-                {/* Prompt Input */}
-                <div className="mb-8">
-                  <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-500" />
-                    Describe your perfect image:
-                  </label>
-                  <textarea
-                    value={imagePrompt}
-                    onChange={(e) => setImagePrompt(e.target.value)}
-                    placeholder={`e.g., "modern luxury car with city lights", "fresh homemade pasta on marble counter", "rustic artisan bread with steam"`}
-                    className="w-full p-4 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all bg-white text-gray-900 placeholder-gray-500"
-                    rows={3}
-                    style={{
-                      direction: "ltr",
-                      unicodeBidi: "normal",
-                      writingMode: "horizontal-tb",
-                      transform: "none",
-                      WebkitTransform: "none",
-                    }}
-                  />
-                  <p className="text-xs text-gray-500 mt-2">
-                    💡 Tip: Be specific about style, mood, and details for
-                    better results
-                  </p>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="space-y-4">
-                  <motion.button
-                    onClick={() => {
-                      // Check if user is authenticated - for demo purposes, show login modal
-                      // In production, this would check actual auth state
-                      window.open(
-                        "/login?next=" +
-                          encodeURIComponent(window.location.href),
-                        "_blank",
-                        "width=500,height=600",
-                      );
-                    }}
-                    className="w-full bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white py-4 px-6 rounded-xl font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-3 text-sm cursor-pointer"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <Sparkles className="w-5 h-5" />
-                    <span>✨ Generate with AI</span>
-                    <div className="ml-auto bg-white/20 px-2 py-1 rounded-full text-xs">
-                      Login Required
-                    </div>
-                  </motion.button>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <motion.button
-                      onClick={generateRandomImage}
-                      className="py-3 px-4 border-2 border-gray-200 text-gray-700 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all text-sm font-medium flex items-center justify-center gap-2"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <span className="text-lg">🎲</span>
-                      Surprise Me
-                    </motion.button>
-
-                    <motion.button
-                      onClick={() => setShowImageModal(false)}
-                      className="py-3 px-4 border-2 border-gray-200 text-gray-700 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all text-sm font-medium"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      Cancel
-                    </motion.button>
-                  </div>
-                </div>
-
-                <p className="text-xs text-gray-500 mt-4 text-center">
-                  Images are generated using Unsplash for demo purposes
-                </p>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </>
-    );
-  };
-
-  const EditableTextComponent = ({ item }: { item: EditableText }) => {
-    const elementRef = useRef<HTMLDivElement>(null);
-    const isSelected = selectedElementId === item.id;
-    const customStyles = elementStyles[item.id];
-
-    // Get the original element's computed styles to preserve them exactly
-    useEffect(() => {
-      if (item.isEditing && elementRef.current) {
-        // Find the original element that was clicked to get its exact styles
-        const originalElement = document.querySelector(
-          `[data-editable-id="${item.id}"]`,
-        ) as HTMLElement;
-        if (originalElement) {
-          const preservedStyles = getTextEditingStyles(originalElement);
-          Object.assign(elementRef.current.style, preservedStyles);
-        }
-      }
-    }, [item.id, item.isEditing]);
-
-    // Handle click to select element for Framer-like UI
-    const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-      e.stopPropagation();
-      const element = e.currentTarget;
-      handleElementSelect(item.id, element);
-      handleTextClick(item.id);
-    };
-
-    // Determine the element tag based on content type
-    const getElementTag = (): string => {
-      if (item.id === "headline") return "h1";
-      if (item.id === "subheading") return "p";
-      if (item.id === "cta") return "button";
-      if (item.id.includes("title")) return "h2";
-      return "p";
-    };
-
-    /**
-     * Typography and box metrics for this element, shared by BOTH the read and
-     * edit branches.
-     *
-     * These used to exist only on the read <div>. The edit branch rendered a
-     * bare `<motion.div className="relative">`, so the textarea's
-     * `fontSize: "inherit"` inherited from the section container rather than
-     * from the element being edited — a text-5xl headline collapsed to base
-     * size the moment you clicked it, and the p-3 padding and border-2 box
-     * disappeared with it, so the block reflowed narrower and taller while its
-     * height stayed pinned to the pixel value captured before the collapse.
-     *
-     * Deriving both branches from one string is what makes edit mode
-     * dimensionally identical to read mode.
-     */
-    const typographyClasses =
-      item.id === "headline"
-        ? `text-4xl md:text-5xl lg:text-6xl font-bold ${getTextColor(item.id)}`
-        : item.id === "subheading"
-          ? `text-lg md:text-xl opacity-90 ${getTextColor(item.id)}`
-          : item.id === "cta"
-            ? `bg-gradient-to-r ${currentSiteData.accentColor} text-white px-8 py-3 text-lg rounded-xl font-semibold inline-block hover:border-transparent`
-            : item.id.includes("title")
-              ? `text-2xl md:text-3xl font-bold mb-4 text-left ${getTextColor(item.id)}`
-              : `text-base md:text-lg opacity-80 text-left ${getTextColor(item.id)}`;
-
-    if (item.isEditing) {
-      // Always use textarea to show full text content
-      const useTextarea = true;
-
+      const isSelected = selectedElementId === id;
       return (
-        <motion.div
-          initial={{ scale: 1 }}
-          animate={{ scale: 1 }}
-          // Same box as the read state — rounded-xl p-3 border-2 — so entering
-          // edit mode changes nothing about size, padding or position.
-          className={`relative rounded-xl p-3 border-2 border-emerald-400 border-solid ${typographyClasses}`}
-          ref={elementRef}
-          data-editing-mode="true"
-          data-editable-id={item.id}
-          style={{
-            // Pin the box to what it measured in read mode so entering edit
-            // mode cannot reflow the layout around it.
-            ...(originalWidths[item.id] > 0 && {
-              width: `${originalWidths[item.id]}px`,
-            }),
-            ...(originalHeights[item.id] > 0 && {
-              minHeight: `${originalHeights[item.id]}px`,
-            }),
-            transform: "translateZ(0)", // Create new stacking context
-            willChange: "transform", // Optimize for transforms
-            isolation: "isolate", // Isolate from parent 3D context
-            ...(customStyles && {
-              fontSize: customStyles.fontSize,
-              fontWeight: customStyles.fontWeight,
-              color: customStyles.color,
-              textAlign: customStyles.textAlign,
-              lineHeight: customStyles.lineHeight,
-              letterSpacing: customStyles.letterSpacing,
-            }),
-          }}
-        >
-          {/* Element Tag Badge */}
-          {isSelected && (
-            <ElementTagBadge
-              tagName={selectedElementTag || getElementTag()}
-              position={{ top: -24, left: -4 }}
-            />
-          )}
-
-          <textarea
-            value={item.text}
-            onChange={(e) => handleTextChange(item.id, e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                handleToolbarDelete();
-              }
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                handleToolbarSave();
-              }
-            }}
-            className="w-full outline-none resize-none"
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: "0",
-              margin: "0",
-              fontSize: customStyles?.fontSize || "inherit",
-              fontFamily: "inherit",
-              fontWeight: customStyles?.fontWeight || "inherit",
-              fontStyle: "inherit",
-              lineHeight: customStyles?.lineHeight || "inherit",
-              letterSpacing: customStyles?.letterSpacing || "inherit",
-              textAlign:
-                (customStyles?.textAlign as React.CSSProperties["textAlign"]) ||
-                "inherit",
-              textDecoration: "inherit",
-              textTransform: "inherit",
-              color: customStyles?.color || optimalColors[item.id] || "inherit",
-              textShadow: textShadows[item.id] || "none",
-              width: "100%",
-              // The WRAPPER carries minHeight (= the read element's offsetHeight,
-              // which already includes its padding and border). Repeating it
-              // here would double-count that chrome and grow the box ~36px on
-              // every click, so the textarea simply fills the space it is given.
-              minHeight: "auto",
-              // minHeight above already prevents the box from shrinking below
-              // its read-mode height. A hard `height` as well would clip the
-              // text whenever an edit reflows to more lines than the captured
-              // value allowed, so height stays auto and is free to grow.
-              height: "auto",
-              overflow: "visible",
-              resize: "none",
-              wordWrap: "break-word",
-              overflowWrap: "break-word",
-              whiteSpace: "pre-wrap",
-              direction: "ltr", // Force left-to-right direction
-              unicodeBidi: "normal", // Normal Unicode bidirectional algorithm
-              writingMode: "horizontal-tb", // Standard horizontal writing mode
-              transform: "none", // Ensure no transforms
-              WebkitTransform: "none", // Safari support
-            }}
-            rows={Math.max(1, item.text.split("\n").length)}
-            autoFocus
-          />
-
-          {/* Selection underline indicator */}
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
-
-          <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap">
-            {useTextarea
-              ? "Ctrl+Enter to save, Esc to cancel"
-              : "Enter to save, Esc to cancel"}
-          </div>
-        </motion.div>
+        <EditableText
+          key={id}
+          item={item}
+          typographyClasses={site.textStyles[id] ?? site.textStyles.default}
+          isSelected={isSelected}
+          selectedTag={isSelected ? selectedElementTag : ""}
+          customStyles={elementStyles[id]}
+          pinnedWidth={originalWidths[id]}
+          pinnedHeight={originalHeights[id]}
+          preservedColor={preservedColors[id]}
+          preservedTextShadow={preservedShadows[id]}
+          onSelect={handleElementActivate}
+          onChange={handleTextChange}
+          onCommit={commitEdit}
+          onCancel={cancelEdit}
+        />
       );
-    }
+    },
+    image: (slot, options) => {
+      const pool = site.images[slot];
+      if (!pool || pool.length === 0) return null;
 
-    return (
-      <div
-        onClick={handleClick}
-        data-editable-id={item.id}
-        className={`cursor-pointer rounded-xl p-3 transition-all duration-200 relative group border-2 ${
-          isSelected
-            ? "border-emerald-400 border-solid"
-            : "border-transparent hover:border-dashed hover:border-blue-400"
-        } ${typographyClasses}`}
-        style={
-          customStyles
-            ? {
-                fontSize: customStyles.fontSize,
-                fontWeight: customStyles.fontWeight,
-                color: customStyles.color,
-                textAlign: customStyles.textAlign,
-                lineHeight: customStyles.lineHeight,
-                letterSpacing: customStyles.letterSpacing,
-              }
-            : undefined
-        }
-      >
-        {/* Element Tag Badge when selected */}
-        {isSelected && (
-          <ElementTagBadge
-            tagName={getElementTag()}
-            position={{ top: -24, left: -4 }}
-          />
-        )}
+      const key = `${site.id}:${slot}`;
+      return (
+        <EditableImage
+          key={key}
+          src={imageSources[key] ?? pool[0]}
+          pool={pool}
+          alt={options.alt}
+          className={options.className}
+          wrapperClassName={options.wrapperClassName}
+          onReplace={(nextSrc) => {
+            setImageSources((prev) => ({ ...prev, [key]: nextSrc }));
+            flashSuccess();
+          }}
+        />
+      );
+    },
+  });
 
-        {/* Preserve formatting for multi-line content */}
-        {item.text.split("\n").map((line, index) => (
-          <div key={index} className={index > 0 ? "mt-2" : ""}>
-            {line}
-          </div>
-        ))}
-
-        {/* Selection underline indicator */}
-        {isSelected && (
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
-        )}
-
-        {/* Hover tooltip - only show when not selected */}
-        {!isSelected && (
-          <div className="absolute -top-12 left-1/2 transform -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap z-10">
-            Click to edit
-          </div>
-        )}
-
-        {/* Edit icon on hover - only show when not selected */}
-        {!isSelected && (
-          <div className="absolute -top-3 -right-3 w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-            <Edit3 className="w-4 h-4 text-white" />
-          </div>
-        )}
-      </div>
-    );
-  };
+  const SiteLayout = SITE_LAYOUTS[currentSiteData.id];
+  const variants = prefersReducedMotion ? fadeVariants : slideVariants;
 
   return (
-    <div className="relative" ref={containerRef}>
-      {/* Floating Editor Toolbar (Framer-like) */}
+    // `data-demo-surface` opts this subtree out of the global border-colour
+    // reset — see the note beside it in globals.css.
+    <div className="relative" data-demo-surface ref={containerRef}>
       <FloatingEditorToolbar
         position={toolbarPosition}
         styles={
           selectedElementId
-            ? getCurrentStyles(selectedElementId)
-            : {
-                fontSize: "1rem",
-                fontWeight: "400",
-                color: "#000000",
-                textAlign: "left",
-              }
+            ? (elementStyles[selectedElementId] ?? DEFAULT_STYLES)
+            : DEFAULT_STYLES
         }
         onStylesChange={handleStylesChange}
-        onSave={handleToolbarSave}
-        onDelete={handleToolbarDelete}
-        onAIPrompt={(prompt) => {
-          // For demo, just log the prompt - in production this would call AI API
-          console.log("AI prompt:", prompt);
+        onSave={commitEdit}
+        onDelete={cancelEdit}
+        onAIPrompt={() => {
           window.open(
             "/login?next=" + encodeURIComponent(window.location.href),
             "_blank",
@@ -1317,11 +456,12 @@ export default function InteractiveHero() {
         }}
         isVisible={
           !!selectedElementId &&
-          editableTexts.some((t) => t.id === selectedElementId && t.isEditing)
+          editableTexts.some(
+            (item) => item.id === selectedElementId && item.isEditing,
+          )
         }
       />
 
-      {/* Unsaved Changes Bar */}
       <UnsavedChangesBar
         hasUnsavedChanges={hasUnsavedChanges}
         onSave={handleSaveAllChanges}
@@ -1329,810 +469,98 @@ export default function InteractiveHero() {
         changeCount={pendingChanges.size}
       />
 
-      {/* Success Animation Overlay */}
       <AnimatePresence>
         {showSuccessAnimation && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            className="fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center gap-2"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.18, ease: EASE }}
+            className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
           >
-            <CheckCircle className="w-5 h-5" />
-            Content updated instantly!
+            <CheckCircle className="h-4 w-4" />
+            Content updated instantly
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Demo Site Navigation - Single Line */}
-      <div className="flex items-center justify-center space-x-4 mb-4">
-        {/* Left Arrow */}
-        <button
-          onClick={prevSite}
-          className="p-2 rounded-full border border-sky-200 text-slate-500 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50 transition-all duration-300"
+      {/* Site switcher */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div
+          className="flex items-center gap-1 rounded-xl border border-sky-200 bg-white/70 p-1 backdrop-blur"
+          role="tablist"
+          aria-label="Demo websites"
         >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
-
-        {/* Tab Buttons */}
-        <div className="flex items-center space-x-3">
           {demoSites.map((site, index) => {
             const Icon = site.icon;
+            const isActive = currentSite === index;
             return (
               <button
                 key={site.id}
-                onClick={() => {
-                  setCurrentSite(index);
-                  setEditableTexts(site.editableTexts);
-                }}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-lg border transition-all duration-300 ${
-                  currentSite === index
-                    ? `border-sky-500 text-sky-700 bg-sky-50`
-                    : "border-sky-200 text-slate-600 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50"
+                type="button"
+                role="tab"
+                aria-selected={isActive}
+                onClick={() => goToSite(index)}
+                className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-200 ${
+                  isActive
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:bg-sky-50 hover:text-slate-900"
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span className="text-sm font-medium">{site.name}</span>
+                <Icon className="h-4 w-4" />
+                {site.name}
               </button>
             );
           })}
         </div>
 
-        {/* Right Arrow */}
-        <button
-          onClick={nextSite}
-          className="p-2 rounded-full border border-sky-200 text-slate-500 hover:text-sky-600 hover:border-sky-400 hover:bg-sky-50 transition-all duration-300"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* ReCopy AI Widget */}
-      <div className="mb-6 relative">
-        {showDemoWidget && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="absolute top-4 right-4 z-20 bg-white rounded-xl shadow-xl border border-gray-200 p-4 w-72"
-          >
-            {/* AI Prompt Input */}
-            <div className="mb-4">
-              <textarea
-                placeholder="Describe how you want to improve the copy..."
-                className="w-full p-3 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
-                rows={2}
-                style={{
-                  color: "#1f2937",
-                  backgroundColor: "#ffffff",
-                  direction: "ltr",
-                  unicodeBidi: "normal",
-                  writingMode: "horizontal-tb",
-                  transform: "none",
-                  WebkitTransform: "none",
-                }}
-              />
-              <button className="w-full mt-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-3 rounded-lg text-sm font-medium hover:from-blue-700 hover:to-purple-700 transition-all">
-                ✨ Improve Copy
-              </button>
-            </div>
-
-            {/* Quick Actions */}
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    const technicalTexts = {
-                      headline:
-                        currentSiteData.theme === "restaurant"
-                          ? "Culinary Innovation Center"
-                          : "Advanced Automotive Care",
-                      subheading:
-                        currentSiteData.theme === "restaurant"
-                          ? "State-of-the-art gastronomy utilizing molecular techniques and precision-sourced ingredients."
-                          : "Professional-grade detailing services employing advanced ceramic coating technology.",
-                    };
-
-                    setEditableTexts((prev) =>
-                      prev.map((item) =>
-                        technicalTexts[item.id as keyof typeof technicalTexts]
-                          ? {
-                              ...item,
-                              text: technicalTexts[
-                                item.id as keyof typeof technicalTexts
-                              ],
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
-                >
-                  🔬 Technical
-                </button>
-
-                <button
-                  onClick={() => {
-                    const casualTexts = {
-                      headline:
-                        currentSiteData.theme === "restaurant"
-                          ? "Amazing Food Spot"
-                          : "Great Car Wash",
-                      subheading:
-                        currentSiteData.theme === "restaurant"
-                          ? "Come grab some seriously good Italian food made fresh daily!"
-                          : "We make your car look awesome with our friendly, professional service.",
-                    };
-
-                    setEditableTexts((prev) =>
-                      prev.map((item) =>
-                        casualTexts[item.id as keyof typeof casualTexts]
-                          ? {
-                              ...item,
-                              text: casualTexts[
-                                item.id as keyof typeof casualTexts
-                              ],
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
-                >
-                  😊 Casual
-                </button>
-
-                <button
-                  onClick={() => {
-                    const urgentTexts = {
-                      headline:
-                        currentSiteData.theme === "restaurant"
-                          ? "Limited Seating Available"
-                          : "Book Today - Spots Filling Fast",
-                      subheading:
-                        currentSiteData.theme === "restaurant"
-                          ? "Reserve your table now - only a few spots left for this weekend!"
-                          : "Don't wait! Schedule your premium car detail before we're fully booked.",
-                    };
-
-                    setEditableTexts((prev) =>
-                      prev.map((item) =>
-                        urgentTexts[item.id as keyof typeof urgentTexts]
-                          ? {
-                              ...item,
-                              text: urgentTexts[
-                                item.id as keyof typeof urgentTexts
-                              ],
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
-                >
-                  ⚡ Urgent
-                </button>
-
-                <button
-                  onClick={() => {
-                    setEditableTexts(demoSites[currentSite].editableTexts);
-                  }}
-                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
-                >
-                  🔄 Reset
-                </button>
-              </div>
-
-              {/* Language and Premium Row */}
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  onChange={(e) => {
-                    if (e.target.value === "es") {
-                      const spanishTexts = {
-                        headline:
-                          currentSiteData.theme === "restaurant"
-                            ? "Cocina Italiana Auténtica"
-                            : "Detallado Premium de Autos",
-                        subheading:
-                          currentSiteData.theme === "restaurant"
-                            ? "Experimenta los mejores platos italianos con ingredientes frescos y locales."
-                            : "Servicios profesionales de lavado y detallado que hacen brillar tu vehículo.",
-                      };
-
-                      setEditableTexts((prev) =>
-                        prev.map((item) =>
-                          spanishTexts[item.id as keyof typeof spanishTexts]
-                            ? {
-                                ...item,
-                                text: spanishTexts[
-                                  item.id as keyof typeof spanishTexts
-                                ],
-                              }
-                            : item,
-                        ),
-                      );
-                    } else if (e.target.value === "fr") {
-                      const frenchTexts = {
-                        headline:
-                          currentSiteData.theme === "restaurant"
-                            ? "Cuisine Italienne Authentique"
-                            : "Détail Auto Premium",
-                        subheading:
-                          currentSiteData.theme === "restaurant"
-                            ? "Découvrez les meilleurs plats italiens avec des ingrédients frais et locaux."
-                            : "Services professionnels de lavage et détail qui font briller votre véhicule.",
-                      };
-
-                      setEditableTexts((prev) =>
-                        prev.map((item) =>
-                          frenchTexts[item.id as keyof typeof frenchTexts]
-                            ? {
-                                ...item,
-                                text: frenchTexts[
-                                  item.id as keyof typeof frenchTexts
-                                ],
-                              }
-                            : item,
-                        ),
-                      );
-                    }
-                    e.target.value = "";
-                  }}
-                  className="p-2 border border-gray-200 rounded text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">🌍 Translate</option>
-                  <option value="es">🇪🇸 Spanish</option>
-                  <option value="fr">🇫🇷 French</option>
-                  <option value="de">🇩🇪 German</option>
-                  <option value="it">🇮🇹 Italian</option>
-                </select>
-
-                <button
-                  onClick={() => {
-                    const premiumTexts = {
-                      headline:
-                        currentSiteData.theme === "restaurant"
-                          ? "Exclusive Dining Experience"
-                          : "Luxury Automotive Care",
-                      subheading:
-                        currentSiteData.theme === "restaurant"
-                          ? "Indulge in an extraordinary culinary journey crafted by world-renowned chefs."
-                          : "Experience unparalleled automotive care with our premium detailing services.",
-                    };
-
-                    setEditableTexts((prev) =>
-                      prev.map((item) =>
-                        premiumTexts[item.id as keyof typeof premiumTexts]
-                          ? {
-                              ...item,
-                              text: premiumTexts[
-                                item.id as keyof typeof premiumTexts
-                              ],
-                            }
-                          : item,
-                      ),
-                    );
-                  }}
-                  className="text-center p-2 rounded hover:bg-gray-50 border border-gray-200 transition-colors text-xs font-medium text-gray-800"
-                >
-                  ✨ Premium
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </div>
-
-      {/* Demo Website Container */}
-      <motion.div
-        key={currentSite}
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.5 }}
-        className={`bg-white rounded-2xl border border-gray-200 overflow-hidden relative`}
-      >
-        {/* Simplified Browser Chrome */}
-        <div className="bg-gray-100 px-6 py-3 flex items-center justify-between border-b border-gray-200">
-          <div className="flex items-center space-x-2">
-            <div className="flex space-x-2">
-              <div className="w-3 h-3 bg-red-400 rounded-full"></div>
-              <div className="w-3 h-3 bg-yellow-400 rounded-full"></div>
-              <div className="w-3 h-3 bg-green-400 rounded-full"></div>
-            </div>
-            <div className="bg-white rounded-lg px-4 py-1 mx-4 border border-gray-200">
-              <span className="text-gray-600 text-sm">
-                https://{currentSiteData.name.toLowerCase().replace(/\s+/g, "")}
-                .com
-              </span>
-            </div>
-          </div>
-          <div className="px-3 py-1 bg-green-500 text-white text-xs font-medium rounded-lg animate-pulse">
-            ReCopyFast Active
-          </div>
-        </div>
-
-        {/* Demo Website Content */}
-        <div className="min-h-[700px] max-h-[700px] overflow-y-auto overflow-x-visible">
-          {/* Restaurant Website Design */}
-          {currentSiteData.theme === "restaurant" && (
-            <>
-              {/* Hero Section with Background Image */}
-              <div className="relative h-[400px] bg-gradient-to-br from-amber-900/90 to-orange-900/90">
-                <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1514933651103-005eec06c04b?w=1200&h=400&fit=crop')] bg-cover bg-center mix-blend-overlay opacity-50"></div>
-                <div className="relative z-10 h-full flex flex-col justify-center items-center text-white px-8">
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="text-center"
-                  >
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find((item) => item.id === "headline")!
-                      }
-                    />
-                  </motion.div>
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 }}
-                    className="mt-6 max-w-2xl text-center"
-                  >
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find((item) => item.id === "subheading")!
-                      }
-                    />
-                  </motion.div>
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.6 }}
-                    className="mt-8"
-                  >
-                    <EditableTextComponent
-                      item={editableTexts.find((item) => item.id === "cta")!}
-                    />
-                  </motion.div>
-                </div>
-              </div>
-
-              {/* About Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
-                  <div>
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find((item) => item.id === "about-title")!
-                      }
-                    />
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find((item) => item.id === "about-text")!
-                      }
-                    />
-                  </div>
-                  <div className="relative group">
-                    <EditableImageComponent
-                      src="https://images.unsplash.com/photo-1559339352-11d035aa65de?w=800&h=600"
-                      alt="Restaurant interior"
-                      className="w-full h-auto object-contain rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                      imageType="restaurant"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Menu Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent
-                    item={
-                      editableTexts.find((item) => item.id === "menu-title")!
-                    }
-                  />
-                  <div className="grid md:grid-cols-2 gap-8 mt-12">
-                    <div className="p-8 rounded-lg">
-                      <EditableImageComponent
-                        src="https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?w=800&h=600"
-                        alt="Special dish"
-                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105"
-                        imageType="food"
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "special-1")!
-                        }
-                      />
-                    </div>
-                    <div className="p-8 rounded-lg">
-                      <EditableImageComponent
-                        src="https://images.unsplash.com/photo-1574484284002-952d92456975?w=800&h=600"
-                        alt="Special dish"
-                        className="w-full h-auto object-contain rounded-xl mb-4 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-105"
-                        imageType="food"
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "special-2")!
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Car Wash Website Design */}
-          {currentSiteData.theme === "carwash" && (
-            <>
-              {/* Modern Hero Section */}
-              <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white">
-                <div className="py-20 px-8">
-                  <div className="max-w-6xl mx-auto grid md:grid-cols-2 gap-12 items-center">
-                    <div>
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.2 }}
-                      >
-                        <EditableTextComponent
-                          item={
-                            editableTexts.find(
-                              (item) => item.id === "headline",
-                            )!
-                          }
-                        />
-                      </motion.div>
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.4 }}
-                        className="mt-6"
-                      >
-                        <EditableTextComponent
-                          item={
-                            editableTexts.find(
-                              (item) => item.id === "subheading",
-                            )!
-                          }
-                        />
-                      </motion.div>
-                      <motion.div
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.6 }}
-                        className="mt-8 flex gap-4"
-                      >
-                        <EditableTextComponent
-                          item={
-                            editableTexts.find((item) => item.id === "cta")!
-                          }
-                        />
-                        <button className="px-6 py-3 border-2 border-white text-white rounded-lg hover:bg-white hover:text-blue-600 transition-all">
-                          <EditableTextComponent
-                            item={
-                              editableTexts.find(
-                                (item) => item.id === "view-pricing-btn",
-                              )!
-                            }
-                          />
-                        </button>
-                      </motion.div>
-                    </div>
-                    <div className="relative group overflow-visible">
-                      <EditableImageComponent
-                        src="https://images.unsplash.com/photo-1601362840469-51e4d8d58785?w=800&h=600"
-                        alt="Luxury car"
-                        className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                        imageType="car"
-                      />
-                      <div className="absolute -bottom-6 -left-6 bg-white p-4 rounded-lg border border-gray-200">
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
-                            <span className="text-white font-bold">✓</span>
-                          </div>
-                          <div>
-                            <EditableTextComponent
-                              item={
-                                editableTexts.find(
-                                  (item) => item.id === "satisfaction-title",
-                                )!
-                              }
-                            />
-                            <EditableTextComponent
-                              item={
-                                editableTexts.find(
-                                  (item) => item.id === "satisfaction-subtitle",
-                                )!
-                              }
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Services Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto">
-                  <EditableTextComponent
-                    item={
-                      editableTexts.find(
-                        (item) => item.id === "services-title",
-                      )!
-                    }
-                  />
-                  <EditableTextComponent
-                    item={
-                      editableTexts.find((item) => item.id === "service-desc")!
-                    }
-                  />
-
-                  {/* Service Cards */}
-                  <div className="grid md:grid-cols-3 gap-6 mt-12">
-                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
-                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                        <span className="text-2xl">🚿</span>
-                      </div>
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "basic-wash-title",
-                          )!
-                        }
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "basic-wash-desc",
-                          )!
-                        }
-                      />
-                    </div>
-                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
-                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                        <span className="text-2xl">✨</span>
-                      </div>
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "premium-detail-title",
-                          )!
-                        }
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "premium-detail-desc",
-                          )!
-                        }
-                      />
-                    </div>
-                    <div className="bg-white p-6 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors">
-                      <div className="w-16 h-16 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                        <span className="text-2xl">🛡️</span>
-                      </div>
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "ceramic-coating-title",
-                          )!
-                        }
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "ceramic-coating-desc",
-                          )!
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Pricing Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent
-                    item={
-                      editableTexts.find((item) => item.id === "pricing-title")!
-                    }
-                  />
-                  <div className="grid md:grid-cols-2 gap-8 mt-12">
-                    <div className="p-8 rounded-xl">
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "package-1")!
-                        }
-                      />
-                    </div>
-                    <div className="p-8 rounded-xl">
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "package-2")!
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Bakery Website Design */}
-          {currentSiteData.theme === "bakery" && (
-            <>
-              {/* Cozy Hero Section */}
-              <div className="bg-gradient-to-br from-pink-100 to-rose-100">
-                <div className="py-16 px-8">
-                  <div className="max-w-6xl mx-auto text-center">
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.2 }}
-                    >
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "headline")!
-                        }
-                      />
-                    </motion.div>
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.4 }}
-                      className="mt-4 max-w-2xl mx-auto"
-                    >
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "subheading",
-                          )!
-                        }
-                      />
-                    </motion.div>
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      transition={{ delay: 0.6 }}
-                      className="mt-8"
-                    >
-                      <EditableTextComponent
-                        item={editableTexts.find((item) => item.id === "cta")!}
-                      />
-                    </motion.div>
-
-                    {/* Product Showcase */}
-                    <div className="grid grid-cols-3 gap-6 mt-12 max-w-5xl mx-auto">
-                      <div className="group overflow-visible">
-                        <EditableImageComponent
-                          src="https://images.unsplash.com/photo-1509440159596-0249088772ff?w=600&h=600"
-                          alt="Fresh bread"
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                          imageType="bakery"
-                        />
-                      </div>
-                      <div className="group overflow-visible">
-                        <EditableImageComponent
-                          src="https://images.unsplash.com/photo-1486427944299-aa1a5e0def7d?w=600&h=600"
-                          alt="Cupcakes"
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                          imageType="bakery"
-                        />
-                      </div>
-                      <div className="group overflow-visible">
-                        <EditableImageComponent
-                          src="https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&h=600"
-                          alt="Croissants"
-                          className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                          imageType="bakery"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tradition Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12 items-center">
-                  <div className="order-2 md:order-1 group overflow-visible">
-                    <EditableImageComponent
-                      src="https://images.unsplash.com/photo-1556909212-d5b604d0c90d?w=800&h=600"
-                      alt="Baker at work"
-                      className="w-full h-auto object-contain rounded-lg shadow-lg hover:shadow-2xl transition-all duration-500 group-hover:scale-105"
-                      imageType="bakery"
-                    />
-                  </div>
-                  <div className="order-1 md:order-2">
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find(
-                          (item) => item.id === "tradition-title",
-                        )!
-                      }
-                    />
-                    <EditableTextComponent
-                      item={
-                        editableTexts.find(
-                          (item) => item.id === "tradition-text",
-                        )!
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Hours Section */}
-              <div className="py-16 px-8">
-                <div className="max-w-4xl mx-auto text-center">
-                  <EditableTextComponent
-                    item={
-                      editableTexts.find((item) => item.id === "hours-title")!
-                    }
-                  />
-                  <div className="p-8 rounded-xl max-w-md mx-auto mt-8">
-                    <div className="space-y-4">
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "hours-1")!
-                        }
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find((item) => item.id === "hours-2")!
-                        }
-                      />
-                    </div>
-                    <div className="mt-8 pt-8 border-t border-gray-200">
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "contact-address",
-                          )!
-                        }
-                      />
-                      <EditableTextComponent
-                        item={
-                          editableTexts.find(
-                            (item) => item.id === "contact-phone",
-                          )!
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* ReCopy Button at Bottom */}
-        <div className="absolute bottom-4 right-4">
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowDemoWidget(!showDemoWidget)}
-            className="bg-white border border-gray-200 text-gray-700 px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-all flex items-center gap-2 shadow-lg"
+            type="button"
+            onClick={prevSite}
+            aria-label="Previous website"
+            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
           >
-            <div className="relative">
-              <Code className="h-4 w-4 text-blue-500" />
-              <Zap className="h-2 w-2 text-purple-400 absolute -top-1 -right-1" />
-            </div>
-            ReCopy
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={nextSite}
+            aria-label="Next website"
+            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
+          >
+            <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-      </motion.div>
+      </div>
 
-      {/* Demo Instructions */}
-      <div className="mt-8 text-center">
-        <div className="inline-flex items-center px-4 py-2 rounded-full bg-sky-50 border border-sky-200 text-slate-700 text-sm">
-          <Sparkles className="w-4 h-4 mr-2 text-sky-600" />
-          Click any text above to edit it instantly
+      {/* The fake browser */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <BrowserChrome domain={currentSiteData.domain} />
+
+        <div className="relative h-[640px] overflow-hidden md:h-[740px]">
+          <AnimatePresence custom={slideDirection} initial={false} mode="wait">
+            <motion.div
+              key={currentSiteData.id}
+              custom={slideDirection}
+              variants={variants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              className="absolute inset-0 overflow-x-hidden overflow-y-auto"
+            >
+              {SiteLayout ? (
+                <SiteLayout {...buildRenderProps(currentSiteData)} />
+              ) : null}
+            </motion.div>
+          </AnimatePresence>
         </div>
       </div>
+
+      <p className="mt-5 flex items-center justify-center gap-2 text-sm text-slate-600">
+        <Sparkles className="h-4 w-4 text-sky-600" />
+        Click any text or photograph above to edit it in place
+      </p>
     </div>
   );
 }

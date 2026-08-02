@@ -1,0 +1,12 @@
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a7341ce","agent_type":"unknown","event":"agent_stop","success":true}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":636967}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":651719}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":660506}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":664328}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":666723}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":670925}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":673742}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":675600}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_stop","success":true,"duration_ms":678510}
+{"t":0,"agent":"abase-t","agent_type":"base-tables-migration","event":"agent_start","parent_mode":"none"}

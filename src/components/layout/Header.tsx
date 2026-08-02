@@ -27,9 +27,7 @@ export function Header() {
     <>
       <header
         className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          isScrolled
-            ? "bg-white/70 backdrop-blur-xl border-b border-sky-100/50 shadow-sm"
-            : "bg-transparent"
+          isScrolled ? "glass-sheet border-b border-white/40" : "bg-transparent"
         }`}
       >
         <div className="max-w-7xl mx-auto px-6 py-4">
@@ -38,9 +36,7 @@ export function Header() {
             <Link href="/" className="flex items-center gap-2.5">
               <div
                 className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
-                  isScrolled
-                    ? "bg-gradient-to-br from-sky-500 to-emerald-500"
-                    : "bg-white/20 backdrop-blur-sm border border-sky-200/50"
+                  isScrolled ? "bg-sky-600" : "glass"
                 }`}
               >
                 <Zap
@@ -117,7 +113,7 @@ export function Header() {
                   <Button
                     onClick={() => setShowAuthModal(true)}
                     size="sm"
-                    className="bg-sky-500 text-white hover:bg-sky-600 shadow-lg shadow-sky-500/20 transition-all"
+                    className="pressable bg-sky-600 text-white hover:bg-sky-700"
                   >
                     Get started
                   </Button>

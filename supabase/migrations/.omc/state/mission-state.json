@@ -1,0 +1,61 @@
+{
+  "updatedAt": "2026-08-01T20:32:13.375Z",
+  "missions": [
+    {
+      "id": "session:f61b8dab-ed96-4b27-bdac-63bbddc11177:none",
+      "source": "session",
+      "name": "none",
+      "objective": "Session mission",
+      "createdAt": "2026-08-01T20:20:33.848Z",
+      "updatedAt": "2026-08-01T20:32:13.375Z",
+      "status": "running",
+      "workerCount": 1,
+      "taskCounts": {
+        "total": 1,
+        "pending": 0,
+        "blocked": 0,
+        "inProgress": 1,
+        "completed": 0,
+        "failed": 0
+      },
+      "agents": [
+        {
+          "name": "base-tables-migration:abase-t",
+          "role": "base-tables-migration",
+          "ownership": "abase-tables-migration-e64763dd4e32892e",
+          "status": "running",
+          "currentStep": null,
+          "latestUpdate": null,
+          "completedSummary": null,
+          "updatedAt": "2026-08-01T20:32:13.375Z"
+        }
+      ],
+      "timeline": [
+        {
+          "id": "session-stop:abase-tables-migration-e64763dd4e32892e:2026-08-01T20:31:49.448Z",
+          "at": "2026-08-01T20:31:49.448Z",
+          "kind": "completion",
+          "agent": "base-tables-migration:abase-t",
+          "detail": "completed",
+          "sourceKey": "session-stop:abase-tables-migration-e64763dd4e32892e"
+        },
+        {
+          "id": "session-stop:abase-tables-migration-e64763dd4e32892e:2026-08-01T20:31:52.358Z",
+          "at": "2026-08-01T20:31:52.358Z",
+          "kind": "completion",
+          "agent": "base-tables-migration:abase-t",
+          "detail": "completed",
+          "sourceKey": "session-stop:abase-tables-migration-e64763dd4e32892e"
+        },
+        {
+          "id": "session-start:abase-tables-migration-e64763dd4e32892e:2026-08-01T20:32:13.375Z",
+          "at": "2026-08-01T20:32:13.375Z",
+          "kind": "update",
+          "agent": "base-tables-migration:abase-t",
+          "detail": "started base-tables-migration:abase-t",
+          "sourceKey": "session-start:abase-tables-migration-e64763dd4e32892e"
+        }
+      ]
+    }
+  ]
+}

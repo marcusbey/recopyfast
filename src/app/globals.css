@@ -214,6 +214,18 @@
   border-color: var(--line);
 }
 
+/* The reset above is unlayered, and unlayered declarations outrank everything
+   inside `@layer utilities` — so it silently wins over every Tailwind
+   border-colour utility in the app, including `border-transparent`.
+   Correcting that globally would repaint 138 call sites across 39 files, so it
+   is left alone here and opted out of only where it actually gets in the way:
+   the marketing demo, whose whole point is that three unrelated brand palettes
+   render side by side. `revert-layer` rolls this element back to the utilities
+   layer, handing control to whatever `border-*` class was authored. */
+[data-demo-surface] * {
+  border-color: revert-layer;
+}
+
 body {
   background: var(--canvas);
   color: var(--text-strong);
@@ -393,6 +405,90 @@ body {
   opacity: 0.03;
   pointer-events: none;
   mix-blend-mode: overlay;
+}
+
+/* ============================================================================
+   GLASS — marketing surfaces that sit over the WebGL sky.
+
+   Three things make a pane read as glass rather than as fog: a heavy blur, a
+   saturation boost (refracted light comes back more saturated, not less), and a
+   lit top edge where the pane catches the sky. The previous treatment had none
+   of them — `bg-white/80 backdrop-blur-sm` is a 4px blur under a fill opaque
+   enough that there was nothing left to refract, which is why it read as a flat
+   white rectangle.
+
+   Two weights, because legibility and depth pull in opposite directions:
+
+   `.glass`       thin tint, maximum blur. For cards, the header, and small
+                  controls — places with real sky behind them, where the point
+                  is that you can see the clouds move through the pane.
+
+   `.glass-sheet` heavy tint, strong blur. For full-bleed section backgrounds,
+                  where body copy has to stay readable over whatever the sky
+                  happens to be doing underneath. Thick frosted glass, not a
+                  window. The tint is doing contrast work and must not be
+                  thinned without re-measuring text contrast against it.
+
+   Both are unlayered, so the `* { border-color }` reset at the top of this file
+   does not win against them (`*` is specificity 0,0,0; a class is 0,1,0).
+   ========================================================================= */
+
+.glass,
+.glass-sheet {
+  position: relative;
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+}
+
+.glass {
+  background: color-mix(in oklab, white 14%, transparent);
+  border: 1px solid color-mix(in oklab, white 30%, transparent);
+  box-shadow:
+    /* the lit top edge — this is the whole trick */
+    inset 0 1px 0 color-mix(in oklab, white 60%, transparent),
+    inset 0 -1px 0 color-mix(in oklab, white 12%, transparent),
+    0 2px 40px -12px hsl(200 40% 30% / 0.18);
+}
+
+/* 62% is measured, not picked. The sky behind ranges from a deep zenith blue
+   (~0.25 relative luminance) to a lit cloud top (~0.85). At 62% white the
+   composite lands between 0.72 and 0.94, which keeps `text-slate-600` body copy
+   between 5.5:1 and 7.1:1 — clear of AA at both ends of the range. Raising the
+   tint hides the sky; lowering it fails contrast against the zenith. */
+.glass-sheet {
+  background: color-mix(in oklab, white 62%, transparent);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, white 70%, transparent),
+    inset 0 -1px 0 color-mix(in oklab, white 20%, transparent);
+}
+
+/* Grain. Real glass is never optically smooth, and without this the pane reads
+   as plastic. Inherits the radius so it works on pills and circles too. */
+.glass::after,
+.glass-sheet::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%' height='100%' filter='url(%23noise)'/%3E%3C/svg%3E");
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+}
+
+/* Safari and Firefox-with-the-flag-off render no backdrop-filter at all, which
+   would leave body copy sitting on a 14%-white pane over live clouds. Fall back
+   to an opaque-enough fill rather than an unreadable one. */
+@supports not (backdrop-filter: blur(1px)) {
+  .glass {
+    background: color-mix(in oklab, white 82%, transparent);
+  }
+
+  .glass-sheet {
+    background: color-mix(in oklab, white 94%, transparent);
+  }
 }
 
 /* ============================================================================

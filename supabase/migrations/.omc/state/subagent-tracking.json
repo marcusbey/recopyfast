@@ -1,0 +1,15 @@
+{
+  "agents": [
+    {
+      "agent_id": "abase-tables-migration-e64763dd4e32892e",
+      "agent_type": "base-tables-migration",
+      "started_at": "2026-08-01T20:32:13.375Z",
+      "parent_mode": "none",
+      "status": "running"
+    }
+  ],
+  "total_spawned": 2,
+  "total_completed": 9,
+  "total_failed": 0,
+  "last_updated": "2026-08-01T20:32:13.478Z"
+}
