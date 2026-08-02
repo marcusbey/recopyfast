@@ -685,86 +685,218 @@
 
       const self = this;
 
-      // Inject banner-specific styles
+      /**
+       * Line icons instead of emoji. Emoji render differently on every OS —
+       * colour, weight and baseline all drift — so the toolbar looked like a
+       * different product on macOS, Windows and Android. These inherit
+       * `currentColor` and sit on the text baseline everywhere.
+       */
+      const ICONS = {
+        eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
+        board: '<rect x="3" y="3.5" width="18" height="17" rx="2.5"/><path d="M3 9.5h18M9.5 20.5v-11"/>',
+        publish: '<path d="M12 20V5.5M5.5 12 12 5.5 18.5 12"/>',
+        shield: '<path d="M12 3.2 19 6v5.6c0 4.2-2.9 7.3-7 8.6-4.1-1.3-7-4.4-7-8.6V6l7-2.8Z"/><path d="m9.2 11.8 2.1 2.1 3.5-3.6"/>',
+        clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3 1.8"/>',
+      };
+
+      function icon(name, size) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', size);
+        svg.setAttribute('height', size);
+        svg.setAttribute('fill', 'none');
+        svg.setAttribute('stroke', 'currentColor');
+        svg.setAttribute('stroke-width', '1.6');
+        svg.setAttribute('stroke-linecap', 'round');
+        svg.setAttribute('stroke-linejoin', 'round');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+        svg.innerHTML = ICONS[name];
+        return svg;
+      }
+
+      // CSS has no previous-sibling selector, so a divider that must disappear
+      // with the item after it carries that item's name.
+      function divider(name) {
+        const el = document.createElement('span');
+        el.className = 'rcf-banner-divider' + (name ? ' rcf-banner-divider-' + name : '');
+        el.setAttribute('aria-hidden', 'true');
+        return el;
+      }
+
+      /**
+       * Every property a host page could plausibly override on a <button> or
+       * <span> is restated here. The toolbar is injected into someone else's
+       * document: a global `button { text-transform: uppercase }` used to leak
+       * straight into it.
+       */
       if (!document.querySelector('#rcf-banner-styles')) {
         const style = document.createElement('style');
         style.id = 'rcf-banner-styles';
         style.textContent = `
-          @keyframes rcf-pulse-ring {
-            0% { transform: scale(1); opacity: 1; }
-            100% { transform: scale(1.8); opacity: 0; }
+          #rcf-staging-banner, #rcf-staging-banner * {
+            box-sizing: border-box;
           }
-          @keyframes rcf-shimmer {
-            0% { background-position: -200% center; }
-            100% { background-position: 200% center; }
+          #rcf-staging-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            height: 46px;
+            padding: 0 14px;
+            background: hsl(200 18% 7% / 0.86);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border-bottom: 1px solid hsl(200 12% 21%);
+            box-shadow: 0 10px 30px -18px rgb(0 0 0 / 0.8);
+            color: hsl(200 22% 96%);
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1;
+            -webkit-font-smoothing: antialiased;
           }
-          .rcf-banner-btn {
-            position: relative;
+          .rcf-banner-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+          }
+          .rcf-banner-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+          }
+          .rcf-banner-divider {
+            width: 1px;
+            height: 16px;
+            background: hsl(200 12% 24%);
+            flex-shrink: 0;
+          }
+          .rcf-banner-mode {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            font-size: 13px;
-            font-weight: 500;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            border: none;
-            outline: none;
-          }
-          .rcf-banner-btn:hover {
-            transform: translateY(-1px);
-          }
-          .rcf-banner-btn:active {
-            transform: scale(0.98);
-          }
-          .rcf-banner-btn-ghost {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            color: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-          }
-          .rcf-banner-btn-ghost:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.25);
-          }
-          .rcf-banner-btn-success {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
-          }
-          .rcf-banner-btn-success:hover {
-            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+            gap: 7px;
+            flex-shrink: 0;
+            font-size: 10.5px;
+            font-weight: 600;
+            letter-spacing: 0.09em;
+            text-transform: uppercase;
+            color: hsl(38 82% 66%);
           }
           .rcf-status-dot {
             position: relative;
-            width: 8px;
-            height: 8px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: #f97316;
-            box-shadow: 0 0 12px rgba(249, 115, 22, 0.6);
+            background: hsl(38 92% 60%);
+            flex-shrink: 0;
           }
           .rcf-status-dot::before {
             content: '';
             position: absolute;
-            inset: 0;
+            inset: -1px;
             border-radius: 50%;
-            background: #f97316;
-            animation: rcf-pulse-ring 2s ease-out infinite;
+            border: 1px solid hsl(38 92% 60%);
+            animation: rcf-pulse-ring 2.4s ease-out infinite;
           }
-          .rcf-pill {
+          @keyframes rcf-pulse-ring {
+            0% { transform: scale(1); opacity: 0.7; }
+            70%, 100% { transform: scale(2.4); opacity: 0; }
+          }
+          .rcf-banner-email {
+            font-size: 12.5px;
+            font-weight: 500;
+            color: hsl(200 22% 96%);
+            max-width: 240px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .rcf-banner-meta {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 4px 12px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 9999px;
+            flex-shrink: 0;
             font-size: 12px;
-            color: rgba(255, 255, 255, 0.8);
+            color: hsl(200 12% 68%);
+            white-space: nowrap;
           }
-          .rcf-pill strong {
-            color: white;
+          .rcf-banner-meta svg {
+            flex-shrink: 0;
+            opacity: 0.75;
+          }
+          .rcf-banner-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            height: 30px;
+            margin: 0;
+            padding: 0 12px;
+            font-family: inherit;
+            font-size: 12.5px;
+            font-weight: 500;
+            line-height: 1;
+            letter-spacing: normal;
+            text-transform: none;
+            text-decoration: none;
+            border-radius: 7px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+          }
+          .rcf-banner-btn:focus-visible {
+            outline: 2px solid hsl(174 48% 58%);
+            outline-offset: 2px;
+          }
+          .rcf-banner-btn:active {
+            transform: translateY(0.5px);
+          }
+          .rcf-banner-btn-ghost {
+            background: hsl(200 14% 13%);
+            border: 1px solid hsl(200 12% 24%);
+            color: hsl(200 18% 88%);
+          }
+          .rcf-banner-btn-ghost:hover {
+            background: hsl(200 13% 18%);
+            border-color: hsl(200 10% 34%);
+            color: hsl(200 22% 96%);
+          }
+          .rcf-banner-btn-primary {
+            background: hsl(174 48% 58%);
+            border: 1px solid hsl(174 48% 58%);
+            color: hsl(200 30% 8%);
+            font-weight: 600;
+          }
+          .rcf-banner-btn-primary:hover {
+            background: hsl(174 52% 65%);
+            border-color: hsl(174 52% 65%);
+          }
+          /* Metadata sheds from least to most important as the bar narrows,
+             so the actions on the right are never pushed off-screen. */
+          @media (max-width: 1000px) {
+            .rcf-banner-meta-expiry,
+            .rcf-banner-divider-expiry { display: none; }
+          }
+          @media (max-width: 840px) {
+            .rcf-banner-meta-perms,
+            .rcf-banner-divider-perms { display: none; }
+          }
+          @media (max-width: 620px) {
+            .rcf-banner-email,
+            .rcf-banner-divider-email,
+            .rcf-banner-btn-label { display: none; }
+            .rcf-banner-btn { padding: 0 9px; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .rcf-status-dot::before { animation: none; }
+            .rcf-banner-btn { transition: none; }
+            .rcf-banner-btn:active { transform: none; }
           }
         `;
         document.head.appendChild(style);
@@ -772,94 +904,87 @@
 
       const banner = document.createElement('div');
       banner.id = 'rcf-staging-banner';
-      banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); color: white; padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; z-index: 99999; box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.08);';
+      banner.setAttribute('role', 'region');
+      banner.setAttribute('aria-label', 'ReCopyFast staging toolbar');
 
       const permissions = this.stagingAccess.permissions || [];
       const permText = permissions.map(function(p) { return p.charAt(0).toUpperCase() + p.slice(1); }).join(', ');
       const expiresAt = this.stagingAccess.expiresAt
         ? new Date(this.stagingAccess.expiresAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : '--';
+        : null;
 
       const infoDiv = document.createElement('div');
-      infoDiv.style.cssText = 'display: flex; align-items: center; gap: 16px;';
+      infoDiv.className = 'rcf-banner-info';
 
-      // Status indicator with pulse
-      const statusContainer = document.createElement('div');
-      statusContainer.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+      const statusContainer = document.createElement('span');
+      statusContainer.className = 'rcf-banner-mode';
 
       const statusDot = document.createElement('span');
       statusDot.className = 'rcf-status-dot';
 
       const modeLabel = document.createElement('span');
-      modeLabel.style.cssText = 'font-weight: 600; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; color: #f97316;';
-      modeLabel.textContent = 'STAGING';
+      modeLabel.textContent = 'Staging';
 
       statusContainer.appendChild(statusDot);
       statusContainer.appendChild(modeLabel);
-
-      // User info pill
-      const userPill = document.createElement('span');
-      userPill.className = 'rcf-pill';
-      const userIcon = document.createElement('span');
-      userIcon.textContent = '👤';
-      userIcon.style.fontSize = '11px';
-      const userEmail = document.createElement('strong');
-      userEmail.textContent = this.stagingAccess.email;
-      userPill.appendChild(userIcon);
-      userPill.appendChild(userEmail);
-
-      // Permissions pill
-      const permPill = document.createElement('span');
-      permPill.className = 'rcf-pill';
-      const permIcon = document.createElement('span');
-      permIcon.textContent = '🔑';
-      permIcon.style.fontSize = '11px';
-      const permValue = document.createElement('span');
-      permValue.textContent = permText;
-      permPill.appendChild(permIcon);
-      permPill.appendChild(permValue);
-
-      // Expires pill
-      const expiresPill = document.createElement('span');
-      expiresPill.className = 'rcf-pill';
-      const expiresIcon = document.createElement('span');
-      expiresIcon.textContent = '⏱️';
-      expiresIcon.style.fontSize = '11px';
-      const expiresValue = document.createElement('span');
-      expiresValue.textContent = expiresAt;
-      expiresPill.appendChild(expiresIcon);
-      expiresPill.appendChild(expiresValue);
-
       infoDiv.appendChild(statusContainer);
-      infoDiv.appendChild(userPill);
-      infoDiv.appendChild(permPill);
-      infoDiv.appendChild(expiresPill);
+
+      infoDiv.appendChild(divider('email'));
+
+      const userEmail = document.createElement('span');
+      userEmail.className = 'rcf-banner-email';
+      userEmail.textContent = this.stagingAccess.email;
+      // The element truncates, so the full address stays reachable on hover.
+      userEmail.title = this.stagingAccess.email;
+      infoDiv.appendChild(userEmail);
+
+      if (permText) {
+        infoDiv.appendChild(divider('perms'));
+        const perms = document.createElement('span');
+        perms.className = 'rcf-banner-meta rcf-banner-meta-perms';
+        const permValue = document.createElement('span');
+        permValue.textContent = permText;
+        perms.appendChild(icon('shield', 13));
+        perms.appendChild(permValue);
+        infoDiv.appendChild(perms);
+      }
+
+      if (expiresAt) {
+        infoDiv.appendChild(divider('expiry'));
+        const expires = document.createElement('span');
+        expires.className = 'rcf-banner-meta rcf-banner-meta-expiry';
+        const expiresValue = document.createElement('span');
+        // "Aug 2" alone read as a creation date; the label removes the guess.
+        expiresValue.textContent = 'Expires ' + expiresAt;
+        expires.appendChild(icon('clock', 13));
+        expires.appendChild(expiresValue);
+        infoDiv.appendChild(expires);
+      }
 
       const buttonsDiv = document.createElement('div');
-      buttonsDiv.style.cssText = 'display: flex; gap: 10px;';
+      buttonsDiv.className = 'rcf-banner-actions';
 
-      const previewBtn = document.createElement('button');
-      previewBtn.id = 'rcf-preview-live';
-      previewBtn.className = 'rcf-banner-btn rcf-banner-btn-ghost';
-      const previewIcon = document.createElement('span');
-      previewIcon.textContent = '👁️';
-      const previewText = document.createElement('span');
-      previewText.textContent = 'Preview Live';
-      previewBtn.appendChild(previewIcon);
-      previewBtn.appendChild(previewText);
+      function actionButton(id, variant, iconName, label) {
+        const btn = document.createElement('button');
+        btn.id = id;
+        btn.type = 'button';
+        btn.className = 'rcf-banner-btn rcf-banner-btn-' + variant;
+        // The label is hidden on narrow viewports, so the name has to survive
+        // in the accessible tree and in the tooltip.
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+        const text = document.createElement('span');
+        text.className = 'rcf-banner-btn-label';
+        text.textContent = label;
+        btn.appendChild(icon(iconName, 14));
+        btn.appendChild(text);
+        return btn;
+      }
 
+      const previewBtn = actionButton('rcf-preview-live', 'ghost', 'eye', 'Preview Live');
       buttonsDiv.appendChild(previewBtn);
 
-      // Edit Board button
-      const editBoardBtn = document.createElement('button');
-      editBoardBtn.id = 'rcf-edit-board-btn';
-      editBoardBtn.className = 'rcf-banner-btn rcf-banner-btn-ghost';
-      const editBoardIcon = document.createElement('span');
-      editBoardIcon.textContent = '📋';
-      const editBoardText = document.createElement('span');
-      editBoardText.textContent = 'Edit Board';
-      editBoardBtn.appendChild(editBoardIcon);
-      editBoardBtn.appendChild(editBoardText);
+      const editBoardBtn = actionButton('rcf-edit-board-btn', 'ghost', 'board', 'Edit Board');
       buttonsDiv.appendChild(editBoardBtn);
 
       editBoardBtn.onclick = function() {
@@ -870,15 +995,7 @@
       };
 
       if (permissions.includes('publish') || permissions.includes('admin')) {
-        const publishBtn = document.createElement('button');
-        publishBtn.id = 'rcf-publish-btn';
-        publishBtn.className = 'rcf-banner-btn rcf-banner-btn-success';
-        const publishIcon = document.createElement('span');
-        publishIcon.textContent = '🚀';
-        const publishText = document.createElement('span');
-        publishText.textContent = 'Publish';
-        publishBtn.appendChild(publishIcon);
-        publishBtn.appendChild(publishText);
+        const publishBtn = actionButton('rcf-publish-btn', 'primary', 'publish', 'Publish');
         buttonsDiv.appendChild(publishBtn);
 
         publishBtn.onclick = function() {
