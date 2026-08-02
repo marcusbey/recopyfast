@@ -67,6 +67,39 @@
 > builds, not fixes, and want a fresh session.
 
 
+## 🔵 NEXT TASK — remove the free plan (decided, not started)
+
+Product decision: **no free plan, no access without payment.** The catalogue
+currently seeds `free` at $0 and it is active.
+
+**Do not deactivate the `free` row first.** `getEffectivePlanId` still ends in
+`return subscription?.plan ?? "free"`, so switching the row off ahead of the code
+would strand every unsubscribed account the moment it deployed — the same
+code-before-schema ordering that broke credits this session.
+
+Order, and the six places that assume a plan always resolves:
+
+1. `src/lib/billing/entitlements.ts` — `getEffectivePlanId` must return an
+   explicit unentitled result instead of `?? "free"`, and `getEffectivePlan`
+   must express "no plan" as a value callers are forced to handle rather than a
+   zero-limit plan they can mistake for a real one.
+2. `src/lib/feature-gating/permissions.ts` — decides access; needs the deny
+   branch.
+3. `src/lib/credits/system.ts` — `includedCredits = plan.limits.monthlyCredits`
+   becomes 0, and the balance read must not throw for an unentitled user.
+4. `src/lib/stripe/subscription.ts`
+5. `src/app/api/billing/dashboard/route.ts` — must render an unentitled state.
+6. `src/app/api/ab-tests/generate/route.ts`
+
+Then, and only then: deactivate the `free` plan row, and decide separately
+whether the `billing_subscriptions.plan` CHECK drops `'free'` — existing rows
+may hold it, so that is a data question, not just a constraint edit.
+
+Open question that blocks the signup flow: what does a newly registered account
+see before it pays? There is no answer to that in the code today.
+
+---
+
 Living tracker for the full-journey QA pass. Findings are from four parallel
 read-only recon agents (payments, auth, embed, UI) plus direct verification.
 
