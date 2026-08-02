@@ -110,6 +110,19 @@ export default function RootLayout({
       lang="en"
       className={`${instrumentSans.variable} ${jetbrainsMono.variable}`}
     >
+      <head>
+        {/*
+          Applies the stored theme before first paint. Without this the page
+          renders with the OS theme and then snaps to the user's choice on
+          hydration — a visible flash on every navigation. Kept inline and
+          synchronous for that reason; it must run before the body paints.
+        */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("recopyfast-theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="font-sans">
         <AuthProvider>{children}</AuthProvider>
       </body>

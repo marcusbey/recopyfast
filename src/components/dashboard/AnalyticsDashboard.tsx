@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useId } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -15,6 +15,7 @@ import {
   Edit3,
   Globe,
   Activity,
+  AlertCircle,
 } from "lucide-react";
 
 interface AnalyticsDashboardProps {
@@ -22,10 +23,35 @@ interface AnalyticsDashboardProps {
   sites?: Site[];
 }
 
+/**
+ * Pull the server's error message out of a failed response so the user sees
+ * "Forbidden" rather than a generic failure. Falls back to the status text when
+ * the body is not the JSON error envelope (e.g. an HTML error page).
+ */
+async function readErrorMessage(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    const message = (body as { error?: unknown }).error;
+    if (typeof message === "string" && message) return message;
+  } catch {
+    // Body was not JSON — fall through to the status-based message.
+  }
+  return `${fallback} (${response.status})`;
+}
+
 export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
   const [data, setData] = useState<AnalyticsDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [selectedSite, setSelectedSite] = useState(siteId || "all");
+  const siteSelectId = useId();
+  const startDateId = useId();
+  const endDateId = useId();
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
@@ -33,13 +59,10 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
     end: new Date().toISOString().split("T")[0],
   });
 
-  useEffect(() => {
-    fetchAnalytics();
-  }, [selectedSite, dateRange]);
-
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const params = new URLSearchParams({
         startDate: dateRange.start,
         endDate: dateRange.end,
@@ -50,18 +73,32 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
       }
 
       const response = await fetch(`/api/analytics/track?${params}`);
-      if (!response.ok) throw new Error("Failed to fetch analytics");
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(response, "Failed to load analytics"),
+        );
+      }
 
-      const analyticsData = await response.json();
+      const analyticsData: AnalyticsDashboardData = await response.json();
       setData(analyticsData);
     } catch (error) {
-      console.error("Failed to fetch analytics:", error);
+      // An outage must not render as an empty account — keep the previous data
+      // on screen if we have it and show the failure explicitly.
+      setLoadError(
+        error instanceof Error ? error.message : "Failed to load analytics",
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedSite, dateRange]);
+
+  useEffect(() => {
+    fetchAnalytics();
+  }, [fetchAnalytics]);
 
   const exportData = async (format: "json" | "csv") => {
+    setExporting(format);
+    setExportError(null);
     try {
       const params = new URLSearchParams({
         format,
@@ -74,7 +111,11 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
       }
 
       const response = await fetch(`/api/analytics/export?${params}`);
-      if (!response.ok) throw new Error("Failed to export data");
+      if (!response.ok) {
+        throw new Error(
+          await readErrorMessage(response, "Failed to export analytics"),
+        );
+      }
 
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -86,7 +127,11 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Failed to export data:", error);
+      setExportError(
+        error instanceof Error ? error.message : "Failed to export analytics",
+      );
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -103,6 +148,28 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
             </Card>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  // A failed load with nothing cached is an error, not an empty account. Only
+  // claim "no data" when the request actually succeeded and came back empty.
+  if (!data && loadError) {
+    return (
+      <div className="text-center py-12" role="alert">
+        <AlertCircle className="mx-auto h-12 w-12 text-tone-danger-text" />
+        <h3 className="mt-2 text-sm font-medium text-foreground">
+          Couldn&apos;t load analytics
+        </h3>
+        <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          onClick={fetchAnalytics}
+        >
+          Try again
+        </Button>
       </div>
     );
   }
@@ -137,38 +204,56 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
         <div className="flex flex-col sm:flex-row gap-3">
           {/* Site Selector */}
           {sites && sites.length > 0 && (
-            <select
-              value={selectedSite}
-              onChange={(e) => setSelectedSite(e.target.value)}
-              className="px-3 py-2 border border-input rounded-md text-sm"
-            >
-              <option value="all">All Sites</option>
-              {sites.map((site) => (
-                <option key={site.id} value={site.id}>
-                  {site.domain}
-                </option>
-              ))}
-            </select>
+            <div>
+              <label htmlFor={siteSelectId} className="sr-only">
+                Filter by site
+              </label>
+              <select
+                id={siteSelectId}
+                value={selectedSite}
+                onChange={(e) => setSelectedSite(e.target.value)}
+                className="px-3 py-2 border border-input rounded-md text-sm"
+              >
+                <option value="all">All Sites</option>
+                {sites.map((site) => (
+                  <option key={site.id} value={site.id}>
+                    {site.domain}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
 
           {/* Date Range */}
           <div className="flex gap-2">
-            <input
-              type="date"
-              value={dateRange.start}
-              onChange={(e) =>
-                setDateRange((prev) => ({ ...prev, start: e.target.value }))
-              }
-              className="px-3 py-2 border border-input rounded-md text-sm"
-            />
-            <input
-              type="date"
-              value={dateRange.end}
-              onChange={(e) =>
-                setDateRange((prev) => ({ ...prev, end: e.target.value }))
-              }
-              className="px-3 py-2 border border-input rounded-md text-sm"
-            />
+            <div>
+              <label htmlFor={startDateId} className="sr-only">
+                Start date
+              </label>
+              <input
+                id={startDateId}
+                type="date"
+                value={dateRange.start}
+                onChange={(e) =>
+                  setDateRange((prev) => ({ ...prev, start: e.target.value }))
+                }
+                className="px-3 py-2 border border-input rounded-md text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor={endDateId} className="sr-only">
+                End date
+              </label>
+              <input
+                id={endDateId}
+                type="date"
+                value={dateRange.end}
+                onChange={(e) =>
+                  setDateRange((prev) => ({ ...prev, end: e.target.value }))
+                }
+                className="px-3 py-2 border border-input rounded-md text-sm"
+              />
+            </div>
           </div>
 
           {/* Export */}
@@ -176,22 +261,44 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
             <Button
               variant="outline"
               size="sm"
+              disabled={exporting !== null}
               onClick={() => exportData("json")}
             >
               <Download className="h-4 w-4 mr-2" />
-              JSON
+              {exporting === "json" ? "Exporting..." : "JSON"}
             </Button>
             <Button
               variant="outline"
               size="sm"
+              disabled={exporting !== null}
               onClick={() => exportData("csv")}
             >
               <Download className="h-4 w-4 mr-2" />
-              CSV
+              {exporting === "csv" ? "Exporting..." : "CSV"}
             </Button>
           </div>
         </div>
       </div>
+
+      {/* A refresh that failed while earlier data is still on screen: say so,
+          otherwise the stale numbers read as current. */}
+      {loadError && (
+        <p
+          role="alert"
+          className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+        >
+          Showing the last loaded data — refresh failed: {loadError}
+        </p>
+      )}
+
+      {exportError && (
+        <p
+          role="alert"
+          className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+        >
+          {exportError}
+        </p>
+      )}
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -413,6 +520,19 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
   );
 }
 
+/**
+ * Bar fills must be written as complete literal class names. Tailwind scans
+ * source text at build time and never sees an interpolated `bg-${color}-200`,
+ * so the class is absent from the stylesheet and every bar renders unstyled.
+ */
+const CHART_BAR_CLASSES = {
+  blue: "bg-tone-info-border",
+  green: "bg-tone-success-border",
+  purple: "bg-tone-accent-border",
+} as const;
+
+type ChartColor = keyof typeof CHART_BAR_CLASSES;
+
 // Simple Chart Component (would be replaced with actual charting library)
 function SimpleChart({
   data,
@@ -420,7 +540,7 @@ function SimpleChart({
   label,
 }: {
   data: Array<{ date: string; value: number }>;
-  color: string;
+  color: ChartColor;
   label: string;
 }) {
   const maxValue = Math.max(...data.map((d) => d.value));
@@ -435,7 +555,7 @@ function SimpleChart({
         {data.slice(-30).map((point, index) => (
           <div
             key={index}
-            className={`flex-1 bg-${color}-200 rounded-t`}
+            className={`flex-1 rounded-t ${CHART_BAR_CLASSES[color]}`}
             style={{
               height: `${maxValue > 0 ? (point.value / maxValue) * 100 : 0}%`,
               minHeight: point.value > 0 ? "4px" : "2px",

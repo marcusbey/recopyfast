@@ -449,7 +449,7 @@ export default function InteractiveHero() {
         onDelete={cancelEdit}
         onAIPrompt={() => {
           window.open(
-            "/login?next=" + encodeURIComponent(window.location.href),
+            "/login?redirectedFrom=" + encodeURIComponent(window.location.href),
             "_blank",
             "width=500,height=600",
           );

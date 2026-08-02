@@ -11,6 +11,9 @@ import { ABTestConfigForm } from "@/components/dashboard/ab-create/ABTestConfigF
 interface ABTestCreateFlowProps {
   siteId: string;
   elements: MappedContentElement[];
+  elementsLoading?: boolean;
+  elementsError?: string | null;
+  onRetryElements?: () => void;
   onComplete?: (testId: string) => void;
   onCancel?: () => void;
 }
@@ -25,6 +28,9 @@ const WIZARD_STEPS = [
 export default function ABTestCreateFlow({
   siteId,
   elements,
+  elementsLoading,
+  elementsError,
+  onRetryElements,
   onComplete,
   onCancel,
 }: ABTestCreateFlowProps) {
@@ -44,9 +50,12 @@ export default function ABTestCreateFlow({
         <ABTestElementPicker
           elements={elements}
           selectedElement={wizard.selectedElement}
+          loading={elementsLoading}
+          error={elementsError}
           onSelect={wizard.selectElement}
           onGenerate={wizard.generate}
           onCancel={() => onCancel?.()}
+          onRetry={onRetryElements}
         />
       )}
 

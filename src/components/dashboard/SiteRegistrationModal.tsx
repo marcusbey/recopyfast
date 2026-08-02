@@ -23,7 +23,6 @@ interface SiteRegistrationModalProps {
 interface FormData {
   name: string;
   domain: string;
-  description: string;
 }
 
 interface FormErrors {
@@ -52,7 +51,6 @@ export function SiteRegistrationModal({
   const [formData, setFormData] = useState<FormData>({
     name: "",
     domain: "",
-    description: "",
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -145,7 +143,7 @@ export function SiteRegistrationModal({
   };
 
   const handleClose = () => {
-    setFormData({ name: "", domain: "", description: "" });
+    setFormData({ name: "", domain: "" });
     setErrors({});
     setRegistrationResult(null);
     setCopied(false);
@@ -244,24 +242,10 @@ export function SiteRegistrationModal({
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label
-                  htmlFor="description"
-                  className="text-foreground font-medium"
-                >
-                  Description{" "}
-                  <span className="text-muted-foreground">(Optional)</span>
-                </Label>
-                <Input
-                  id="description"
-                  placeholder="Brief description of your website"
-                  value={formData.description}
-                  onChange={(e) =>
-                    setFormData({ ...formData, description: e.target.value })
-                  }
-                  disabled={isLoading}
-                />
-              </div>
+              {/* The Description field that used to sit here was never sent to
+                  /api/sites/register, and `sites` has no column to hold it —
+                  every description typed in was discarded on submit. Removed
+                  rather than faked. */}
 
               <div className="flex justify-end gap-3 pt-4">
                 <Button
@@ -335,7 +319,10 @@ export function SiteRegistrationModal({
                     Step 1: Copy the embed script
                   </p>
                   <div className="relative">
-                    <pre className="bg-foreground text-foreground p-4 rounded-lg text-xs overflow-x-auto">
+                    {/* Was `bg-foreground text-foreground` — background and
+                        text resolved to the same colour, so the snippet the
+                        customer has to copy was invisible in both themes. */}
+                    <pre className="bg-surface-2 text-foreground p-4 pr-24 rounded-lg text-xs overflow-x-auto">
                       <code>{registrationResult.embedScript}</code>
                     </pre>
                     <Button
@@ -374,17 +361,36 @@ export function SiteRegistrationModal({
 
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground font-medium">
-                    Step 3: Mark elements as editable
+                    Step 3: That&apos;s it — your text is already editable
+                  </p>
+                  {/*
+                    These instructions used to tell people to add a
+                    `data-recopyfast-editable` attribute. No such attribute
+                    exists anywhere in the product: the widget discovers text by
+                    tag name and only reads data-rcf-content / data-rcf-ignore.
+                    Anyone who followed the old steps literally got nothing.
+                  */}
+                  <p className="text-sm text-muted-foreground">
+                    The widget finds your text automatically — headings,
+                    paragraphs, list items, table cells, labels, buttons and
+                    images all become editable with no markup changes.
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Add the{" "}
+                    To exclude something, add{" "}
                     <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
-                      data-recopyfast-editable
-                    </code>{" "}
-                    attribute to any HTML element you want to make editable.
+                      data-rcf-ignore
+                    </code>
+                    . To make a container editable that would not be picked up
+                    on its own, add{" "}
+                    <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
+                      data-rcf-content
+                    </code>
+                    .
                   </p>
-                  <pre className="bg-foreground text-foreground p-3 rounded-lg text-xs overflow-x-auto">
-                    <code>{`<h1 data-recopyfast-editable>Your Editable Heading</h1>`}</code>
+                  <pre className="bg-surface-2 text-foreground p-3 rounded-lg text-xs overflow-x-auto">
+                    <code>{`<h1>Edited automatically</h1>
+<p data-rcf-ignore>Never editable</p>
+<div data-rcf-content>Opt this container in</div>`}</code>
                   </pre>
                 </div>
 

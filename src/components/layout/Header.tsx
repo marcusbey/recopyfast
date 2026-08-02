@@ -54,8 +54,8 @@ export function Header() {
 
             {/* Desktop Navigation */}
             <nav className="hidden md:flex items-center gap-8">
-              <a
-                href="#features"
+              <Link
+                href="/#features"
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
@@ -63,9 +63,9 @@ export function Header() {
                 }`}
               >
                 Features
-              </a>
-              <a
-                href="#pricing"
+              </Link>
+              <Link
+                href="/#pricing"
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
                     ? "text-slate-600 hover:text-slate-900"
@@ -73,7 +73,7 @@ export function Header() {
                 }`}
               >
                 Pricing
-              </a>
+              </Link>
               <Link
                 href="/demo"
                 className={`text-sm font-medium transition-colors ${
@@ -122,6 +122,10 @@ export function Header() {
 
               {/* Mobile menu button */}
               <button
+                type="button"
+                aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+                aria-expanded={mobileMenuOpen}
+                aria-controls="mobile-menu"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                 className={`md:hidden p-2 rounded-lg transition-colors ${
                   isScrolled
@@ -140,22 +144,25 @@ export function Header() {
 
           {/* Mobile menu */}
           {mobileMenuOpen && (
-            <div className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4">
+            <div
+              id="mobile-menu"
+              className="md:hidden mt-4 pb-4 border-t border-sky-100 pt-4"
+            >
               <nav className="flex flex-col gap-4">
-                <a
-                  href="#features"
+                <Link
+                  href="/#features"
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Features
-                </a>
-                <a
-                  href="#pricing"
+                </Link>
+                <Link
+                  href="/#pricing"
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Pricing
-                </a>
+                </Link>
                 <Link
                   href="/demo"
                   className="text-slate-600 hover:text-slate-900 text-sm font-medium"

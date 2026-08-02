@@ -1,7 +1,11 @@
 "use client";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { DashboardNavigation } from "@/components/dashboard/DashboardNavigation";
+import {
+  DashboardNavigation,
+  isDashboardPlan,
+  type DashboardPlan,
+} from "@/components/dashboard/DashboardNavigation";
 import { Breadcrumbs } from "@/components/dashboard/Breadcrumbs";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -26,23 +30,24 @@ export default function DashboardLayout({
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const [userPlan, setUserPlan] = useState<"free" | "pro" | "enterprise">(
-    "free",
-  );
+  const [userPlan, setUserPlan] = useState<DashboardPlan>("free");
 
   useEffect(() => {
     if (!loading && !user) {
-      const next = encodeURIComponent(pathname ?? "/dashboard");
-      router.push(`/login?next=${next}`);
+      // Must be `redirectedFrom`: that is the key `src/middleware.ts` sets and
+      // the only one `LoginForm` reads. Sending `next` here silently dropped
+      // the destination and landed everyone on /dashboard after sign-in.
+      const redirectedFrom = encodeURIComponent(pathname ?? "/dashboard");
+      router.push(`/login?redirectedFrom=${redirectedFrom}`);
     }
   }, [user, loading, router, pathname]);
 
   useEffect(() => {
-    // Fetch user plan from API or user metadata
-    if (user) {
-      const plan = user.user_metadata?.plan || "free";
-      setUserPlan(plan);
-    }
+    if (!user) return;
+    // user_metadata is client-writable in Supabase, so an unrecognised value
+    // must fall back to free rather than being trusted into the nav gate.
+    const plan = user.user_metadata?.plan;
+    setUserPlan(isDashboardPlan(plan) ? plan : "free");
   }, [user]);
 
   // A skeleton in the shape of the shell, so the page does not flash from a

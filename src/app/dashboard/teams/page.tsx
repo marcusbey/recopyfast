@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef, useId } from "react";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Users,
@@ -34,12 +36,57 @@ interface TeamMember {
   };
 }
 
+/** Roles the invitations endpoint accepts. */
+const INVITE_ROLES = [
+  { value: "viewer", label: "Viewer" },
+  { value: "editor", label: "Editor" },
+  { value: "manager", label: "Manager" },
+] as const;
+
+type InviteRole = (typeof INVITE_ROLES)[number]["value"];
+
+async function readError(response: Response, fallback: string) {
+  try {
+    const body: unknown = await response.json();
+    const message = (body as { error?: unknown }).error;
+    if (typeof message === "string" && message) return message;
+  } catch {
+    // Non-JSON body — fall back to a status-qualified message.
+  }
+  return `${fallback} (${response.status})`;
+}
+
 export default function TeamsPage() {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InviteRole>("editor");
+  const [inviting, setInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  const inviteEmailRef = useRef<HTMLInputElement>(null);
+  const inviteEmailId = useId();
+  const inviteRoleId = useId();
+
+  const fetchMembers = useCallback(async (id: string) => {
+    setLoadingMembers(true);
+    try {
+      const membersRes = await fetch(`/api/teams/${id}/members`);
+      if (!membersRes.ok) {
+        throw new Error(await readError(membersRes, "Failed to fetch members"));
+      }
+      const membersData = await membersRes.json();
+      setMembers(membersData.members ?? []);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, []);
 
   // Fetch the user's first team, then its members
   useEffect(() => {
@@ -49,7 +96,7 @@ export default function TeamsPage() {
       try {
         const teamsRes = await fetch("/api/teams");
         if (!teamsRes.ok) {
-          throw new Error("Failed to fetch teams");
+          throw new Error(await readError(teamsRes, "Failed to fetch teams"));
         }
         const teamsData = await teamsRes.json();
         const teams: Array<{ id: string }> = teamsData.teams ?? [];
@@ -62,14 +109,8 @@ export default function TeamsPage() {
         const firstTeamId = teams[0].id;
         setTeamId(firstTeamId);
         setLoadingTeams(false);
-        setLoadingMembers(true);
 
-        const membersRes = await fetch(`/api/teams/${firstTeamId}/members`);
-        if (!membersRes.ok) {
-          throw new Error("Failed to fetch team members");
-        }
-        const membersData = await membersRes.json();
-        setMembers(membersData.members ?? []);
+        await fetchMembers(firstTeamId);
       } catch (err) {
         setFetchError(
           err instanceof Error ? err.message : "Failed to load team data",
@@ -81,7 +122,66 @@ export default function TeamsPage() {
     };
 
     fetchTeamAndMembers();
-  }, []);
+  }, [fetchMembers]);
+
+  const handleInvite = async () => {
+    if (!teamId || !inviteEmail.trim()) return;
+    setInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+
+    try {
+      const response = await fetch(`/api/teams/${teamId}/invitations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          teamId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response, "Failed to send invitation"));
+      }
+
+      setInviteSuccess(`Invitation sent to ${inviteEmail.trim()}.`);
+      setInviteEmail("");
+      // A pending invite changes the counts shown above the form.
+      await fetchMembers(teamId);
+    } catch (err) {
+      setInviteError(
+        err instanceof Error ? err.message : "Failed to send invitation",
+      );
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const handleRemoveMember = async (member: TeamMember) => {
+    if (!teamId) return;
+    const name = member.user?.email ?? "this member";
+    if (!window.confirm(`Remove ${name} from the team?`)) return;
+
+    setRemovingId(member.id);
+    setFetchError(null);
+    try {
+      const response = await fetch(
+        `/api/teams/${teamId}/members?memberId=${member.id}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        throw new Error(await readError(response, "Failed to remove member"));
+      }
+      await fetchMembers(teamId);
+    } catch (err) {
+      setFetchError(
+        err instanceof Error ? err.message : "Failed to remove member",
+      );
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   const getMemberName = (member: TeamMember): string => {
     return (
@@ -136,7 +236,13 @@ export default function TeamsPage() {
             Collaborate with your team members
           </p>
         </div>
-        <Button className="bg-primary" disabled>
+        {/* Shortcut to the invite form further down the page rather than a
+            second, competing invite control. */}
+        <Button
+          className="bg-primary"
+          disabled={!teamId}
+          onClick={() => inviteEmailRef.current?.focus()}
+        >
           <Plus className="w-4 h-4 mr-2" />
           Invite Member
         </Button>
@@ -154,10 +260,12 @@ export default function TeamsPage() {
                 Pro Feature
               </h3>
               <p className="text-muted-foreground mb-4">
-                Team collaboration is available on Pro and Enterprise plans.
-                Upgrade to invite team members and manage permissions.
+                Team collaboration is available on the Pro plan. Upgrade to
+                invite team members and manage permissions.
               </p>
-              <Button className="bg-primary">Upgrade to Pro</Button>
+              <Button asChild className="bg-primary">
+                <Link href="/dashboard/billing">Upgrade to Pro</Link>
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -216,19 +324,71 @@ export default function TeamsPage() {
             Send an invitation to collaborate on your sites
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex gap-4">
-            <Input
-              placeholder="email@example.com"
-              type="email"
-              className="flex-1"
-              disabled
-            />
-            <Button disabled className="cursor-not-allowed opacity-50">
+        <CardContent className="space-y-3">
+          {inviteError && (
+            <p
+              role="alert"
+              className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+            >
+              {inviteError}
+            </p>
+          )}
+          {inviteSuccess && (
+            <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-md px-3 py-2">
+              {inviteSuccess}
+            </p>
+          )}
+          {/* A real form so Enter submits, which is what people expect from a
+              single-field invite box. */}
+          <form
+            className="flex flex-col gap-4 sm:flex-row sm:items-end"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleInvite();
+            }}
+          >
+            <div className="flex-1 space-y-2">
+              <Label htmlFor={inviteEmailId}>Email address</Label>
+              <Input
+                id={inviteEmailId}
+                ref={inviteEmailRef}
+                placeholder="email@example.com"
+                type="email"
+                required
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                disabled={!teamId || inviting}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor={inviteRoleId}>Role</Label>
+              <select
+                id={inviteRoleId}
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as InviteRole)}
+                disabled={!teamId || inviting}
+                className="w-full px-3 py-2 border border-input rounded-md text-sm bg-transparent sm:w-40"
+              >
+                {INVITE_ROLES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              type="submit"
+              disabled={!teamId || inviting || !inviteEmail.trim()}
+            >
               <Mail className="w-4 h-4 mr-2" />
-              Send Invite
+              {inviting ? "Sending..." : "Send Invite"}
             </Button>
-          </div>
+          </form>
+          {!teamId && !loadingTeams && (
+            <p className="text-sm text-muted-foreground">
+              You need to belong to a team before you can invite anyone.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -278,8 +438,18 @@ export default function TeamsPage() {
                   <div className="flex items-center gap-3">
                     {getRoleBadge(member.role)}
                     {member.role !== "owner" && (
-                      <Button variant="ghost" size="sm" disabled>
-                        <UserX className="w-4 h-4" />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Remove ${getMemberName(member)} from the team`}
+                        disabled={removingId === member.id}
+                        onClick={() => handleRemoveMember(member)}
+                      >
+                        {removingId === member.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <UserX className="w-4 h-4" />
+                        )}
                       </Button>
                     )}
                   </div>

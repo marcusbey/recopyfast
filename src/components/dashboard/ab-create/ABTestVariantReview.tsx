@@ -60,6 +60,7 @@ export function ABTestVariantReview({
                 <Button
                   size="sm"
                   variant="ghost"
+                  aria-label={`Edit ${variant.name}`}
                   onClick={() => onStartEditing(index)}
                 >
                   <Edit className="h-3 w-3" />

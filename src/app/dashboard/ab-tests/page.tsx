@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft, FlaskConical } from "lucide-react";
+import { Loader2, ArrowLeft, FlaskConical, AlertCircle } from "lucide-react";
 import { useSites } from "@/hooks/useSites";
 import { useContentElements } from "@/hooks/useContentElements";
 import { SiteSelectorBar } from "@/components/dashboard/SiteSelectorBar";
@@ -18,10 +18,20 @@ export default function ABTestsPage() {
   const searchParams = useSearchParams();
   const siteIdParam = searchParams.get("siteId");
 
-  const { sites, selectedSiteId, setSelectedSiteId, loading } = useSites(
-    siteIdParam || undefined,
-  );
-  const { elements } = useContentElements(selectedSiteId);
+  const {
+    sites,
+    selectedSiteId,
+    setSelectedSiteId,
+    loading,
+    error: sitesError,
+    refetch: refetchSites,
+  } = useSites(siteIdParam || undefined);
+  const {
+    elements,
+    loading: elementsLoading,
+    error: elementsError,
+    refetch: refetchElements,
+  } = useContentElements(selectedSiteId);
 
   const [view, setView] = useState<View>("list");
   const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
@@ -38,6 +48,38 @@ export default function ABTestsPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      </div>
+    );
+  }
+
+  // A failed site list is not an empty account — say which one it is.
+  if (sitesError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">A/B Tests</h1>
+          <p className="mt-1 text-muted-foreground">
+            Test copy variations to optimize conversions
+          </p>
+        </div>
+        <Card>
+          <CardContent className="py-12">
+            <div className="text-center" role="alert">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-tone-danger-surface">
+                <AlertCircle className="h-8 w-8 text-tone-danger-text" />
+              </div>
+              <h3 className="mb-2 text-lg font-semibold text-foreground">
+                Couldn&apos;t load your sites
+              </h3>
+              <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
+                {sitesError}
+              </p>
+              <Button variant="outline" onClick={refetchSites}>
+                Try again
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -126,6 +168,9 @@ export default function ABTestsPage() {
             <ABTestCreateFlow
               siteId={selectedSiteId}
               elements={elements}
+              elementsLoading={elementsLoading}
+              elementsError={elementsError}
+              onRetryElements={refetchElements}
               onComplete={(testId) => {
                 setSelectedTestId(testId);
                 setView("results");

@@ -24,7 +24,7 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   badge?: string;
-  requiresPlan?: "pro" | "enterprise";
+  requiresPlan?: DashboardPlan;
 }
 
 interface NavGroup {
@@ -64,8 +64,28 @@ const navGroups: NavGroup[] = [
   },
 ];
 
+/**
+ * Plans that gate navigation. Kept as a literal union rather than read from the
+ * plan catalogue because it is a compile-time contract between this list and
+ * the `requiresPlan` on each item, not a pricing decision.
+ */
+export type DashboardPlan = "free" | "starter" | "pro";
+
+const DASHBOARD_PLANS: readonly DashboardPlan[] = [
+  "free",
+  "starter",
+  "pro",
+] as const;
+
+export function isDashboardPlan(value: unknown): value is DashboardPlan {
+  return (
+    typeof value === "string" &&
+    (DASHBOARD_PLANS as readonly string[]).includes(value)
+  );
+}
+
 interface DashboardNavigationProps {
-  userPlan?: "free" | "pro" | "enterprise";
+  userPlan?: DashboardPlan;
   className?: string;
 }
 
@@ -84,12 +104,17 @@ export function DashboardNavigation({
     return pathname.startsWith(href);
   };
 
+  // Ordered weakest to strongest: an item is accessible when the customer's
+  // plan ranks at or above the one it requires.
+  const PLAN_RANK: Record<DashboardPlan, number> = {
+    free: 0,
+    starter: 1,
+    pro: 2,
+  };
+
   const canAccessItem = (item: NavItem) => {
     if (!item.requiresPlan) return true;
-    // "enterprise" early-return; after it TypeScript narrows userPlan to "free"|"pro"
-    if (userPlan === "enterprise") return true;
-    if (item.requiresPlan === "pro" && userPlan === "pro") return true;
-    return false;
+    return PLAN_RANK[userPlan] >= PLAN_RANK[item.requiresPlan];
   };
 
   const NavLink = ({ item }: { item: NavItem }) => {

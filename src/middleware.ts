@@ -40,8 +40,11 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Define protected routes
-  const protectedRoutes = ["/dashboard", "/sites", "/settings"];
+  // Define protected routes.
+  // "/sites" is deliberately absent: no such page exists (site management lives
+  // at /dashboard/sites). Gating it only turned a 404 into a login redirect that
+  // then 404s anyway.
+  const protectedRoutes = ["/dashboard", "/settings"];
   const authRoutes = ["/login", "/signup"];
   const isProtectedRoute = protectedRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route),

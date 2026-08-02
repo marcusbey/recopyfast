@@ -10,7 +10,7 @@ interface ABTestResultsProps {
 }
 
 export default function ABTestResults({ testId }: ABTestResultsProps) {
-  const { data, loading } = useABTestResults(testId);
+  const { data, loading, error, refetch } = useABTestResults(testId);
 
   if (loading) {
     return (
@@ -22,8 +22,17 @@ export default function ABTestResults({ testId }: ABTestResultsProps) {
 
   if (!data) {
     return (
-      <div className="py-12 text-center text-sm text-muted-foreground">
-        Failed to load test results
+      <div className="py-12 text-center" role="alert">
+        <p className="text-sm text-tone-danger-text">
+          {error ?? "Failed to load test results"}
+        </p>
+        <button
+          type="button"
+          onClick={refetch}
+          className="mt-3 text-sm underline underline-offset-2"
+        >
+          Try again
+        </button>
       </div>
     );
   }

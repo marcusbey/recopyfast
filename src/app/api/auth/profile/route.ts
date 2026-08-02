@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
+/** Notification toggles offered on the settings page. */
+const NOTIFICATION_KEYS = [
+  "email",
+  "contentEdits",
+  "weeklyReports",
+  "marketing",
+] as const;
+
 export async function PATCH(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -28,7 +36,7 @@ export async function PATCH(request: NextRequest) {
 
     // Only allow safe metadata fields to be updated
     const allowedFields = ["name", "company", "role"] as const;
-    const userMetadata: Record<string, string> = {};
+    const userMetadata: Record<string, unknown> = {};
 
     for (const field of allowedFields) {
       if (field in payload) {
@@ -40,6 +48,38 @@ export async function PATCH(request: NextRequest) {
           );
         }
         userMetadata[field] = value.trim();
+      }
+    }
+
+    // Notification preferences are a fixed set of booleans. They are validated
+    // key by key rather than passed through, so a caller cannot smuggle
+    // arbitrary keys into their own auth metadata.
+    if ("notifications" in payload) {
+      const raw = payload.notifications;
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        return NextResponse.json(
+          { error: 'Field "notifications" must be an object' },
+          { status: 400 },
+        );
+      }
+
+      const incoming = raw as Record<string, unknown>;
+      const notifications: Record<string, boolean> = {};
+
+      for (const key of NOTIFICATION_KEYS) {
+        if (!(key in incoming)) continue;
+        const value = incoming[key];
+        if (typeof value !== "boolean") {
+          return NextResponse.json(
+            { error: `Notification preference "${key}" must be a boolean` },
+            { status: 400 },
+          );
+        }
+        notifications[key] = value;
+      }
+
+      if (Object.keys(notifications).length > 0) {
+        userMetadata.notifications = notifications;
       }
     }
 

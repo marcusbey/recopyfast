@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ImagePlus, Shuffle, Sparkles, X } from "lucide-react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 export interface EditableImageProps {
   /** Currently displayed photo. Owned by `InteractiveHero`, not by this component. */
@@ -41,6 +42,9 @@ export default function EditableImage({
   onReplace,
 }: EditableImageProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const titleId = useId();
+  const closeModal = useCallback(() => setIsModalOpen(false), []);
+  const dialogRef = useFocusTrap<HTMLDivElement>(isModalOpen, closeModal);
   const [prompt, setPrompt] = useState("");
 
   const shuffle = () => {
@@ -55,7 +59,7 @@ export default function EditableImage({
     // than pretending. (The old code called `source.unsplash.com`, an endpoint
     // Unsplash retired, so "generate" quietly produced nothing at all.)
     window.open(
-      "/login?next=" + encodeURIComponent(window.location.href),
+      "/login?redirectedFrom=" + encodeURIComponent(window.location.href),
       "_blank",
       "width=500,height=600",
     );
@@ -97,6 +101,10 @@ export default function EditableImage({
             onClick={() => setIsModalOpen(false)}
           >
             <motion.div
+              ref={dialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 12 }}
@@ -105,7 +113,10 @@ export default function EditableImage({
               onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-                <h3 className="text-[15px] font-semibold text-slate-900">
+                <h3
+                  id={titleId}
+                  className="text-[15px] font-semibold text-slate-900"
+                >
                   Replace image
                 </h3>
                 <button

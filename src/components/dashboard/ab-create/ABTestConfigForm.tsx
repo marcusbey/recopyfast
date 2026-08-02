@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, FlaskConical, Loader2 } from "lucide-react";
@@ -27,15 +28,22 @@ export function ABTestConfigForm({
   onActivate,
   onBack,
 }: ABTestConfigFormProps) {
+  const sampleSizeId = useId();
+  const confidenceId = useId();
+
   return (
     <div className="space-y-4">
       <Card>
         <CardContent className="space-y-4 p-4">
           <div>
-            <label className="mb-1 block text-sm font-medium">
+            <label
+              htmlFor={sampleSizeId}
+              className="mb-1 block text-sm font-medium"
+            >
               Minimum Sample Size
             </label>
             <input
+              id={sampleSizeId}
               type="number"
               className="w-full rounded border p-2 text-sm"
               value={minSampleSize}
@@ -50,10 +58,14 @@ export function ABTestConfigForm({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium">
+            <label
+              htmlFor={confidenceId}
+              className="mb-1 block text-sm font-medium"
+            >
               Confidence Threshold
             </label>
             <select
+              id={confidenceId}
               className="w-full rounded border p-2 text-sm"
               value={confidenceThreshold}
               onChange={(e) =>

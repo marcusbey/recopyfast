@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/status-badge";
 import {
   CheckCircle2,
+  AlertCircle,
   Copy,
   ExternalLink,
   Code,
@@ -85,6 +86,11 @@ function StatTile({ label, value, icon: Icon }: StatTileProps) {
 }
 
 export function SiteDetailView({ site }: SiteDetailViewProps) {
+  // Content elements only ever reach the database by the embed script POSTing
+  // them from the customer's page, so a non-zero count is proof the script has
+  // run at least once against the live API.
+  const hasReportedContent = (site.stats?.content_elements_count ?? 0) > 0;
+
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
@@ -336,21 +342,39 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
+            {/*
+              These two rows were hardcoded to "Verified" / "Connected", so a
+              site whose script had never been installed still reported a
+              healthy integration. The only first-party evidence the script ran
+              is that it posted content elements back, so that is what drives
+              the status now.
+            */}
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-foreground">
                 Script Installation
               </span>
-              <Badge variant="tone-success">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Verified
-              </Badge>
+              {hasReportedContent ? (
+                <Badge variant="tone-success">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Verified
+                </Badge>
+              ) : (
+                <Badge variant="tone-warning">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Not detected yet
+                </Badge>
+              )}
             </div>
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-foreground">API Connection</span>
-              <Badge variant="tone-success">
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Connected
-              </Badge>
+              {hasReportedContent ? (
+                <Badge variant="tone-success">
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Connected
+                </Badge>
+              ) : (
+                <Badge variant="tone-neutral">Awaiting first request</Badge>
+              )}
             </div>
             <div className="flex items-center justify-between py-2">
               <span className="text-sm text-foreground">Content Elements</span>

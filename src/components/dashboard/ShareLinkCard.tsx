@@ -110,6 +110,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
             size="sm"
             onClick={handleCopy}
             disabled={isExpired}
+            aria-label={copied ? "Share link copied" : "Copy share link"}
             className="h-8 px-2"
           >
             {copied ? (
@@ -123,6 +124,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
             size="sm"
             onClick={handleRevoke}
             disabled={revoking}
+            aria-label="Revoke this share"
             className="h-8 px-2 text-tone-danger-text hover:text-tone-danger-text hover:bg-tone-danger-surface"
           >
             <Trash2 className="w-4 h-4" />

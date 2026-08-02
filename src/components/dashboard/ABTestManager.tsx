@@ -17,7 +17,8 @@ export default function ABTestManager({
   onCreateTest,
   onViewResults,
 }: ABTestManagerProps) {
-  const { tests, loading, actionLoading, updateStatus } = useABTests(siteId);
+  const { tests, loading, error, actionLoading, updateStatus, refetch } =
+    useABTests(siteId);
 
   if (loading) {
     return (
@@ -42,7 +43,24 @@ export default function ABTestManager({
         </Button>
       </div>
 
-      {tests.length === 0 ? (
+      {error && (
+        <p
+          role="alert"
+          className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
+        >
+          {error}{" "}
+          <button
+            type="button"
+            onClick={refetch}
+            className="underline underline-offset-2"
+          >
+            Try again
+          </button>
+        </p>
+      )}
+
+      {/* Only claim "no tests yet" when the fetch actually succeeded. */}
+      {tests.length === 0 && !error ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <FlaskConical className="mb-3 h-10 w-10 text-muted-foreground" />

@@ -51,8 +51,11 @@ export function ShareSiteDialog({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Form state
-  const [linkType, setLinkType] = useState<LinkType>("link");
+  // Form state.
+  // Defaults to "invite": anonymous "link" sharing was retired and a database
+  // trigger now rejects it, so the old default made the very first click fail
+  // with "Make sure you have admin permission" on the user's own site.
+  const [linkType, setLinkType] = useState<LinkType>("invite");
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<Permission[]>([
     "view",
@@ -64,14 +67,21 @@ export function ShareSiteDialog({
   const fetchActiveLinks = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const res = await fetch(`/api/staging/access?siteId=${site.id}`);
       const data = await res.json();
 
-      if (data.success && data.accessList) {
-        setActiveLinks(data.accessList);
+      if (!res.ok || !data.success) {
+        // Swallowing this left the dialog showing "no active links" when the
+        // request had actually failed, hiding shares that do exist.
+        throw new Error(data.error || `Failed to load shares (${res.status})`);
       }
+
+      setActiveLinks(data.accessList ?? []);
     } catch (err) {
-      console.error("Failed to fetch active links:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to load active shares",
+      );
     } finally {
       setLoading(false);
     }
@@ -329,8 +339,11 @@ export function ShareSiteDialog({
             </Button>
           </div>
 
-          {/* Active Links Section */}
-          {activeLinks.length > 0 && (
+          {/* Active Links Section.
+              The loading branch used to be nested inside `activeLinks.length > 0`,
+              so it could only render when the list was already populated — i.e.
+              never on first open. The spinner now gates the section itself. */}
+          {(loading || activeLinks.length > 0) && (
             <div className="border-t border-border pt-6">
               <h3 className="font-medium text-foreground mb-4">Active Links</h3>
               <div className="space-y-3">

@@ -93,6 +93,7 @@ export function ABTestCard({
           <Button
             size="sm"
             variant="ghost"
+            aria-label={`View results for ${test.name}`}
             onClick={() => onViewResults(test.id)}
           >
             <BarChart3 className="h-4 w-4" />

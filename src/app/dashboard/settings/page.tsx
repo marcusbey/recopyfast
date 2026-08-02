@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -12,9 +12,64 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
+import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
+import { ThemePicker } from "@/components/settings/ThemePicker";
 import { User, Bell, Shield, Key, Palette, Save } from "lucide-react";
+
+/**
+ * Notification toggles. The keys match the whitelist enforced by
+ * PATCH /api/auth/profile, which stores them on the user's auth metadata.
+ */
+const NOTIFICATION_OPTIONS = [
+  {
+    key: "email",
+    label: "Email Notifications",
+    description: "Receive updates via email",
+  },
+  {
+    key: "contentEdits",
+    label: "Content Edit Alerts",
+    description: "Get notified when content is edited",
+  },
+  {
+    key: "weeklyReports",
+    label: "Weekly Reports",
+    description: "Receive weekly analytics summaries",
+  },
+  {
+    key: "marketing",
+    label: "Marketing Emails",
+    description: "Updates about new features and offers",
+  },
+] as const;
+
+type NotificationKey = (typeof NOTIFICATION_OPTIONS)[number]["key"];
+type NotificationPrefs = Record<NotificationKey, boolean>;
+
+const DEFAULT_NOTIFICATIONS: NotificationPrefs = {
+  email: true,
+  contentEdits: true,
+  weeklyReports: false,
+  marketing: false,
+};
+
+function readNotifications(metadata: unknown): NotificationPrefs {
+  const stored = (metadata as { notifications?: unknown } | undefined)
+    ?.notifications;
+  if (typeof stored !== "object" || stored === null) {
+    return DEFAULT_NOTIFICATIONS;
+  }
+  const source = stored as Record<string, unknown>;
+  return NOTIFICATION_OPTIONS.reduce<NotificationPrefs>((acc, option) => {
+    const value = source[option.key];
+    return {
+      ...acc,
+      [option.key]:
+        typeof value === "boolean" ? value : DEFAULT_NOTIFICATIONS[option.key],
+    };
+  }, DEFAULT_NOTIFICATIONS);
+}
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -27,6 +82,21 @@ export default function SettingsPage() {
   const [email] = useState(user?.email ?? "");
   const [company, setCompany] = useState(user?.user_metadata?.company ?? "");
   const [role, setRole] = useState(user?.user_metadata?.role ?? "");
+
+  const [notifications, setNotifications] = useState<NotificationPrefs>(() =>
+    readNotifications(user?.user_metadata),
+  );
+  const [savingNotifications, setSavingNotifications] = useState(false);
+  const [notificationsError, setNotificationsError] = useState<string | null>(
+    null,
+  );
+  const [notificationsSaved, setNotificationsSaved] = useState(false);
+
+  // The auth context resolves the user asynchronously, so seed the toggles
+  // again once the real metadata arrives.
+  useEffect(() => {
+    if (user) setNotifications(readNotifications(user.user_metadata));
+  }, [user]);
 
   const handleSaveProfile = async () => {
     setSaving(true);
@@ -55,6 +125,36 @@ export default function SettingsPage() {
       );
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    setSavingNotifications(true);
+    setNotificationsError(null);
+    setNotificationsSaved(false);
+
+    try {
+      const response = await fetch("/api/auth/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notifications }),
+      });
+
+      const data: unknown = await response.json();
+
+      if (!response.ok) {
+        const errData = data as { error?: string };
+        throw new Error(errData.error ?? "Failed to save preferences");
+      }
+
+      setNotificationsSaved(true);
+      setTimeout(() => setNotificationsSaved(false), 3000);
+    } catch (err) {
+      setNotificationsError(
+        err instanceof Error ? err.message : "An unexpected error occurred",
+      );
+    } finally {
+      setSavingNotifications(false);
     }
   };
 
@@ -103,7 +203,10 @@ export default function SettingsPage() {
             </CardHeader>
             <CardContent className="space-y-4">
               {saveError && (
-                <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
+                <p
+                  role="alert"
+                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+                >
                   {saveError}
                 </p>
               )}
@@ -171,45 +274,57 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center justify-between py-3 border-b">
-                <div>
-                  <p className="font-medium">Email Notifications</p>
-                  <p className="text-sm text-muted-foreground">
-                    Receive updates via email
-                  </p>
+              {notificationsError && (
+                <p
+                  role="alert"
+                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+                >
+                  {notificationsError}
+                </p>
+              )}
+              {notificationsSaved && (
+                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-md px-3 py-2">
+                  Preferences saved.
+                </p>
+              )}
+              {NOTIFICATION_OPTIONS.map((option, index) => (
+                <div
+                  key={option.key}
+                  className={`flex items-center justify-between py-3 ${
+                    index < NOTIFICATION_OPTIONS.length - 1 ? "border-b" : ""
+                  }`}
+                >
+                  <div>
+                    <Label
+                      htmlFor={`notification-${option.key}`}
+                      className="font-medium"
+                    >
+                      {option.label}
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      {option.description}
+                    </p>
+                  </div>
+                  <input
+                    id={`notification-${option.key}`}
+                    type="checkbox"
+                    className="w-4 h-4"
+                    checked={notifications[option.key]}
+                    onChange={(e) =>
+                      setNotifications((prev) => ({
+                        ...prev,
+                        [option.key]: e.target.checked,
+                      }))
+                    }
+                  />
                 </div>
-                <input type="checkbox" defaultChecked className="w-4 h-4" />
-              </div>
-              <div className="flex items-center justify-between py-3 border-b">
-                <div>
-                  <p className="font-medium">Content Edit Alerts</p>
-                  <p className="text-sm text-muted-foreground">
-                    Get notified when content is edited
-                  </p>
-                </div>
-                <input type="checkbox" defaultChecked className="w-4 h-4" />
-              </div>
-              <div className="flex items-center justify-between py-3 border-b">
-                <div>
-                  <p className="font-medium">Weekly Reports</p>
-                  <p className="text-sm text-muted-foreground">
-                    Receive weekly analytics summaries
-                  </p>
-                </div>
-                <input type="checkbox" className="w-4 h-4" />
-              </div>
-              <div className="flex items-center justify-between py-3">
-                <div>
-                  <p className="font-medium">Marketing Emails</p>
-                  <p className="text-sm text-muted-foreground">
-                    Updates about new features and offers
-                  </p>
-                </div>
-                <input type="checkbox" className="w-4 h-4" />
-              </div>
-              <Button disabled>
+              ))}
+              <Button
+                onClick={handleSaveNotifications}
+                disabled={savingNotifications}
+              >
                 <Save className="w-4 h-4 mr-2" />
-                Save Preferences
+                {savingNotifications ? "Saving..." : "Save Preferences"}
               </Button>
             </CardContent>
           </Card>
@@ -217,80 +332,46 @@ export default function SettingsPage() {
 
         {/* Security Settings */}
         <TabsContent value="security">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Password</CardTitle>
-                <CardDescription>
-                  Update your password to keep your account secure
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="current-password">Current Password</Label>
-                  <Input id="current-password" type="password" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-password">New Password</Label>
-                  <Input id="new-password" type="password" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirm-password">Confirm New Password</Label>
-                  <Input id="confirm-password" type="password" />
-                </div>
-                <Button>Update Password</Button>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Two-Factor Authentication</CardTitle>
-                <CardDescription>
-                  Add an extra layer of security to your account
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium">2FA Status</p>
-                    <p className="text-sm text-muted-foreground">
-                      Currently disabled
-                    </p>
-                  </div>
-                  <Button variant="outline">Enable 2FA</Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+          {/*
+            There is no password card here on purpose. ReCopyFast signs in with
+            magic links only — no password is ever set, and the auth callback
+            excludes the `recovery` OTP type. A "change password" form would be
+            a form with nothing to submit to. 2FA is likewise not implemented,
+            so it is described rather than offered as a live button.
+          */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Sign-in Method</CardTitle>
+              <CardDescription>
+                How you access your ReCopyFast account
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <p className="font-medium">Magic link</p>
+                <p className="text-sm text-muted-foreground">
+                  We email a one-time sign-in link to{" "}
+                  <span className="font-medium text-foreground">
+                    {email || "your address"}
+                  </span>
+                  . There is no password on this account, so there is nothing to
+                  leak or reuse.
+                </p>
+              </div>
+              <div className="border-t pt-4">
+                <p className="font-medium">Two-factor authentication</p>
+                <p className="text-sm text-muted-foreground">
+                  Not available yet. Each sign-in already requires access to
+                  your email inbox.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* API Keys */}
         <TabsContent value="api">
-          <Card>
-            <CardHeader>
-              <CardTitle>API Keys</CardTitle>
-              <CardDescription>
-                Manage your API keys for programmatic access
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 bg-surface-1 rounded-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="font-medium">Production Key</p>
-                  <Badge className="bg-tone-success-surface text-tone-success-text">
-                    Active
-                  </Badge>
-                </div>
-                <code className="text-sm text-muted-foreground break-all">
-                  rf_prod_xxxxxxxxxxxxxxxxxxxx
-                </code>
-              </div>
-              <Button variant="outline">
-                <Key className="w-4 h-4 mr-2" />
-                Generate New Key
-              </Button>
-            </CardContent>
-          </Card>
+          <ApiKeysPanel />
         </TabsContent>
 
         {/* Appearance */}
@@ -302,28 +383,10 @@ export default function SettingsPage() {
                 Customize how ReCopyFast looks for you
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Theme</Label>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="border-2 border-primary rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-card rounded mb-2"></div>
-                    <p className="text-sm font-medium text-center">Light</p>
-                  </div>
-                  <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-foreground rounded mb-2"></div>
-                    <p className="text-sm font-medium text-center">Dark</p>
-                  </div>
-                  <div className="border-2 border-border rounded-lg p-4 cursor-pointer">
-                    <div className="w-full h-20 bg-foreground rounded mb-2"></div>
-                    <p className="text-sm font-medium text-center">System</p>
-                  </div>
-                </div>
-              </div>
-              <Button disabled>
-                <Save className="w-4 h-4 mr-2" />
-                Save Appearance
-              </Button>
+            <CardContent>
+              {/* No save button: the theme applies and persists on selection,
+                  so a separate confirm step would only be able to no-op. */}
+              <ThemePicker />
             </CardContent>
           </Card>
         </TabsContent>

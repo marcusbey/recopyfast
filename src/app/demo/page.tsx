@@ -51,7 +51,14 @@ export default function Demo() {
                 provide cutting-edge technology that helps you stay ahead of the
                 competition.
               </p>
-              <button className="bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-600 hover:to-emerald-600 text-white px-6 py-3 rounded-full font-semibold shadow-lg shadow-sky-500/25 transition-all hover:scale-105">
+              {/* No onClick on purpose. Everything inside this block is the
+                  mock customer site the demo edits, and the widget's selector
+                  includes `button` — so clicking this opens the inline editor.
+                  Giving it a navigation handler would fight the editor. */}
+              <button
+                type="button"
+                className="bg-gradient-to-r from-sky-500 to-emerald-500 hover:from-sky-600 hover:to-emerald-600 text-white px-6 py-3 rounded-full font-semibold shadow-lg shadow-sky-500/25 transition-all hover:scale-105"
+              >
                 Get Started Today
               </button>
             </div>
@@ -103,7 +110,12 @@ export default function Demo() {
                 Join thousands of satisfied customers who have transformed their
                 business with our platform.
               </p>
-              <button className="bg-white text-sky-600 px-8 py-3 rounded-full font-semibold hover:bg-sky-50 transition-colors shadow-lg">
+              {/* Sample copy inside the mock site — editable by the widget,
+                  deliberately not a real CTA. The real one is below the fold. */}
+              <button
+                type="button"
+                className="bg-white text-sky-600 px-8 py-3 rounded-full font-semibold hover:bg-sky-50 transition-colors shadow-lg"
+              >
                 Start Your Free Trial
               </button>
             </div>

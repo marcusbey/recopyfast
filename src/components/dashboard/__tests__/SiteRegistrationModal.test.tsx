@@ -65,7 +65,14 @@ describe("SiteRegistrationModal", () => {
 
       expect(screen.getByLabelText(/Website Name/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/Website URL/i)).toBeInTheDocument();
-      expect(screen.getByLabelText(/Description/i)).toBeInTheDocument();
+    });
+
+    it("should not offer a Description field that is never persisted", () => {
+      render(<SiteRegistrationModal {...defaultProps} />);
+
+      // The form used to collect a description that handleSubmit never sent and
+      // `sites` has no column for, so every value typed in was discarded.
+      expect(screen.queryByLabelText(/Description/i)).not.toBeInTheDocument();
     });
 
     it("should render submit and cancel buttons", () => {
@@ -356,8 +363,33 @@ describe("SiteRegistrationModal", () => {
         screen.getByText(/Step 2: Add the script to your website/i),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Step 3: Mark elements as editable/i),
+        screen.getByText(/Step 3: That's it — your text is already editable/i),
       ).toBeInTheDocument();
+    });
+
+    it("should document the attributes the widget actually honours", async () => {
+      const user = userEvent.setup();
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockSuccessResponse,
+      });
+
+      render(<SiteRegistrationModal {...defaultProps} />);
+      await user.type(screen.getByLabelText(/Website Name/i), "Test Site");
+      await user.type(screen.getByLabelText(/Website URL/i), "example.com");
+      await user.click(screen.getByRole("button", { name: /Register Site/i }));
+
+      // The old copy told users to add `data-recopyfast-editable`, a string that
+      // exists nowhere in the product. The widget scans by tag name and only
+      // reads data-rcf-ignore / data-rcf-content.
+      // Each attribute appears twice: once in the prose, once in the code
+      // sample below it.
+      await screen.findByText(/Step 3/i);
+      expect(screen.getAllByText(/data-rcf-ignore/).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/data-rcf-content/).length).toBeGreaterThan(0);
+      expect(
+        screen.queryByText(/data-recopyfast-editable/),
+      ).not.toBeInTheDocument();
     });
   });
 

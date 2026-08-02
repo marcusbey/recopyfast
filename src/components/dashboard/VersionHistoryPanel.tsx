@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { X, Loader2, History, ChevronDown } from "lucide-react";
 import { VersionTimelineItem, type Version } from "./VersionTimelineItem";
 import { VersionPreviewDialog } from "./VersionPreviewDialog";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface VersionHistoryPanelProps {
   open: boolean;
@@ -89,20 +90,12 @@ export function VersionHistoryPanel({
     }
   }, [open, fetchVersions]);
 
-  // The panel is a modal drawer, so it owes keyboard users an Escape route and
-  // a sensible starting focus — neither of which came for free here the way
-  // they do from the Radix Dialog used elsewhere.
-  useEffect(() => {
-    if (!open) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    closeButtonRef.current?.focus();
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  // The panel is a modal drawer, so it owes keyboard users an Escape route,
+  // a sensible starting focus, and a Tab loop that stays inside the drawer —
+  // none of which come for free here the way they do from the Radix Dialog
+  // used elsewhere. Escape and initial focus were already handled; Tab used to
+  // walk straight out into the page behind the overlay.
+  const dialogRef = useFocusTrap<HTMLDivElement>(open, onClose);
 
   const handleLoadMore = () => {
     fetchVersions(offset + LIMIT, true);
@@ -139,6 +132,7 @@ export function VersionHistoryPanel({
 
       {/* Panel */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

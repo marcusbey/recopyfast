@@ -86,13 +86,16 @@ describe("Header", () => {
 
     render(<Header />);
 
+    // Root-relative, not bare "#features": the header renders on /demo, /blog,
+    // /privacy and /terms, where a bare fragment points at an anchor that does
+    // not exist on the page and the link does nothing.
     expect(screen.getByRole("link", { name: "Features" })).toHaveAttribute(
       "href",
-      "#features",
+      "/#features",
     );
     expect(screen.getByRole("link", { name: "Pricing" })).toHaveAttribute(
       "href",
-      "#pricing",
+      "/#pricing",
     );
     expect(screen.getByRole("link", { name: "Demo" })).toHaveAttribute(
       "href",
