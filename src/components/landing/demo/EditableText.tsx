@@ -188,14 +188,35 @@ export default function EditableText({
     );
   }
 
+  const activate = (element: HTMLElement) => onSelect(item.id, element);
+
   return (
     <div
+      role="button"
+      tabIndex={0}
+      /**
+       * This is an editor affordance, not a description of the copy, so it has
+       * to say what activating it does. `aria-label` replaces the element's
+       * text-derived accessible name outright — that is the point: a screen
+       * reader user hearing just the sentence has no way to know it is
+       * editable.
+       */
+      aria-label={`Edit: ${item.text.replace(/\n/g, " ")}`}
       onClick={(event) => {
         event.stopPropagation();
-        onSelect(item.id, event.currentTarget);
+        activate(event.currentTarget);
+      }}
+      onKeyDown={(event) => {
+        // Enter and Space are the two activation keys a real <button> honours.
+        // Space's default action is scrolling the page, so it has to be
+        // suppressed the same way a native button suppresses it.
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        activate(event.currentTarget);
       }}
       data-editable-id={item.id}
-      className={`${BOX} group cursor-pointer transition-colors duration-200 ${
+      className={`${BOX} group cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:outline-dashed focus-visible:outline-emerald-400 ${
         isSelected
           ? "outline-emerald-400"
           : "outline-transparent hover:outline-dashed hover:outline-emerald-400/70"
@@ -219,7 +240,10 @@ export default function EditableText({
       ))}
 
       {!isSelected && (
-        <div className="pointer-events-none absolute -top-2.5 -right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 opacity-0 transition-opacity group-hover:opacity-100">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-2.5 -right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 opacity-0 transition-opacity group-hover:opacity-100"
+        >
           <Edit3 className="h-3 w-3 text-white" />
         </div>
       )}
