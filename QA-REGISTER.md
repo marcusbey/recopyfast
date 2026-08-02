@@ -385,9 +385,68 @@ site. Both verified directly, not just by reading.
   admin is told they lack permission on their own site. Fixed: default is now
   `"invite"`, with a comment explaining the old default's failure mode
   (`ShareSiteDialog.tsx:55-58`).
-- [ ] P4 ~15 orphaned components with zero importers, several backing live API
-  routes that are therefore UI-unreachable. Still accurate — spot-checked
-  `BulkOperations.tsx` and `ApiKeyManagement.tsx`, both zero importers today.
+- [x] **P4 orphaned components — audited, not just "~15."** A second, more
+  rigorous pass (import-path grep across every non-`ui/` component, not the
+  symbol-name grep that produces false positives against unrelated,
+  same-named lib exports) found exactly 15, not ~15 — `knip` alone would
+  have missed 5 of them. Classified into three groups and resolved:
+  - **Deleted (7).** Two genuinely dead: `collaboration/CollaborativeEditor.tsx`
+    and `collaboration/PresenceIndicator.tsx` both depended on
+    `collaborationRealtime` (`src/lib/collaboration/realtime.ts`), whose
+    expected Socket.io events share nothing with what `server/index.js`
+    actually emits/listens for beyond the built-in `connect`/`disconnect`/
+    `error` — wiring either in would have connected a socket that never
+    receives anything it asked for. Five superseded by a live replacement
+    using the same API route: `dashboard/ApiKeyManagement.tsx` (→
+    `settings/ApiKeysPanel.tsx`, `/api/api-keys`), `dashboard/PublishButton.tsx`
+    and `dashboard/StagingDiff.tsx` (→ the embed widget's own in-page publish
+    button, `public/embed/recopyfast.src.js:1243,1269`, calling
+    `/api/staging/publish` directly), `dashboard/StagingAccessManager.tsx`
+    (→ `ShareSiteDialog.tsx` + `ShareLinkCard.tsx`, `/api/staging/access`),
+    `collaboration/TeamDashboard.tsx` (→ `dashboard/teams/page.tsx`,
+    `/api/teams/{id}/{invitations,members}`). Deleting `ApiKeyManagement.tsx`
+    lost one real capability — its per-key rate-limit display — restored on
+    the surviving panel: `ApiKeysPanel.tsx:34,230` now shows
+    `rate_limit_per_minute` (the only rate-limit field the route or the
+    `api_keys` table actually has — the deleted component's TS interface
+    additionally claimed `requestsPerHour`/`requestsPerDay`, but neither
+    exists in `/api/api-keys`'s `select()` or in migration
+    `20250817000000_complete_database_setup.sql:88`; restoring those would
+    have been inventing data, not restoring it). The only test file touching
+    any of the seven, `src/__tests__/integration/collaboration.test.tsx`,
+    covered `TeamDashboard` plus two survivors (`TeamSelector`,
+    `NotificationCenter`) in one file — its `TeamDashboard` describe block
+    (and the fixtures used only there) is removed, the other two are
+    untouched and still pass (5/5).
+  - **Kept on purpose, not orphaned by mistake (1).**
+    `collaboration/TeamSelector.tsx` — it is the only multi-team switcher in
+    the codebase; deleting it would make the gap below unfixable without a
+    rewrite. See the new open item.
+  - **Kept, being wired up (7).** `dashboard/BulkOperations.tsx`,
+    `dashboard/DomainVerification.tsx`, `dashboard/SecurityDashboard.tsx`,
+    `dashboard/TranslationDashboard.tsx`, `editor/AISuggestionButton.tsx`,
+    `collaboration/InvitationManager.tsx`,
+    `collaboration/NotificationCenter.tsx` — all back real, authorised,
+    working API routes with zero UI anywhere. A separate lane is wiring
+    these in; nothing was changed here.
+  Verified, not asserted: `npx tsc --noEmit -p tsconfig.build.json` 0 errors,
+  `npm run lint` 0 errors, `npx jest` 1319 passed / 0 failed (84 suites),
+  `npm run format:check` clean.
+- [!] **New: multi-team switching is unreachable.** `dashboard/teams/page.tsx:109`
+  fetches `/api/teams` and silently uses `teams[0]` — a user who belongs to
+  two or more teams has no way to switch which one they are managing.
+  `TeamSelector.tsx` is the only component that ever did this and was kept
+  specifically against this gap (see P4 above), but nothing renders it.
+  Needs a product decision on whether multi-team support is wanted before
+  it is a build.
+- [~] **New, claimed: team-invite acceptance has no UI.**
+  `collaboration/InvitationManager.tsx` is the invitee side — accept a team
+  invite via a URL token or a pending-invitations list from
+  `/api/notifications` — and nothing else in the app lets an invited person
+  accept; `dashboard/teams/page.tsx` only covers the inviter side (sending
+  invites). A real, broken flow, not just a missing dashboard tab. Claimed
+  by the lane wiring up the seven load-bearing components above — listed
+  here for visibility, not as unowned work.
 
 ## 5. Accessibility
 

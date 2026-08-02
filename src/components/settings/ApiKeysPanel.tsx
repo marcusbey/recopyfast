@@ -31,6 +31,7 @@ interface ApiKeySummary {
   is_active: boolean;
   created_at: string;
   last_used_at: string | null;
+  rate_limit_per_minute: number;
 }
 
 async function readError(response: Response, fallback: string) {
@@ -225,6 +226,9 @@ export function ApiKeysPanel() {
                       <code className="font-mono text-sm text-muted-foreground break-all">
                         {apiKey.key_prefix}…
                       </code>
+                      <p className="text-xs text-muted-foreground">
+                        {apiKey.rate_limit_per_minute} requests/minute
+                      </p>
                     </div>
                     <Button
                       variant="ghost"
