@@ -121,12 +121,20 @@ async function main() {
   } catch (error) {
     const detail = lastSocketError?.message ?? error.message;
     record("connect + auth", false, detail);
-    if (/timed out/.test(error.message)) {
+    // Both failures present as "connect never finished", but the fixes are
+    // opposite, so guessing between them wastes a debugging cycle. The scheme
+    // tells them apart: a TLS-only server drops a plaintext socket without ever
+    // reading the AUTH, which is not a credential problem at all.
+    if (parsed.protocol === "redis:" && /closed|ECONNRESET|EPIPE/i.test(detail)) {
       console.error(
-        "\nThe host accepted the TCP connection but never completed AUTH.\n" +
-          "That is what a WRONG PASSWORD looks like against Upstash.\n" +
-          "An Upstash REST token is NOT the TCP password — copy the rediss://\n" +
-          "string from the database's Connect tab instead.",
+        "\nThe server closed a plaintext connection. Upstash is TLS-only.\n" +
+          "This is NOT a bad password — change the scheme to rediss://",
+      );
+    } else if (/WRONGPASS|NOAUTH|timed out/i.test(detail + error.message)) {
+      console.error(
+        "\nThe host accepted the connection but AUTH did not succeed.\n" +
+          "Note an Upstash REST token is NOT the TCP password — copy the\n" +
+          "rediss:// string from the database's Connect tab instead.",
       );
     }
     // destroy() is synchronous and throws on an unopened client; it is not a promise.
