@@ -1,13 +1,18 @@
 /**
  * Integration coverage for the public /demo route.
  *
- * The previous version of this file mocked `document.createElement` at module
- * scope (which broke Testing Library's own container creation) and then
- * asserted against `MockDemoPage` / `MockRealTimeDemo` components declared
- * inside the test file — exercising React rather than the product. This renders
- * the real `src/app/demo/page.tsx` instead.
+ * This file used to assert the page's old shape: a hand-built "simulated
+ * customer site", an injected embed script, and a redirect into staging mode
+ * carrying `test_staging_token_valid_123`. Every one of those assertions passed
+ * while the live page showed nothing but "Access Denied — Invalid or expired
+ * staging link", because the token was a fixture that exists in no database and
+ * the tests mocked away the only thing that would have noticed.
+ *
+ * The page now runs the same in-memory `InteractiveHero` as the landing page, so
+ * the contract these tests hold it to is different: it must render a working
+ * demo, and it must never again reach for a credential to do it.
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import Demo from "@/app/demo/page";
 
@@ -23,127 +28,130 @@ jest.mock("@/contexts/AuthContext", () => ({
   }),
 }));
 
-const DEMO_SITE_ID = "7e3b2d6c-1ab1-46f3-92fd-493173fa3e17";
-const DEMO_STAGING_TOKEN = "test_staging_token_valid_123";
-
-const getEmbedScript = () =>
-  document.body.querySelector<HTMLScriptElement>(
-    'script[src="/embed/recopyfast.js"]',
-  );
-
 describe("Demo page", () => {
   beforeEach(() => {
-    // jsdom does not implement navigation; the loader's redirect branch logs
-    // through console.error when the staging params are missing.
-    jest.spyOn(console, "error").mockImplementation();
-    jest.spyOn(console, "log").mockImplementation();
-    delete window.RECOPYFAST_API;
-    delete window.RECOPYFAST_WS;
-  });
-
-  afterEach(() => {
-    document
-      .querySelectorAll('script[src="/embed/recopyfast.js"]')
-      .forEach((node) => node.remove());
-    jest.restoreAllMocks();
+    window.history.replaceState({}, "", "/demo");
   });
 
   describe("page content", () => {
-    beforeEach(() => {
-      window.history.replaceState(
-        {},
-        "",
-        `/demo?rcf_staging=1&rcf_token=${DEMO_STAGING_TOKEN}`,
-      );
-    });
-
     it("renders the demo headline and instructions", () => {
       render(<Demo />);
 
       expect(
-        screen.getByRole("heading", { name: "See ReCopyFast in Action" }),
+        screen.getByRole("heading", { name: /edit a real website/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Click on any text element below to edit it/i),
+        screen.getByText(/three customer sites, three different designers/i),
       ).toBeInTheDocument();
     });
 
-    it("renders the simulated customer site used as the edit target", () => {
-      render(<Demo />);
+    it("renders the interactive demo itself", () => {
+      const { container } = render(<Demo />);
 
-      expect(
-        screen.getByRole("heading", { name: "Demo Company Website" }),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/This is a demo site showing ReCopyFast in action/i),
-      ).toBeInTheDocument();
+      // The demo's editable strings are what make this page a demo rather than
+      // a description of one.
+      const editables = container.querySelectorAll("[data-editable-id]");
+      expect(editables.length).toBeGreaterThan(5);
     });
 
     it("renders the closing call to action", () => {
       render(<Demo />);
 
+      const cta = screen.getByRole("link", { name: /add it to your site/i });
+      expect(cta).toHaveAttribute("href", "/signup");
+    });
+
+    it("explains the three things a visitor can do", () => {
+      render(<Demo />);
+
       expect(
-        screen.getByRole("heading", { name: "Ready to Get Started?" }),
+        screen.getByRole("heading", { name: /click anything/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: /type over it/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: /swap the photographs/i }),
       ).toBeInTheDocument();
     });
   });
 
-  describe("embed script wiring", () => {
-    it("injects the embed script when the page is in staging mode", () => {
-      window.history.replaceState(
-        {},
-        "",
-        `/demo?rcf_staging=1&rcf_token=${DEMO_STAGING_TOKEN}`,
-      );
-
-      render(<Demo />);
-
-      const script = getEmbedScript();
-      expect(script).not.toBeNull();
-      expect(script!.getAttribute("data-site-id")).toBe(DEMO_SITE_ID);
-      expect(script!.getAttribute("data-site-token")).toBe(DEMO_STAGING_TOKEN);
-    });
-
-    it("publishes the API and websocket endpoints the embed script reads", () => {
-      window.history.replaceState(
-        {},
-        "",
-        `/demo?rcf_staging=1&rcf_token=${DEMO_STAGING_TOKEN}`,
-      );
-
-      render(<Demo />);
-
-      expect(window.RECOPYFAST_API).toBe(`${window.location.origin}/api`);
-      expect(window.RECOPYFAST_WS).toBe(
-        process.env.NEXT_PUBLIC_WS_URL || "http://localhost:4001",
-      );
-    });
-
-    it("renders the page but injects nothing when staging params are absent", () => {
-      window.history.replaceState({}, "", "/demo");
-
+  /**
+   * The regression guard. Each of these is a way the page previously made
+   * itself dependent on a credential, and each one is why it 403'd in
+   * production while every test here was green.
+   */
+  describe("needs no credential to run", () => {
+    it("injects no embed script", () => {
       render(<Demo />);
 
       expect(
-        screen.getByRole("heading", { name: "See ReCopyFast in Action" }),
-      ).toBeInTheDocument();
-      expect(getEmbedScript()).toBeNull();
-      expect(window.RECOPYFAST_API).toBeUndefined();
+        document.querySelector('script[src="/embed/recopyfast.js"]'),
+      ).toBeNull();
     });
 
-    it("removes the embed script when the page unmounts", () => {
-      window.history.replaceState(
-        {},
-        "",
-        `/demo?rcf_staging=1&rcf_token=${DEMO_STAGING_TOKEN}`,
+    it("never puts the page into staging mode", () => {
+      render(<Demo />);
+
+      expect(window.location.search).not.toContain("rcf_staging");
+      expect(window.location.search).not.toContain("rcf_token");
+    });
+
+    it("carries no site id or staging token anywhere in its markup", () => {
+      const { container } = render(<Demo />);
+
+      const html = container.innerHTML;
+      expect(html).not.toContain("test_staging_token_valid_123");
+      expect(html).not.toContain("7e3b2d6c-1ab1-46f3-92fd-493173fa3e17");
+      expect(container.querySelector("[data-site-token]")).toBeNull();
+      expect(container.querySelector("[data-site-id]")).toBeNull();
+    });
+
+    it("publishes no widget endpoints onto window", () => {
+      render(<Demo />);
+
+      // Read through a cast rather than a global augmentation. The `Window`
+      // declaration for these lived in ReCopyFastLoader and went with it —
+      // there is no longer any code that legitimately sets them, which is the
+      // property being asserted.
+      const globals = window as unknown as Record<string, unknown>;
+      expect(globals.RECOPYFAST_API).toBeUndefined();
+      expect(globals.RECOPYFAST_WS).toBeUndefined();
+    });
+
+    it("shows no access-denied state", () => {
+      render(<Demo />);
+
+      expect(screen.queryByText(/access denied/i)).toBeNull();
+      expect(screen.queryByText(/invalid or expired/i)).toBeNull();
+    });
+  });
+
+  describe("the demo is genuinely editable", () => {
+    it("gives every editable element a stable id to key edits on", () => {
+      const { container } = render(<Demo />);
+
+      const ids = [...container.querySelectorAll("[data-editable-id]")].map(
+        (el) => el.getAttribute("data-editable-id"),
       );
 
-      const { unmount } = render(<Demo />);
-      expect(getEmbedScript()).not.toBeNull();
+      expect(ids.every((id) => !!id)).toBe(true);
+      // Ids are what an edit is stored against, so duplicates would mean two
+      // elements sharing one edit.
+      expect(new Set(ids).size).toBe(ids.length);
+    });
 
-      unmount();
+    it("puts the demo inside the page rather than linking out to it", () => {
+      const { container } = render(<Demo />);
 
-      expect(getEmbedScript()).toBeNull();
+      const main = container.querySelector("main");
+      expect(main).not.toBeNull();
+      expect(
+        within(main as HTMLElement).getAllByText(/./).length,
+      ).toBeGreaterThan(0);
+      expect(
+        (main as HTMLElement).querySelectorAll("[data-editable-id]").length,
+      ).toBeGreaterThan(5);
     });
   });
 });

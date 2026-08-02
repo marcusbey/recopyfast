@@ -10,9 +10,14 @@ export default function FinalCTA() {
   const isInView = useInView(ref, { once: true, margin: "-100px" });
 
   return (
+    /* No sheet here, deliberately. This is the one section whose background IS
+       the sky, which by this point in the scroll has turned orange. Every text
+       colour below is darkened to compensate: `.glass-sheet` was doing contrast
+       work that nothing is doing now, and slate-600 body copy measures about
+       2.4:1 against the sunset zenith. */
     <section
       ref={ref}
-      className="glass-sheet relative overflow-hidden border-t border-white/40 py-32 px-6"
+      className="relative overflow-hidden border-t border-white/30 py-32 px-6"
     >
       <div className="max-w-4xl mx-auto relative z-10 text-center">
         <motion.div
@@ -22,7 +27,7 @@ export default function FinalCTA() {
           className="glass mb-8 inline-flex items-center gap-2 rounded-full px-4 py-2"
         >
           <Zap className="w-4 h-4 text-amber-500" />
-          <span className="text-sm text-slate-600">
+          <span className="text-sm text-slate-800">
             Set up in under 5 minutes
           </span>
         </motion.div>
@@ -35,14 +40,18 @@ export default function FinalCTA() {
         >
           Ready to take control
           <br />
-          <span className="text-sky-700">of your content?</span>
+          {/* Was sky-700. Blue on orange is the one pairing this sky cannot
+              carry — complementary, so it vibrates at the edges and reads as a
+              mistake. A deep warm brown belongs to the same family as the
+              background and still measures over 5:1 against it. */}
+          <span className="text-amber-950">of your content?</span>
         </motion.h2>
 
         <motion.p
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-lg sm:text-xl text-slate-600 max-w-2xl mx-auto mb-12"
+          className="text-lg sm:text-xl text-slate-800 max-w-2xl mx-auto mb-12"
         >
           Stop waiting on developers for every text change. Give your team the
           power to update website content instantly.
@@ -54,9 +63,12 @@ export default function FinalCTA() {
           transition={{ duration: 0.8, delay: 0.3 }}
           className="flex flex-col sm:flex-row items-center justify-center gap-4"
         >
+          {/* Near-black rather than sky blue: on a warm background the darkest
+              thing on screen is the strongest call to action, and it does not
+              fight the sky for attention the way a saturated blue would. */}
           <Link
             href="/signup"
-            className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-sky-700"
+            className="pressable group inline-flex items-center gap-2 rounded-full bg-slate-900 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-slate-800"
           >
             <span>Get started</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
@@ -64,7 +76,7 @@ export default function FinalCTA() {
 
           <Link
             href="/demo"
-            className="inline-flex items-center gap-2 px-8 py-5 text-slate-600 hover:text-slate-900 font-medium transition-colors"
+            className="inline-flex items-center gap-2 px-8 py-5 text-slate-800 hover:text-slate-900 font-medium transition-colors"
           >
             See it in action
             <ArrowRight className="w-4 h-4" />
@@ -75,7 +87,7 @@ export default function FinalCTA() {
           initial={{ opacity: 0 }}
           animate={isInView ? { opacity: 1 } : {}}
           transition={{ duration: 0.8, delay: 0.5 }}
-          className="mt-16 flex flex-wrap justify-center items-center gap-6 text-sm text-slate-400"
+          className="mt-16 flex flex-wrap justify-center items-center gap-6 text-sm text-slate-800"
         >
           {/*
             "No credit card required" and "14-day free trial" were removed:

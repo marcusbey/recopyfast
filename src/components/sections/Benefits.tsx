@@ -91,7 +91,7 @@ export default function Benefits() {
       // This is the features section, so it takes the anchor, matching how
       // Pricing.tsx:66 already carries id="pricing".
       id="features"
-      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
+      className="solid-sheet relative overflow-hidden border-y border-slate-200/80 py-32 px-6"
     >
       <div className="relative z-10 mx-auto max-w-6xl">
         {/* Left-aligned on purpose. Four sections above this one open with a

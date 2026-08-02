@@ -4,7 +4,23 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { ATMOSPHERE, SIMPLEX_2D } from "./shaders/noise";
-import { SKY_HORIZON, SKY_ZENITH, SUN_COLOR, SUN_DIR } from "./palette";
+import {
+  SKY_HORIZON,
+  SKY_ZENITH,
+  SUN_COLOR,
+  SUN_DIR,
+  SUNSET_END,
+  SUNSET_HORIZON,
+  SUNSET_START,
+  SUNSET_SUN,
+  SUNSET_ZENITH,
+} from "./palette";
+
+/** Hermite ramp, matching GLSL `smoothstep`, so the turn has no hard edges. */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
+  return t * t * (3 - 2 * t);
+}
 
 /**
  * The cheap sky: everything below the fold, and every mobile device.
@@ -148,6 +164,17 @@ export default function SkyLayered({
   useFrame((state) => {
     uniforms.uAspect.value = size.width / Math.max(size.height, 1);
     uniforms.uScroll.value = scrollProgress;
+
+    /* Day turns to sunset across the bottom of the page. Driven by scroll
+       rather than by a timer, so the colour is a function of where the reader
+       is and scrolling back up returns the sky to blue.
+
+       `copy().lerp()` writes through the Color the uniform already holds, so
+       this allocates nothing on a frame that runs at 60fps. */
+    const sunset = smoothstep(SUNSET_START, SUNSET_END, scrollProgress);
+    uniforms.uSkyZenith.value.copy(SKY_ZENITH).lerp(SUNSET_ZENITH, sunset);
+    uniforms.uSkyHorizon.value.copy(SKY_HORIZON).lerp(SUNSET_HORIZON, sunset);
+    uniforms.uSunColor.value.copy(SUN_COLOR).lerp(SUNSET_SUN, sunset);
 
     if (isAnimating) {
       uniforms.uTime.value = state.clock.elapsedTime;

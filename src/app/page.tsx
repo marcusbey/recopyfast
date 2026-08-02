@@ -39,7 +39,11 @@ export default function Home() {
         <ValueProposition />
 
         {/* Interactive Demo Websites Section */}
-        <section className="glass-sheet border-y border-white/40 py-20 px-6">
+        {/* Solid white, not glass: the demo sites below are themselves full
+            page designs with their own backgrounds, and showing sky between
+            them made the section read as three floating cards rather than as
+            three websites. */}
+        <section className="solid-sheet border-y border-slate-200/80 py-20 px-6">
           <div className="max-w-7xl mx-auto">
             <div className="text-center mb-12">
               <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
