@@ -1,7 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
-import { readEffectivePlanId } from "@/lib/billing/effective-plan";
+import {
+  hasAnyEntitlement,
+  resolveEntitlement,
+} from "@/lib/billing/effective-plan";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -19,7 +22,13 @@ export const runtime = "nodejs";
 const CHECKOUT_PATH = "/dashboard/billing";
 
 /**
- * Is this session's account without a plan?
+ * Is this session's account entitled to nothing at all?
+ *
+ * Deliberately `resolveEntitlement` + `hasAnyEntitlement` rather than a
+ * condition of its own: the router must not hold a second opinion about who is
+ * let in, or the paywall and the feature gates drift and one of them is wrong.
+ * A credit holder passes here — they bought something that works, and bouncing
+ * them to checkout would put the thing they paid for behind a wall.
  *
  * Fails open. A Supabase blip must not lock a paying customer out of their own
  * dashboard, and this gate is routing, not authorisation — every API route and
@@ -31,7 +40,7 @@ async function isUnentitled(
   userId: string,
 ): Promise<boolean> {
   try {
-    return (await readEffectivePlanId(supabase, userId)) === null;
+    return !hasAnyEntitlement(await resolveEntitlement(supabase, userId));
   } catch (error) {
     console.error("[middleware] entitlement check failed", error);
     return false;

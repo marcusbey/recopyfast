@@ -1,5 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
-import { getEffectivePlan } from "@/lib/billing/entitlements";
+import {
+  getEffectivePlan,
+  hasAnyEntitlement,
+} from "@/lib/billing/entitlements";
 import {
   getUserCreditBalance,
   consumeCredits,
@@ -34,20 +37,28 @@ export interface FeaturePermission {
 const UNLIMITED = -1;
 
 /**
- * The single denial for an account with no plan.
+ * The denial for an account with nothing at all — no plan, no credits.
  *
- * Every gate returns this rather than a feature-specific message, because the
- * answer is the same regardless of what was asked for and the remedy is the
- * same too. `upgradeRequired` sends the UI to the plan picker.
- *
- * Purchased credits do not buy their way past it. Credits are an add-on to a
- * plan, not a substitute for one, and nothing is destroyed by the denial — a
- * wallet balance survives untouched and is spendable again the moment the
- * account has a plan.
+ * `upgradeRequired` sends the UI to the plan picker.
  */
-const NO_PLAN: FeaturePermission = {
+const NO_ENTITLEMENT: FeaturePermission = {
   allowed: false,
   reason: "This account has no active plan. Choose a plan to continue.",
+  upgradeRequired: true,
+};
+
+/**
+ * The denial for a credit holder reaching for something credits do not buy.
+ *
+ * Distinct from `NO_ENTITLEMENT` because the remedy is different and so is the
+ * truth: they have paid us for something, it works, and this particular thing
+ * is not it. Sites and seats are plan-shaped — a quota, not metered usage — and
+ * a wallet balance must never be mistaken for one.
+ */
+const CREDITS_ARE_NOT_A_PLAN: FeaturePermission = {
+  allowed: false,
+  reason:
+    "Your credits cover AI features. Creating sites and inviting collaborators needs a plan.",
   upgradeRequired: true,
 };
 
@@ -87,9 +98,13 @@ async function countOwnedSites(
 export async function canCreateWebsite(
   userId: string,
 ): Promise<FeaturePermission> {
+  // Quota-shaped: only a plan carries one. Credits are metered usage and buy
+  // no allowance here, however large the balance.
   const entitlement = await getEffectivePlan(userId);
-  if (!entitlement.entitled) {
-    return NO_PLAN;
+  if (entitlement.kind !== "plan") {
+    return entitlement.kind === "credits"
+      ? CREDITS_ARE_NOT_A_PLAN
+      : NO_ENTITLEMENT;
   }
   const { plan } = entitlement;
 
@@ -134,9 +149,13 @@ export async function canAddCollaborator(
   userId: string,
   siteId: string,
 ): Promise<FeaturePermission> {
+  // Quota-shaped: only a plan carries one. Credits are metered usage and buy
+  // no allowance here, however large the balance.
   const entitlement = await getEffectivePlan(userId);
-  if (!entitlement.entitled) {
-    return NO_PLAN;
+  if (entitlement.kind !== "plan") {
+    return entitlement.kind === "credits"
+      ? CREDITS_ARE_NOT_A_PLAN
+      : NO_ENTITLEMENT;
   }
   const { plan } = entitlement;
 
@@ -188,12 +207,15 @@ export async function canUseAIFeatures(
   creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION,
 ): Promise<FeaturePermission> {
   const entitlement = await getEffectivePlan(userId);
-  if (!entitlement.entitled) {
-    return NO_PLAN;
-  }
-  const { plan } = entitlement;
 
-  if (!plan.limits.aiFeatures) {
+  if (!hasAnyEntitlement(entitlement)) {
+    return NO_ENTITLEMENT;
+  }
+
+  // AI is metered in credits, so a plan's `aiFeatures` flag is what decides
+  // whether the *plan* includes it. A credit holder has no plan to consult and
+  // is spending what they bought, which is the whole of the entitlement.
+  if (entitlement.kind === "plan" && !entitlement.plan.limits.aiFeatures) {
     return {
       allowed: false,
       reason: "AI features require a Pro subscription",
@@ -222,11 +244,15 @@ export async function canUseTranslation(
   userId: string,
 ): Promise<FeaturePermission> {
   const entitlement = await getEffectivePlan(userId);
-  if (!entitlement.entitled) {
-    return NO_PLAN;
+
+  if (!hasAnyEntitlement(entitlement)) {
+    return NO_ENTITLEMENT;
   }
 
-  const translationLimit = entitlement.plan.limits.translations;
+  // A credit holder has no included allowance, so they take the pay-per-use
+  // path below — the same one a plan with `translations: 0` takes.
+  const translationLimit =
+    entitlement.kind === "plan" ? entitlement.plan.limits.translations : 0;
 
   if (translationLimit === 0) {
     // Plans with no included translation allowance can still pay per use out
@@ -337,14 +363,16 @@ export async function getUserUsageLimits(userId: string) {
 
   return {
     // Null rather than a stand-in plan, so a caller rendering "you are on the
-    // X plan" has to decide what to say to someone who is on none.
-    plan: entitlement.entitled
-      ? {
-          id: entitlement.planId,
-          name: entitlement.plan.name,
-          limits: entitlement.plan.limits,
-        }
-      : null,
+    // X plan" has to decide what to say to someone who is on none. A credit
+    // holder is on none — that is the point of the distinction.
+    plan:
+      entitlement.kind === "plan"
+        ? {
+            id: entitlement.planId,
+            name: entitlement.plan.name,
+            limits: entitlement.plan.limits,
+          }
+        : null,
     current: {
       websites: websiteCount,
       aiUsage,

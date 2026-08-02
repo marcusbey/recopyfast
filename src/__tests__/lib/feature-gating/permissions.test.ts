@@ -42,9 +42,14 @@ jest.mock("@/lib/supabase/server", () => ({
 // The gates read the plan in force, which counts lifetime entitlements as well
 // as subscriptions, so this is the seam to stub rather than the subscription
 // table underneath it.
+// Only the resolution is stubbed. `hasAnyEntitlement` is the real predicate:
+// it is the one the router also consumes, so a gate must not be tested against
+// a local copy of it that could quietly disagree.
 jest.mock("@/lib/billing/entitlements", () => ({
   getEffectivePlan: jest.fn(),
   getEffectivePlanId: jest.fn(),
+  hasAnyEntitlement: jest.requireActual("@/lib/billing/effective-plan")
+    .hasAnyEntitlement,
 }));
 
 jest.mock("@/lib/credits/system", () => {
@@ -96,13 +101,20 @@ const NO_LIMITS = plan().limits;
 
 /** What `getEffectivePlan` hands a gate for a user who is on a plan. */
 const entitled = (subscriptionPlan: SubscriptionPlan): Entitlement => ({
-  entitled: true,
+  kind: "plan",
   planId: subscriptionPlan.id,
   plan: subscriptionPlan,
 });
 
-/** ...and for one who is on none. There is no free plan to stand in for it. */
-const UNENTITLED: Entitlement = { entitled: false, planId: null, plan: null };
+/** ...for one holding purchased credits and no plan... */
+const CREDIT_HOLDER: Entitlement = {
+  kind: "credits",
+  planId: null,
+  plan: null,
+};
+
+/** ...and for one with nothing. There is no free plan to stand in for it. */
+const UNENTITLED: Entitlement = { kind: "none", planId: null, plan: null };
 
 const STARTER_PLAN = plan({
   price: 9,
@@ -380,10 +392,8 @@ describe("Feature Gating Permissions", () => {
       expect(getUserCreditBalance).not.toHaveBeenCalled();
     });
 
-    it("cannot translate even holding purchased credits", async () => {
-      // Credits are an add-on to a plan, not a substitute for one. The balance
-      // is not spent and not lost — it becomes spendable again on subscribing.
-      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(500));
+    it("cannot translate, having nothing to pay with", async () => {
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(0));
 
       const result = await canUseTranslation(testUserId);
 
@@ -399,6 +409,82 @@ describe("Feature Gating Permissions", () => {
       expect(result.error).toContain("no active plan");
       expect(consumeCredits).not.toHaveBeenCalled();
       expect(mockInsert).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * An account holding purchased credits and no plan.
+   *
+   * They paid for a delivered good, so it stays spendable — clawing it back is
+   * the shape of a chargeback. What it must not do is behave like a plan: no
+   * sites, no seats, no capability flags.
+   */
+  describe("an account with credits but no plan", () => {
+    beforeEach(() => {
+      asMock(getEffectivePlan).mockResolvedValue(CREDIT_HOLDER);
+    });
+
+    it("can spend them on a translation", async () => {
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(50));
+
+      const result = await canUseTranslation(testUserId);
+
+      expect(result.allowed).toBe(true);
+      expect(result.requiresCredits).toBe(true);
+      expect(result.creditsRequired).toBe(1);
+    });
+
+    it("can spend them on an AI suggestion", async () => {
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(50));
+
+      const result = await canUseAIFeatures(testUserId);
+
+      expect(result.allowed).toBe(true);
+    });
+
+    it("actually consumes them, and records the usage", async () => {
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(50));
+      asMock(consumeCredits).mockResolvedValue({ success: true });
+
+      const result = await consumeFeatureUsage(testUserId, "translation");
+
+      expect(result.success).toBe(true);
+      expect(consumeCredits).toHaveBeenCalledWith(
+        testUserId,
+        CREDIT_COSTS.AI_TRANSLATION,
+        "translation",
+        undefined,
+      );
+    });
+
+    it("is refused once the balance runs out", async () => {
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(0));
+
+      const result = await canUseAIFeatures(testUserId, 1);
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain("Insufficient credits");
+    });
+
+    it("still cannot create a website — credits are not a quota", async () => {
+      queryCount = 0;
+
+      const result = await canCreateWebsite(testUserId);
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("needs a plan");
+      // Not even asked how many sites they have; there is no allowance to
+      // compare against.
+      expect(mockSupabase.from).not.toHaveBeenCalled();
+    });
+
+    it("still cannot add a collaborator", async () => {
+      const result = await canAddCollaborator(testUserId, "site-1");
+
+      expect(result.allowed).toBe(false);
+      expect(result.upgradeRequired).toBe(true);
+      expect(result.reason).toContain("needs a plan");
     });
   });
 });

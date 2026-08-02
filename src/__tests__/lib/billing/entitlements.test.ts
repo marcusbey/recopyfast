@@ -1,10 +1,12 @@
 /**
- * Resolving what plan an account has, including the case where it has none.
+ * Resolving what an account is entitled to: a plan, spendable credits, or
+ * nothing.
  *
- * `getEffectivePlanId` used to end in `?? "free"`, so "has never paid" and "is
- * on a plan" came back as the same kind of value and every gate downstream
- * evaluated the free row's limits instead of asking whether the account was
- * entitled at all. These tests pin the absence of that fallback.
+ * Two rules meet here and their order matters. `free` is retired, so a row
+ * still holding it grants no plan; and purchased credits are an entitlement in
+ * their own right, because the holder paid for a delivered good. An account
+ * with `plan='free'` AND credits is therefore a credit holder, not a lost one —
+ * the case most likely to be missed.
  */
 
 interface QueryResult {
@@ -17,8 +19,23 @@ const results: Record<string, QueryResult> = {};
 
 const mockSupabase = {
   from: jest.fn((table: string) => {
-    const chain: Record<string, unknown> = {};
-    for (const method of ["select", "eq", "is", "in", "order", "limit"]) {
+    const chain: Record<string, unknown> = {
+      // credit_purchases is awaited directly; the others end in maybeSingle().
+      then: (resolve: (value: QueryResult) => unknown) =>
+        Promise.resolve(results[table] ?? { data: [], error: null }).then(
+          resolve,
+        ),
+    };
+    for (const method of [
+      "select",
+      "eq",
+      "is",
+      "in",
+      "gt",
+      "or",
+      "order",
+      "limit",
+    ]) {
       chain[method] = jest.fn(() => chain);
     }
     chain.maybeSingle = jest.fn(() =>
@@ -43,6 +60,7 @@ jest.mock("@/lib/stripe/plans", () => ({
 import {
   getEffectivePlan,
   getEffectivePlanId,
+  hasAnyEntitlement,
   UNENTITLED,
 } from "@/lib/billing/entitlements";
 import { findPlanById } from "@/lib/stripe/plans";
@@ -76,6 +94,11 @@ function setRows(rows: Partial<Record<string, QueryResult>>) {
   Object.assign(results, rows);
 }
 
+/** A wallet holding `n` spendable credits. */
+function wallet(n: number): QueryResult {
+  return { data: n > 0 ? [{ credits_remaining: n }] : [], error: null };
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   setRows({});
@@ -105,6 +128,27 @@ describe("getEffectivePlanId", () => {
   });
 
   it.each([
+    ["a subscription row", "billing_subscriptions", { plan: "free" }],
+    ["a grant", "plan_entitlements", { plan_id: "free" }],
+  ])(
+    "normalises a retired free plan on %s to no plan at all",
+    async (_label, table, data) => {
+      setRows({ [table]: { data, error: null } });
+
+      await expect(getEffectivePlanId(USER)).resolves.toBeNull();
+    },
+  );
+
+  it("falls through a free grant to a real subscription underneath it", async () => {
+    setRows({
+      plan_entitlements: { data: { plan_id: "free" }, error: null },
+      billing_subscriptions: { data: { plan: "pro" }, error: null },
+    });
+
+    await expect(getEffectivePlanId(USER)).resolves.toBe("pro");
+  });
+
+  it.each([
     ["plan_entitlements", /Failed to read plan entitlements/],
     ["billing_subscriptions", /Failed to read billing subscriptions/],
   ])(
@@ -120,32 +164,55 @@ describe("getEffectivePlanId", () => {
 });
 
 describe("getEffectivePlan", () => {
-  it("resolves an unpaid account to UNENTITLED without consulting the catalogue", async () => {
-    const entitlement = await getEffectivePlan(USER);
-
-    expect(entitlement).toEqual(UNENTITLED);
-    expect(entitlement.entitled).toBe(false);
-    expect(entitlement.plan).toBeNull();
-    expect(entitlement.planId).toBeNull();
-    // The catalogue is not asked for a plan that does not exist. It used to be
-    // asked for "free", which threw the moment that row was switched off.
-    expect(findPlanById).not.toHaveBeenCalled();
-  });
-
   it("carries the plan and its id for a subscriber", async () => {
     setRows({ billing_subscriptions: { data: { plan: "pro" }, error: null } });
 
     const entitlement = await getEffectivePlan(USER);
 
-    expect(entitlement.entitled).toBe(true);
+    expect(entitlement.kind).toBe("plan");
     expect(entitlement.planId).toBe("pro");
     expect(entitlement.plan).toBe(PRO);
   });
 
-  it("treats a plan id with no catalogue row as unentitled", async () => {
-    // A plan retired years ago can still be sitting in an old subscription row.
-    // It used to fall back to free, so a plan that no longer exists kept
-    // conferring access.
+  it("does not read the wallet when a plan already resolved", async () => {
+    setRows({ billing_subscriptions: { data: { plan: "pro" }, error: null } });
+
+    await getEffectivePlan(USER);
+
+    // A subscriber's gate checks must not get slower because credits can now
+    // entitle someone.
+    expect(mockSupabase.from).not.toHaveBeenCalledWith("credit_purchases");
+  });
+
+  it("resolves an account with nothing to UNENTITLED", async () => {
+    const entitlement = await getEffectivePlan(USER);
+
+    expect(entitlement).toEqual(UNENTITLED);
+    expect(entitlement.kind).toBe("none");
+    expect(entitlement.plan).toBeNull();
+    expect(findPlanById).not.toHaveBeenCalled();
+  });
+
+  it("resolves a wallet with credits and no plan to credits", async () => {
+    setRows({ credit_purchases: wallet(250) });
+
+    const entitlement = await getEffectivePlan(USER);
+
+    expect(entitlement.kind).toBe("credits");
+    // Credits confer no plan, so there is nothing here to read limits off.
+    expect(entitlement.plan).toBeNull();
+    expect(entitlement.planId).toBeNull();
+  });
+
+  it("resolves a drained wallet to nothing", async () => {
+    // Spending the last credit must move the holder to the paywall rather than
+    // stranding them in a half-lit dashboard.
+    setRows({ credit_purchases: wallet(0) });
+
+    await expect(getEffectivePlan(USER)).resolves.toEqual(UNENTITLED);
+  });
+
+  it("treats a plan id with no catalogue row as no plan", async () => {
     setRows({
       billing_subscriptions: { data: { plan: "enterprise" }, error: null },
     });
@@ -154,16 +221,46 @@ describe("getEffectivePlan", () => {
     await expect(getEffectivePlan(USER)).resolves.toEqual(UNENTITLED);
   });
 
-  it("still resolves a grandfathered free row while that plan is seeded", async () => {
-    // Existing rows holding plan='free' keep working. What changed is that
-    // nothing new arrives at that id by fallback.
-    const free = { ...PRO, id: "free" as const, name: "Free" };
-    setRows({ billing_subscriptions: { data: { plan: "free" }, error: null } });
-    asMock(findPlanById).mockResolvedValue(free);
+  it("falls a dead plan id through to the wallet rather than off a cliff", async () => {
+    setRows({
+      billing_subscriptions: { data: { plan: "enterprise" }, error: null },
+      credit_purchases: wallet(100),
+    });
+    asMock(findPlanById).mockResolvedValue(null);
+
+    expect((await getEffectivePlan(USER)).kind).toBe("credits");
+  });
+
+  it("composes the two rules: a free row plus credits is a credit holder", async () => {
+    // The case most likely to be missed. `free` retires to no plan, and the
+    // wallet is then what decides — so they keep spending what they bought.
+    setRows({
+      billing_subscriptions: { data: { plan: "free" }, error: null },
+      credit_purchases: wallet(500),
+    });
 
     const entitlement = await getEffectivePlan(USER);
 
-    expect(entitlement.entitled).toBe(true);
-    expect(entitlement.planId).toBe("free");
+    expect(entitlement.kind).toBe("credits");
+    expect(findPlanById).not.toHaveBeenCalled();
+  });
+
+  it("composes them the other way: a free row with an empty wallet is nothing", async () => {
+    setRows({
+      billing_subscriptions: { data: { plan: "free" }, error: null },
+      credit_purchases: wallet(0),
+    });
+
+    await expect(getEffectivePlan(USER)).resolves.toEqual(UNENTITLED);
+  });
+});
+
+describe("hasAnyEntitlement", () => {
+  it.each([
+    ["a plan", { kind: "plan", planId: "pro", plan: PRO } as const, true],
+    ["credits", { kind: "credits", planId: null, plan: null } as const, true],
+    ["nothing", UNENTITLED, false],
+  ])("is %s → %s", (_label, entitlement, expected) => {
+    expect(hasAnyEntitlement(entitlement)).toBe(expected);
   });
 });

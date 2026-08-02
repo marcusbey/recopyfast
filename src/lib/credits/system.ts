@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { readPurchasedCreditBalance, spendableFilter } from "./spendable";
 import type { CreditTransaction, CreditWallet } from "@/types/billing";
 
 /**
@@ -52,12 +53,6 @@ function assertRead<T>(
   return result.data;
 }
 
-/**
- * Rows whose credits are still spendable: `expires_at` NULL means never
- * expires, which is what a purchased pack is.
- */
-const SPENDABLE = "expires_at.is.null,expires_at.gt.";
-
 /** PostgreSQL SQLSTATEs, referred to by name rather than by digits. */
 const NOT_NULL_VIOLATION = "23502";
 const UNIQUE_VIOLATION = "23505";
@@ -71,9 +66,10 @@ const UNIQUE_VIOLATION = "23505";
  * 500, Stripe retries forever, and the customer is charged for credits that
  * never appear — the same shape as the Starter defect.
  *
- * A date this distant is spendable under `SPENDABLE`'s `expires_at.gt.<now>`
- * arm, so a grant written before the migration behaves exactly like one written
- * after it. Credits are never lost, only labelled differently.
+ * A date this distant is spendable under `spendableFilter()`'s
+ * `expires_at.gt.<now>` arm, so a grant written before the migration behaves
+ * exactly like one written after it. Credits are never lost, only labelled
+ * differently.
  */
 const NEVER_EXPIRES = "9999-12-31T23:59:59.999Z";
 
@@ -108,10 +104,6 @@ async function insertNonExpiringGrant(
     .insert({ ...row, expires_at: NEVER_EXPIRES });
 }
 
-function spendableFilter(): string {
-  return `${SPENDABLE}${new Date().toISOString()}`;
-}
-
 /**
  * Get user's current credit balance
  */
@@ -123,14 +115,13 @@ export async function getUserCreditBalance(
   // Resolved through the entitlement layer so a Lifetime Pro customer, who has
   // no billing_subscriptions row at all, still gets Pro's included credits.
   //
-  // No plan means no included allowance, and reading the balance must still
-  // work: an unentitled user has a wallet like anyone else, and the credits in
-  // it were paid for. This read is on the path the billing dashboard takes, so
-  // throwing here would turn "you have not subscribed" into a 500.
+  // Only a plan includes credits. A credit-only holder has a wallet and no
+  // allowance, which is the difference between the two kinds of entitlement.
+  // This read is on the path the billing dashboard takes, so it must answer
+  // rather than throw for someone who has not subscribed.
   const entitlement = await getEffectivePlan(userId);
-  const includedCredits = entitlement.entitled
-    ? entitlement.plan.limits.monthlyCredits
-    : 0;
+  const includedCredits =
+    entitlement.kind === "plan" ? entitlement.plan.limits.monthlyCredits : 0;
 
   // NOTE: `plan` is the column name on billing_subscriptions, not `plan_id`.
   // Only the period boundary is needed here; the plan itself came from above.
@@ -144,21 +135,10 @@ export async function getUserCreditBalance(
     "billing_subscriptions read",
   );
 
-  const creditPurchases = assertRead(
-    await supabase
-      .from("credit_purchases")
-      .select("credits_remaining")
-      .eq("user_id", userId)
-      .gt("credits_remaining", 0)
-      .or(spendableFilter()),
-    "credit_purchases read",
-  );
-
-  const purchasedCredits =
-    creditPurchases?.reduce(
-      (sum, purchase) => sum + (purchase.credits_remaining || 0),
-      0,
-    ) || 0;
+  // Shared with entitlement resolution, which asks the same question to decide
+  // whether a wallet alone entitles its holder. Two totals computed two ways
+  // would eventually disagree about which rows still count.
+  const purchasedCredits = await readPurchasedCreditBalance(supabase, userId);
 
   const startOfPeriod =
     subscription?.current_period_start || startOfCurrentMonth();

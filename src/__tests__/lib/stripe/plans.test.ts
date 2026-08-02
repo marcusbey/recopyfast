@@ -463,10 +463,10 @@ describe("findSubscriptionPlan", () => {
     expect(findSubscriptionPlan(catalogue, id)).toBeUndefined();
   });
 
-  it("still resolves a grandfathered free row while one is seeded", () => {
-    // Existing `billing_subscriptions.plan = 'free'` rows have to keep
-    // resolving until the data question about them is settled; what changed is
-    // that nothing new arrives at that id by fallback.
+  it("resolves an id the catalogue does hold, free included", () => {
+    // This is lookup, not policy. `free` is retired upstream, in
+    // readEffectivePlanId, so no caller reaches here holding it — but a
+    // catalogue lookup that lied about its own contents would be worse.
     expect(findSubscriptionPlan(catalogue, "free")?.id).toBe("free");
   });
 });

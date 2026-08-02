@@ -58,8 +58,9 @@ export function UpgradeDialog({
   const { startCheckout, isRedirecting, error: checkoutError } = useCheckout();
 
   // No plan means no Stripe subscription to prorate, so the submit below has to
-  // open Checkout rather than change a plan in place.
-  const hasSubscription = currentPlan !== null && currentPlan !== "free";
+  // open Checkout rather than change a plan in place. A credit holder is in
+  // exactly that position: money spent with us, but nothing to prorate.
+  const hasSubscription = currentPlan !== null;
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);

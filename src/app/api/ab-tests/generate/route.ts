@@ -65,13 +65,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check plan allows A/B testing
+    // A/B testing is a plan capability, not metered usage, so credits alone do
+    // not unlock it even though generating a test also costs credits.
     const entitlement = await getEffectivePlan(user.id);
 
-    if (!entitlement.entitled) {
+    if (entitlement.kind !== "plan") {
       return NextResponse.json(
         {
-          error: "This account has no active plan. Choose a plan to continue.",
+          error:
+            entitlement.kind === "credits"
+              ? "A/B testing requires a plan. Your credits cover AI suggestions and translations."
+              : "This account has no active plan. Choose a plan to continue.",
           upgrade_required: true,
         },
         { status: 403 },

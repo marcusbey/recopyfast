@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { findPlanById } from "@/lib/stripe/plans";
-import type { SubscriptionPlan } from "@/lib/stripe/plans";
-import { readEffectivePlanId } from "./effective-plan";
+import { readEffectivePlanId, resolveEntitlement } from "./effective-plan";
+import type { Entitlement } from "./effective-plan";
+
+export {
+  UNENTITLED,
+  hasAnyEntitlement,
+  resolveEntitlement,
+} from "./effective-plan";
+export type { Entitlement } from "./effective-plan";
 
 /**
  * Which plan's entitlements a user actually has — or that they have none.
@@ -14,36 +20,6 @@ import { readEffectivePlanId } from "./effective-plan";
  * subscription row at all and reading only that table would strand them the
  * moment they finished paying $199.
  */
-
-/**
- * The plan in force for a user, or the explicit absence of one.
- *
- * Modelled as a discriminated union rather than as a zero-limit plan object,
- * because at a call site those two are indistinguishable. `getEffectivePlan`
- * used to end in a `?? "free"` fallback that handed every gate a real
- * `SubscriptionPlan` whose limits were all zero, so "has not paid" and "is on a
- * plan that includes nothing" read identically — a gate that forgot to check
- * entitlement worked anyway, by accident, and would have started granting
- * access the day someone edited the free row's limits.
- *
- * `plan` and `planId` are `null` on the unentitled branch, so
- * `entitlement.plan.limits` does not compile until the caller has narrowed on
- * `entitled`. That is the point: the compiler finds the call sites, not grep.
- */
-export type Entitlement =
-  | {
-      readonly entitled: true;
-      readonly planId: string;
-      readonly plan: SubscriptionPlan;
-    }
-  | { readonly entitled: false; readonly planId: null; readonly plan: null };
-
-/** The single unentitled value, so callers can compare against it directly. */
-export const UNENTITLED: Entitlement = {
-  entitled: false,
-  planId: null,
-  plan: null,
-};
 
 /**
  * The raw plan id recorded for a user, or `null` when there is none.
@@ -58,24 +34,15 @@ export async function getEffectivePlanId(
 }
 
 /**
- * The full plan config in force for a user, or `UNENTITLED`.
+ * What the signed-in user is entitled to: a plan, spendable credits, or
+ * nothing.
  *
- * A plan id with no active catalogue row — one retired years ago, or one
- * switched off — is unentitled too. It used to fall back to `free`, which is
- * how a plan that no longer exists kept conferring access.
+ * A thin binding of `resolveEntitlement` to the cookie-scoped client. The
+ * computation itself is shared with `src/middleware.ts`, which passes its own
+ * client to the same function — see ./effective-plan for why that matters.
  */
 export async function getEffectivePlan(userId: string): Promise<Entitlement> {
-  const planId = await getEffectivePlanId(userId);
-  if (planId === null) {
-    return UNENTITLED;
-  }
-
-  const plan = await findPlanById(planId);
-  if (!plan) {
-    return UNENTITLED;
-  }
-
-  return { entitled: true, planId, plan };
+  return resolveEntitlement(await createClient(), userId);
 }
 
 export interface GrantEntitlementResult {

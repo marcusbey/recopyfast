@@ -91,17 +91,28 @@ export function BillingDashboard() {
   const currentPlan = dashboardData.effectivePlanId;
   const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
 
-  // This is the whole page for an unpaid account. Every other dashboard route
-  // redirects here (see src/middleware.ts), so it has to stand on its own
-  // rather than assume the reader arrived by choice.
+  // Credits entitle their holder to spend them and to nothing else, so they
+  // have no plan and land here too — but telling them their credits are
+  // unavailable would be false, and they can reach this page under their own
+  // steam rather than being bounced to it.
+  const creditBalance = dashboardData.creditWallet?.balance ?? 0;
+  const holdsCredits = creditBalance > 0;
+
+  // This is the whole page for an account with no plan. Every other dashboard
+  // route redirects a wholly unentitled session here (see src/middleware.ts),
+  // so it has to stand on its own rather than assume the reader arrived by
+  // choice.
   if (currentPlan === null) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="mx-auto max-w-lg p-8 text-center">
-          <h1 className="mb-2 text-2xl font-bold">Choose a plan to continue</h1>
+          <h1 className="mb-2 text-2xl font-bold">
+            {holdsCredits ? "You're on credits" : "Choose a plan to continue"}
+          </h1>
           <p className="mb-6 text-gray-600">
-            ReCopyFast needs an active subscription before your sites, editors
-            and AI credits become available.
+            {holdsCredits
+              ? `You have ${creditBalance.toLocaleString("en-US")} credits to spend on AI suggestions and translations. Sites, collaborators and A/B testing need a plan.`
+              : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
           </p>
           <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
             See plans

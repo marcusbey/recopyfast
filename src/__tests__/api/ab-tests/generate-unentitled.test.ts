@@ -68,7 +68,7 @@ beforeEach(() => {
 describe("A/B test generation without a plan", () => {
   it("refuses with 403 before spending credits or calling the model", async () => {
     asMock(getEffectivePlan).mockResolvedValue({
-      entitled: false,
+      kind: "none",
       planId: null,
       plan: null,
     });
@@ -83,9 +83,28 @@ describe("A/B test generation without a plan", () => {
     expect(aiService.generateABVariants).not.toHaveBeenCalled();
   });
 
+  it("refuses a credit holder, since A/B testing is a plan capability", async () => {
+    // Credits pay for metered usage of capabilities a plan grants. A/B testing
+    // is one of those capabilities, not a meter, so a wallet does not buy it
+    // even though generating a test also costs credits.
+    asMock(getEffectivePlan).mockResolvedValue({
+      kind: "credits",
+      planId: null,
+      plan: null,
+    });
+
+    const response = await POST(generateRequest());
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toContain("requires a plan");
+    expect(hasEnoughCredits).not.toHaveBeenCalled();
+    expect(aiService.generateABVariants).not.toHaveBeenCalled();
+  });
+
   it("still refuses a plan that does not include A/B testing", async () => {
     asMock(getEffectivePlan).mockResolvedValue({
-      entitled: true,
+      kind: "plan",
       planId: "starter",
       plan: { limits: { abTesting: false } },
     });

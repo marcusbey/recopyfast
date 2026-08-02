@@ -48,15 +48,38 @@ jest.mock("@supabase/ssr", () => ({
   createServerClient: jest.fn(() => ({ auth: { getUser } })),
 }));
 
+// Only the resolution is stubbed. `hasAnyEntitlement` is the real predicate,
+// because the point of these tests is that the router does not hold a second
+// opinion about who is let in — stubbing it would test the stub.
 jest.mock("@/lib/billing/effective-plan", () => ({
-  readEffectivePlanId: jest.fn(),
+  resolveEntitlement: jest.fn(),
+  hasAnyEntitlement: jest.requireActual("@/lib/billing/effective-plan")
+    .hasAnyEntitlement,
 }));
 
 import type { NextRequest } from "next/server";
+import type { Entitlement } from "@/lib/billing/effective-plan";
 import { middleware } from "@/middleware";
-import { readEffectivePlanId } from "@/lib/billing/effective-plan";
+import { resolveEntitlement } from "@/lib/billing/effective-plan";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
+
+/**
+ * The router only ever looks at `kind`, so the plan body is not filled in.
+ */
+const ON_PRO = {
+  kind: "plan",
+  planId: "pro",
+  plan: {},
+} as unknown as Entitlement;
+
+const CREDIT_HOLDER: Entitlement = {
+  kind: "credits",
+  planId: null,
+  plan: null,
+};
+
+const NOTHING: Entitlement = { kind: "none", planId: null, plan: null };
 
 /**
  * The middleware reads `nextUrl` (cloning it to build redirects) and the
@@ -90,12 +113,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   carriedCookies.length = 0;
   getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-  asMock(readEffectivePlanId).mockResolvedValue("pro");
+  asMock(resolveEntitlement).mockResolvedValue(ON_PRO);
 });
 
 describe("an authenticated session with no plan", () => {
   beforeEach(() => {
-    asMock(readEffectivePlanId).mockResolvedValue(null);
+    asMock(resolveEntitlement).mockResolvedValue(NOTHING);
   });
 
   it.each([
@@ -151,8 +174,26 @@ describe("an authenticated session with no plan", () => {
   it("does not spend a query on an API route", async () => {
     await run("/api/sites/register");
 
-    expect(readEffectivePlanId).not.toHaveBeenCalled();
+    expect(resolveEntitlement).not.toHaveBeenCalled();
   });
+});
+
+describe("an authenticated session holding only credits", () => {
+  beforeEach(() => {
+    asMock(resolveEntitlement).mockResolvedValue(CREDIT_HOLDER);
+  });
+
+  it.each(["/dashboard", "/dashboard/content", "/settings"])(
+    "reaches %s",
+    async (path) => {
+      // Relaxing the feature gate alone would change nothing observable: the
+      // router would still bounce them off the surface where credits are spent.
+      // Both consume hasAnyEntitlement, so they agree.
+      const response = await run(path);
+
+      expect(response.redirectedTo).toBeUndefined();
+    },
+  );
 });
 
 describe("an authenticated session with a plan", () => {
@@ -166,7 +207,7 @@ describe("an authenticated session with a plan", () => {
     // Failing open. A Supabase blip must not lock a paying customer out of
     // their own dashboard, and every API route gates itself regardless.
     const logged = jest.spyOn(console, "error").mockImplementation(() => {});
-    asMock(readEffectivePlanId).mockRejectedValue(new Error("boom"));
+    asMock(resolveEntitlement).mockRejectedValue(new Error("boom"));
 
     const response = await run("/dashboard");
 
@@ -188,6 +229,6 @@ describe("an anonymous visitor", () => {
     expect(response.redirectedTo?.searchParams.get("redirectedFrom")).toBe(
       "/dashboard",
     );
-    expect(readEffectivePlanId).not.toHaveBeenCalled();
+    expect(resolveEntitlement).not.toHaveBeenCalled();
   });
 });

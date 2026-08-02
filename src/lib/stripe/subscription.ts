@@ -325,8 +325,10 @@ export async function checkFeatureAccess(
     | "collaborators"
     | "translations",
 ): Promise<boolean> {
+  // Every feature here is plan-shaped — a capability flag or a quota — so
+  // purchased credits do not answer any of them.
   const entitlement = await getEffectivePlan(userId);
-  if (!entitlement.entitled) {
+  if (entitlement.kind !== "plan") {
     return false;
   }
   const { plan } = entitlement;
