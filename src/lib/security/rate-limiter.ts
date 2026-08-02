@@ -237,26 +237,44 @@ export class RedisRateLimiter {
     this.resetClient();
   }
 
-  private generateKey(config: RateLimitConfig): string {
+  /**
+   * `now` is passed in rather than read here so one checkLimit() call derives
+   * the key and the window boundaries from a single instant. Reading the clock
+   * twice let a call that straddled a window boundary bump the counter for one
+   * window while reporting the reset time of the next.
+   */
+  private generateKey(config: RateLimitConfig, now: number): string {
     const endpoint = config.endpoint || "global";
-    const window = Math.floor(Date.now() / config.windowMs);
+    const window = Math.floor(now / config.windowMs);
     return `rate_limit:${config.identifierType}:${config.identifier}:${endpoint}:${window}`;
   }
 
   async checkLimit(config: RateLimitConfig): Promise<RateLimitResult> {
     await this.connect();
 
-    const key = this.generateKey(config);
     const now = Date.now();
+    const key = this.generateKey(config, now);
     const windowStart = Math.floor(now / config.windowMs) * config.windowMs;
     const windowEnd = windowStart + config.windowMs;
 
-    // Use Redis pipeline for atomic operations
+    /**
+     * Two commands, not three.
+     *
+     * The key is already scoped to a fixed window, so it expires exactly at
+     * `windowEnd` — the TTL round-trip that used to be here only re-derived a
+     * number this function had already computed. It was also less accurate:
+     * `now + ttl * 1000` measures the TTL forward from the CURRENT request, so
+     * the first request of a window reported a reset up to a full window late
+     * and clients got an inflated Retry-After.
+     *
+     * The third of the traffic this removes matters on a metered store: the
+     * auth endpoints fail closed, so exhausting a command quota takes down
+     * editor login exactly the way a dead instance does.
+     */
     const pipeline = this.client!.multi();
 
     pipeline.incr(key);
     pipeline.expire(key, Math.ceil(config.windowMs / 1000));
-    pipeline.ttl(key);
 
     let results: unknown[] | null;
     try {
@@ -271,28 +289,33 @@ export class RedisRateLimiter {
       throw error;
     }
 
-    if (!results || results.length < 3) {
+    if (!results || results.length < 2) {
       throw new Error("Redis pipeline execution failed");
     }
 
     const requests = Number(results[0]);
-    const ttl = Number(results[2]);
+
+    // A non-numeric INCR reply means the key holds something else entirely (key
+    // collision, or someone else writing into our namespace). Treating NaN as a
+    // count would make `allowed` false-y in a way that silently denies traffic.
+    if (!Number.isFinite(requests)) {
+      throw new Error("Redis INCR returned a non-numeric reply");
+    }
 
     const allowed = requests <= config.maxRequests;
     const remaining = Math.max(0, config.maxRequests - requests);
-    const resetTime = ttl > 0 ? now + ttl * 1000 : windowEnd;
 
     return {
       allowed,
       remaining,
-      resetTime,
+      resetTime: windowEnd,
       totalRequests: requests,
     };
   }
 
   async resetLimit(config: RateLimitConfig): Promise<void> {
     await this.connect();
-    const key = this.generateKey(config);
+    const key = this.generateKey(config, Date.now());
     await this.client!.del(key);
   }
 
