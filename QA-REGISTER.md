@@ -4,6 +4,29 @@
 > the working tree. One test suite is red and the pre-commit hook runs the full
 > suite, so nothing can land until it is fixed.
 >
+> ## 🔴 DEPLOY ORDER — Starter is switched OFF in live on purpose
+>
+> `billing_subscriptions.plan` shipped with `CHECK (plan IN ('free','pro','enterprise'))`
+> from a migration predating the Starter tier. Every Starter checkout raises
+> 23514, the webhook returns 500, and Stripe retries forever — **card charged,
+> subscription row never written, customer stranded on free.**
+>
+> `STRIPE_STARTER_PRICE_ID_LIVE` and `STRIPE_STARTER_YEARLY_PRICE_ID_LIVE` have
+> been **removed from Vercel production** and the site redeployed, so Starter now
+> fails at checkout creation instead of taking money. Pro is unaffected and still
+> sells normally.
+>
+> **To re-enable Starter, in this order and no other:**
+> 1. Run `supabase/migrations/20260802020000_plan_constraint_and_credit_collapse.sql`
+>    against production. It rewrites the constraint to `('free','starter','pro')`
+>    and grandfathers any enterprise subscriber to pro *before* tightening it —
+>    that ordering is load-bearing and asserted by a test.
+> 2. Deploy the committed code.
+> 3. Re-add both Starter live price ids to Vercel, then **redeploy** — Vercel bakes
+>    env vars per deployment, so adding a value without redeploying does nothing.
+>    (Values are in local `.env`.)
+> 4. Verify with a real Starter checkout that the subscription row is written.
+>
 > **To land everything:**
 > 1. Fix `src/lib/stripe/__tests__/config.test.ts` (3 failures). It asserts the
 >    OLD live-mode contract — `NODE_ENV=production` implying live Stripe keys.
