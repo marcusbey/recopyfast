@@ -16,11 +16,14 @@ export default function SweetDreamsSite({ text, image }: DemoSiteRenderProps) {
         className={`flex flex-wrap items-center justify-between gap-4 border-b px-6 py-4 md:px-10 ${RULE}`}
       >
         {text("brand")}
-        <nav className="hidden items-center gap-7 text-[13px] text-[#7a6a58] lg:flex">
-          <span>Bread</span>
-          <span>Pastry</span>
-          <span>Cakes to order</span>
-          <span>Wholesale</span>
+        {/* gap-3 rather than gap-7: each item is now an editable, and those
+            carry their own padding, so the smaller gap lands on the same
+            rendered spacing the plain spans had. */}
+        <nav className="hidden items-center gap-3 lg:flex">
+          {text("nav-link-1")}
+          {text("nav-link-2")}
+          {text("nav-link-3")}
+          {text("nav-link-4")}
         </nav>
         {text("nav-since")}
       </header>

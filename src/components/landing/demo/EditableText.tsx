@@ -51,6 +51,10 @@ function elementTagFor(id: string): string {
   if (id === "cta" || id.endsWith("-btn")) return "button";
   if (id.includes("title")) return "h2";
   if (id === "brand") return "span";
+  // Only the `nav-link-*` ids are navigation. `nav-since`, `nav-hours` and
+  // `nav-status` share the prefix but are standing copy, not links, so the
+  // check is on the full prefix rather than on "nav".
+  if (id.startsWith("nav-link-")) return "a";
   if (id.includes("price") || id.includes("eyebrow")) return "span";
   return "p";
 }

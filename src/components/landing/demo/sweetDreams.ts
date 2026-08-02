@@ -38,6 +38,12 @@ export const sweetDreams: DemoSite = {
     brand:
       "rounded-sm text-[1.15rem] font-semibold tracking-[-0.02em] text-[#2a2119]",
     "nav-since": "rounded-sm font-serif text-[13px] italic text-[#7a6a58]",
+    // The nav's own type, previously inherited from the <nav> wrapper by plain
+    // <span>s. Each item carries it directly now that each is its own editable.
+    "nav-link-1": "rounded-sm text-[13px] text-[#7a6a58]",
+    "nav-link-2": "rounded-sm text-[13px] text-[#7a6a58]",
+    "nav-link-3": "rounded-sm text-[13px] text-[#7a6a58]",
+    "nav-link-4": "rounded-sm text-[13px] text-[#7a6a58]",
     "hero-eyebrow": "rounded-sm font-serif text-[15px] italic text-[#c2603f]",
     headline:
       "rounded-sm max-w-[14ch] text-[2.5rem] font-semibold leading-[1.0] tracking-[-0.035em] text-[#2a2119] md:text-[3.2rem] lg:text-[3.8rem]",
@@ -77,6 +83,10 @@ export const sweetDreams: DemoSite = {
 
   editableTexts: [
     editable("brand", "Sweet Dreams"),
+    editable("nav-link-1", "Bread"),
+    editable("nav-link-2", "Pastry"),
+    editable("nav-link-3", "Cakes to order"),
+    editable("nav-link-4", "Wholesale"),
     editable("nav-since", "On Main Street since 1985"),
     editable("hero-eyebrow", "Ovens on at four"),
     editable("headline", "Baked before you wake up"),

@@ -33,6 +33,18 @@ export const premiumAutoSpa: DemoSite = {
   textStyles: {
     brand:
       "rounded-none font-mono text-[12px] font-medium uppercase tracking-[0.3em] text-[#e8eaed]",
+    // The nav's own type, previously inherited from the <nav> wrapper by plain
+    // <span>s. Each item carries it directly now that each is its own editable.
+    // `rounded-none` throughout, because this site's chrome is square-cornered.
+    "nav-link-1":
+      "rounded-none font-mono text-[11px] uppercase tracking-[0.2em] text-[#8d949d]",
+    "nav-link-2":
+      "rounded-none font-mono text-[11px] uppercase tracking-[0.2em] text-[#8d949d]",
+    "nav-link-3":
+      "rounded-none font-mono text-[11px] uppercase tracking-[0.2em] text-[#8d949d]",
+    // Brighter than its neighbours: it reads as live status, not navigation.
+    "nav-status":
+      "rounded-none font-mono text-[11px] uppercase tracking-[0.2em] text-[#e8eaed]",
     "hero-eyebrow":
       "rounded-none font-mono text-[11px] uppercase tracking-[0.28em] text-[#ff4d17]",
     headline:
@@ -97,6 +109,10 @@ export const premiumAutoSpa: DemoSite = {
 
   editableTexts: [
     editable("brand", "Premium Auto Spa"),
+    editable("nav-link-1", "Process"),
+    editable("nav-link-2", "Services"),
+    editable("nav-link-3", "Packages"),
+    editable("nav-status", "Booking open"),
     editable("hero-eyebrow", "Appointment only · Bays 01–04"),
     editable("headline", "Detailing held to a body-shop tolerance"),
     editable(

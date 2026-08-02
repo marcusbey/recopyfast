@@ -24,13 +24,19 @@ export default function PremiumAutoSpaSite({
         className={`flex flex-wrap items-center justify-between gap-4 border-b px-6 py-4 md:px-10 ${RULE}`}
       >
         {text("brand")}
-        <nav className="hidden items-center gap-7 font-mono text-[11px] uppercase tracking-[0.2em] text-[#8d949d] lg:flex">
-          <span>Process</span>
-          <span>Services</span>
-          <span>Packages</span>
-          <span className="flex items-center gap-2 text-[#e8eaed]">
+        {/* gap-3 rather than gap-7: each item is now an editable, and those
+            carry their own padding, so the smaller gap lands on the same
+            rendered spacing the plain spans had. */}
+        <nav className="hidden items-center gap-3 lg:flex">
+          {text("nav-link-1")}
+          {text("nav-link-2")}
+          {text("nav-link-3")}
+          {/* The status dot stays outside the editable: it is a graphic, not
+              copy, and pulling it inside would put markup into a string the
+              visitor edits as plain text. */}
+          <span className="flex items-center">
             <span className="h-1.5 w-1.5 bg-[#ff4d17]" />
-            Booking open
+            {text("nav-status")}
           </span>
         </nav>
       </header>

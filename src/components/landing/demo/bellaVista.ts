@@ -44,6 +44,16 @@ export const bellaVista: DemoSite = {
       "rounded-sm font-serif text-[15px] font-medium uppercase tracking-[0.3em] text-[#1a1512]",
     "nav-hours":
       "rounded-sm font-mono text-[11px] uppercase tracking-[0.2em] text-[#6b5c4d]",
+    // The nav's own type, previously inherited from the <nav> wrapper by plain
+    // <span>s. Each item carries it directly now that each is its own editable.
+    "nav-link-1":
+      "rounded-sm font-mono text-[11px] uppercase tracking-[0.2em] text-[#6b5c4d]",
+    "nav-link-2":
+      "rounded-sm font-mono text-[11px] uppercase tracking-[0.2em] text-[#6b5c4d]",
+    "nav-link-3":
+      "rounded-sm font-mono text-[11px] uppercase tracking-[0.2em] text-[#6b5c4d]",
+    "nav-link-4":
+      "rounded-sm font-mono text-[11px] uppercase tracking-[0.2em] text-[#6b5c4d]",
     headline:
       "rounded-sm font-serif text-[2.5rem] leading-[0.95] tracking-[-0.025em] text-[#f6f1e9] md:text-[3.5rem] lg:text-[4.25rem] [text-shadow:0_2px_24px_rgb(16_12_10/0.55)]",
     subheading:
@@ -93,6 +103,10 @@ export const bellaVista: DemoSite = {
 
   editableTexts: [
     editable("brand", "Bella Vista"),
+    editable("nav-link-1", "Menu"),
+    editable("nav-link-2", "Wine"),
+    editable("nav-link-3", "Private dining"),
+    editable("nav-link-4", "Find us"),
     editable("nav-hours", "Tue–Sun · 5 to 10"),
     editable("headline", "Sicilian cooking,\nthree generations deep"),
     editable(
