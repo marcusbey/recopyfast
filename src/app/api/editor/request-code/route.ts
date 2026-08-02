@@ -5,12 +5,22 @@
  * allowlist. Called from the hub (no siteId) and from the widget's unlock
  * prompt (siteId set).
  *
- * The response is identical whether or not the address is an editor of
- * anything. That is the entire enumeration defence: an attacker with a list of
- * addresses learns nothing about which of them can edit which site.
+ * The response — status, body and headers — is identical whether or not the
+ * address is an editor of anything, and it is sent BEFORE the two operations
+ * that differ by recognition even run: minting a code (a DB write) and mailing
+ * it (a network round trip to Resend). Both are deferred to `after()`, which
+ * runs once the response has already been committed, specifically so that an
+ * attacker timing the request cannot tell a recognised address from an
+ * unrecognised one either — doing either piece of work before responding was
+ * a timing oracle exactly as real as a body that varied. It also closes a
+ * sharper oracle that used to exist alongside it: minting used to fail with a
+ * distinct 503 (`code_unavailable`) that was only reachable for a recognised
+ * address, which needed no statistics at all — one request confirmed the
+ * address. `after()`'s callback therefore never has a response left to shape;
+ * every failure path inside it can only log, as loudly as it did before.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import {
   isEmailProviderConfigured,
   sendEditorAccessCode,
@@ -78,8 +88,9 @@ export async function POST(request: NextRequest) {
     const limited = await limitCodeRequests(request, { email, siteId });
     if (limited) return withPublicCors(limited, request);
 
-    // Resolve the claim. Both misses fall through to the neutral response with
-    // no mail sent and no timing branch worth measuring.
+    // Resolve the claim. Both branches below reach the same
+    // `return NEUTRAL_RESPONSE` at the same point in the function — nothing
+    // past this lookup is allowed to change the response.
     let siteLabel: string | undefined;
     let recognised = false;
 
@@ -94,35 +105,32 @@ export async function POST(request: NextRequest) {
       siteLabel = undefined;
     }
 
-    if (!recognised) {
+    if (recognised) {
+      // Runs after the response below has already been sent. Neither branch
+      // of this function may await a DB write or a Resend call before
+      // responding — that asymmetry was the timing leak. Every failure here
+      // is still logged as loudly as before; none of them may become a
+      // distinct status code, because that is the sharper oracle this whole
+      // change exists to close.
+      after(async () => {
+        const code = await issueVerificationCode({ email, siteId });
+        if (!code) {
+          console.error(
+            `[editor-auth] could not mint a code after responding (site: ${siteId ?? "hub"})`,
+          );
+          return;
+        }
+
+        const mail = await sendEditorAccessCode(email, code, siteLabel);
+        if (!mail.sent) {
+          console.error(
+            `[editor-auth] code generated but delivery failed (site: ${siteId ?? "hub"}): ${mail.error}`,
+          );
+        }
+      });
+    } else {
       console.warn(
         `[editor-auth] code requested for an address with no access (site: ${siteId ?? "hub"})`,
-      );
-      return withPublicCors(NextResponse.json(NEUTRAL_RESPONSE), request);
-    }
-
-    const code = await issueVerificationCode({ email, siteId });
-    if (!code) {
-      return withPublicCors(
-        NextResponse.json(
-          {
-            error: "code_unavailable",
-            message: "We couldn't send the code. Please try again.",
-          },
-          { status: 503 },
-        ),
-        request,
-      );
-    }
-
-    const mail = await sendEditorAccessCode(email, code, siteLabel);
-    if (!mail.sent) {
-      // Provider is configured but this send failed. Logged loudly; the caller
-      // still gets the neutral response, because a per-address failure returned
-      // here would be exactly the existence oracle the neutral response exists
-      // to prevent. See the report for this trade-off.
-      console.error(
-        `[editor-auth] code generated but delivery failed (site: ${siteId ?? "hub"}): ${mail.error}`,
       );
     }
 
