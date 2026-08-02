@@ -58,6 +58,56 @@ function assertRead<T>(
  */
 const SPENDABLE = "expires_at.is.null,expires_at.gt.";
 
+/** PostgreSQL SQLSTATEs, referred to by name rather than by digits. */
+const NOT_NULL_VIOLATION = "23502";
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Stand-in for "never expires" when the database still forbids NULL.
+ *
+ * Migration 20260802020000 drops `credit_purchases.expires_at`'s NOT NULL, but
+ * code and schema deploy separately and the code can arrive first. Until the
+ * migration lands, inserting NULL raises 23502; the webhook turns that into a
+ * 500, Stripe retries forever, and the customer is charged for credits that
+ * never appear — the same shape as the Starter defect.
+ *
+ * A date this distant is spendable under `SPENDABLE`'s `expires_at.gt.<now>`
+ * arm, so a grant written before the migration behaves exactly like one written
+ * after it. Credits are never lost, only labelled differently.
+ */
+const NEVER_EXPIRES = "9999-12-31T23:59:59.999Z";
+
+/**
+ * Insert a grant that does not expire, under either schema.
+ *
+ * NULL is attempted first so that once the migration has run every row records
+ * "never expires" the way the migration intends, and the fallback quietly stops
+ * being used. Nothing is written by a failed insert, so the retry cannot
+ * double-credit.
+ */
+async function insertNonExpiringGrant(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  row: Record<string, unknown>,
+): Promise<{ error: { code?: string; message: string } | null }> {
+  const attempt = await supabase
+    .from("credit_purchases")
+    .insert({ ...row, expires_at: null });
+
+  if (attempt.error?.code !== NOT_NULL_VIOLATION) {
+    return attempt;
+  }
+
+  console.warn(
+    "credit_purchases.expires_at is still NOT NULL — migration 20260802020000 " +
+      "has not been applied to this database. Granting with a far-future " +
+      "expiry so the credits are not lost; run the migration to restore NULL.",
+  );
+
+  return supabase
+    .from("credit_purchases")
+    .insert({ ...row, expires_at: NEVER_EXPIRES });
+}
+
 function spendableFilter(): string {
   return `${SPENDABLE}${new Date().toISOString()}`;
 }
@@ -239,8 +289,10 @@ export async function consumeCredits(
  * instead of crediting twice. That collision is the idempotency guard working,
  * and is reported as `duplicate` rather than thrown.
  *
- * `expires_at` is NULL: purchased credits do not expire, which is what the
- * pricing page promises.
+ * Purchased credits do not expire, which is what the pricing page promises.
+ * That is recorded as a NULL `expires_at`, falling back to a far-future one on
+ * a database that has not had migration 20260802020000 applied yet — see
+ * `insertNonExpiringGrant`.
  */
 export async function addPurchasedCredits(
   userId: string,
@@ -258,17 +310,16 @@ export async function addPurchasedCredits(
 
   const supabase = createServiceRoleClient();
 
-  const { error } = await supabase.from("credit_purchases").insert({
+  const { error } = await insertNonExpiringGrant(supabase, {
     user_id: userId,
     credits_purchased: credits,
     credits_remaining: credits,
     price_cents: priceCents ?? null,
     stripe_payment_intent_id: stripePaymentIntentId,
-    expires_at: null,
   });
 
   if (error) {
-    if (error.code === "23505") {
+    if (error.code === UNIQUE_VIOLATION) {
       return { success: false, duplicate: true };
     }
     // Thrown, not logged: the caller is the webhook, and a 500 there makes
@@ -303,13 +354,12 @@ export async function refundCredits(
 
   const supabase = createServiceRoleClient();
 
-  const { error } = await supabase.from("credit_purchases").insert({
+  const { error } = await insertNonExpiringGrant(supabase, {
     user_id: userId,
     credits_purchased: credits,
     credits_remaining: credits,
     price_cents: 0,
     stripe_payment_intent_id: `refund_${reason}_${userId}_${Date.now()}`,
-    expires_at: null,
   });
 
   if (error) {

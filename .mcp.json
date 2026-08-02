@@ -8,18 +8,6 @@
     },
     {
       "type": "promptString",
-      "id": "supabase-access-token",
-      "description": "Supabase Personal Access Token",
-      "password": true
-    },
-    {
-      "type": "promptString",
-      "id": "supabase-project-ref",
-      "description": "Supabase Project Reference ID",
-      "default": "uexwowziiigweobgpmtk"
-    },
-    {
-      "type": "promptString",
       "id": "github-token",
       "description": "GitHub Personal Access Token",
       "password": true
@@ -37,21 +25,12 @@
         "STRIPE_SECRET_KEY": "${input:stripe-secret-key}"
       }
     },
-    "supabase": {
+    "memory": {
       "command": "npx",
       "args": [
         "-y",
-        "@supabase/mcp-server-supabase@latest",
-        "--read-only=false",
-        "--project-ref=${input:supabase-project-ref}"
-      ],
-      "env": {
-        "SUPABASE_ACCESS_TOKEN": "${input:supabase-access-token}"
-      }
-    },
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
+        "@modelcontextprotocol/server-memory"
+      ]
     },
     "context7": {
       "type": "http",
@@ -59,10 +38,17 @@
     },
     "github": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
         "GITHUB_PERSONAL_ACCESS_TOKEN": "${input:github-token}"
       }
+    },
+    "supabase": {
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=uexwowziiigweobgpmtk&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
     }
   }
 }

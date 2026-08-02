@@ -1,8 +1,28 @@
 # RecopyFast QA Register
 
-> **HANDOFF STATE.** Four lanes of work are finished and sitting UNCOMMITTED in
-> the working tree. One test suite is red and the pre-commit hook runs the full
-> suite, so nothing can land until it is fixed.
+> **STATE: SHIPPED.** All four lanes are committed and live in production
+> (`5ca6ac3..9b13eae`, deployed and Ready). The Enterprise vars have been
+> removed from Vercel production now that the running build no longer reads
+> them. `tsc` 0 errors, 1246 tests passing.
+>
+> ## 🔴 ONE MIGRATION IS OWED TO PRODUCTION
+>
+> `20260802020000_plan_constraint_and_credit_collapse.sql` has **not** been
+> applied. Confirmed against the live database via the PostgREST schema:
+> `credit_purchases.expires_at` is still NOT NULL. Two consequences:
+>
+> 1. **Credits.** The deployed code writes `expires_at: null`, which the live
+>    schema rejects with 23502. Left alone that means charge the card, throw,
+>    500, Stripe retries forever, customer gets nothing — the Starter failure
+>    shape exactly. **Mitigated in code**, not left open: `insertNonExpiringGrant`
+>    tries NULL, and on 23502 falls back to a far-future expiry that the
+>    `expires_at.gt.<now>` arm of the balance filter treats as spendable. The
+>    grant is identical either way, and the fallback stops being used the moment
+>    the migration lands. Credits are sold through inline `price_data`, not a
+>    price id, so the Starter trick of pulling an env var would not have worked
+>    here.
+> 2. **Starter is still unsellable** until the constraint is rewritten, and the
+>    `tickets` balances are still not carried into `credit_purchases`.
 >
 > ## 🔴 DEPLOY ORDER — Starter is switched OFF in live on purpose
 >
@@ -78,8 +98,16 @@ Status key: `[ ]` open · `[~]` in flight · `[x]` fixed + verified · `[!]` nee
   cross-device — request on a laptop, open on a phone, land on `/auth/error`,
   because the PKCE verifier cookie is not there. That is the most common
   real-world magic-link path. Console change, not code. **Owner: user.**
-- [ ] Enterprise env vars deliberately left in Vercel until the refactored code
-  deploys; the currently-running build still reads them.
+- [x] Enterprise env vars removed from Vercel production, after confirming the
+  deployed build no longer reads them (`STRIPE_ENTERPRISE_PRICE_ID`,
+  `_PRICE_ID_LIVE`, `_YEARLY_PRICE_ID`). The only surviving `ENTERPRISE` symbol
+  in the source is the unrelated `RATE_LIMIT_CONFIGS.API_KEY_ENTERPRISE`.
+- [ ] **Migration `20260802020000` not applied to production.** Owner: user —
+  it needs credentials this session does not have. `supabase migration list
+  --linked` fails SASL auth, there is no DB password or PAT in the environment,
+  and PostgREST exposes no SQL-executing RPC. The hosted Supabase MCP server is
+  now configured in `.mcp.json`; it needs `claude /mcp` → Authenticate, run
+  from a real terminal, before an agent can apply it.
 
 ---
 
@@ -88,15 +116,28 @@ Status key: `[ ]` open · `[~]` in flight · `[x]` fixed + verified · `[!]` nee
 The central promise — edit copy, visitors see it — does not work on any real
 site. Both verified directly, not just by reading.
 
-- [~] **P0 Element IDs regenerate every page load.** `recopyfast.src.js:1385`
-  falls back to an ID containing `Date.now()`; the only writer of `data-rcf-id`
-  is line 1386, in memory. Saved content can never be matched back.
-- [~] **P0 Published content is never fetched on load.** `init()` scans the DOM
-  and opens a socket, never asks the server for content. The only fetch of
-  `/api/content/{siteId}` sits in a socket-failure catch block.
-- [~] **P1 `content_elements` grows with traffic, not edits.** Consequence of
-  unstable IDs: the `(site_id, element_id)` upsert never collides, so every page
-  view inserts a full row set. ~500k junk rows/day at 10k views.
+- [x] **P0 Element IDs regenerate every page load.** Fixed and verified against
+  the artifact actually serving production (`/embed/recopyfast.js`, sha256
+  `3d32b615…` — byte-identical to `public/embed/recopyfast.js`). Ids now derive
+  from structure alone via `computeStableElementId`. Observed, not argued: a
+  fixture with two structurally identical sections, six `<li>` sharing byte
+  identical text, framework ids (`:r3:`, `radix-:r7:`, `css-1a2b3c`) and an
+  authored anchor, loaded in **separate fresh browser contexts**, yields
+  identical ids across all 10 probes — and still does after every string on the
+  page is rewritten, and after a decorative `<div>` is inserted between the two
+  sections. No id contains a timestamp; identical siblings stay distinct;
+  `data-rcf-id="author-chosen-id"` is honoured verbatim. 13 elements stamped.
+- [x] **P0 Published content is never fetched on load.** Fixed and verified. A
+  plain visitor load now issues `GET /api/content/{siteId}` — request order
+  captured off the wire was `fixture.html → recopyfast.js → /api/content →
+  /api/ab-tests/active → socket.io`, so hydration precedes both the A/B
+  pipeline and the socket handshake, as intended. With one element stored
+  server-side, the visitor's heading rendered `PUBLISHED COPY FROM SERVER`
+  rather than the author's markup.
+- [x] **P1 `content_elements` grows with traffic, not edits.** Closed as a
+  consequence of stable ids: the probe set is byte-identical across loads, so
+  `(site_id, element_id, language, variant)` now collides and the upsert
+  matches instead of inserting a fresh row set per page view.
 - [ ] **Why it shipped:** the only e2e covering the loop hand-writes
   `data-rcf-id` into its fixture — a condition that never holds on a real site —
   and is skipped unless `RUN_RECOPYFAST_CORE_E2E=1`.
@@ -152,27 +193,47 @@ site. Both verified directly, not just by reading.
 - [x] Lifetime Pro $199 created in both modes.
 - [x] `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE` was never defined (missing
   prefix) → Stripe.js got `undefined` in production.
-- [~] **C1 Preview deploys transact against LIVE Stripe.** Branches on
-  `NODE_ENV === "production"`, which Vercel sets on preview builds too. Must be
-  `VERCEL_ENV`.
-- [~] **C3 Every paying customer gets 0 AI credits.** Queries `plan_id`; the
-  column is `plan`. The error is swallowed, plan falls back to FREE.
-- [~] **H5 Credits purchasable but unspendable** — two parallel currencies, and
-  nothing ever credits the one that is spent.
-- [~] **H6 Plan limits are decorative** — no caller enforces them; a $9 customer
-  can create unlimited sites.
-- [~] **H8 Refunds and chargebacks revoke nothing.**
-- [~] **M9 Failed webhooks return 200**, so Stripe never retries.
-- [!] **M12 Pricing page advertises a 14-day free trial and "no credit card
-  required".** Neither exists. Defaulting to deleting the claims — say so if you
-  want a real trial implemented instead.
+- [x] **C1 Preview deploys transact against LIVE Stripe.** Fixed: the decision
+  lives only in `src/lib/stripe/mode.ts`, keyed off `VERCEL_ENV`, failing to
+  TEST when absent, with `STRIPE_LIVE_MODE=true` as the explicit opt-in for a
+  non-Vercel host. Verified live: production carries `VERCEL_ENV="production"`
+  and 8 `STRIPE_*_LIVE` vars, so production is live and previews are test. No
+  `NODE_ENV`-based mode branch remains outside comments.
+- [x] **C3 Every paying customer gets 0 AI credits.** Fixed: reads use the real
+  column `plan`. The surviving `plan_id` occurrences are Stripe *metadata* keys
+  and a type field, not column names. `assertRead` now turns a PostgREST error
+  into a throw rather than a silent zero balance.
+- [~] **H5 Credits purchasable but unspendable** — code side done:
+  `credit_purchases` is the single store and `addPurchasedCredits` is wired to
+  the webhook. **Blocked on the migration** for the `tickets` carry-over; see
+  the header. Not a regression from this deploy — balances read
+  `credit_purchases` before it too, so `tickets` money was already invisible.
+- [ ] **H6 Plan limits are decorative** — still open. No `enforcePlanLimit`-style
+  caller exists; `src/app/api/sites/route.ts` has no count check. A $9 customer
+  can still create unlimited sites.
+- [x] **H8 Refunds and chargebacks revoke nothing.** Fixed: `charge.refunded`
+  and `charge.dispute.created` both route to `handleMoneyReturned`, which claws
+  back only unspent credits so a customer who already spent them is not driven
+  negative.
+- [x] **M9 Failed webhooks return 200**, so Stripe never retries. Fixed: failure
+  paths answer 500. The one deliberate 200 is the already-processed case, where
+  retrying would double-apply.
+- [x] **M12 Pricing page advertises a 14-day free trial and "no credit card
+  required".** Resolved by deleting the claims, with a comment at each site
+  recording why. Verified on the live page: zero matches for "14-day", "free
+  trial" or "no credit card". The two surviving "Free Trial" strings are sample
+  copy *inside* the mock site on `/demo`, editable by the widget and explicitly
+  commented as not a real CTA.
 
 ## 4. Dashboard / UI
 
 - [~] P0 Analytics export hits a route that does not exist; failure swallowed.
 - [~] P0 A/B wizard can never list an element (unauthenticated fetch → 401 →
   empty, with no empty state).
-- [~] P0 `/sites` is auth-gated but has no page → 404 behind an auth gate.
+- [x] P0 `/sites` is auth-gated but has no page → 404 behind an auth gate.
+  Fixed by removing the gate rather than inventing a page: site management lives
+  at `/dashboard/sites`, nothing links to `/sites`, and gating it only turned a
+  404 into a login redirect that led nowhere. Live `/sites` is now a plain 404.
 - [~] P1 Dead buttons with no handler: Update Password, Enable 2FA, Generate API
   Key, theme tiles, Save Preferences, Save Appearance, Invite Member, Send
   Invite, remove-member, 6 blog category filters, Load More, newsletter
