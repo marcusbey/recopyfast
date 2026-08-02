@@ -57,8 +57,11 @@ const WRITE_ERROR = {
   details: "server closed the connection unexpectedly",
 };
 
-/** A billing_customers row so handlers get past their early return. */
-const CUSTOMER_ROW = { id: "11111111-1111-1111-1111-111111111111" };
+/** A billing_customers row so handlers can attribute the event. */
+const CUSTOMER_ROW = {
+  id: "11111111-1111-1111-1111-111111111111",
+  user_id: "22222222-2222-2222-2222-222222222222",
+};
 
 /**
  * Minimal PostgREST-shaped builder. Reads resolve with CUSTOMER_ROW; writes
@@ -66,12 +69,16 @@ const CUSTOMER_ROW = { id: "11111111-1111-1111-1111-111111111111" };
  * supabase-js returns on a failed write.
  */
 function buildClient(writeResult: { error: unknown }) {
-  const chain = () => {
+  // Table-aware: billing_events must read empty (that is the idempotency probe
+  // saying "not seen before"), while billing_customers must resolve a row or
+  // the handler correctly refuses to attribute the event to anyone.
+  const chain = (table: string) => {
+    const row = table === "billing_customers" ? CUSTOMER_ROW : null;
     const thenable: Record<string, unknown> = {
       select: jest.fn(() => thenable),
       eq: jest.fn(() => thenable),
-      single: jest.fn(async () => ({ data: CUSTOMER_ROW, error: null })),
-      maybeSingle: jest.fn(async () => ({ data: null, error: null })),
+      single: jest.fn(async () => ({ data: row, error: null })),
+      maybeSingle: jest.fn(async () => ({ data: row, error: null })),
       insert: jest.fn(async () => ({ error: null })),
       upsert: jest.fn(async () => writeResult),
       update: jest.fn(() => ({
@@ -80,7 +87,7 @@ function buildClient(writeResult: { error: unknown }) {
     };
     return thenable;
   };
-  return { from: jest.fn(() => chain()) };
+  return { from: jest.fn((table: string) => chain(table)) };
 }
 
 function request(): Parameters<typeof POST>[0] {

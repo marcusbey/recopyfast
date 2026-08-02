@@ -7,10 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { PaymentMethodsCard } from "./PaymentMethodsCard";
 import { InvoiceHistoryCard } from "./InvoiceHistoryCard";
-import { TicketBalanceCard } from "./TicketBalanceCard";
+import { CreditBalanceCard } from "./CreditBalanceCard";
 import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
+import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { BillingDashboardData } from "@/types/billing";
 
 export function BillingDashboard() {
@@ -78,8 +79,33 @@ export function BillingDashboard() {
     );
   }
 
-  const currentPlan = dashboardData?.subscription?.plan_id || "free";
+  // Both early returns above cover the null case; this narrows the type and
+  // keeps a future refactor from rendering an empty dashboard silently.
+  if (!dashboardData) {
+    return null;
+  }
+
+  // The plan in force counts lifetime entitlements, not just subscriptions, so
+  // it comes from the server rather than from the subscription row.
+  const currentPlan = dashboardData.effectivePlanId;
   const isPaidPlan = currentPlan !== "free";
+  const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
+
+  if (!plan) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <Card className="p-6 text-center">
+          <h2 className="text-xl font-semibold text-red-600 mb-2">
+            Plan Catalogue Unavailable
+          </h2>
+          <p className="text-gray-600 mb-4">
+            We could not load the plan you are on. Please try again.
+          </p>
+          <Button onClick={fetchDashboardData}>Try Again</Button>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -108,32 +134,24 @@ export function BillingDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
         <div className="lg:col-span-2 space-y-6">
           <SubscriptionCard
-            subscription={dashboardData?.subscription}
+            subscription={dashboardData.subscription}
+            plan={plan}
             onUpdate={handleSubscriptionUpdate}
           />
           <PaymentMethodsCard
-            paymentMethods={dashboardData?.paymentMethods || []}
+            paymentMethods={dashboardData.paymentMethods}
             onUpdate={handleSubscriptionUpdate}
           />
-          <InvoiceHistoryCard invoices={dashboardData?.invoices || []} />
+          <InvoiceHistoryCard invoices={dashboardData.invoices} />
         </div>
 
         <div className="space-y-6">
-          <TicketBalanceCard
-            tickets={dashboardData?.tickets}
-            recentTransactions={dashboardData?.recentTransactions || []}
+          <CreditBalanceCard
+            wallet={dashboardData.creditWallet}
+            recentTransactions={dashboardData.recentTransactions}
+            creditPack={dashboardData.catalogue.creditPack}
           />
-          <UsageCard
-            currentUsage={
-              dashboardData?.currentUsage || {
-                websites: 0,
-                collaborators: 0,
-                aiUsage: 0,
-                translations: 0,
-              }
-            }
-            subscription={dashboardData?.subscription}
-          />
+          <UsageCard currentUsage={dashboardData.currentUsage} plan={plan} />
         </div>
       </div>
 
@@ -141,6 +159,7 @@ export function BillingDashboard() {
         open={showUpgradeDialog}
         onOpenChange={setShowUpgradeDialog}
         currentPlan={currentPlan}
+        catalogue={dashboardData.catalogue}
         onSuccess={handleSubscriptionUpdate}
       />
     </div>

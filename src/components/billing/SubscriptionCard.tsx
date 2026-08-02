@@ -5,27 +5,24 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
+import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { Subscription } from "@/types/billing";
 
 interface SubscriptionCardProps {
   subscription?: Subscription;
+  /** Plan in force, resolved server-side from the `plans` table. */
+  plan: SubscriptionPlan;
   onUpdate: () => void;
 }
 
 export function SubscriptionCard({
   subscription,
+  plan,
   onUpdate,
 }: SubscriptionCardProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isConfirmingCancel, setIsConfirmingCancel] = useState(false);
-
-  const currentPlan = subscription?.plan_id || "free";
-  const planData =
-    SUBSCRIPTION_PLANS[
-      currentPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
-    ] ?? SUBSCRIPTION_PLANS.FREE;
 
   const handleCancelSubscription = async () => {
     try {
@@ -110,7 +107,7 @@ export function SubscriptionCard({
       <div className="flex justify-between items-start mb-4">
         <div>
           <h3 className="text-xl font-semibold">Current Subscription</h3>
-          <p className="text-gray-600 mt-1">{planData.description}</p>
+          <p className="text-gray-600 mt-1">{plan.description}</p>
         </div>
         {getStatusBadge()}
       </div>
@@ -123,9 +120,9 @@ export function SubscriptionCard({
 
       <div className="space-y-4">
         <div>
-          <h4 className="font-medium text-lg">{planData.name} Plan</h4>
+          <h4 className="font-medium text-lg">{plan.name} Plan</h4>
           <p className="text-2xl font-bold text-blue-600">
-            {planData.price === 0 ? "Free" : `$${planData.price}/month`}
+            {plan.price === 0 ? "Free" : `$${plan.price}/month`}
           </p>
         </div>
 
@@ -152,7 +149,7 @@ export function SubscriptionCard({
         <div>
           <h5 className="font-medium mb-2">Plan Features</h5>
           <ul className="space-y-1 text-sm text-gray-600">
-            {planData.features.map((feature, index) => (
+            {plan.features.map((feature, index) => (
               <li key={index} className="flex items-center">
                 <svg
                   className="w-4 h-4 text-green-500 mr-2"

@@ -58,7 +58,7 @@ export default function FinalCTA() {
             href="/signup"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-10 py-5 text-lg font-semibold text-white transition-colors hover:bg-sky-700"
           >
-            <span>Start your free trial</span>
+            <span>Get started</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
           </Link>
 
@@ -77,14 +77,11 @@ export default function FinalCTA() {
           transition={{ duration: 0.8, delay: 0.5 }}
           className="mt-16 flex flex-wrap justify-center items-center gap-6 text-sm text-slate-400"
         >
-          <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-            No credit card required
-          </span>
-          <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-            14-day free trial
-          </span>
+          {/*
+            "No credit card required" and "14-day free trial" were removed:
+            there is no trial_period_days anywhere and subscription Checkout
+            always collects a card, so both were claims the product broke.
+          */}
           <span className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
             Cancel anytime

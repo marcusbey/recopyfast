@@ -23,7 +23,12 @@ test.describe("share edit publish flow", () => {
   const siteToken = `e2e_site_${randomUUID()}`;
   const stagingToken = `e2e_staging_${randomUUID()}`;
   const editToken = `e2e_edit_${randomUUID()}`;
-  const elementId = "hero-title";
+
+  // Discovered from the running widget, never hand-authored. A real customer
+  // page has no `data-rcf-id` in its markup, so pre-seeding one here would have
+  // hidden the fact that the widget used to mint a brand-new, time-based id on
+  // every page load.
+  let elementId: string | null = null;
 
   test.beforeAll(async () => {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -39,7 +44,7 @@ test.describe("share edit publish flow", () => {
       auth: { persistSession: false },
     });
 
-    await seedCoreFlowData("Original live copy");
+    await seedCoreFlowData();
     targetServer = await startTargetServer();
   });
 
@@ -92,7 +97,25 @@ test.describe("share edit publish flow", () => {
       timeout: 20_000,
     });
 
-    const heading = page.locator(`[data-rcf-id="${elementId}"]`);
+    const heading = page.locator("main h1");
+    await expect(heading).toHaveAttribute("data-rcf-id", /.+/, {
+      timeout: 20_000,
+    });
+
+    const discoveredId = await heading.getAttribute("data-rcf-id");
+    if (!discoveredId) {
+      throw new Error("The widget did not assign an element id to the heading.");
+    }
+
+    if (elementId === null) {
+      elementId = discoveredId;
+      await seedContentElement("Original live copy");
+    } else {
+      // The second run is a completely separate page load in a fresh browser
+      // context. Getting the same id back is the whole point of BUG-2's fix.
+      expect(discoveredId).toBe(elementId);
+    }
+
     await expect(heading).toBeVisible();
     await heading.click();
     await expect(page.locator(".rcf-actions-inline")).toBeVisible();
@@ -114,13 +137,24 @@ test.describe("share edit publish flow", () => {
       .toBe(newText);
     await expect.poll(() => getContentColumn("staging_content")).toBeNull();
 
+    // A plain visitor load: no staging query, no socket broadcast in flight.
+    // The published copy has to arrive purely from the widget fetching it on
+    // init, and it has to land on an element the widget re-identified from
+    // scratch under the exact same id.
     await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
+    await expect(heading).toHaveAttribute("data-rcf-id", elementId, {
+      timeout: 20_000,
+    });
     await expect(heading).toHaveText(newText, { timeout: 20_000 });
   }
 
   async function getContentColumn(
     column: "published_content" | "staging_content",
   ) {
+    if (!elementId) {
+      throw new Error("No element id has been discovered from the page yet.");
+    }
+
     const { data, error } = await supabase
       .from("content_elements")
       .select(column)
@@ -136,7 +170,7 @@ test.describe("share edit publish flow", () => {
     return row?.[column] ?? null;
   }
 
-  async function seedCoreFlowData(liveText: string) {
+  async function seedCoreFlowData() {
     await supabase.from("sites").delete().eq("id", siteId);
 
     const { error: siteError } = await supabase.from("sites").insert({
@@ -148,23 +182,6 @@ test.describe("share edit publish flow", () => {
 
     if (siteError) {
       throw siteError;
-    }
-
-    const { error: contentError } = await supabase.from("content_elements").insert({
-      site_id: siteId,
-      element_id: elementId,
-      selector: `[data-rcf-id="${elementId}"]`,
-      original_content: liveText,
-      current_content: liveText,
-      published_content: liveText,
-      staging_content: null,
-      language: "en",
-      variant: "default",
-      metadata: {},
-    });
-
-    if (contentError) {
-      throw contentError;
     }
 
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
@@ -197,6 +214,36 @@ test.describe("share edit publish flow", () => {
     }
   }
 
+  /**
+   * Establish the published baseline for the id the widget actually derived.
+   *
+   * Upsert rather than insert: the widget's own content map reaches the server
+   * over the socket at roughly the same moment, and both writes target the same
+   * (site_id, element_id, language, variant) key — which is the behaviour that
+   * keeps ordinary page views from inserting duplicate rows.
+   */
+  async function seedContentElement(liveText: string) {
+    const { error } = await supabase.from("content_elements").upsert(
+      {
+        site_id: siteId,
+        element_id: elementId,
+        selector: `[data-rcf-id="${elementId}"]`,
+        original_content: liveText,
+        current_content: liveText,
+        published_content: liveText,
+        staging_content: null,
+        language: "en",
+        variant: "default",
+        metadata: {},
+      },
+      { onConflict: "site_id,element_id,language,variant" },
+    );
+
+    if (error) {
+      throw error;
+    }
+  }
+
   async function startTargetServer() {
     const server = createServer((_, response) => {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -214,7 +261,7 @@ test.describe("share edit publish flow", () => {
   </head>
   <body>
     <main>
-      <h1 data-rcf-id="${elementId}">Original live copy</h1>
+      <h1>Original live copy</h1>
     </main>
   </body>
 </html>`);

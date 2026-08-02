@@ -84,7 +84,7 @@ describe("/api/billing/subscription", () => {
       const result = {
         subscription: {
           id: "sub-123",
-          plan_id: "enterprise",
+          plan_id: "starter",
           status: "active",
         },
         requiresAction: false,
@@ -92,14 +92,14 @@ describe("/api/billing/subscription", () => {
       };
       (updateSubscription as jest.Mock).mockResolvedValue(result);
 
-      const response = await PUT(putRequest({ planId: "enterprise" }));
+      const response = await PUT(putRequest({ planId: "starter" }));
       const data = await response.json();
 
       expect(response.status).toBe(200);
       expect(data).toEqual(result);
       // billingPeriod defaults to monthly when the caller omits it.
       expect(updateSubscription).toHaveBeenCalledWith("test-user-id", {
-        planId: "enterprise",
+        planId: "starter",
         billingPeriod: "monthly",
       });
     });

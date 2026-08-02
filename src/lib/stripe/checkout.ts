@@ -1,8 +1,10 @@
 import type Stripe from "stripe";
 import { stripe, STRIPE_CONFIG } from "./config";
 import {
-  TICKET_CONFIG,
-  getPaidPlan,
+  getCreditPackConfig,
+  getOneTimeProduct,
+  resolveOneTimePriceId,
+  resolveStripePriceId,
   type BillingPeriod,
   type PaidPlanId,
 } from "./plans";
@@ -23,7 +25,8 @@ import { createClient } from "@/lib/supabase/server";
 
 export type CheckoutIntent =
   | { type: "subscription"; planId: PaidPlanId; billingPeriod: BillingPeriod }
-  | { type: "tickets"; quantity: number }
+  | { type: "credits"; quantity: number }
+  | { type: "lifetime" }
   | { type: "payment_method" };
 
 export interface CheckoutSessionResult {
@@ -37,9 +40,9 @@ export interface CheckoutSessionStatus {
   status: Stripe.Checkout.Session.Status | null;
   paymentStatus: Stripe.Checkout.Session.PaymentStatus;
   /**
-   * True once the Stripe webhook has written the resulting subscription or
-   * ticket credit to our database. Paying is not the same as being provisioned,
-   * so the UI waits on this rather than on `paymentStatus`.
+   * True once the Stripe webhook has written the resulting subscription,
+   * credit top-up or lifetime grant to our database. Paying is not the same as
+   * being provisioned, so the UI waits on this rather than on `paymentStatus`.
    */
   reconciled: boolean;
   /** Only present for completed `setup` sessions. */
@@ -72,23 +75,6 @@ function buildReturnUrls(): { successUrl: string; cancelUrl: string } {
     successUrl: `${base}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${base}?checkout=cancelled`,
   };
-}
-
-function resolvePriceId(
-  planId: PaidPlanId,
-  billingPeriod: BillingPeriod,
-): string {
-  const plan = getPaidPlan(planId);
-  const priceId =
-    billingPeriod === "yearly" ? plan.yearlyPriceId : plan.priceId;
-
-  if (!priceId) {
-    throw new Error(
-      `No Stripe price configured for the ${plan.name} plan (${billingPeriod}). ` +
-        "Set the matching STRIPE_*_PRICE_ID environment variable.",
-    );
-  }
-  return priceId;
 }
 
 /**
@@ -125,7 +111,10 @@ export async function createCheckoutSession(
         mode: "subscription",
         line_items: [
           {
-            price: resolvePriceId(intent.planId, intent.billingPeriod),
+            price: await resolveStripePriceId(
+              intent.planId,
+              intent.billingPeriod,
+            ),
             quantity: 1,
           },
         ],
@@ -144,13 +133,10 @@ export async function createCheckoutSession(
       break;
     }
 
-    case "tickets": {
-      const totalTickets = intent.quantity * TICKET_CONFIG.TICKETS_PER_PURCHASE;
-      const unitAmount = Math.round(
-        TICKET_CONFIG.TICKETS_PER_PURCHASE *
-          TICKET_CONFIG.PRICE_PER_TICKET *
-          100,
-      );
+    case "credits": {
+      const pack = await getCreditPackConfig();
+      const product = await getOneTimeProduct("credits");
+      const totalCredits = intent.quantity * pack.creditsPerPack;
 
       params = {
         ...baseParams,
@@ -160,26 +146,58 @@ export async function createCheckoutSession(
             quantity: intent.quantity,
             price_data: {
               currency: STRIPE_CONFIG.CURRENCY,
-              unit_amount: unitAmount,
+              unit_amount: Math.round(pack.pricePerPack * 100),
               product_data: {
-                name: `${TICKET_CONFIG.TICKETS_PER_PURCHASE} AI tickets`,
-                description:
-                  "Pay-per-use credits for AI suggestions and translations",
+                name: `${pack.creditsPerPack.toLocaleString("en-US")} AI credits`,
+                description: product.description,
               },
             },
           },
         ],
         // handlePaymentIntentSucceeded credits the wallet from this metadata.
-        // Tickets are NEVER credited client-side.
+        // Credits are NEVER granted client-side.
         payment_intent_data: {
           setup_future_usage: "off_session",
           metadata: {
             user_id: userId,
-            ticket_quantity: totalTickets.toString(),
-            type: "ticket_purchase",
+            credit_quantity: totalCredits.toString(),
+            type: "credit_purchase",
           },
         },
-        metadata: { user_id: userId, type: "ticket_purchase" },
+        metadata: { user_id: userId, type: "credit_purchase" },
+      };
+      break;
+    }
+
+    case "lifetime": {
+      const product = await getOneTimeProduct("lifetime_pro");
+
+      if (!product.grantsPlanId) {
+        throw new Error(
+          "Lifetime Pro is on sale but grants no plan. Set " +
+            'plans."lifetime_pro".grants_plan_id.',
+        );
+      }
+
+      // A configured Stripe Price, not price_data: a lifetime purchase is a
+      // catalogue SKU that has to reconcile against the same product in
+      // Stripe's dashboard reporting as every other lifetime sale.
+      params = {
+        ...baseParams,
+        mode: "payment",
+        line_items: [
+          { price: await resolveOneTimePriceId("lifetime_pro"), quantity: 1 },
+        ],
+        allow_promotion_codes: true,
+        // handlePaymentIntentSucceeded reads this to write the permanent grant.
+        payment_intent_data: {
+          metadata: {
+            user_id: userId,
+            grants_plan_id: product.grantsPlanId,
+            type: "lifetime_purchase",
+          },
+        },
+        metadata: { user_id: userId, type: "lifetime_purchase" },
       };
       break;
     }
@@ -282,14 +300,25 @@ async function hasWebhookLanded(
     const paymentIntentId = idOf(session.payment_intent);
     if (!paymentIntentId) return false;
 
-    // Written by add_tickets() from the payment_intent.succeeded handler.
-    const { data } = await supabase
-      .from("ticket_transactions")
-      .select("id")
-      .eq("stripe_payment_intent_id", paymentIntentId)
-      .maybeSingle();
+    // A one-off payment is either a credit top-up or a lifetime purchase, and
+    // the two land in different tables. Either row proves the webhook ran.
+    const [{ data: creditPurchase }, { data: entitlement }] = await Promise.all(
+      [
+        // Written by addPurchasedCredits() from payment_intent.succeeded.
+        supabase
+          .from("credit_purchases")
+          .select("id")
+          .eq("stripe_payment_intent_id", paymentIntentId)
+          .maybeSingle(),
+        supabase
+          .from("plan_entitlements")
+          .select("id")
+          .eq("stripe_payment_intent_id", paymentIntentId)
+          .maybeSingle(),
+      ],
+    );
 
-    return Boolean(data);
+    return Boolean(creditPurchase) || Boolean(entitlement);
   }
 
   return true;

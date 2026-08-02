@@ -7,7 +7,7 @@ import {
 } from "@/lib/stripe/checkout";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
-  TICKET_CONFIG,
+  getCreditPackConfig,
   isBillingPeriod,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
@@ -31,7 +31,7 @@ type ParsedIntent =
   | { ok: true; intent: CheckoutIntent }
   | { ok: false; error: string };
 
-function parseIntent(body: CheckoutRequestBody): ParsedIntent {
+async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
   switch (body.intent) {
     case "subscription": {
       if (!isPaidPlanId(body.planId)) {
@@ -47,21 +47,25 @@ function parseIntent(body: CheckoutRequestBody): ParsedIntent {
       };
     }
 
-    case "tickets": {
+    case "credits": {
+      const { maxPacksPerPurchase } = await getCreditPackConfig();
       const quantity = body.quantity;
       if (
         typeof quantity !== "number" ||
         !Number.isInteger(quantity) ||
         quantity < 1 ||
-        quantity > TICKET_CONFIG.MAX_PACKS_PER_PURCHASE
+        quantity > maxPacksPerPurchase
       ) {
         return {
           ok: false,
-          error: `Invalid quantity. Must be a whole number between 1 and ${TICKET_CONFIG.MAX_PACKS_PER_PURCHASE}.`,
+          error: `Invalid quantity. Must be a whole number between 1 and ${maxPacksPerPurchase}.`,
         };
       }
-      return { ok: true, intent: { type: "tickets", quantity } };
+      return { ok: true, intent: { type: "credits", quantity } };
     }
+
+    case "lifetime":
+      return { ok: true, intent: { type: "lifetime" } };
 
     case "payment_method":
       return { ok: true, intent: { type: "payment_method" } };
@@ -73,7 +77,7 @@ function parseIntent(body: CheckoutRequestBody): ParsedIntent {
 
 /**
  * POST /api/billing/checkout
- * Body: { intent: "subscription" | "tickets" | "payment_method", ... }
+ * Body: { intent: "subscription" | "credits" | "lifetime" | "payment_method", ... }
  * Returns: { url, sessionId }
  */
 export async function POST(req: NextRequest) {
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as CheckoutRequestBody;
-    const parsed = parseIntent(body);
+    const parsed = await parseIntent(body);
 
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });

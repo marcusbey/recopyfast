@@ -7,7 +7,7 @@ import {
   hasEnoughCredits,
   consumeCredits,
 } from "@/lib/credits/system";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
 export async function POST(req: NextRequest) {
   try {
@@ -66,22 +66,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Check plan allows A/B testing
-    const { data: subscription } = await supabase
-      .from("billing_subscriptions")
-      .select("plan_id")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .single();
+    const plan = await getEffectivePlan(user.id);
 
-    const planId = (subscription?.plan_id?.toUpperCase() ||
-      "FREE") as keyof typeof SUBSCRIPTION_PLANS;
-    const plan = SUBSCRIPTION_PLANS[planId] || SUBSCRIPTION_PLANS.FREE;
-    const planLimits = plan.limits as { abTesting?: boolean };
-
-    if (!planLimits.abTesting) {
+    if (!plan.limits.abTesting) {
       return NextResponse.json(
         {
-          error: "A/B testing requires a Pro or Enterprise plan",
+          error: "A/B testing requires a Pro plan",
           upgrade_required: true,
         },
         { status: 403 },

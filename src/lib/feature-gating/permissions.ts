@@ -1,22 +1,63 @@
 import { createClient } from "@/lib/supabase/server";
-import { getUserSubscription } from "@/lib/stripe/subscription";
-import { getUserTicketBalance, consumeTickets } from "@/lib/stripe/tickets";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/config";
+import {
+  getEffectivePlan,
+  getEffectivePlanId,
+} from "@/lib/billing/entitlements";
 import {
   getUserCreditBalance,
-  hasEnoughCredits,
   consumeCredits,
   CREDIT_COSTS,
 } from "@/lib/credits/system";
 
+/**
+ * Feature gates.
+ *
+ * Every allowance read here comes from the `plans` table via
+ * `getEffectivePlan`, which resolves lifetime entitlements as well as live
+ * subscriptions. Nothing in this file hardcodes what a plan includes.
+ */
+
 export interface FeaturePermission {
   allowed: boolean;
   reason?: string;
-  requiresTickets?: boolean;
-  ticketsRequired?: number;
+  requiresCredits?: boolean;
+  creditsRequired?: number;
   upgradeRequired?: boolean;
   currentLimit?: number;
   maxLimit?: number;
+}
+
+/** `-1` in a plan limit means unlimited. */
+const UNLIMITED = -1;
+
+type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * How many sites this user owns.
+ *
+ * `sites` has no owner column — ownership is an `admin` row in
+ * site_permissions, which is what POST /api/sites/register writes. The previous
+ * `sites.user_id` filter returned a PostgREST 42703 that was discarded with the
+ * count, so every quota check saw 0 sites and passed unconditionally.
+ *
+ * Throws instead of defaulting to 0: a count that cannot be read must not be
+ * read as "plenty of room".
+ */
+async function countOwnedSites(
+  supabase: SupabaseLike,
+  userId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("site_permissions")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("permission", "admin");
+
+  if (error) {
+    throw new Error(`Failed to count owned sites: ${error.message}`);
+  }
+
+  return count ?? 0;
 }
 
 /**
@@ -26,39 +67,37 @@ export async function canCreateWebsite(
   userId: string,
 ): Promise<FeaturePermission> {
   const supabase = await createClient();
-  const subscription = await getUserSubscription(userId);
+  const plan = await getEffectivePlan(userId);
 
-  const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
-
-  // Count current websites
-  const { count: currentWebsites } = await supabase
-    .from("sites")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId);
-
+  const currentWebsites = await countOwnedSites(supabase, userId);
   const websiteLimit = plan.limits.websites;
 
-  // Unlimited websites
-  if (websiteLimit === -1) {
+  if (websiteLimit === UNLIMITED) {
     return { allowed: true };
   }
 
-  // Check if within limit
-  if ((currentWebsites || 0) < websiteLimit) {
+  if (currentWebsites < websiteLimit) {
     return {
       allowed: true,
-      currentLimit: currentWebsites || 0,
+      currentLimit: currentWebsites,
       maxLimit: websiteLimit,
     };
   }
 
+  // Plans that sell overage sites say so, so the customer sees a price rather
+  // than a wall.
+  const overage = plan.additionalSitePrice;
+  const reason =
+    overage !== null
+      ? `Your ${plan.name} plan includes ${websiteLimit} website${websiteLimit === 1 ? "" : "s"}. ` +
+        `Additional sites are $${overage} each per month.`
+      : `You've reached your limit of ${websiteLimit} website${websiteLimit === 1 ? "" : "s"}`;
+
   return {
     allowed: false,
-    reason: `You've reached your limit of ${websiteLimit} website${websiteLimit === 1 ? "" : "s"}`,
+    reason,
     upgradeRequired: true,
-    currentLimit: currentWebsites || 0,
+    currentLimit: currentWebsites,
     maxLimit: websiteLimit,
   };
 }
@@ -71,13 +110,8 @@ export async function canAddCollaborator(
   siteId: string,
 ): Promise<FeaturePermission> {
   const supabase = await createClient();
-  const subscription = await getUserSubscription(userId);
+  const plan = await getEffectivePlan(userId);
 
-  const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
-
-  // Count current collaborators for the site
   const { count: currentCollaborators } = await supabase
     .from("site_permissions")
     .select("*", { count: "exact", head: true })
@@ -86,7 +120,6 @@ export async function canAddCollaborator(
 
   const collaboratorLimit = plan.limits.collaborators;
 
-  // No collaborators allowed
   if (collaboratorLimit === 0) {
     return {
       allowed: false,
@@ -97,12 +130,10 @@ export async function canAddCollaborator(
     };
   }
 
-  // Unlimited collaborators
-  if (collaboratorLimit === -1) {
+  if (collaboratorLimit === UNLIMITED) {
     return { allowed: true };
   }
 
-  // Check if within limit
   if ((currentCollaborators || 0) < collaboratorLimit) {
     return {
       allowed: true,
@@ -113,7 +144,7 @@ export async function canAddCollaborator(
 
   return {
     allowed: false,
-    reason: `You've reached your limit of ${collaboratorLimit} collaborator${(collaboratorLimit as number) === 1 ? "" : "s"} per website`,
+    reason: `You've reached your limit of ${collaboratorLimit} collaborator${collaboratorLimit === 1 ? "" : "s"} per website`,
     upgradeRequired: true,
     currentLimit: currentCollaborators || 0,
     maxLimit: collaboratorLimit,
@@ -127,33 +158,27 @@ export async function canUseAIFeatures(
   userId: string,
   creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION,
 ): Promise<FeaturePermission> {
-  const subscription = await getUserSubscription(userId);
-  const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+  const plan = await getEffectivePlan(userId);
 
-  // AI features not available on free plan
   if (!plan.limits.aiFeatures) {
     return {
       allowed: false,
-      reason: "AI features require a Pro or Enterprise subscription",
+      reason: "AI features require a Pro subscription",
       upgradeRequired: true,
     };
   }
 
-  // Check credit balance for Pro/Enterprise users
   const creditBalance = await getUserCreditBalance(userId);
 
   if (creditBalance.total < creditsRequired) {
     return {
       allowed: false,
       reason: `Insufficient credits. You need ${creditsRequired} credits but only have ${creditBalance.total}.`,
-      requiresTickets: true,
-      ticketsRequired: creditsRequired,
+      requiresCredits: true,
+      creditsRequired,
     };
   }
 
-  // AI features available with sufficient credits
   return { allowed: true };
 }
 
@@ -163,33 +188,28 @@ export async function canUseAIFeatures(
 export async function canUseTranslation(
   userId: string,
 ): Promise<FeaturePermission> {
-  const subscription = await getUserSubscription(userId);
-  const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
-
+  const plan = await getEffectivePlan(userId);
   const translationLimit = plan.limits.translations;
 
-  // No translations allowed
   if (translationLimit === 0) {
-    // Check if user has tickets
-    const ticketBalance = await getUserTicketBalance(userId);
+    // Plans with no included translation allowance can still pay per use out
+    // of purchased credits.
+    const balance = await getUserCreditBalance(userId);
 
-    if (ticketBalance >= 1) {
+    if (balance.total >= 1) {
       return {
         allowed: true,
-        requiresTickets: true,
-        ticketsRequired: 1,
+        requiresCredits: true,
+        creditsRequired: 1,
       };
     }
 
     return {
       allowed: false,
-      reason:
-        "Translation features require a Pro or Enterprise plan, or individual tickets",
+      reason: "Translation features require a Pro plan, or purchased credits",
       upgradeRequired: true,
-      requiresTickets: true,
-      ticketsRequired: 1,
+      requiresCredits: true,
+      creditsRequired: 1,
     };
   }
 
@@ -207,7 +227,6 @@ export async function consumeFeatureUsage(
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
 
-  // Determine credits required based on feature
   let creditsRequired = 0;
   if (feature === "ai_suggestion") {
     creditsRequired = CREDIT_COSTS.AI_SUGGESTION;
@@ -215,7 +234,6 @@ export async function consumeFeatureUsage(
     creditsRequired = CREDIT_COSTS.AI_TRANSLATION;
   }
 
-  // Check if feature requires credits and user has permission
   const permission = await (feature === "ai_suggestion"
     ? canUseAIFeatures(userId, creditsRequired)
     : canUseTranslation(userId));
@@ -224,7 +242,6 @@ export async function consumeFeatureUsage(
     return { success: false, error: permission.reason };
   }
 
-  // Consume credits for AI features
   if (feature === "ai_suggestion" || feature === "translation") {
     const result = await consumeCredits(
       userId,
@@ -238,7 +255,6 @@ export async function consumeFeatureUsage(
     }
   }
 
-  // Track usage
   await supabase.from("usage_tracking").insert({
     user_id: userId,
     feature_type: feature,
@@ -257,20 +273,12 @@ export async function consumeFeatureUsage(
  */
 export async function getUserUsageLimits(userId: string) {
   const supabase = await createClient();
-  const subscription = await getUserSubscription(userId);
-  const ticketBalance = await getUserTicketBalance(userId);
+  const planId = await getEffectivePlanId(userId);
+  const plan = await getEffectivePlan(userId);
+  const creditBalance = await getUserCreditBalance(userId);
 
-  const planId = subscription?.plan_id || "free";
-  const plan =
-    SUBSCRIPTION_PLANS[planId.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS];
+  const websiteCount = await countOwnedSites(supabase, userId);
 
-  // Get current usage counts
-  const { count: websiteCount } = await supabase
-    .from("sites")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", userId);
-
-  // Get this month's usage
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
@@ -298,10 +306,10 @@ export async function getUserUsageLimits(userId: string) {
       limits: plan.limits,
     },
     current: {
-      websites: websiteCount || 0,
+      websites: websiteCount,
       aiUsage,
       translationUsage,
-      ticketBalance,
+      creditBalance: creditBalance.total,
     },
     permissions: {
       canCreateWebsite: await canCreateWebsite(userId),

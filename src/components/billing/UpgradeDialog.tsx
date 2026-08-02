@@ -12,26 +12,24 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import {
-  SUBSCRIPTION_PLANS,
-  getPlanCyclePrice,
-  getPlanDisplayPrice,
+  isPaidPlanId,
+  planCyclePrice,
+  planDisplayPrice,
+  sellablePlans,
   type BillingPeriod,
   type PaidPlanId,
-} from "@/lib/stripe/plans";
+  type PlanCatalogue,
+} from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
 
 interface UpgradeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentPlan: string;
+  /** Plan catalogue, resolved server-side from the `plans` table. */
+  catalogue: PlanCatalogue;
   onSuccess: () => void;
 }
-
-const PLANS = [
-  { id: "starter" as const, data: SUBSCRIPTION_PLANS.STARTER },
-  { id: "pro" as const, data: SUBSCRIPTION_PLANS.PRO },
-  { id: "enterprise" as const, data: SUBSCRIPTION_PLANS.ENTERPRISE },
-];
 
 const BILLING_PERIODS: ReadonlyArray<{ id: BillingPeriod; label: string }> = [
   { id: "monthly", label: "Monthly" },
@@ -42,8 +40,13 @@ export function UpgradeDialog({
   open,
   onOpenChange,
   currentPlan,
+  catalogue,
   onSuccess,
 }: UpgradeDialogProps) {
+  // Only paid plans are selectable; `free` is the absence of a subscription.
+  const plans = sellablePlans(catalogue).filter((plan) =>
+    isPaidPlanId(plan.id),
+  );
   const [selectedPlan, setSelectedPlan] = useState<PaidPlanId>("pro");
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
   const [isChangingPlan, setIsChangingPlan] = useState(false);
@@ -55,10 +58,7 @@ export function UpgradeDialog({
   const hasSubscription = Boolean(currentPlan) && currentPlan !== "free";
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
-  const selectedPlanData =
-    SUBSCRIPTION_PLANS[
-      selectedPlan.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS
-    ];
+  const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);
 
   /**
    * No subscription yet → hand off to Stripe Checkout.
@@ -120,9 +120,10 @@ export function UpgradeDialog({
   const submitLabel = () => {
     if (isRedirecting) return "Redirecting to Stripe…";
     if (isChangingPlan) return "Updating your plan…";
+    if (!selectedPlanData) return "Select a plan";
     return hasSubscription
       ? `Switch to ${selectedPlanData.name}`
-      : `Continue to payment — $${getPlanCyclePrice(selectedPlan, billingPeriod)}`;
+      : `Continue to payment — $${planCyclePrice(selectedPlanData, billingPeriod)}`;
   };
 
   return (
@@ -191,9 +192,9 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Subscription plan"
-            className="grid grid-cols-1 md:grid-cols-3 gap-6"
+            className="grid grid-cols-1 md:grid-cols-2 gap-6"
           >
-            {PLANS.map((plan) => {
+            {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
               const isCurrent = currentPlan === plan.id;
 
@@ -203,7 +204,7 @@ export function UpgradeDialog({
                   type="button"
                   role="radio"
                   aria-checked={isSelected}
-                  onClick={() => setSelectedPlan(plan.id)}
+                  onClick={() => setSelectedPlan(plan.id as PaidPlanId)}
                   disabled={isBusy}
                   className={`p-6 border-2 rounded-lg text-left transition-all disabled:opacity-60 ${
                     isSelected
@@ -213,12 +214,8 @@ export function UpgradeDialog({
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <h3 className="text-xl font-semibold">
-                        {plan.data.name}
-                      </h3>
-                      <p className="text-gray-600 mt-1">
-                        {plan.data.description}
-                      </p>
+                      <h3 className="text-xl font-semibold">{plan.name}</h3>
+                      <p className="text-gray-600 mt-1">{plan.description}</p>
                     </div>
                     {isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
@@ -231,19 +228,18 @@ export function UpgradeDialog({
 
                   <div className="mb-4">
                     <span className="text-3xl font-bold">
-                      ${getPlanDisplayPrice(plan.id, billingPeriod)}
+                      ${planDisplayPrice(plan, billingPeriod)}
                     </span>
                     <span className="text-gray-600">/month</span>
                     {billingPeriod === "yearly" && (
                       <p className="text-sm text-gray-500 mt-1">
-                        Billed ${getPlanCyclePrice(plan.id, "yearly")} once a
-                        year
+                        Billed ${planCyclePrice(plan, "yearly")} once a year
                       </p>
                     )}
                   </div>
 
                   <ul className="space-y-2">
-                    {plan.data.features.map((feature) => (
+                    {plan.features.map((feature) => (
                       <li key={feature} className="flex items-center text-sm">
                         <svg
                           className="w-4 h-4 text-green-500 mr-2 shrink-0"

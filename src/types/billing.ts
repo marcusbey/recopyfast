@@ -1,3 +1,16 @@
+import type {
+  PaidPlanId,
+  PlanCatalogue,
+  PlanLimits,
+  SubscriptionPlan,
+  SubscriptionPlanId,
+} from "@/lib/stripe/plan-types";
+
+// Plan shapes live in @/lib/stripe/plan-types, which is the client-safe half
+// of the DB-backed plan loader. Re-exported here so the many callers that
+// already import billing types from one place keep working.
+export type { PlanLimits, SubscriptionPlan as PlanData };
+
 export interface Customer {
   id: string;
   user_id: string;
@@ -13,7 +26,7 @@ export interface Subscription {
   user_id: string;
   customer_id: string;
   stripe_subscription_id: string;
-  plan_id: "starter" | "pro" | "enterprise";
+  plan_id: SubscriptionPlanId | string;
   status:
     | "incomplete"
     | "incomplete_expired"
@@ -66,26 +79,30 @@ export interface Invoice {
   updated_at: string;
 }
 
-export interface Tickets {
-  id: string;
-  user_id: string;
-  customer_id: string;
+/**
+ * Credit balance summary.
+ *
+ * Computed from credit_purchases + credit_usage rather than stored: there is no
+ * balance column to drift out of sync with the rows that justify it.
+ */
+export interface CreditWallet {
+  /** Spendable now: remaining included allowance plus purchased credits. */
   balance: number;
-  total_purchased: number;
-  total_consumed: number;
-  created_at: string;
-  updated_at: string;
+  /** Granted by the plan this period. */
+  included: number;
+  /** Bought and not yet spent. Does not expire. */
+  purchased: number;
+  usedThisMonth: number;
+  totalPurchased: number;
+  totalConsumed: number;
 }
 
-export interface TicketTransaction {
+/** A purchase, a refund or a spend, merged into one timeline for the UI. */
+export interface CreditTransaction {
   id: string;
-  user_id: string;
-  ticket_id: string;
   type: "purchase" | "consumption" | "refund";
   amount: number;
   description?: string;
-  stripe_payment_intent_id?: string;
-  metadata: Record<string, unknown>;
   created_at: string;
 }
 
@@ -108,48 +125,38 @@ export interface BillingEvent {
   created_at: string;
 }
 
-// Plan limits and features
-export interface PlanLimits {
-  websites: number; // -1 for unlimited
-  collaborators: number; // -1 for unlimited
-  aiFeatures: boolean;
-  translations: number; // -1 for unlimited
-}
-
-export interface PlanData {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  priceId: string | null;
-  features: string[];
-  limits: PlanLimits;
-}
-
 // Billing dashboard data
 export interface BillingDashboardData {
   customer?: Customer;
   subscription?: Subscription;
   paymentMethods: PaymentMethod[];
   invoices: Invoice[];
-  tickets?: Tickets;
-  recentTransactions: TicketTransaction[];
+  creditWallet?: CreditWallet;
+  recentTransactions: CreditTransaction[];
   currentUsage: {
     websites: number;
     collaborators: number;
     aiUsage: number;
     translations: number;
   };
+  /**
+   * The plan catalogue, resolved server-side. Client billing components render
+   * prices, limits and feature lists from this rather than from a compiled-in
+   * copy — see src/lib/stripe/plans.ts.
+   */
+  catalogue: PlanCatalogue;
+  /** Plan in force, counting lifetime entitlements as well as subscriptions. */
+  effectivePlanId: string;
 }
 
 // Subscription management
 export interface SubscriptionUpdateRequest {
-  planId: "starter" | "pro" | "enterprise";
+  planId: PaidPlanId;
   paymentMethodId?: string;
 }
 
-export interface TicketPurchaseRequest {
-  quantity: number; // number of ticket packs to purchase
+export interface CreditPurchaseRequest {
+  quantity: number; // number of credit packs to purchase
   paymentMethodId?: string;
 }
 
@@ -176,7 +183,7 @@ export interface BillingAlert {
     | "payment_failed"
     | "subscription_canceled"
     | "trial_ending"
-    | "low_tickets";
+    | "low_credits";
   message: string;
   severity: "info" | "warning" | "error";
   actionRequired: boolean;

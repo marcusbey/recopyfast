@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
+import { CREDIT_COSTS, refundCredits } from "@/lib/credits/system";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
@@ -160,7 +161,7 @@ export async function POST(request: NextRequest) {
 
     // Authorization: the authenticated user must have a permission on this site.
     // Without this check any logged-in user could trigger paid translation jobs
-    // and consume ticket quota billed to another tenant's site.
+    // and consume credit quota billed to another tenant's site.
     const { data: permission } = await supabase
       .from("site_permissions")
       .select("permission")
@@ -199,7 +200,7 @@ export async function POST(request: NextRequest) {
           error: usageResult.error,
           requiresUpgrade:
             usageResult.error?.includes("plan") ||
-            usageResult.error?.includes("tickets"),
+            usageResult.error?.includes("credits"),
         },
         { status: 403 },
       );
@@ -214,6 +215,13 @@ export async function POST(request: NextRequest) {
     );
 
     if (!result.success) {
+      // Credits were charged before the model was called, so a provider failure
+      // would otherwise bill the customer for nothing.
+      await refundCredits(
+        user.id,
+        CREDIT_COSTS.AI_TRANSLATION,
+        "translation_failed",
+      );
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
+import { CREDIT_COSTS, refundCredits } from "@/lib/credits/system";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import {
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
             error: usageResult.error,
             requiresUpgrade:
               usageResult.error?.includes("plan") ||
-              usageResult.error?.includes("tickets"),
+              usageResult.error?.includes("credits"),
           },
           { status: 403 },
         ),
@@ -132,6 +133,13 @@ export async function POST(request: NextRequest) {
     });
 
     if (!result.success) {
+      // Credits were charged before the model was called, so a provider failure
+      // would otherwise bill the customer for nothing.
+      await refundCredits(
+        user.id,
+        CREDIT_COSTS.AI_SUGGESTION,
+        "ai_suggestion_failed",
+      );
       return withPublicCors(
         NextResponse.json({ error: result.error }, { status: 500 }),
       );

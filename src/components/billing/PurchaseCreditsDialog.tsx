@@ -12,33 +12,34 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
-import { TICKET_CONFIG } from "@/lib/stripe/plans";
+import type { CreditPackConfig } from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
 
 /**
  * There is no `onSuccess` here: the purchase completes on Stripe's page, and
  * the wallet is refreshed by CheckoutStatusBanner once the customer is
- * redirected back and the webhook has credited the tickets.
+ * redirected back and the webhook has credited the account.
+ *
+ * Pack size and price arrive as props from the server-resolved plan catalogue —
+ * nothing about the product is compiled into this component.
  */
-interface PurchaseTicketsDialogProps {
+interface PurchaseCreditsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  creditPack: CreditPackConfig;
 }
 
-const TICKETS_PER_PACK = TICKET_CONFIG.TICKETS_PER_PURCHASE;
-const PRICE_PER_PACK =
-  TICKET_CONFIG.TICKETS_PER_PURCHASE * TICKET_CONFIG.PRICE_PER_TICKET;
-const MAX_PACKS = TICKET_CONFIG.MAX_PACKS_PER_PURCHASE;
-
-export function PurchaseTicketsDialog({
+export function PurchaseCreditsDialog({
   open,
   onOpenChange,
-}: PurchaseTicketsDialogProps) {
+  creditPack,
+}: PurchaseCreditsDialogProps) {
   const [quantity, setQuantity] = useState(1);
   const { startCheckout, isRedirecting, error } = useCheckout();
 
-  const totalTickets = quantity * TICKETS_PER_PACK;
-  const totalPrice = quantity * PRICE_PER_PACK;
+  const { creditsPerPack, pricePerPack, maxPacksPerPurchase } = creditPack;
+  const totalCredits = quantity * creditsPerPack;
+  const totalPrice = Math.round(quantity * pricePerPack * 100) / 100;
 
   const handleQuantityChange = (value: string) => {
     const parsed = parseInt(value, 10);
@@ -46,16 +47,16 @@ export function PurchaseTicketsDialog({
       setQuantity(1);
       return;
     }
-    setQuantity(Math.min(MAX_PACKS, Math.max(1, parsed)));
+    setQuantity(Math.min(maxPacksPerPurchase, Math.max(1, parsed)));
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Purchase AI Tickets</DialogTitle>
+          <DialogTitle>Purchase AI Credits</DialogTitle>
           <DialogDescription>
-            Buy tickets to use AI-powered features like suggestions and
+            Buy credits to use AI-powered features like suggestions and
             translations.
           </DialogDescription>
         </DialogHeader>
@@ -68,31 +69,31 @@ export function PurchaseTicketsDialog({
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="quantity">Number of Ticket Packs</Label>
+            <Label htmlFor="quantity">Number of Credit Packs</Label>
             <Input
               id="quantity"
               type="number"
               min="1"
-              max={MAX_PACKS}
+              max={maxPacksPerPurchase}
               value={quantity}
               disabled={isRedirecting}
               onChange={(e) => handleQuantityChange(e.target.value)}
               placeholder="1"
             />
             <p className="text-sm text-gray-600">
-              Each pack contains {TICKETS_PER_PACK} tickets for $
-              {PRICE_PER_PACK}
+              Each pack contains {creditsPerPack.toLocaleString("en-US")}{" "}
+              credits for ${pricePerPack}
             </p>
           </div>
 
           <div className="bg-blue-50 p-4 rounded-lg space-y-2">
             <div className="flex justify-between text-sm">
-              <span>Ticket Packs:</span>
+              <span>Credit Packs:</span>
               <span>{quantity}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span>Total Tickets:</span>
-              <span>{totalTickets}</span>
+              <span>Total Credits:</span>
+              <span>{totalCredits.toLocaleString("en-US")}</span>
             </div>
             <div className="flex justify-between font-semibold border-t pt-2">
               <span>Total Price:</span>
@@ -101,9 +102,8 @@ export function PurchaseTicketsDialog({
           </div>
 
           <div className="text-xs text-gray-500 space-y-1">
-            <p>• 1 ticket = 1 AI suggestion or translation</p>
-            <p>• Tickets never expire</p>
-            <p>• Unused tickets are refunded if features fail</p>
+            <p>• 1 credit = 1 AI suggestion; translations cost more</p>
+            <p>• Unused credits are refunded if a feature fails</p>
             <p>• Payment is completed on Stripe&apos;s secure checkout page</p>
           </div>
 
@@ -117,7 +117,7 @@ export function PurchaseTicketsDialog({
               Cancel
             </Button>
             <Button
-              onClick={() => startCheckout({ intent: "tickets", quantity })}
+              onClick={() => startCheckout({ intent: "credits", quantity })}
               disabled={isRedirecting}
               className="flex-1"
             >

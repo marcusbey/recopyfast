@@ -202,7 +202,7 @@ export function PaymentMethodsCard({
         <div className="text-center py-8 text-gray-500">
           <p>No payment methods added yet</p>
           <p className="text-sm">
-            Add a card to start a subscription or buy AI tickets
+            Add a card to start a subscription or buy AI credits
           </p>
         </div>
       )}

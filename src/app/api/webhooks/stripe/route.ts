@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import type Stripe from "stripe";
 import { stripe, requireWebhookSecret } from "@/lib/stripe/config";
-import { SUBSCRIPTION_PLANS } from "@/lib/stripe/plans";
+import { isPaidPlanId, resolveStripePriceId } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { addTicketsToUser } from "@/lib/stripe/tickets";
+import {
+  addPurchasedCredits,
+  revokePurchasedCredits,
+} from "@/lib/credits/system";
+import {
+  grantPlanEntitlement,
+  revokeEntitlementForPayment,
+} from "@/lib/billing/entitlements";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
 // STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
@@ -36,18 +43,20 @@ type StripeSubscriptionWithPeriod = Stripe.Subscription & {
  * in the Stripe dashboard; resolve it by matching the plan recorded in
  * metadata, and refuse to guess if that fails.
  */
-function resolvePeriodItem(
+async function resolvePeriodItem(
   subscription: StripeSubscriptionWithPeriod,
-): Stripe.SubscriptionItem | undefined {
+): Promise<Stripe.SubscriptionItem | undefined> {
   const items = subscription.items?.data ?? [];
 
   if (items.length <= 1) return items[0];
 
   const planId = subscription.metadata?.plan_id;
-  const plan = Object.values(SUBSCRIPTION_PLANS).find((p) => p.id === planId);
-  const candidatePriceIds = [plan?.priceId, plan?.yearlyPriceId].filter(
-    (id): id is string => Boolean(id),
-  );
+  const candidatePriceIds: readonly string[] = isPaidPlanId(planId)
+    ? await Promise.all([
+        resolveStripePriceId(planId, "monthly"),
+        resolveStripePriceId(planId, "yearly"),
+      ])
+    : [];
 
   const matches = items.filter((item) =>
     candidatePriceIds.includes(item.price?.id),
@@ -70,13 +79,13 @@ function resolvePeriodItem(
  * Throws rather than emitting an invalid date — a loud failure that Stripe
  * retries is recoverable; silently writing a bogus period is not.
  */
-function subscriptionPeriod(
+async function subscriptionPeriod(
   subscription: StripeSubscriptionWithPeriod,
   boundary: "start" | "end",
-): string {
+): Promise<string> {
   const key = `current_period_${boundary}` as const;
   const epochSeconds =
-    resolvePeriodItem(subscription)?.[key] ?? subscription[key];
+    (await resolvePeriodItem(subscription))?.[key] ?? subscription[key];
 
   if (typeof epochSeconds !== "number" || !Number.isFinite(epochSeconds)) {
     throw new Error(
@@ -201,6 +210,18 @@ export async function POST(req: NextRequest) {
         await handlePaymentIntentSucceeded(event.data.object);
         break;
 
+      case "checkout.session.completed":
+        await handleCheckoutSessionCompleted(event.data.object);
+        break;
+
+      case "charge.refunded":
+        await handleMoneyReturned(event.data.object, "refund");
+        break;
+
+      case "charge.dispute.created":
+        await handleMoneyReturned(event.data.object, "dispute");
+        break;
+
       case "payment_intent.payment_failed":
         await handlePaymentIntentFailed(event.data.object);
         break;
@@ -245,6 +266,14 @@ export async function POST(req: NextRequest) {
 
 type ServiceClient = ReturnType<typeof createServiceRoleClient>;
 
+/** Stripe expands references inconsistently; normalise to an id. */
+function idOf(
+  value: string | { id: string } | null | undefined,
+): string | null {
+  if (!value) return null;
+  return typeof value === "string" ? value : value.id;
+}
+
 /**
  * Turn a supabase-js `{ error }` into a throw.
  *
@@ -283,24 +312,13 @@ async function handleSubscriptionCreated(
   subscription: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
-  const userId = subscription.metadata?.user_id;
-
-  if (!userId) {
-    console.error("No user_id in subscription metadata");
-    return;
-  }
-
-  // Get customer from billing_customers
-  const { data: customer } = await supabase
-    .from("billing_customers")
-    .select("*")
-    .eq("stripe_customer_id", subscription.customer)
-    .single();
-
-  if (!customer) {
-    console.error("Customer not found for subscription");
-    return;
-  }
+  // A subscription created from the Stripe dashboard or a Payment Link carries
+  // no metadata, so fall back to the customer record before giving up.
+  const customer = await requireBillingCustomer(
+    subscription.customer,
+    supabase,
+  );
+  const userId = subscription.metadata?.user_id ?? customer.user_id;
 
   // Insert or update subscription — use actual migration column names:
   // plan (not plan_id), cancel_at (not cancel_at_period_end)
@@ -318,8 +336,8 @@ async function handleSubscriptionCreated(
         stripe_subscription_id: subscription.id,
         plan: subscription.metadata?.plan_id || "pro",
         status: subscription.status,
-        current_period_start: subscriptionPeriod(subscription, "start"),
-        current_period_end: subscriptionPeriod(subscription, "end"),
+        current_period_start: await subscriptionPeriod(subscription, "start"),
+        current_period_end: await subscriptionPeriod(subscription, "end"),
         cancel_at: subscription.cancel_at
           ? new Date(subscription.cancel_at * 1000).toISOString()
           : null,
@@ -350,8 +368,8 @@ async function handleSubscriptionUpdated(
     .update({
       plan: subscription.metadata?.plan_id || "pro",
       status: subscription.status,
-      current_period_start: subscriptionPeriod(subscription, "start"),
-      current_period_end: subscriptionPeriod(subscription, "end"),
+      current_period_start: await subscriptionPeriod(subscription, "start"),
+      current_period_end: await subscriptionPeriod(subscription, "end"),
       cancel_at: subscription.cancel_at
         ? new Date(subscription.cancel_at * 1000).toISOString()
         : null,
@@ -467,21 +485,197 @@ async function handleInvoicePaymentFailed(
 }
 
 /**
- * Handle successful payment intent (for ticket purchases).
- * Tickets are ONLY credited here (in the webhook) to avoid double-crediting
- * from the synchronous purchase path in tickets.ts.
+ * The billing_customers row for a Stripe customer.
+ *
+ * Throws rather than returning null. WHY: the previous code logged "Customer
+ * not found" and fell through to `{ received: true }` with HTTP 200. Stripe
+ * treats 2xx as delivered and never redelivers, so a subscription that arrived
+ * a moment before its customer row was committed was lost permanently — the
+ * card is charged monthly and the customer is on the free plan. A throw becomes
+ * a 500, and Stripe's retry schedule fixes the race on its own.
+ */
+async function requireBillingCustomer(
+  stripeCustomer: string | Stripe.Customer | Stripe.DeletedCustomer | null,
+  supabase: ServiceClient,
+): Promise<{ id: string; user_id: string }> {
+  const stripeCustomerId =
+    typeof stripeCustomer === "string" ? stripeCustomer : stripeCustomer?.id;
+
+  if (!stripeCustomerId) {
+    throw new Error("Stripe event carries no customer to attribute");
+  }
+
+  const { data: customer, error } = await supabase
+    .from("billing_customers")
+    .select("id, user_id")
+    .eq("stripe_customer_id", stripeCustomerId)
+    .maybeSingle<{ id: string; user_id: string }>();
+
+  if (error) {
+    throw new Error(`billing_customers lookup failed: ${error.message}`);
+  }
+
+  if (!customer) {
+    throw new Error(
+      `No billing_customers row for Stripe customer ${stripeCustomerId}. ` +
+        `Returning 5xx so Stripe redelivers once the row exists.`,
+    );
+  }
+
+  return customer;
+}
+
+/**
+ * Grant Lifetime Pro from a completed payment.
+ *
+ * Reached from both `payment_intent.succeeded` and
+ * `checkout.session.completed`, because which of the two arrives (and in which
+ * order) depends on the payment method. Both key off the payment intent id, and
+ * `plan_entitlements.stripe_payment_intent_id` is UNIQUE, so the second one to
+ * land is a no-op rather than a second grant.
+ */
+async function grantLifetime(
+  userId: string,
+  grantsPlanId: string | undefined,
+  paymentIntentId: string,
+): Promise<void> {
+  if (!grantsPlanId) {
+    throw new Error(
+      `payment ${paymentIntentId} is a lifetime purchase with no ` +
+        `grants_plan_id — the customer paid but nothing says what for`,
+    );
+  }
+
+  const result = await grantPlanEntitlement(
+    userId,
+    grantsPlanId,
+    paymentIntentId,
+  );
+
+  if (result.duplicate) {
+    console.log(`Lifetime entitlement for ${paymentIntentId} already granted.`);
+  }
+}
+
+/**
+ * Handle a successful one-off payment: a credit top-up or a Lifetime Pro
+ * purchase.
+ *
+ * Both entitlements are granted ONLY here (or from checkout.session.completed),
+ * never on the client and never optimistically from the Checkout return URL —
+ * the return URL is a redirect the customer controls, while this event is
+ * signed by Stripe.
  */
 async function handlePaymentIntentSucceeded(
   paymentIntent: Stripe.PaymentIntent,
 ) {
-  if (paymentIntent.metadata?.type === "ticket_purchase") {
-    const userId = paymentIntent.metadata.user_id;
-    const ticketQuantity = parseInt(paymentIntent.metadata.ticket_quantity);
+  const metadata = paymentIntent.metadata ?? {};
+  const userId = metadata.user_id;
 
-    if (userId && ticketQuantity) {
-      await addTicketsToUser(userId, ticketQuantity, paymentIntent.id);
+  if (!userId) {
+    // Payments we did not originate (dashboard-created, older metadata shapes)
+    // have nobody to credit. Logged rather than thrown so Stripe stops retrying
+    // an event that will never succeed.
+    if (metadata.type) {
+      console.error(
+        `payment_intent ${paymentIntent.id} has type "${metadata.type}" but no user_id`,
+      );
     }
+    return;
   }
+
+  switch (metadata.type) {
+    case "credit_purchase": {
+      const creditQuantity = Number.parseInt(metadata.credit_quantity, 10);
+
+      if (!Number.isInteger(creditQuantity) || creditQuantity <= 0) {
+        throw new Error(
+          `payment_intent ${paymentIntent.id} is a credit purchase with an ` +
+            `unusable credit_quantity: ${metadata.credit_quantity}`,
+        );
+      }
+
+      const result = await addPurchasedCredits(
+        userId,
+        creditQuantity,
+        paymentIntent.id,
+        paymentIntent.amount_received ?? undefined,
+      );
+
+      if (result.duplicate) {
+        console.log(`Credits for ${paymentIntent.id} already granted.`);
+      } else if (!result.success) {
+        throw new Error(result.error ?? "Failed to credit purchase");
+      }
+      break;
+    }
+
+    case "lifetime_purchase":
+      await grantLifetime(userId, metadata.grants_plan_id, paymentIntent.id);
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+ * Checkout finished. Stripe emits this alongside payment_intent.succeeded for
+ * one-off purchases; handling both closes the gap where a payment method emits
+ * one and not the other.
+ */
+async function handleCheckoutSessionCompleted(
+  session: Stripe.Checkout.Session,
+) {
+  // `unpaid` sessions complete for invoice-style flows where money has not
+  // moved yet. Granting on those would hand out product for an unpaid invoice.
+  if (session.payment_status === "unpaid") {
+    return;
+  }
+
+  const metadata = session.metadata ?? {};
+  const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
+  const paymentIntentId = idOf(session.payment_intent);
+
+  if (!userId || !paymentIntentId || metadata.type !== "lifetime_purchase") {
+    return;
+  }
+
+  // Subscriptions and credit packs are provisioned by their own events; only
+  // the lifetime grant needs the belt-and-braces second path.
+  await grantLifetime(userId, "pro", paymentIntentId);
+}
+
+/**
+ * Money came back out: a refund or a chargeback.
+ *
+ * Both revoke whatever the payment bought. Without this a customer could buy
+ * Lifetime Pro, charge it back, and keep the entitlement permanently — there is
+ * no renewal to fail, so nothing would ever take it away.
+ *
+ * Revocation is deliberately idempotent and quiet when there is nothing to
+ * revoke: refunds also arrive for payments that granted nothing.
+ */
+async function handleMoneyReturned(
+  event: Stripe.Charge | Stripe.Dispute,
+  reason: "refund" | "dispute",
+) {
+  const paymentIntentId = idOf(event.payment_intent);
+
+  if (!paymentIntentId) {
+    console.error(`${reason} on ${event.id} has no payment_intent`);
+    return;
+  }
+
+  const [entitlement, credits] = await Promise.all([
+    revokeEntitlementForPayment(paymentIntentId, reason),
+    revokePurchasedCredits(paymentIntentId),
+  ]);
+
+  console.log(
+    `${reason} on ${paymentIntentId}: entitlement revoked=${entitlement.revoked}, ` +
+      `credits revoked=${credits.revoked}`,
+  );
 }
 
 /**

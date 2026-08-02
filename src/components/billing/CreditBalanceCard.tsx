@@ -4,23 +4,29 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { PurchaseTicketsDialog } from "./PurchaseTicketsDialog";
-import type { Tickets, TicketTransaction } from "@/types/billing";
+import { PurchaseCreditsDialog } from "./PurchaseCreditsDialog";
+import type { CreditTransaction, CreditWallet } from "@/types/billing";
+import type { CreditPackConfig } from "@/lib/stripe/plan-types";
 
-interface TicketBalanceCardProps {
-  tickets?: Tickets;
-  recentTransactions: TicketTransaction[];
+interface CreditBalanceCardProps {
+  wallet?: CreditWallet;
+  recentTransactions: CreditTransaction[];
+  creditPack: CreditPackConfig;
 }
 
-export function TicketBalanceCard({
-  tickets,
+/** Below this many credits the card nudges the customer to top up. */
+const LOW_BALANCE_THRESHOLD = 5;
+
+export function CreditBalanceCard({
+  wallet,
   recentTransactions,
-}: TicketBalanceCardProps) {
+  creditPack,
+}: CreditBalanceCardProps) {
   const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
 
-  const balance = tickets?.balance || 0;
-  const totalPurchased = tickets?.total_purchased || 0;
-  const totalConsumed = tickets?.total_consumed || 0;
+  const balance = wallet?.balance || 0;
+  const totalPurchased = wallet?.totalPurchased || 0;
+  const totalConsumed = wallet?.totalConsumed || 0;
 
   const getTransactionIcon = (type: string) => {
     switch (type) {
@@ -35,7 +41,7 @@ export function TicketBalanceCard({
     }
   };
 
-  const formatTransactionAmount = (transaction: TicketTransaction) => {
+  const formatTransactionAmount = (transaction: CreditTransaction) => {
     const prefix = transaction.type === "consumption" ? "" : "+";
     return `${prefix}${Math.abs(transaction.amount)}`;
   };
@@ -53,18 +59,18 @@ export function TicketBalanceCard({
     <Card className="p-6">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xl font-semibold">AI Tickets</h3>
+          <h3 className="text-xl font-semibold">AI Credits</h3>
           <p className="text-gray-600 mt-1">Pay-per-use for AI features</p>
         </div>
         <Button onClick={() => setShowPurchaseDialog(true)} size="sm">
-          Buy Tickets
+          Buy Credits
         </Button>
       </div>
 
       <div className="space-y-4">
         <div className="text-center p-4 bg-blue-50 rounded-lg">
           <div className="text-3xl font-bold text-blue-600">{balance}</div>
-          <div className="text-sm text-gray-600">Available Tickets</div>
+          <div className="text-sm text-gray-600">Available Credits</div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
@@ -78,7 +84,7 @@ export function TicketBalanceCard({
           </div>
         </div>
 
-        {balance < 5 && (
+        {balance < LOW_BALANCE_THRESHOLD && (
           <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-center text-yellow-700">
               <svg
@@ -92,10 +98,10 @@ export function TicketBalanceCard({
                   clipRule="evenodd"
                 />
               </svg>
-              <span className="text-sm font-medium">Low ticket balance</span>
+              <span className="text-sm font-medium">Low credit balance</span>
             </div>
             <p className="text-sm text-yellow-600 mt-1">
-              Purchase more tickets to continue using AI features
+              Purchase more credits to continue using AI features
             </p>
           </div>
         )}
@@ -135,15 +141,16 @@ export function TicketBalanceCard({
             </div>
           ) : (
             <p className="text-gray-500 text-sm text-center py-4">
-              No ticket activity yet
+              No credit activity yet
             </p>
           )}
         </div>
       </div>
 
-      <PurchaseTicketsDialog
+      <PurchaseCreditsDialog
         open={showPurchaseDialog}
         onOpenChange={setShowPurchaseDialog}
+        creditPack={creditPack}
       />
     </Card>
   );

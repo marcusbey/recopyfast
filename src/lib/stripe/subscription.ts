@@ -1,11 +1,13 @@
 import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
 import {
-  SUBSCRIPTION_PLANS,
   getPaidPlan,
+  getPlanForSubscriber,
+  resolveStripePriceId,
   type BillingPeriod,
   type PaidPlanId,
 } from "./plans";
+import { getEffectivePlanId } from "@/lib/billing/entitlements";
 import type { Subscription } from "@/types/billing";
 
 /**
@@ -98,15 +100,10 @@ export async function updateSubscription(
   }
 
   const billingPeriod = updates.billingPeriod ?? "monthly";
-  const plan = getPaidPlan(updates.planId);
-  const priceId =
-    billingPeriod === "yearly" ? plan.yearlyPriceId : plan.priceId;
-
-  if (!priceId) {
-    throw new Error(
-      `No Stripe price configured for the ${plan.name} plan (${billingPeriod}).`,
-    );
-  }
+  // Throws on an unknown plan id, and again if no Stripe price is configured
+  // for the plan/period pair — either way before anything is charged.
+  await getPaidPlan(updates.planId);
+  const priceId = await resolveStripePriceId(updates.planId, billingPeriod);
 
   const existingSubscription = await stripe.subscriptions.retrieve(
     currentSubscription.stripe_subscription_id,
@@ -315,7 +312,11 @@ export async function getUserSubscription(
 }
 
 /**
- * Check if user has access to a feature based on their subscription
+ * Check if user has access to a feature based on the plan in force.
+ *
+ * Resolved through `getEffectivePlanId` rather than `billing_subscriptions`
+ * alone so a Lifetime Pro customer — who has an entitlement and no subscription
+ * — is not gated to the free plan's limits.
  */
 export async function checkFeatureAccess(
   userId: string,
@@ -325,23 +326,7 @@ export async function checkFeatureAccess(
     | "collaborators"
     | "translations",
 ): Promise<boolean> {
-  const subscription = await getUserSubscription(userId);
-
-  if (!subscription) {
-    // User has no subscription - no access to paid features
-    return (
-      feature !== "aiFeatures" &&
-      feature !== "unlimited_websites" &&
-      feature !== "collaborators" &&
-      feature !== "translations"
-    );
-  }
-
-  // getUserSubscription normalises the DB `plan` column onto `plan_id`.
-  const planKey =
-    subscription.plan_id.toUpperCase() as keyof typeof SUBSCRIPTION_PLANS;
-
-  const plan = SUBSCRIPTION_PLANS[planKey] ?? SUBSCRIPTION_PLANS.FREE;
+  const plan = await getPlanForSubscriber(await getEffectivePlanId(userId));
 
   switch (feature) {
     case "aiFeatures":

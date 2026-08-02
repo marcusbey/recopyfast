@@ -109,32 +109,9 @@ describe("Stripe Webhook Handler", () => {
     });
   });
 
-  // API-020: Webhook handles payment_intent.succeeded for tickets
-  describe("API-020: payment_intent.succeeded for tickets", () => {
-    it("should add tickets on successful payment", async () => {
-      const event = {
-        type: "payment_intent.succeeded",
-        data: {
-          object: {
-            id: "pi_123",
-            amount: 500, // $5.00 = 10 tickets
-            metadata: {
-              type: "ticket_purchase",
-              userId: "user-123",
-              ticketCount: "10",
-            },
-          },
-        },
-      };
-
-      mockConstructEvent.mockReturnValue(event);
-
-      const paymentIntent = event.data.object;
-      expect(paymentIntent.metadata.type).toBe("ticket_purchase");
-      expect(Number(paymentIntent.metadata.ticketCount)).toBe(10);
-      expect(paymentIntent.amount).toBe(500);
-    });
-  });
+  // API-020 lives in one-time-purchases.test.ts, which drives the real route
+  // handler for credit top-ups and Lifetime Pro instead of asserting on a
+  // hand-built event object.
 
   // API-021: Webhook handles invoice.payment_failed
   describe("API-021: invoice.payment_failed event", () => {

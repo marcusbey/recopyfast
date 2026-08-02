@@ -8,10 +8,20 @@
  * route: signing with "" returned 200 and reached the handler, while signing
  * with a wrong non-empty secret returned 400.
  *
- * STRIPE_CONFIG reads process.env at module-evaluation time, so each case
- * resets the module registry and re-imports rather than mutating a cached
- * value.
+ * The live/test discriminator is VERCEL_ENV, NOT NODE_ENV. Vercel sets
+ * NODE_ENV=production on preview builds too, so keying on it pointed every PR
+ * preview at the live Stripe account. These cases pin the new contract,
+ * including the one that used to be wrong: NODE_ENV=production with VERCEL_ENV
+ * unset must resolve to TEST.
+ *
+ * Each case resets the module registry and re-imports rather than mutating a
+ * cached value.
  */
+
+// Both suites in this directory load their subject with a dynamic import(),
+// so without this marker TypeScript treats the file as a global script and
+// their identically-named top-level constants collide.
+export {};
 
 const ORIGINAL_ENV = process.env;
 
@@ -27,10 +37,10 @@ afterEach(() => {
 });
 
 describe("requireWebhookSecret", () => {
-  describe("development", () => {
+  describe("secret validation", () => {
     it("returns the secret when STRIPE_WEBHOOK_SECRET is set", async () => {
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "development",
+        VERCEL_ENV: "development",
         STRIPE_WEBHOOK_SECRET: "whsec_a_real_looking_secret",
       });
 
@@ -39,7 +49,7 @@ describe("requireWebhookSecret", () => {
 
     it("throws when STRIPE_WEBHOOK_SECRET is an empty string", async () => {
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "development",
+        VERCEL_ENV: "development",
         STRIPE_WEBHOOK_SECRET: "",
       });
 
@@ -51,7 +61,7 @@ describe("requireWebhookSecret", () => {
       // plain `if (!secret)` check would let it through, yet it is not a real
       // signing key.
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "development",
+        VERCEL_ENV: "development",
         STRIPE_WEBHOOK_SECRET: "   ",
       });
 
@@ -60,7 +70,7 @@ describe("requireWebhookSecret", () => {
 
     it("throws when STRIPE_WEBHOOK_SECRET is undefined", async () => {
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "development",
+        VERCEL_ENV: "development",
         STRIPE_WEBHOOK_SECRET: undefined,
       });
 
@@ -68,10 +78,10 @@ describe("requireWebhookSecret", () => {
     });
   });
 
-  describe("production", () => {
+  describe("live mode (VERCEL_ENV=production)", () => {
     it("reads the _LIVE variable, not the test one", async () => {
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "production",
+        VERCEL_ENV: "production",
         STRIPE_WEBHOOK_SECRET: "whsec_test_value_must_not_be_used",
         STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value",
       });
@@ -83,7 +93,7 @@ describe("requireWebhookSecret", () => {
       // The exact production hazard: the test variable being populated must not
       // mask an unset live secret.
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "production",
+        VERCEL_ENV: "production",
         STRIPE_WEBHOOK_SECRET: "whsec_test_value_is_set",
         STRIPE_WEBHOOK_SECRET_LIVE: "",
       });
@@ -95,7 +105,7 @@ describe("requireWebhookSecret", () => {
 
     it("names the live variable in the error so the fix is unambiguous", async () => {
       const { requireWebhookSecret } = await loadConfig({
-        NODE_ENV: "production",
+        VERCEL_ENV: "production",
         STRIPE_WEBHOOK_SECRET_LIVE: undefined,
       });
 
@@ -105,11 +115,86 @@ describe("requireWebhookSecret", () => {
     });
   });
 
+  describe("test mode", () => {
+    // THE REGRESSION THIS FILE EXISTS TO PREVENT. `next build` sets
+    // NODE_ENV=production on Vercel PREVIEW deployments, so keying live mode on
+    // it meant every pull-request preview resolved live Stripe credentials and
+    // could take real money off a real card.
+    it("stays on TEST when NODE_ENV is production but VERCEL_ENV is unset", async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        NODE_ENV: "production",
+        VERCEL_ENV: undefined,
+        STRIPE_WEBHOOK_SECRET: "whsec_test_value",
+        STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value_must_not_be_used",
+      });
+
+      expect(requireWebhookSecret()).toBe("whsec_test_value");
+    });
+
+    it("stays on TEST for a preview deployment", async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        NODE_ENV: "production",
+        VERCEL_ENV: "preview",
+        STRIPE_WEBHOOK_SECRET: "whsec_test_value",
+        STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value_must_not_be_used",
+      });
+
+      expect(requireWebhookSecret()).toBe("whsec_test_value");
+    });
+
+    it("stays on TEST for a development deployment", async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        VERCEL_ENV: "development",
+        STRIPE_WEBHOOK_SECRET: "whsec_test_value",
+        STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value_must_not_be_used",
+      });
+
+      expect(requireWebhookSecret()).toBe("whsec_test_value");
+    });
+
+    it("names the test variable when it is the one missing", async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        VERCEL_ENV: "preview",
+        STRIPE_WEBHOOK_SECRET: undefined,
+      });
+
+      expect(() => requireWebhookSecret()).toThrow(
+        /STRIPE_WEBHOOK_SECRET is not set/,
+      );
+    });
+  });
+
+  describe("explicit override for non-Vercel hosts", () => {
+    // A self-hosted production deployment has no VERCEL_ENV and would otherwise
+    // be stuck in test mode forever, unable to take real payments.
+    it('goes live when STRIPE_LIVE_MODE is exactly "true"', async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        VERCEL_ENV: undefined,
+        STRIPE_LIVE_MODE: "true",
+        STRIPE_WEBHOOK_SECRET: "whsec_test_value",
+        STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value",
+      });
+
+      expect(requireWebhookSecret()).toBe("whsec_live_value");
+    });
+
+    it("does not go live on a merely truthy value", async () => {
+      const { requireWebhookSecret } = await loadConfig({
+        VERCEL_ENV: undefined,
+        STRIPE_LIVE_MODE: "1",
+        STRIPE_WEBHOOK_SECRET: "whsec_test_value",
+        STRIPE_WEBHOOK_SECRET_LIVE: "whsec_live_value_must_not_be_used",
+      });
+
+      expect(requireWebhookSecret()).toBe("whsec_test_value");
+    });
+  });
+
   it("explains why an empty secret is refused", async () => {
     // The message is the only thing an on-call engineer sees at 3am; it must say
     // why rather than just what.
     const { requireWebhookSecret } = await loadConfig({
-      NODE_ENV: "development",
+      VERCEL_ENV: "development",
       STRIPE_WEBHOOK_SECRET: "",
     });
 

@@ -1,12 +1,15 @@
 import Stripe from "stripe";
+import { describeStripeMode, isLiveMode, stripeEnvVar } from "./mode";
 
 let _stripe: Stripe | null = null;
 
 function getStripe(): Stripe {
   if (!_stripe) {
-    const key = STRIPE_CONFIG.SECRET_KEY;
+    const { name, value: key } = stripeEnvVar(STRIPE_ENV_VARS.SECRET_KEY);
     if (!key) {
-      throw new Error("Stripe secret key is not set in environment variables");
+      throw new Error(
+        `${name} is not set (Stripe mode: ${describeStripeMode()})`,
+      );
     }
     _stripe = new Stripe(key, {
       apiVersion: STRIPE_CONFIG.API_VERSION,
@@ -28,39 +31,74 @@ export const stripe = new Proxy({} as Stripe, {
   },
 });
 
-// Plan/ticket configuration lives in ./plans so client components can import it
-// without pulling the Node Stripe SDK into the browser bundle. Re-exported here
-// to keep existing `@/lib/stripe/config` imports working.
+// Plans are loaded from the database by ./plans. Re-exported here to keep
+// existing `@/lib/stripe/config` imports working. Server-side callers only —
+// ./plans opens a Supabase client, so a client component that needs plan shapes
+// or price arithmetic imports ./plan-types instead.
+export { isLiveMode, stripeMode, describeStripeMode } from "./mode";
 export {
-  SUBSCRIPTION_PLANS,
-  TICKET_CONFIG,
   PAID_PLAN_IDS,
   isPaidPlanId,
   isBillingPeriod,
   getPaidPlan,
+  getPlanCatalogue,
+  getSubscriptionPlans,
+  getSubscriptionPlan,
+  getPlanForSubscriber,
   getPlanDisplayPrice,
   getPlanCyclePrice,
+  getOneTimeProduct,
+  getOneTimeProducts,
+  getCreditPackConfig,
+  resolveStripePriceId,
+  resolveOneTimePriceId,
 } from "./plans";
 export type {
   BillingPeriod,
   PaidPlanId,
+  OneTimeProduct,
+  OneTimeProductId,
+  PlanCatalogue,
+  PlanLimits,
   SubscriptionPlan,
-  SubscriptionPlanData,
+  SubscriptionPlanId,
 } from "./plans";
 
+/**
+ * Environment variable names per mode. Which one is read is decided once, in
+ * ./mode — never by NODE_ENV, which is "production" on Vercel preview builds
+ * too and therefore pointed every PR preview at the live Stripe account.
+ */
+const STRIPE_ENV_VARS = {
+  PUBLISHABLE_KEY: {
+    test: "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY",
+    live: "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE",
+  },
+  SECRET_KEY: {
+    test: "STRIPE_SECRET_KEY",
+    live: "STRIPE_SECRET_KEY_LIVE",
+  },
+  WEBHOOK_SECRET: {
+    test: "STRIPE_WEBHOOK_SECRET",
+    live: "STRIPE_WEBHOOK_SECRET_LIVE",
+  },
+} as const;
+
 export const STRIPE_CONFIG = {
-  PUBLISHABLE_KEY:
-    process.env.NODE_ENV === "production"
-      ? process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE!
-      : process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
-  SECRET_KEY:
-    process.env.NODE_ENV === "production"
-      ? process.env.STRIPE_SECRET_KEY_LIVE!
-      : process.env.STRIPE_SECRET_KEY!,
-  WEBHOOK_SECRET:
-    process.env.NODE_ENV === "production"
-      ? process.env.STRIPE_WEBHOOK_SECRET_LIVE!
-      : process.env.STRIPE_WEBHOOK_SECRET!,
+  // NEXT_PUBLIC_* is inlined at build time, so these two are read as literal
+  // property accesses rather than through a computed name — a computed lookup
+  // would resolve to undefined in the browser bundle.
+  get PUBLISHABLE_KEY(): string | undefined {
+    return isLiveMode()
+      ? process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE
+      : process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  },
+  get SECRET_KEY(): string | undefined {
+    return stripeEnvVar(STRIPE_ENV_VARS.SECRET_KEY).value;
+  },
+  get WEBHOOK_SECRET(): string | undefined {
+    return stripeEnvVar(STRIPE_ENV_VARS.WEBHOOK_SECRET).value;
+  },
   CURRENCY: "usd",
   API_VERSION: "2025-07-30.basil" as const,
 } as const;
@@ -78,7 +116,7 @@ export const STRIPE_CONFIG = {
  * secret was correctly rejected with 400.
  *
  * The exposure is not theoretical. `payment_intent.succeeded` carrying
- * `metadata.type=ticket_purchase` credits tickets, and
+ * `metadata.type=credit_purchase` credits a wallet, and
  * `customer.subscription.created` provisions a plan — both forgeable for free
  * with no secret at all.
  *
@@ -88,18 +126,15 @@ export const STRIPE_CONFIG = {
  * loud misconfiguration.
  */
 export function requireWebhookSecret(): string {
-  const secret = STRIPE_CONFIG.WEBHOOK_SECRET;
+  const { name, value } = stripeEnvVar(STRIPE_ENV_VARS.WEBHOOK_SECRET);
 
-  if (!secret || secret.trim() === "") {
-    const variable =
-      process.env.NODE_ENV === "production"
-        ? "STRIPE_WEBHOOK_SECRET_LIVE"
-        : "STRIPE_WEBHOOK_SECRET";
+  if (!value || value.trim() === "") {
     throw new Error(
-      `${variable} is not set. Refusing to verify Stripe webhooks: an empty ` +
-        `signing secret makes every forged request verify successfully.`,
+      `${name} is not set (Stripe mode: ${describeStripeMode()}). Refusing to ` +
+        `verify Stripe webhooks: an empty signing secret makes every forged ` +
+        `request verify successfully.`,
     );
   }
 
-  return secret;
+  return value;
 }

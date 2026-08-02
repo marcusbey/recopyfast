@@ -28,7 +28,7 @@ interface CheckoutSessionStatus {
 
 const SUCCESS_MESSAGES: Record<CheckoutSessionStatus["mode"], string> = {
   subscription: "Your subscription is active. Welcome aboard.",
-  payment: "Payment received. Your tickets have been added to your balance.",
+  payment: "Payment received. Your purchase has been applied to your account.",
   setup: "Card saved. It is now your default payment method.",
 };
 
@@ -135,7 +135,8 @@ export function CheckoutStatusBanner({
         }
 
         // `reconciled` means the Stripe webhook has already written the
-        // subscription/ticket credit, so a refetch will show real data.
+        // subscription, credit top-up or lifetime grant, so a refetch will show
+        // real data.
         if (!session.reconciled) {
           if (attempts >= MAX_POLL_ATTEMPTS) {
             setState({

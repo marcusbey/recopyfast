@@ -247,6 +247,153 @@
     else element.addEventListener('load', pin, { once: true });
   }
 
+  // ==========================================
+  // STABLE ELEMENT IDENTITY
+  // ==========================================
+
+  /**
+   * Is this `id` safe to anchor an element path on?
+   *
+   * Only ids a human plausibly typed. Component kits and CSS-in-JS mint ids per
+   * render (`:r3:`, `radix-:r7:`, `css-1a2b3c`, `headlessui-menu-4`); anchoring
+   * on one of those would reintroduce exactly the per-load churn this whole
+   * scheme exists to eliminate.
+   */
+  function isStableAnchorId(id) {
+    if (!id || typeof id !== 'string') return false;
+    // React's `useId` wraps its output in colons, which this rejects outright.
+    if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) return false;
+    if (/^(radix|headlessui|reakit|react-aria|mui|chakra|ember|ng|rc)[-_]/i.test(id)) return false;
+    // A long hex run *containing digits* is a build artifact ("css-1a2b3c"),
+    // not a name anyone typed. The digit requirement spares real words that
+    // happen to be spelled in hex letters ("addfeedback"). Rejecting a genuine
+    // id here is harmless anyway: the walk simply continues to the next
+    // ancestor, costing a longer path and nothing else.
+    if (/[0-9a-f]{6,}/i.test(id) && /\d/.test(id)) return false;
+    return true;
+  }
+
+  /**
+   * 1-based position among the siblings that share this element's tag.
+   *
+   * Deliberately *not* `nth-child`: counting only same-tag siblings means a
+   * decorative `<div>` slipped in between two `<p>`s does not renumber the
+   * paragraphs. Text nodes are never counted, so whitespace differences between
+   * a server render and a client render cannot shift it either.
+   */
+  function indexAmongSameTagSiblings(element) {
+    const parent = element.parentNode;
+    if (!parent || !parent.children) return 1;
+
+    const tag = element.tagName;
+    let index = 1;
+    for (let i = 0; i < parent.children.length; i++) {
+      if (parent.children[i] === element) return index;
+      if (parent.children[i].tagName === tag) index++;
+    }
+    return index;
+  }
+
+  /**
+   * The element's structural path through the document, root-first.
+   *
+   * e.g. `#main>section:2>ul:1>li:5>p:1`
+   */
+  function structuralPath(element) {
+    const segments = [];
+    let current = element;
+
+    while (current && current.nodeType === 1 /* ELEMENT_NODE */) {
+      const id = current.getAttribute('id');
+      // `getElementById` also settles duplicate-id pages: only the first match
+      // is accepted as an anchor, everything else keeps walking upward.
+      if (isStableAnchorId(id) && document.getElementById(id) === current) {
+        segments.unshift('#' + id);
+        break;
+      }
+
+      segments.unshift(current.tagName.toLowerCase() + ':' + indexAmongSameTagSiblings(current));
+
+      const parent = current.parentNode;
+      if (!parent) break;
+
+      // Crossing out of a shadow root. Without the explicit hop, two instances
+      // of the same web component would produce byte-identical paths and
+      // collapse onto one id.
+      if (parent.nodeType === 11 /* DOCUMENT_FRAGMENT_NODE */) {
+        if (!parent.host) break;
+        segments.unshift('::shadow');
+        current = parent.host;
+        continue;
+      }
+
+      if (parent.nodeType !== 1) break; // reached <html>; its parent is the document
+      current = parent;
+    }
+
+    return segments.join('>');
+  }
+
+  /**
+   * cyrb53 — small, well-distributed, non-cryptographic.
+   *
+   * Only 32-bit integer ops and `Math.imul`, both of which are exactly specified
+   * by ECMAScript, so every browser produces the same digest for the same input.
+   * 53 bits of output: at 10k elements per site the collision odds are ~1 in
+   * 200 million.
+   */
+  function hashPath(text) {
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+
+  /**
+   * A deterministic identifier for an element, stable across page loads.
+   *
+   * WHY THIS IS STABLE — every input is a structural fact about where the
+   * element sits, and nothing else:
+   *
+   *   - No clock, no counter, no randomness. The previous scheme was
+   *     `'rcf-' + SITE_ID + '-' + Date.now() + '-' + index`, so a fresh id was
+   *     minted on every single page load and saved content could never be
+   *     matched back to the element it was written for. That is the entire bug.
+   *   - No text. The product's whole premise is that the copy changes; hashing
+   *     an element's own words would destroy its identity the instant someone
+   *     edited it. Sibling text can change freely too — text nodes are not part
+   *     of the path.
+   *   - No class names. Frameworks toggle state classes (`is-open`, `active`)
+   *     at runtime, and utility-CSS builds reshuffle them between deploys.
+   *   - Tag name plus same-tag sibling index, so two identical rows in a table
+   *     or two identical cards in a list stay distinguishable — collisions
+   *     within a page are structurally impossible before hashing.
+   *   - Anchored at the nearest ancestor with an author-written `id`, so markup
+   *     inserted above that anchor (a cookie bar, a promo strip) does not
+   *     renumber everything beneath it.
+   *   - Shadow boundaries crossed explicitly via the host element.
+   *
+   * The honest trade-off: moving an element in the DOM does change its id, and
+   * content saved under the old id is orphaned. That is inherent to positional
+   * identity. An author who needs an id that survives a redesign writes their
+   * own `data-rcf-id`, which is always honoured verbatim.
+   */
+  function computeStableElementId(element) {
+    const authored = element.getAttribute('data-rcf-id');
+    if (authored) return authored;
+
+    return 'rcf-' + hashPath(structuralPath(element));
+  }
+
   class ReCopyFast {
     constructor() {
       this.elements = new Map();
@@ -288,6 +435,12 @@
         await Rules.whenFontsReady(window);
 
         this.scanForContent();
+
+        // Apply what has already been saved for this site. Must come before the
+        // A/B pipeline so that a running test's variant copy wins over the
+        // published baseline, and before the socket handshake so a visitor sees
+        // current copy whether or not realtime is reachable.
+        await this.hydrateStoredContent();
 
         // A/B testing pipeline (non-blocking for staging mode)
         if (!this.stagingMode) {
@@ -1374,7 +1527,7 @@
                        'a.rcf-editable-link, img, div[data-rcf-content]';
       const textElements = this.queryDeep(selector);
 
-      textElements.forEach(function(element, index) {
+      textElements.forEach(function(element) {
         if (self.shouldSkipElement(element)) return;
 
         // An <img> is identified by its source, not by text content.
@@ -1382,7 +1535,10 @@
         const text = isImage ? (element.getAttribute('src') || '') : self.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
-        const elementId = element.getAttribute('data-rcf-id') || 'rcf-' + SITE_ID + '-' + Date.now() + '-' + index;
+        // Deterministic — see computeStableElementId. The same element yields
+        // the same id on every load, which is what lets saved content find its
+        // way back onto the page.
+        const elementId = computeStableElementId(element);
         element.setAttribute('data-rcf-id', elementId);
 
         self.elements.set(elementId, {
@@ -2078,10 +2234,26 @@
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
 
+      if (!this.applyContentToElement(elementData, content, data.alt)) return;
+
+      elementData.element.classList.add('rcf-updated');
+      setTimeout(function() {
+        elementData.element.classList.remove('rcf-updated');
+      }, 300);
+    }
+
+    /**
+     * Write stored content onto a live element.
+     *
+     * Shared by the realtime broadcast handler and by the load-time hydration
+     * below, so both agree on how each element type is written and on what is
+     * off-limits. Returns whether the write happened.
+     */
+    applyContentToElement(elementData, content, alt) {
       const target = elementData.element;
 
       // Never overwrite what someone is actively typing.
-      if (target.getAttribute('data-rcf-editing')) return;
+      if (target.getAttribute('data-rcf-editing')) return false;
 
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         target.value = content;
@@ -2089,15 +2261,90 @@
         // Same no-reflow swap the editor uses, so a realtime update from another
         // session cannot resize the page under the reader.
         applyImageSource(target, content);
-        if (data.alt !== undefined && data.alt !== null) target.alt = data.alt;
+        if (alt !== undefined && alt !== null) target.alt = alt;
       } else {
         target.textContent = content;
       }
 
-      elementData.element.classList.add('rcf-updated');
-      setTimeout(function() {
-        elementData.element.classList.remove('rcf-updated');
-      }, 300);
+      // Keep the map in step with the DOM: the edit board and the content map
+      // both read `originalContent` as "what this element currently says".
+      elementData.originalContent = content;
+      return true;
+    }
+
+    /**
+     * Pull the site's saved content and apply it to this page load.
+     *
+     * Without this the widget only ever *sent* content upward. The sole thing
+     * that wrote saved copy back was the socket `content-update` broadcast,
+     * which by definition only reaches tabs that were already open at the
+     * moment someone hit publish — so an ordinary visitor arriving afterwards
+     * saw the original HTML forever.
+     *
+     * FOUC: unavoidable for a client-side widget. The browser has already
+     * painted the author's markup before this script can run, so a published
+     * change necessarily lands one network round-trip later. Running here —
+     * straight after the scan, before the socket handshake and before the A/B
+     * pipeline — keeps that window as small as it can be without a server-side
+     * render of the customer's page.
+     *
+     * Failure is never allowed to damage the page: if the fetch fails, if the
+     * response is malformed, or if a row carries no content, the original
+     * markup simply stays. Rows for elements that are not on this page are
+     * skipped, and elements with no row keep whatever the author wrote.
+     */
+    async hydrateStoredContent() {
+      if (!RECOPYFAST_API) return;
+
+      const endpoint = this.stagingMode
+        ? RECOPYFAST_API + '/staging/content/' + SITE_ID +
+          (this.editSessionToken
+            ? '?rcf_edit_token=' + encodeURIComponent(this.editSessionToken)
+            : '?rcf_token=' + encodeURIComponent(this.stagingToken || ''))
+        : RECOPYFAST_API + '/content/' + SITE_ID;
+
+      let rows;
+      try {
+        const response = await fetch(endpoint, {
+          headers: { 'Authorization': 'Bearer ' + SITE_TOKEN }
+        });
+
+        if (!response.ok) {
+          console.warn('ReCopyFast: could not load saved content (HTTP ' + response.status + '); showing the page as authored.');
+          return;
+        }
+
+        const body = await response.json();
+        rows = this.stagingMode ? (body && body.content) : body;
+      } catch (error) {
+        console.warn('ReCopyFast: could not load saved content; showing the page as authored.', error);
+        return;
+      }
+
+      if (!Array.isArray(rows)) return;
+
+      let applied = 0;
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !row.element_id) continue;
+
+        const elementData = this.elements.get(row.element_id);
+        if (!elementData) continue; // stored, but not present on this page
+
+        const content = row.current_content;
+        // Blanking the page is the one outcome worth guarding against, and an
+        // empty string here means every stored column was null — a data gap,
+        // not somebody deliberately publishing nothing.
+        if (typeof content !== 'string' || content === '') continue;
+        if (content === elementData.originalContent) continue;
+
+        if (this.applyContentToElement(elementData, content, row.metadata && row.metadata.alt)) {
+          applied++;
+        }
+      }
+
+      console.log('ReCopyFast: applied ' + applied + ' saved element(s) of ' + rows.length + ' stored');
     }
 
     setupMutationObserver() {

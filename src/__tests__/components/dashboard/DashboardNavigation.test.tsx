@@ -123,11 +123,11 @@ describe("DashboardNavigation", () => {
       expect(teamsLink).not.toHaveClass("cursor-not-allowed");
     });
 
-    it("should enable Teams link for enterprise users", () => {
-      render(<DashboardNavigation userPlan="enterprise" />);
+    it("should disable Teams link for starter users", () => {
+      render(<DashboardNavigation userPlan="starter" />);
 
       const teamsLink = screen.getByText("Teams").closest("a");
-      expect(teamsLink).not.toHaveClass("cursor-not-allowed");
+      expect(teamsLink).toHaveClass("cursor-not-allowed");
     });
 
     it("should prevent navigation when clicking disabled link", () => {

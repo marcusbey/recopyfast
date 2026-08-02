@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
+import { canCreateWebsite } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 
 function normalizeDomain(domain: string) {
@@ -82,6 +83,25 @@ export async function POST(request: NextRequest) {
       message: "Too many site registrations. Please try again later.",
     });
     if (registrationLimited) return registrationLimited;
+
+    // Plan quota. This is the ONLY place site creation is metered — the limits
+    // in the plans table were previously decorative because canCreateWebsite()
+    // had no callers, so a $9 Starter customer could register without bound.
+    //
+    // Checked after the rate limit and before anything is written, so a refused
+    // request costs nothing and leaves no orphan row.
+    const quota = await canCreateWebsite(user.id);
+    if (!quota.allowed) {
+      return NextResponse.json(
+        {
+          error: quota.reason ?? "Your plan does not allow another website",
+          upgrade_required: quota.upgradeRequired ?? true,
+          current: quota.currentLimit,
+          limit: quota.maxLimit,
+        },
+        { status: 403 },
+      );
+    }
 
     // Check if domain already exists
     const { data: existingSite } = await serviceClient

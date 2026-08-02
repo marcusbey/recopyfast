@@ -1,6 +1,6 @@
 // Collaboration Types
 export type TeamRole = "viewer" | "editor" | "manager" | "owner";
-export type BillingPlan = "free" | "starter" | "pro" | "enterprise";
+export type BillingPlan = "free" | "starter" | "pro";
 export type NotificationType =
   | "invitation"
   | "permission_change"
@@ -439,7 +439,7 @@ export interface ScheduledContent {
   published_at?: string;
 }
 
-// Enterprise Features
+// Audit & Compliance
 export interface AuditLog {
   id: string;
   user_id?: string;

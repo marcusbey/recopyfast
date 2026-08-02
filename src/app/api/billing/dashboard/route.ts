@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getUserSubscription } from "@/lib/stripe/subscription";
-import { getUserTickets } from "@/lib/stripe/tickets";
+import { getCreditWallet, getCreditTransactions } from "@/lib/credits/system";
+import { getPlanCatalogue } from "@/lib/stripe/plans";
+import { getEffectivePlanId } from "@/lib/billing/entitlements";
 import { listPaymentMethods } from "@/lib/stripe/payment-methods";
 import type { BillingDashboardData, PaymentMethod } from "@/types/billing";
 
@@ -55,16 +57,8 @@ export async function GET() {
       .order("created_at", { ascending: false })
       .limit(10);
 
-    // Get ticket information
-    const tickets = await getUserTickets(user.id);
-
-    // Get recent ticket transactions
-    const { data: recentTransactions } = await supabase
-      .from("ticket_transactions")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+    const creditWallet = await getCreditWallet(user.id);
+    const recentTransactions = await getCreditTransactions(user.id, 10);
 
     // Get current usage statistics
     const { data: usageData } = await supabase
@@ -84,11 +78,20 @@ export async function GET() {
       translations: 0,
     };
 
-    // Count websites
-    const { count: websiteCount } = await supabase
-      .from("sites")
+    // Sites have no owner column — ownership is an 'admin' row in
+    // site_permissions. Counting sites.user_id returned a PostgREST 42703 that
+    // was discarded along with the count, so this always reported 0.
+    const { count: websiteCount, error: websiteCountError } = await supabase
+      .from("site_permissions")
       .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id);
+      .eq("user_id", user.id)
+      .eq("permission", "admin");
+
+    if (websiteCountError) {
+      throw new Error(
+        `Failed to count owned sites: ${websiteCountError.message}`,
+      );
+    }
 
     currentUsage.websites = websiteCount || 0;
 
@@ -110,14 +113,24 @@ export async function GET() {
       }
     });
 
+    // The catalogue ships with the dashboard payload so the client components
+    // render prices, limits and feature lists from the database without each
+    // one fetching the plans separately.
+    const [catalogue, effectivePlanId] = await Promise.all([
+      getPlanCatalogue(),
+      getEffectivePlanId(user.id),
+    ]);
+
     const dashboardData: BillingDashboardData = {
       customer: customer || undefined,
       subscription: subscription || undefined,
       paymentMethods,
       invoices: invoices || [],
-      tickets: tickets || undefined,
-      recentTransactions: recentTransactions || [],
+      creditWallet,
+      recentTransactions,
       currentUsage,
+      catalogue,
+      effectivePlanId,
     };
 
     return NextResponse.json(dashboardData);

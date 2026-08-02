@@ -24,11 +24,7 @@ jest.mock("@/lib/supabase/server", () => {
   };
 });
 
-import {
-  CREDIT_COSTS,
-  PLAN_CREDITS,
-  CREDIT_PACKAGES,
-} from "@/lib/credits/system";
+import { CREDIT_COSTS } from "@/lib/credits/system";
 
 describe("Credit System", () => {
   // UNIT-010: Credit costs
@@ -46,20 +42,9 @@ describe("Credit System", () => {
     });
   });
 
-  // UNIT-011: Plan credits
-  describe("UNIT-011: Monthly included credits per plan", () => {
-    it("Free plan should include 0 credits", () => {
-      expect(PLAN_CREDITS.FREE).toBe(0);
-    });
-
-    it("Pro plan should include 500 credits", () => {
-      expect(PLAN_CREDITS.PRO).toBe(500);
-    });
-
-    it("Enterprise plan should include 2000 credits", () => {
-      expect(PLAN_CREDITS.ENTERPRISE).toBe(2000);
-    });
-  });
+  // UNIT-011 moved: how many credits a plan includes is a plan limit and now
+  // lives in the `plans` table (limits.monthly_credits), so it is covered by
+  // the plan-loader suite rather than asserted against a compiled-in constant.
 
   // UNIT-012: Credit balance calculation
   describe("UNIT-012: Balance calculation logic", () => {
@@ -153,34 +138,7 @@ describe("Credit System", () => {
     });
   });
 
-  // Credit packages validation
-  describe("Credit packages", () => {
-    it("Starter pack should have 1000 credits for $19", () => {
-      expect(CREDIT_PACKAGES.STARTER.credits).toBe(1000);
-      expect(CREDIT_PACKAGES.STARTER.price).toBe(19);
-    });
-
-    it("Professional pack should have 5000 credits for $79", () => {
-      expect(CREDIT_PACKAGES.PROFESSIONAL.credits).toBe(5000);
-      expect(CREDIT_PACKAGES.PROFESSIONAL.price).toBe(79);
-    });
-
-    it("Enterprise pack should have 20000 credits for $299", () => {
-      expect(CREDIT_PACKAGES.ENTERPRISE.credits).toBe(20000);
-      expect(CREDIT_PACKAGES.ENTERPRISE.price).toBe(299);
-    });
-
-    it("larger packs should have better price per credit", () => {
-      const starterPerCredit =
-        CREDIT_PACKAGES.STARTER.price / CREDIT_PACKAGES.STARTER.credits;
-      const proPerCredit =
-        CREDIT_PACKAGES.PROFESSIONAL.price /
-        CREDIT_PACKAGES.PROFESSIONAL.credits;
-      const enterprisePerCredit =
-        CREDIT_PACKAGES.ENTERPRISE.price / CREDIT_PACKAGES.ENTERPRISE.credits;
-
-      expect(proPerCredit).toBeLessThan(starterPerCredit);
-      expect(enterprisePerCredit).toBeLessThan(proPerCredit);
-    });
-  });
+  // The three-tier CREDIT_PACKAGES ladder is gone. Credits are a single
+  // catalogue product (`plans` row "credits"), and its size and price are
+  // asserted in the plan-loader suite against the seeded row.
 });

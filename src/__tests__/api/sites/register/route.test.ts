@@ -3,10 +3,17 @@ import { POST } from "@/app/api/sites/register/route";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
+import { canCreateWebsite } from "@/lib/feature-gating/permissions";
 
 // Mock dependencies
 jest.mock("@/lib/supabase/server");
 jest.mock("@/lib/supabase/service");
+// The plan quota has its own suite (feature-gating/permissions.test.ts); this
+// one is about registration mechanics, so the gate is stubbed to "allowed" and
+// its enforcement is covered by the dedicated case below.
+jest.mock("@/lib/feature-gating/permissions", () => ({
+  canCreateWebsite: jest.fn(),
+}));
 jest.mock("@/lib/security/site-auth", () => {
   const actual = jest.requireActual("@/lib/security/site-auth");
   return {
@@ -39,6 +46,9 @@ const mockCreateServiceClient = createServiceRoleClient as jest.MockedFunction<
 const mockBuildSiteToken = buildSiteToken as jest.MockedFunction<
   typeof buildSiteToken
 >;
+const mockCanCreateWebsite = canCreateWebsite as jest.MockedFunction<
+  typeof canCreateWebsite
+>;
 
 describe("/api/sites/register - POST", () => {
   beforeEach(() => {
@@ -56,6 +66,7 @@ describe("/api/sites/register - POST", () => {
       >,
     );
     mockBuildSiteToken.mockReturnValue("signed-site-token");
+    mockCanCreateWebsite.mockResolvedValue({ allowed: true });
 
     mockServiceClient.from.mockReturnThis();
     mockServiceClient.select.mockReturnThis();
@@ -278,5 +289,31 @@ describe("/api/sites/register - POST", () => {
     expect(data).toEqual({
       error: "Internal server error",
     });
+  });
+
+  it("refuses registration once the plan's website quota is used up", async () => {
+    // H6: these limits used to be decorative — canCreateWebsite had no callers,
+    // so a $9 Starter customer could register without bound.
+    mockCanCreateWebsite.mockResolvedValue({
+      allowed: false,
+      reason: "Your Starter plan includes 1 website.",
+      upgradeRequired: true,
+      currentLimit: 1,
+      maxLimit: 1,
+    });
+
+    const response = await POST(
+      new NextRequest("https://recopyfast.com/api/sites/register", {
+        method: "POST",
+        body: JSON.stringify({ domain: "quota.example.com", name: "Quota" }),
+      }),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(data.upgrade_required).toBe(true);
+    expect(data.error).toContain("Starter plan includes 1 website");
+    // Nothing may be written when the quota refuses the request.
+    expect(mockServiceClient.insert).not.toHaveBeenCalled();
   });
 });
