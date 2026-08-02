@@ -1,9 +1,44 @@
 # RecopyFast QA Register
 
-> **STATE: SHIPPED.** All four lanes are committed and live in production
-> (`5ca6ac3..9b13eae`, deployed and Ready). The Enterprise vars have been
-> removed from Vercel production now that the running build no longer reads
-> them. `tsc` 0 errors, 1246 tests passing.
+> **STATE: COMMITTED, NOT DEPLOYED.** `e7ae07a..e4759cc` are on `main` and
+> **not pushed**. Everything below them (`5ca6ac3..9b13eae`) is live in
+> production. `tsc` 0 errors, `lint` 0 errors, **1352 tests passing**, full
+> pre-commit hook run on every commit.
+>
+> ## ⚠️ WHAT CHANGES FOR EXISTING USERS WHEN THIS DEPLOYS
+>
+> **Every account currently on `plan = 'free'` is locked out at next sign-in.**
+> This was chosen deliberately over grandfathering. There is no free tier: an
+> account with no plan and no credits is redirected to `/dashboard/billing` and
+> cannot reach anything else. Nobody has been notified. Support will hear about
+> this before you do.
+>
+> Purchased credits remain spendable without a subscription — a credit holder
+> keeps AI and translations, but gets no sites and no seats.
+>
+> ## ▶️ NEXT SESSION — nine builds, none started
+>
+> All are *builds*, not fixes, which is why they were left. In priority order:
+>
+> 1. **Team-invite acceptance** (`InvitationManager`) — invited people cannot
+>    accept, today. A broken flow, not a missing tab.
+> 2. **Editor enrolment P0-1 / P0-2** — the magic-code widget client and the
+>    `site_editors` enrolment UI. Same shape of defect twice over: an invited
+>    person cannot get in.
+> 3. **Five feature wire-ups** — bulk ops, domain verification, security
+>    dashboard, AI translate, AI suggest. Each is a built, authorised,
+>    working API route with no UI at all (see P4).
+>
+> Also open, needing a product decision rather than a build: multi-team
+> switching, and whether A/B testing stays in the product at all — there is a
+> live `/dashboard/ab-tests` page and ~11 components behind a feature the owner
+> is not currently pursuing.
+>
+> **Check before deploying:** if the marketing site still advertises real-time
+> collaboration or presence, that claim now has nothing behind it —
+> `CollaborativeEditor` and `PresenceIndicator` were deleted in `5455c9d`
+> because they spoke a socket protocol `server/index.js` does not implement.
+> Same category as the "14-day free trial" copy an earlier lane had to remove.
 >
 > ## 🔴 ONE MIGRATION IS OWED TO PRODUCTION
 >
@@ -79,36 +114,45 @@
 > a fix.
 
 
-## 🔵 NEXT TASK — remove the free plan (decided, not started)
+## ✅ DONE — the free plan is gone (`e7ae07a`, `ed639fb`, `0af7668`)
 
-Product decision: **no free plan, no access without payment.** The catalogue
-currently seeds `free` at $0 and it is active.
+**No free plan, no access without payment.** Shipped, code-only, in the order
+the previous entry insisted on: nothing touches the schema.
 
-**Do not deactivate the `free` row first.** `getEffectivePlanId` still ends in
-`return subscription?.plan ?? "free"`, so switching the row off ahead of the code
-would strand every unsubscribed account the moment it deployed — the same
-code-before-schema ordering that broke credits this session.
+`getEffectivePlan` returns an `Entitlement` — a discriminated union whose
+unentitled branch carries `plan: null`, so `entitlement.plan.limits` does not
+compile until the caller narrows. The compiler enumerated the call sites rather
+than grep, and each one had to say in code what it does about somebody who has
+not paid. A zero-limit plan object would have been indistinguishable from a real
+plan at exactly the sites that matter.
 
-Order, and the six places that assume a plan always resolves:
+It also removed a bug nobody had reported: `findPlanById` and
+`findSubscriptionPlan` used to fall back to `free`, so a plan id retired years
+ago kept conferring access by resolving to a live row.
 
-1. `src/lib/billing/entitlements.ts` — `getEffectivePlanId` must return an
-   explicit unentitled result instead of `?? "free"`, and `getEffectivePlan`
-   must express "no plan" as a value callers are forced to handle rather than a
-   zero-limit plan they can mistake for a real one.
-2. `src/lib/feature-gating/permissions.ts` — decides access; needs the deny
-   branch.
-3. `src/lib/credits/system.ts` — `includedCredits = plan.limits.monthlyCredits`
-   becomes 0, and the balance read must not throw for an unentitled user.
-4. `src/lib/stripe/subscription.ts`
-5. `src/app/api/billing/dashboard/route.ts` — must render an unentitled state.
-6. `src/app/api/ab-tests/generate/route.ts`
+**The signup question was answered: checkout before the account is usable.**
+Middleware redirects a session with no entitlement off `/dashboard` and
+`/settings` to `/dashboard/billing`, which is deliberately ungated — Stripe
+returns there on success *and* cancel, and the webhook usually has not landed
+when a paying customer arrives back. It fails open on a read error, because a
+Supabase blip must not lock out a subscriber; every API route resolves
+entitlement independently anyway, so this gate is routing, not authorisation.
 
-Then, and only then: deactivate the `free` plan row, and decide separately
-whether the `billing_subscriptions.plan` CHECK drops `'free'` — existing rows
-may hold it, so that is a data question, not just a constraint edit.
+**Two owner decisions were made on top:**
 
-Open question that blocks the signup flow: what does a newly registered account
-see before it pays? There is no answer to that in the code today.
+- **Purchased credits entitle their holder.** A credit balance is spendable
+  with no subscription. Taking back a delivered good is the shape of a
+  chargeback. Credits buy *metered* things only — never sites or seats.
+- **`plan = 'free'` resolves to unentitled immediately**, not grandfathered.
+  Normalised in `readEffectivePlanId` via `RETIRED_PLAN_IDS`, so the middleware
+  path and the gates agree. The catalogue row stays seeded and inert: it is the
+  code that makes it mean nothing, and deactivating the row first would have
+  been the code-before-schema inversion that already broke credits once.
+
+**Still owed to the database, separately and deliberately:** deactivating the
+`free` row, and deciding whether the `billing_subscriptions.plan` CHECK drops
+`'free'`. Existing rows may hold it, so it is a data question, not a constraint
+edit — and nothing may be written while `20260802020000` is unapplied.
 
 ---
 
@@ -280,16 +324,27 @@ site. Both verified directly, not just by reading.
   the webhook. **Blocked on the migration** for the `tickets` carry-over; see
   the header. Not a regression from this deploy — balances read
   `credit_purchases` before it too, so `tickets` money was already invisible.
-- [ ] **H6 Plan limits are decorative** — status unclear, flagged rather than
-  closed. Site creation actually lives at `POST /api/sites/register`, not
-  `src/app/api/sites/route.ts` (that file only exports `GET`), and it now calls
-  `canCreateWebsite(user.id)` from `src/lib/feature-gating/permissions.ts`
-  before writing a row, with a comment there describing this as the fix for
-  exactly this defect (`src/app/api/sites/register/route.ts:87-104`). Not
-  marked `[x]`: `feature-gating/permissions.ts` is one of the files another
-  agent is actively rewriting for this session's free-plan removal, so its
-  current behaviour cannot be treated as settled. Re-check once that work
-  lands.
+- [x] **H6 Plan limits are decorative** — closed in `e4759cc`, after auditing
+  all six fields of `PlanLimits` rather than only the one the entry named.
+  Five were already enforced: `websites` at `sites/register/route.ts:93` via
+  `canCreateWebsite` (including Pro's `additionalSitePrice` overage, so the
+  denial quotes a price rather than a wall); `aiFeatures` and `translations`
+  through `consumeFeatureUsage`, which routes to `canUseAIFeatures` /
+  `canUseTranslation` and is called by both AI routes; `abTesting` inline at
+  `ab-tests/generate/route.ts:85`; `monthlyCredits` is an allowance the credit
+  system grants, not a gate.
+  **`collaborators` was the decorative one, and the register never named it.**
+  `canAddCollaborator` was written, correct, and had **zero callers**, while
+  `sites/[siteId]/share/route.ts` inserted into `site_permissions` — the table
+  that gate counts — unguarded. Starter sells 0 seats and Pro sells 5; both
+  were unlimited. Now checked before the insert via `canShareSite`, which bills
+  the site **owner** (an `admin` row in `site_permissions`) rather than the
+  sharer, since a manager may share a site they do not own. 8 tests, both
+  quota edges pinned.
+  **Known and deliberately not closed:** the check and the insert are not
+  atomic, so two concurrent shares can both pass on the last seat. Closing it
+  needs a DB constraint, and no migration may be written while
+  `20260802020000` is unapplied.
 - [x] **H8 Refunds and chargebacks revoke nothing.** Fixed: `charge.refunded`
   and `charge.dispute.created` both route to `handleMoneyReturned`, which claws
   back only unspent credits so a customer who already spent them is not driven
@@ -447,6 +502,28 @@ site. Both verified directly, not just by reading.
   invites). A real, broken flow, not just a missing dashboard tab. Claimed
   by the lane wiring up the seven load-bearing components above — listed
   here for visibility, not as unowned work.
+- [x] **New: the dashboard nav could not tell anybody apart.** Closed in
+  `9e541ad`. The sidebar read `user.user_metadata.plan`; nothing in the
+  codebase has ever written that key, so it was always `undefined` and every
+  account fell to the `"free"` default — a Pro subscriber saw "Plan: free",
+  was offered an Upgrade button for the plan they were on, and had Teams
+  greyed out. Also the wrong source in principle: `user_metadata` is
+  client-writable, so the gate that failed closed for everyone would have
+  failed open for anyone who edited their own metadata.
+  It now reads `GET /api/billing/entitlement`, which resolves through
+  `getEffectivePlan` — the same function middleware and the feature gates
+  share, so the shell cannot hold a fourth opinion about who has paid. A
+  dedicated endpoint rather than `/api/billing/dashboard`, which calls Stripe
+  and pulls invoices, transactions and 30 days of usage to draw a sidebar.
+  That also closed the trap it exposed: an unentitled account is bounced off
+  every dashboard route back to `/dashboard/billing`, but the shell still drew
+  all seven other links around it, each leading back where the user already
+  was. Only Billing is offered now — and it *is* offered, since being unable
+  to reach the page that sells the way out is its own trap. Unknown is treated
+  as entitled while the fetch is in flight: being wrong that way costs a
+  redirect, the other way tells a paying customer they have nothing.
+  33 nav tests (rewritten from the old `userPlan="free"` contract, which
+  described a state only the bug could produce) + 6 endpoint tests.
 
 ## 5. Accessibility
 
