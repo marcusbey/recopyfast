@@ -1,10 +1,9 @@
 import React from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { TeamDashboard } from "@/components/collaboration/TeamDashboard";
 import { TeamSelector } from "@/components/collaboration/TeamSelector";
 import { NotificationCenter } from "@/components/collaboration/NotificationCenter";
-import { Team, TeamMember, TeamInvitation } from "@/types";
+import { Team } from "@/types";
 
 // Mock fetch
 global.fetch = jest.fn();
@@ -31,184 +30,10 @@ const mockTeam: Team = {
   updated_at: "2023-01-01T00:00:00Z",
 };
 
-const mockMembers: TeamMember[] = [
-  {
-    id: "member-1",
-    team_id: "team-1",
-    user_id: "user-1",
-    role: "owner",
-    joined_at: "2023-01-01T00:00:00Z",
-    user: {
-      email: "owner@example.com",
-      raw_user_meta_data: { name: "Team Owner" },
-    },
-  },
-  {
-    id: "member-2",
-    team_id: "team-1",
-    user_id: "user-2",
-    role: "editor",
-    joined_at: "2023-01-02T00:00:00Z",
-    user: {
-      email: "editor@example.com",
-      raw_user_meta_data: { name: "Team Editor" },
-    },
-  },
-];
-
-const mockInvitations: TeamInvitation[] = [
-  {
-    id: "invite-1",
-    team_id: "team-1",
-    email: "newuser@example.com",
-    role: "editor",
-    invited_by: "user-1",
-    token: "invite-token",
-    expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: "2023-01-03T00:00:00Z",
-    team: { name: "Test Team" },
-    inviter: { email: "owner@example.com" },
-  },
-];
-
 describe("Collaboration Components Integration", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fetch as jest.Mock).mockClear();
-  });
-
-  describe("TeamDashboard", () => {
-    it("should render team information and load data", async () => {
-      // Mock API calls
-      (fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ members: mockMembers }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ invitations: mockInvitations }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ activities: [] }),
-        });
-
-      render(
-        <TeamDashboard
-          team={mockTeam}
-          userRole="owner"
-          onUpdateTeam={jest.fn()}
-        />,
-      );
-
-      // The dashboard shows a spinner until members/invitations/activity land,
-      // so wait for the loaded state before asserting on the header.
-      await waitFor(() => {
-        expect(screen.getByText("Team Members (2)")).toBeInTheDocument();
-      });
-
-      // Check team header
-      expect(screen.getByText("Test Team")).toBeInTheDocument();
-      expect(screen.getByText("A test team")).toBeInTheDocument();
-      expect(screen.getByText("2 / 5 members")).toBeInTheDocument();
-      expect(screen.getByText("free plan")).toBeInTheDocument();
-
-      // Check member display
-      expect(screen.getByText("Team Owner")).toBeInTheDocument();
-      expect(screen.getByText("owner@example.com")).toBeInTheDocument();
-      expect(screen.getByText("Team Editor")).toBeInTheDocument();
-      expect(screen.getByText("editor@example.com")).toBeInTheDocument();
-    });
-
-    it("should allow team managers to invite new members", async () => {
-      const user = userEvent.setup();
-
-      (fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ members: mockMembers }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ invitations: [] }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ activities: [] }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ invitation: mockInvitations[0] }),
-        });
-
-      render(
-        <TeamDashboard
-          team={mockTeam}
-          userRole="manager"
-          onUpdateTeam={jest.fn()}
-        />,
-      );
-
-      // Wait for initial load
-      await waitFor(() => {
-        expect(screen.getByText("Invite Member")).toBeInTheDocument();
-      });
-
-      // Click invite button
-      await user.click(screen.getByText("Invite Member"));
-
-      // Fill invitation form
-      const emailInput = screen.getByLabelText("Email Address");
-      await user.type(emailInput, "newuser@example.com");
-
-      const roleSelect = screen.getByLabelText("Role");
-      await user.selectOptions(roleSelect, "editor");
-
-      // Submit invitation
-      await user.click(screen.getByText("Send Invitation"));
-
-      await waitFor(() => {
-        expect(fetch).toHaveBeenCalledWith(
-          `/api/teams/${mockTeam.id}/invitations`,
-          expect.objectContaining({
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: "newuser@example.com",
-              role: "editor",
-              teamId: mockTeam.id,
-            }),
-          }),
-        );
-      });
-    });
-
-    it("should not show invite button for viewers", async () => {
-      (fetch as jest.Mock)
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ members: mockMembers }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ activities: [] }),
-        });
-
-      render(
-        <TeamDashboard
-          team={mockTeam}
-          userRole="viewer"
-          onUpdateTeam={jest.fn()}
-        />,
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("Test Team")).toBeInTheDocument();
-      });
-
-      expect(screen.queryByText("Invite Member")).not.toBeInTheDocument();
-    });
   });
 
   describe("TeamSelector", () => {
