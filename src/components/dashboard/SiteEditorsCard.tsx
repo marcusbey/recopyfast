@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AlertCircle, CheckCircle2, Loader2, Lock, Users } from "lucide-react";
+import Link from "next/link";
 import { InviteEditorForm } from "./InviteEditorForm";
 import { SiteEditorRow, type SiteEditorSummary } from "./SiteEditorRow";
 import type { EditorPermission } from "@/lib/auth/editor-access";
@@ -70,29 +71,59 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 /**
+ * A refused action, and whether the remedy is billing rather than retrying.
+ *
+ * `upgradeRequired` is what separates "this went wrong" from "you have spent
+ * what you bought". Showing the second as a red error would be a lie about
+ * whose fault it is and would leave the owner retrying a button that is working
+ * exactly as intended.
+ */
+interface ActionFailure {
+  message: string;
+  upgradeRequired: boolean;
+}
+
+/**
  * The route answers with a machine code in `error` and, where there is anything
  * a person can do about it, human text in `message`. Prefer the latter, then a
  * translation of the code, and only then a status-qualified fallback — printing
  * a bare `server_error` at a customer is not an error message.
  */
+async function readActionFailure(
+  response: Response,
+  fallback: string,
+): Promise<ActionFailure> {
+  try {
+    const body: unknown = await response.json();
+    const { error, message, upgradeRequired } = (body ?? {}) as {
+      error?: unknown;
+      message?: unknown;
+      upgradeRequired?: unknown;
+    };
+
+    const text =
+      typeof message === "string" && message
+        ? message
+        : typeof error === "string" && ERROR_MESSAGES[error]
+          ? ERROR_MESSAGES[error]
+          : `${fallback} (${response.status})`;
+
+    return { message: text, upgradeRequired: upgradeRequired === true };
+  } catch {
+    // Non-JSON body — fall through to the status-qualified fallback.
+    return {
+      message: `${fallback} (${response.status})`,
+      upgradeRequired: false,
+    };
+  }
+}
+
+/** The same parse where only the prose is wanted. */
 async function readEditorsError(
   response: Response,
   fallback: string,
 ): Promise<string> {
-  try {
-    const body: unknown = await response.json();
-    const { error, message } = (body ?? {}) as {
-      error?: unknown;
-      message?: unknown;
-    };
-    if (typeof message === "string" && message) return message;
-    if (typeof error === "string" && ERROR_MESSAGES[error]) {
-      return ERROR_MESSAGES[error];
-    }
-  } catch {
-    // Non-JSON body — fall through to the status-qualified fallback.
-  }
-  return `${fallback} (${response.status})`;
+  return (await readActionFailure(response, fallback)).message;
 }
 
 /**
@@ -112,7 +143,9 @@ function editorHubHref(hubUrl: string): string | null {
 export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(
+    null,
+  );
 
   const [revokeTarget, setRevokeTarget] = useState<SiteEditorSummary | null>(
     null,
@@ -165,7 +198,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
       email: string,
       permissions: EditorPermission[],
     ): Promise<boolean> => {
-      setActionError(null);
+      setActionFailure(null);
       setNotice(null);
 
       try {
@@ -176,8 +209,8 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
         });
 
         if (!response.ok) {
-          setActionError(
-            await readEditorsError(response, "Could not add that editor"),
+          setActionFailure(
+            await readActionFailure(response, "Could not add that editor"),
           );
           return false;
         }
@@ -194,7 +227,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
         return true;
       } catch (error) {
         console.error("Failed to add site editor:", error);
-        setActionError(NETWORK_ERROR);
+        setActionFailure({ message: NETWORK_ERROR, upgradeRequired: false });
         return false;
       }
     },
@@ -225,7 +258,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
       }
 
       const data: { grantsRevoked?: number } = await response.json();
-      setActionError(null);
+      setActionFailure(null);
       setNotice({
         kind: "removed",
         email: revokeTarget.email,
@@ -264,14 +297,33 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
       <CardContent className="space-y-4">
         {notice && <NoticePanel notice={notice} />}
 
-        {actionError && (
-          <p
-            role="alert"
-            className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
-          >
-            {actionError}
-          </p>
-        )}
+        {actionFailure &&
+          (actionFailure.upgradeRequired ? (
+            // A seat limit is not a malfunction. It gets the warning tone and a
+            // route to the thing that actually resolves it, rather than a red
+            // box inviting the owner to press the button again.
+            <div
+              role="alert"
+              className="flex flex-col gap-2 rounded-md border border-tone-warning-border bg-tone-warning-surface px-3 py-2 text-sm text-tone-warning-text"
+            >
+              <p>{actionFailure.message}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                asChild
+              >
+                <Link href="/dashboard/billing">View plans</Link>
+              </Button>
+            </div>
+          ) : (
+            <p
+              role="alert"
+              className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
+            >
+              {actionFailure.message}
+            </p>
+          ))}
 
         {state.status === "loading" && (
           <div className="space-y-2" role="status" aria-label="Loading editors">

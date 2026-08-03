@@ -232,6 +232,92 @@ describe("SiteEditorsCard", () => {
     expect(screen.getByText("No editors yet")).toBeInTheDocument();
   });
 
+  it("renders a seat-limit refusal as a billing matter, not a malfunction", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: "seat_limit",
+            message:
+              "You've used all 5 seats on your Pro plan for this site. Editors and collaborators share the same allowance — remove one, or upgrade for more.",
+            upgradeRequired: true,
+            currentLimit: 5,
+            maxLimit: 5,
+          },
+          403,
+        ),
+      );
+
+    renderCard();
+    await screen.findByText("No editors yet");
+
+    await user.type(screen.getByLabelText(/editor email/i), grace.email);
+    await user.click(screen.getByRole("button", { name: /add editor/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("all 5 seats on your Pro plan");
+    // Which limit, and what actually resolves it. Retrying the button does not.
+    expect(
+      within(alert).getByRole("link", { name: /view plans/i }),
+    ).toHaveAttribute("href", "/dashboard/billing");
+    expect(screen.getByLabelText(/editor email/i)).toHaveValue(grace.email);
+  });
+
+  it("tells a plan with no seats at all apart from a plan that has run out", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: "seat_limit",
+            message:
+              "Your Starter plan does not include collaborator seats. Upgrade to invite editors or collaborators to this site.",
+            upgradeRequired: true,
+            currentLimit: 0,
+            maxLimit: 0,
+          },
+          403,
+        ),
+      );
+
+    renderCard();
+    await screen.findByText("No editors yet");
+
+    await user.type(screen.getByLabelText(/editor email/i), grace.email);
+    await user.click(screen.getByRole("button", { name: /add editor/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Your Starter plan does not include collaborator seats",
+    );
+    expect(alert).not.toHaveTextContent("used all");
+    expect(
+      within(alert).getByRole("link", { name: /view plans/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an ordinary failure red and offers no upgrade path", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
+      .mockResolvedValueOnce(jsonResponse({ error: "server_error" }, 500));
+
+    renderCard();
+    await screen.findByText("No editors yet");
+
+    await user.type(screen.getByLabelText(/editor email/i), grace.email);
+    await user.click(screen.getByRole("button", { name: /add editor/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/Something went wrong on our end/);
+    expect(
+      within(alert).queryByRole("link", { name: /view plans/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("refuses to submit an enrolment with no permissions", async () => {
     const user = userEvent.setup();
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }));

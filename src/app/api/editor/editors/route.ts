@@ -15,11 +15,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
+  findActiveSiteEditor,
   isPlausibleEmail,
   listSiteEditors,
   revokeSiteEditor,
   upsertSiteEditor,
 } from "@/lib/auth/editor-directory";
+import { canShareSite } from "@/lib/feature-gating/permissions";
 import {
   normalizePermissions,
   type EditorPermission,
@@ -144,6 +146,37 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 },
       );
+    }
+
+    // An editor is a person with standing access to change live copy, which is
+    // what a seat is. Enrolment went unmetered while the share path was gated,
+    // so the allowance Starter sells as zero and Pro sells as five was
+    // avoidable simply by using this door instead of that one.
+    //
+    // Charged only when the write would actually occupy a seat. An already
+    // active editor holds theirs, so re-saving their permissions costs nothing;
+    // an unknown or revoked address does not, so both enrolling and restoring
+    // are checked here — a seat freed by a revocation may have been taken by
+    // someone else in the meantime.
+    //
+    // canShareSite resolves whose plan pays: the site's owner, never the
+    // acting admin, or a Pro admin on a Starter owner's site would be issuing
+    // seats nobody bought.
+    const existingEditor = await findActiveSiteEditor(siteId, email.trim());
+    if (!existingEditor) {
+      const seatQuota = await canShareSite(siteId, auth.caller.userId);
+      if (!seatQuota.allowed) {
+        return NextResponse.json(
+          {
+            error: "seat_limit",
+            message: seatQuota.reason ?? "Seat limit reached.",
+            upgradeRequired: seatQuota.upgradeRequired ?? false,
+            currentLimit: seatQuota.currentLimit,
+            maxLimit: seatQuota.maxLimit,
+          },
+          { status: 403 },
+        );
+      }
     }
 
     const editor = await upsertSiteEditor({

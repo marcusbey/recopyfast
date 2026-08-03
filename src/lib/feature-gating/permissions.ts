@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   getEffectivePlan,
   hasAnyEntitlement,
@@ -201,7 +202,66 @@ export async function canShareSite(
 }
 
 /**
- * Check if user can add collaborators
+ * Every seat occupied on a site, across both doors that create one.
+ *
+ * A seat is a person with standing access to change live copy, and two tables
+ * grant exactly that: `site_permissions` holds collaborators who have a
+ * ReCopyFast account, `site_editors` holds email addresses on the durable
+ * allowlist — usually a client's marketing contact who has no account and never
+ * will. They are different records of the same purchased thing.
+ *
+ * Counting only the first is what made the limit avoidable. Each door checked
+ * its own table, so each independently allowed N and alternating between them
+ * allowed 2N. One count, read by both paths, is the only shape that cannot
+ * drift — the same reason `hasAnyEntitlement` exists rather than each gate
+ * deciding for itself what "entitled" means.
+ *
+ * `site_editors` is read with the service-role client deliberately. Its SELECT
+ * policy requires `admin` on the site, and the share path admits managers too,
+ * so a request-scoped read would return 0 for precisely the caller in the best
+ * position to exploit it. A quota that RLS can silently zero is not a quota.
+ *
+ * Both reads throw on failure rather than coalescing to 0, for the reason
+ * `countOwnedSites` documents: a count that could not be read must never be
+ * read as "plenty of room".
+ */
+async function countOccupiedSeats(
+  supabase: SupabaseLike,
+  siteId: string,
+  payerId: string,
+): Promise<number> {
+  const { count: collaborators, error: collaboratorError } = await supabase
+    .from("site_permissions")
+    .select("*", { count: "exact", head: true })
+    .eq("site_id", siteId)
+    .neq("user_id", payerId); // The payer holds their own site, not a seat on it.
+
+  if (collaboratorError) {
+    throw new Error(
+      `Failed to count collaborator seats: ${collaboratorError.message}`,
+    );
+  }
+
+  const { count: editors, error: editorError } = await createServiceRoleClient()
+    .from("site_editors")
+    .select("*", { count: "exact", head: true })
+    .eq("site_id", siteId)
+    .is("revoked_at", null); // A revoked editor has given their seat back.
+
+  if (editorError) {
+    throw new Error(`Failed to count editor seats: ${editorError.message}`);
+  }
+
+  return (collaborators ?? 0) + (editors ?? 0);
+}
+
+/**
+ * Can this site take another seat, charged to `userId`'s plan?
+ *
+ * Named for the collaborator path it was written for, but the allowance it
+ * reads is per-site and covers editors too — see `countOccupiedSeats`. Both
+ * POST /api/sites/[siteId]/share and POST /api/editor/editors consume this,
+ * which is what makes the limit hold whichever door is used.
  */
 export async function canAddCollaborator(
   userId: string,
@@ -216,20 +276,17 @@ export async function canAddCollaborator(
       : NO_ENTITLEMENT;
   }
   const { plan } = entitlement;
-
-  const supabase = await createClient();
-  const { count: currentCollaborators } = await supabase
-    .from("site_permissions")
-    .select("*", { count: "exact", head: true })
-    .eq("site_id", siteId)
-    .neq("user_id", userId); // Exclude the owner
-
   const collaboratorLimit = plan.limits.collaborators;
 
+  // Answered before counting: a plan selling no seats and one selling unlimited
+  // both have the same answer whatever the current occupancy is, and neither
+  // needs two round trips to reach it.
   if (collaboratorLimit === 0) {
     return {
       allowed: false,
-      reason: "Collaborators are not available on your current plan",
+      reason:
+        `Your ${plan.name} plan does not include collaborator seats. ` +
+        `Upgrade to invite editors or collaborators to this site.`,
       upgradeRequired: true,
       currentLimit: 0,
       maxLimit: 0,
@@ -240,19 +297,27 @@ export async function canAddCollaborator(
     return { allowed: true };
   }
 
-  if ((currentCollaborators || 0) < collaboratorLimit) {
+  const supabase = await createClient();
+  const occupiedSeats = await countOccupiedSeats(supabase, siteId, userId);
+
+  if (occupiedSeats < collaboratorLimit) {
     return {
       allowed: true,
-      currentLimit: currentCollaborators || 0,
+      currentLimit: occupiedSeats,
       maxLimit: collaboratorLimit,
     };
   }
 
   return {
     allowed: false,
-    reason: `You've reached your limit of ${collaboratorLimit} collaborator${collaboratorLimit === 1 ? "" : "s"} per website`,
+    // Says "seats" rather than "collaborators", because the number counts
+    // editors as well and an owner told they have 5 collaborators while seeing
+    // two in the list would reasonably conclude the count is broken.
+    reason:
+      `You've used all ${collaboratorLimit} seat${collaboratorLimit === 1 ? "" : "s"} on your ${plan.name} plan for this site. ` +
+      `Editors and collaborators share the same allowance — remove one, or upgrade for more.`,
     upgradeRequired: true,
-    currentLimit: currentCollaborators || 0,
+    currentLimit: occupiedSeats,
     maxLimit: collaboratorLimit,
   };
 }
