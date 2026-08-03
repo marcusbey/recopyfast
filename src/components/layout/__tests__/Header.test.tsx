@@ -1,5 +1,11 @@
 import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  act,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Header } from "../Header";
 import { useAuth } from "@/contexts/AuthContext";
@@ -201,7 +207,7 @@ describe("Header", () => {
     expect(header).toHaveClass("fixed", "top-0", "z-50");
   });
 
-  it("applies the blurred background only after scrolling past the threshold", () => {
+  it("applies the blurred background only after scrolling past the threshold", async () => {
     (useAuth as jest.Mock).mockReturnValue({
       user: null,
       loading: false,
@@ -229,7 +235,12 @@ describe("Header", () => {
     // primitive in globals.css, which carries the blur, the saturation boost and
     // the lit top edge together. The behaviour under test is unchanged: the
     // header is transparent over the hero and frosted once scrolled past it.
-    expect(header).toHaveClass("glass-sheet");
+    //
+    // The wait is required because the handler no longer reads scrollY inside
+    // the event — it defers the read to the next animation frame so the browser
+    // is not forced to flush layout on every scroll event. The class therefore
+    // lands a frame after the event, which is still the same frame the user sees.
+    await waitFor(() => expect(header).toHaveClass("glass-sheet"));
     expect(header.className).not.toContain("bg-transparent");
   });
 

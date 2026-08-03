@@ -8,6 +8,9 @@ import { UserMenu } from "@/components/auth/UserMenu";
 import { Zap, Menu, X } from "lucide-react";
 import Link from "next/link";
 
+/* Past this many pixels the header takes on its solid, bordered state. */
+const SCROLLED_THRESHOLD_PX = 50;
+
 export function Header() {
   const { user, loading } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -15,12 +18,30 @@ export function Header() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 50);
+    let frame = 0;
+
+    /* Reading scrollY inside the scroll event forces the browser to flush
+       pending layout synchronously, once per event. Deferring the read to the
+       next animation frame collapses a burst of events into one read that
+       happens when layout is already clean. */
+    const readScroll = () => {
+      frame = 0;
+      setIsScrolled(window.scrollY > SCROLLED_THRESHOLD_PX);
     };
 
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    const handleScroll = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(readScroll);
+    };
+
+    /* The page can load already scrolled — restored position, or a #hash. */
+    handleScroll();
+    window.addEventListener("scroll", handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   return (
