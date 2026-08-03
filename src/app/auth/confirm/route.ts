@@ -42,6 +42,41 @@ function parseOtpType(value: string | null): EmailOtpType | null {
     : null;
 }
 
+/**
+ * Where to send the user after the link is confirmed.
+ *
+ * Two spellings arrive here and both have to work. Our own code builds `next`
+ * with a relative path. The Supabase email template passes `{{ .RedirectTo }}`
+ * as `redirect_to`, which renders an **absolute** URL — so it fails
+ * `sanitizeNext`'s leading-slash rule and silently became `/dashboard`. The
+ * template was the one thing standing between a magic link and working
+ * cross-device, and once repointed here it would have signed people in
+ * correctly and then dropped wherever they were going, every time.
+ *
+ * An absolute value is reduced to its path, and only when it is on our own
+ * origin. That keeps `sanitizeNext` as the single open-redirect guard rather
+ * than adding a second, weaker one beside it: anything cross-origin, or
+ * unparseable, falls back exactly as before.
+ */
+function resolveDestination(
+  searchParams: URLSearchParams,
+  origin: string,
+): string {
+  const next = searchParams.get("next");
+  if (next) return sanitizeNext(next);
+
+  const redirectTo = searchParams.get("redirect_to");
+  if (!redirectTo) return sanitizeNext(null);
+
+  try {
+    const target = new URL(redirectTo, origin);
+    if (target.origin !== new URL(origin).origin) return sanitizeNext(null);
+    return sanitizeNext(`${target.pathname}${target.search}${target.hash}`);
+  } catch {
+    return sanitizeNext(null);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   // Same validated origin as /auth/callback — see ../public-origin.ts. Shared so
@@ -49,7 +84,7 @@ export async function GET(request: NextRequest) {
   const origin = resolvePublicOrigin(request);
   const tokenHash = searchParams.get("token_hash");
   const type = parseOtpType(searchParams.get("type"));
-  const next = sanitizeNext(searchParams.get("next"));
+  const next = resolveDestination(searchParams, origin);
 
   if (!tokenHash || !type) {
     return NextResponse.redirect(`${origin}/auth/error`);

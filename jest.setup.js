@@ -85,6 +85,17 @@ jest.mock('next/server', () => ({
       }
     },
     {
+      // Mirrors the real signature: 307 by default, destination in `Location`.
+      // Absent entirely until now, so any route that redirects could not be
+      // tested at all — which is why the auth confirm route had no coverage of
+      // where it actually sends people.
+      redirect: (url, status = 307) => ({
+        json: () => Promise.resolve(null),
+        status,
+        headers: new Headers({ location: String(url) }),
+        ok: false,
+        _status: status,
+      }),
       json: (data, init) => {
         const status = init?.status || 200
         if (status === 204 || status === 205 || status === 304) {
