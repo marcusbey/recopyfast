@@ -3845,8 +3845,23 @@
 
         const th = actionsDiv.offsetHeight || 44;
         const tw = actionsDiv.offsetWidth || 200;
+
+        // Flip below the element when the toolbar would collide with the
+        // staging banner, not merely when it would leave the viewport.
+        //
+        // The banner is `position: fixed` across the top at z-index 99999,
+        // and this toolbar sits at 10000, so anywhere they overlap the banner
+        // wins the hit test and swallows the click. That is not cosmetic: for
+        // any element within roughly a toolbar's height of the top of the
+        // page, the editor could see their own Save button and not press it.
+        // The old threshold of 4 only avoided the viewport edge, which left
+        // the whole band beneath the banner as a dead zone.
+        const topChrome = document.getElementById('rcf-staging-banner');
+        const minTop =
+          (topChrome ? topChrome.getBoundingClientRect().bottom : 0) + 4;
+
         let top = r.top - th - GAP;
-        if (top < 4) top = r.bottom + GAP;
+        if (top < minTop) top = r.bottom + GAP;
         let left = r.left + r.width / 2 - tw / 2;
         left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
         actionsDiv.style.top = top + 'px';
