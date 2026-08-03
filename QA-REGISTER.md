@@ -70,6 +70,26 @@
 > as long as the bug existed — a mock looser than the platform certifies bugs as
 > correct. It now refuses a body on 204/205/304.
 >
+> ## ✅ SCOPE CUTS AND CLEANUP, ALL DEPLOYED
+>
+> - **A/B testing is out of the launch**, reversibly. The cron that ran every
+>   five minutes is gone, the nav entry and the site-detail card are gone (its
+>   only button pointed at the route), and the page is disabled by moving it to
+>   `_ab-tests`, which Next does not route. Components, API routes, tables and
+>   `plan.limits.abTesting` all survive, so restoring it is a rename.
+> - **Real-time is opt-in.** Nothing listens on the configured socket endpoint
+>   and Vercel cannot host `server/index.js`, so the widget was dialling a dead
+>   host five times per visitor page load and deriving an endpoint when none was
+>   set — which made "no server" look like "flaky server". `NEXT_PUBLIC_WS_URL`
+>   is removed from production. Editing and publishing are entirely HTTP.
+> - **A dead Publish button.** The confirm handler was attached only after the
+>   pending-changes preview resolved, so the button rendered enabled with no
+>   `onclick` while that request was in flight. Found because it made the E2E
+>   alternate between pass and fail; a slow connection makes it routine.
+> - **2,392 `node_modules` files untracked** across two nested trees. This is a
+>   public repository and those files were most of what GitHub's 15 vulnerability
+>   reports covered — `npm audit --omit=dev` in the root reports **0**.
+>
 > ## 🔴 WHAT ACTUALLY BLOCKS LAUNCH NOW
 >
 > 1. **P0-1 / P0-2 below** — an invited editor still cannot edit. This is the
