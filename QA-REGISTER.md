@@ -1,20 +1,55 @@
 # RecopyFast QA Register
 
-> **STATE: COMMITTED, NOT DEPLOYED.** `e7ae07a..e4759cc` are on `main` and
-> **not pushed**. Everything below them (`5ca6ac3..9b13eae`) is live in
-> production. `tsc` 0 errors, `lint` 0 errors, **1352 tests passing**, full
-> pre-commit hook run on every commit.
+> **STATE: DEPLOYED.** `db677b0..f2951b8` pushed and live (deployment Ready).
+> `tsc` 0 errors, `lint` 0 errors, **1352 tests passing**, pre-commit hook run
+> on every commit.
 >
-> ## ⚠️ WHAT CHANGES FOR EXISTING USERS WHEN THIS DEPLOYS
+> ## 🔴 ROTATE THE DATABASE PASSWORD
 >
-> **Every account currently on `plan = 'free'` is locked out at next sign-in.**
-> This was chosen deliberately over grandfathering. There is no free tier: an
-> account with no plan and no credits is redirected to `/dashboard/billing` and
-> cannot reach anything else. Nobody has been notified. Support will hear about
-> this before you do.
+> `SUPABASE_PASSWORD` was printed in full into an agent session transcript on
+> 2026-08-02 (a `psql` connection-string parse error echoed it). Rotate it in
+> the Supabase dashboard and update `.env` and any CI secret. Unlike the cron
+> secret this was never committed, but treat a transcript as untrusted storage.
+>
+> `CRON_SECRET` has already been rotated (see below) — that one is done.
+>
+> ## ✅ THE THREE HEADLINE BLOCKERS WERE STALE — ALL NOW RESOLVED
+>
+> This register spent two sessions warning about a migration that had already
+> been applied. Verified directly against production, not inferred:
+>
+> - **`20260802020000` is applied.** `credit_purchases.expires_at` is nullable
+>   and the `plan` CHECK had already been widened. The far-future-expiry
+>   fallback in `insertNonExpiringGrant` is now dead code and can be removed.
+> - **Starter is sellable.** Both live price ids are present in Vercel and the
+>   CHECK admits `'starter'`. The "Starter is switched OFF on purpose" section
+>   below is history, not current state.
+> - **The free plan is fully retired** (`f2951b8`): row `is_active = false`,
+>   CHECK narrowed to `('starter','pro')`, and a `'free'` write is now rejected
+>   by the database. Confirmed by a rolled-back test insert.
+>
+> **Production is effectively empty**: 1 user, 0 subscriptions, 1 site, 0 credit
+> purchases. Every warning in this document about stranding or grandfathering
+> existing accounts is therefore moot — there are none.
 >
 > Purchased credits remain spendable without a subscription — a credit holder
 > keeps AI and translations, but gets no sites and no seats.
+>
+> ## 🔴 WHAT ACTUALLY BLOCKS LAUNCH NOW
+>
+> 1. **P0-1 / P0-2 below** — an invited editor still cannot edit. This is the
+>    product, and it is the only remaining functional blocker.
+> 2. **Supabase email template** still points at `/auth/callback`; magic links
+>    break cross-device. Console change, owner.
+> 3. **The core E2E has never run.** `RUN_RECOPYFAST_CORE_E2E=1` against a
+>    disposable project. Both P0 embed bugs shipped because nothing ran it.
+> 4. **15 dependency vulnerabilities (8 high)** reported by GitHub on push;
+>    one Dependabot PR is open.
+> 5. **Is the Socket.io server deployed?** `server/index.js` is a separate
+>    process Vercel cannot host, and `NEXT_PUBLIC_WS_URL` points at
+>    `wss://recopyfa.st:3001`. If nothing listens there, real-time sync is dead
+>    in production and no test would notice.
+> 6. **`server/node_modules` is tracked in git** — 2,130 files.
 >
 > ## ▶️ NEXT SESSION — nine builds, none started
 >
