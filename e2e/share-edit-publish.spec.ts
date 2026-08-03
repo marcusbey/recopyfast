@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 
 const RUN_CORE_E2E = process.env.RUN_RECOPYFAST_CORE_E2E === "1";
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
@@ -16,11 +16,42 @@ test.describe("share edit publish flow", () => {
   );
   test.describe.configure({ mode: "serial" });
 
+  // The default 30s is not enough now that each run clears a real device
+  // verification before it can edit anything: a code round trip, then the
+  // widget re-booting into staging mode, then the edit and publish assertions
+  // which each poll the database.
+  test.setTimeout(180_000);
+
   let supabase: SupabaseClient;
   let targetServer: Server;
 
+  /** Stands in for the emailed code. Stored plaintext, compared timing-safely. */
+  const STAGING_VERIFICATION_CODE = "424242";
+
   const siteId = randomUUID();
-  const siteToken = `e2e_site_${randomUUID()}`;
+  /**
+   * The site's API key, and the embed token derived from it.
+   *
+   * These are two different things and the test used to conflate them, putting
+   * the raw key in `data-site-token`. A site token is
+   * `<siteId>.<issuedAt>.<HMAC-SHA256(siteId.issuedAt, apiKey)>`, so the raw key
+   * is rejected as "Invalid site token" — which the visitor content fetch then
+   * reported as a 401 and the test reported as stale copy on the page.
+   *
+   * Built here rather than imported from `@/lib/security/site-auth` so this
+   * spec keeps asserting against the wire format rather than against whatever
+   * that module currently produces: if the token shape changes, this should
+   * fail rather than silently follow.
+   */
+  const siteApiKey = `e2e_key_${randomUUID()}`;
+  const siteToken = (() => {
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const payload = `${siteId}.${issuedAt}`;
+    const signature = createHmac("sha256", siteApiKey)
+      .update(payload)
+      .digest("hex");
+    return `${payload}.${signature}`;
+  })();
   const stagingToken = `e2e_staging_${randomUUID()}`;
   const editToken = `e2e_edit_${randomUUID()}`;
 
@@ -86,12 +117,68 @@ test.describe("share edit publish flow", () => {
     );
   });
 
+  /**
+   * Clear the emailed-code prompt when the widget raises one.
+   *
+   * A staging link is bound to a device now. `email_verified` alone stopped
+   * being sufficient in 9f1aa70, which closed the hole where forwarding an
+   * already-verified URL handed the recipient full access — verification is
+   * pinned to a User-Agent fingerprint captured at the moment the code is
+   * accepted, and pre-existing verified rows deliberately fail closed rather
+   * than being grandfathered.
+   *
+   * This test predated that change and seeded `email_verified: true` with none
+   * of the binding columns, so it sat on the code prompt until it timed out and
+   * reported the failure as "the staging banner never appeared". The banner was
+   * never going to appear: the widget was correctly refusing an unbound device.
+   *
+   * Driving the real prompt rather than forging `verified_user_agent_hash` is
+   * deliberate. Writing the hash would test our ability to reproduce a hashing
+   * function, and would keep passing if the widget stopped asking at all —
+   * which is precisely the regression worth catching.
+   *
+   * Conditional because only the staging-token path is device-bound; the
+   * edit-session token is a different credential and raises no prompt.
+   */
+  async function completeDeviceVerificationIfPrompted(page: Page) {
+    const codeInput = page.getByPlaceholder("000000");
+
+    // `isVisible()` resolves immediately and ignores a timeout, so using it
+    // here silently answered "no prompt" before the widget had rendered one,
+    // and the failure surfaced much later as a missing banner. `waitFor` is
+    // the call that actually waits.
+    const prompted = await codeInput
+      .waitFor({ state: "visible", timeout: 15_000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!prompted) {
+      return;
+    }
+
+    await codeInput.fill(STAGING_VERIFICATION_CODE);
+    await page.getByRole("button", { name: /verify & continue/i }).click();
+
+    // The prompt must actually go away. Asserting only that the banner appears
+    // would let a widget that renders both at once pass.
+    await expect(codeInput).toBeHidden({ timeout: 20_000 });
+
+    // Then let the widget finish re-initialising. Clearing verification puts it
+    // through a reboot into staging mode, and an edit started before that
+    // settles is discarded along with the pre-reboot DOM — which surfaced as
+    // typing that appeared to do nothing, with the snapshot at failure showing
+    // the page stripped of every piece of widget chrome.
+    await page.waitForLoadState("networkidle");
+  }
+
   async function exerciseShareFlow(
     page: Page,
     query: string,
     newText: string,
   ) {
     await page.goto(`${TARGET_URL}/?${query}`, { waitUntil: "domcontentloaded" });
+
+    await completeDeviceVerificationIfPrompted(page);
 
     await expect(page.locator("#rcf-staging-banner")).toBeVisible({
       timeout: 20_000,
@@ -120,8 +207,22 @@ test.describe("share edit publish flow", () => {
     await heading.click();
     await expect(page.locator(".rcf-actions-inline")).toBeVisible();
 
-    await page.keyboard.press("Control+A");
+    // Select the existing line from inside the element that the click above
+    // already focused, rather than reaching for a select-all.
+    //
+    // Four approaches failed here first, each differently, which is why this
+    // is spelled out: `Control+A` does not select on macOS, so the replacement
+    // was typed in front of the original and both were saved; `ControlOrMeta+A`
+    // selected at page scope and the typing never reached the field;
+    // `selectText()` shifted focus enough that the widget dropped the edit;
+    // and a triple-click re-entered edit mode, losing the caret entirely.
+    //
+    // End then Shift+Home is the one that stays inside the focused element and
+    // means the same thing on every platform.
+    await page.keyboard.press("End");
+    await page.keyboard.press("Shift+Home");
     await page.keyboard.type(newText);
+
     await page.locator(".rcf-btn-save").click();
 
     await expect
@@ -177,7 +278,7 @@ test.describe("share edit publish flow", () => {
       id: siteId,
       domain: `localhost:${TARGET_PORT}`,
       name: "ReCopyFast E2E Target",
-      api_key: siteToken,
+      api_key: siteApiKey,
     });
 
     if (siteError) {
@@ -189,7 +290,14 @@ test.describe("share edit publish flow", () => {
       site_id: siteId,
       access_type: "link",
       email: "e2e@recopyfast.local",
-      email_verified: true,
+      // Unverified on purpose. Seeding `true` without the binding columns
+      // produces a row the widget refuses, which is the correct behaviour and
+      // is what this test used to mistake for a broken banner. The code is
+      // stored in plaintext and compared with `timingSafeEqualString`, so a
+      // known value here is exactly what a real emailed code would be.
+      email_verified: false,
+      verification_code: STAGING_VERIFICATION_CODE,
+      verification_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       token: stagingToken,
       permissions: ["view", "edit", "publish"],
       label: "Core E2E",
