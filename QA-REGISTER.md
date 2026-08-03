@@ -35,6 +35,41 @@
 > Purchased credits remain spendable without a subscription — a credit holder
 > keeps AI and translations, but gets no sites and no seats.
 >
+> ## ✅ THE CORE E2E NOW RUNS, AND FOUND FOUR REAL DEFECTS
+>
+> `e2e/share-edit-publish.spec.ts` had never been executed. Running it took
+> four attempts before it reached anything real, and then found, in order:
+>
+> 1. **`edit_sessions` rejected `publish`** (23514). The API validates its input
+>    against `["view","edit","publish","admin"]` and accepts `publish`; the
+>    database refused it. Same shape as the Starter checkout that charged a card
+>    and wrote no subscription row.
+> 2. **`publish_staging_content_atomic` did not exist** — `POST
+>    /api/staging/publish` answered 500. Publishing, half of what the product
+>    promises, did not work at all.
+> 3. **The staging banner swallowed clicks on Save.** The inline toolbar flipped
+>    below its element only at the viewport edge, so anything near the top of a
+>    page put Save underneath the banner, which has the higher z-index.
+> 4. **Every CORS preflight threw.** `NextResponse.json({}, { status: 204 })`
+>    is invalid — 204 forbids a body — so ten OPTIONS handlers threw on every
+>    call. In the content route the exception was caught into a blanket 403, so
+>    the widget's cross-origin fetch was never sent and **published copy could
+>    not reach a visitor on any real customer site**. That is the defect
+>    `47e414e` set out to fix, still live, because its fixture never crossed an
+>    origin.
+>
+> Both tests now pass end to end, and the production preflight is verified: the
+> site's own origin gets 204, a stranger still gets 403.
+>
+> **Two lessons worth keeping.** `20260617000000` is recorded as applied and
+> none of its contents are in production; `supabase db push` cannot apply a file
+> containing a dollar-quoted function body plus GRANTs ("cannot insert multiple
+> commands into a prepared statement"). Assume any migration of that shape is
+> absent until checked. And the jest mock of `NextResponse` was more permissive
+> than the runtime, so the unit test asserting "OPTIONS returns 204" passed for
+> as long as the bug existed — a mock looser than the platform certifies bugs as
+> correct. It now refuses a body on 204/205/304.
+>
 > ## 🔴 WHAT ACTUALLY BLOCKS LAUNCH NOW
 >
 > 1. **P0-1 / P0-2 below** — an invited editor still cannot edit. This is the

@@ -64,3 +64,7 @@ supabase/.temp/
 
 # Supabase CLI scratch state, not project configuration
 supabase/.temp/
+
+# The server subproject ships its own dependency tree; it was committed by
+# accident (2130 files) and is not project source.
+**/node_modules/
