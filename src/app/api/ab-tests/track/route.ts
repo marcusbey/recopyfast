@@ -203,5 +203,5 @@ export async function POST(request: NextRequest) {
 }
 
 export async function OPTIONS() {
-  return withCors(NextResponse.json({}, { status: 204 }));
+  return withCors(new NextResponse(null, { status: 204 }));
 }

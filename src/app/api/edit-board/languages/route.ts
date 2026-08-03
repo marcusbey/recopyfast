@@ -535,5 +535,5 @@ export async function DELETE(request: NextRequest) {
 
 export async function OPTIONS(request: NextRequest) {
   const origin = request.headers.get("origin");
-  return withCors(NextResponse.json({}, { status: 204 }), origin);
+  return withCors(new NextResponse(null, { status: 204 }), origin);
 }

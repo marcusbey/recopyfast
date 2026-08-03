@@ -57,16 +57,50 @@ jest.mock('next/server', () => ({
       return JSON.parse(this.body || '{}')
     }
   },
-  NextResponse: {
-    json: (data, init) => ({
-      json: () => Promise.resolve(data),
-      status: init?.status || 200,
-      headers: new Headers(init?.headers),
-      ok: (init?.status || 200) >= 200 && (init?.status || 200) < 300,
-      _data: data,
-      _status: init?.status || 200,
-    }),
-  },
+  // Constructible, and faithful about which statuses may carry a body.
+  //
+  // This mock used to be a bare object exposing only `json`, which meant two
+  // things it should not have meant. `new NextResponse(null, ...)` was not
+  // possible at all, so route code written the correct way could not be
+  // tested; and `NextResponse.json({}, { status: 204 })` happily returned a
+  // 204 here while the real Response constructor throws "Invalid response
+  // status code 204" on it, because 204, 205 and 304 forbid a body.
+  //
+  // The consequence was not theoretical. Every CORS preflight written that way
+  // threw in production and was caught into a blanket 403, so the widget's
+  // cross-origin content fetch never happened — and the unit test asserting
+  // "returns 204" passed the whole time, because this mock said it did.
+  // A mock that is more permissive than the runtime does not just fail to
+  // catch a bug, it certifies the bug as correct.
+  NextResponse: Object.assign(
+    function NextResponse(body, init) {
+      const status = init?.status || 200
+      return {
+        json: () => Promise.resolve(body),
+        status,
+        headers: new Headers(init?.headers),
+        ok: status >= 200 && status < 300,
+        _data: body,
+        _status: status,
+      }
+    },
+    {
+      json: (data, init) => {
+        const status = init?.status || 200
+        if (status === 204 || status === 205 || status === 304) {
+          throw new TypeError(`Invalid response status code ${status}`)
+        }
+        return {
+          json: () => Promise.resolve(data),
+          status,
+          headers: new Headers(init?.headers),
+          ok: status >= 200 && status < 300,
+          _data: data,
+          _status: status,
+        }
+      },
+    },
+  ),
 }))
 
 // Mock Next.js router

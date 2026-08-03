@@ -221,5 +221,5 @@ export async function GET(
 }
 
 export async function OPTIONS() {
-  return withCors(NextResponse.json({}, { status: 204 }));
+  return withCors(new NextResponse(null, { status: 204 }));
 }
