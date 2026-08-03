@@ -46,7 +46,9 @@ const navGroups: NavGroup[] = [
       { label: "Overview", href: "/dashboard", icon: LayoutDashboard },
       { label: "Sites", href: "/dashboard/sites", icon: Globe },
       { label: "Content", href: "/dashboard/content", icon: FileText },
-      { label: "A/B Tests", href: "/dashboard/ab-tests", icon: FlaskConical },
+      // A/B Tests is deliberately absent. The feature is not being pursued, and
+      // the route it pointed at now 404s — see src/app/dashboard/ab-tests.
+      // The components and API routes are kept so the decision is reversible.
       { label: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
     ],
   },

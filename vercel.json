@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/generate-blog-post",
       "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/cron/ab-test-lifecycle",
-      "schedule": "*/5 * * * *"
     }
   ]
 }

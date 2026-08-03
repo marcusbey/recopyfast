@@ -132,7 +132,8 @@ describe("DashboardNavigation", () => {
       ["Overview"],
       ["Sites"],
       ["Content"],
-      ["A/B Tests"],
+      // A/B Tests is no longer in the nav at all — the feature is not being
+      // pursued and its route is disabled, so there is nothing here to gate.
       ["Analytics"],
       ["Teams"],
       ["Settings"],

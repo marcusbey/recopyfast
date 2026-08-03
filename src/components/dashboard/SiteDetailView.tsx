@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Card,
   CardContent,
@@ -25,10 +25,7 @@ import {
   FileText,
   Activity,
   History,
-  FlaskConical,
-  ArrowRight,
 } from "lucide-react";
-import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
@@ -95,19 +92,6 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
-  const [activeTestCount, setActiveTestCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    fetch(`/api/ab-tests?siteId=${site.id}`)
-      .then((res) => (res.ok ? res.json() : []))
-      .then((tests: Array<{ status: string }>) => {
-        setActiveTestCount(
-          tests.filter((t) => t.status === "active" || t.status === "running")
-            .length,
-        );
-      })
-      .catch(() => setActiveTestCount(0));
-  }, [site.id]);
   const status = site.status || "active";
   const statusDefinition = siteStatuses[status];
 
@@ -230,41 +214,10 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           on the header button. */}
       <SiteEditorsCard siteId={site.id} siteName={site.name} />
 
-      {/* A/B Testing Summary */}
-      <Card className="border-border">
-        <CardContent className="p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <FlaskConical
-                  className="h-5 w-5 text-primary"
-                  aria-hidden="true"
-                />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-foreground">
-                  A/B Copy Testing
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {activeTestCount === null
-                    ? "Loading..."
-                    : activeTestCount === 0
-                      ? "No active tests"
-                      : `${activeTestCount} active test${activeTestCount !== 1 ? "s" : ""}`}
-                </p>
-              </div>
-            </div>
-            {/* asChild keeps this a single <a>; wrapping a <button> in a link
-                nests two interactive elements and breaks screen readers. */}
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/dashboard/ab-tests?siteId=${site.id}`}>
-                Manage Tests
-                <ArrowRight className="ml-1 h-4 w-4" aria-hidden="true" />
-              </Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* The A/B testing card lived here. The feature is not being
+          pursued, its route is disabled, and a card whose only control
+          navigated to a 404 is worse than no card. The components and API
+          routes are intact, so restoring this is a revert. */}
 
       {/* Embed Script */}
       <Card className="border-border">
