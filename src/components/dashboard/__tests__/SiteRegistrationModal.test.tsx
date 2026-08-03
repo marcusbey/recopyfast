@@ -148,50 +148,53 @@ describe("SiteRegistrationModal", () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it("should accept valid domain formats", async () => {
-      const user = userEvent.setup();
-      const validDomains = [
-        "example.com",
-        "https://example.com",
-        "http://example.com",
-        "subdomain.example.com",
-      ];
+    /* One case per format rather than a loop inside a single `it`. Four full
+       render-type-submit cycles shared one 5s budget, which fits on an idle
+       machine and overruns as soon as the run competes for CPU with the other
+       suites — that is why this file failed only under a full `jest` run and
+       passed in isolation. Split, each format gets its own budget, and a
+       failure names the format that broke instead of the whole set.
+       `delay: null` drops userEvent's wait between keystrokes; the same key
+       sequence is dispatched, so the assertions are unchanged. */
+    it.each([
+      "example.com",
+      "https://example.com",
+      "http://example.com",
+      "subdomain.example.com",
+    ])("should accept %s as a valid domain format", async (domain) => {
+      const user = userEvent.setup({ delay: null });
 
-      for (const domain of validDomains) {
-        (global.fetch as jest.Mock).mockResolvedValueOnce({
-          ok: true,
-          json: async () => ({
-            site: {
-              id: "test-id",
-              domain: domain,
-              name: "Test Site",
-              created_at: "2024-01-01",
-            },
-            apiKey: "test-api-key",
-            siteToken: "test-token",
-            embedScript: '<script src="test.js"></script>',
-          }),
-        });
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          site: {
+            id: "test-id",
+            domain: domain,
+            name: "Test Site",
+            created_at: "2024-01-01",
+          },
+          apiKey: "test-api-key",
+          siteToken: "test-token",
+          embedScript: '<script src="test.js"></script>',
+        }),
+      });
 
-        render(<SiteRegistrationModal {...defaultProps} />);
+      render(<SiteRegistrationModal {...defaultProps} />);
 
-        const nameInput = screen.getByLabelText(/Website Name/i);
-        const domainInput = screen.getByLabelText(/Website URL/i);
+      const nameInput = screen.getByLabelText(/Website Name/i);
+      const domainInput = screen.getByLabelText(/Website URL/i);
 
-        await user.type(nameInput, "Test Site");
-        await user.type(domainInput, domain);
+      await user.type(nameInput, "Test Site");
+      await user.type(domainInput, domain);
 
-        const submitButton = screen.getByRole("button", {
-          name: /Register Site/i,
-        });
-        await user.click(submitButton);
+      const submitButton = screen.getByRole("button", {
+        name: /Register Site/i,
+      });
+      await user.click(submitButton);
 
-        await waitFor(() => {
-          expect(global.fetch).toHaveBeenCalled();
-        });
-
-        jest.clearAllMocks();
-      }
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled();
+      });
     });
 
     it("should clear field errors when user starts typing", async () => {
