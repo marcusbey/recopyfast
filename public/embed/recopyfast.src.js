@@ -123,6 +123,443 @@
     return div.innerHTML;
   }
 
+  // ==========================================
+  // EDITOR AUTH — client for /api/editor/*
+  // ==========================================
+
+  // @rcf-editor-auth:begin
+  /**
+   * The widget's half of the magic-code editor system.
+   *
+   * An enrolled editor signs in at recopyfast.com/edit, picks a site, and is
+   * redirected to it carrying `?rcf_handoff=<code>`. That code is the only thing
+   * able to cross the origin boundary: recopyfast.com cannot write localStorage
+   * on the customer's domain, so the durable credential has to be minted on this
+   * side. Spending the code here is what turns "arrived from the hub" into "is a
+   * known editor of this site, on this browser". Until something did that, every
+   * hub sign-in landed the user as an anonymous visitor.
+   *
+   * This client decides no policy. The server already settles every question
+   * worth settling — whether a grant is live, whether its holder is still an
+   * editor, whether the browser matches the one it was minted for — and answers
+   * with a `nextAction` that is obeyed here rather than second-guessed. That
+   * includes its third value, `refresh`, which does not mean "call
+   * refresh-grant": it means a sibling tab rotated the token being presented and
+   * wrote the replacement into the very storage entry this tab is reading, so
+   * the repair is to read it again. Treating `refresh` as a rejection is how a
+   * background tab ends up asking a signed-in editor for an emailed code.
+   *
+   * Built as a dependency-injected factory with no reference to `window`, so the
+   * suite exercises this exact source rather than a transcription of it — see
+   * src/__tests__/embed/editor-auth.test.ts, which slices the block out of this
+   * file between the markers above and below.
+   */
+  function createEditorAuthClient(deps) {
+    const api = deps.apiUrl || '';
+    const siteId = deps.siteId;
+    const doFetch = deps.fetch;
+    const local = deps.localStorage || null;
+    const session = deps.sessionStorage || null;
+    const loc = deps.location || null;
+    const hist = deps.history || null;
+    const now = deps.now || function() { return Date.now(); };
+    const warn = deps.warn || function() {};
+
+    const STORAGE_KEY = 'rcf_editor_grant:' + siteId;
+    const HANDOFF_PARAM = 'rcf_handoff';
+
+    /**
+     * A remembered grant runs seven days and an unremembered one twelve hours,
+     * and `handoff/redeem` returns the expiry without saying which it chose.
+     * Anything with more than a day left can only be the former — the one bit
+     * actually needed here, because it decides localStorage versus
+     * sessionStorage. `submit-code` states it outright and is believed instead.
+     */
+    const REMEMBERED_FLOOR_MS = 24 * 60 * 60 * 1000;
+
+    // Storage throws rather than returns null in a partitioned iframe or with
+    // cookies blocked outright, and an editor with storage disabled should be a
+    // visitor, not a stack trace on someone else's page.
+    function safeGet(store) {
+      if (!store) return null;
+      try { return store.getItem(STORAGE_KEY); } catch (e) { return null; }
+    }
+    function safeSet(store, value) {
+      if (!store) return;
+      try { store.setItem(STORAGE_KEY, value); } catch (e) {}
+    }
+    function safeRemove(store) {
+      if (!store) return;
+      try { store.removeItem(STORAGE_KEY); } catch (e) {}
+    }
+
+    function readStored() {
+      const raw = safeGet(local) || safeGet(session);
+      if (!raw) return null;
+
+      let parsed;
+      try { parsed = JSON.parse(raw); } catch (e) { return null; }
+      if (!parsed || typeof parsed.grant !== 'string' || !parsed.grant) return null;
+
+      return parsed;
+    }
+
+    /**
+     * One home per grant, never two. The other store is cleared on every write
+     * so a re-read can never resurrect a token that rotation has already
+     * superseded — which is precisely the replay the server logs and refuses.
+     */
+    function writeStored(record) {
+      const payload = JSON.stringify(record);
+      if (record.remembered) {
+        safeRemove(session);
+        safeSet(local, payload);
+      } else {
+        safeRemove(local);
+        safeSet(session, payload);
+      }
+      return record;
+    }
+
+    function clearStored() {
+      safeRemove(local);
+      safeRemove(session);
+    }
+
+    function toRecord(body, remembered) {
+      const expiresAt = typeof body.expiresAt === 'string' ? body.expiresAt : null;
+      const isRemembered = typeof remembered === 'boolean'
+        ? remembered
+        : !!(expiresAt && Date.parse(expiresAt) - now() > REMEMBERED_FLOOR_MS);
+
+      return {
+        grant: body.grant,
+        expiresAt: expiresAt,
+        email: typeof body.email === 'string' ? body.email : null,
+        permissions: Array.isArray(body.permissions) ? body.permissions : [],
+        remembered: isRemembered
+      };
+    }
+
+    async function post(path, body) {
+      const response = await doFetch(api + '/editor/' + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      let parsed = null;
+      try { parsed = await response.json(); } catch (e) { parsed = null; }
+
+      return { status: response.status, ok: response.ok, body: parsed || {} };
+    }
+
+    /**
+     * Take the handoff code out of the URL, and out of the address bar.
+     *
+     * Stripped before the redemption is even attempted rather than after it
+     * succeeds. The code is single-use and inert sixty seconds from now either
+     * way, so this is not what makes it safe — but a spent secret left sitting
+     * in the address bar is the kind of thing that gets copied into a chat
+     * window, and the route's own header asks the widget to remove it.
+     */
+    function consumeHandoffFromUrl() {
+      if (!loc || typeof loc.search !== 'string') return null;
+
+      const params = new URLSearchParams(loc.search);
+      const code = params.get(HANDOFF_PARAM);
+      if (!code) return null;
+
+      params.delete(HANDOFF_PARAM);
+      const search = params.toString();
+
+      if (hist && typeof hist.replaceState === 'function') {
+        hist.replaceState(
+          hist.state,
+          '',
+          loc.pathname + (search ? '?' + search : '') + (loc.hash || '')
+        );
+      }
+
+      return code;
+    }
+
+    async function redeem(code) {
+      const result = await post('handoff/redeem', { code: code, siteId: siteId });
+
+      if (!result.ok || result.body.ok !== true || !result.body.grant) {
+        return { ok: false, reason: result.body.reason || 'error' };
+      }
+
+      return { ok: true, record: writeStored(toRecord(result.body)) };
+    }
+
+    async function validate(record) {
+      const result = await post('validate-grant', { grant: record.grant, siteId: siteId });
+      const body = result.body;
+
+      if (body.valid === true) {
+        return {
+          valid: true,
+          email: typeof body.email === 'string' ? body.email : record.email,
+          permissions: Array.isArray(body.permissions) ? body.permissions : [],
+          expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : record.expiresAt,
+          shouldRefresh: body.shouldRefresh === true
+        };
+      }
+
+      // A 500, or a body with no verdict in it, is our outage rather than a
+      // judgement on the holder. Discarding the grant for one would sign every
+      // editor out of every site for as long as it lasted, and they would have
+      // to find their mailbox to come back.
+      if (result.status >= 500 || typeof body.reason !== 'string') {
+        return { valid: false, transient: true };
+      }
+
+      return {
+        valid: false,
+        reason: body.reason,
+        nextAction: typeof body.nextAction === 'string' ? body.nextAction : 'verify'
+      };
+    }
+
+    async function refresh(record) {
+      const result = await post('refresh-grant', {
+        grant: record.grant,
+        siteId: siteId,
+        rememberDevice: record.remembered === true
+      });
+      const body = result.body;
+
+      if (result.ok && body.ok === true && body.grant) {
+        return {
+          ok: true,
+          record: writeStored({
+            grant: body.grant,
+            expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
+            // Rotation slides the expiry; it does not change who the holder is.
+            // The route returns the token alone, so identity is carried across
+            // rather than dropped — otherwise the banner loses the editor's name
+            // every time the grant nears its end.
+            email: record.email,
+            permissions: record.permissions,
+            remembered: record.remembered === true
+          })
+        };
+      }
+
+      return {
+        ok: false,
+        reason: typeof body.reason === 'string' ? body.reason : 'error',
+        nextAction: typeof body.nextAction === 'string' ? body.nextAction : 'verify',
+        transient: result.status >= 500
+      };
+    }
+
+    /**
+     * The `refresh` verdict, handled as the server describes it.
+     *
+     * `nextActionFor` returns it for `replayed` and `raced`, which are the same
+     * event seen from two sides: a sibling tab rotated this grant and wrote the
+     * replacement into the shared entry. So re-read, and retry with whatever is
+     * there now. Calling refresh-grant instead would be asking to rotate a token
+     * already known to be superseded, and prompting would interrupt someone who
+     * never stopped being signed in.
+     *
+     * When storage still holds the token just presented, no sibling wrote
+     * anything, re-reading cannot help, and the caller falls through to `verify`.
+     */
+    function rereadAfterRotation(presented) {
+      const current = readStored();
+      if (!current || current.grant === presented.grant) return null;
+      return current;
+    }
+
+    async function settle(record, shouldRefresh) {
+      let current = writeStored(record);
+
+      if (shouldRefresh) {
+        let rotated;
+        try {
+          rotated = await refresh(current);
+        } catch (e) {
+          rotated = { ok: false, transient: true };
+        }
+
+        if (rotated.ok) {
+          current = rotated.record;
+        } else if (rotated.nextAction === 'refresh') {
+          const replacement = rereadAfterRotation(current);
+          if (replacement) current = replacement;
+        }
+        // Every other refusal is survivable and deliberately ignored: validate
+        // has just said this grant is good, so the session continues on it and
+        // the next load tries the slide again. Sliding an expiry is an
+        // optimisation; failing to do it is not grounds for a code prompt.
+      }
+
+      return {
+        status: 'authenticated',
+        grant: current.grant,
+        email: current.email,
+        permissions: current.permissions || [],
+        expiresAt: current.expiresAt,
+        remembered: current.remembered === true
+      };
+    }
+
+    async function resolveStored(record, allowRetry) {
+      let outcome;
+      try {
+        outcome = await validate(record);
+      } catch (e) {
+        // Offline, blocked, or DNS still resolving. Keep the credential.
+        return { status: 'offline' };
+      }
+
+      if (outcome.valid) {
+        return settle({
+          grant: record.grant,
+          expiresAt: outcome.expiresAt,
+          email: outcome.email,
+          permissions: outcome.permissions,
+          remembered: record.remembered === true
+        }, outcome.shouldRefresh);
+      }
+
+      if (outcome.transient) return { status: 'offline' };
+
+      if (outcome.nextAction === 'refresh' && allowRetry) {
+        const replacement = rereadAfterRotation(record);
+        // Once, and only when a sibling really did write something new.
+        if (replacement) return resolveStored(replacement, false);
+      }
+
+      clearStored();
+
+      if (outcome.nextAction === 'hide') {
+        // Not an editor of this site any more. Nothing to prompt for: a code
+        // would be refused, and asking for one would advertise that the address
+        // used to work here.
+        return { status: 'hidden', reason: outcome.reason };
+      }
+
+      return { status: 'needs-code', reason: outcome.reason };
+    }
+
+    /**
+     * Establish who is looking at this page, in the order the answers get
+     * cheaper: a handoff code if the hub just sent one, otherwise whatever this
+     * browser already holds.
+     */
+    async function boot(handoffCode) {
+      if (handoffCode) {
+        let redeemed;
+        try {
+          redeemed = await redeem(handoffCode);
+        } catch (e) {
+          redeemed = { ok: false, reason: 'network' };
+        }
+
+        if (redeemed.ok) return settle(redeemed.record, false);
+
+        // A spent, expired or wrong-site code is no reason to throw away a grant
+        // this browser already holds — the ordinary cause is a reloaded page or
+        // a re-shared handoff URL, and the editor behind it is still signed in.
+        warn('ReCopyFast: editor handoff was not accepted (' + redeemed.reason + ').');
+      }
+
+      const stored = readStored();
+      if (!stored) return { status: 'anonymous' };
+
+      return resolveStored(stored, true);
+    }
+
+    async function requestCode(email) {
+      let result;
+      try {
+        result = await post('request-code', { email: email, siteId: siteId });
+      } catch (e) {
+        return { ok: false, message: 'Network error. Please try again.' };
+      }
+
+      if (result.ok && result.body.ok === true) {
+        // Deliberately neutral, and repeated verbatim: the route answers
+        // identically whether or not the address can edit this site, and
+        // rewording it per outcome here would rebuild the oracle it closed.
+        return { ok: true, message: result.body.message || '' };
+      }
+
+      return {
+        ok: false,
+        message: result.body.message || 'Could not send a code. Please try again.'
+      };
+    }
+
+    async function submitCode(email, code, rememberDevice) {
+      let result;
+      try {
+        result = await post('submit-code', {
+          email: email,
+          code: code,
+          siteId: siteId,
+          rememberDevice: rememberDevice === true
+        });
+      } catch (e) {
+        return { ok: false, message: 'Network error. Please try again.' };
+      }
+
+      const body = result.body;
+
+      if (result.ok && body.ok === true && body.grant) {
+        const record = writeStored(toRecord(body, body.rememberDevice === true));
+        return {
+          ok: true,
+          identity: {
+            status: 'authenticated',
+            grant: record.grant,
+            email: record.email,
+            permissions: record.permissions,
+            expiresAt: record.expiresAt,
+            remembered: record.remembered
+          }
+        };
+      }
+
+      return {
+        ok: false,
+        message: body.message || "That code isn't valid. Request a new one."
+      };
+    }
+
+    return {
+      storageKey: STORAGE_KEY,
+      consumeHandoffFromUrl: consumeHandoffFromUrl,
+      boot: boot,
+      requestCode: requestCode,
+      submitCode: submitCode,
+      readStored: readStored,
+      clearStored: clearStored
+    };
+  }
+  // @rcf-editor-auth:end
+
+  const EditorAuth = createEditorAuthClient({
+    apiUrl: RECOPYFAST_API,
+    siteId: SITE_ID,
+    fetch: function(url, options) { return window.fetch(url, options); },
+    localStorage: (function() { try { return window.localStorage; } catch (e) { return null; } })(),
+    sessionStorage: (function() { try { return window.sessionStorage; } catch (e) { return null; } })(),
+    location: window.location,
+    history: window.history,
+    warn: function(message) { console.warn(message); }
+  });
+
+  // Read and stripped here, at parse time, so the code leaves the address bar
+  // before the first `await` anywhere in this file rather than after a redirect,
+  // a font wait and a network round trip.
+  const HANDOFF_CODE = EditorAuth.consumeHandoffFromUrl();
+
   // @rcf-inject:editing-rules
   //
   // `scripts/build-embed.mjs` replaces everything between these two markers with
@@ -409,6 +846,12 @@
       this.stagingAccess = null;
       this.editMode = false;
 
+      // Magic-code editor identity, once /api/editor/* has confirmed one. Kept
+      // apart from stagingAccess above because the two are different
+      // credentials with different lifetimes, and conflating them is how one
+      // would start being used where the other is required.
+      this.editorAuth = null;
+
       // A/B testing properties
       this.activeTests = [];
       this.variantAssignments = {};
@@ -427,6 +870,14 @@
         } else {
           this.editMode = false;
         }
+
+        // The magic-code path is independent of the staging link above — it is
+        // how an enrolled editor gets in without one — so it runs either way and
+        // a handoff code is always spent. It deliberately does not touch
+        // `editMode`: a staging session that has already decided this page's
+        // edit mode keeps that decision, and a grant on its own cannot grant
+        // one (see initEditorAuth).
+        await this.initEditorAuth();
 
         // Anything measured before web fonts land describes the fallback face,
         // and the two have different advance widths — capacity estimates and
@@ -533,6 +984,349 @@
         console.error('Staging validation error:', error);
         this.showStagingError('Failed to validate staging access.');
       }
+    }
+
+    /**
+     * Establish a magic-code editor identity for this page load.
+     *
+     * Costs nothing for an ordinary visitor: with no handoff code in the URL and
+     * no grant in storage there is nobody to identify, and the function returns
+     * before making a request. Everyone else gets exactly one boot round trip.
+     *
+     * Note what this does NOT do: it does not turn on `editMode`. A device grant
+     * proves identity to `/api/editor/*` and to nothing else — the content and
+     * publish endpoints authenticate through `validateEditorTokenFromRequest`,
+     * which knows staging tokens and edit-session tokens only. Enabling the
+     * editing affordances off the back of a grant would put a pencil on the page
+     * whose every save is refused by a server that never learnt this credential.
+     * So the identity is established, persisted and shown, and the editing
+     * surface stays off until the grant is accepted where content is written.
+     */
+    async initEditorAuth() {
+      if (!RECOPYFAST_API) return;
+
+      // Nothing to redeem and nothing remembered — the overwhelmingly common
+      // case, and it must not cost a visitor a request.
+      if (!HANDOFF_CODE && !EditorAuth.readStored()) return;
+
+      let outcome;
+      try {
+        outcome = await EditorAuth.boot(HANDOFF_CODE);
+      } catch (error) {
+        console.warn('ReCopyFast: editor sign-in check failed; continuing as a visitor.', error);
+        return;
+      }
+
+      if (outcome.status === 'authenticated') {
+        this.applyEditorIdentity(outcome);
+        return;
+      }
+
+      if (outcome.status === 'needs-code') {
+        await this.showEditorCodeUI();
+        return;
+      }
+
+      // 'hidden'   — no longer an editor here; prompting would only confirm that
+      //              the address once was one.
+      // 'offline'  — we could not reach the API. The grant is deliberately still
+      //              in storage; the next load asks again.
+      // 'anonymous'— nothing was ever stored.
+      // In each case the page stays exactly as a visitor sees it.
+    }
+
+    applyEditorIdentity(identity) {
+      this.editorAuth = identity;
+      this.showEditorBanner();
+    }
+
+    /**
+     * Name the signed-in editor, and say plainly what they can do.
+     *
+     * Deliberately not `showStagingBanner`: that toolbar offers Publish and Edit
+     * Board, both of which authenticate with a staging or edit-session token
+     * this holder does not have, so every button on it would answer 401.
+     */
+    showEditorBanner() {
+      if (!this.editorAuth) return;
+      if (document.querySelector('#rcf-editor-banner')) return;
+
+      if (!document.querySelector('#rcf-editor-banner-styles')) {
+        const style = document.createElement('style');
+        style.id = 'rcf-editor-banner-styles';
+        style.textContent = `
+          #rcf-editor-banner, #rcf-editor-banner * { box-sizing: border-box; }
+          #rcf-editor-banner {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 42px;
+            padding: 6px 14px;
+            background: hsl(200 18% 7% / 0.88);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border-bottom: 1px solid hsl(200 12% 21%);
+            color: hsl(200 22% 92%);
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 13px;
+            line-height: 1.4;
+          }
+          #rcf-editor-banner .rcf-editor-banner-email {
+            font-weight: 600;
+            color: hsl(174 48% 68%);
+          }
+          #rcf-editor-banner .rcf-editor-banner-note { color: hsl(200 12% 65%); }
+          #rcf-editor-banner .rcf-editor-banner-dismiss {
+            margin-left: auto;
+            flex: none;
+            background: transparent;
+            border: 1px solid hsl(200 12% 26%);
+            border-radius: 6px;
+            color: hsl(200 18% 82%);
+            font: inherit;
+            line-height: 1;
+            padding: 5px 9px;
+            cursor: pointer;
+          }
+          #rcf-editor-banner .rcf-editor-banner-dismiss:hover {
+            background: hsl(200 12% 16%);
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      const banner = document.createElement('div');
+      banner.id = 'rcf-editor-banner';
+      banner.setAttribute('role', 'region');
+      banner.setAttribute('aria-label', 'ReCopyFast editor session');
+
+      const identity = document.createElement('span');
+      identity.appendChild(document.createTextNode('Signed in as '));
+      const email = document.createElement('span');
+      email.className = 'rcf-editor-banner-email';
+      email.textContent = this.editorAuth.email || 'an editor';
+      identity.appendChild(email);
+      banner.appendChild(identity);
+
+      const note = document.createElement('span');
+      note.className = 'rcf-editor-banner-note';
+      note.textContent = '— in-page editing isn’t enabled for this site yet.';
+      note.title = 'Your sign-in is recognised. The content API does not yet accept editor device grants.';
+      banner.appendChild(note);
+
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'rcf-editor-banner-dismiss';
+      dismiss.textContent = 'Hide';
+      // Hides the bar for this page load only. It does not sign anyone out:
+      // discarding a credential is something the holder should have to mean.
+      dismiss.setAttribute('aria-label', 'Hide the ReCopyFast editor bar');
+      dismiss.onclick = function() {
+        if (banner.parentNode) banner.parentNode.removeChild(banner);
+      };
+      banner.appendChild(dismiss);
+
+      document.body.appendChild(banner);
+    }
+
+    /**
+     * The in-page code prompt, for a holder whose grant needs verifying again —
+     * an expired one, a revoked device, or a grant carried to a browser it was
+     * not minted for.
+     *
+     * That last case is the one to be careful about. Verification is bound to
+     * the browser that completed it, so a forwarded link or a copied token lands
+     * here and must stay here: closing this modal returns the page to what a
+     * visitor sees and nothing more. The only way through is a code delivered to
+     * a mailbox that is already on the site's editor allowlist.
+     */
+    showEditorCodeUI() {
+      const self = this;
+
+      return new Promise(function(resolve) {
+        const overlay = self.createOverlay();
+        const modal = document.createElement('div');
+        modal.className = 'rcf-modal';
+
+        const iconContainer = document.createElement('div');
+        iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
+
+        const icon = document.createElement('div');
+        icon.className = 'rcf-modal-icon';
+        icon.style.background = 'linear-gradient(135deg, rgba(45, 212, 191, 0.2) 0%, rgba(13, 148, 136, 0.2) 100%)';
+        icon.style.border = '1px solid rgba(45, 212, 191, 0.3)';
+        icon.textContent = '✉';
+
+        const title = document.createElement('h2');
+        title.className = 'rcf-modal-title';
+        title.textContent = 'Confirm it’s you';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'rcf-modal-subtitle';
+        subtitle.textContent = 'Enter the email you edit this site with and we’ll send a 6-digit code.';
+
+        iconContainer.appendChild(icon);
+        iconContainer.appendChild(title);
+        iconContainer.appendChild(subtitle);
+
+        const formContainer = document.createElement('div');
+        formContainer.style.cssText = 'margin-bottom: 20px;';
+
+        const emailLabel = document.createElement('label');
+        emailLabel.className = 'rcf-modal-label';
+        emailLabel.setAttribute('for', 'rcf-editor-email');
+        emailLabel.textContent = 'Email Address';
+
+        const emailInput = document.createElement('input');
+        emailInput.type = 'email';
+        emailInput.id = 'rcf-editor-email';
+        emailInput.className = 'rcf-modal-input';
+        emailInput.placeholder = 'you@example.com';
+
+        const codeLabel = document.createElement('label');
+        codeLabel.className = 'rcf-modal-label';
+        codeLabel.setAttribute('for', 'rcf-editor-code');
+        codeLabel.style.marginTop = '16px';
+        codeLabel.style.display = 'none';
+        codeLabel.textContent = 'Verification Code';
+
+        const codeInput = document.createElement('input');
+        codeInput.type = 'text';
+        codeInput.id = 'rcf-editor-code';
+        codeInput.className = 'rcf-code-input';
+        codeInput.placeholder = '000000';
+        codeInput.maxLength = 6;
+        codeInput.style.display = 'none';
+        codeInput.setAttribute('inputmode', 'numeric');
+        codeInput.setAttribute('autocomplete', 'one-time-code');
+
+        const noticeEl = document.createElement('p');
+        noticeEl.className = 'rcf-modal-subtitle';
+        noticeEl.style.margin = '12px 0 0';
+        noticeEl.style.display = 'none';
+
+        const errorEl = document.createElement('p');
+        errorEl.className = 'rcf-modal-error';
+
+        formContainer.appendChild(emailLabel);
+        formContainer.appendChild(emailInput);
+        formContainer.appendChild(codeLabel);
+        formContainer.appendChild(codeInput);
+        formContainer.appendChild(noticeEl);
+        formContainer.appendChild(errorEl);
+
+        const rememberRow = document.createElement('label');
+        rememberRow.style.cssText = 'display: flex; align-items: center; gap: 8px; margin-bottom: 20px; color: #cbd5e1; font-size: 13px; cursor: pointer;';
+        const rememberInput = document.createElement('input');
+        rememberInput.type = 'checkbox';
+        rememberInput.id = 'rcf-editor-remember';
+        const rememberText = document.createElement('span');
+        rememberText.textContent = 'Remember this device for 7 days';
+        rememberRow.appendChild(rememberInput);
+        rememberRow.appendChild(rememberText);
+
+        const submitBtn = document.createElement('button');
+        submitBtn.className = 'rcf-modal-btn rcf-modal-btn-primary';
+        submitBtn.style.marginBottom = '12px';
+        submitBtn.textContent = 'Send code';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
+        cancelBtn.textContent = 'Continue as a visitor';
+
+        modal.appendChild(iconContainer);
+        modal.appendChild(formContainer);
+        modal.appendChild(rememberRow);
+        modal.appendChild(submitBtn);
+        modal.appendChild(cancelBtn);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+        emailInput.focus();
+
+        let stage = 'email';
+
+        function close() {
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          resolve();
+        }
+
+        function showError(message) {
+          errorEl.textContent = message;
+          errorEl.style.display = 'block';
+        }
+
+        codeInput.oninput = function() {
+          codeInput.value = codeInput.value.replace(/[^0-9]/g, '').slice(0, 6);
+        };
+
+        const submit = async function() {
+          errorEl.style.display = 'none';
+          const email = emailInput.value.trim();
+
+          if (!email || email.indexOf('@') < 1) {
+            showError('Enter a valid email address.');
+            return;
+          }
+
+          submitBtn.disabled = true;
+
+          if (stage === 'email') {
+            submitBtn.textContent = 'Sending…';
+            const sent = await EditorAuth.requestCode(email);
+            submitBtn.disabled = false;
+
+            if (!sent.ok) {
+              submitBtn.textContent = 'Send code';
+              showError(sent.message);
+              return;
+            }
+
+            // The server's message is neutral by design — it says the same thing
+            // whether or not the address can edit this site. Passed through
+            // unchanged rather than rewritten into "code sent!", which would
+            // claim more than the response does.
+            stage = 'code';
+            noticeEl.textContent = sent.message;
+            noticeEl.style.display = 'block';
+            codeLabel.style.display = 'block';
+            codeInput.style.display = 'block';
+            submitBtn.textContent = 'Verify';
+            codeInput.focus();
+            return;
+          }
+
+          const code = codeInput.value.trim();
+          if (code.length !== 6) {
+            submitBtn.disabled = false;
+            showError('Enter the 6-digit code.');
+            return;
+          }
+
+          submitBtn.textContent = 'Verifying…';
+          const result = await EditorAuth.submitCode(email, code, rememberInput.checked);
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Verify';
+
+          if (!result.ok) {
+            showError(result.message);
+            return;
+          }
+
+          self.applyEditorIdentity(result.identity);
+          close();
+        };
+
+        submitBtn.onclick = submit;
+        cancelBtn.onclick = close;
+
+        emailInput.onkeydown = function(e) { if (e.key === 'Enter') submit(); };
+        codeInput.onkeydown = function(e) { if (e.key === 'Enter') submit(); };
+        overlay.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
+      });
     }
 
     showEmailCaptureUI() {
