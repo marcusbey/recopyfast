@@ -33,6 +33,7 @@ import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { ShareButton } from "./ShareButton";
+import { SiteEditorsCard } from "./SiteEditorsCard";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 
 export type { SiteStatus };
@@ -224,6 +225,10 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         />
         <StatTile label="Last Activity" value={lastActivity} icon={Activity} />
       </div>
+
+      {/* Editors — the durable allowlist, distinct from the staging share link
+          on the header button. */}
+      <SiteEditorsCard siteId={site.id} siteName={site.name} />
 
       {/* A/B Testing Summary */}
       <Card className="border-border">
