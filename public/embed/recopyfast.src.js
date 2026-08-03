@@ -20,18 +20,6 @@
         return null;
       }
     }
-    function deriveWsUrl() {
-      if (!script || !script.src) return null;
-      try {
-        var url = new URL(script.src);
-        if (url.hostname === 'localhost' && url.port === '3000') {
-          url.port = '4001';
-        }
-        return url.origin;
-      } catch (e) {
-        return null;
-      }
-    }
     if (!window.RECOPYFAST_API) {
       var apiAttr = script && script.getAttribute('data-api-url');
       if (apiAttr) {
@@ -46,11 +34,15 @@
       var wsAttr = script && script.getAttribute('data-ws-url');
       if (wsAttr) {
         window.RECOPYFAST_WS = wsAttr;
-      } else if (deriveWsUrl()) {
-        window.RECOPYFAST_WS = deriveWsUrl();
-      } else {
-        console.warn('ReCopyFast: RECOPYFAST_WS is not set. Add a data-ws-url attribute to the script tag or set window.RECOPYFAST_WS before loading this script.');
       }
+      // Deliberately no derived fallback, and no warning.
+      //
+      // Guessing an endpoint from the script origin produced a URL that looked
+      // configured and was not, so the widget connected to nothing and retried
+      // — the absence of a real-time server presented as a flaky one. Real-time
+      // is opt-in now: set data-ws-url, or window.RECOPYFAST_WS, or it does not
+      // run. Nothing is wrong with a site that has neither; editing and
+      // publishing work entirely over HTTP.
     }
   })();
   const RECOPYFAST_API = window.RECOPYFAST_API;
@@ -2031,6 +2023,19 @@
       cancelBtn.onclick = close;
       overlay.onclick = function(e) { if (e.target === overlay) close(); };
 
+      // Disabled until the pending-changes preview below has answered.
+      //
+      // The confirm handler is attached after that fetch, so for as long as it
+      // was in flight this button rendered enabled and did nothing at all —
+      // press it in that window and the click landed on an element with no
+      // onclick, silently. That is the dead-control failure 0bbb3de spent a
+      // commit removing, reintroduced by ordering rather than by omission, and
+      // it is exactly the kind of thing a slow connection makes routine.
+      //
+      // Disabling it states the truth: the dialog is not ready yet.
+      confirmBtn.disabled = true;
+      confirmBtn.style.opacity = '0.5';
+
       // Fetch pending changes
       try {
         const publishPreviewUrl =
@@ -2041,18 +2046,25 @@
         const response = await fetch(publishPreviewUrl);
         const result = await response.json();
 
-        if (result.success) {
-          if (result.pendingChanges === 0) {
-            statusText.textContent = '✅ No pending changes to publish.';
-            confirmBtn.disabled = true;
-            confirmBtn.style.opacity = '0.5';
-          } else {
+        if (result.success && result.pendingChanges === 0) {
+          statusText.textContent = '✅ No pending changes to publish.';
+          // Stays disabled: there is genuinely nothing to publish.
+        } else {
+          if (result.success) {
             statusText.textContent = '📝 ' + result.pendingChanges + ' element(s) with changes';
           }
+          confirmBtn.disabled = false;
+          confirmBtn.style.opacity = '';
         }
       } catch (error) {
         statusText.textContent = 'Failed to load pending changes.';
         statusText.style.color = '#ef4444';
+        // Re-enabled deliberately. Failing to *preview* the pending changes
+        // does not mean there are none, and the publish request is authorised
+        // and counted server-side regardless. Leaving it disabled would turn a
+        // cosmetic lookup failure into an inability to ship copy.
+        confirmBtn.disabled = false;
+        confirmBtn.style.opacity = '';
       }
 
       confirmBtn.onclick = async function() {
@@ -2652,6 +2664,24 @@
 
     async establishConnection() {
       const self = this;
+
+      // No endpoint, no connection — and crucially, no socket.io download
+      // either.
+      //
+      // Real-time is an enhancement here, not the delivery mechanism: published
+      // copy reaches a visitor through GET /api/content/:siteId on init, which
+      // is what 47e414e established. So when nothing is listening, the right
+      // behaviour is silence rather than five reconnection attempts on every
+      // visitor page load of every customer site, plus the transfer of a
+      // socket.io client that will not be used.
+      //
+      // This matters right now because nothing is listening: server/index.js is
+      // a separate Express process that Vercel cannot host, and the configured
+      // endpoint refuses connections.
+      if (!RECOPYFAST_WS) {
+        return;
+      }
+
       try {
         const io = await this.loadSocketIO();
 
