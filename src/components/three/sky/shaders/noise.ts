@@ -111,8 +111,16 @@ export const FBM_3D = /* glsl */ `
     float amp = 0.5;
     for (int i = 0; i < 5; i++) {
       if (i >= octaves) break;
-      value += amp * snoise(p);
-      p *= 2.03;
+      float n = snoise(p);
+      value += amp * n;
+      /* Each octave is displaced by the one below it before being sampled —
+         a domain warp that costs nothing because the offset is a value the
+         loop already computed. Plain octave stacking lines every feature up on
+         the same lattice, which reads as regular ripples once it is stretched
+         across a sky; folding the lattice by an amount that itself varies is
+         what turns ripples into billows. The offsets differ per axis so the
+         fold has no single diagonal to it. */
+      p = p * 2.03 + vec3(n * 0.26, n * 0.11, -n * 0.26);
       amp *= 0.5;
     }
     return value;
@@ -127,10 +135,18 @@ export const FBM_3D = /* glsl */ `
   /* Vertical density profile through the cloud slab. Real cumulus have flat,
      sharply-cut bases and billowy tops, so the gradient is asymmetric: it opens
      fast at the bottom and tapers slowly toward the top. A symmetric falloff is
-     the single most common reason procedural clouds read as fog. */
-  float heightProfile(float h) {
-    float base = remap(h, 0.0, 0.12);
-    float top  = 1.0 - remap(h, 0.45, 1.0);
+     the single most common reason procedural clouds read as fog.
+
+     The swell argument is how much cloud this column holds, 0..1, and both
+     ends of the taper rise with it. A thin column stays a shallow patch on the
+     base; a dense one towers to the top of the slab. Giving every column the
+     same ceiling — which a one-argument profile has no choice but to do — is
+     what flattens a cumulus field into a single stretched sheet, because the
+     silhouette is then entirely horizontal and carries no vertical shape at
+     all. */
+  float heightProfile(float h, float swell) {
+    float base = remap(h, 0.0, 0.07);
+    float top  = 1.0 - remap(h, mix(0.14, 0.52, swell), mix(0.42, 1.0, swell));
     return base * top;
   }
 

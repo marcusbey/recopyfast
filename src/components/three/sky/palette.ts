@@ -65,9 +65,43 @@ export const SUNSET_SUN = new THREE.Color(1.0, 0.84, 0.62);
 export const SUNSET_START = 0.55;
 export const SUNSET_END = 0.92;
 
-/** Cloud slab in world units. Bottom is flat, top is where billowing tapers. */
-export const CLOUD_BOTTOM = 12.0;
-export const CLOUD_TOP = 38.0;
+/**
+ * Cloud slab in world units. Bottom is flat, top is where billowing tapers.
+ *
+ * What matters is not the height but the height against the width of a cloud,
+ * which the shader's field scale puts at about 25 units. That ratio is the
+ * angle a cloud subtends. At the old base of 12 against 48-unit clouds the
+ * nearest one was wider than it was far away and filled most of the hero, so
+ * there was no perspective left in the field at all — every cloud on screen was
+ * the same enormous near one, which is the other half of why this read as being
+ * inside the weather rather than under it. At 30 against 25-unit clouds the
+ * nearest reads at about thirty degrees and the field recedes properly, small
+ * cumulus along the bottom of the frame and larger ones overhead.
+ *
+ * The slab is deliberately half as thick as a cloud is wide. Cumulus humilis —
+ * the flat-bottomed fair-weather kind — are wider than they are tall; a slab as
+ * thick as the clouds are wide grows towers instead.
+ */
+export const CLOUD_BOTTOM = 30.0;
+export const CLOUD_TOP = 43.0;
+
+/* ---------------------------------------------------------------------------
+ * Coverage gate.
+ *
+ * The volumetric shader samples a wide, slow noise field and only grows cloud
+ * where that field clears a floor. The floor is therefore the dial for how much
+ * sky is open, and moving it is what disperses the deck as the page scrolls:
+ * raising it shrinks every cloud toward its own core, so the gaps between them
+ * widen rather than the whole field fading out.
+ *
+ * These are the two ends of that travel, not arbitrary limits. DENSE is a
+ * summer afternoon with distinct cumulus and blue between them — the sky the
+ * hero opens on. CLEAR is the same weather an hour later: a few survivors, most
+ * of the frame open. Going much above CLEAR empties the sky entirely, which
+ * loses the parallax that makes the backdrop feel like depth at all.
+ * ------------------------------------------------------------------------- */
+export const CLOUD_GATE_DENSE = 0.52;
+export const CLOUD_GATE_CLEAR = 0.72;
 
 /**
  * Blur radius, in CSS pixels, of the `.glass` panes that sit over this sky.

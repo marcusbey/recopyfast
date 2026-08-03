@@ -188,6 +188,8 @@
   --font-sans:
     var(--font-instrument-sans), -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  /* Display face for marketing headlines only — never UI chrome or prose. */
+  --font-display: var(--font-bricolage), var(--font-sans);
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
 
   --radius-xs: calc(var(--radius) - 8px);

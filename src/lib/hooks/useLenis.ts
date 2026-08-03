@@ -4,28 +4,63 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import Lenis from "lenis";
 
 export interface UseLenisReturn {
+  /**
+   * Progress as of the last render — deliberately not a live value.
+   *
+   * Reading this does not subscribe the caller to anything, and scrolling does
+   * not re-render whoever holds it. Anything that needs progress at frame rate
+   * must call `readScrollProgress()` from inside its own animation loop, which
+   * is both cheaper and finer-grained than a prop could ever be. See the note
+   * on `publish` below for why.
+   */
   scrollProgress: number;
   lenis: Lenis | null;
   scrollTo: (target: string | number | HTMLElement) => void;
 }
 
 /**
- * Progress is reported in discrete steps rather than continuously.
+ * Scroll progress lives in a module-scope variable rather than React state.
  *
- * `scrollProgress` is consumed as a React prop and src/app/page.tsx is a client
- * component, so every distinct value re-renders the entire landing tree. Lenis
- * emits a scroll event per animation frame, which meant roughly 60 full-tree
- * re-renders per second while scrolling — the visible instability on the
- * marketing page.
+ * It used to be state, quantised to 200 steps to limit how often it changed.
+ * That was still one render of the entire landing tree per animation frame on
+ * any scroll faster than a crawl, because 200 steps across a 8,400px page is a
+ * step every 42px and a flick moves further than that in a single frame. A
+ * profile of a six-second scroll measured 204 commits costing 3,371ms of React
+ * render time — more than half the wall clock spent re-rendering a tree whose
+ * output never changed, which is what made the page judder.
  *
- * 200 steps is finer than a single device pixel of progress on any realistic
- * page height, so the backdrop animation looks identical while a render happens
- * only when the quantised bucket actually changes.
+ * Nothing about the sky needs React. It is a shader reading uniforms inside a
+ * `useFrame` callback, so it can pull the current value at exactly the moment
+ * it needs it. Publishing here and pulling there removes the render entirely
+ * and, as a bonus, gives the shader the unquantised value.
  */
-const PROGRESS_STEPS = 200;
+let liveProgress: number | null = null;
+
+/** Notified on every scroll event, for consumers with no frame loop of their own. */
+const subscribers = new Set<(progress: number) => void>();
+
+/**
+ * Current scroll progress, 0 at the top of the page and 1 at the bottom, or
+ * `null` when no Lenis instance is mounted. The null case matters: it lets a
+ * consumer tell "the page is at the top" apart from "nothing is driving scroll
+ * on this page", and fall back to a static value rather than pinning itself to
+ * zero.
+ */
+export function readScrollProgress(): number | null {
+  return liveProgress;
+}
+
+/** Returns an unsubscribe function. Safe to call before Lenis mounts. */
+export function subscribeScrollProgress(
+  callback: (progress: number) => void,
+): () => void {
+  subscribers.add(callback);
+  return () => {
+    subscribers.delete(callback);
+  };
+}
 
 export function useLenis(): UseLenisReturn {
-  const [scrollProgress, setScrollProgress] = useState(0);
   const [lenis, setLenis] = useState<Lenis | null>(null);
   const instanceRef = useRef<Lenis | null>(null);
 
@@ -49,12 +84,9 @@ export function useLenis(): UseLenisReturn {
 
     instanceRef.current = lenisInstance;
 
-    let lastStep = -1;
     function onScroll({ progress }: { progress: number }) {
-      const step = Math.round(progress * PROGRESS_STEPS);
-      if (step === lastStep) return;
-      lastStep = step;
-      setScrollProgress(step / PROGRESS_STEPS);
+      liveProgress = progress;
+      for (const callback of subscribers) callback(progress);
     }
 
     lenisInstance.on("scroll", onScroll);
@@ -78,6 +110,10 @@ export function useLenis(): UseLenisReturn {
       lenisInstance.off("scroll", onScroll);
       lenisInstance.destroy();
       instanceRef.current = null;
+      // Back to "nobody is driving scroll", so a consumer that outlives this
+      // hook falls back rather than freezing at wherever the page happened to
+      // be when it unmounted.
+      liveProgress = null;
     };
   }, []);
 
@@ -88,5 +124,5 @@ export function useLenis(): UseLenisReturn {
     instanceRef.current?.scrollTo(target);
   }, []);
 
-  return { scrollProgress, lenis, scrollTo };
+  return { scrollProgress: liveProgress ?? 0, lenis, scrollTo };
 }

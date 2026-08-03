@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import type { MotionValue } from "framer-motion";
 import { CheckCircle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { FloatingEditorToolbar, UnsavedChangesBar } from "@/components/editor";
 import { useFloatingPosition } from "@/lib/hooks/useFloatingPosition";
@@ -69,7 +70,23 @@ const fadeVariants = {
   exit: { opacity: 0, transition: { duration: 0.12 } },
 };
 
-export default function InteractiveHero() {
+interface InteractiveHeroProps {
+  /**
+   * 0→1 progress from the sticky wrapper's scroll track. When provided, page
+   * scroll drives the demo site's own scroll position — the fake browser stays
+   * pinned while the reader scrolls through the demo page, and the landing
+   * page resumes once the demo bottoms out. Subscribed to directly rather than
+   * consumed as React state: it changes every frame while scrolling.
+   */
+  demoScrollProgress?: MotionValue<number>;
+  /** Fill the parent's height instead of the fixed marketing-page height. */
+  fillHeight?: boolean;
+}
+
+export default function InteractiveHero({
+  demoScrollProgress,
+  fillHeight = false,
+}: InteractiveHeroProps) {
   const [currentSite, setCurrentSite] = useState(0);
   const [slideDirection, setSlideDirection] = useState(0);
 
@@ -119,6 +136,28 @@ export default function InteractiveHero() {
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** What the element said when editing started, so Esc can put it back. */
   const editStartText = useRef<{ id: string; text: string } | null>(null);
+
+  /** The active site's scrollable viewport, re-bound on every site switch. */
+  const siteScrollRef = useRef<HTMLDivElement | null>(null);
+  /** Last progress seen, so a freshly mounted site starts at the right depth. */
+  const latestDemoProgress = useRef(0);
+
+  const applyDemoScroll = useCallback((progressValue: number) => {
+    const el = siteScrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    if (maxScroll > 0) el.scrollTop = progressValue * maxScroll;
+  }, []);
+
+  useEffect(() => {
+    if (!demoScrollProgress) return;
+    latestDemoProgress.current = demoScrollProgress.get();
+    applyDemoScroll(latestDemoProgress.current);
+    return demoScrollProgress.on("change", (value) => {
+      latestDemoProgress.current = value;
+      applyDemoScroll(value);
+    });
+  }, [demoScrollProgress, applyDemoScroll]);
 
   const prefersReducedMotion = useReducedMotion();
   const currentSiteData = demoSites[currentSite];
@@ -436,7 +475,11 @@ export default function InteractiveHero() {
   return (
     // `data-demo-surface` opts this subtree out of the global border-colour
     // reset — see the note beside it in globals.css.
-    <div className="relative" data-demo-surface ref={containerRef}>
+    <div
+      className={`relative ${fillHeight ? "flex h-full min-h-0 flex-col" : ""}`}
+      data-demo-surface
+      ref={containerRef}
+    >
       <FloatingEditorToolbar
         position={toolbarPosition}
         styles={
@@ -535,13 +578,29 @@ export default function InteractiveHero() {
       </div>
 
       {/* The fake browser */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+      <div
+        className={`overflow-hidden rounded-2xl border border-slate-200 bg-white ${
+          fillHeight ? "flex min-h-0 flex-1 flex-col" : ""
+        }`}
+      >
         <BrowserChrome domain={currentSiteData.domain} />
 
-        <div className="relative h-[640px] overflow-hidden md:h-[740px]">
+        <div
+          className={`relative overflow-hidden ${
+            fillHeight ? "min-h-0 flex-1" : "h-[640px] md:h-[740px]"
+          }`}
+        >
           <AnimatePresence custom={slideDirection} initial={false} mode="wait">
             <motion.div
               key={currentSiteData.id}
+              ref={(node: HTMLDivElement | null) => {
+                siteScrollRef.current = node;
+                // A newly mounted site (site switch mid-track) starts at the
+                // depth the page scroll says it should be, not at its top.
+                if (node && demoScrollProgress) {
+                  applyDemoScroll(latestDemoProgress.current);
+                }
+              }}
               custom={slideDirection}
               variants={variants}
               initial="enter"

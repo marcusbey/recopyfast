@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
-import { Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import {
+  Bricolage_Grotesque,
+  Instrument_Sans,
+  JetBrains_Mono,
+} from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 
@@ -8,6 +12,10 @@ import { AuthProvider } from "@/contexts/AuthContext";
  * the Inter default it replaces — narrower, with a distinctive single-storey
  * `g` and open apertures that hold up at 12–13px in dense tables.
  *
+ * Bricolage Grotesque is the display voice: marketing headlines only. It has
+ * the weight range (up to 800) and the slightly off-kilter cuts that let a
+ * hero headline carry a page without a container doing the work for it.
+ *
  * JetBrains Mono is reserved for machine-generated strings: site tokens,
  * element IDs, embed snippets. It is never used for prose.
  */
@@ -15,6 +23,12 @@ const instrumentSans = Instrument_Sans({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-instrument-sans",
+});
+
+const bricolageGrotesque = Bricolage_Grotesque({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-bricolage",
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -108,7 +122,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${instrumentSans.variable} ${jetbrainsMono.variable}`}
+      className={`${instrumentSans.variable} ${bricolageGrotesque.variable} ${jetbrainsMono.variable}`}
     >
       <head>
         {/*

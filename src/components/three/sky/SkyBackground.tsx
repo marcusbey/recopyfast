@@ -1,7 +1,11 @@
 "use client";
 
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
+import {
+  readScrollProgress,
+  subscribeScrollProgress,
+} from "@/lib/hooks/useLenis";
 import SkyLayered from "./SkyLayered";
 import SkyVolumetric from "./SkyVolumetric";
 
@@ -18,6 +22,10 @@ import SkyVolumetric from "./SkyVolumetric";
  *   - device pixel ratio is capped (a 3x phone would otherwise shade 9x the pixels)
  *   - the volumetric path unmounts entirely below the fold
  *   - `prefers-reduced-motion` switches the loop off after a single frame
+ *
+ * A fourth thing matters more than all of them: scroll never reaches React.
+ * Progress is published by useLenis and pulled here inside the frame loop, so
+ * scrolling the page costs no renders at all. See Scene.
  */
 
 /**
@@ -27,20 +35,38 @@ import SkyVolumetric from "./SkyVolumetric";
  * behind panes that blur at 32px.
  */
 const MAX_DPR_VOLUMETRIC = 0.72;
-const MAX_DPR_LAYERED = 1.5;
+/**
+ * The layered path covers the whole page rather than one viewport, so it is on
+ * screen for most of a visit and its resolution is the single largest fixed
+ * cost in the backdrop. 1.5 shaded 4.7 megapixels through six noise layers; at
+ * 1.2 that is 3.0, and against a soft subject behind panes blurring at 32px the
+ * difference does not survive being looked at.
+ */
+const MAX_DPR_LAYERED = 1.2;
 
 const FADE_PER_SECOND = 2.4;
 
+/**
+ * Reduced motion runs the canvas on demand, so nothing redraws unless something
+ * asks it to. Scroll still has to move the sky — the sunset at the bottom of the
+ * page is scroll-driven and freezing it would leave those readers on a blue sky
+ * under an orange call to action. This is how coarsely it moves: 40 steps over
+ * the page is visible progress at 40 redraws for the whole visit, rather than
+ * one per frame, and stepping is the honest behaviour to give someone who has
+ * asked for less animation.
+ */
+const REDUCED_MOTION_STEPS = 40;
+
 interface SceneProps {
   mouseRef: React.RefObject<{ x: number; y: number }>;
-  scrollProgress: number;
+  fallbackProgress: number;
   wantsVolumetric: boolean;
   isAnimating: boolean;
 }
 
 function Scene({
   mouseRef,
-  scrollProgress,
+  fallbackProgress,
   wantsVolumetric,
   isAnimating,
 }: SceneProps) {
@@ -48,10 +74,22 @@ function Scene({
      and driving it through setState would re-render the tree ~25 times per fade
      for no benefit. Only the final mount/unmount decision touches React. */
   const fade = useRef({ value: wantsVolumetric ? 1 : 0 });
+  /* Scroll travels the same way, and for a far larger reason. It used to arrive
+     as a number prop, so every step of the scroll re-rendered the landing tree
+     and this scene under it: a profiled six-second scroll spent 3,371ms across
+     204 React commits producing output that never changed, which is what made
+     the page judder. Resolved once per frame into a box both shaders read, it
+     costs a property lookup. */
+  const scroll = useRef({ value: fallbackProgress });
   const [isVolumetricMounted, setIsVolumetricMounted] =
     useState(wantsVolumetric);
 
   useFrame((_, delta) => {
+    /* Null means nothing is driving scroll on this page, so the prop is all
+       there is to go on. A page that mounts this sky without useLenis then gets
+       a correctly positioned one instead of being pinned to the top. */
+    scroll.current.value = readScrollProgress() ?? fallbackProgress;
+
     const target = wantsVolumetric ? 1 : 0;
     const step = FADE_PER_SECOND * Math.min(delta, 0.1);
 
@@ -73,13 +111,13 @@ function Scene({
     <>
       <SkyLayered
         mouseRef={mouseRef}
-        scrollProgress={scrollProgress}
+        scroll={scroll.current}
         isAnimating={isAnimating}
       />
       {isVolumetricMounted && (
         <SkyVolumetric
           mouseRef={mouseRef}
-          scrollProgress={scrollProgress}
+          scroll={scroll.current}
           fade={fade.current}
           isAnimating={isAnimating}
         />
@@ -88,7 +126,38 @@ function Scene({
   );
 }
 
+/**
+ * Requests a redraw when scroll moves, for the reduced-motion case only.
+ *
+ * With `frameloop="demand"` the canvas draws once and then waits. Previously a
+ * changing prop invalidated it as a side effect of re-rendering; now that scroll
+ * bypasses React entirely, nothing would ever ask for the next frame. This asks,
+ * at a coarse step, so the sky still follows the page down without the loop
+ * running free.
+ */
+function InvalidateOnScroll() {
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    let lastStep = -1;
+    return subscribeScrollProgress((progress) => {
+      const step = Math.round(progress * REDUCED_MOTION_STEPS);
+      if (step === lastStep) return;
+      lastStep = step;
+      invalidate();
+    });
+  }, [invalidate]);
+
+  return null;
+}
+
 interface SkyBackgroundProps {
+  /**
+   * Scroll progress for pages that do not run Lenis. When Lenis is driving,
+   * that live value wins and this is never read — deliberately, because a
+   * number prop is a render per scroll step and this backdrop is behind the
+   * entire landing page.
+   */
   scrollProgress?: number;
   /** Element that decides when the expensive path is worth running. */
   heroSelector?: string;
@@ -171,10 +240,11 @@ export default function SkyBackground({
       >
         <Scene
           mouseRef={mouseRef}
-          scrollProgress={scrollProgress}
+          fallbackProgress={scrollProgress}
           wantsVolumetric={wantsVolumetric}
           isAnimating={!prefersReducedMotion}
         />
+        {prefersReducedMotion && <InvalidateOnScroll />}
       </Canvas>
 
       {/* Sits behind the canvas and shows through only if WebGL is unavailable

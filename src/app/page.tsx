@@ -10,7 +10,7 @@ import HowItWorks from "@/components/sections/HowItWorks";
 import Benefits from "@/components/sections/Benefits";
 import Pricing from "@/components/sections/Pricing";
 import FinalCTA from "@/components/sections/FinalCTA";
-import InteractiveHero from "@/components/landing/InteractiveHero";
+import StickyDemoSection from "@/components/landing/StickyDemoSection";
 
 // Dynamic import to avoid SSR issues with Three.js. The loading gradient runs
 // the same horizon-to-zenith ramp as the shader, so the hand-off is a sharpening
@@ -38,30 +38,9 @@ export default function Home() {
         <Hero />
         <ValueProposition />
 
-        {/* Interactive Demo Websites Section */}
-        {/* Solid white, not glass: the demo sites below are themselves full
-            page designs with their own backgrounds, and showing sky between
-            them made the section read as three floating cards rather than as
-            three websites. */}
-        <section className="solid-sheet border-y border-slate-200/80 py-20 px-6">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-                See It In Action
-              </h2>
-              <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-                Three real-looking customer sites, three different designers.
-                Click any text or photograph to change it.
-              </p>
-            </div>
-          </div>
-          {/* The demo breaks out of the page's 7xl measure: these are supposed
-              to read as full websites, and boxing them into the article column
-              was the main reason they did not. */}
-          <div className="max-w-[104rem] mx-auto">
-            <InteractiveHero />
-          </div>
-        </section>
+        {/* Interactive demo websites — pinned while page scroll drives the
+            demo page's own scroll. See StickyDemoSection for the mechanics. */}
+        <StickyDemoSection />
 
         <HowItWorks />
         <Benefits />

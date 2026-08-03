@@ -56,6 +56,7 @@ const fragmentShader = /* glsl */ `
   uniform vec2  uMouse;
   uniform float uPitch;
   uniform float uScroll;
+  uniform float uDisperse;
   uniform float uOpacity;
 
   varying vec2 vUv;
@@ -74,10 +75,12 @@ const fragmentShader = /* glsl */ `
     p.x *= uAspect;
 
     vec2 m = (uMouse - 0.5) * 0.035;
-    /* Matches SkyVolumetric: the pitch offset clears the vertical half-extent so
-       the horizon falls just below the viewport and the whole frame carries
-       cloud. The two paths must agree here or the cross-fade tilts. */
-    vec3 rd = normalize(vec3(p.x + m.x, p.y * 0.62 + uPitch + m.y, 1.35));
+    /* Matches SkyVolumetric: the pitch offset keeps the horizon at the very
+       bottom edge of the viewport. The two paths must agree here or the
+       cross-fade tilts. The 0.72 vertical scale is deliberate — squashing
+       further (the old 0.62) is what smeared every cloud into a horizontal
+       streak and made the sky read as flown-through storm rather than weather. */
+    vec3 rd = normalize(vec3(p.x + m.x, p.y * 0.72 + uPitch + m.y, 1.35));
 
     vec3 col = skyColor(rd);
     float sunDot = max(dot(rd, uSunDir), 0.0);
@@ -92,7 +95,11 @@ const fragmentShader = /* glsl */ `
         float near = float(i) / float(LAYERS - 1);
 
         float planeHeight = mix(46.0, 9.0, near);
-        float t = planeHeight / max(rd.y, 0.05);
+        /* The floor on rd.y is the anti-streak dial. At the old 0.05 a ray near
+           the horizon sampled the noise field at 20x the zenith scale, which
+           stretched every cloud into a radial smear. 0.22 caps that at ~4.5x —
+           still perspective, no longer a storm wall. */
+        float t = planeHeight / max(rd.y, 0.22);
         vec2 uvL = rd.xz * t * mix(0.020, 0.058, near);
 
         /* Wind, and the scroll parallax. Near layers move furthest — that
@@ -102,8 +109,13 @@ const fragmentShader = /* glsl */ `
 
         float d = fbm2(uvL, 4);
         /* Far layers get a higher coverage threshold so they read as sparse
-           haze rather than as a second identical deck stacked behind. */
-        d = remap(d, mix(0.54, 0.45, near), 1.0);
+           haze rather than as a second identical deck stacked behind. The
+           baseline is higher than it used to be — full coverage on every layer
+           left no sky anywhere, which is precisely what stopped the clouds
+           reading as clouds. uDisperse raises the floor further as the reader
+           scrolls, so the deck visibly breaks up and clears. */
+        float lo = mix(0.60, 0.50, near) + uDisperse * 0.16;
+        d = remap(d, lo, 1.0);
 
         if (d > 0.001) {
           /* Thin edges facing the sun catch light — the silver lining. Cubed
@@ -120,7 +132,10 @@ const fragmentShader = /* glsl */ `
              Without it six layers of the same white read as one flat mass. */
           cloudCol = mix(uSkyHorizon, cloudCol, mix(0.45, 1.0, near));
 
-          float alpha = d * mix(0.5, 0.95, near) * horizonFade;
+          /* Dispersal also thins what survives the coverage floor, so scrolled
+             sky carries a few translucent wisps rather than a faded deck. */
+          float alpha = d * mix(0.38, 0.85, near)
+                      * (1.0 - uDisperse * 0.45) * horizonFade;
           col = mix(col, cloudCol, clamp(alpha, 0.0, 1.0));
         }
       }
@@ -133,13 +148,18 @@ const fragmentShader = /* glsl */ `
 
 interface SkyLayeredProps {
   mouseRef: React.RefObject<{ x: number; y: number }>;
-  scrollProgress: number;
+  /**
+   * Scroll progress as a mutable object, read once per frame. A number prop
+   * would put this subtree back on React's render path on every scroll step,
+   * which is the cost useLenis exists to avoid.
+   */
+  scroll: { value: number };
   isAnimating: boolean;
 }
 
 export default function SkyLayered({
   mouseRef,
-  scrollProgress,
+  scroll,
   isAnimating,
 }: SkyLayeredProps) {
   const { size } = useThree();
@@ -152,6 +172,7 @@ export default function SkyLayered({
       uMouse: { value: new THREE.Vector2(0.5, 0.5) },
       uPitch: { value: 0.78 },
       uScroll: { value: 0 },
+      uDisperse: { value: 0 },
       uOpacity: { value: 1 },
       uSunDir: { value: SUN_DIR.clone() },
       uSkyZenith: { value: SKY_ZENITH.clone() },
@@ -162,8 +183,20 @@ export default function SkyLayered({
   );
 
   useFrame((state) => {
+    const scrollProgress = scroll.value;
+
     uniforms.uAspect.value = size.width / Math.max(size.height, 1);
     uniforms.uScroll.value = scrollProgress;
+
+    /* Scrolling scatters the deck: coverage drops and what remains thins, so
+       the clouds read as spreading away from the reader rather than as one
+       static texture that follows them down the page. Scrolling back up
+       reassembles the sky, because the value is a function of position.
+
+       Starts where the raymarcher's own dispersal finishes, so the two paths
+       hand over mid-movement and the sky keeps opening across the cross-fade
+       rather than restarting behind it. */
+    uniforms.uDisperse.value = smoothstep(0.12, 0.55, scrollProgress);
 
     /* Day turns to sunset across the bottom of the page. Driven by scroll
        rather than by a timer, so the colour is a function of where the reader
