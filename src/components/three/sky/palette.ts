@@ -37,11 +37,17 @@ export const SUN_DIR = new THREE.Vector3(0.42, 0.58, -0.7).normalize();
  * on glass or on white, so the one that asks for the signup is the only place
  * the sky is the background, and it turns over as you scroll into it.
  *
- * The ZENITH carries this, not the horizon. `skyColor` biases its gradient with
- * `pow(h, 0.62)` and the sky is pitched so the frame samples rd.y well above
- * the horizon line — the visible page is nearly all zenith. Colouring the
- * horizon instead, which is the intuitive way round for a sunset, would tint a
- * band that is mostly off-screen and leave the page still blue.
+ * The ZENITH carries this — but that reasoning has an expiry date on it, and it
+ * has now expired. It held because the sky was pitched so the frame sampled rd.y
+ * well above the horizon line, making the visible page nearly all zenith, so
+ * colouring the horizon would have tinted a band that was mostly off-screen.
+ *
+ * The camera now sits level with the horizon at mid-viewport, so roughly half
+ * the frame is horizon-side and SKY_HORIZON is load-bearing where it used to be
+ * nearly invisible. Warming only the zenith will leave the bottom half of the
+ * closing section pale while the top half turns orange. The colours below are
+ * deliberately unchanged pending someone looking at the CTA and deciding how the
+ * sunset should read now that half of it is sky the reader can actually see.
  * ------------------------------------------------------------------------- */
 
 /** Warm and unambiguous: this is the colour the closing section reads as. */
@@ -100,7 +106,12 @@ export const CLOUD_TOP = 43.0;
  * of the frame open. Going much above CLEAR empties the sky entirely, which
  * loses the parallax that makes the backdrop feel like depth at all.
  * ------------------------------------------------------------------------- */
-export const CLOUD_GATE_DENSE = 0.52;
+/* Raised from 0.52 when the eye moved above the deck. Looking up, a ray crossed
+   the slab once and the gaps between cloud groups were most of the frame. Looking
+   down, the same field is seen in plan across a huge area, so every gap is filled
+   by another group further out and 0.52 rendered as one continuous white floor —
+   fog, not weather. A higher floor is what puts sky back between the groups. */
+export const CLOUD_GATE_DENSE = 0.6;
 export const CLOUD_GATE_CLEAR = 0.72;
 
 /**

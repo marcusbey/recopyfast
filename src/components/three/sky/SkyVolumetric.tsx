@@ -177,44 +177,81 @@ const fragmentShader = /* glsl */ `
     vec2 m = (uMouse - 0.5) * 0.06;
 
     vec3 ro = vec3(0.0, uAltitude, 0.0);
-    /* The pitch offset keeps the horizon at the very bottom edge of the
-       viewport so the frame is sky with cloud in it, without pointing the lower
-       half of the screen below the deck. The 0.72 vertical scale matches
-       SkyLayered — the old 0.62 squash is what stretched every cloud into a
-       horizontal smear. */
+    /* uPitch is 0, which puts the horizon exactly at the vertical centre of the
+       viewport: the horizon is where rd.y == 0, and with no pitch offset that is
+       where p.y == 0, which is the middle of the screen.
+
+       It used to be 0.78. Against p.y in [-1, 1] scaled by 0.72 that put rd.y in
+       [0.06, 1.50] — every ray in the frame pointing upward, the horizon pushed
+       off the bottom edge, and the whole page looking up at the underside of a
+       deck 30 units overhead. That is what read as the camera lying parallel to
+       the sky rather than looking at it.
+
+       The 0.72 vertical scale is a ~56 degree vertical field of view and matches
+       SkyLayered. The two paths must agree on both numbers or the cross-fade
+       tilts as the hero leaves. */
     vec3 rd = normalize(vec3(p.x + m.x, p.y * 0.72 + uPitch + m.y, 1.35));
 
     vec3 bg = skyColor(rd);
 
-    /* Fade the cloud contribution out as the ray approaches the horizon rather
-       than cutting it off. A hard early-out leaves a visible seam straight
-       across the page where the slab stops being intersected. */
-    float horizonFade = smoothstep(0.004, 0.03, rd.y);
+    /* Symmetric around the horizon, because there is now cloud on both sides of
+       it: the deck below the eye and its billows above. The old one-sided fade
+       deleted everything at or below rd.y == 0, which is precisely the cloud
+       floor this view exists to show.
 
-    float tNear = (uCloudBottom - ro.y) / rd.y;
-    float tFar  = (uCloudTop - ro.y) / rd.y;
+       What it is actually for is the grazing case. A ray within a hair of the
+       horizon travels enormous distances through the slab, stacking cloud behind
+       cloud into one horizontal smear — the same failure the old shader had at
+       the bottom of the frame, which would return here in the middle of it. Both
+       signs need the same treatment because both now graze. */
+    float horizonFade = smoothstep(0.012, 0.06, abs(rd.y));
 
-    /* Aerial perspective, and the reason there is no hard line across the lower
-       frame. Cutting the march off at MAX_DIST leaves a seam exactly where rays
-       stop reaching the slab — the cloud field simply ends, mid-sky, along a
-       line. Fading it out over the last stretch instead is both free and what
-       distance actually does to contrast. */
-    /* Starts early on purpose. A deck seen at a shallow angle stacks cloud
-       behind cloud, so without a strong distance term the lower frame fills
-       with a carpet of small identical shapes — the same "too many of them"
-       problem the coverage gate solves overhead, arriving by a different route.
-       Fading toward bg rather than to nothing is what makes it read as a hazy
-       horizon instead of a hole, because bg down there is already the pale end
-       of the sky ramp. */
-    float distanceFade = 1.0 - smoothstep(MAX_DIST * 0.22, MAX_DIST * 0.85, tNear);
+    /* General ray/slab intersection, correct for any eye position and any ray
+       direction. The old pair of divides assumed the eye was below the slab and
+       the ray pointed up; from above with rd.y negative the two roots swap, tFar
+       lands before tNear, and the march runs backwards and draws nothing. */
+    float tEnter;
+    float tExit;
+    if (abs(rd.y) < 1e-4) {
+      /* Parallel to the slab: no root exists. The ray is either inside the deck
+         for its whole length or never in it at all. */
+      tEnter = 0.0;
+      tExit = (ro.y > uCloudBottom && ro.y < uCloudTop) ? MAX_DIST : -1.0;
+    } else {
+      float ta = (uCloudBottom - ro.y) / rd.y;
+      float tb = (uCloudTop - ro.y) / rd.y;
+      /* Ordered rather than assumed, then clamped forward. Clamping to zero is
+         what handles the eye being inside the deck, which is where the reader
+         ends up after scrolling — the ray starts in cloud, so it enters at
+         t = 0 rather than at a root behind the camera. */
+      tEnter = max(min(ta, tb), 0.0);
+      tExit = max(ta, tb);
+    }
+
+    /* Aerial perspective, and the reason there is no hard line across the frame.
+       Cutting the march off at MAX_DIST leaves a seam exactly where rays stop
+       reaching the slab — the cloud field simply ends, mid-sky, along a line.
+       Fading out over the last stretch instead is free and is what distance
+       actually does to contrast.
+
+       Reaches further out than it used to. Looking up at a ceiling, everything
+       past a few hundred units was near-horizontal and wanted killing early.
+       Looking down at a floor, that same range is the visible deck receding
+       toward the horizon — the depth cue that sells the height — so the fade
+       starts late and finishes at the far limit. Fading toward bg rather than to
+       nothing keeps it reading as haze instead of a hole, because bg near the
+       horizon is already the pale end of the sky ramp. */
+    float distanceFade = 1.0 - smoothstep(MAX_DIST * 0.35, MAX_DIST, tEnter);
     float cloudFade = horizonFade * distanceFade;
 
-    if (cloudFade < 0.002) {
+    /* tExit <= tEnter covers both the miss and the slab-entirely-behind-the-eye
+       case: looking up from above the deck, both roots are negative. */
+    if (tExit <= tEnter || tEnter > MAX_DIST || cloudFade < 0.002) {
       gl_FragColor = vec4(bg, uOpacity);
       return;
     }
 
-    tFar = min(tFar, tNear + MAX_SPAN);
+    tExit = min(tExit, tEnter + MAX_SPAN);
 
     float cosTheta = dot(rd, uSunDir);
     /* Dual-lobe phase. A single forward lobe makes the sun side glow correctly
@@ -237,12 +274,12 @@ const fragmentShader = /* glsl */ `
        goes storm-grey and the sky reads as ominous rather than bright. */
     phase = clamp(phase, 0.62, 4.2);
 
-    float stepSize = (tFar - tNear) / float(PRIMARY_STEPS);
+    float stepSize = (tExit - tEnter) / float(PRIMARY_STEPS);
 
     /* Dither the ray start by up to one step. Without this, 32 steps across a
        soft volume produce visible concentric banding. */
     float dither = hash12(gl_FragCoord.xy + uTime);
-    float t = tNear + stepSize * dither;
+    float t = tEnter + stepSize * dither;
 
     /* Biased toward the horizon colour, which is the pale end of the ramp. Sky
        ambient on a real overcast-free day is bright — weighting this toward the
@@ -320,6 +357,27 @@ const fragmentShader = /* glsl */ `
  */
 const DISPERSE_OVER = 0.16;
 
+/**
+ * Where the eye sits, in the same world units as the cloud slab.
+ *
+ * The slab runs CLOUD_BOTTOM 30 to CLOUD_TOP 43. The eye used to start at 0 and
+ * climb to 14, so it was never less than sixteen units *below* the deck and
+ * never once reached it — the page spent its whole life looking up at the
+ * underside of a ceiling, which is what made the sky read as something happening
+ * above the reader rather than around them.
+ *
+ * START is just above the top of the deck: high enough to see cloud tops
+ * receding to the horizon, close enough that the nearest billows still break the
+ * horizon line rather than lying flat below it. END is inside the slab, in its
+ * lower half but clear of the base — the reader descends into the cloud as they
+ * scroll and ends up among it.
+ *
+ * END must stay above CLOUD_BOTTOM. Below it the eye is back under the deck,
+ * looking up at the same ceiling this change exists to get out from under.
+ */
+const EYE_START = 54.0;
+const EYE_END = 36.0;
+
 interface SkyVolumetricProps {
   mouseRef: React.RefObject<{ x: number; y: number }>;
   /**
@@ -350,8 +408,9 @@ export default function SkyVolumetric({
       uTime: { value: 0 },
       uAspect: { value: 1 },
       uMouse: { value: new THREE.Vector2(0.5, 0.5) },
-      uPitch: { value: 0.78 },
-      uAltitude: { value: 0 },
+      /* Level. See the ray setup for why this is 0 and not 0.78. */
+      uPitch: { value: 0 },
+      uAltitude: { value: EYE_START },
       uOpacity: { value: 1 },
       uCloudBottom: { value: CLOUD_BOTTOM },
       uCloudTop: { value: CLOUD_TOP },
@@ -394,14 +453,15 @@ export default function SkyVolumetric({
 
     const progress = scroll.value;
 
-    /* Scroll flies the camera up into the deck and levels the view off, so the
-       hero's sky opens out as it leaves rather than simply sliding away. */
+    /* Scroll lowers the eye into the deck: the reader starts above the cloud
+       tops and sinks into them. It used to climb, which was the opposite motion
+       and, from thirty units below the base, never arrived anywhere.
+
+       Pitch no longer moves. The horizon is the anchor of this composition, and
+       a horizon that drifts up the frame while the reader scrolls reads as the
+       page tilting rather than as the camera descending. */
     const eased = 1 - Math.pow(1 - Math.min(progress / 0.35, 1), 3);
-    /* Scaled with the slab: the climb has to stay a visible fraction of the 30
-       units up to the cloud base, or raising the deck quietly turns the flight
-       into a drift. */
-    uniforms.uAltitude.value = eased * 14.0;
-    uniforms.uPitch.value = 0.78 - eased * 0.16;
+    uniforms.uAltitude.value = EYE_START + eased * (EYE_END - EYE_START);
 
     /* Dispersal. Raising the gate floor shrinks every cloud toward its own core
        so the gaps between them widen, and stretching the field moves the cores

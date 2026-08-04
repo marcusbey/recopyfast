@@ -75,31 +75,40 @@ const fragmentShader = /* glsl */ `
     p.x *= uAspect;
 
     vec2 m = (uMouse - 0.5) * 0.035;
-    /* Matches SkyVolumetric: the pitch offset keeps the horizon at the very
-       bottom edge of the viewport. The two paths must agree here or the
-       cross-fade tilts. The 0.72 vertical scale is deliberate — squashing
-       further (the old 0.62) is what smeared every cloud into a horizontal
-       streak and made the sky read as flown-through storm rather than weather. */
+    /* Matches SkyVolumetric exactly — uPitch 0 and a 0.72 vertical scale — which
+       puts the horizon at the vertical centre of the viewport. The two paths
+       must agree on both numbers or the cross-fade tilts as the hero leaves.
+       Both used to carry a 0.78 pitch offset, which pushed the horizon off the
+       bottom edge and pointed every ray in the frame upward. */
     vec3 rd = normalize(vec3(p.x + m.x, p.y * 0.72 + uPitch + m.y, 1.35));
 
     vec3 col = skyColor(rd);
     float sunDot = max(dot(rd, uSunDir), 0.0);
 
-    /* Near the horizon the plane projection below diverges, so the layers are
-       faded out before it can alias into moire. */
-    float horizonFade = smoothstep(0.015, 0.20, rd.y);
+    /* The layers are a cloud floor *below* the eye now, so it is the downward
+       rays that carry them and the sky above the horizon is left open. That
+       matches the raymarched path, where the eye sits above the deck looking
+       down at its tops.
+
+       Near the horizon the projection below diverges as it always did, so the
+       fade still exists for the same reason — it is only which side of the
+       horizon it applies to that changed. */
+    float horizonFade = smoothstep(0.015, 0.20, -rd.y);
 
     if (horizonFade > 0.001) {
       for (int i = 0; i < LAYERS; i++) {
         /* 0 = farthest, 1 = nearest. Every per-layer property keys off this. */
         float near = float(i) / float(LAYERS - 1);
 
-        float planeHeight = mix(46.0, 9.0, near);
-        /* The floor on rd.y is the anti-streak dial. At the old 0.05 a ray near
-           the horizon sampled the noise field at 20x the zenith scale, which
-           stretched every cloud into a radial smear. 0.22 caps that at ~4.5x —
-           still perspective, no longer a storm wall. */
-        float t = planeHeight / max(rd.y, 0.22);
+        /* Depth below the eye rather than height above it. Same numbers: the
+           layers sit 46 to 9 units down, so the near ones are the ones just
+           under the reader. */
+        float planeDepth = mix(46.0, 9.0, near);
+        /* The floor on the divisor is the anti-streak dial. At the old 0.05 a
+           ray near the horizon sampled the noise field at 20x the scale directly
+           below, which stretched every cloud into a radial smear. 0.22 caps that
+           at ~4.5x — still perspective, no longer a storm wall. */
+        float t = planeDepth / max(-rd.y, 0.22);
         vec2 uvL = rd.xz * t * mix(0.020, 0.058, near);
 
         /* Wind, and the scroll parallax. Near layers move furthest — that
@@ -177,7 +186,8 @@ export default function SkyLayered({
       uTime: { value: 0 },
       uAspect: { value: 1 },
       uMouse: { value: new THREE.Vector2(0.5, 0.5) },
-      uPitch: { value: 0.78 },
+      /* Level, so the horizon lands mid-viewport. Must match SkyVolumetric. */
+      uPitch: { value: 0 },
       uScroll: { value: 0 },
       uDisperse: { value: 0 },
       uOpacity: { value: 1 },
