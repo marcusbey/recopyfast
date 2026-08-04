@@ -173,6 +173,16 @@ export function useLenis(): UseLenisReturn {
 
     instanceRef.current = lenisInstance;
 
+    /* Publish where the page actually is, for the same reason the native path
+       does. Lenis emits nothing until the reader moves, so without this the
+       store sits at `null` from mount until the first scroll — and consumers
+       read `null` as "nothing is driving this page" and fall back to 0. A page
+       restored partway down therefore showed the top-of-page sky until touched,
+       and toggling reduced motion off mid-page did the same, because that now
+       rebuilds this effect. Lenis takes its own initial position from the
+       document, so this is the value it would report anyway. */
+    publish(readNativeProgress());
+
     function onScroll({ progress }: { progress: number }) {
       publish(progress);
     }

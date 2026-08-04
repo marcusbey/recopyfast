@@ -48,9 +48,31 @@ function emitScroll(progress: number) {
   });
 }
 
+/**
+ * jsdom lays nothing out, so the document is not scrollable unless told it is.
+ * 3000px of content in a 1000px viewport gives a 2000px scroll range, which
+ * makes the arithmetic legible: scrollY 500 is progress 0.25.
+ */
+function setScrollMetrics(scrollY: number, scrollHeight = 3000) {
+  Object.defineProperty(document.documentElement, "scrollHeight", {
+    value: scrollHeight,
+    configurable: true,
+  });
+  Object.defineProperty(window, "innerHeight", {
+    value: 1000,
+    configurable: true,
+  });
+  Object.defineProperty(window, "scrollY", {
+    value: scrollY,
+    configurable: true,
+  });
+}
+
 beforeEach(() => {
   handlers.clear();
   destroy.mockClear();
+  /* Back to an unscrollable document, so no test inherits another's geometry. */
+  setScrollMetrics(0, 0);
 });
 
 describe("scroll progress store", () => {
@@ -88,9 +110,12 @@ describe("scroll progress store", () => {
     unmount();
   });
 
-  it("notifies subscribers on every scroll event", () => {
+  it("notifies subscribers on mount and on every scroll event", () => {
     const seen: number[] = [];
     const unsubscribe = subscribeScrollProgress((p) => seen.push(p));
+    // Mount publishes the starting position — an unscrollable jsdom document is
+    // 0 — so a subscriber that never sees a scroll still knows where the page
+    // is, rather than waiting for one.
     const { unmount } = renderHook(() => useLenis());
 
     emitScroll(0.1);
@@ -98,7 +123,7 @@ describe("scroll progress store", () => {
     unsubscribe();
     emitScroll(0.3);
 
-    expect(seen).toEqual([0.1, 0.2]);
+    expect(seen).toEqual([0, 0.1, 0.2]);
     unmount();
   });
 
@@ -118,6 +143,21 @@ describe("scroll progress store", () => {
     const first = result.current.scrollTo;
     rerender();
     expect(result.current.scrollTo).toBe(first);
+    unmount();
+  });
+
+  it("publishes the current position on mount, before any scroll event", () => {
+    // Lenis emits nothing until the reader moves. Leaving the store at `null`
+    // until then means consumers read "nothing is driving this page" and fall
+    // back to 0, so a page restored partway down showed the top-of-page sky
+    // until it was touched.
+    setScrollMetrics(500);
+
+    const { unmount } = renderHook(() => useLenis());
+
+    expect(readScrollProgress()).toBe(0.25);
+    expect(handlers.size).toBe(1);
+
     unmount();
   });
 });
@@ -140,21 +180,6 @@ describe("reduced motion", () => {
       removeEventListener: jest.fn(),
       dispatchEvent: jest.fn(),
     }));
-  }
-
-  function setScrollMetrics(scrollY: number) {
-    Object.defineProperty(document.documentElement, "scrollHeight", {
-      value: 3000,
-      configurable: true,
-    });
-    Object.defineProperty(window, "innerHeight", {
-      value: 1000,
-      configurable: true,
-    });
-    Object.defineProperty(window, "scrollY", {
-      value: scrollY,
-      configurable: true,
-    });
   }
 
   /** The native publisher defers its read by a frame, as the Header's does. */
