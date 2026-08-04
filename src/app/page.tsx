@@ -20,7 +20,7 @@ const SkyBackground = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-[#3d78db] via-[#9dc4ee] to-[#c7e0f7]" />
+      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-[#4a8ed8] via-[#a4cdf0] to-[#cfe6f8]" />
     ),
   },
 );

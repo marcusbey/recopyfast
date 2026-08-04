@@ -414,20 +414,22 @@ const DISPERSE_OVER = 0.16;
  * underside of a ceiling, which is what made the sky read as something happening
  * above the reader rather than around them.
  *
- * START is barely above the ceiling of an ordinary cloud — but below the crown
- * of a fully swelled one, because CLOUD_TOP now runs past the eye. That is the
- * point: the tallest towers cross the horizon line while the flat humilis field
- * recedes below it, which is what distributes cloud across the vertical axis
- * instead of parking the whole deck under one line. (It was 54, six-and-a-half
- * units above everything; no silhouette ever reached the horizon and the deck
- * read as a single plane.) END is inside the slab, in its lower half but clear
- * of the base — the reader descends into the cloud as they scroll and ends up
- * among it.
+ * START sits just *below* the top of the slab, not hovering above it. From
+ * even half a unit outside, the transition at the horizon compresses into a
+ * few pixels: rays above the line cross clean sky while rays a fraction below
+ * it are already marching through ninety units of deck, and the two states
+ * meet as a sharp edge no haze can fully hide. Starting 0.8 units inside puts
+ * a thin veil of the nearest cloud on *both* sides of the horizon from the
+ * first frame — the page opens in the same enveloped, gradual state the
+ * scroll descends into, just lighter. (History: 54 read as a single flat
+ * plane; 47.5 fixed the plane but kept the hard line.) END is deeper in the
+ * slab's lower half but clear of the base — the reader descends further into
+ * the cloud as they scroll.
  *
  * END must stay above CLOUD_BOTTOM. Below it the eye is back under the deck,
  * looking up at the same ceiling this change exists to get out from under.
  */
-const EYE_START = 47.5;
+const EYE_START = 46.2;
 const EYE_END = 36.0;
 
 interface SkyVolumetricProps {
