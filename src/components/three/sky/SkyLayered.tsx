@@ -13,6 +13,7 @@ import {
   SUNSET_HORIZON,
   SUNSET_START,
   SUNSET_SUN,
+  SUNSET_SUN_DIR,
   SUNSET_ZENITH,
 } from "./palette";
 
@@ -85,6 +86,47 @@ const fragmentShader = /* glsl */ `
     vec3 col = skyColor(rd);
     float sunDot = max(dot(rd, uSunDir), 0.0);
 
+    /* The upper storey. The deck below only ever draws under the horizon, so
+       the top half of every viewport was a bare gradient — the whole sky
+       flattened onto one plane. Three thin layers of high cloud, projected
+       onto planes *above* the eye, put cloud on the other side of the horizon
+       at its own parallax rates. Far layer is sheared cirrus (domain stretched
+       ~4:1 into filaments); the near ones are softer alto patches. These are
+       optically thin on purpose — never past ~0.3 alpha — because a second
+       opaque deck overhead would just rebuild the compactness complaint one
+       storey up. At sunset they matter most: uSunColor has turned gold and the
+       rim term paints it along their edges, which is what a sunset actually
+       looks like. */
+    float upFade = smoothstep(0.02, 0.14, rd.y);
+    if (upFade > 0.001) {
+      for (int i = 0; i < 3; i++) {
+        float near = float(i) / 2.0;
+
+        float planeH = mix(150.0, 55.0, near);
+        float t = planeH / max(rd.y, 0.2);
+        vec2 uvH = rd.xz * t * mix(vec2(0.0015, 0.0062), vec2(0.0052, 0.0088), near);
+
+        uvH += vec2(uTime * 0.004, uTime * 0.009) * mix(0.4, 1.0, near);
+        uvH += vec2(0.0, uScroll * mix(0.15, 0.7, near));
+
+        float d = fbm2(uvH, 3);
+        float lo = mix(0.56, 0.50, near) + uDisperse * 0.10;
+        d = remap(d, lo, 1.0);
+
+        if (d > 0.001) {
+          float rim = pow(1.0 - d, 3.0) * sunDot;
+          vec3 cloudColH = mix(
+            mix(uSkyHorizon, vec3(1.0), 0.55),
+            uSunColor,
+            clamp(rim * 1.2, 0.0, 1.0)
+          );
+          float alphaH = d * mix(0.14, 0.3, near)
+                       * (1.0 - uDisperse * 0.25) * upFade;
+          col = mix(col, cloudColH, clamp(alphaH, 0.0, 1.0));
+        }
+      }
+    }
+
     /* The layers are a cloud floor *below* the eye now, so it is the downward
        rays that carry them and the sky above the horizon is left open. That
        matches the raymarched path, where the eye sits above the deck looking
@@ -100,10 +142,11 @@ const fragmentShader = /* glsl */ `
         /* 0 = farthest, 1 = nearest. Every per-layer property keys off this. */
         float near = float(i) / float(LAYERS - 1);
 
-        /* Depth below the eye rather than height above it. Same numbers: the
-           layers sit 46 to 9 units down, so the near ones are the ones just
-           under the reader. */
-        float planeDepth = mix(46.0, 9.0, near);
+        /* Depth below the eye rather than height above it. Wider spread than
+           the old 46..9: the far layers now sit much deeper, so the six planes
+           separate visibly under parallax instead of reading as one deck with
+           a slight shimmer. */
+        float planeDepth = mix(60.0, 8.0, near);
         /* The floor on the divisor is the anti-streak dial. At the old 0.05 a
            ray near the horizon sampled the noise field at 20x the scale directly
            below, which stretched every cloud into a radial smear. 0.22 caps that
@@ -123,14 +166,20 @@ const fragmentShader = /* glsl */ `
            left no sky anywhere, which is precisely what stopped the clouds
            reading as clouds. uDisperse raises the floor further as the reader
            scrolls, so the deck visibly breaks up and clears. */
-        float lo = mix(0.60, 0.50, near) + uDisperse * 0.16;
+        float lo = mix(0.65, 0.55, near) + uDisperse * 0.16;
         d = remap(d, lo, 1.0);
 
         if (d > 0.001) {
           /* Thin edges facing the sun catch light — the silver lining. Cubed
-             so it stays confined to genuinely thin cloud. */
+             so it stays confined to genuinely thin cloud. The 0.38 floor is
+             the same correction the raymarcher's phase clamp makes: the sun
+             sits behind the camera all day, so without a floor sunDot is
+             zero everywhere and every cloud rendered at half-shadow — a grey
+             deck against a blue sky. Front-lit cloud is bright, and at sunset
+             the floor pulls the deck toward the gold sun colour, which is what
+             lights the closing section's clouds. */
           float rim = pow(1.0 - d, 3.0) * sunDot;
-          float lit = clamp(d * 0.55 + rim * 0.9, 0.0, 1.0);
+          float lit = clamp(0.38 + d * 0.5 + rim * 0.9, 0.0, 1.0);
 
           /* Kept in step with the volumetric path's ambient term — if one path
              renders brighter cloud than the other the cross-fade shows. */
@@ -142,8 +191,11 @@ const fragmentShader = /* glsl */ `
           cloudCol = mix(uSkyHorizon, cloudCol, mix(0.45, 1.0, near));
 
           /* Dispersal also thins what survives the coverage floor, so scrolled
-             sky carries a few translucent wisps rather than a faded deck. */
-          float alpha = d * mix(0.38, 0.85, near)
+             sky carries a few translucent wisps rather than a faded deck. The
+             ceiling is 0.62 where it was 0.85 — a near layer at 0.85 was a
+             solid object, and solidity is thickness. Below ~0.65 the sky reads
+             through every cloud and the deck goes from wall to vapour. */
+          float alpha = d * mix(0.28, 0.62, near)
                       * (1.0 - uDisperse * 0.45) * horizonFade;
           col = mix(col, cloudCol, clamp(alpha, 0.0, 1.0));
         }
@@ -216,16 +268,6 @@ export default function SkyLayered({
     uniforms.uAspect.value = size.width / Math.max(size.height, 1);
     uniforms.uScroll.value = scrollProgress;
 
-    /* Scrolling scatters the deck: coverage drops and what remains thins, so
-       the clouds read as spreading away from the reader rather than as one
-       static texture that follows them down the page. Scrolling back up
-       reassembles the sky, because the value is a function of position.
-
-       Starts where the raymarcher's own dispersal finishes, so the two paths
-       hand over mid-movement and the sky keeps opening across the cross-fade
-       rather than restarting behind it. */
-    uniforms.uDisperse.value = smoothstep(0.12, 0.55, scrollProgress);
-
     /* Day turns to sunset across the bottom of the page. Driven by scroll
        rather than by a timer, so the colour is a function of where the reader
        is and scrolling back up returns the sky to blue.
@@ -236,6 +278,34 @@ export default function SkyLayered({
     uniforms.uSkyZenith.value.copy(SKY_ZENITH).lerp(SUNSET_ZENITH, sunset);
     uniforms.uSkyHorizon.value.copy(SKY_HORIZON).lerp(SUNSET_HORIZON, sunset);
     uniforms.uSunColor.value.copy(SUN_COLOR).lerp(SUNSET_SUN, sunset);
+
+    /* The sun itself moves. The daytime vector points *behind* the camera —
+       deliberately, so the hero carries no blown highlight — which meant the
+       halo and disc in skyColor never rendered anywhere on the page, and the
+       sunset was a gradient with no sun in it: a flat orange wall. At dusk the
+       sun swings into frame and sinks to the horizon, and the CTA gets a low
+       glow that reads as an actual evening sky. Renormalised because lerping
+       two unit vectors does not produce one. */
+    uniforms.uSunDir.value
+      .copy(SUN_DIR)
+      .lerp(SUNSET_SUN_DIR, sunset)
+      .normalize();
+
+    /* Scrolling scatters the deck: coverage drops and what remains thins, so
+       the clouds read as spreading away from the reader rather than as one
+       static texture that follows them down the page. Scrolling back up
+       reassembles the sky, because the value is a function of position.
+
+       Starts where the raymarcher's own dispersal finishes, so the two paths
+       hand over mid-movement and the sky keeps opening across the cross-fade
+       rather than restarting behind it.
+
+       Damped by the sunset: full dispersal at the bottom of the page deleted
+       every cloud exactly where the sky turns gold, leaving the sunset with
+       nothing to light. The weather comes back for the finale — thin, and lit
+       from the horizon. */
+    uniforms.uDisperse.value =
+      smoothstep(0.12, 0.55, scrollProgress) * (1 - 0.75 * sunset);
 
     if (isAnimating) {
       uniforms.uTime.value = state.clock.elapsedTime;

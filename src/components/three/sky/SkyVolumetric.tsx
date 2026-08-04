@@ -98,13 +98,15 @@ const fragmentShader = /* glsl */ `
      old one spanned 0.39 against that same field, so no sample ever reached a
      quarter of full density: every cloud was the same faint grey, and what
      opacity there was came from path length rather than from density. Narrow
-     enough to saturate is what gives a cloud a core, an edge and a silhouette. */
-  const float SHAPE_WINDOW = 0.16;
+     enough to saturate is what gives a cloud a core, an edge and a silhouette.
+     0.19 rather than 0.16: the extra width is all spent on the fringe, which is
+     the translucent skirt that makes a cloud read as vapour instead of solid. */
+  const float SHAPE_WINDOW = 0.19;
   /* How much of the gate's range is a soft edge rather than a hard boundary.
      Wide, and every cloud group trails a broad skirt of optically thin cloud
      that fills the gaps back in with haze — which is the version of "too many
      clouds" that survives lowering the coverage. */
-  const float GATE_WINDOW = 0.20;
+  const float GATE_WINDOW = 0.15;
 
   float cloudDensity(vec3 pos, int octaves) {
     float h = (pos.y - uCloudBottom) / (uCloudTop - uCloudBottom);
@@ -194,6 +196,25 @@ const fragmentShader = /* glsl */ `
 
     vec3 bg = skyColor(rd);
 
+    /* Cirrus. The cumulus deck lives below the eye, so without this the whole
+       upper half of the frame was one flat blue gradient — which is what made
+       every cloud in the composition sit on a single plane. A veil of high ice
+       cloud is the cheapest possible second storey: one 3-octave 2D sample on
+       rays that point upward, projected onto a plane far above the slab. The
+       domain is stretched 4:1 so the features draw out into filaments rather
+       than lumps — cirrus is wind-sheared ice, not billow. */
+    if (rd.y > 0.03) {
+      vec2 cp = (ro + rd * ((150.0 - ro.y) / rd.y)).xz;
+      cp += uWind.xz * 2.4;
+      float cir = fbm2(cp * vec2(0.0016, 0.0068), 3);
+      float veil = remap(cir, 0.52, 0.94);
+      /* Thin by construction: never past ~0.4 alpha, faded near the horizon so
+         it does not stack over the distant deck, and faded at the zenith so the
+         top of the page keeps its depth of blue. */
+      veil *= 0.4 * smoothstep(0.03, 0.16, rd.y) * (1.0 - smoothstep(0.5, 0.95, rd.y) * 0.55);
+      bg = mix(bg, mix(uSkyHorizon, vec3(1.0), 0.6), veil);
+    }
+
     /* Symmetric around the horizon, because there is now cloud on both sides of
        it: the deck below the eye and its billows above. The old one-sided fade
        deleted everything at or below rd.y == 0, which is precisely the cloud
@@ -204,7 +225,13 @@ const fragmentShader = /* glsl */ `
        cloud into one horizontal smear — the same failure the old shader had at
        the bottom of the frame, which would return here in the middle of it. Both
        signs need the same treatment because both now graze. */
-    float horizonFade = smoothstep(0.012, 0.06, abs(rd.y));
+    /* Narrower dead zone than the original 0.012–0.06: that band killed cloud
+       for a full three degrees either side of the horizon, which drew a clean
+       empty stripe across the middle of the frame — a hard seam exactly where
+       the deck should dissolve into the distance. MAX_SPAN already stops the
+       grazing rays from smearing, so the fade only needs to cover the last
+       fraction of a degree. */
+    float horizonFade = smoothstep(0.004, 0.045, abs(rd.y));
 
     /* General ray/slab intersection, correct for any eye position and any ray
        direction. The old pair of divides assumed the eye was below the slab and
@@ -270,9 +297,14 @@ const fragmentShader = /* glsl */ `
       0.3
     ) * 12.566;
     /* The lower clamp is the brightness floor for cloud facing away from the
-       sun. Physically it wants to be near zero, but at 0.28 the anti-sun side
-       goes storm-grey and the sky reads as ominous rather than bright. */
-    phase = clamp(phase, 0.62, 4.2);
+       sun — and with the daytime sun deliberately behind the camera, that is
+       every cloud on the page. At 0.62 the whole deck rendered a few stops
+       darker than the sky it sat under: a grey floor meeting a blue sky along
+       a straight luminance step at the horizon. Front-lit cloud tops are the
+       brightest surface in a real sky (backscatter, not shadow), and 1.05 is
+       what makes the deck white. The step dissolves because both sides of the
+       horizon now arrive at the same brightness. */
+    phase = clamp(phase, 1.05, 4.2);
 
     float stepSize = (tExit - tEnter) / float(PRIMARY_STEPS);
 
@@ -283,8 +315,11 @@ const fragmentShader = /* glsl */ `
 
     /* Biased toward the horizon colour, which is the pale end of the ramp. Sky
        ambient on a real overcast-free day is bright — weighting this toward the
-       deep zenith is what made the cloud bases read as slate. */
-    vec3 ambient = mix(uSkyHorizon, uSkyZenith, 0.28);
+       deep zenith is what made the cloud bases read as slate. The push toward
+       white on top of that stands in for the light a deck bounces between its
+       own tops, which a single-scatter ambient term has no way to produce and
+       which is most of why real cloud fields look luminous from above. */
+    vec3 ambient = mix(mix(uSkyHorizon, uSkyZenith, 0.28), vec3(1.02), 0.22);
     float transmittance = 1.0;
     vec3 scattering = vec3(0.0);
 
@@ -366,16 +401,20 @@ const DISPERSE_OVER = 0.16;
  * underside of a ceiling, which is what made the sky read as something happening
  * above the reader rather than around them.
  *
- * START is just above the top of the deck: high enough to see cloud tops
- * receding to the horizon, close enough that the nearest billows still break the
- * horizon line rather than lying flat below it. END is inside the slab, in its
- * lower half but clear of the base — the reader descends into the cloud as they
- * scroll and ends up among it.
+ * START is barely above the ceiling of an ordinary cloud — but below the crown
+ * of a fully swelled one, because CLOUD_TOP now runs past the eye. That is the
+ * point: the tallest towers cross the horizon line while the flat humilis field
+ * recedes below it, which is what distributes cloud across the vertical axis
+ * instead of parking the whole deck under one line. (It was 54, six-and-a-half
+ * units above everything; no silhouette ever reached the horizon and the deck
+ * read as a single plane.) END is inside the slab, in its lower half but clear
+ * of the base — the reader descends into the cloud as they scroll and ends up
+ * among it.
  *
  * END must stay above CLOUD_BOTTOM. Below it the eye is back under the deck,
  * looking up at the same ceiling this change exists to get out from under.
  */
-const EYE_START = 54.0;
+const EYE_START = 47.5;
 const EYE_END = 36.0;
 
 interface SkyVolumetricProps {
@@ -416,9 +455,13 @@ export default function SkyVolumetric({
       uCloudTop: { value: CLOUD_TOP },
       /* Deliberately below full coverage: distinct cumulus with blue between
          them is what reads as a real sky. 1.05 filled every gap and turned the
-         hero into the inside of an overcast — dense enough that the deck read
-         as storm, not weather. */
-      uCoverage: { value: 0.92 },
+         hero into the inside of an overcast; 0.92 still welded the deck into
+         one white mass seen from above. Density is the thickness dial — this is
+         most of the difference between foam and vapour. (0.74 overshot: with
+         the gate already separating the groups, it starved the cores too and
+         the whole deck went to formless milk. 0.88 saturates the cores again
+         while the raised gate floor keeps blue between the groups.) */
+      uCoverage: { value: 0.88 },
       uGateFloor: { value: CLOUD_GATE_DENSE },
       uSpread: { value: 1 },
       uWind: { value: new THREE.Vector3() },

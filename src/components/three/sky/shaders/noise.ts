@@ -181,6 +181,32 @@ export const ATMOSPHERE = /* glsl */ `
        of a sky lives. A linear mix puts the transition uselessly high up. */
     vec3 col = mix(uSkyHorizon, uSkyZenith, pow(h, 0.62));
 
+    /* Haze band straddling the horizon, symmetric in rd.y. Without it the ramp
+       above still carries 65% zenith at rd.y = 0, so the sky met the cloud
+       deck's accumulated scatter — which begins exactly at the horizon — as a
+       saturated blue against a pale wash: a straight line across mid-frame.
+       Distance whitens everything near the horizon on BOTH sides in a real
+       atmosphere, and this exponential is that. It is what dissolves the seam
+       between the two halves of the composition into a gradient. */
+    col = mix(col, uSkyHorizon, exp(-abs(rd.y) * 4.5) * 0.6);
+
+    /* Distant cloud bank. The haze above blends the two halves of the sky in
+       luminance, but a blend between two horizontal gradients still meets
+       along a perfectly straight line, and the eye finds it instantly. What a
+       real sky puts on the horizon is weather: far cumulus stacked into a
+       ragged bright band whose top edge is cloud-shaped, not geometric. Noise
+       over azimuth (not over screen x, so it does not shear as the view
+       shifts) modulated by a narrow band around rd.y = 0 is that bank, and
+       its irregular silhouette is what finally breaks the line. Branched,
+       because the fbm only matters within ~6 degrees of the horizon. */
+    float band = 1.0 - smoothstep(0.0, 0.11, abs(rd.y));
+    if (band > 0.001) {
+      float az = atan(rd.x, rd.z);
+      float rag = fbm2(vec2(az * 2.2, rd.y * 26.0), 3);
+      float bank = band * smoothstep(0.46, 0.74, rag);
+      col = mix(col, mix(uSkyHorizon, vec3(1.04), 0.6), bank * 0.65);
+    }
+
     float sunDot = max(dot(rd, uSunDir), 0.0);
     /* Two lobes: a wide atmospheric bloom and a tight disc. */
     col += uSunColor * pow(sunDot, 8.0) * 0.28;

@@ -50,14 +50,29 @@ export const SUN_DIR = new THREE.Vector3(0.42, 0.58, -0.7).normalize();
  * sunset should read now that half of it is sky the reader can actually see.
  * ------------------------------------------------------------------------- */
 
-/** Warm and unambiguous: this is the colour the closing section reads as. */
-export const SUNSET_ZENITH = new THREE.Color(0.94, 0.42, 0.16);
+/** Dusk overhead is violet, not orange — the orange lives at the horizon.
+    A single-hue orange ramp is what made the CTA read as a flat fill: both
+    ends of the gradient were the same colour at two brightnesses. Splitting
+    the ramp across two hue families is what makes it read as an actual sky. */
+export const SUNSET_ZENITH = new THREE.Color(0.38, 0.3, 0.55);
 
-/** Lighter and creamier below, so the gradient still has somewhere to go. */
-export const SUNSET_HORIZON = new THREE.Color(1.0, 0.79, 0.55);
+/** Hot amber-gold at the horizon, saturated enough to survive the tonemap. */
+export const SUNSET_HORIZON = new THREE.Color(1.0, 0.6, 0.26);
 
-/** A low sun is redder — it is the same light through more atmosphere. */
-export const SUNSET_SUN = new THREE.Color(1.0, 0.84, 0.62);
+/** A low sun is redder — it is the same light through more atmosphere. Values
+    above 1.0 are deliberate: this feeds skyColor's bloom and disc terms before
+    the tonemap, and at unit brightness the dusk halo was too faint to read.
+    The excess is what makes the sun visibly glow low on the closing section. */
+export const SUNSET_SUN = new THREE.Color(1.45, 0.76, 0.4);
+
+/**
+ * Where the sun goes at sunset: low, left of centre, and — critically — in
+ * front of the camera. The daytime SUN_DIR has negative z, which is behind
+ * every ray the shaders cast, so skyColor's halo and disc never rendered at
+ * all. At dusk the sun swings into frame and drops to the horizon, which is
+ * what a sunset is; the glow low on the CTA is this vector, not a decoration.
+ */
+export const SUNSET_SUN_DIR = new THREE.Vector3(-0.3, 0.09, 0.95).normalize();
 
 /**
  * Scroll window the turn happens over, as a fraction of total page scroll.
@@ -89,7 +104,13 @@ export const SUNSET_END = 0.92;
  * thick as the clouds are wide grows towers instead.
  */
 export const CLOUD_BOTTOM = 30.0;
-export const CLOUD_TOP = 43.0;
+/* Raised from 43 so a fully swelled column can tower. heightProfile keys its
+   ceiling off the coverage gate, so most clouds stay flat humilis while the
+   densest few climb the extra headroom — and with the eye just above the old
+   ceiling, those few are the ones that break the horizon line. A deck whose
+   silhouette never crosses the horizon is what read as everything sitting on
+   one plane. */
+export const CLOUD_TOP = 47.0;
 
 /* ---------------------------------------------------------------------------
  * Coverage gate.
@@ -110,9 +131,14 @@ export const CLOUD_TOP = 43.0;
    the slab once and the gaps between cloud groups were most of the frame. Looking
    down, the same field is seen in plan across a huge area, so every gap is filled
    by another group further out and 0.52 rendered as one continuous white floor —
-   fog, not weather. A higher floor is what puts sky back between the groups. */
-export const CLOUD_GATE_DENSE = 0.6;
-export const CLOUD_GATE_CLEAR = 0.72;
+   fog, not weather. A higher floor is what puts sky back between the groups.
+
+   Raised again from 0.60/0.72: at 0.60 the groups still touched and the deck
+   rendered as one unbroken white field with no blue through it anywhere — the
+   compact, heavy version of this sky. At 0.66 the groups separate and the deck
+   reads as individual cumulus over open air. */
+export const CLOUD_GATE_DENSE = 0.66;
+export const CLOUD_GATE_CLEAR = 0.78;
 
 /**
  * Blur radius, in CSS pixels, of the `.glass` panes that sit over this sky.
