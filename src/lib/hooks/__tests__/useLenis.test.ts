@@ -121,3 +121,130 @@ describe("scroll progress store", () => {
     unmount();
   });
 });
+
+/**
+ * The preference is about the smooth scrolling itself, so the hook has to stop
+ * providing it — not provide it faster. What must survive is the store: the sky
+ * drives its sunset from progress, and a reader who asked for less animation
+ * still has to arrive at the bottom of the page under the right colour.
+ */
+describe("reduced motion", () => {
+  function setReducedMotion(matches: boolean) {
+    (window.matchMedia as jest.Mock).mockImplementation((query: string) => ({
+      matches: query.includes("prefers-reduced-motion") ? matches : false,
+      media: query,
+      onchange: null,
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    }));
+  }
+
+  function setScrollMetrics(scrollY: number) {
+    Object.defineProperty(document.documentElement, "scrollHeight", {
+      value: 3000,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 1000,
+      configurable: true,
+    });
+    Object.defineProperty(window, "scrollY", {
+      value: scrollY,
+      configurable: true,
+    });
+  }
+
+  /** The native publisher defers its read by a frame, as the Header's does. */
+  async function flushFrame() {
+    await act(async () => {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => resolve(null)),
+      );
+    });
+  }
+
+  beforeEach(() => {
+    setReducedMotion(true);
+    setScrollMetrics(500);
+  });
+
+  afterEach(() => {
+    setReducedMotion(false);
+  });
+
+  it("never constructs Lenis", () => {
+    const { unmount } = renderHook(() => useLenis());
+
+    // No scroll handler was registered, so nothing subscribed to Lenis, and
+    // nothing had to be destroyed — the instance was never built in the first
+    // place rather than built and torn down.
+    expect(handlers.size).toBe(0);
+    expect(destroy).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it("publishes progress from the document's own scroll position", async () => {
+    // 500px down a 3000px document in a 1000px viewport: 500 / 2000.
+    const { unmount } = renderHook(() => useLenis());
+
+    // Published on mount, so a page opened partway down is not pinned to the top.
+    expect(readScrollProgress()).toBe(0.25);
+
+    setScrollMetrics(1500);
+    await act(async () => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    await flushFrame();
+
+    expect(readScrollProgress()).toBe(0.75);
+
+    unmount();
+  });
+
+  it("notifies subscribers, so the sky still follows the page down", async () => {
+    const seen: number[] = [];
+    const unsubscribe = subscribeScrollProgress((progress) =>
+      seen.push(progress),
+    );
+    const { unmount } = renderHook(() => useLenis());
+
+    setScrollMetrics(2000);
+    await act(async () => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    await flushFrame();
+
+    expect(seen).toContain(1);
+
+    unsubscribe();
+    unmount();
+  });
+
+  it("clamps to the ends rather than reporting past them", async () => {
+    // Rubber-band overscroll on a trackpad reports a scrollY beyond the maximum.
+    const { unmount } = renderHook(() => useLenis());
+
+    setScrollMetrics(9999);
+    await act(async () => {
+      window.dispatchEvent(new Event("scroll"));
+    });
+    await flushFrame();
+
+    expect(readScrollProgress()).toBe(1);
+
+    unmount();
+  });
+
+  it("returns to null on unmount, as the Lenis path does", () => {
+    const { unmount } = renderHook(() => useLenis());
+    expect(readScrollProgress()).toBe(0.25);
+
+    unmount();
+
+    expect(readScrollProgress()).toBeNull();
+  });
+});

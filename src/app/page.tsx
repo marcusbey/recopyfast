@@ -26,12 +26,17 @@ const SkyBackground = dynamic(
 );
 
 export default function Home() {
-  const { scrollProgress } = useLenis();
+  /* Called for its effect, not its return value: it mounts Lenis and publishes
+     scroll progress to the module store the sky reads directly. Destructuring
+     `scrollProgress` here and passing it down would put the value back on the
+     React render path — one render of this entire tree per scroll step, which
+     is the cost useLenis exists to avoid. */
+  useLenis();
 
   return (
     <div className="min-h-screen">
       {/* Volumetric sky above the fold, cheap layered sky below it. */}
-      <SkyBackground scrollProgress={scrollProgress} />
+      <SkyBackground />
 
       <Header />
       <main className="relative z-10">

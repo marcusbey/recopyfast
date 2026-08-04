@@ -60,11 +60,100 @@ export function subscribeScrollProgress(
   };
 }
 
+function publish(progress: number) {
+  liveProgress = progress;
+  for (const callback of subscribers) callback(progress);
+}
+
+/**
+ * Progress read from the document's own scroll position rather than from Lenis.
+ * Used when smooth scrolling is off, so consumers see the same 0-to-1 value
+ * either way and none of them has to know which mode is driving the page.
+ */
+function readNativeProgress(): number {
+  const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+  if (maxScroll <= 0) return 0;
+  return Math.min(1, Math.max(0, window.scrollY / maxScroll));
+}
+
+function usePrefersReducedMotion(): boolean {
+  /* Resolved during the first render rather than in the effect that keeps it in
+     sync. Defaulting to false would construct a Lenis instance and tear it down
+     again on mount for exactly the readers who asked for no smooth scrolling.
+     Nothing renders from this value — it only decides which effect body runs —
+     so the server's `false` and the client's answer cannot disagree in markup. */
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setPrefersReducedMotion(query.matches);
+
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
 export function useLenis(): UseLenisReturn {
   const [lenis, setLenis] = useState<Lenis | null>(null);
   const instanceRef = useRef<Lenis | null>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    /**
+     * Reduced motion means no Lenis at all, rather than a Lenis configured to
+     * move quickly.
+     *
+     * Smooth scrolling is the animation this preference is most directly about:
+     * every wheel tick becomes a 1.2s eased glide the reader did not ask for,
+     * and the page keeps moving after the input stops. Shortening the duration
+     * still animates; the honest response is to hand the scroll back to the
+     * browser, which is also what makes `<a href="#pricing">` an instant native
+     * jump again — anchors only needed intercepting because Lenis was otherwise
+     * overriding the position they set.
+     *
+     * Progress still has to be published, because the sky's sunset is driven by
+     * it. Freezing it would leave these readers on a blue sky under an orange
+     * call to action. The read is deferred to an animation frame for the same
+     * reason the Header's is: reading scrollY inside the event forces a layout
+     * flush.
+     */
+    if (prefersReducedMotion) {
+      setLenis(null);
+      instanceRef.current = null;
+
+      let frame = 0;
+      const readAndPublish = () => {
+        frame = 0;
+        publish(readNativeProgress());
+      };
+      const onNativeScroll = () => {
+        if (frame) return;
+        frame = requestAnimationFrame(readAndPublish);
+      };
+
+      /* Publish the current position immediately, so a page opened partway down
+         starts with the sky it should have rather than the one at the top. */
+      readAndPublish();
+      window.addEventListener("scroll", onNativeScroll, { passive: true });
+      /* Resizing changes the denominator, so the same scrollY is a different
+         progress. Without this the sky drifts out of step on rotation. */
+      window.addEventListener("resize", onNativeScroll, { passive: true });
+
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+        window.removeEventListener("scroll", onNativeScroll);
+        window.removeEventListener("resize", onNativeScroll);
+        liveProgress = null;
+      };
+    }
+
     const lenisInstance = new Lenis({
       lerp: 0.1,
       duration: 1.2,
@@ -85,8 +174,7 @@ export function useLenis(): UseLenisReturn {
     instanceRef.current = lenisInstance;
 
     function onScroll({ progress }: { progress: number }) {
-      liveProgress = progress;
-      for (const callback of subscribers) callback(progress);
+      publish(progress);
     }
 
     lenisInstance.on("scroll", onScroll);
@@ -115,13 +203,29 @@ export function useLenis(): UseLenisReturn {
       // be when it unmounted.
       liveProgress = null;
     };
-  }, []);
+  }, [prefersReducedMotion]);
 
   // Reads the ref rather than the `lenis` state value, so the callback identity
   // is stable from first render and callers need no guard for the one-render
   // window where state is still null.
   const scrollTo = useCallback((target: string | number | HTMLElement) => {
-    instanceRef.current?.scrollTo(target);
+    const instance = instanceRef.current;
+    if (instance) {
+      instance.scrollTo(target);
+      return;
+    }
+
+    /* No Lenis: either it has not mounted yet, or the reader asked for reduced
+       motion and it never will. Both want the browser's own instant scroll —
+       animating here is exactly what the preference rules out. */
+    if (typeof target === "number") {
+      window.scrollTo({ top: target, behavior: "auto" });
+      return;
+    }
+
+    const element =
+      typeof target === "string" ? document.querySelector(target) : target;
+    element?.scrollIntoView({ behavior: "auto" });
   }, []);
 
   return { scrollProgress: liveProgress ?? 0, lenis, scrollTo };
