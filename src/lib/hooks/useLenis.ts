@@ -183,11 +183,21 @@ export function useLenis(): UseLenisReturn {
        document, so this is the value it would report anyway. */
     publish(readNativeProgress());
 
-    function onScroll({ progress }: { progress: number }) {
-      publish(progress);
+    /* Published from the document, not from Lenis's own `progress`. Lenis
+       computes progress against its internally measured `limit`, and when that
+       measurement disagrees with the document's real max-scroll — sticky
+       pinning and late-loading content both cause it — progress tops out well
+       short of 1. The visible symptom was the scroll-driven sunset arriving
+       half-finished at the bottom of the page: the CTA sat on a grey lerp
+       midpoint instead of the dusk sky. The document's own ratio is what the
+       reader's position actually is, whichever engine is animating it. */
+    function onScroll() {
+      publish(readNativeProgress());
     }
 
     lenisInstance.on("scroll", onScroll);
+    /* Resize changes the denominator while emitting no scroll event. */
+    window.addEventListener("resize", onScroll, { passive: true });
 
     // The frame handle must be captured and cancelled. Previously `raf`
     // re-scheduled itself unconditionally while cleanup only called destroy(),
@@ -205,6 +215,7 @@ export function useLenis(): UseLenisReturn {
 
     return () => {
       cancelAnimationFrame(frame);
+      window.removeEventListener("resize", onScroll);
       lenisInstance.off("scroll", onScroll);
       lenisInstance.destroy();
       instanceRef.current = null;

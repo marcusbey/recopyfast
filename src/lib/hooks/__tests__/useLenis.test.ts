@@ -41,10 +41,17 @@ import {
   useLenis,
 } from "../useLenis";
 
-/** Fires what Lenis fires, without needing a scrollable document. */
-function emitScroll(progress: number) {
+/**
+ * Fires what Lenis fires. The payload's progress is deliberately nonsense:
+ * the implementation ignores it and reads the document instead, because
+ * Lenis measures progress against its own internal limit and that limit can
+ * disagree with the document's real scroll range (sticky pinning, late
+ * content). Asserting against `setScrollMetrics` geometry while emitting a
+ * wrong payload is what pins that behaviour down.
+ */
+function emitScroll() {
   act(() => {
-    for (const handler of handlers) handler({ progress });
+    for (const handler of handlers) handler({ progress: 0.999 });
   });
 }
 
@@ -88,9 +95,12 @@ describe("scroll progress store", () => {
     });
 
     const rendersAfterMount = renders;
-    emitScroll(0.25);
-    emitScroll(0.5);
-    emitScroll(0.75);
+    setScrollMetrics(500);
+    emitScroll();
+    setScrollMetrics(1000);
+    emitScroll();
+    setScrollMetrics(1500);
+    emitScroll();
 
     expect(readScrollProgress()).toBe(0.75);
     expect(renders).toBe(rendersAfterMount);
@@ -101,11 +111,13 @@ describe("scroll progress store", () => {
   it("publishes the exact value rather than a quantised one", () => {
     const { unmount } = renderHook(() => useLenis());
 
-    // Two values inside the same 1/200th step the old implementation used.
-    emitScroll(0.1231);
-    expect(readScrollProgress()).toBe(0.1231);
-    emitScroll(0.1234);
-    expect(readScrollProgress()).toBe(0.1234);
+    // Two positions inside the same 1/200th step the old implementation used.
+    setScrollMetrics(125);
+    emitScroll();
+    expect(readScrollProgress()).toBe(0.0625);
+    setScrollMetrics(126);
+    emitScroll();
+    expect(readScrollProgress()).toBeCloseTo(0.063, 12);
 
     unmount();
   });
@@ -118,10 +130,13 @@ describe("scroll progress store", () => {
     // is, rather than waiting for one.
     const { unmount } = renderHook(() => useLenis());
 
-    emitScroll(0.1);
-    emitScroll(0.2);
+    setScrollMetrics(200);
+    emitScroll();
+    setScrollMetrics(400);
+    emitScroll();
     unsubscribe();
-    emitScroll(0.3);
+    setScrollMetrics(600);
+    emitScroll();
 
     expect(seen).toEqual([0, 0.1, 0.2]);
     unmount();
@@ -129,7 +144,8 @@ describe("scroll progress store", () => {
 
   it("returns to null on unmount so a later consumer falls back", () => {
     const { unmount } = renderHook(() => useLenis());
-    emitScroll(0.6);
+    setScrollMetrics(1200);
+    emitScroll();
     expect(readScrollProgress()).toBe(0.6);
 
     unmount();
