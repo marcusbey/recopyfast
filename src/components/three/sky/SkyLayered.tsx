@@ -154,15 +154,22 @@ interface SkyLayeredProps {
    * which is the cost useLenis exists to avoid.
    */
   scroll: { value: number };
+  /**
+   * Opacity of the volumetric sky drawn over this one, or null when that path
+   * is not mounted at all. Read at frame rate for the same reason as `scroll`.
+   */
+  coveredBy: { value: number } | null;
   isAnimating: boolean;
 }
 
 export default function SkyLayered({
   mouseRef,
   scroll,
+  coveredBy,
   isAnimating,
 }: SkyLayeredProps) {
   const { size } = useThree();
+  const mesh = useRef<THREE.Mesh>(null);
   const smoothedMouse = useRef(new THREE.Vector2(0.5, 0.5));
 
   const uniforms = useMemo(
@@ -183,6 +190,17 @@ export default function SkyLayered({
   );
 
   useFrame((state) => {
+    /* The raymarched sky is a fullscreen quad drawn over this one. While it is
+       at full opacity nothing here reaches the screen, so shading it is pure
+       waste — and it is not small waste: six noise layers over every pixel is
+       roughly a third of the hero's fragment budget, spent on an image that is
+       completely covered. Both still draw through the cross-fade, which is the
+       only time any of it is visible. */
+    if (mesh.current) {
+      mesh.current.visible = coveredBy === null || coveredBy.value < 0.995;
+      if (!mesh.current.visible) return;
+    }
+
     const scrollProgress = scroll.value;
 
     uniforms.uAspect.value = size.width / Math.max(size.height, 1);
@@ -220,7 +238,7 @@ export default function SkyLayered({
   });
 
   return (
-    <mesh renderOrder={0} frustumCulled={false}>
+    <mesh ref={mesh} renderOrder={0} frustumCulled={false}>
       <planeGeometry args={[2, 2]} />
       <shaderMaterial
         vertexShader={vertexShader}

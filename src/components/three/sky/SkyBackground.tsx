@@ -112,6 +112,7 @@ function Scene({
       <SkyLayered
         mouseRef={mouseRef}
         scroll={scroll.current}
+        coveredBy={isVolumetricMounted ? fade.current : null}
         isAnimating={isAnimating}
       />
       {isVolumetricMounted && (
