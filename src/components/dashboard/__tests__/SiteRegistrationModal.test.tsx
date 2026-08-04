@@ -33,6 +33,19 @@ const getFooterCloseButton = () =>
 const spyOnClipboard = () =>
   jest.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
 
+/**
+ * No wait between keystrokes.
+ *
+ * At userEvent's default delay this file spent most of its ~35s wall clock
+ * sitting in timers between characters. That fits inside the 5s per-test budget
+ * on an idle machine and overruns as soon as the run competes for CPU with the
+ * other 90 suites, which is why the file failed under a full `jest` run and
+ * passed when run on its own — and why the pre-commit hook was rejecting
+ * unrelated commits. The same key sequence is dispatched either way, so no
+ * assertion here depends on the delay being real.
+ */
+const TYPING = { delay: null };
+
 describe("SiteRegistrationModal", () => {
   const mockOnClose = jest.fn();
   const mockOnSuccess = jest.fn();
@@ -95,7 +108,7 @@ describe("SiteRegistrationModal", () => {
 
   describe("Form Validation", () => {
     it("should show error when website name is empty", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       render(<SiteRegistrationModal {...defaultProps} />);
 
       const submitButton = screen.getByRole("button", {
@@ -110,7 +123,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should show error when website URL is empty", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       render(<SiteRegistrationModal {...defaultProps} />);
 
       const nameInput = screen.getByLabelText(/Website Name/i);
@@ -128,7 +141,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should show error for invalid URL format", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       render(<SiteRegistrationModal {...defaultProps} />);
 
       const nameInput = screen.getByLabelText(/Website Name/i);
@@ -148,21 +161,17 @@ describe("SiteRegistrationModal", () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    /* One case per format rather than a loop inside a single `it`. Four full
-       render-type-submit cycles shared one 5s budget, which fits on an idle
-       machine and overruns as soon as the run competes for CPU with the other
-       suites — that is why this file failed only under a full `jest` run and
-       passed in isolation. Split, each format gets its own budget, and a
-       failure names the format that broke instead of the whole set.
-       `delay: null` drops userEvent's wait between keystrokes; the same key
-       sequence is dispatched, so the assertions are unchanged. */
+    /* One case per format rather than a loop inside a single `it`: four full
+       render-type-submit cycles used to share one 5s budget, so this was the
+       first case to overrun under load. Split, each format gets its own budget
+       and a failure names the format that broke instead of the whole set. */
     it.each([
       "example.com",
       "https://example.com",
       "http://example.com",
       "subdomain.example.com",
     ])("should accept %s as a valid domain format", async (domain) => {
-      const user = userEvent.setup({ delay: null });
+      const user = userEvent.setup(TYPING);
 
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
@@ -198,7 +207,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should clear field errors when user starts typing", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       render(<SiteRegistrationModal {...defaultProps} />);
 
       const submitButton = screen.getByRole("button", {
@@ -238,7 +247,7 @@ describe("SiteRegistrationModal", () => {
     };
 
     it("should successfully register a site", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -266,7 +275,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should show loading state during submission", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockImplementationOnce(
         () =>
           new Promise((resolve) =>
@@ -305,7 +314,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should display embed script in success state", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -334,7 +343,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should show integration instructions", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -371,7 +380,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should document the attributes the widget actually honours", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -398,7 +407,7 @@ describe("SiteRegistrationModal", () => {
 
   describe("Error Handling", () => {
     it("should handle duplicate domain error", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: false,
         status: 400,
@@ -424,7 +433,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should handle general API errors", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: false,
         status: 500,
@@ -450,7 +459,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should handle network errors", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockRejectedValueOnce(
         new Error("Network error"),
       );
@@ -489,7 +498,7 @@ describe("SiteRegistrationModal", () => {
     };
 
     it("should copy embed script to clipboard", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -524,7 +533,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it('should show temporary "Copied" state', async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => mockSuccessResponse,
@@ -572,7 +581,7 @@ describe("SiteRegistrationModal", () => {
 
   describe("Modal State Management", () => {
     it("should call onClose when Cancel button is clicked", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       render(<SiteRegistrationModal {...defaultProps} />);
 
       const cancelButton = screen.getByRole("button", { name: /Cancel/i });
@@ -582,7 +591,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should call onClose when Close button is clicked in success state", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -624,7 +633,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should call onSuccess when Go to Site Dashboard is clicked", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -669,7 +678,7 @@ describe("SiteRegistrationModal", () => {
     });
 
     it("should reset form state when modal is closed and reopened", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       const { rerender } = render(<SiteRegistrationModal {...defaultProps} />);
 
       const nameInput = screen.getByLabelText(/Website Name/i);
@@ -688,7 +697,7 @@ describe("SiteRegistrationModal", () => {
 
   describe("API Integration", () => {
     it("should send correct data to the API", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -747,7 +756,7 @@ describe("SiteRegistrationModal", () => {
      * exists and starts failing once the trim moves ahead of validation.
      */
     it.failing("should trim whitespace from input fields", async () => {
-      const user = userEvent.setup();
+      const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
         json: async () => ({
