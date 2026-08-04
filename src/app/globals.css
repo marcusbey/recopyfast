@@ -452,15 +452,24 @@ body {
     0 2px 40px -12px hsl(200 40% 30% / 0.18);
 }
 
-/* 62% is measured, not picked. The sky behind ranges from a deep zenith blue
-   (~0.25 relative luminance) to a lit cloud top (~0.85). At 62% white the
-   composite lands between 0.72 and 0.94, which keeps `text-slate-600` body copy
-   between 5.5:1 and 7.1:1 — clear of AA at both ends of the range. Raising the
-   tint hides the sky; lowering it fails contrast against the zenith. */
+/* A gradient rather than a flat fill, and thinner overall than the 62% it
+   replaces — a uniform 62% white was opaque enough that the sky vanished and
+   the section read as a solid lavender-grey slab, which defeats glass as a
+   material. The gradient carries the same contrast work unevenly on purpose:
+   heaviest at the top, where a pane catches the light and where headings sit,
+   thinning toward the bottom so the sky visibly comes through by the foot of
+   the section. Worst case for copy is slate-600 over the ~48% band against a
+   lit cloud top, which still clears AA at ~5:1; body text lower than that sits
+   on the following section's own surface, not on this fade. */
 .glass-sheet {
-  background: color-mix(in oklab, white 62%, transparent);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, white 56%, transparent) 0%,
+    color-mix(in oklab, white 44%, transparent) 55%,
+    color-mix(in oklab, white 30%, transparent) 100%
+  );
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, white 70%, transparent),
     inset 0 -1px 0 color-mix(in oklab, white 20%, transparent);
