@@ -80,16 +80,29 @@ function Scene({
      204 React commits producing output that never changed, which is what made
      the page judder. Resolved once per frame into a box both shaders read, it
      costs a property lookup. */
-  const scroll = useRef({ value: fallbackProgress });
+  /* Computed on read rather than assigned once per frame, which matters more
+     than it looks. R3F runs a child's useFrame subscription before its parent's,
+     because that is the order layout effects register in. Assigning here meant
+     both shaders read the value this scene had written on the *previous* frame.
+     Under frameloop="always" that is 16ms of lag nobody can see. Under "demand"
+     — the reduced-motion path — exactly one frame is rendered per scroll step,
+     so being a frame behind means the sky draws the position the reader has
+     already left and then stops, and the scroll-driven sunset never arrives at
+     all. A getter has no ordering to get wrong. */
+  const fallbackRef = useRef(fallbackProgress);
+  fallbackRef.current = fallbackProgress;
+  const scroll = useRef({
+    /* Null means nothing is driving scroll on this page, so the prop is all
+       there is to go on. A page that mounts this sky without useLenis then gets
+       a correctly positioned one instead of being pinned to the top. */
+    get value() {
+      return readScrollProgress() ?? fallbackRef.current;
+    },
+  });
   const [isVolumetricMounted, setIsVolumetricMounted] =
     useState(wantsVolumetric);
 
   useFrame((_, delta) => {
-    /* Null means nothing is driving scroll on this page, so the prop is all
-       there is to go on. A page that mounts this sky without useLenis then gets
-       a correctly positioned one instead of being pinned to the top. */
-    scroll.current.value = readScrollProgress() ?? fallbackProgress;
-
     const target = wantsVolumetric ? 1 : 0;
     const step = FADE_PER_SECOND * Math.min(delta, 0.1);
 
