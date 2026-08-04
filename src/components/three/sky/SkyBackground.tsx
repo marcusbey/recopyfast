@@ -89,6 +89,22 @@ function Scene({
      so being a frame behind means the sky draws the position the reader has
      already left and then stops, and the scroll-driven sunset never arrives at
      all. A getter has no ordering to get wrong. */
+  /* Written during render, which React discourages, and deliberately kept that
+     way. The value comes from this render's own props and is idempotent, so a
+     StrictMode double render writes the same thing twice, and the getter is only
+     read from frame callbacks that run after commit.
+
+     This is load-bearing if `fallbackProgress` ever carries a real value — today
+     the only caller does not pass it, so it is always 0. Two things to know then.
+     Moving the assignment into the useFrame below is the tempting fix and the
+     wrong one: children's frame callbacks run before their parent's, so the
+     fallback would be a frame stale in exactly the case it is read — a page with
+     no Lenis, where it is the only source — reintroducing what the getter above
+     removes, one level down and harder to see. The correct move is to leave the
+     write here and let the object identity change with the prop, so the getter
+     closes over the current value instead of reaching through a ref. That costs
+     an object per prop change: free while the prop is static, correct once it
+     is not. */
   const fallbackRef = useRef(fallbackProgress);
   fallbackRef.current = fallbackProgress;
   const scroll = useRef({
