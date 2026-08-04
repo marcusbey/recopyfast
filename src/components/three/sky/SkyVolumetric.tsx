@@ -203,15 +203,17 @@ const fragmentShader = /* glsl */ `
        rays that point upward, projected onto a plane far above the slab. The
        domain is stretched 4:1 so the features draw out into filaments rather
        than lumps — cirrus is wind-sheared ice, not billow. */
-    if (rd.y > 0.03) {
+    if (rd.y > 0.012) {
       vec2 cp = (ro + rd * ((150.0 - ro.y) / rd.y)).xz;
       cp += uWind.xz * 2.4;
       float cir = fbm2(cp * vec2(0.0016, 0.0068), 3);
       float veil = remap(cir, 0.52, 0.94);
-      /* Thin by construction: never past ~0.4 alpha, faded near the horizon so
-         it does not stack over the distant deck, and faded at the zenith so the
-         top of the page keeps its depth of blue. */
-      veil *= 0.4 * smoothstep(0.03, 0.16, rd.y) * (1.0 - smoothstep(0.5, 0.95, rd.y) * 0.55);
+      /* Thin by construction: never past ~0.4 alpha, and faded at the zenith
+         so the top of the page keeps its depth of blue. The lower edge starts
+         almost at the horizon — the band between the distant cloud bank and
+         the first cirrus filament was the one strip of clean untouched blue
+         left in the frame, and it read as a break in the gradient. */
+      veil *= 0.4 * smoothstep(0.012, 0.10, rd.y) * (1.0 - smoothstep(0.5, 0.95, rd.y) * 0.55);
       bg = mix(bg, mix(uSkyHorizon, vec3(1.0), 0.6), veil);
     }
 
@@ -230,8 +232,19 @@ const fragmentShader = /* glsl */ `
        empty stripe across the middle of the frame — a hard seam exactly where
        the deck should dissolve into the distance. MAX_SPAN already stops the
        grazing rays from smearing, so the fade only needs to cover the last
-       fraction of a degree. */
-    float horizonFade = smoothstep(0.004, 0.045, abs(rd.y));
+       fraction of a degree.
+
+       And it must not exist at all once the eye is inside the slab. The fade
+       is protection against rays grazing a *distant* deck; scrolled into the
+       cloud, a horizontal ray legitimately passes through cloud right beside
+       the eye, and keeping the dead zone there slices a clean bright slot
+       through the middle of otherwise dense cloud — the horizontal stripe
+       that appeared mid-scroll. Outside-ness ramps the fade back in over the
+       first few units above or below the slab. */
+    float outsideSlab = clamp(
+      max(uCloudBottom - ro.y, ro.y - uCloudTop) / 4.0, 0.0, 1.0);
+    float horizonFade = mix(
+      1.0, smoothstep(0.004, 0.045, abs(rd.y)), outsideSlab);
 
     /* General ray/slab intersection, correct for any eye position and any ray
        direction. The old pair of divides assumed the eye was below the slab and

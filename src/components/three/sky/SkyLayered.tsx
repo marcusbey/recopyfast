@@ -97,7 +97,7 @@ const fragmentShader = /* glsl */ `
        storey up. At sunset they matter most: uSunColor has turned gold and the
        rim term paints it along their edges, which is what a sunset actually
        looks like. */
-    float upFade = smoothstep(0.02, 0.14, rd.y);
+    float upFade = smoothstep(0.01, 0.12, rd.y);
     if (upFade > 0.001) {
       for (int i = 0; i < 3; i++) {
         float near = float(i) / 2.0;
@@ -135,7 +135,7 @@ const fragmentShader = /* glsl */ `
        Near the horizon the projection below diverges as it always did, so the
        fade still exists for the same reason — it is only which side of the
        horizon it applies to that changed. */
-    float horizonFade = smoothstep(0.015, 0.20, -rd.y);
+    float horizonFade = smoothstep(0.006, 0.16, -rd.y);
 
     if (horizonFade > 0.001) {
       for (int i = 0; i < LAYERS; i++) {

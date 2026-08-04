@@ -188,7 +188,12 @@ export const ATMOSPHERE = /* glsl */ `
        Distance whitens everything near the horizon on BOTH sides in a real
        atmosphere, and this exponential is that. It is what dissolves the seam
        between the two halves of the composition into a gradient. */
-    col = mix(col, uSkyHorizon, exp(-abs(rd.y) * 4.5) * 0.6);
+    /* Amplitude and slope are the progressiveness dials. At 4.5/0.6 the band
+       was narrow enough that the eye still read a boundary between the blue
+       families above and below the line; 3.2/0.78 converges both sides onto
+       the horizon colour across a fifth of the frame, which is the gradual
+       hand-off a real atmosphere makes. */
+    col = mix(col, uSkyHorizon, exp(-abs(rd.y) * 3.2) * 0.78);
 
     /* Distant cloud bank. The haze above blends the two halves of the sky in
        luminance, but a blend between two horizontal gradients still meets
