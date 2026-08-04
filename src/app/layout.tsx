@@ -123,6 +123,14 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${instrumentSans.variable} ${bricolageGrotesque.variable} ${jetbrainsMono.variable}`}
+      /* Attribute-level only, and only on this element. Two things legitimately
+         mutate <html> before hydration: the theme script below writes
+         data-theme, and browser extensions (UI.Vision's data-kantu, Grammarly,
+         password managers) inject their own markers. React 19 diffs server
+         attributes against the extension-modified DOM and logs a hydration
+         error for attributes this app never rendered. Suppressing here does
+         not extend to children, so real hydration bugs still surface. */
+      suppressHydrationWarning
     >
       <head>
         {/*
