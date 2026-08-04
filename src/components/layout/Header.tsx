@@ -22,8 +22,21 @@ export function Header() {
 
     /* Reading scrollY inside the scroll event forces the browser to flush
        pending layout synchronously, once per event. Deferring the read to the
-       next animation frame collapses a burst of events into one read that
-       happens when layout is already clean. */
+       next animation frame collapses a burst of those into one read per frame.
+
+       That read is clean in practice, but not by guarantee: rAF runs before
+       style and layout for its frame, so it is only clean while nothing earlier
+       in the frame has dirtied the DOM — and React can commit before rAF in the
+       same frame. What makes it hold here is that scrolling this page barely
+       touches React at all. Progress is published to a module store rather than
+       state (see useLenis), and this handler writes the same boolean on every
+       frame but the two either side of the threshold, so React bails without
+       committing. Measured: 34ms of forced reflow attributed to this handler
+       over a 5s scroll, now none detected.
+
+       So this is the place to look if that number comes back. Reintroducing
+       per-frame React work during scroll would make the read dirty again
+       without changing a line of this file. */
     const readScroll = () => {
       frame = 0;
       setIsScrolled(window.scrollY > SCROLLED_THRESHOLD_PX);
