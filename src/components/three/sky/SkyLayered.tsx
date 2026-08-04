@@ -107,7 +107,7 @@ const fragmentShader = /* glsl */ `
         vec2 uvH = rd.xz * t * mix(vec2(0.0015, 0.0062), vec2(0.0052, 0.0088), near);
 
         uvH += vec2(uTime * 0.004, uTime * 0.009) * mix(0.4, 1.0, near);
-        uvH += vec2(0.0, uScroll * mix(0.15, 0.7, near));
+        uvH += vec2(0.0, uScroll * mix(0.08, 0.4, near));
 
         float d = fbm2(uvH, 3);
         float lo = mix(0.56, 0.50, near) + uDisperse * 0.10;
@@ -155,9 +155,13 @@ const fragmentShader = /* glsl */ `
         vec2 uvL = rd.xz * t * mix(0.020, 0.058, near);
 
         /* Wind, and the scroll parallax. Near layers move furthest — that
-           inverse-depth relationship is the entire effect. */
+           inverse-depth relationship is the entire effect. The scroll rates
+           are less than half what they were: at 5.5 field-units per page the
+           near layer streamed past faster than the content, which read as
+           the sky rushing rather than the reader drifting down through it.
+           The near/far ratio (not the absolute speed) carries the depth. */
         uvL += vec2(uTime * 0.007, uTime * 0.016) * mix(0.35, 1.0, near);
-        uvL += vec2(0.0, uScroll * mix(0.6, 5.5, near));
+        uvL += vec2(0.0, uScroll * mix(0.3, 2.4, near));
 
         float d = fbm2(uvL, 4);
         /* Far layers get a higher coverage threshold so they read as sparse

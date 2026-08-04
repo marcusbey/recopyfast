@@ -399,11 +399,12 @@ const fragmentShader = /* glsl */ `
  * Scroll fraction the hero's sky opens out over.
  *
  * The hero is about one viewport of a nine-viewport page, so the raymarcher is
- * only alive for the first eighth of the scroll. Keyed any wider, the dispersal
- * would still be getting started when this path hands over to the layered sky,
- * and nobody would ever see it happen.
+ * only alive for the first eighth of the scroll. Deliberately keyed wider than
+ * that window: the dispersal is still mid-movement when this path hands over
+ * to the layered sky, whose own dispersal (keyed 0.12–0.55) carries it on —
+ * a slower, continuous opening instead of one that finishes inside the hero.
  */
-const DISPERSE_OVER = 0.16;
+const DISPERSE_OVER = 0.24;
 
 /**
  * Where the eye sits, in the same world units as the cloud slab.
@@ -518,7 +519,11 @@ export default function SkyVolumetric({
        Pitch no longer moves. The horizon is the anchor of this composition, and
        a horizon that drifts up the frame while the reader scrolls reads as the
        page tilting rather than as the camera descending. */
-    const eased = 1 - Math.pow(1 - Math.min(progress / 0.35, 1), 3);
+    /* 0.55 rather than 0.35: the descent runs across more of the scroll, so
+       the clouds rise past the reader at roughly half the previous rate. The
+       hero unmounts long before the easing completes — only the gentle first
+       stretch of this curve is ever visible. */
+    const eased = 1 - Math.pow(1 - Math.min(progress / 0.55, 1), 3);
     uniforms.uAltitude.value = EYE_START + eased * (EYE_END - EYE_START);
 
     /* Dispersal. Raising the gate floor shrinks every cloud toward its own core

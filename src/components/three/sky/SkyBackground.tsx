@@ -280,7 +280,7 @@ export default function SkyBackground({
       {/* Sits behind the canvas and shows through only if WebGL is unavailable
           or the context is lost. Matches the shader's horizon-to-zenith ramp so
           the failure is a flatter sky, not a different one. */}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[#4a8ed8] via-[#a4cdf0] to-[#cfe6f8]" />
+      <div className="absolute inset-0 -z-10 bg-gradient-to-b from-[#5a9ce4] via-[#aed3f4] to-[#d6eafa]" />
     </div>
   );
 }

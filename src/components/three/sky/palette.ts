@@ -18,7 +18,7 @@ import * as THREE from "three";
     Leans cyan rather than violet — the blue of a clear morning. The previous
     (0.24, 0.47, 0.86) sat far enough toward violet that the page read as a
     late-afternoon steel blue. */
-export const SKY_ZENITH = new THREE.Color(0.26, 0.55, 0.92);
+export const SKY_ZENITH = new THREE.Color(0.33, 0.63, 1.0);
 
 /** Horizon desaturates toward white — real atmosphere does this via scattering. */
 export const SKY_HORIZON = new THREE.Color(0.78, 0.88, 0.97);
