@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
   
   if (error) return NextResponse.json({ error }, { status: 400 });
   
-  const embedScript = `<script src="https://cdn.recopyfast.com/embed/recopyfast.js" data-site-id="${siteId}" data-site-token="${siteToken}"></script>`;
+  const embedScript = `<script src="https://recopyfa.st/embed/recopyfast.js" data-site-id="${siteId}" data-site-token="${siteToken}"></script>`;
   
   return NextResponse.json({ site: data, embedScript });
 }
@@ -447,7 +447,7 @@ vercel deploy
 # Set up CDN for embed script
 
 # Production embed script update
-<script src="https://cdn.recopyfast.com/embed/recopyfast.js" data-site-id="YOUR_SITE_ID"></script>
+<script src="https://recopyfa.st/embed/recopyfast.js" data-site-id="YOUR_SITE_ID" data-site-token="YOUR_SITE_TOKEN" data-api-url="https://recopyfa.st/api"></script>
 ```
 
 ## Technical Architecture
