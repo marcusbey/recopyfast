@@ -5,9 +5,9 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
+  authorizeFirstPartyEditorAccess,
   requireEditorPermission,
   validateEditorTokenFromRequest,
 } from "@/lib/auth/editor-access";
@@ -29,37 +29,6 @@ function extractElementIds(value: unknown): string[] | null {
   return elementIds.length > 0 ? elementIds : null;
 }
 
-async function getAuthenticatedUserAccess(siteId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return null;
-  }
-
-  const { data: permission, error } = await supabase
-    .from("site_permissions")
-    .select("permission")
-    .eq("site_id", siteId)
-    .eq("user_id", user.id)
-    .single();
-
-  if (error || !permission) {
-    return null;
-  }
-
-  return {
-    user,
-    permission: permission.permission as string,
-    canView: true,
-    canPublish: ["admin", "owner", "publish"].includes(
-      permission.permission as string,
-    ),
-  };
-}
-
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -72,12 +41,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const authenticatedAccess = await getAuthenticatedUserAccess(siteId);
+    // Shared with the staging content routes so "may this caller publish" is
+    // answered by one graded permission model. The check this replaces spelled
+    // it `["admin", "owner", "publish"]` inline, inventing an "owner" level the
+    // permission model does not have while omitting nothing it does — harmless
+    // by luck, and the kind of drift that stops being harmless on the next edit.
+    //
+    // Asked at "view" rather than "publish" so that a signed-in collaborator
+    // who genuinely lacks publish rights is told exactly that, instead of
+    // falling through to the token path and being answered "Authentication
+    // required" — which is both untrue and unactionable for someone who is
+    // plainly signed in.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
+      siteId,
+      "view",
+    );
     let publisherEmail: string | null = null;
     let publisherId: string | null = null;
 
-    if (authenticatedAccess) {
-      if (!authenticatedAccess.canPublish) {
+    if (firstPartyAccess) {
+      if (!requireEditorPermission(firstPartyAccess, "publish")) {
         return withPublicCors(
           NextResponse.json(
             { error: "Publish permission required" },
@@ -87,8 +70,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      publisherEmail = authenticatedAccess.user.email || null;
-      publisherId = authenticatedAccess.user.id;
+      publisherEmail = firstPartyAccess.email || null;
+      publisherId = firstPartyAccess.userId || null;
     } else {
       const validation = await validateEditorTokenFromRequest({
         request,
@@ -181,10 +164,13 @@ export async function GET(request: NextRequest) {
     }
 
     let canPublish = false;
-    const authenticatedAccess = await getAuthenticatedUserAccess(siteId);
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
+      siteId,
+      "view",
+    );
 
-    if (authenticatedAccess) {
-      canPublish = authenticatedAccess.canPublish;
+    if (firstPartyAccess) {
+      canPublish = requireEditorPermission(firstPartyAccess, "publish");
     } else {
       const validation = await validateEditorTokenFromRequest({
         request,

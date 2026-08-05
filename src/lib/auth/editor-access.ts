@@ -88,6 +88,81 @@ export function requireEditorPermission(
   return normalizePermissions(access.permissions).includes(permission);
 }
 
+/**
+ * The signed-in owner's (or collaborator's) access to a site, or null.
+ *
+ * The editor-token functions above model ONE caller: somebody who arrived
+ * through an emailed invite and carries a token. That is the collaborator, and
+ * it is not the owner. The owner is signed in, holds a `site_permissions` row
+ * saying `admin`, and has no token at all — so on any route that only validated
+ * tokens, the one person guaranteed to hold every right was the only person
+ * refused.
+ *
+ * That asymmetry had already produced a visible split down the middle of the
+ * core loop: `POST /api/staging/publish` grew its own inline session check and
+ * let the owner publish, while `PUT /api/staging/content/[siteId]` never did,
+ * so an owner could publish edits they had no way to make. The register records
+ * the consequence as "the owner has no first-party editing surface".
+ *
+ * This is deliberately the same shape as the F-4 fix in
+ * `src/lib/security/site-auth.ts`: authorise a first-party caller by session
+ * plus a `site_permissions` row, never by Origin, and return null rather than
+ * throwing so a route can fall through to the token path unchanged.
+ *
+ * Permissions are graded through `normalizePermissions`, the same function the
+ * token path uses, so `admin` implies `publish` implies `edit` implies `view`
+ * exactly once in this codebase rather than once per call site — the previous
+ * hand-rolled check spelled it `["admin", "owner", "publish"]`, which quietly
+ * invented an "owner" level that the permission model does not have.
+ */
+export async function authorizeFirstPartyEditorAccess(
+  siteId: string,
+  required: EditorPermission,
+): Promise<EditorAccess | null> {
+  // Imported lazily: this module is reached from routes that run before a
+  // session exists, and `@/lib/supabase/server` touches next/headers.
+  const { createClient } = await import("@/lib/supabase/server");
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return null;
+  }
+
+  // Read under the USER's client, not the service role. The row has to be
+  // visible to its own owner for this to succeed, which is precisely the
+  // property that silently failed when `site_permissions` had row-level
+  // security enabled and no policy behind it (register F-2/F-3). Reading it
+  // with the service role here would hide that regression from this path.
+  const { data: permission } = await supabase
+    .from("site_permissions")
+    .select("permission")
+    .eq("site_id", siteId)
+    .eq("user_id", user.id)
+    .maybeSingle<{ permission: string }>();
+
+  if (!permission) {
+    return null;
+  }
+
+  const access: EditorAccess = {
+    kind: "edit-session",
+    siteId,
+    // First-party access is carried by the session cookie; there is no bearer
+    // token to echo, and inventing one would imply a credential that can be
+    // replayed.
+    token: "",
+    permissions: normalizePermissions([permission.permission]),
+    email: user.email ?? null,
+    userId: user.id,
+    verified: true,
+  };
+
+  return requireEditorPermission(access, required) ? access : null;
+}
+
 export function extractEditorToken(
   request: EditorTokenRequest,
   body?: Record<string, unknown> | null,

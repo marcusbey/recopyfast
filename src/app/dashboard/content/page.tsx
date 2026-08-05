@@ -88,10 +88,12 @@ export default function ContentPage() {
 
   // Fetch content for a specific site
   const fetchSiteContent = useCallback(async (site: Site) => {
-    // The content route is site-token authenticated. Without this it 401s for
-    // every site. It also rejects requests whose Origin is not the customer's
-    // own domain, which the dashboard can never satisfy — see the note on
-    // fetchAllContent. A failure here must surface, not read as "no content".
+    // The content route is site-token authenticated for the embed widget, but
+    // also recognizes this dashboard as a first-party caller: with a signed-in
+    // session and a site_permissions row it authorizes on that instead of the
+    // token/Origin check (see authorizeFirstPartySiteRequest in site-auth.ts).
+    // The token query param below is kept as a fallback for that widget path.
+    // A failure here must surface, not read as "no content" — see fetchAllContent.
     const res = await fetch(
       `/api/content/${site.id}?token=${encodeURIComponent(site.siteToken ?? "")}`,
     );

@@ -7,6 +7,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  authorizeFirstPartyEditorAccess,
+  requireEditorPermission,
+} from "@/lib/auth/editor-access";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -39,14 +43,6 @@ export async function GET(
     const { versionId } = await params;
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
-
-    if (!token) {
-      return withCors(
-        NextResponse.json({ error: "Missing staging token" }, { status: 401 }),
-        origin,
-      );
-    }
-
     const supabase = createServiceRoleClient();
 
     // Get the version
@@ -63,19 +59,38 @@ export async function GET(
       );
     }
 
-    // Validate staging access
-    const validation = await StagingAccessManager.validateStagingAccess(
-      token,
+    // The signed-in owner holds `site_permissions` and never a staging token.
+    // Same first-party path as the history list and the staging routes.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       version.site_id,
+      "view",
     );
-    if (!validation.valid || !validation.verified) {
-      return withCors(
-        NextResponse.json(
-          { error: validation.error || "Access denied" },
-          { status: 401 },
-        ),
-        origin,
+
+    if (!firstPartyAccess) {
+      if (!token) {
+        return withCors(
+          NextResponse.json(
+            { error: "Missing staging token" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      // Validate staging access
+      const validation = await StagingAccessManager.validateStagingAccess(
+        token,
+        version.site_id,
       );
+      if (!validation.valid || !validation.verified) {
+        return withCors(
+          NextResponse.json(
+            { error: validation.error || "Access denied" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
     }
 
     return withCors(
@@ -111,14 +126,6 @@ export async function POST(
     const { versionId } = await params;
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
-
-    if (!token) {
-      return withCors(
-        NextResponse.json({ error: "Missing staging token" }, { status: 401 }),
-        origin,
-      );
-    }
-
     const supabase = createServiceRoleClient();
 
     // Get the version
@@ -135,41 +142,87 @@ export async function POST(
       );
     }
 
-    // Validate staging access (edit permission required)
-    const validation = await StagingAccessManager.validateStagingAccess(
-      token,
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       version.site_id,
+      "view",
     );
-    if (!validation.valid || !validation.verified) {
-      return withCors(
-        NextResponse.json(
-          { error: validation.error || "Access denied" },
-          { status: 401 },
-        ),
-        origin,
+
+    // Who to record on the restore, whichever way they authenticated.
+    let restoredBy: string | null = null;
+
+    if (firstPartyAccess) {
+      if (!requireEditorPermission(firstPartyAccess, "edit")) {
+        return withCors(
+          NextResponse.json(
+            { error: "Edit permission required" },
+            { status: 403 },
+          ),
+          origin,
+        );
+      }
+
+      restoredBy = firstPartyAccess.email ?? null;
+    } else {
+      if (!token) {
+        return withCors(
+          NextResponse.json(
+            { error: "Missing staging token" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      // Validate staging access (edit permission required)
+      const validation = await StagingAccessManager.validateStagingAccess(
+        token,
+        version.site_id,
       );
+      if (!validation.valid || !validation.verified) {
+        return withCors(
+          NextResponse.json(
+            { error: validation.error || "Access denied" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      const hasEditPermission =
+        validation.permissions.includes("edit") ||
+        validation.permissions.includes("publish") ||
+        validation.permissions.includes("admin");
+
+      if (!hasEditPermission) {
+        return withCors(
+          NextResponse.json(
+            { error: "Edit permission required" },
+            { status: 403 },
+          ),
+          origin,
+        );
+      }
+
+      restoredBy = validation.email ?? null;
     }
 
-    const hasEditPermission =
-      validation.permissions.includes("edit") ||
-      validation.permissions.includes("publish") ||
-      validation.permissions.includes("admin");
-
-    if (!hasEditPermission) {
-      return withCors(
-        NextResponse.json(
-          { error: "Edit permission required" },
-          { status: 403 },
-        ),
-        origin,
-      );
-    }
-
-    // Use the database function to restore version
+    // Two arguments, not three.
+    //
+    // This passed `p_site_id` as well, and no database has ever had a
+    // `restore_content_version` that accepts it: production's takes
+    // (p_version_id, p_restored_by) and derives the site from the version row
+    // itself. PostgREST resolves RPC by NAMED arguments, so the extra one made
+    // every call fail resolution with PGRST202 — rollback returned 500 for
+    // everybody, always. It went unnoticed because the route was reachable only
+    // with a staging token, and the register never got that far.
+    //
+    // The repo's own migration (20251230100000_edit_board.sql) declares the
+    // three-argument shape, so the schema and production disagreed exactly the
+    // way they did for `billing_customers` in F-1 — a fresh database would have
+    // behaved differently from the live one. 20260804150000 reconciles it.
     const { data, error } = await supabase.rpc("restore_content_version", {
-      p_site_id: version.site_id,
       p_version_id: versionId,
-      p_restored_by: validation.email || "unknown",
+      p_restored_by: restoredBy || "unknown",
     });
 
     if (error) {
