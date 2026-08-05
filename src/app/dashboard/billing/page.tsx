@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
+import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
 import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
 
@@ -39,19 +40,9 @@ async function readLifetimeGrant(): Promise<LifetimeGrantStatus> {
       return { kind: "unknown" };
     }
 
-    const { data, error } = await supabase
-      .from("plan_entitlements")
-      .select("plan_id")
-      .eq("user_id", user.id)
-      .is("revoked_at", null)
-      .returns<Array<{ plan_id: string }>>();
-
-    if (error) {
-      console.error("[billing] could not read plan entitlements:", error);
-      return { kind: "unknown" };
-    }
-
-    const planIds = Array.from(new Set((data ?? []).map((row) => row.plan_id)));
+    // Shared with the checkout guard, so the card cannot offer something the
+    // server will refuse — or hide something the server would allow.
+    const planIds = await readGrantedPlanIds(supabase, user.id);
 
     return planIds.length > 0 ? { kind: "granted", planIds } : { kind: "none" };
   } catch (error) {

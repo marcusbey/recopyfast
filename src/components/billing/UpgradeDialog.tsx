@@ -286,7 +286,7 @@ export function UpgradeDialog({
                   <p className="text-sm text-muted-foreground">
                     {lifetimeOffer.description}
                     {hasSubscription &&
-                      " Your current subscription keeps billing until you cancel it."}
+                      " Your current subscription stops renewing once the purchase completes."}
                   </p>
                 </div>
                 <Button

@@ -391,6 +391,32 @@ describe("Domain Verification", () => {
       ).resolves.toMatchObject({ success: true });
     });
 
+    it("refuses to verify when the stored code is empty", async () => {
+      // `"anything".includes("")` is true, so a blank code would have accepted
+      // ANY file at the well-known path and marked the domain verified.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("literally anything at all"),
+      });
+
+      const result = await verifyDomainFile("example.com", "");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("missing");
+    });
+
+    it("refuses to verify on a whitespace-only code", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("anything"),
+      });
+
+      const result = await verifyDomainFile("example.com", "   ");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("missing");
+    });
+
     it("rejects a file that does not carry this domain's code", async () => {
       (global.fetch as jest.Mock).mockResolvedValue({
         ok: true,

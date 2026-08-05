@@ -283,6 +283,54 @@ async function main() {
     }
   }
 
+  // -- 3b. a monthly subscriber can still buy out to Lifetime ---------------
+  //
+  // The duplicate guard for `intent: "lifetime"` first asked
+  // `getEffectivePlanId`, which falls back to a live subscription when there is
+  // no grant — so every Pro monthly subscriber resolved to `pro`, matched the
+  // plan Lifetime confers, and was refused with "You already have lifetime
+  // access" for something they had never bought. That is the customer most
+  // likely to want it.
+  //
+  // A subscription row, deliberately with NO entitlement: the state the guard
+  // has to tell apart.
+  console.log("\n3b. Buying out of a subscription");
+
+  const subInsert = await supabaseAdmin(env, "/rest/v1/billing_subscriptions", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: userId,
+      plan: "pro",
+      status: "active",
+      stripe_subscription_id: `sub_qa_${stamp}`,
+    }),
+  });
+
+  if (!subInsert.ok) {
+    record("3b.1", "Subscriber reaches Lifetime checkout", "skip", `could not seed a subscription (${subInsert.status})`);
+  } else {
+    const asSubscriber = await app("/api/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ intent: "lifetime" }),
+    });
+    const body = await json(asSubscriber);
+
+    if (asSubscriber.ok && typeof body.url === "string") {
+      record("3b.1", "Subscriber reaches Lifetime checkout", "pass", "not refused as a duplicate");
+    } else {
+      record(
+        "3b.1",
+        "Subscriber reaches Lifetime checkout",
+        "fail",
+        `${asSubscriber.status} ${JSON.stringify(body).slice(0, 160)} — a paying subscriber cannot buy out`,
+      );
+    }
+
+    await supabaseAdmin(env, `/rest/v1/billing_subscriptions?user_id=eq.${userId}`, {
+      method: "DELETE",
+    });
+  }
+
   // -- 4. a paid customer is admitted (register F-2 died HERE) --------------
   //
   // The plan is granted the way the Stripe webhook grants a Lifetime purchase —
@@ -316,6 +364,17 @@ async function main() {
       `expected {kind:"plan",planId:"pro"}, got ${JSON.stringify(entitled).slice(0, 200)} — ` +
         `this is register F-2: the row exists but RLS hides it from its owner`,
     );
+  }
+
+  // …and the guard still fires for someone who genuinely holds the grant.
+  const duplicate = await app("/api/billing/checkout", {
+    method: "POST",
+    body: JSON.stringify({ intent: "lifetime" }),
+  });
+  if (duplicate.status === 409) {
+    record("4.2b", "Lifetime is refused to someone who already holds it", "pass", "409");
+  } else {
+    record("4.2b", "Lifetime is refused to someone who already holds it", "fail", `expected 409, got ${duplicate.status} — $199 could be taken twice`);
   }
 
   const dashboard = await app("/dashboard");

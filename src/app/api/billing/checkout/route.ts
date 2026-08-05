@@ -12,7 +12,7 @@ import {
   isBillingPeriod,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
-import { getEffectivePlanId } from "@/lib/billing/entitlements";
+import { getGrantedPlanIds } from "@/lib/billing/entitlements";
 
 /**
  * Stripe Checkout entry point.
@@ -128,9 +128,16 @@ export async function POST(req: NextRequest) {
     // more expensive product.
     if (parsed.intent.type === "lifetime") {
       const grantedPlanId = await getLifetimeGrantPlanId();
-      const effectivePlanId = await getEffectivePlanId(user.id);
+      // The GRANT, not the effective plan. Asking `getEffectivePlanId` here
+      // refused every Pro monthly subscriber — it falls back to a live
+      // subscription when there is no grant, so a subscriber resolved to `pro`
+      // and was told they already owned something they had never bought. That
+      // is the customer most likely to want this, and the rest of the flow
+      // (the offer card, the plan dialog, and the webhook that cancels their
+      // subscription afterwards) all assume they can reach it.
+      const heldGrants = await getGrantedPlanIds(user.id);
 
-      if (grantedPlanId !== null && effectivePlanId === grantedPlanId) {
+      if (grantedPlanId !== null && heldGrants.includes(grantedPlanId)) {
         return NextResponse.json(
           {
             error:

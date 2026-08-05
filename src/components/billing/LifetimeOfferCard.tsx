@@ -143,9 +143,10 @@ export function LifetimeOfferCard({
         {hasLiveSubscription && (
           <Alert className="border-tone-warning-border bg-tone-warning-surface">
             <p className="text-tone-warning-text">
-              This does not cancel your current subscription. Cancel it yourself
-              once the purchase lands, or you will keep paying every month for a
-              plan you already own.
+              Your current subscription will stop renewing once this purchase
+              completes — you do not need to cancel it yourself. You keep the
+              period you have already paid for, and you will not be charged
+              again.
             </p>
           </Alert>
         )}

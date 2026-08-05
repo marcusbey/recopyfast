@@ -348,6 +348,26 @@ export async function verifyDomainFile(
     // survive the things that really happen to a hosted text file: a trailing
     // newline added by an editor, CRLF from a Windows checkout, or a static
     // host that appends nothing but serves with different whitespace.
+    // A blank code must never verify anything.
+    //
+    // `"anything".includes("")` is true, and an empty code also collapses the
+    // URL to /.well-known/recopyfast-verification-.txt — so on any domain that
+    // serves a catch-all 200 (an SPA fallback, a friendly 404 page) the check
+    // would pass without the owner having uploaded a thing. A missing column, a
+    // half-written row or a caller passing "" was enough to mark a domain
+    // verified.
+    //
+    // Deliberately only an emptiness check, not a minimum length: codes are
+    // generated as 32 hex characters, and inventing a length policy here would
+    // silently refuse any shorter value already sitting in the table.
+    if (verificationCode.trim().length === 0) {
+      return {
+        success: false,
+        error: "Verification code is missing",
+        details: { url },
+      };
+    }
+
     if (normalizedContent.includes(verificationCode)) {
       return { success: true };
     } else {

@@ -196,11 +196,19 @@ describe("LifetimeOfferCard", () => {
     expect(screen.queryByText(/does not cancel/i)).not.toBeInTheDocument();
   });
 
-  it("warns a subscriber that the monthly charge continues until they cancel", () => {
+  it("tells a subscriber their renewal stops by itself", () => {
+    // This asserted "does not cancel your current subscription. Cancel it
+    // yourself" — true when written, false once the webhook started setting
+    // cancel_at_period_end on a lifetime purchase. A customer acting on it
+    // would cancel early and lose the period they had already paid for.
     render(
       <LifetimeOfferCard product={LIFETIME_PRO} hasLiveSubscription={true} />,
     );
 
-    expect(screen.getByText(/does not cancel/i)).toBeInTheDocument();
+    expect(screen.getByText(/stop renewing/i)).toBeInTheDocument();
+    // The old instruction's distinguishing threat, which is no longer true.
+    expect(
+      screen.queryByText(/keep paying every month/i),
+    ).not.toBeInTheDocument();
   });
 });
