@@ -1,5 +1,72 @@
 import { Suspense } from "react";
+import { createClient } from "@/lib/supabase/server";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
+import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
+
+/**
+ * Does this account already hold a permanent plan grant?
+ *
+ * Read here rather than in the client, because the dashboard payload cannot
+ * answer it: `effectivePlanId` says `pro` whether the plan came from a $199
+ * lifetime grant or a $19 monthly subscription, and the whole point of the
+ * question is to tell those two apart before offering to sell the grant again.
+ *
+ * Reads EVERY live grant, not the most recent one.
+ *
+ * `readEffectivePlanId` takes the newest because it only needs to answer "what
+ * plan is in force". This question is different — "do they already own the
+ * thing we are about to sell" — and the newest row is the wrong answer to it.
+ * An account holding a lifetime Pro grant plus a later support-issued Starter
+ * grant would report `starter`, which does not match what Lifetime Pro confers,
+ * so the offer would reappear and take $199 for a grant they already hold.
+ *
+ * Read through the cookie-scoped client, so RLS keeps a session to its own rows.
+ *
+ * Every failure path answers `unknown`, which hides the offer. That is the safe
+ * direction: not showing an upsell loses a sale we can make tomorrow, showing
+ * one to someone who already bought it takes $199 twice.
+ */
+async function readLifetimeGrant(): Promise<LifetimeGrantStatus> {
+  try {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return { kind: "unknown" };
+    }
+
+    const { data, error } = await supabase
+      .from("plan_entitlements")
+      .select("plan_id")
+      .eq("user_id", user.id)
+      .is("revoked_at", null)
+      .returns<Array<{ plan_id: string }>>();
+
+    if (error) {
+      console.error("[billing] could not read plan entitlements:", error);
+      return { kind: "unknown" };
+    }
+
+    const planIds = Array.from(new Set((data ?? []).map((row) => row.plan_id)));
+
+    return planIds.length > 0 ? { kind: "granted", planIds } : { kind: "none" };
+  } catch (error) {
+    console.error("[billing] could not read plan entitlements:", error);
+    return { kind: "unknown" };
+  }
+}
+
+/**
+ * Kept as a nested async component rather than awaiting in the page itself so
+ * the skeleton below still renders while the grant is being read.
+ */
+async function BillingDashboardSection() {
+  return <BillingDashboard lifetimeGrant={await readLifetimeGrant()} />;
+}
 
 export default function BillingPage() {
   return (
@@ -18,7 +85,7 @@ export default function BillingPage() {
           </div>
         }
       >
-        <BillingDashboard />
+        <BillingDashboardSection />
       </Suspense>
     </div>
   );

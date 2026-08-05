@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -11,10 +12,25 @@ import { CreditBalanceCard } from "./CreditBalanceCard";
 import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
+import {
+  LifetimeOfferCard,
+  resolveLifetimeOffer,
+  type LifetimeGrantStatus,
+} from "./LifetimeOfferCard";
 import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { BillingDashboardData } from "@/types/billing";
 
-export function BillingDashboard() {
+interface BillingDashboardProps {
+  /**
+   * Whether a permanent plan grant is already in force, resolved server-side by
+   * the page. It cannot be derived from the dashboard payload — see
+   * LifetimeOfferCard for why — and it decides whether Lifetime Pro is offered.
+   */
+  lifetimeGrant: LifetimeGrantStatus;
+}
+
+export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
+  const router = useRouter();
   const [dashboardData, setDashboardData] =
     useState<BillingDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,16 +64,21 @@ export function BillingDashboard() {
 
   const handleSubscriptionUpdate = useCallback(() => {
     void fetchDashboardData();
-  }, [fetchDashboardData]);
+    // `lifetimeGrant` is a server prop, so refetching the dashboard payload
+    // alone would leave it stale — and stale here means still offering Lifetime
+    // Pro to someone who has just this second bought it. `router.refresh()`
+    // re-runs the page's grant read and replaces the prop.
+    router.refresh();
+  }, [fetchDashboardData, router]);
 
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <div className="h-8 bg-surface-2 rounded w-1/4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-48 bg-gray-200 rounded-lg"></div>
+              <div key={i} className="h-48 bg-surface-2 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -69,11 +90,11 @@ export function BillingDashboard() {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="p-6 text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">
-            Error Loading Billing Data
+          <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
+            Error loading billing data
           </h2>
-          <p className="text-gray-600 mb-4">{error}</p>
-          <Button onClick={fetchDashboardData}>Try Again</Button>
+          <p className="text-muted-foreground mb-4">{error}</p>
+          <Button onClick={fetchDashboardData}>Try again</Button>
         </Card>
       </div>
     );
@@ -98,6 +119,17 @@ export function BillingDashboard() {
   const creditBalance = dashboardData.creditWallet?.balance ?? 0;
   const holdsCredits = creditBalance > 0;
 
+  // Lifetime Pro is a way *in* for an account with no plan and a way *out* of a
+  // subscription for one that has one, so it is resolved before the unentitled
+  // branch below and offered in both.
+  const lifetimeOffer = resolveLifetimeOffer(
+    dashboardData.catalogue,
+    lifetimeGrant,
+  );
+  // `subscription` only ever holds a live row (see getUserSubscription), so its
+  // presence is exactly "something is still billing this card every month".
+  const hasLiveSubscription = Boolean(dashboardData.subscription);
+
   // This is the whole page for an account with no plan. Every other dashboard
   // route redirects a wholly unentitled session here (see src/middleware.ts),
   // so it has to stand on its own rather than assume the reader arrived by
@@ -106,10 +138,10 @@ export function BillingDashboard() {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="mx-auto max-w-lg p-8 text-center">
-          <h1 className="mb-2 text-2xl font-bold">
+          <h1 className="mb-2 text-2xl font-semibold">
             {holdsCredits ? "You're on credits" : "Choose a plan to continue"}
           </h1>
-          <p className="mb-6 text-gray-600">
+          <p className="mb-6 text-muted-foreground">
             {holdsCredits
               ? `You have ${creditBalance.toLocaleString("en-US")} credits to spend on AI suggestions and translations. Sites, collaborators and A/B testing need a plan.`
               : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
@@ -121,11 +153,21 @@ export function BillingDashboard() {
 
         <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
 
+        {lifetimeOffer && (
+          <div className="mx-auto mt-6 max-w-lg">
+            <LifetimeOfferCard
+              product={lifetimeOffer}
+              hasLiveSubscription={hasLiveSubscription}
+            />
+          </div>
+        )}
+
         <UpgradeDialog
           open={showUpgradeDialog}
           onOpenChange={setShowUpgradeDialog}
           currentPlan={null}
           catalogue={dashboardData.catalogue}
+          lifetimeOffer={lifetimeOffer}
           onSuccess={handleSubscriptionUpdate}
         />
       </div>
@@ -136,13 +178,13 @@ export function BillingDashboard() {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="p-6 text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">
-            Plan Catalogue Unavailable
+          <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
+            Plan catalogue unavailable
           </h2>
-          <p className="text-gray-600 mb-4">
+          <p className="text-muted-foreground mb-4">
             We could not load the plan you are on. Please try again.
           </p>
-          <Button onClick={fetchDashboardData}>Try Again</Button>
+          <Button onClick={fetchDashboardData}>Try again</Button>
         </Card>
       </div>
     );
@@ -152,8 +194,8 @@ export function BillingDashboard() {
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-3xl font-bold">Billing & Subscription</h1>
-          <p className="text-gray-600 mt-2">
+          <h1 className="text-display">Billing & subscription</h1>
+          <p className="text-muted-foreground mt-2">
             Manage your subscription, payment methods, and billing information
           </p>
         </div>
@@ -162,7 +204,7 @@ export function BillingDashboard() {
             {currentPlan.toUpperCase()} PLAN
           </Badge>
           <Button onClick={() => setShowUpgradeDialog(true)}>
-            Change Plan
+            Change plan
           </Button>
         </div>
       </div>
@@ -190,6 +232,12 @@ export function BillingDashboard() {
             creditPack={dashboardData.catalogue.creditPack}
           />
           <UsageCard currentUsage={dashboardData.currentUsage} plan={plan} />
+          {lifetimeOffer && (
+            <LifetimeOfferCard
+              product={lifetimeOffer}
+              hasLiveSubscription={hasLiveSubscription}
+            />
+          )}
         </div>
       </div>
 
@@ -198,6 +246,7 @@ export function BillingDashboard() {
         onOpenChange={setShowUpgradeDialog}
         currentPlan={currentPlan}
         catalogue={dashboardData.catalogue}
+        lifetimeOffer={lifetimeOffer}
         onSuccess={handleSubscriptionUpdate}
       />
     </div>

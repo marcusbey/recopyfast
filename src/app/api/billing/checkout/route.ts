@@ -8,9 +8,11 @@ import {
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
+  getLifetimeGrantPlanId,
   isBillingPeriod,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
+import { getEffectivePlanId } from "@/lib/billing/entitlements";
 
 /**
  * Stripe Checkout entry point.
@@ -108,6 +110,31 @@ export async function POST(req: NextRequest) {
           {
             error:
               "You already have a subscription. Use the upgrade flow to change plans.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // Lifetime is bought once and never lapses, so a second purchase takes $199
+    // for something the customer already owns outright — and the grant is
+    // keyed on the payment intent, so the duplicate would not even be
+    // deduplicated on the way back in: they would simply be $199 poorer.
+    //
+    // `LifetimeOfferCard` already hides the offer in this state, but that is a
+    // rendering decision and this is a money decision. The subscription intent
+    // above has always enforced its own precondition server-side rather than
+    // trusting the dialog not to offer it; this is the same rule applied to the
+    // more expensive product.
+    if (parsed.intent.type === "lifetime") {
+      const grantedPlanId = await getLifetimeGrantPlanId();
+      const effectivePlanId = await getEffectivePlanId(user.id);
+
+      if (grantedPlanId !== null && effectivePlanId === grantedPlanId) {
+        return NextResponse.json(
+          {
+            error:
+              "You already have lifetime access to this plan. There is nothing further to buy.",
           },
           { status: 409 },
         );

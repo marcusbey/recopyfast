@@ -12,6 +12,7 @@ import {
   grantPlanEntitlement,
   revokeEntitlementForPayment,
 } from "@/lib/billing/entitlements";
+import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
 // STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
@@ -554,6 +555,65 @@ async function grantLifetime(
 
   if (result.duplicate) {
     console.log(`Lifetime entitlement for ${paymentIntentId} already granted.`);
+    // Already handled on the first delivery, including the cancellation below.
+    return;
+  }
+
+  await stopBillingForLifetimeOwner(userId, paymentIntentId);
+}
+
+/**
+ * Stop charging someone monthly for a plan they have just bought outright.
+ *
+ * `readEffectivePlanId` ranks a grant above a subscription, so the moment the
+ * entitlement lands the customer HAS Pro — and their Stripe subscription keeps
+ * renewing at $19 a month beside it, invisibly, for a plan they now own. Nobody
+ * would notice until a card statement.
+ *
+ * Cancelled at period end rather than immediately, on purpose: the current
+ * period is already paid for, so ending it early would take money for nothing
+ * and invite a refund request. There is no access gap either way — the grant
+ * outranks the subscription for the whole remaining period.
+ *
+ * Failures here are logged, never thrown. The customer's $199 has been captured
+ * and the entitlement is already written; throwing would make Stripe retry the
+ * event, and `grantPlanEntitlement` would then short-circuit on the duplicate
+ * and never reach this line again. A subscription that outlives its purchase is
+ * a support ticket; a lost grant is a customer who paid $199 for nothing.
+ */
+async function stopBillingForLifetimeOwner(
+  userId: string,
+  paymentIntentId: string,
+): Promise<void> {
+  try {
+    const supabase = createServiceRoleClient();
+    const { data: subscriptions } = await supabase
+      .from("billing_subscriptions")
+      .select("stripe_subscription_id")
+      .eq("user_id", userId)
+      .in("status", LIVE_SUBSCRIPTION_STATUSES)
+      .returns<Array<{ stripe_subscription_id: string | null }>>();
+
+    for (const subscription of subscriptions ?? []) {
+      if (!subscription.stripe_subscription_id) continue;
+
+      await stripe.subscriptions.update(subscription.stripe_subscription_id, {
+        cancel_at_period_end: true,
+        metadata: { cancelled_reason: "lifetime_purchase", paymentIntentId },
+      });
+
+      console.log(
+        `Lifetime purchase ${paymentIntentId}: subscription ` +
+          `${subscription.stripe_subscription_id} set to cancel at period end.`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      `Lifetime purchase ${paymentIntentId} granted, but the existing ` +
+        `subscription could not be cancelled — this customer is being billed ` +
+        `for a plan they own. Cancel it by hand.`,
+      error,
+    );
   }
 }
 

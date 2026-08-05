@@ -10,6 +10,7 @@ import {
 } from "./plans";
 import { createOrGetCustomer } from "./customer";
 import { createClient } from "@/lib/supabase/server";
+import { resolveDeploymentOrigin } from "@/lib/deployment/origin";
 
 /**
  * Stripe Checkout is the single entry point for every payment this app takes.
@@ -53,9 +54,23 @@ export interface CheckoutSessionStatus {
  * Absolute origin used to build Checkout return URLs.
  *
  * Never derived from a request header — a spoofed `Origin` would turn Checkout
- * into an open redirect.
+ * into an open redirect. `resolveDeploymentOrigin` reads only platform-set
+ * environment variables and takes no request, so it does not weaken that.
+ *
+ * The deployment's own origin outranks NEXT_PUBLIC_APP_URL on a non-production
+ * deployment for the reason register F-14 records: a preview inherits the
+ * production NEXT_PUBLIC_APP_URL at build time, so a customer who paid on a
+ * preview was returned to https://www.recopyfa.st holding a cookie scoped to
+ * the preview host — i.e. logged out, staring at a paywall, having just been
+ * charged. This is the same resolver `resolvePublicOrigin` uses for auth
+ * redirects, so the two cannot send the same user to two different hosts.
  */
 function getAppBaseUrl(): string {
+  const deploymentOrigin = resolveDeploymentOrigin();
+  if (deploymentOrigin) {
+    return deploymentOrigin;
+  }
+
   const configured = process.env.NEXT_PUBLIC_APP_URL;
   if (configured) {
     return configured.replace(/\/$/, "");

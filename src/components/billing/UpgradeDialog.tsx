@@ -17,6 +17,7 @@ import {
   planDisplayPrice,
   sellablePlans,
   type BillingPeriod,
+  type OneTimeProduct,
   type PaidPlanId,
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
@@ -29,6 +30,12 @@ interface UpgradeDialogProps {
   currentPlan: string | null;
   /** Plan catalogue, resolved server-side from the `plans` table. */
   catalogue: PlanCatalogue;
+  /**
+   * The buy-once alternative to a subscription, or null when this account must
+   * not be offered it. Resolved by `resolveLifetimeOffer` in the dashboard so
+   * the dialog and the sidebar card cannot disagree about who may see it.
+   */
+  lifetimeOffer: OneTimeProduct | null;
   onSuccess: () => void;
 }
 
@@ -42,6 +49,7 @@ export function UpgradeDialog({
   onOpenChange,
   currentPlan,
   catalogue,
+  lifetimeOffer,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -136,7 +144,7 @@ export function UpgradeDialog({
       <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>
-            {hasSubscription ? "Change Your Plan" : "Choose Your Plan"}
+            {hasSubscription ? "Change your plan" : "Choose your plan"}
           </DialogTitle>
           <DialogDescription>
             {hasSubscription
@@ -147,14 +155,14 @@ export function UpgradeDialog({
 
         <div className="space-y-6">
           {error && (
-            <Alert className="border-red-200 bg-red-50">
-              <p className="text-red-700">{error}</p>
+            <Alert className="border-tone-danger-border bg-tone-danger-surface">
+              <p className="text-tone-danger-text">{error}</p>
             </Alert>
           )}
 
           {actionUrl && (
-            <Alert className="border-amber-200 bg-amber-50">
-              <p className="text-amber-800">
+            <Alert className="border-tone-warning-border bg-tone-warning-surface">
+              <p className="text-tone-warning-text">
                 Your plan was changed, but the prorated charge still needs
                 confirmation — your bank asked for verification, or the card was
                 declined.
@@ -163,7 +171,7 @@ export function UpgradeDialog({
                 href={actionUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-2 inline-block font-medium text-amber-900 underline"
+                className="mt-2 inline-block font-medium text-tone-warning-text underline"
               >
                 Complete the payment on Stripe
               </a>
@@ -185,8 +193,8 @@ export function UpgradeDialog({
                 disabled={isBusy}
                 className={`rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
                   billingPeriod === period.id
-                    ? "bg-blue-500 text-white"
-                    : "text-gray-600 hover:text-gray-900"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {period.label}
@@ -211,33 +219,33 @@ export function UpgradeDialog({
                   aria-checked={isSelected}
                   onClick={() => setSelectedPlan(plan.id as PaidPlanId)}
                   disabled={isBusy}
-                  className={`p-6 border-2 rounded-lg text-left transition-all disabled:opacity-60 ${
+                  className={`p-6 border-2 rounded-lg text-left transition-colors disabled:opacity-60 ${
                     isSelected
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-200 hover:border-gray-300"
+                      ? "border-primary bg-tone-accent-surface"
+                      : "border-border hover:border-input"
                   }`}
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div>
                       <h3 className="text-xl font-semibold">{plan.name}</h3>
-                      <p className="text-gray-600 mt-1">{plan.description}</p>
+                      <p className="text-muted-foreground mt-1">
+                        {plan.description}
+                      </p>
                     </div>
                     {isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
-                      isSelected && (
-                        <Badge className="bg-blue-500">Selected</Badge>
-                      )
+                      isSelected && <Badge>Selected</Badge>
                     )}
                   </div>
 
                   <div className="mb-4">
-                    <span className="text-3xl font-bold">
+                    <span className="text-3xl font-semibold tabular">
                       ${planDisplayPrice(plan, billingPeriod)}
                     </span>
-                    <span className="text-gray-600">/month</span>
+                    <span className="text-muted-foreground">/month</span>
                     {billingPeriod === "yearly" && (
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-muted-foreground mt-1">
                         Billed ${planCyclePrice(plan, "yearly")} once a year
                       </p>
                     )}
@@ -247,7 +255,7 @@ export function UpgradeDialog({
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex items-center text-sm">
                         <svg
-                          className="w-4 h-4 text-green-500 mr-2 shrink-0"
+                          className="w-4 h-4 text-tone-success-text mr-2 shrink-0"
                           fill="currentColor"
                           viewBox="0 0 20 20"
                           aria-hidden="true"
@@ -267,7 +275,32 @@ export function UpgradeDialog({
             })}
           </div>
 
-          <div className="text-xs text-gray-500 space-y-1">
+          {lifetimeOffer && (
+            <div className="rounded-lg border border-border bg-surface-1 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="font-medium">
+                    Prefer to pay once? {lifetimeOffer.name} — $
+                    <span className="tabular">{lifetimeOffer.price}</span>, once
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    {lifetimeOffer.description}
+                    {hasSubscription &&
+                      " Your current subscription keeps billing until you cancel it."}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => startCheckout({ intent: "lifetime" })}
+                  disabled={isBusy}
+                >
+                  Buy once
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <div className="text-xs text-muted-foreground space-y-1">
             <p>• Cancel anytime — no long-term contracts</p>
             <p>• Prorated billing when you change plans mid-cycle</p>
             <p>
