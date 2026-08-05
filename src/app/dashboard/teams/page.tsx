@@ -70,6 +70,12 @@ export default function TeamsPage() {
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
 
+  // Whether to show the upgrade notice. Starts null — "not known yet" — so a
+  // Pro subscriber never sees "Upgrade to Pro" flash while the plan is in
+  // flight. The card used to be unconditional JSX, which told every paying
+  // customer to buy the plan they were already paying for.
+  const [needsUpgrade, setNeedsUpgrade] = useState<boolean | null>(null);
+
   const inviteEmailRef = useRef<HTMLInputElement>(null);
   const inviteEmailId = useId();
   const inviteRoleId = useId();
@@ -123,6 +129,28 @@ export default function TeamsPage() {
 
     fetchTeamAndMembers();
   }, [fetchMembers]);
+
+  // Teams is a Pro capability, so only a non-Pro account is being asked to
+  // upgrade. `planId` is the resolved plan and already accounts for a Lifetime
+  // Pro grant, which reports as "pro" like any other Pro account.
+  //
+  // Failing quiet rather than loud: if the plan cannot be read, leave the
+  // notice hidden. A missing upsell costs nothing, whereas showing a subscriber
+  // an upgrade prompt because of a transient fetch error reads as a billing bug.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch("/api/billing/entitlement", { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { planId?: string | null } | null) => {
+        setNeedsUpgrade(data ? data.planId !== "pro" : false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setNeedsUpgrade(false);
+      });
+
+    return () => controller.abort();
+  }, []);
 
   const handleInvite = async () => {
     if (!teamId || !inviteEmail.trim()) return;
@@ -248,28 +276,30 @@ export default function TeamsPage() {
         </Button>
       </div>
 
-      {/* Pro Feature Notice */}
-      <Card className="border-2 border-primary/30 bg-primary/5">
-        <CardContent className="p-6">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
-              <Lock className="w-6 h-6 text-white" />
+      {/* Pro Feature Notice — only for accounts that are not already on Pro */}
+      {needsUpgrade === true && (
+        <Card className="border-2 border-primary/30 bg-primary/5">
+          <CardContent className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
+                <Lock className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-foreground mb-1">
+                  Pro Feature
+                </h3>
+                <p className="text-muted-foreground mb-4">
+                  Team collaboration is available on the Pro plan. Upgrade to
+                  invite team members and manage permissions.
+                </p>
+                <Button asChild className="bg-primary">
+                  <Link href="/dashboard/billing">Upgrade to Pro</Link>
+                </Button>
+              </div>
             </div>
-            <div className="flex-1">
-              <h3 className="font-semibold text-foreground mb-1">
-                Pro Feature
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                Team collaboration is available on the Pro plan. Upgrade to
-                invite team members and manage permissions.
-              </p>
-              <Button asChild className="bg-primary">
-                <Link href="/dashboard/billing">Upgrade to Pro</Link>
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Team Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

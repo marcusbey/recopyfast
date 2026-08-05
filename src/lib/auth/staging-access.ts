@@ -68,7 +68,7 @@ export class StagingAccessManager {
    */
   static async createStagingAccess(
     params: CreateStagingAccessParams,
-  ): Promise<{ access: StagingAccess; verificationCode?: string } | null> {
+  ): Promise<{ access: StagingAccess; verificationCode?: string }> {
     try {
       const supabase = await createClient();
 
@@ -149,8 +149,14 @@ export class StagingAccessManager {
         verificationCode,
       };
     } catch (error) {
+      // Rethrown (not swallowed): the single caller
+      // (src/app/api/staging/access/route.ts) needs the real reason — "not an
+      // admin", "links are retired", "email missing" — to map to the right
+      // status code. Collapsing everything to a generic failure here made every
+      // rejection look like a permissions problem to the caller, including ones
+      // that had nothing to do with permissions.
       console.error("Error creating staging access:", error);
-      return null;
+      throw error;
     }
   }
 
