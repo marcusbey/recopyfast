@@ -29,17 +29,23 @@ const benefits = [
   {
     stat: "1 line",
     label: "Of code to install",
-    color: "text-emerald-500",
+    color: "text-sky-700",
   },
   {
     stat: "$0",
     label: "Developer cost per update",
-    color: "text-emerald-500",
+    color: "text-sky-700",
   },
   {
+    // Was "Changes go live instantly", which described a real-time pipeline
+    // this product no longer has: the embed's establishConnection() returns
+    // early because no websocket endpoint is configured, and a visitor picks
+    // up published copy from GET /api/content/:siteId as the page loads. The
+    // claim worth making is the one being contrasted — no redeploy, no CI
+    // wait, no developer — not a latency figure we cannot hold to.
     stat: "No deploy",
-    label: "Changes go live instantly",
-    color: "text-emerald-500",
+    label: "Live on the next page load",
+    color: "text-sky-700",
   },
 ];
 
@@ -50,7 +56,7 @@ export default function ValueProposition() {
   return (
     <section
       ref={ref}
-      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-24 sm:py-32 px-6"
     >
       <div className="max-w-6xl mx-auto relative z-10">
         {/* Section header */}
@@ -60,10 +66,10 @@ export default function ValueProposition() {
           transition={{ duration: 0.8 }}
           className="text-center mb-20"
         >
-          <span className="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-orange-600 bg-orange-50 rounded-full mb-6">
-            The Problem
+          <span className="mb-6 inline-block text-sm font-semibold uppercase tracking-[0.075em] text-sky-700">
+            The problem
           </span>
-          <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-slate-900 tracking-tight mb-6">
+          <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
             Your website copy is{" "}
             <span className="relative">
               <span className="relative z-10">trapped</span>
@@ -81,7 +87,7 @@ export default function ValueProposition() {
               </svg>
             </span>
           </h2>
-          <p className="text-xl text-slate-600 max-w-2xl mx-auto leading-relaxed">
+          <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto">
             Every typo fix, every A/B test, every campaign update requires a
             developer ticket and days of waiting.
           </p>
@@ -97,7 +103,7 @@ export default function ValueProposition() {
             className="space-y-6"
           >
             <div className="text-center lg:text-left mb-8">
-              <span className="text-sm font-semibold text-red-500 uppercase tracking-wider">
+              <span className="text-sm font-semibold text-red-500 uppercase tracking-[0.075em]">
                 Without ReCopyFast
               </span>
             </div>
@@ -142,7 +148,7 @@ export default function ValueProposition() {
             className="space-y-6"
           >
             <div className="text-center lg:text-left mb-8">
-              <span className="text-sm font-semibold text-emerald-500 uppercase tracking-wider">
+              <span className="text-sm font-semibold text-sky-700 uppercase tracking-[0.075em]">
                 With ReCopyFast
               </span>
             </div>
@@ -152,10 +158,10 @@ export default function ValueProposition() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={isInView ? { opacity: 1, y: 0 } : {}}
                 transition={{ duration: 0.5, delay: 0.5 + i * 0.1 }}
-                className="flex items-center gap-5 p-5 bg-emerald-50/50 rounded-2xl border border-emerald-100"
+                className="flex items-center gap-5 p-5 bg-sky-50/50 rounded-2xl border border-sky-100"
               >
-                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                  <span className="text-lg font-bold text-emerald-600">✓</span>
+                <div className="w-12 h-12 rounded-xl bg-sky-100 flex items-center justify-center flex-shrink-0">
+                  <span className="text-lg font-bold text-sky-700">✓</span>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-slate-900">
@@ -178,7 +184,7 @@ export default function ValueProposition() {
           <p className="text-2xl sm:text-3xl text-slate-900 font-medium max-w-3xl mx-auto leading-relaxed">
             Content updates go from a{" "}
             <span className="line-through text-red-400">ticket</span> to a{" "}
-            <span className="text-emerald-500 font-bold">click</span>.
+            <span className="text-sky-700 font-bold">click</span>.
           </p>
         </motion.div>
       </div>

@@ -37,7 +37,6 @@ const headline = [
     title: "Find out which words actually win",
     description:
       "Generate variants of a headline, split your traffic across them, and let the test call it. Views, clicks and conversions are attributed per variant, and the winner stays live on its own.",
-    isSignal: true,
   },
 ];
 
@@ -45,8 +44,12 @@ const supporting = [
   {
     icon: MousePointerClick,
     title: "Click. Edit. Done.",
+    // "Click any text on your live site" skipped the one precondition that
+    // matters: the widget only enters edit mode behind an edit-session link
+    // (`rcf_edit_token`), which the dashboard mints. A visitor to the live URL
+    // gets a normal page, which is the whole point of the design.
     description:
-      "Click any text on your live site and type. No dashboard to learn.",
+      "Open your site from the dashboard and edit in place. No CMS screens to learn.",
   },
   {
     icon: Wand2,
@@ -91,23 +94,22 @@ export default function Benefits() {
       // This is the features section, so it takes the anchor, matching how
       // Pricing.tsx:66 already carries id="pricing".
       id="features"
-      className="solid-sheet relative overflow-hidden border-y border-slate-200/80 py-32 px-6"
+      className="solid-sheet relative overflow-hidden border-y border-slate-200/80 py-24 sm:py-32 px-6"
     >
       <div className="relative z-10 mx-auto max-w-6xl">
-        {/* Left-aligned on purpose. Four sections above this one open with a
-            centered eyebrow-over-headline-over-subhead stack; repeating it a
-            fifth time is most of why the page read as a template. */}
         <motion.div
           initial={{ opacity: 0, y: 32 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.7 }}
-          className="mb-16 max-w-2xl"
+          className="mb-16 text-center"
         >
-          <span className="text-eyebrow">Features</span>
-          <h2 className="mt-4 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
+          <span className="mb-6 inline-block text-sm font-semibold uppercase tracking-[0.075em] text-sky-700">
+            Features
+          </span>
+          <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
             Changing the words is the easy part
           </h2>
-          <p className="mt-5 text-lg leading-relaxed text-slate-700">
+          <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto">
             Knowing which words to use is the hard part. ReCopyFast does both.
           </p>
         </motion.div>
@@ -124,21 +126,13 @@ export default function Benefits() {
               transition={{ duration: 0.6, delay: 0.1 + i * 0.1 }}
               className="surface-interactive rounded-3xl border border-white/60 bg-white/70 p-9"
             >
-              <div
-                className={`mb-6 flex h-12 w-12 items-center justify-center rounded-2xl ${
-                  item.isSignal ? "bg-emerald-600" : "bg-sky-600"
-                }`}
-              >
+              <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-600">
                 <item.icon className="h-6 w-6 text-white" />
               </div>
-              <span
-                className={`text-eyebrow ${
-                  item.isSignal ? "text-emerald-700" : "text-sky-700"
-                }`}
-              >
+              <span className="text-sm font-semibold uppercase tracking-[0.075em] text-sky-700">
                 {item.eyebrow}
               </span>
-              <h3 className="mt-3 text-2xl font-bold leading-snug text-slate-900">
+              <h3 className="mt-3 text-2xl font-semibold leading-snug text-slate-900">
                 {item.title}
               </h3>
               <p className="mt-4 leading-relaxed text-slate-700">

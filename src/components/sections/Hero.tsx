@@ -96,8 +96,8 @@ export default function Hero() {
         >
           Stop waiting days for simple text updates. Add one line of code and
           give your team{" "}
-          <span className="font-semibold text-slate-900">instant control</span>{" "}
-          over every word on your website.
+          <span className="font-semibold text-slate-900">direct control</span>{" "}
+          over the words on your website.
         </motion.p>
 
         <motion.div
@@ -106,11 +106,21 @@ export default function Hero() {
           transition={{ duration: 0.8, delay: 0.2 }}
           className="flex flex-col items-center justify-center gap-4 sm:flex-row"
         >
+          {/*
+            Was "Start editing for free". There is no free plan — `free` is
+            retired and resolves to no entitlement, so an account is worth
+            nothing until a paid plan is on it. Same class as the "14-day free
+            trial" and "No credit card required" claims already removed from
+            FinalCTA and Pricing. The label names no price either: the
+            catalogue is fetched live in Pricing.tsx, and a number hardcoded
+            here would be a second source of truth free to drift from it —
+            which is exactly how Stripe ended up describing Pro as 3 sites.
+          */}
           <Link
             href="/signup"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-8 py-4 font-semibold text-white transition-colors hover:bg-sky-700"
           >
-            <span>Start editing for free</span>
+            <span>Get started</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
           </Link>
 

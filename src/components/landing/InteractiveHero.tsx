@@ -522,7 +522,12 @@ export default function InteractiveHero({
             className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
           >
             <CheckCircle className="h-4 w-4" />
-            Content updated instantly
+            {/* Was "Content updated instantly", which is the same real-time
+                claim F-12 removed from ValueProposition and HowItWorks — and
+                this component renders on the landing page, so it undid the fix
+                two sections further down. Editing saves a draft; a separate
+                publish is what reaches visitors. */}
+            Saved — ready to publish
           </motion.div>
         )}
       </AnimatePresence>

@@ -17,9 +17,9 @@ export default function FinalCTA() {
        2.4:1 against the sunset zenith. */
     <section
       ref={ref}
-      className="relative overflow-hidden border-t border-white/30 py-32 px-6"
+      className="relative overflow-hidden border-t border-white/30 py-24 sm:py-32 px-6"
     >
-      <div className="max-w-4xl mx-auto relative z-10 text-center">
+      <div className="max-w-6xl mx-auto relative z-10 text-center">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={isInView ? { opacity: 1, scale: 1 } : {}}
@@ -36,7 +36,7 @@ export default function FinalCTA() {
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.8, delay: 0.1 }}
-          className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold text-slate-900 tracking-tight mb-6 leading-tight"
+          className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6"
         >
           Ready to take control
           <br />
@@ -47,14 +47,18 @@ export default function FinalCTA() {
           <span className="text-amber-950">of your content?</span>
         </motion.h2>
 
+        {/* "update website content instantly" went the way of the trial copy
+            further down: publishing is plain HTTP and the new copy reaches
+            visitors on their next page load. What is genuinely immediate is
+            who is allowed to make the change, so that is what this says. */}
         <motion.p
           initial={{ opacity: 0, y: 30 }}
           animate={isInView ? { opacity: 1, y: 0 } : {}}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="text-lg sm:text-xl text-slate-800 max-w-2xl mx-auto mb-12"
+          className="text-lg sm:text-xl text-slate-800 leading-relaxed max-w-2xl mx-auto mb-12"
         >
           Stop waiting on developers for every text change. Give your team the
-          power to update website content instantly.
+          power to update website copy without a deploy.
         </motion.p>
 
         <motion.div
