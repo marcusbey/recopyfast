@@ -78,7 +78,7 @@ export function Header() {
                 />
               </div>
               <span
-                className={`font-bold text-xl tracking-tight transition-colors ${
+                className={`font-semibold text-xl tracking-tight transition-colors ${
                   isScrolled ? "text-slate-900" : "text-slate-800"
                 }`}
               >

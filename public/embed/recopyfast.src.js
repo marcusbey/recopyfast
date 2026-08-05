@@ -830,6 +830,16 @@
       this.observer = null;
       this.isInitialized = false;
       this.selectedElement = null;
+      /** Element-id set last reported, so rescans don't re-POST an identical map. */
+      this.lastContentMapFingerprint = null;
+      /**
+       * Element ids the server is already known to hold, learned from the
+       * content GET every boot performs anyway. `null` means "not known" —
+       * hydration has not run yet or could not be read — in which case
+       * reporting proceeds, because failing to discover is worse than a
+       * redundant write. See postContentMap.
+       */
+      this.serverKnownElementIds = null;
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -896,6 +906,18 @@
         }
 
         await this.establishConnection();
+
+        // Report what we found, regardless of whether a socket came up.
+        //
+        // This used to happen only inside the socket's 'connect' handler, so
+        // with real-time opt-in (and unset on every real install) discovery was
+        // never announced at all. That is what left every site permanently
+        // "Verifying" — see sendContentMap.
+        //
+        // After establishConnection so a live socket, when there is one, is
+        // already attached and gets the same map fanned out in the same pass.
+        this.sendContentMap();
+
         this.setupMutationObserver();
 
         if (this.editMode) {
@@ -2766,13 +2788,6 @@
     }
 
     sendContentMap() {
-      // Callers include the MutationObserver rescan and the public `rescan()`
-      // API, both of which can fire while we're in polling fallback mode with
-      // no socket at all.
-      if (!this.socket) {
-        return;
-      }
-
       const contentMap = {};
 
       this.elements.forEach(function(data, elementId) {
@@ -2783,13 +2798,147 @@
         };
       });
 
-      this.socket.emit('content-map', {
-        siteId: SITE_ID,
-        url: window.location.href,
-        token: SITE_TOKEN,
-        stagingMode: this.stagingMode,
-        stagingToken: this.stagingToken,
-        contentMap: contentMap
+      // Report over HTTP, not over the socket.
+      //
+      // This used to `return` early whenever `this.socket` was null and then
+      // emit 'content-map'. Since real-time became opt-in, RECOPYFAST_WS is
+      // normally unset, so `this.socket` is null on every real install and the
+      // content map was never sent ANYWHERE — server/index.js, the only
+      // listener for that event, is a separate Express process Vercel cannot
+      // host anyway.
+      //
+      // Nothing therefore ever wrote `content_elements` for a live site, and
+      // GET /api/sites derives a site's status from exactly that table
+      // (`elementsCount > 0 ? "active" : "verifying"`). Every customer's site
+      // sat at "Verifying" forever while the widget worked perfectly on their
+      // page — register F-10.
+      //
+      // POST /api/content/:siteId is the same endpoint the dashboard already
+      // reads back, it authorises the widget the way every other widget call is
+      // authorised (site token + registered Origin), and it upserts with
+      // `ignoreDuplicates`, so re-reporting on every page load and every
+      // MutationObserver rescan can never overwrite a published edit.
+      this.postContentMap(contentMap);
+
+      // The socket is an enhancement when something is listening: it fans the
+      // discovery out to other editors viewing the same page live. It is no
+      // longer how the map is delivered.
+      if (this.socket) {
+        this.socket.emit('content-map', {
+          siteId: SITE_ID,
+          url: window.location.href,
+          token: SITE_TOKEN,
+          stagingMode: this.stagingMode,
+          stagingToken: this.stagingToken,
+          contentMap: contentMap
+        });
+      }
+    }
+
+    /**
+     * Announce discovered elements to the API.
+     *
+     * Deliberately fire-and-forget and deliberately quiet. This runs on a
+     * customer's own page in front of their visitors: a failure here means the
+     * dashboard is missing an element, never that the page should break or that
+     * a stranger's console should fill with our errors.
+     */
+    postContentMap(contentMap) {
+      if (!RECOPYFAST_API || !SITE_ID || !SITE_TOKEN) {
+        return;
+      }
+      const elementIds = Object.keys(contentMap);
+      if (elementIds.length === 0) {
+        return;
+      }
+
+      // Nothing has changed since the last report, so the request would be a
+      // no-op upsert. Rescans fire on every DOM mutation, and a page with a
+      // carousel or a live region can mutate many times a second.
+      const fingerprint = JSON.stringify(elementIds.slice().sort());
+      if (fingerprint === this.lastContentMapFingerprint) {
+        return;
+      }
+
+      // Report only what the server does not already hold.
+      //
+      // This runs on a customer's page for every VISITOR, not just for editors,
+      // so an unconditional POST turns their traffic into our write volume: one
+      // bulk upsert of every element on the page, per page view, forever. The
+      // fingerprint above only dedupes within a single page's lifetime, which
+      // never spans two visitors.
+      //
+      // Discovery is a one-time event per element. `hydrateStoredContent` has
+      // already fetched exactly the set the server holds, so once a site is
+      // discovered every visitor answers "nothing new" locally and sends
+      // nothing at all; a genuinely new element still reports immediately.
+      // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
+      // this is about not paying for a write that can only be a no-op.
+      if (this.serverKnownElementIds) {
+        let hasUnknownElement = false;
+        for (let i = 0; i < elementIds.length; i++) {
+          if (!this.serverKnownElementIds.has(elementIds[i])) {
+            hasUnknownElement = true;
+            break;
+          }
+        }
+        if (!hasUnknownElement) {
+          this.lastContentMapFingerprint = fingerprint;
+          return;
+        }
+      }
+
+      // Claimed before the request, and given back if the request fails.
+      //
+      // Recording it up front is what stops a rescan storm — a carousel can
+      // mutate the DOM many times a second — from firing a second POST while
+      // the first is still in flight. But a claim that is never released is a
+      // claim that outlives its reason: on a page that never reloads, one
+      // transient failure would leave the fingerprint set, every later rescan
+      // short-circuit on it, and the site sit at "no content yet" for as long
+      // as the visitor stays. A multi-page site papers over this by reloading;
+      // an SPA does not.
+      const previousFingerprint = this.lastContentMapFingerprint;
+      this.lastContentMapFingerprint = fingerprint;
+
+      const known = this.serverKnownElementIds;
+      const claimed = [];
+      if (known) {
+        for (let i = 0; i < elementIds.length; i++) {
+          if (!known.has(elementIds[i])) {
+            known.add(elementIds[i]);
+            claimed.push(elementIds[i]);
+          }
+        }
+      }
+
+      const self = this;
+
+      fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + SITE_TOKEN
+        },
+        // No `keepalive`. It caps the request body at 64 KB across the whole
+        // document, and a content-heavy page's map goes well past that — the
+        // browser rejects the request outright, so exactly the biggest customer
+        // sites would never report their content and would sit on "no content
+        // yet" forever. This runs on load rather than on unload, so there is
+        // nothing for keepalive to buy.
+        body: JSON.stringify(contentMap)
+      }).catch(function() {
+        // Offline, blocked by an extension, or the site was deleted. Nothing
+        // useful to say on a customer's page — but give the claim back, so the
+        // next rescan or navigation retries instead of inheriting a report that
+        // never happened. Only the ids this call added are removed; ones the
+        // server already held are not ours to forget.
+        self.lastContentMapFingerprint = previousFingerprint;
+        if (known) {
+          for (let i = 0; i < claimed.length; i++) {
+            known.delete(claimed[i]);
+          }
+        }
       });
     }
 
@@ -3146,6 +3295,15 @@
       }
 
       if (!Array.isArray(rows)) return;
+
+      // Everything the server already holds for this site. Discovery is only
+      // worth a write when the page shows something absent from this set.
+      this.serverKnownElementIds = new Set();
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i] && rows[i].element_id) {
+          this.serverKnownElementIds.add(rows[i].element_id);
+        }
+      }
 
       let applied = 0;
 

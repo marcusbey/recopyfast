@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
+  authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
   sanitizeIncomingContent,
@@ -45,34 +46,45 @@ export async function GET(
   try {
     const { siteId } = await params;
     const supabase = createServiceRoleClient();
-    const token = extractToken(request);
-    const origin = request.headers.get("origin");
-    const referer = request.headers.get("referer");
 
     let allowedOrigin: string | null = null;
 
-    try {
-      ({ allowedOrigin } = await authorizeSiteRequest({
-        siteId,
-        token: token,
-        origin,
-        referer,
-      }));
-    } catch (authError) {
-      console.error("Content GET authorization failed:", authError);
-      return NextResponse.json(
-        {
-          error:
-            authError instanceof Error ? authError.message : "Unauthorized",
-        },
-        {
-          status:
-            authError instanceof Error &&
-            authError.message === "Origin not allowed"
-              ? 403
-              : 401,
-        },
-      );
+    // Dashboard requests are same-origin with a Supabase session and never
+    // carry a site token, so try that path first; only fall back to the
+    // widget's token/origin path when there is no session (or no permission
+    // row), keeping the widget's behavior byte-for-byte unchanged.
+    const firstPartyAuth = await authorizeFirstPartySiteRequest(siteId);
+
+    if (firstPartyAuth) {
+      allowedOrigin = firstPartyAuth.allowedOrigin;
+    } else {
+      const token = extractToken(request);
+      const origin = request.headers.get("origin");
+      const referer = request.headers.get("referer");
+
+      try {
+        ({ allowedOrigin } = await authorizeSiteRequest({
+          siteId,
+          token: token,
+          origin,
+          referer,
+        }));
+      } catch (authError) {
+        console.error("Content GET authorization failed:", authError);
+        return NextResponse.json(
+          {
+            error:
+              authError instanceof Error ? authError.message : "Unauthorized",
+          },
+          {
+            status:
+              authError instanceof Error &&
+              authError.message === "Origin not allowed"
+                ? 403
+                : 401,
+          },
+        );
+      }
     }
 
     // Get language and variant from query params

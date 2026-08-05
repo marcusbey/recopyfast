@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import {
-  AlertCircle,
   CheckCircle2,
+  CircleDashed,
+  CircleSlash,
   Clock,
   FileText,
   FlaskConical,
@@ -61,26 +62,53 @@ export type ABTestStatus =
   | "paused"
   | "completed";
 
+/**
+ * What a site's status actually means, as opposed to what it used to say.
+ *
+ * `GET /api/sites` derives the flag from exactly one thing — `content_elements`
+ * rows exist for this site, or they do not. It has never consulted
+ * `domain_verifications`, and nothing else does either: the embed script is
+ * admitted by `authorizeSiteRequest`, which checks an HMAC site token and the
+ * request origin against `sites.domain`. A site with no verification record at
+ * all serves and saves content perfectly.
+ *
+ * So the previous entry here — "Verifying / Site verification in progress" —
+ * described a process that does not exist, could not be started from anywhere
+ * in the dashboard, and that no owner action would ever finish. Two live sites
+ * sat on it indefinitely while their script worked, and the overview counted
+ * them as zero. (The widget not reporting its content map at all was the other
+ * half of that; see register F-10.)
+ */
 export const siteStatuses: Record<SiteStatus, StatusDefinition> = {
   active: {
     label: "Active",
     tone: "success",
     icon: CheckCircle2,
-    description: "Site is verified and operational",
+    description: "ReCopyFast has content from this site.",
+  },
+  verifying: {
+    label: "No content yet",
+    tone: "neutral",
+    icon: CircleDashed,
+    description:
+      "Registered and ready. ReCopyFast has not recorded any content from this site yet — nothing is blocking it.",
   },
   inactive: {
     label: "Inactive",
     tone: "neutral",
-    icon: AlertCircle,
-    description: "Site is not currently active",
-  },
-  verifying: {
-    label: "Verifying",
-    tone: "warning",
-    icon: Clock,
-    description: "Site verification in progress",
+    icon: CircleSlash,
+    description: "Site is not currently active.",
   },
 };
+
+/** Falls back safely when the API sends a status this build does not know. */
+export function resolveSiteStatus(
+  status: string | undefined,
+): StatusDefinition {
+  return (
+    siteStatuses[(status ?? "inactive") as SiteStatus] ?? siteStatuses.inactive
+  );
+}
 
 export const contentStatuses: Record<ContentStatus, StatusDefinition> = {
   original: {

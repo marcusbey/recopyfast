@@ -6,10 +6,12 @@
  */
 
 const mockConstructEvent = jest.fn();
+const mockSubscriptionUpdate = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
+    subscriptions: { update: mockSubscriptionUpdate },
   })),
 );
 
@@ -22,10 +24,14 @@ jest.mock("next/headers", () => ({
 
 const maybeSingleMock = jest.fn();
 const insertMock = jest.fn();
+/** Live `billing_subscriptions` rows the lifetime buyer still has running. */
+const liveSubscriptionsMock = jest.fn();
 
 interface QueryBuilder {
   select: jest.Mock;
   eq: jest.Mock;
+  in: jest.Mock;
+  returns: jest.Mock;
   maybeSingle: jest.Mock;
   insert: jest.Mock;
 }
@@ -33,6 +39,8 @@ interface QueryBuilder {
 const queryBuilder: QueryBuilder = {
   select: jest.fn((): QueryBuilder => queryBuilder),
   eq: jest.fn((): QueryBuilder => queryBuilder),
+  in: jest.fn((): QueryBuilder => queryBuilder),
+  returns: jest.fn(() => liveSubscriptionsMock()),
   maybeSingle: maybeSingleMock,
   insert: insertMock,
 };
@@ -100,6 +108,8 @@ describe("payment_intent.succeeded", () => {
     });
     asMock(revokeEntitlementForPayment).mockResolvedValue({ revoked: true });
     asMock(revokePurchasedCredits).mockResolvedValue({ revoked: 0 });
+    liveSubscriptionsMock.mockResolvedValue({ data: [], error: null });
+    mockSubscriptionUpdate.mockResolvedValue({});
   });
 
   describe("credit purchases", () => {
@@ -174,6 +184,46 @@ describe("payment_intent.succeeded", () => {
 
       expect(response.status).toBe(200);
       expect(grantPlanEntitlement).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * A lifetime buyer's running subscription is stopped for them. Each
+     * cancellation is independent, so one failing must not decide the rest:
+     * the guard used to sit outside the loop, and a transient Stripe error on
+     * the first row left every later subscription billing forever. There is no
+     * second chance — the grant is already recorded, so a webhook retry
+     * short-circuits before reaching this code.
+     */
+    it("keeps cancelling after one subscription fails to cancel", async () => {
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      jest.spyOn(console, "log").mockImplementation(() => {});
+      liveSubscriptionsMock.mockResolvedValue({
+        data: [
+          { stripe_subscription_id: "sub_first" },
+          { stripe_subscription_id: "sub_second" },
+        ],
+        error: null,
+      });
+      mockSubscriptionUpdate
+        .mockRejectedValueOnce(new Error("Stripe rate limit"))
+        .mockResolvedValueOnce({});
+
+      const response = await deliver(
+        paymentIntentEvent({
+          type: "lifetime_purchase",
+          user_id: "user-1",
+          grants_plan_id: "pro",
+        }),
+      );
+
+      // The grant still stands — cancellation trouble must never cost the
+      // customer the thing they paid $199 for.
+      expect(response.status).toBe(200);
+      expect(mockSubscriptionUpdate).toHaveBeenCalledTimes(2);
+      expect(mockSubscriptionUpdate).toHaveBeenLastCalledWith(
+        "sub_second",
+        expect.objectContaining({ cancel_at_period_end: true }),
+      );
     });
 
     it("refuses a lifetime payment that says nothing about what it grants", async () => {

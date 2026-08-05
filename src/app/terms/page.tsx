@@ -22,7 +22,7 @@ export default function Terms() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-sky-100 mb-6">
             <FileText className="w-8 h-8 text-sky-600" />
           </div>
-          <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 mb-4">
+          <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-4">
             Terms of Service
           </h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
@@ -43,21 +43,21 @@ export default function Terms() {
         {/* Quick summary cards */}
         <div className="grid sm:grid-cols-3 gap-4 mb-16">
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Scale className="w-6 h-6 text-sky-500 mb-3" />
+            <Scale className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">Fair Use</h3>
             <p className="text-sm text-slate-600">
               Use our service responsibly and legally
             </p>
           </div>
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Shield className="w-6 h-6 text-emerald-500 mb-3" />
+            <Shield className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">Your Content</h3>
             <p className="text-sm text-slate-600">
               You own what you create and modify
             </p>
           </div>
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Clock className="w-6 h-6 text-purple-500 mb-3" />
+            <Clock className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">99.9% Uptime</h3>
             <p className="text-sm text-slate-600">
               Reliable service you can count on
@@ -69,7 +69,7 @@ export default function Terms() {
         <div className="prose prose-slate max-w-none">
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 1
               </span>
               Acceptance of Terms
@@ -84,7 +84,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 2
               </span>
               Description of Service
@@ -107,7 +107,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 3
               </span>
               User Accounts
@@ -130,7 +130,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 4
               </span>
               Acceptable Use & Security Requirements
@@ -181,7 +181,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 5
               </span>
               Content and Intellectual Property
@@ -208,7 +208,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 6
               </span>
               Privacy, Data Protection & Security
@@ -250,7 +250,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 7
               </span>
               Service Availability & Business Continuity
@@ -284,7 +284,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 8
               </span>
               Limitation of Liability & Indemnification
@@ -324,7 +324,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 9
               </span>
               Termination & Data Retention
@@ -372,7 +372,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 10
               </span>
               Changes to Terms
@@ -395,7 +395,7 @@ export default function Terms() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 11
               </span>
               Security Incident Response
@@ -429,7 +429,7 @@ export default function Terms() {
 
           <section className="bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-6 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 12
               </span>
               Contact Information

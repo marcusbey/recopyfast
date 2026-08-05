@@ -70,11 +70,11 @@ describe("AuthModal", () => {
       </AuthProviderWrapper>,
     );
 
-    expect(screen.getByRole("tab", { name: "Sign In" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign in" })).toHaveAttribute(
       "data-state",
       "active",
     );
-    expect(screen.getByRole("tab", { name: "Sign Up" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign up" })).toHaveAttribute(
       "data-state",
       "inactive",
     );
@@ -87,11 +87,11 @@ describe("AuthModal", () => {
       </AuthProviderWrapper>,
     );
 
-    expect(screen.getByRole("tab", { name: "Sign Up" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign up" })).toHaveAttribute(
       "data-state",
       "active",
     );
-    expect(screen.getByRole("tab", { name: "Sign In" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign in" })).toHaveAttribute(
       "data-state",
       "inactive",
     );
@@ -105,16 +105,16 @@ describe("AuthModal", () => {
       </AuthProviderWrapper>,
     );
 
-    const signUpTab = screen.getByRole("tab", { name: "Sign Up" });
+    const signUpTab = screen.getByRole("tab", { name: "Sign up" });
     await user.click(signUpTab);
 
     expect(signUpTab).toHaveAttribute("data-state", "active");
-    expect(screen.getByRole("tab", { name: "Sign In" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign in" })).toHaveAttribute(
       "data-state",
       "inactive",
     );
 
-    const signInTab = screen.getByRole("tab", { name: "Sign In" });
+    const signInTab = screen.getByRole("tab", { name: "Sign in" });
     await user.click(signInTab);
 
     expect(signInTab).toHaveAttribute("data-state", "active");
@@ -155,7 +155,7 @@ describe("AuthModal", () => {
     const signUpLink = screen.getByRole("button", { name: "Sign up" });
     await user.click(signUpLink);
 
-    expect(screen.getByRole("tab", { name: "Sign Up" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign up" })).toHaveAttribute(
       "data-state",
       "active",
     );
@@ -173,7 +173,7 @@ describe("AuthModal", () => {
     const signInLink = screen.getByRole("button", { name: "Sign in" });
     await user.click(signInLink);
 
-    expect(screen.getByRole("tab", { name: "Sign In" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Sign in" })).toHaveAttribute(
       "data-state",
       "active",
     );
@@ -201,8 +201,8 @@ describe("AuthModal", () => {
       </AuthProviderWrapper>,
     );
 
-    const signInTab = screen.getByRole("tab", { name: "Sign In" });
-    const signUpTab = screen.getByRole("tab", { name: "Sign Up" });
+    const signInTab = screen.getByRole("tab", { name: "Sign in" });
+    const signUpTab = screen.getByRole("tab", { name: "Sign up" });
 
     // Click on the sign-in tab to focus it first
     await user.click(signInTab);

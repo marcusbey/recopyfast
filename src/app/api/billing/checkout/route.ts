@@ -8,9 +8,11 @@ import {
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
+  getLifetimeGrantPlanId,
   isBillingPeriod,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
+import { getGrantedPlanIds } from "@/lib/billing/entitlements";
 
 /**
  * Stripe Checkout entry point.
@@ -108,6 +110,38 @@ export async function POST(req: NextRequest) {
           {
             error:
               "You already have a subscription. Use the upgrade flow to change plans.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    // Lifetime is bought once and never lapses, so a second purchase takes $199
+    // for something the customer already owns outright — and the grant is
+    // keyed on the payment intent, so the duplicate would not even be
+    // deduplicated on the way back in: they would simply be $199 poorer.
+    //
+    // `LifetimeOfferCard` already hides the offer in this state, but that is a
+    // rendering decision and this is a money decision. The subscription intent
+    // above has always enforced its own precondition server-side rather than
+    // trusting the dialog not to offer it; this is the same rule applied to the
+    // more expensive product.
+    if (parsed.intent.type === "lifetime") {
+      const grantedPlanId = await getLifetimeGrantPlanId();
+      // The GRANT, not the effective plan. Asking `getEffectivePlanId` here
+      // refused every Pro monthly subscriber — it falls back to a live
+      // subscription when there is no grant, so a subscriber resolved to `pro`
+      // and was told they already owned something they had never bought. That
+      // is the customer most likely to want this, and the rest of the flow
+      // (the offer card, the plan dialog, and the webhook that cancels their
+      // subscription afterwards) all assume they can reach it.
+      const heldGrants = await getGrantedPlanIds(user.id);
+
+      if (grantedPlanId !== null && heldGrants.includes(grantedPlanId)) {
+        return NextResponse.json(
+          {
+            error:
+              "You already have lifetime access to this plan. There is nothing further to buy.",
           },
           { status: 409 },
         );

@@ -186,8 +186,8 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "pending") {
     return (
-      <Alert className="mb-6 border-blue-200 bg-blue-50">
-        <p className="text-blue-800">
+      <Alert variant="info" className="mb-6">
+        <p>
           Confirming your payment with Stripe. This usually takes a few seconds
           — you can safely stay on this page.
         </p>
@@ -197,9 +197,9 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "slow") {
     return (
-      <Alert className="mb-6 border-amber-200 bg-amber-50">
+      <Alert variant="warning" className="mb-6">
         <div className="flex items-start justify-between gap-4">
-          <p className="text-amber-800">
+          <p>
             {state.paid
               ? "Your payment went through, but it is taking longer than usual to appear on this page. Nothing is lost — refresh in a minute, and contact support if it still looks wrong."
               : "We could not confirm this payment. If your card was charged it will show up here shortly; otherwise nothing was taken."}
@@ -214,16 +214,16 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "success") {
     return (
-      <Alert className="mb-6 border-green-200 bg-green-50">
-        <p className="text-green-800">{state.message}</p>
+      <Alert variant="success" className="mb-6">
+        <p>{state.message}</p>
       </Alert>
     );
   }
 
   if (state.kind === "cancelled") {
     return (
-      <Alert className="mb-6 border-gray-200 bg-gray-50">
-        <p className="text-gray-700">
+      <Alert className="mb-6">
+        <p className="text-muted-foreground">
           Checkout was cancelled. You have not been charged.
         </p>
       </Alert>
@@ -231,9 +231,9 @@ export function CheckoutStatusBanner({
   }
 
   return (
-    <Alert className="mb-6 border-red-200 bg-red-50">
+    <Alert variant="destructive" className="mb-6">
       <div className="flex items-start justify-between gap-4">
-        <p className="text-red-700">{state.message}</p>
+        <p>{state.message}</p>
         <Button size="sm" variant="outline" onClick={onReconciled}>
           Refresh
         </Button>

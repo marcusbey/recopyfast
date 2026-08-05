@@ -54,7 +54,7 @@ export function PurchaseCreditsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Purchase AI Credits</DialogTitle>
+          <DialogTitle>Purchase AI credits</DialogTitle>
           <DialogDescription>
             Buy credits to use AI-powered features like suggestions and
             translations.
@@ -63,13 +63,13 @@ export function PurchaseCreditsDialog({
 
         <div className="space-y-4">
           {error && (
-            <Alert className="border-red-200 bg-red-50">
-              <p className="text-red-700">{error}</p>
+            <Alert className="border-tone-danger-border bg-tone-danger-surface">
+              <p className="text-tone-danger-text">{error}</p>
             </Alert>
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="quantity">Number of Credit Packs</Label>
+            <Label htmlFor="quantity">Number of credit packs</Label>
             <Input
               id="quantity"
               type="number"
@@ -80,28 +80,30 @@ export function PurchaseCreditsDialog({
               onChange={(e) => handleQuantityChange(e.target.value)}
               placeholder="1"
             />
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-muted-foreground">
               Each pack contains {creditsPerPack.toLocaleString("en-US")}{" "}
               credits for ${pricePerPack}
             </p>
           </div>
 
-          <div className="bg-blue-50 p-4 rounded-lg space-y-2">
+          <div className="bg-surface-2 p-4 rounded-lg space-y-2">
             <div className="flex justify-between text-sm">
-              <span>Credit Packs:</span>
-              <span>{quantity}</span>
+              <span>Credit packs:</span>
+              <span className="tabular">{quantity}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span>Total Credits:</span>
-              <span>{totalCredits.toLocaleString("en-US")}</span>
+              <span>Total credits:</span>
+              <span className="tabular">
+                {totalCredits.toLocaleString("en-US")}
+              </span>
             </div>
             <div className="flex justify-between font-semibold border-t pt-2">
-              <span>Total Price:</span>
-              <span>${totalPrice}</span>
+              <span>Total price:</span>
+              <span className="tabular">${totalPrice}</span>
             </div>
           </div>
 
-          <div className="text-xs text-gray-500 space-y-1">
+          <div className="text-xs text-muted-foreground space-y-1">
             <p>• 1 credit = 1 AI suggestion; translations cost more</p>
             <p>• Unused credits are refunded if a feature fails</p>
             <p>• Payment is completed on Stripe&apos;s secure checkout page</p>

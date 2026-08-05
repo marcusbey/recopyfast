@@ -167,11 +167,16 @@ export function EditorSignIn() {
   return (
     <div className="w-full max-w-md space-y-6">
       <header className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-blue-100">
-          <ShieldCheck className="h-6 w-6 text-blue-600" aria-hidden="true" />
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tone-accent-surface">
+          <ShieldCheck
+            className="h-6 w-6 text-tone-accent-text"
+            aria-hidden="true"
+          />
         </div>
-        <h1 className="text-2xl font-semibold text-gray-900">Edit your site</h1>
-        <p className="text-sm text-gray-600">
+        <h1 className="text-2xl font-semibold text-foreground">
+          Edit your site
+        </h1>
+        <p className="text-sm text-muted-foreground">
           Sign in with the email address the site owner added you with.
         </p>
       </header>
@@ -215,16 +220,16 @@ export function EditorSignIn() {
 
       {step === "code" && (
         <form onSubmit={submitCode} className="space-y-4" noValidate>
-          <div className="rounded-lg bg-gray-50 p-4 text-center">
+          <div className="rounded-lg bg-surface-1 p-4 text-center">
             <Mail
-              className="mx-auto mb-2 h-6 w-6 text-gray-500"
+              className="mx-auto mb-2 h-6 w-6 text-muted-foreground"
               aria-hidden="true"
             />
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-foreground">
               {notice ??
                 "If that address can edit a site, a code is on its way."}
             </p>
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-muted-foreground">
               Sent to <span className="font-medium">{email.trim()}</span>. It
               expires in 10 minutes.
             </p>
@@ -252,10 +257,10 @@ export function EditorSignIn() {
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-gray-300"
+              className="h-4 w-4 rounded border-border"
               checked={rememberDevice}
               onChange={(event) => setRememberDevice(event.target.checked)}
               disabled={isLoading}
@@ -297,22 +302,22 @@ export function EditorSignIn() {
       {step === "sites" && (
         <div className="space-y-4">
           {sites.length === 0 ? (
-            <div className="rounded-lg border border-gray-200 p-6 text-center">
+            <div className="rounded-lg border border-border p-6 text-center">
               <Globe
-                className="mx-auto mb-3 h-8 w-8 text-gray-400"
+                className="mx-auto mb-3 h-8 w-8 text-muted-foreground"
                 aria-hidden="true"
               />
-              <h2 className="text-base font-medium text-gray-900">
+              <h2 className="text-base font-medium text-foreground">
                 No sites yet
               </h2>
-              <p className="mt-1 text-sm text-gray-600">
+              <p className="mt-1 text-sm text-muted-foreground">
                 {email.trim()} isn&apos;t set up to edit anything. Ask the site
                 owner to add this address.
               </p>
             </div>
           ) : (
             <>
-              <h2 className="text-sm font-medium text-gray-700">
+              <h2 className="text-sm font-medium text-muted-foreground">
                 Choose a site to edit
               </h2>
               <ul className="space-y-2">
@@ -322,24 +327,24 @@ export function EditorSignIn() {
                       type="button"
                       onClick={() => openSite(site)}
                       disabled={handingOffTo !== null}
-                      className="flex w-full items-center justify-between rounded-lg border border-gray-200 p-4 text-left transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:opacity-60"
+                      className="flex w-full items-center justify-between rounded-lg border border-border p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
                     >
                       <span className="min-w-0">
-                        <span className="block truncate font-medium text-gray-900">
+                        <span className="block truncate font-medium text-foreground">
                           {site.name}
                         </span>
-                        <span className="block truncate text-sm text-gray-500">
+                        <span className="block truncate text-sm text-muted-foreground">
                           {site.domain}
                         </span>
                       </span>
                       {handingOffTo === site.siteId ? (
                         <Loader2
-                          className="h-5 w-5 shrink-0 animate-spin text-blue-600"
+                          className="h-5 w-5 shrink-0 animate-spin text-primary"
                           aria-hidden="true"
                         />
                       ) : (
                         <ArrowRight
-                          className="h-5 w-5 shrink-0 text-gray-400"
+                          className="h-5 w-5 shrink-0 text-muted-foreground"
                           aria-hidden="true"
                         />
                       )}

@@ -355,35 +355,17 @@ describe("Domain Verification", () => {
       "Generated: 2023-01-01T00:00:00.000Z";
 
     /**
-     * KNOWN PRODUCTION DEFECT — src/lib/security/domain-verification.ts:337.
+     * The file the owner downloaded carries `Generated: <ISO timestamp>` from
+     * the moment it was issued. verifyDomainFile used to regenerate that body
+     * at check time and demand exact equality, so the expected value differed
+     * from the real file by however long the owner had taken to upload it —
+     * making the hosted-file method impossible to complete for anybody.
      *
-     * generateFileVerificationContent embeds `Generated: ${new Date()...}`, and
-     * verifyDomainFile compares the fetched file against a *freshly generated*
-     * copy with strict equality. The timestamp therefore never matches the one
-     * the owner was given, so file-based domain verification can never succeed.
-     * /api/domains/verify hands out exactly this content as the instructions,
-     * so the whole "file" verification method is dead on arrival. The fix is to
-     * match on the verification code rather than the full string (or drop the
-     * timestamp from the generated content).
-     *
-     * `it.failing` keeps the correct expectation: it passes while the defect
-     * exists and starts failing once the comparison is fixed.
+     * The timestamp here is deliberately old: a comparison that regenerates the
+     * body cannot pass this test, which is what makes it a regression guard
+     * rather than a restatement of the implementation.
      */
-    it.failing(
-      "should verify a correctly formatted file the owner uploaded earlier",
-      async () => {
-        (global.fetch as jest.Mock).mockResolvedValue({
-          ok: true,
-          text: () => Promise.resolve(previouslyIssuedFile),
-        });
-
-        const result = await verifyDomainFile("example.com", "code123");
-
-        expect(result.success).toBe(true);
-      },
-    );
-
-    it("currently rejects a correctly formatted file (pins the defect above)", async () => {
+    it("verifies a file the owner downloaded and uploaded earlier", async () => {
       (global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
         text: () => Promise.resolve(previouslyIssuedFile),
@@ -391,12 +373,105 @@ describe("Domain Verification", () => {
 
       const result = await verifyDomainFile("example.com", "code123");
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("File content does not match");
+      expect(result.success).toBe(true);
       expect(global.fetch).toHaveBeenCalledWith(
         "https://example.com/.well-known/recopyfast-verification-code123.txt",
         expect.any(Object),
       );
+    });
+
+    it("tolerates the trailing newline an editor or static host adds", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(`${previouslyIssuedFile}\r\n`),
+      });
+
+      await expect(
+        verifyDomainFile("example.com", "code123"),
+      ).resolves.toMatchObject({ success: true });
+    });
+
+    it("refuses to verify when the stored code is empty", async () => {
+      // `"anything".includes("")` is true, so a blank code would have accepted
+      // ANY file at the well-known path and marked the domain verified.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("literally anything at all"),
+      });
+
+      const result = await verifyDomainFile("example.com", "");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("missing");
+    });
+
+    it("refuses to verify on a whitespace-only code", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("anything"),
+      });
+
+      const result = await verifyDomainFile("example.com", "   ");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("missing");
+    });
+
+    it("tolerates a retyped label but not a retyped code", async () => {
+      // The label is decoration a human may retype in any casing. The code is
+      // the secret being proved: folding its case would accept a value that was
+      // never issued, so a near-miss transcription — or a smaller search space
+      // for anyone guessing — could verify a domain.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve("VERIFICATION CODE: abc123def\nGenerated: whenever"),
+      });
+
+      await expect(
+        verifyDomainFile("example.com", "abc123def"),
+      ).resolves.toMatchObject({ success: true });
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("Verification Code: ABC123DEF"),
+      });
+
+      await expect(
+        verifyDomainFile("example.com", "abc123def"),
+      ).resolves.toMatchObject({ success: false });
+    });
+
+    it("refuses a 404 page that merely echoes the requested path", async () => {
+      // The code is IN the url we fetch, so any domain whose fallback page
+      // reflects the path contains it. A substring match would have verified a
+      // domain for someone who only pointed a hostname at it.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            "<h1>404</h1><p>Not found: /.well-known/recopyfast-verification-code123.txt</p>",
+          ),
+      });
+
+      const result = await verifyDomainFile("example.com", "code123");
+
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects a file that does not carry this domain's code", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            "ReCopyFast Domain Verification\nVerification Code: someoneelsescode\n",
+          ),
+      });
+
+      const result = await verifyDomainFile("example.com", "code123");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("code123");
     });
 
     it("should fail for incorrect file content", async () => {
@@ -408,7 +483,7 @@ describe("Domain Verification", () => {
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("File content does not match");
+      expect(result.error).toContain("does not declare the verification code");
     });
 
     it("should handle HTTP errors", async () => {

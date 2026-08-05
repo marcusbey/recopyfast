@@ -97,20 +97,20 @@ export function PaymentMethodsCard({
   return (
     <Card className="p-6">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-semibold">Payment Methods</h3>
+        <h3 className="text-xl font-semibold">Payment methods</h3>
         <Button
           size="sm"
           variant="outline"
           disabled={isBusy}
           onClick={() => startCheckout({ intent: "payment_method" })}
         >
-          {isRedirecting ? "Redirecting…" : "Add New Card"}
+          {isRedirecting ? "Redirecting…" : "Add new card"}
         </Button>
       </div>
 
       {visibleError && (
-        <Alert className="mb-4 border-red-200 bg-red-50">
-          <p className="text-red-700">{visibleError}</p>
+        <Alert variant="destructive" className="mb-4">
+          <p>{visibleError}</p>
         </Alert>
       )}
 
@@ -138,7 +138,7 @@ export function PaymentMethodsCard({
                         </Badge>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-muted-foreground">
                       {expiry ? `Expires ${expiry}` : "Saved card"}
                     </p>
                   </div>
@@ -151,7 +151,7 @@ export function PaymentMethodsCard({
                         onClick={() => handleSetDefault(pm.id)}
                         disabled={isBusy}
                       >
-                        {isSettingDefault ? "Saving…" : "Set Default"}
+                        {isSettingDefault ? "Saving…" : "Set default"}
                       </Button>
                     )}
                     <Button
@@ -161,7 +161,7 @@ export function PaymentMethodsCard({
                         setConfirmingRemoval(isConfirming ? null : pm.id)
                       }
                       disabled={isBusy}
-                      className="text-red-600 hover:text-red-700"
+                      className="text-destructive hover:text-destructive"
                     >
                       {isRemoving ? "Removing…" : "Remove"}
                     </Button>
@@ -170,7 +170,7 @@ export function PaymentMethodsCard({
 
                 {isConfirming && (
                   <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
-                    <p className="text-sm text-gray-700">
+                    <p className="text-sm text-muted-foreground">
                       Remove this card? Any subscription billed to it will need
                       another card before it renews.
                     </p>
@@ -199,7 +199,7 @@ export function PaymentMethodsCard({
           })}
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-muted-foreground">
           <p>No payment methods added yet</p>
           <p className="text-sm">
             Add a card to start a subscription or buy AI credits

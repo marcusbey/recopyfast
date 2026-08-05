@@ -106,22 +106,22 @@ export function SubscriptionCard({
     <Card className="p-6">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xl font-semibold">Current Subscription</h3>
-          <p className="text-gray-600 mt-1">{plan.description}</p>
+          <h3 className="text-xl font-semibold">Current subscription</h3>
+          <p className="text-muted-foreground mt-1">{plan.description}</p>
         </div>
         {getStatusBadge()}
       </div>
 
       {error && (
-        <Alert className="mb-4 border-red-200 bg-red-50">
-          <p className="text-red-700">{error}</p>
+        <Alert className="mb-4 border-tone-danger-border bg-tone-danger-surface">
+          <p className="text-tone-danger-text">{error}</p>
         </Alert>
       )}
 
       <div className="space-y-4">
         <div>
-          <h4 className="font-medium text-lg">{plan.name} Plan</h4>
-          <p className="text-2xl font-bold text-blue-600">
+          <h4 className="font-medium text-lg">{plan.name} plan</h4>
+          <p className="text-2xl font-semibold text-primary tabular">
             {plan.price === 0 ? "Free" : `$${plan.price}/month`}
           </p>
         </div>
@@ -129,14 +129,14 @@ export function SubscriptionCard({
         {subscription && (
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="text-gray-600">Current Period</p>
+              <p className="text-muted-foreground">Current period</p>
               <p className="font-medium">
                 {formatDate(subscription.current_period_start)} -{" "}
                 {formatDate(subscription.current_period_end)}
               </p>
             </div>
             <div>
-              <p className="text-gray-600">Next Billing</p>
+              <p className="text-muted-foreground">Next billing</p>
               <p className="font-medium">
                 {subscription.cancel_at_period_end
                   ? "Plan will be canceled"
@@ -147,12 +147,12 @@ export function SubscriptionCard({
         )}
 
         <div>
-          <h5 className="font-medium mb-2">Plan Features</h5>
-          <ul className="space-y-1 text-sm text-gray-600">
+          <h5 className="font-medium mb-2">Plan features</h5>
+          <ul className="space-y-1 text-sm text-muted-foreground">
             {plan.features.map((feature, index) => (
               <li key={index} className="flex items-center">
                 <svg
-                  className="w-4 h-4 text-green-500 mr-2"
+                  className="w-4 h-4 text-tone-success-text mr-2"
                   fill="currentColor"
                   viewBox="0 0 20 20"
                 >
@@ -180,7 +180,7 @@ export function SubscriptionCard({
               </Button>
             ) : isConfirmingCancel ? (
               <div className="space-y-3">
-                <p className="text-sm text-gray-700">
+                <p className="text-sm text-foreground">
                   Cancel your subscription? You keep access until{" "}
                   {formatDate(subscription.current_period_end)}, and you will
                   not be charged again.

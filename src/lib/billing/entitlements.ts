@@ -1,6 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { readEffectivePlanId, resolveEntitlement } from "./effective-plan";
+import {
+  readEffectivePlanId,
+  readGrantedPlanIds,
+  resolveEntitlement,
+} from "./effective-plan";
 import type { Entitlement } from "./effective-plan";
 
 export {
@@ -31,6 +35,14 @@ export async function getEffectivePlanId(
   userId: string,
 ): Promise<string | null> {
   return readEffectivePlanId(await createClient(), userId);
+}
+
+/**
+ * Plans this user holds a permanent grant for — see `readGrantedPlanIds` for
+ * why this is deliberately NOT the effective plan.
+ */
+export async function getGrantedPlanIds(userId: string): Promise<string[]> {
+  return readGrantedPlanIds(await createClient(), userId);
 }
 
 /**

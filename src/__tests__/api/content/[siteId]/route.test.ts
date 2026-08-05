@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { GET, POST, PUT, OPTIONS } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
+  authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
   sanitizeIncomingContent,
@@ -9,11 +10,16 @@ import {
 
 jest.mock("@/lib/supabase/service");
 jest.mock("@/lib/security/site-auth", () => ({
+  authorizeFirstPartySiteRequest: jest.fn(),
   authorizeSiteRequest: jest.fn(),
   authorizeSiteOrigin: jest.fn(),
   sanitizeIncomingContent: jest.fn((value: string) => value),
 }));
 
+const mockAuthorizeFirstPartySiteRequest =
+  authorizeFirstPartySiteRequest as jest.MockedFunction<
+    typeof authorizeFirstPartySiteRequest
+  >;
 const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<
   typeof authorizeSiteRequest
 >;
@@ -58,6 +64,9 @@ describe("/api/content/[siteId]", () => {
         typeof createServiceRoleClient
       >,
     );
+    // No session by default: every existing test exercises the widget's
+    // token/origin path exactly as before.
+    mockAuthorizeFirstPartySiteRequest.mockResolvedValue(null);
     mockAuthorizeSiteRequest.mockResolvedValue({
       site: { id: "site-123", domain: "example.com", api_key: "api-key" },
       allowedOrigin: "https://example.com",
@@ -189,6 +198,37 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(401);
       expect(data.error).toBe("Missing site token");
+    });
+
+    it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
+      mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce({
+        site: { id: "site-123", domain: "example.com", api_key: "api-key" },
+        allowedOrigin: null,
+      });
+      mockServiceClient.eq
+        .mockImplementationOnce(() => mockServiceClient) // site_id
+        .mockImplementationOnce(() => mockServiceClient) // language
+        .mockImplementationOnce(() =>
+          Promise.resolve({ data: mockContentElements, error: null }),
+        ); // variant
+
+      // No Authorization header, no Origin header, no ?token= — the dashboard
+      // never sends these; only the session cookie authorizes this request.
+      const request = new NextRequest("http://localhost/api/content/site-123");
+
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data).toEqual(mockContentElements);
+      expect(mockAuthorizeSiteRequest).not.toHaveBeenCalled();
+      // allowedOrigin is null for first-party requests, so withCors() falls
+      // back to NEXT_PUBLIC_APP_URL rather than echoing a caller-supplied origin.
+      expect(
+        response.headers.get("Access-Control-Allow-Origin"),
+      ).not.toBeNull();
     });
   });
 

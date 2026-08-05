@@ -17,6 +17,11 @@ import { Check, Copy, Loader2, AlertCircle, ExternalLink } from "lucide-react";
 interface SiteRegistrationModalProps {
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * A site now exists. Fired once, as soon as the API confirms it — not when
+   * the dialog is dismissed — so the page underneath is already correct by the
+   * time the success screen appears, whichever way the owner leaves it.
+   */
   onSuccess?: () => void;
 }
 
@@ -123,6 +128,10 @@ export function SiteRegistrationModal({
       }
 
       setRegistrationResult(data);
+      // Before the modal shows anything, tell the parent the list is stale.
+      // Deferring this to the footer button left "0 active sites / No sites
+      // connected yet" sitting behind "Site Registered Successfully!".
+      onSuccess?.();
     } catch {
       setErrors({ general: "An unexpected error occurred. Please try again." });
     } finally {
@@ -150,11 +159,9 @@ export function SiteRegistrationModal({
     onClose();
   };
 
+  // `onSuccess` already fired at registration, so this is only a dismissal.
   const handleGoToDashboard = () => {
     handleClose();
-    if (onSuccess) {
-      onSuccess();
-    }
   };
 
   return (
@@ -387,10 +394,27 @@ export function SiteRegistrationModal({
                     </code>
                     .
                   </p>
+                  {/*
+                    Links are the one common element the widget deliberately
+                    skips: the selector is `a.rcf-editable-link`, not `a`, so
+                    that discovery cannot turn a site's whole navigation into
+                    editable copy. Saying so here rather than only on the
+                    marketing page — the register's F-12 asked for "the copy AND
+                    docs", and this modal IS the docs for anyone installing.
+                  */}
+                  <p className="text-sm text-muted-foreground">
+                    Links are skipped on purpose, so nobody can rewrite your
+                    navigation by accident. Opt an individual link in with{" "}
+                    <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
+                      class=&quot;rcf-editable-link&quot;
+                    </code>
+                    .
+                  </p>
                   <pre className="bg-surface-2 text-foreground p-3 rounded-lg text-xs overflow-x-auto">
                     <code>{`<h1>Edited automatically</h1>
 <p data-rcf-ignore>Never editable</p>
-<div data-rcf-content>Opt this container in</div>`}</code>
+<div data-rcf-content>Opt this container in</div>
+<a href="/pricing" class="rcf-editable-link">Opt this link in</a>`}</code>
                   </pre>
                 </div>
 

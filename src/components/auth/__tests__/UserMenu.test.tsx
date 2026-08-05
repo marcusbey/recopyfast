@@ -241,7 +241,7 @@ describe("UserMenu", () => {
     expect(logoutItem?.querySelector("svg")).toBeInTheDocument();
   });
 
-  it("applies gradient styling to avatar", () => {
+  it("applies solid primary styling to avatar", () => {
     (useAuth as jest.Mock).mockReturnValue({
       user: mockUser,
       loading: false,
@@ -253,13 +253,9 @@ describe("UserMenu", () => {
 
     render(<UserMenu />);
 
-    // The gradient is on the div containing the initial, not the button
+    // The fill is on the div containing the initial, not the button
     const avatarDiv = screen.getByText("J");
-    expect(avatarDiv).toHaveClass(
-      "bg-gradient-to-r",
-      "from-blue-600",
-      "to-purple-600",
-    );
+    expect(avatarDiv).toHaveClass("bg-primary", "text-primary-foreground");
   });
 
   it("has proper ARIA attributes", async () => {
@@ -295,7 +291,7 @@ describe("UserMenu", () => {
     expect(logoutButton).toBeInTheDocument();
   });
 
-  it("styles logout item with red color", async () => {
+  it("styles logout item with the danger tone", async () => {
     const user = userEvent.setup();
     (useAuth as jest.Mock).mockReturnValue({
       user: mockUser,
@@ -311,6 +307,6 @@ describe("UserMenu", () => {
     await user.click(screen.getByRole("button"));
 
     const logoutItem = screen.getByText("Log out").closest('[role="menuitem"]');
-    expect(logoutItem).toHaveClass("text-red-600");
+    expect(logoutItem).toHaveClass("text-tone-danger-text");
   });
 });

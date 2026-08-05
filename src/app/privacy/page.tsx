@@ -22,7 +22,7 @@ export default function Privacy() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-sky-100 mb-6">
             <Shield className="w-8 h-8 text-sky-600" />
           </div>
-          <h1 className="text-4xl sm:text-5xl font-bold text-slate-900 mb-4">
+          <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-4">
             Privacy Policy
           </h1>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
@@ -43,7 +43,7 @@ export default function Privacy() {
         {/* Quick summary cards */}
         <div className="grid sm:grid-cols-3 gap-4 mb-16">
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Lock className="w-6 h-6 text-emerald-500 mb-3" />
+            <Lock className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">
               Encrypted Data
             </h3>
@@ -52,14 +52,14 @@ export default function Privacy() {
             </p>
           </div>
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Eye className="w-6 h-6 text-sky-500 mb-3" />
+            <Eye className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">No Data Sales</h3>
             <p className="text-sm text-slate-600">
               We never sell your personal information
             </p>
           </div>
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Database className="w-6 h-6 text-purple-500 mb-3" />
+            <Database className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">Your Control</h3>
             <p className="text-sm text-slate-600">
               Export or delete your data anytime
@@ -71,7 +71,7 @@ export default function Privacy() {
         <div className="prose prose-slate max-w-none">
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 1
               </span>
               Information We Collect
@@ -135,7 +135,7 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 2
               </span>
               How We Use Your Information
@@ -181,14 +181,14 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 3
               </span>
               Information Sharing & Data Transfers
             </h2>
 
-            <div className="bg-emerald-50 border-l-4 border-emerald-400 p-4 mb-6 rounded-r-lg">
-              <p className="text-sm text-emerald-800">
+            <div className="bg-sky-50 border-l-4 border-sky-400 p-4 mb-6 rounded-r-lg">
+              <p className="text-sm text-sky-800">
                 <strong>Zero-Sale Policy:</strong> We never sell, trade, or rent
                 your personal information to third parties. Your data is not a
                 product.
@@ -264,14 +264,14 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 4
               </span>
               Data Security & Protection
             </h2>
 
-            <div className="bg-purple-50 border-l-4 border-purple-400 p-4 mb-6 rounded-r-lg">
-              <p className="text-sm text-purple-800">
+            <div className="bg-sky-50 border-l-4 border-sky-400 p-4 mb-6 rounded-r-lg">
+              <p className="text-sm text-sky-800">
                 <strong>Security First:</strong> We implement defense-in-depth
                 security strategies and maintain SOC 2 Type II compliance for
                 the highest level of data protection.
@@ -314,7 +314,7 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 5
               </span>
               Your Privacy Rights & Controls
@@ -373,7 +373,7 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 6
               </span>
               Cookies & Tracking
@@ -409,7 +409,7 @@ export default function Privacy() {
 
           <section className="mb-12 bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-4 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 7
               </span>
               Data Retention
@@ -445,7 +445,7 @@ export default function Privacy() {
 
           <section className="bg-white rounded-2xl p-8 border border-sky-100 shadow-sm">
             <h2 className="text-2xl font-semibold text-slate-900 mb-6 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-bold text-sky-600">
+              <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 8
               </span>
               Contact Us

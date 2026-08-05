@@ -11,16 +11,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Link2,
-  Mail,
-  CheckCircle2,
-  Loader2,
-  Eye,
-  Edit,
-  Upload,
-  Shield,
-} from "lucide-react";
+import { CheckCircle2, Loader2, Eye, Edit, Upload, Shield } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { ShareLinkCard, type ShareLink } from "./ShareLinkCard";
 import type { Site } from "@/types";
 
@@ -30,7 +22,6 @@ interface ShareSiteDialogProps {
   site: Site;
 }
 
-type LinkType = "link" | "invite";
 type Permission = "view" | "edit" | "publish" | "admin";
 
 const EXPIRY_OPTIONS = [
@@ -38,6 +29,17 @@ const EXPIRY_OPTIONS = [
   { value: 7, label: "7 days" },
   { value: 14, label: "14 days" },
   { value: 30, label: "30 days" },
+];
+
+const PERMISSION_OPTIONS: ReadonlyArray<{
+  key: Permission;
+  icon: LucideIcon;
+  label: string;
+}> = [
+  { key: "view", icon: Eye, label: "View" },
+  { key: "edit", icon: Edit, label: "Edit" },
+  { key: "publish", icon: Upload, label: "Publish" },
+  { key: "admin", icon: Shield, label: "Admin" },
 ];
 
 export function ShareSiteDialog({
@@ -52,10 +54,10 @@ export function ShareSiteDialog({
   const [success, setSuccess] = useState<string | null>(null);
 
   // Form state.
-  // Defaults to "invite": anonymous "link" sharing was retired and a database
-  // trigger now rejects it, so the old default made the very first click fail
-  // with "Make sure you have admin permission" on the user's own site.
-  const [linkType, setLinkType] = useState<LinkType>("invite");
+  // Anonymous "Anyone with link" sharing was retired — a database trigger
+  // rejects those rows — so email invite is the only access type this dialog
+  // can create. There is no `linkType` toggle any more; every submission
+  // sends type "invite".
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<Permission[]>([
     "view",
@@ -94,7 +96,7 @@ export function ShareSiteDialog({
   }, [open, fetchActiveLinks]);
 
   const handleCreateLink = async () => {
-    if (linkType === "invite" && !email) {
+    if (!email) {
       setError("Email is required for email invites");
       return;
     }
@@ -109,8 +111,8 @@ export function ShareSiteDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteId: site.id,
-          type: linkType,
-          email: linkType === "invite" ? email : undefined,
+          type: "invite",
+          email,
           permissions,
           label: label || undefined,
           expiresInDays,
@@ -123,8 +125,17 @@ export function ShareSiteDialog({
         throw new Error(data.error || "Failed to create share link");
       }
 
-      // Copy link to clipboard
-      if (data.stagingUrl) {
+      // The invite is worthless without its emailed verification code, so say
+      // plainly when the mail did not go out rather than reporting a success
+      // the recipient will never see. `emailDelivered` is undefined on
+      // responses that sent no mail at all.
+      if (data.emailDelivered === false) {
+        setError(
+          "Invite created, but the verification email could not be sent. " +
+            "The recipient cannot get in until it is resent — check the email " +
+            "provider configuration.",
+        );
+      } else if (data.stagingUrl) {
         await navigator.clipboard.writeText(data.stagingUrl);
         setSuccess("Link created and copied to clipboard!");
       } else {
@@ -190,94 +201,75 @@ export function ShareSiteDialog({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Link Type Selection */}
-          <div className="space-y-3">
-            <Label className="text-sm font-medium">Link Type</Label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setLinkType("link")}
-                className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                  linkType === "link"
-                    ? "border-primary bg-tone-info-surface"
-                    : "border-border hover:border-input"
-                }`}
-              >
-                <Link2
-                  className={`w-5 h-5 ${linkType === "link" ? "text-tone-info-text" : "text-muted-foreground"}`}
-                />
-                <span
-                  className={`text-sm font-medium ${linkType === "link" ? "text-tone-info-text" : "text-foreground"}`}
-                >
-                  Anyone with link
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setLinkType("invite")}
-                className={`flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                  linkType === "invite"
-                    ? "border-primary bg-tone-info-surface"
-                    : "border-border hover:border-input"
-                }`}
-              >
-                <Mail
-                  className={`w-5 h-5 ${linkType === "invite" ? "text-tone-info-text" : "text-muted-foreground"}`}
-                />
-                <span
-                  className={`text-sm font-medium ${linkType === "invite" ? "text-tone-info-text" : "text-foreground"}`}
-                >
-                  Email invite
-                </span>
-              </button>
-            </div>
+          {/* Email invite is the only access type this dialog creates.
+              "Anyone with link" sharing was retired — StagingAccessManager
+              .createStagingAccess throws for it and the database rejects the
+              row — so the Link Type toggle that used to offer it (and always
+              failed) has been removed in favor of a single invite form. */}
+          <div className="space-y-2">
+            <Label htmlFor="email">Email Address</Label>
+            <Input
+              id="email"
+              type="email"
+              placeholder="collaborator@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
 
-          {/* Email field for invite type */}
-          {linkType === "invite" && (
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="collaborator@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* Permissions */}
+          {/* Permissions.
+              These were bare <button>s whose only state signal was a colour
+              swap, so nothing announced them as toggles and nothing said which
+              ones were on. They are a checkbox group rather than the radiogroup
+              used in UpgradeDialog and ThemePicker because several permissions
+              hold at once — the default grant is view + edit — and radio
+              semantics would tell a screen reader the opposite, that choosing
+              one clears the others. A checkbox group is also the pattern that
+              needs no roving tabindex: every option stays in the tab order, and
+              a native <button> already answers Space and Enter, which is the
+              whole keyboard contract for role="checkbox". */}
           <div className="space-y-3">
-            <Label className="text-sm font-medium">Permissions</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { key: "view" as Permission, icon: Eye, label: "View" },
-                { key: "edit" as Permission, icon: Edit, label: "Edit" },
-                {
-                  key: "publish" as Permission,
-                  icon: Upload,
-                  label: "Publish",
+            <Label id="share-permissions-label" className="text-sm font-medium">
+              Permissions
+            </Label>
+            <div
+              role="group"
+              aria-labelledby="share-permissions-label"
+              className="grid grid-cols-2 gap-2"
+            >
+              {PERMISSION_OPTIONS.map(
+                ({ key, icon: Icon, label: permLabel }) => {
+                  const isGranted = permissions.includes(key);
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={isGranted}
+                      onClick={() => togglePermission(key)}
+                      className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                        isGranted
+                          ? "border-primary bg-tone-info-surface text-tone-info-text"
+                          : "border-border text-muted-foreground hover:border-input"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" aria-hidden="true" />
+                      <span className="text-sm font-medium">{permLabel}</span>
+                      {/* Carries WCAG 1.4.1 on its own: the granted option is
+                          the only one wearing a tick, so the state survives
+                          when the teal border and surface do not read as
+                          different. */}
+                      {isGranted && (
+                        <CheckCircle2
+                          className="w-4 h-4 ml-auto text-tone-info-text"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </button>
+                  );
                 },
-                { key: "admin" as Permission, icon: Shield, label: "Admin" },
-              ].map(({ key, icon: Icon, label: permLabel }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => togglePermission(key)}
-                  className={`flex items-center gap-2 p-2 rounded-lg border transition-all ${
-                    permissions.includes(key)
-                      ? "border-primary bg-tone-info-surface text-tone-info-text"
-                      : "border-border text-muted-foreground hover:border-input"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="text-sm font-medium">{permLabel}</span>
-                  {permissions.includes(key) && (
-                    <CheckCircle2 className="w-4 h-4 ml-auto text-tone-info-text" />
-                  )}
-                </button>
-              ))}
+              )}
             </div>
           </div>
 

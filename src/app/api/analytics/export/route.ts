@@ -128,7 +128,11 @@ export async function GET(req: NextRequest) {
 
     const dateRange =
       startDate && endDate ? { start: startDate, end: endDate } : undefined;
-    const data = await analytics.getDashboardData(siteId, dateRange);
+    const data = await analytics.getDashboardData(
+      siteId,
+      dateRange,
+      auth.userId,
+    );
 
     const stamp = new Date().toISOString().split("T")[0];
     const filename = `analytics-${siteId ?? "all-sites"}-${stamp}.${formatParam}`;

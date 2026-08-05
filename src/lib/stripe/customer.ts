@@ -1,9 +1,24 @@
 import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import type { Customer } from "@/types/billing";
 
+/** Postgres unique-violation. Two concurrent checkouts raced to enrol the user. */
+const UNIQUE_VIOLATION = "23505";
+
 /**
- * Create or retrieve a Stripe customer for a user
+ * Create or retrieve a Stripe customer for a user.
+ *
+ * Writes go through the service-role client, not the caller's session. Every
+ * billing table is user-readable and service-role-writable — see the policies
+ * on billing_payment_methods and billing_invoices in
+ * `20260611010000_rls_hardening.sql`, and `20260804120000` for this table.
+ * Under the caller's token the INSERT below is rejected by RLS (42501), which
+ * failed *every* checkout before it reached Stripe.
+ *
+ * `userId` is not caller-supplied: the route resolves it from the verified
+ * session before calling in, so widening the client here does not widen who
+ * can enrol whom.
  */
 export async function createOrGetCustomer(
   userId: string,
@@ -13,27 +28,32 @@ export async function createOrGetCustomer(
   customer: Customer;
   stripeCustomer: import("stripe").Stripe.Customer;
 }> {
-  const supabase = await createClient();
+  const supabase = createServiceRoleClient();
 
-  // Check if customer already exists in our database
-  const { data: existingCustomer } = await supabase
-    .from("billing_customers")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
+  const readCustomer = async (): Promise<Customer | null> => {
+    const { data } = await supabase
+      .from("billing_customers")
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+    return data;
+  };
 
-  if (existingCustomer) {
-    // Get the Stripe customer
+  const resolveStripeCustomer = async (customer: Customer) => {
     const retrieved = await stripe.customers.retrieve(
-      existingCustomer.stripe_customer_id,
+      customer.stripe_customer_id,
     );
     if (retrieved.deleted) {
       throw new Error("Stripe customer has been deleted");
     }
-    return { customer: existingCustomer, stripeCustomer: retrieved };
+    return { customer, stripeCustomer: retrieved };
+  };
+
+  const existingCustomer = await readCustomer();
+  if (existingCustomer) {
+    return resolveStripeCustomer(existingCustomer);
   }
 
-  // Create new Stripe customer
   const stripeCustomer = await stripe.customers.create({
     email,
     name,
@@ -42,7 +62,6 @@ export async function createOrGetCustomer(
     },
   });
 
-  // Save customer to our database
   const { data: newCustomer, error } = await supabase
     .from("billing_customers")
     .insert({
@@ -54,11 +73,26 @@ export async function createOrGetCustomer(
     .select()
     .single();
 
-  if (error) {
-    throw new Error(`Failed to create customer: ${error.message}`);
+  if (!error) {
+    return { customer: newCustomer, stripeCustomer };
   }
 
-  return { customer: newCustomer, stripeCustomer };
+  // The row exists after all — a concurrent checkout won the race. Adopt its
+  // customer and discard the duplicate we just opened at Stripe.
+  if (error.code === UNIQUE_VIOLATION) {
+    const raced = await readCustomer();
+    if (raced) {
+      await stripe.customers.del(stripeCustomer.id).catch(() => {});
+      return resolveStripeCustomer(raced);
+    }
+  }
+
+  // The Stripe customer is created before the row that records it, so a failed
+  // write leaves one behind with nothing pointing at it. Retries then open a
+  // fresh orphan every time. Take it back out rather than accumulate them.
+  await stripe.customers.del(stripeCustomer.id).catch(() => {});
+
+  throw new Error(`Failed to create customer: ${error.message}`);
 }
 
 /**

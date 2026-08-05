@@ -31,13 +31,17 @@ export function CreditBalanceCard({
   const getTransactionIcon = (type: string) => {
     switch (type) {
       case "purchase":
-        return <div className="w-2 h-2 rounded-full bg-green-500"></div>;
+        return (
+          <div className="w-2 h-2 rounded-full bg-tone-success-text"></div>
+        );
       case "consumption":
-        return <div className="w-2 h-2 rounded-full bg-red-500"></div>;
+        return <div className="w-2 h-2 rounded-full bg-tone-danger-text"></div>;
       case "refund":
-        return <div className="w-2 h-2 rounded-full bg-blue-500"></div>;
+        return <div className="w-2 h-2 rounded-full bg-tone-info-text"></div>;
       default:
-        return <div className="w-2 h-2 rounded-full bg-gray-500"></div>;
+        return (
+          <div className="w-2 h-2 rounded-full bg-tone-neutral-text"></div>
+        );
     }
   };
 
@@ -59,34 +63,38 @@ export function CreditBalanceCard({
     <Card className="p-6">
       <div className="flex justify-between items-start mb-4">
         <div>
-          <h3 className="text-xl font-semibold">AI Credits</h3>
-          <p className="text-gray-600 mt-1">Pay-per-use for AI features</p>
+          <h3 className="text-xl font-semibold">AI credits</h3>
+          <p className="text-muted-foreground mt-1">
+            Pay-per-use for AI features
+          </p>
         </div>
         <Button onClick={() => setShowPurchaseDialog(true)} size="sm">
-          Buy Credits
+          Buy credits
         </Button>
       </div>
 
       <div className="space-y-4">
-        <div className="text-center p-4 bg-blue-50 rounded-lg">
-          <div className="text-3xl font-bold text-blue-600">{balance}</div>
-          <div className="text-sm text-gray-600">Available Credits</div>
+        <div className="text-center p-4 bg-tone-accent-surface rounded-lg">
+          <div className="text-3xl font-semibold text-primary tabular">
+            {balance}
+          </div>
+          <div className="text-sm text-muted-foreground">Available credits</div>
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="text-center p-3 bg-gray-50 rounded">
-            <div className="font-semibold">{totalPurchased}</div>
-            <div className="text-gray-600">Total Purchased</div>
+          <div className="text-center p-3 bg-surface-1 rounded">
+            <div className="font-semibold tabular">{totalPurchased}</div>
+            <div className="text-muted-foreground">Total purchased</div>
           </div>
-          <div className="text-center p-3 bg-gray-50 rounded">
-            <div className="font-semibold">{totalConsumed}</div>
-            <div className="text-gray-600">Total Used</div>
+          <div className="text-center p-3 bg-surface-1 rounded">
+            <div className="font-semibold tabular">{totalConsumed}</div>
+            <div className="text-muted-foreground">Total used</div>
           </div>
         </div>
 
         {balance < LOW_BALANCE_THRESHOLD && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center text-yellow-700">
+          <div className="p-3 bg-tone-warning-surface border border-tone-warning-border rounded-lg">
+            <div className="flex items-center text-tone-warning-text">
               <svg
                 className="w-4 h-4 mr-2"
                 fill="currentColor"
@@ -100,14 +108,14 @@ export function CreditBalanceCard({
               </svg>
               <span className="text-sm font-medium">Low credit balance</span>
             </div>
-            <p className="text-sm text-yellow-600 mt-1">
+            <p className="text-sm text-tone-warning-text mt-1">
               Purchase more credits to continue using AI features
             </p>
           </div>
         )}
 
         <div>
-          <h4 className="font-medium mb-3">Recent Activity</h4>
+          <h4 className="font-medium mb-3">Recent activity</h4>
           {recentTransactions.length > 0 ? (
             <div className="space-y-2 max-h-40 overflow-y-auto">
               {recentTransactions.slice(0, 5).map((transaction) => (
@@ -125,14 +133,14 @@ export function CreditBalanceCard({
                     <Badge
                       variant={
                         transaction.type === "consumption"
-                          ? "destructive"
-                          : "default"
+                          ? "tone-danger"
+                          : "tone-success"
                       }
-                      className="text-xs"
+                      className="text-xs tabular"
                     >
                       {formatTransactionAmount(transaction)}
                     </Badge>
-                    <span className="text-gray-500 text-xs">
+                    <span className="text-muted-foreground text-xs">
                       {formatDate(transaction.created_at)}
                     </span>
                   </div>
@@ -140,7 +148,7 @@ export function CreditBalanceCard({
               ))}
             </div>
           ) : (
-            <p className="text-gray-500 text-sm text-center py-4">
+            <p className="text-muted-foreground text-sm text-center py-4">
               No credit activity yet
             </p>
           )}

@@ -39,6 +39,16 @@ describe("SiteDetailView", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // SiteEditorsCard and the domain ownership panel both fetch on mount.
+    // Without a stub they reject into their own catch blocks and every test in
+    // the file renders an error state it did not ask for.
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      const body = url.includes("/api/domains/verify")
+        ? { verifications: [], canManage: true }
+        : {};
+      return { ok: true, status: 200, json: async () => body } as Response;
+    }) as unknown as typeof fetch;
   });
 
   it("renders site information correctly", () => {
@@ -53,7 +63,7 @@ describe("SiteDetailView", () => {
 
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(
-      screen.getByText("Site is verified and operational"),
+      screen.getByText("ReCopyFast has content from this site."),
     ).toBeInTheDocument();
   });
 
@@ -179,15 +189,59 @@ describe("SiteDetailView", () => {
     const { rerender } = render(
       <SiteDetailView site={{ ...mockSite, status: "verifying" }} />,
     );
-    expect(screen.getByText("Verifying")).toBeInTheDocument();
+    expect(screen.getByText("No content yet")).toBeInTheDocument();
     expect(
-      screen.getByText("Site verification in progress"),
+      screen.getByText(/has not recorded any content from this site yet/i),
     ).toBeInTheDocument();
 
     rerender(<SiteDetailView site={{ ...mockSite, status: "inactive" }} />);
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(
-      screen.getByText("Site is not currently active"),
+      screen.getByText("Site is not currently active."),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * F-10: two live sites sat on "Verifying" with nothing in the dashboard
+   * saying what was being waited on. Nothing was: the embed script is admitted
+   * by its signed site token and its origin, and `domain_verifications` is
+   * never consulted on that path.
+   */
+  it("tells an owner with no recorded content that nothing is pending", () => {
+    render(
+      <SiteDetailView
+        site={{
+          ...mockSite,
+          status: "verifying",
+          stats: { ...mockSite.stats, content_elements_count: 0 },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText(/no domain verification gates your script/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not claim anything is pending once content has been recorded", () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    expect(
+      screen.queryByText(/no domain verification gates your script/i),
+    ).not.toBeInTheDocument();
+  });
+
+  /**
+   * The component and the `domain_verifications` table shipped together and the
+   * component was mounted nowhere, so the only trace of the feature an owner
+   * could find was a status pill implying it was already running.
+   */
+  it("mounts the domain ownership panel with the site's own domain", async () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    expect(await screen.findByText("Domain ownership")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Your embed script does not wait on this/i),
     ).toBeInTheDocument();
   });
 

@@ -677,6 +677,66 @@ describe("SiteRegistrationModal", () => {
       expect(mockOnClose).toHaveBeenCalled();
     });
 
+    /**
+     * F-11. `onSuccess` used to fire only from the footer's "Go to Site
+     * Dashboard" button, so the sites list and the overview counts behind the
+     * dialog still read "0 active sites / No sites connected yet" while the
+     * success screen was on top of them — and pressing Close left them wrong
+     * until a manual reload. The parent is now told the moment the row exists.
+     */
+    it("should notify the parent as soon as the site is registered", async () => {
+      const user = userEvent.setup(TYPING);
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          site: {
+            id: "test-site-123",
+            domain: "example.com",
+            name: "Test Site",
+            created_at: "2024-01-01T00:00:00Z",
+          },
+          apiKey: "test-api-key",
+          siteToken: "test-token",
+          embedScript: '<script src="test.js"></script>',
+        }),
+      });
+
+      render(<SiteRegistrationModal {...defaultProps} />);
+
+      await user.type(screen.getByLabelText(/Website Name/i), "Test Site");
+      await user.type(screen.getByLabelText(/Website URL/i), "example.com");
+      await user.click(screen.getByRole("button", { name: /Register Site/i }));
+
+      expect(
+        await screen.findByText(/Site Registered Successfully!/i),
+      ).toBeInTheDocument();
+
+      // Refreshed while the success screen is still open, and without the user
+      // having dismissed anything.
+      expect(mockOnSuccess).toHaveBeenCalledTimes(1);
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+
+    it("should not report success when registration fails", async () => {
+      const user = userEvent.setup(TYPING);
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "Internal server error" }),
+      });
+
+      render(<SiteRegistrationModal {...defaultProps} />);
+
+      await user.type(screen.getByLabelText(/Website Name/i), "Test Site");
+      await user.type(screen.getByLabelText(/Website URL/i), "example.com");
+      await user.click(screen.getByRole("button", { name: /Register Site/i }));
+
+      expect(
+        await screen.findByText("Internal server error"),
+      ).toBeInTheDocument();
+      expect(mockOnSuccess).not.toHaveBeenCalled();
+    });
+
     it("should reset form state when modal is closed and reopened", async () => {
       const user = userEvent.setup(TYPING);
       const { rerender } = render(<SiteRegistrationModal {...defaultProps} />);

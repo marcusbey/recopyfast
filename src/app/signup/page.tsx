@@ -16,26 +16,24 @@ export default function SignupPage() {
   const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Logo */}
         <Link
           href="/"
           className="flex items-center justify-center space-x-3 mb-8"
         >
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-            <Code className="w-7 h-7 text-white" />
+          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
+            <Code className="w-7 h-7 text-primary-foreground" />
           </div>
-          <span className="font-bold text-2xl text-gray-900 tracking-tight">
+          <span className="font-semibold text-2xl text-foreground tracking-tight">
             ReCopyFast
           </span>
         </Link>
 
-        <Card className="border-gray-200 shadow-lg">
+        <Card>
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold">
-              Create Your Account
-            </CardTitle>
+            <CardTitle>Create your account</CardTitle>
             <CardDescription>
               Get started with ReCopyFast in just a few seconds
             </CardDescription>
@@ -45,13 +43,13 @@ export default function SignupPage() {
           </CardContent>
         </Card>
 
-        <p className="text-center text-sm text-gray-600 mt-6">
+        <p className="text-center text-sm text-muted-foreground mt-6">
           By continuing, you agree to our{" "}
-          <Link href="/terms" className="text-blue-600 hover:text-blue-700">
+          <Link href="/terms" className="text-primary hover:underline">
             Terms of Service
           </Link>{" "}
           and{" "}
-          <Link href="/privacy" className="text-blue-600 hover:text-blue-700">
+          <Link href="/privacy" className="text-primary hover:underline">
             Privacy Policy
           </Link>
         </p>

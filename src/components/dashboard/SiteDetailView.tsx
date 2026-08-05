@@ -12,9 +12,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   StatusBadge,
-  siteStatuses,
+  resolveSiteStatus,
   type SiteStatus,
 } from "@/components/ui/status-badge";
+import { DomainVerification } from "./DomainVerification";
 import {
   CheckCircle2,
   AlertCircle,
@@ -92,8 +93,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
-  const status = site.status || "active";
-  const statusDefinition = siteStatuses[status];
+  const statusDefinition = resolveSiteStatus(site.status);
 
   const embedScript =
     site.embedScript ||
@@ -159,12 +159,25 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         <CardContent>
           <div className="space-y-4">
             <div>
-              <p className="text-sm text-muted-foreground mb-1">
-                Status Description
-              </p>
+              <p className="text-sm text-muted-foreground mb-1">Status</p>
               <p className="text-sm text-foreground">
                 {statusDefinition.description}
               </p>
+              {/*
+                The dashboard used to leave an owner staring at "Verifying"
+                with nothing to act on and no way to tell whether their site was
+                degraded. Both of those are answerable: nothing is queued on our
+                side, no domain verification gates the script, and the script
+                behaves identically either way.
+              */}
+              {!hasReportedContent && (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Nothing is pending review, and no domain verification gates
+                  your script. This reads Active once ReCopyFast has recorded
+                  content for {site.domain}; until then the embed script serves
+                  and applies saved copy exactly as it does for a site that has.
+                </p>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
@@ -341,6 +354,19 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
               </Badge>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Domain ownership.
+          `DomainVerification` and the `domain_verifications` table have existed
+          since the security schema landed and the component was never mounted
+          anywhere, so the only trace of the feature an owner could find was a
+          status pill claiming their site was being verified. It lives here,
+          under the integration it is adjacent to, prefilled with the domain the
+          site already has. */}
+      <Card className="border-border">
+        <CardContent className="p-6">
+          <DomainVerification siteId={site.id} siteDomain={site.domain} />
         </CardContent>
       </Card>
 

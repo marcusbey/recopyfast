@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
+  authorizeFirstPartyEditorAccess,
   requireEditorPermission,
   validateEditorTokenFromRequest,
 } from "@/lib/auth/editor-access";
@@ -20,28 +21,37 @@ export async function GET(
   try {
     const { siteId } = await params;
 
-    const validation = await validateEditorTokenFromRequest({
-      request,
-      siteId,
-    });
-    if (!validation.valid || !validation.access) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: validation.error || "Invalid editor token" },
-          { status: validation.status || 401 },
-        ),
-        request,
-      );
-    }
+    // Same first-party path as PUT below. Without it the owner could save a
+    // draft and then be refused when reading it back, which is a worse state
+    // than not being able to edit at all.
+    let access = await authorizeFirstPartyEditorAccess(siteId, "view");
 
-    if (!requireEditorPermission(validation.access, "view")) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: "Requires 'view' permission" },
-          { status: 403 },
-        ),
+    if (!access) {
+      const validation = await validateEditorTokenFromRequest({
         request,
-      );
+        siteId,
+      });
+      if (!validation.valid || !validation.access) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: validation.error || "Invalid editor token" },
+            { status: validation.status || 401 },
+          ),
+          request,
+        );
+      }
+
+      if (!requireEditorPermission(validation.access, "view")) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Requires 'view' permission" },
+            { status: 403 },
+          ),
+          request,
+        );
+      }
+
+      access = validation.access;
     }
 
     const supabase = createServiceRoleClient();
@@ -86,8 +96,8 @@ export async function GET(
     return withPublicCors(
       NextResponse.json({
         content: transformedContent,
-        permissions: validation.access.permissions,
-        email: validation.access.email,
+        permissions: access.permissions,
+        email: access.email,
       }),
       request,
     );
@@ -115,22 +125,27 @@ export async function PUT(
     const variant =
       typeof requestBody.variant === "string" ? requestBody.variant : "default";
 
-    const validation = await validateEditorTokenFromRequest({
-      request,
+    // The site's own owner is signed in and holds a `site_permissions` row; they
+    // carry no editor token and never can, so validating tokens alone refused
+    // the one caller guaranteed to hold every right. Tried first, falls through
+    // to the token path untouched — see authorizeFirstPartyEditorAccess.
+    //
+    // Asked at "view" and graded afterwards, matching the GET handler above and
+    // /api/staging/publish. The helper returns null both for "no first-party
+    // access at all" and for "has access, but not at this level", so asking for
+    // "edit" up front made a view-only collaborator indistinguishable from an
+    // anonymous caller: they fell through to the token path and were told their
+    // editor token was invalid, which is unactionable advice for someone who is
+    // plainly signed in and never had a token.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       siteId,
-      body: requestBody,
-    });
-    if (!validation.valid || !validation.access) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: validation.error || "Invalid editor token" },
-          { status: validation.status || 403 },
-        ),
-        request,
-      );
-    }
+      "view",
+    );
 
-    if (!requireEditorPermission(validation.access, "edit")) {
+    if (
+      firstPartyAccess &&
+      !requireEditorPermission(firstPartyAccess, "edit")
+    ) {
       return withPublicCors(
         NextResponse.json(
           { error: "Requires 'edit' permission" },
@@ -138,6 +153,37 @@ export async function PUT(
         ),
         request,
       );
+    }
+
+    let access = firstPartyAccess;
+
+    if (!access) {
+      const validation = await validateEditorTokenFromRequest({
+        request,
+        siteId,
+        body: requestBody,
+      });
+      if (!validation.valid || !validation.access) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: validation.error || "Invalid editor token" },
+            { status: validation.status || 403 },
+          ),
+          request,
+        );
+      }
+
+      if (!requireEditorPermission(validation.access, "edit")) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "Requires 'edit' permission" },
+            { status: 403 },
+          ),
+          request,
+        );
+      }
+
+      access = validation.access;
     }
 
     if (!elementId || content === undefined) {
@@ -200,13 +246,12 @@ export async function PUT(
     // Record in staging history
     await supabase.from("staging_history").insert({
       content_element_id: currentElement.id,
-      staging_access_id: validation.access.stagingAccessId || null,
+      // Null for a first-party edit: the owner's change is not attributable to
+      // any staging invite, and pointing it at one would misattribute the edit.
+      staging_access_id: access.stagingAccessId || null,
       previous_content: currentElement.staging_content,
       new_content: sanitizedContent,
-      user_email:
-        validation.access.email ||
-        validation.access.userId ||
-        validation.access.kind,
+      user_email: access.email || access.userId || access.kind,
       action: currentElement.staging_content ? "update" : "create",
     });
 

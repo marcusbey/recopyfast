@@ -107,24 +107,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
     }
 
-    // Create staging access
-    const result = await StagingAccessManager.createStagingAccess({
-      siteId,
-      accessType: type,
-      email,
-      permissions,
-      label,
-      createdBy: user.id,
-      expiresInDays,
-    });
+    // Create staging access.
+    // `createStagingAccess` now throws instead of returning null, so its real
+    // reason for failing — not an admin, links are retired, email missing — can
+    // be told apart here instead of every rejection collapsing into one generic
+    // "make sure you have admin permission" message.
+    let result: Awaited<
+      ReturnType<typeof StagingAccessManager.createStagingAccess>
+    >;
+    try {
+      result = await StagingAccessManager.createStagingAccess({
+        siteId,
+        accessType: type,
+        email,
+        permissions,
+        label,
+        createdBy: user.id,
+        expiresInDays,
+      });
+    } catch (createError) {
+      const message =
+        createError instanceof Error ? createError.message : undefined;
 
-    if (!result) {
+      if (message === "Only site admins can create staging access") {
+        return NextResponse.json({ error: message }, { status: 403 });
+      }
+      if (
+        message ===
+        "Shareable staging links are retired. Add the person as a site editor instead."
+      ) {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      if (message === "Email is required for invite-type access") {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+
+      // Anything else — e.g. a raw database error — is logged server-side only.
+      // Surfacing it to the client would leak schema/internals.
+      console.error("Error creating staging access:", createError);
       return NextResponse.json(
-        {
-          error:
-            "Failed to create staging access. Make sure you have admin permission.",
-        },
-        { status: 403 },
+        { error: "Failed to create staging access" },
+        { status: 500 },
       );
     }
 
@@ -137,23 +160,32 @@ export async function POST(request: NextRequest) {
     // The verification code is a shared secret gating staging access. Deliver it
     // only via email — returning it here would let any caller self-verify and bypass
     // email ownership. For invite-type access we email it now.
+    // An invite whose code never arrives is indistinguishable from no invite at
+    // all, so whether the mail actually left is part of the result. Reporting an
+    // unqualified success here is how a misconfigured sender domain went
+    // unnoticed: the row was written, Resend refused the message, and the
+    // dialog said "Link created".
+    let emailDelivered: boolean | undefined;
+
     if (type === "invite" && email && result.verificationCode) {
       const mail = await sendStagingVerificationEmail(
         email,
         result.verificationCode,
         result.access.label ?? undefined,
       );
+      emailDelivered = mail.sent;
+
       if (!mail.sent) {
         console.error(
           "Staging invite created but verification email failed:",
           mail.error,
         );
-        // Non-fatal: the access exists and the code can be resent. Surface a hint.
       }
     }
 
     return NextResponse.json({
       success: true,
+      emailDelivered,
       access: {
         id: result.access.id,
         type: result.access.access_type,

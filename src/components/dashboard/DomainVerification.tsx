@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,15 +19,26 @@ import {
   AlertTriangle,
   RefreshCw,
 } from "lucide-react";
+import {
+  fileVerificationPath,
+  generateDNSTXTRecord,
+  generateFileVerificationContent,
+} from "@/lib/security/domain-challenge";
 
-interface DomainVerification {
+/**
+ * Shape returned by `GET /api/domains/verify`. The route used to hand back raw
+ * `domain_verifications` rows in snake_case while this file read camelCase, so
+ * every field rendered `undefined` and `verificationMethod.toUpperCase()` threw
+ * the moment a row existed. The route now normalises; this is that contract.
+ */
+interface DomainVerificationRecord {
   id: string;
+  siteId: string;
   domain: string;
   verificationMethod: "dns" | "file";
-  verificationToken: string;
   verificationCode: string;
   isVerified: boolean;
-  verifiedAt?: string;
+  verifiedAt: string | null;
   expiresAt: string;
   createdAt: string;
 }
@@ -39,27 +50,47 @@ interface VerificationInstructions {
   content?: string;
 }
 
-interface DomainVerificationProps {
-  siteId: string;
+/**
+ * The exact text this challenge is satisfied by — the DNS record's value, or
+ * the file's whole body. Built by the same functions the verifier checks
+ * against, so what a customer is shown, what they copy, and what is accepted
+ * cannot drift apart.
+ */
+function verificationValue(verification: DomainVerificationRecord): string {
+  return verification.verificationMethod === "dns"
+    ? generateDNSTXTRecord(verification.verificationCode)
+    : generateFileVerificationContent(verification.verificationCode).content;
 }
 
-export function DomainVerification({ siteId }: DomainVerificationProps) {
-  const [verifications, setVerifications] = useState<DomainVerification[]>([]);
+interface DomainVerificationProps {
+  siteId: string;
+  /**
+   * The domain already on the site record. Asking an owner to retype a domain
+   * the product knows is how the empty form used to get abandoned.
+   */
+  siteDomain?: string;
+}
+
+export function DomainVerification({
+  siteId,
+  siteDomain,
+}: DomainVerificationProps) {
+  const [verifications, setVerifications] = useState<
+    DomainVerificationRecord[]
+  >([]);
+  const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newDomain, setNewDomain] = useState("");
+  const [newDomain, setNewDomain] = useState(siteDomain ?? "");
   const [verificationMethod, setVerificationMethod] = useState<"dns" | "file">(
     "dns",
   );
   const [instructions, setInstructions] =
     useState<VerificationInstructions | null>(null);
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchVerifications();
-  }, [siteId]);
-
-  const fetchVerifications = async () => {
+  const fetchVerifications = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/domains/verify?siteId=${siteId}`);
@@ -70,15 +101,35 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
       }
 
       setVerifications(data.verifications || []);
+      setCanManage(Boolean(data.canManage));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
+  }, [siteId]);
+
+  useEffect(() => {
+    void fetchVerifications();
+  }, [fetchVerifications]);
+
+  const openAddForm = () => {
+    setError(null);
+    setNewDomain(siteDomain ?? "");
+    setShowAddForm(true);
   };
 
   const createVerification = async () => {
-    if (!newDomain.trim()) {
+    // The server sanitises before it validates, and sanitising escapes `/`, so
+    // a pasted `https://example.com` never survives to `normalizeDomain` and
+    // comes back as "Invalid domain format". Hand it a bare host instead of
+    // making the owner work that out.
+    const domain = newDomain
+      .trim()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+      .replace(/[/?#].*$/, "");
+
+    if (!domain) {
       setError("Domain is required");
       return;
     }
@@ -92,7 +143,7 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           siteId,
-          domain: newDomain.trim(),
+          domain,
           method: verificationMethod,
         }),
       });
@@ -104,7 +155,6 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
       }
 
       setInstructions(data.instructions);
-      setNewDomain("");
       setShowAddForm(false);
       await fetchVerifications();
     } catch (err) {
@@ -127,39 +177,8 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
 
       const data = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok || !data.success) {
         throw new Error(data.error || "Verification failed");
-      }
-
-      if (data.success) {
-        await fetchVerifications();
-      } else {
-        setError(data.error || "Verification failed");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const deleteVerification = async (verificationId: string) => {
-    if (!confirm("Are you sure you want to delete this verification?")) {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const response = await fetch(
-        `/api/domains/verify?verificationId=${verificationId}`,
-        {
-          method: "DELETE",
-        },
-      );
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to delete verification");
       }
 
       await fetchVerifications();
@@ -170,8 +189,31 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
     }
   };
 
+  const deleteVerification = async (verificationId: string) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(
+        `/api/domains/verify?verificationId=${verificationId}`,
+        { method: "DELETE" },
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to delete verification");
+      }
+
+      setDeleteTargetId(null);
+      await fetchVerifications();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text);
   };
 
   const downloadFile = (filename: string, content: string) => {
@@ -186,171 +228,197 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
     URL.revokeObjectURL(url);
   };
 
-  const getStatusBadge = (verification: DomainVerification) => {
+  const isExpired = (expiresAt: string) => new Date(expiresAt) <= new Date();
+
+  const getStatusBadge = (verification: DomainVerificationRecord) => {
     if (verification.isVerified) {
       return (
-        <Badge className="bg-tone-success-surface text-tone-success-text">
-          <CheckCircle className="w-3 h-3 mr-1" />
+        <Badge variant="tone-success" className="gap-1">
+          <CheckCircle className="h-3 w-3" aria-hidden="true" />
           Verified
         </Badge>
       );
     }
 
-    const isExpired = new Date(verification.expiresAt) <= new Date();
-    if (isExpired) {
+    if (isExpired(verification.expiresAt)) {
       return (
-        <Badge className="bg-tone-danger-surface text-tone-danger-text">
-          <XCircle className="w-3 h-3 mr-1" />
+        <Badge variant="tone-danger" className="gap-1">
+          <XCircle className="h-3 w-3" aria-hidden="true" />
           Expired
         </Badge>
       );
     }
 
     return (
-      <Badge className="bg-tone-warning-surface text-tone-warning-text">
-        <Clock className="w-3 h-3 mr-1" />
-        Pending
+      <Badge variant="tone-warning" className="gap-1">
+        <Clock className="h-3 w-3" aria-hidden="true" />
+        Awaiting your DNS record
       </Badge>
     );
   };
 
-  const isExpired = (expiresAt: string) => new Date(expiresAt) <= new Date();
-
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Domain Verification</h2>
-          <p className="text-muted-foreground">
-            Verify domain ownership to enable secure embeds
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-prose">
+          <h3 className="text-title">Domain ownership</h3>
+          {/*
+            The old copy read "Verify domain ownership to enable secure embeds",
+            which is not true of this product: the embed script is authorised by
+            its signed site token and by the origin it runs on
+            (`authorizeSiteRequest`), and nothing in the embed, CORS or content
+            path reads `domain_verifications`. Saying otherwise sends owners
+            hunting for a blocker that does not exist — which is exactly what
+            happened.
+          */}
+          <p className="mt-1 text-sm text-muted-foreground">
+            Record proof that you control this domain, with a DNS TXT record or
+            a file on the site. Your embed script does not wait on this — it is
+            already authorised by its site token and the origin it runs on.
           </p>
         </div>
-        <Button
-          onClick={() => setShowAddForm(true)}
-          disabled={loading}
-          className="flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Domain
-        </Button>
+        {canManage && (
+          <Button
+            variant="outline"
+            onClick={openAddForm}
+            disabled={loading || showAddForm}
+          >
+            <Plus aria-hidden="true" />
+            Add domain
+          </Button>
+        )}
       </div>
 
       {error && (
-        <Alert className="border-tone-danger-border bg-tone-danger-surface">
-          <AlertTriangle className="h-4 w-4 text-tone-danger-text" />
-          <div className="text-tone-danger-text">{error}</div>
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+          <div className="text-sm">{error}</div>
         </Alert>
       )}
 
       {instructions && (
-        <Card className="p-6 bg-tone-info-surface border-tone-info-border">
-          <h3 className="text-lg font-semibold text-tone-info-text mb-4">
-            Verification Instructions
-          </h3>
+        <Card variant="outline" className="p-5">
+          <div className="flex items-start justify-between gap-3">
+            <h4 className="text-title">Finish verification</h4>
+            <Button
+              onClick={() => setInstructions(null)}
+              variant="ghost"
+              size="sm"
+            >
+              Dismiss
+            </Button>
+          </div>
 
           {instructions.type === "dns" ? (
-            <div className="space-y-3">
-              <p className="text-tone-info-text">
-                Add the following TXT record to your domain&apos;s DNS settings:
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Add this TXT record at the root of your domain&apos;s DNS zone:
               </p>
-              <div className="bg-tone-info-surface p-3 rounded font-mono text-sm flex items-center justify-between">
-                <span>{instructions.record}</span>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-1 p-3">
+                <code className="break-all font-mono text-sm text-foreground">
+                  {instructions.record}
+                </code>
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => copyToClipboard(instructions.record!)}
-                  className="flex items-center gap-1"
+                  className="shrink-0"
+                  onClick={() => copyToClipboard(instructions.record ?? "")}
                 >
-                  <Copy className="w-3 h-3" />
+                  <Copy aria-hidden="true" />
                   Copy
                 </Button>
               </div>
-              <p className="text-sm text-tone-info-text">
-                DNS changes may take up to 24 hours to propagate. You can check
-                verification status after making the changes.
+              <p className="text-sm text-muted-foreground">
+                DNS can take up to 24 hours to propagate. Come back and press
+                Check when the record is live — the challenge itself expires 24
+                hours after it was created.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              <p className="text-tone-info-text">
-                Upload the verification file to your domain&apos;s web server:
+            <div className="mt-3 space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Upload this file so it is served at{" "}
+                <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
+                  https://{newDomain || "yourdomain.com"}/.well-known/
+                  {instructions.filename}
+                </code>
               </p>
-              <div className="bg-tone-info-surface p-3 rounded">
-                <div className="flex items-center justify-between mb-2">
-                  <strong>File: /.well-known/{instructions.filename}</strong>
+              <div className="rounded-lg border border-border bg-surface-1 p-3">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <span className="break-all font-mono text-sm text-foreground">
+                    {instructions.filename}
+                  </span>
                   <Button
                     size="sm"
                     variant="outline"
+                    className="shrink-0"
                     onClick={() =>
                       downloadFile(
-                        instructions.filename!,
-                        instructions.content!,
+                        instructions.filename ?? "verification.txt",
+                        instructions.content ?? "",
                       )
                     }
-                    className="flex items-center gap-1"
                   >
-                    <Download className="w-3 h-3" />
+                    <Download aria-hidden="true" />
                     Download
                   </Button>
                 </div>
-                <pre className="text-xs bg-card p-2 rounded">
+                <pre className="overflow-x-auto rounded bg-card p-2 text-xs text-foreground">
                   {instructions.content}
                 </pre>
               </div>
-              <p className="text-sm text-tone-info-text">
-                Make sure the file is accessible at:
-                https://yourdomain.com/.well-known/{instructions.filename}
+              <p className="text-sm text-muted-foreground">
+                The file must match byte for byte, and the challenge expires 24
+                hours after it was created.
               </p>
             </div>
           )}
-
-          <Button
-            onClick={() => setInstructions(null)}
-            variant="outline"
-            className="mt-4"
-          >
-            Close Instructions
-          </Button>
         </Card>
       )}
 
       {showAddForm && (
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Add New Domain</h3>
-          <div className="space-y-4">
+        <Card variant="outline" className="p-5">
+          <h4 className="text-title">Add a domain</h4>
+          <div className="mt-4 space-y-4">
             <div>
-              <Label htmlFor="domain">Domain</Label>
+              <Label htmlFor="rcf-verification-domain">Domain</Label>
               <Input
-                id="domain"
+                id="rcf-verification-domain"
                 value={newDomain}
                 onChange={(e) => setNewDomain(e.target.value)}
                 placeholder="example.com"
                 className="mt-1"
               />
+              {/* `validateDomain` refuses localhost and bare IPs, so say so
+                  before the request rather than after a 400. */}
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                A public domain name. localhost and IP addresses cannot be
+                verified — there is nothing external to check.
+              </p>
             </div>
 
             <div>
-              <Label>Verification Method</Label>
+              <Label>Method</Label>
               <Tabs
                 value={verificationMethod}
                 onValueChange={(v) =>
                   setVerificationMethod(v as "dns" | "file")
                 }
               >
-                <TabsList className="grid w-full grid-cols-2 mt-1">
-                  <TabsTrigger value="dns">DNS Record</TabsTrigger>
-                  <TabsTrigger value="file">File Upload</TabsTrigger>
+                <TabsList className="mt-1 grid w-full grid-cols-2">
+                  <TabsTrigger value="dns">DNS record</TabsTrigger>
+                  <TabsTrigger value="file">Hosted file</TabsTrigger>
                 </TabsList>
                 <TabsContent value="dns" className="mt-3">
                   <p className="text-sm text-muted-foreground">
-                    Add a TXT record to your domain&apos;s DNS settings. This
-                    method is recommended for most users.
+                    Add a TXT record to your DNS. Best if you control the domain
+                    but not the server.
                   </p>
                 </TabsContent>
                 <TabsContent value="file" className="mt-3">
                   <p className="text-sm text-muted-foreground">
-                    Upload a verification file to your website. Requires access
-                    to your web server.
+                    Serve a file under <code>/.well-known/</code>. Best if you
+                    can deploy to the site but not change DNS.
                   </p>
                 </TabsContent>
               </Tabs>
@@ -360,10 +428,11 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
               <Button
                 onClick={createVerification}
                 disabled={loading || !newDomain.trim()}
-                className="flex items-center gap-2"
               >
-                {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
-                Create Verification
+                {loading && (
+                  <RefreshCw className="animate-spin" aria-hidden="true" />
+                )}
+                Get instructions
               </Button>
               <Button variant="outline" onClick={() => setShowAddForm(false)}>
                 Cancel
@@ -373,97 +442,179 @@ export function DomainVerification({ siteId }: DomainVerificationProps) {
         </Card>
       )}
 
-      <div className="grid gap-4">
-        {verifications.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="text-muted-foreground">
-              No domain verifications yet.
-            </p>
-            <Button onClick={() => setShowAddForm(true)} className="mt-4">
-              Add Your First Domain
-            </Button>
-          </Card>
-        ) : (
-          verifications.map((verification) => (
-            <Card key={verification.id} className="p-6">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-semibold">
-                      {verification.domain}
-                    </h3>
-                    {getStatusBadge(verification)}
-                    <Badge variant="outline">
-                      {verification.verificationMethod.toUpperCase()}
-                    </Badge>
-                  </div>
+      {verifications.length === 0 ? (
+        !showAddForm && (
+          <p className="text-sm text-muted-foreground">
+            No ownership proof on record for this site.{" "}
+            {canManage
+              ? "Nothing is blocked by that — add one only if you want it on file."
+              : "Only a site admin can add one."}
+          </p>
+        )
+      ) : (
+        <div className="grid gap-3">
+          {verifications.map((verification) => {
+            const expired = isExpired(verification.expiresAt);
 
-                  <div className="text-sm text-muted-foreground space-y-1">
-                    <p>
-                      Created:{" "}
-                      {new Date(verification.createdAt).toLocaleDateString()}
-                    </p>
-                    {verification.isVerified ? (
-                      <p>
-                        Verified:{" "}
-                        {new Date(
-                          verification.verifiedAt!,
-                        ).toLocaleDateString()}
-                      </p>
-                    ) : (
-                      <p>
-                        Expires:{" "}
-                        {new Date(verification.expiresAt).toLocaleDateString()}
-                      </p>
-                    )}
-                  </div>
-                </div>
+            return (
+              <Card key={verification.id} variant="outline" className="p-5">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <h4 className="truncate font-mono text-sm text-foreground">
+                        {verification.domain}
+                      </h4>
+                      {getStatusBadge(verification)}
+                      <Badge variant="tone-neutral">
+                        {verification.verificationMethod === "dns"
+                          ? "DNS"
+                          : "File"}
+                      </Badge>
+                    </div>
 
-                <div className="flex gap-2">
-                  {!verification.isVerified &&
-                    !isExpired(verification.expiresAt) && (
-                      <Button
-                        size="sm"
-                        onClick={() => verifyDomain(verification.id)}
-                        disabled={loading}
-                        className="flex items-center gap-1"
-                      >
-                        {loading ? (
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <CheckCircle className="w-3 h-3" />
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <p>
+                        Added{" "}
+                        {new Date(verification.createdAt).toLocaleDateString()}
+                      </p>
+                      {verification.isVerified && verification.verifiedAt ? (
+                        <p>
+                          Verified{" "}
+                          {new Date(
+                            verification.verifiedAt,
+                          ).toLocaleDateString()}
+                        </p>
+                      ) : (
+                        <p>
+                          {expired ? "Expired " : "Expires "}
+                          {new Date(
+                            verification.expiresAt,
+                          ).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+
+                    {/*
+                      What this hands back has to be what the checker looks
+                      for. It used to copy the bare code for the file method,
+                      while the block beside it displayed the PATH — so an owner
+                      following the button wrote a file containing a naked code,
+                      which `fileDeclaresCode` refuses because it requires the
+                      labelled `Verification Code:` line. The instructions panel
+                      that produces a correct file is dismissible and cannot be
+                      reopened for an existing row, so this button was the only
+                      affordance left and it pointed the wrong way.
+
+                      The file method now shows both halves — where it goes and
+                      what goes in it — and copies the body, generated by the
+                      same function the server checks against.
+                    */}
+                    {!verification.isVerified && !expired && (
+                      <div className="mt-3 space-y-2 rounded-lg border border-border bg-surface-1 p-3">
+                        {verification.verificationMethod === "file" && (
+                          <p className="text-xs text-muted-foreground">
+                            Serve at{" "}
+                            <code className="break-all font-mono">
+                              {fileVerificationPath(
+                                verification.verificationCode,
+                              )}
+                            </code>
+                          </p>
                         )}
-                        Verify
-                      </Button>
+                        <div className="flex items-center justify-between gap-3">
+                          <code className="whitespace-pre-wrap break-all font-mono text-xs text-foreground">
+                            {verificationValue(verification)}
+                          </code>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="shrink-0"
+                            onClick={() =>
+                              copyToClipboard(verificationValue(verification))
+                            }
+                          >
+                            <Copy aria-hidden="true" />
+                            <span className="sr-only">
+                              {verification.verificationMethod === "dns"
+                                ? `Copy DNS record for ${verification.domain}`
+                                : `Copy file contents for ${verification.domain}`}
+                            </span>
+                          </Button>
+                        </div>
+                      </div>
                     )}
+                  </div>
 
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => deleteVerification(verification.id)}
-                    disabled={loading}
-                    className="flex items-center gap-1 text-tone-danger-text hover:text-tone-danger-text"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    Delete
-                  </Button>
+                  {canManage && (
+                    <div className="flex shrink-0 gap-2">
+                      {!verification.isVerified && !expired && (
+                        <Button
+                          size="sm"
+                          onClick={() => verifyDomain(verification.id)}
+                          disabled={loading}
+                        >
+                          {loading ? (
+                            <RefreshCw
+                              className="animate-spin"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <CheckCircle aria-hidden="true" />
+                          )}
+                          Check
+                        </Button>
+                      )}
+
+                      {deleteTargetId === verification.id ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => deleteVerification(verification.id)}
+                            disabled={loading}
+                          >
+                            Confirm
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setDeleteTargetId(null)}
+                            disabled={loading}
+                          >
+                            Keep
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setDeleteTargetId(verification.id)}
+                          disabled={loading}
+                        >
+                          <Trash2 aria-hidden="true" />
+                          <span className="sr-only">
+                            Remove verification for {verification.domain}
+                          </span>
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {isExpired(verification.expiresAt) &&
-                !verification.isVerified && (
-                  <Alert className="mt-4 border-tone-warning-border bg-tone-warning-surface">
-                    <AlertTriangle className="h-4 w-4 text-tone-warning-text" />
-                    <div className="text-tone-warning-text">
-                      This verification has expired. Please create a new
-                      verification to verify this domain.
+                {expired && !verification.isVerified && (
+                  <Alert variant="warning" className="mt-4">
+                    <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                    <div className="text-sm">
+                      This challenge expired before the record was found. Remove
+                      it and add the domain again to get a fresh one.
                     </div>
                   </Alert>
                 )}
-            </Card>
-          ))
-        )}
-      </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

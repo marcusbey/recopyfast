@@ -55,10 +55,13 @@ interface SiteWithStats extends Site {
 type SortOption = "name" | "date" | "activity";
 type FilterOption = "all" | SiteStatus;
 
+/* This filter was labelled "Verifying", naming a check that nothing in this
+   product performs — see the `siteStatuses` note in `@/components/ui/status-badge`. The
+   key is still the one the API sends; only the word the owner reads changed. */
 const STATUS_FILTERS: ReadonlyArray<{ value: FilterOption; label: string }> = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
-  { value: "verifying", label: "Verifying" },
+  { value: "verifying", label: "No content yet" },
   { value: "inactive", label: "Inactive" },
 ];
 
@@ -209,9 +212,16 @@ export default function SitesPage() {
     }
   };
 
+  /**
+   * Fired the moment the site row exists, not when the dialog is dismissed.
+   *
+   * The modal used to report success only from its "Go to Site Dashboard"
+   * button, so the list and the counts behind the open dialog still said "no
+   * sites connected" while the success screen was on top of them, and pressing
+   * Close left them wrong until a manual reload.
+   */
   const handleRegistrationSuccess = () => {
-    setIsRegistrationModalOpen(false);
-    fetchSites();
+    void fetchSites();
   };
 
   const selectedSite = selectedSiteId

@@ -132,12 +132,42 @@ describe("SiteCard", () => {
         {...mockHandlers}
       />,
     );
-    expect(screen.getByText("Verifying")).toBeInTheDocument();
+    expect(screen.getByText("No content yet")).toBeInTheDocument();
 
     rerender(
       <SiteCard site={{ ...mockSite, status: "inactive" }} {...mockHandlers} />,
     );
     expect(screen.getByText("Inactive")).toBeInTheDocument();
+  });
+
+  /**
+   * The API's `verifying` flag means "no content_elements rows", and nothing in
+   * this product gates a site on `domain_verifications`. Calling it "Verifying"
+   * put two working sites in a queue that does not exist and that no owner
+   * action could clear.
+   */
+  it("never labels a site as verifying, because nothing verifies it", () => {
+    render(
+      <SiteCard
+        site={{ ...mockSite, status: "verifying" }}
+        {...mockHandlers}
+      />,
+    );
+
+    expect(screen.queryByText(/verifying/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByTitle(/has not recorded any content from this site yet/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not assume an unknown status is healthy", () => {
+    const siteWithoutStatus = { ...mockSite };
+    delete siteWithoutStatus.status;
+
+    render(<SiteCard site={siteWithoutStatus} {...mockHandlers} />);
+
+    expect(screen.getByText("Inactive")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
   });
 
   it("handles sites with no stats gracefully", () => {

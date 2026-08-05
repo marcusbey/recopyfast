@@ -28,19 +28,19 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
   const getStatusBadge = (status: string) => {
     const variant =
       status === "paid"
-        ? "default"
+        ? "tone-success"
         : status === "open"
-          ? "secondary"
+          ? "tone-info"
           : status === "draft"
-            ? "outline"
-            : "destructive";
+            ? "tone-neutral"
+            : "tone-danger";
 
     return <Badge variant={variant}>{status.toUpperCase()}</Badge>;
   };
 
   return (
     <Card className="p-6">
-      <h3 className="text-xl font-semibold mb-4">Invoice History</h3>
+      <h3 className="text-xl font-semibold mb-4">Invoice history</h3>
 
       {invoices.length > 0 ? (
         <div className="space-y-3">
@@ -56,7 +56,7 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
                   </span>
                   {getStatusBadge(invoice.status)}
                 </div>
-                <div className="text-sm text-gray-600">
+                <div className="text-sm text-muted-foreground">
                   {invoice.period_start && invoice.period_end ? (
                     <span>
                       {formatDate(invoice.period_start)} -{" "}
@@ -69,17 +69,17 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
               </div>
 
               <div className="text-right">
-                <div className="font-semibold">
+                <div className="font-semibold tabular">
                   {formatAmount(invoice.amount_paid || invoice.amount_due)}
                 </div>
                 {invoice.hosted_invoice_url && (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="link"
                     onClick={() =>
                       window.open(invoice.hosted_invoice_url, "_blank")
                     }
-                    className="text-blue-600 hover:text-blue-700 p-0 h-auto"
+                    className="p-0 h-auto"
                   >
                     View PDF
                   </Button>
@@ -89,7 +89,7 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
           ))}
         </div>
       ) : (
-        <div className="text-center py-8 text-gray-500">
+        <div className="text-center py-8 text-muted-foreground">
           <p>No invoices yet</p>
           <p className="text-sm">Your billing history will appear here</p>
         </div>

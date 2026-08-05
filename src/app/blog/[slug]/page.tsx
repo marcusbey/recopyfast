@@ -51,17 +51,17 @@ export default async function BlogPostPage({
     Math.ceil(post.content.split(" ").length / 200) + " min read";
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="max-w-4xl mx-auto px-6 py-16">
         {/* Back to Blog */}
         <Link
           href="/blog"
-          className="inline-flex items-center text-blue-600 hover:text-blue-800 mb-8 group"
+          className="inline-flex items-center text-primary hover:underline mb-8 group"
         >
           <ArrowLeft className="h-4 w-4 mr-2 group-hover:-translate-x-1 transition-transform" />
-          Back to Blog
+          Back to blog
         </Link>
 
         {/* Article Header */}
@@ -70,7 +70,7 @@ export default async function BlogPostPage({
             <Badge variant="secondary" className="text-sm">
               {post.category}
             </Badge>
-            <div className="flex items-center text-gray-500 text-sm">
+            <div className="flex items-center text-muted-foreground text-sm">
               <Calendar className="h-4 w-4 mr-2" />
               {new Date(post.published_at).toLocaleDateString("en-US", {
                 year: "numeric",
@@ -78,18 +78,16 @@ export default async function BlogPostPage({
                 day: "numeric",
               })}
             </div>
-            <div className="flex items-center text-gray-500 text-sm">
+            <div className="flex items-center text-muted-foreground text-sm">
               <Clock className="h-4 w-4 mr-2" />
               {readTime}
             </div>
           </div>
 
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6 leading-tight">
-            {post.title}
-          </h1>
+          <h1 className="text-display mb-6">{post.title}</h1>
 
           {post.excerpt && (
-            <p className="text-xl text-gray-600 leading-relaxed">
+            <p className="text-sm text-muted-foreground leading-relaxed">
               {post.excerpt}
             </p>
           )}
@@ -108,27 +106,27 @@ export default async function BlogPostPage({
         </article>
 
         {/* Article Footer */}
-        <footer className="mt-16 pt-8 border-t border-gray-200">
-          <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl p-8">
-            <h3 className="text-2xl font-bold text-gray-900 mb-4">
+        <footer className="mt-16 pt-8 border-t border-border">
+          <div className="bg-surface-1 rounded-xl p-8">
+            <h3 className="text-xl font-semibold text-foreground mb-4">
               Ready to transform your website?
             </h3>
-            <p className="text-gray-600 mb-6">
+            <p className="text-sm text-muted-foreground mb-6">
               Try ReCopyFast today and see how easy it is to make any website
               editable with just one line of code.
             </p>
             <div className="flex flex-col sm:flex-row gap-4">
               <Link
                 href="/demo"
-                className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                className="inline-flex items-center px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
               >
-                Try Demo
+                Try demo
               </Link>
               <Link
                 href="/#features"
-                className="inline-flex items-center px-6 py-3 border border-blue-600 text-blue-600 rounded-lg font-semibold hover:bg-blue-50 transition-colors"
+                className="inline-flex items-center px-6 py-3 border border-input bg-card text-foreground rounded-lg font-medium hover:bg-accent transition-colors"
               >
-                Learn More
+                Learn more
               </Link>
             </div>
           </div>

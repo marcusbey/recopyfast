@@ -43,16 +43,14 @@ const blogPosts = [
 
 export default function Blog() {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="max-w-7xl mx-auto px-6 py-16">
         {/* Blog Header */}
         <div className="text-center mb-16">
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-            Blog
-          </h1>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+          <h1 className="text-display mb-6">Blog</h1>
+          <p className="text-sm text-muted-foreground max-w-3xl mx-auto">
             Insights, tutorials, and stories for creators who build and manage
             websites with AI tools
           </p>
@@ -65,17 +63,17 @@ export default function Blog() {
             onSubmit and no endpoint — every address typed into it was silently
             discarded. There is no subscriber store in this codebase, so it is
             replaced with a CTA that goes somewhere real. */}
-        <div className="mt-20 bg-gray-50 rounded-2xl p-8 md:p-12 text-center">
-          <h3 className="text-2xl font-bold text-gray-900 mb-4">
+        <div className="mt-20 bg-surface-1 rounded-xl p-8 md:p-12 text-center">
+          <h3 className="text-xl font-semibold text-foreground mb-4">
             Start editing your site in minutes
           </h3>
-          <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
+          <p className="text-sm text-muted-foreground mb-8 max-w-2xl mx-auto">
             Drop one script tag into any site and make its copy editable — no
             migration, no rebuild.
           </p>
           <Link
             href="/signup"
-            className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            className="inline-flex items-center px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
           >
             Get started free
             <ArrowRight className="ml-2 h-4 w-4" />

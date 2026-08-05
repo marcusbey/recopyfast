@@ -1,5 +1,10 @@
 import { randomBytes } from "crypto";
 import { promises as dnsPromises } from "dns";
+import {
+  fileDeclaresCode,
+  generateDNSTXTRecord,
+  generateFileVerificationContent,
+} from "./domain-challenge";
 
 export interface DomainVerification {
   id: string;
@@ -237,25 +242,13 @@ export function validateDomain(domain: string): {
   return { isValid: true };
 }
 
-/**
- * Generate DNS TXT record content for verification
- */
-export function generateDNSTXTRecord(verificationCode: string): string {
-  return `recopyfast-verification=${verificationCode}`;
-}
-
-/**
- * Generate file verification content
- */
-export function generateFileVerificationContent(verificationCode: string): {
-  filename: string;
-  content: string;
-} {
-  return {
-    filename: `recopyfast-verification-${verificationCode}.txt`,
-    content: `ReCopyFast Domain Verification\nVerification Code: ${verificationCode}\nGenerated: ${new Date().toISOString()}`,
-  };
-}
+// The challenge format and its matcher live in ./domain-challenge, which the
+// dashboard can import — this module cannot be bundled for the browser (see
+// `crypto` and `dns` above). Re-exported so server callers keep one import.
+export {
+  generateDNSTXTRecord,
+  generateFileVerificationContent,
+} from "./domain-challenge";
 
 /**
  * Verify DNS TXT record
@@ -332,17 +325,51 @@ export async function verifyDomainFile(
 
     const content = await response.text();
     const normalizedContent = content.trim();
-    const normalizedExpected = expectedContent.trim();
 
-    if (normalizedContent === normalizedExpected) {
+    // Match on the CODE, not on byte equality with a regenerated body.
+    //
+    // The body carries a `Generated: <ISO timestamp>` line, and this function
+    // used to rebuild it at check time and require an exact match — so the
+    // expected value differed from the file the owner had downloaded by however
+    // many milliseconds had passed. The hosted-file method could therefore
+    // never succeed for anybody, and once the UI was mounted it became a
+    // download button leading to a permanent "File content does not match
+    // expected verification content".
+    //
+    // The code is the secret; the header and timestamp are decoration for the
+    // human who opens the file. Matching the labelled line rather than the
+    // whole body is also what makes this survive the things that really happen
+    // to a hosted text file: a trailing newline added by an editor, CRLF from a
+    // Windows checkout, or a static host that serves with different whitespace.
+    // A blank code must never verify anything.
+    //
+    // An empty code collapses the URL to
+    // /.well-known/recopyfast-verification-.txt, and the labelled line degrades
+    // to a bare `Verification Code:` — so on any domain serving a catch-all 200
+    // that happens to render that label the check would pass without the owner
+    // having uploaded a thing. A missing column, a half-written row or a caller
+    // passing "" was enough to mark a domain verified.
+    //
+    // Deliberately only an emptiness check, not a minimum length: codes are
+    // generated as 32 hex characters, and inventing a length policy here would
+    // silently refuse any shorter value already sitting in the table.
+    if (verificationCode.trim().length === 0) {
+      return {
+        success: false,
+        error: "Verification code is missing",
+        details: { url },
+      };
+    }
+
+    if (fileDeclaresCode(normalizedContent, verificationCode)) {
       return { success: true };
     } else {
       return {
         success: false,
-        error: "File content does not match expected verification content",
+        error: `File does not declare the verification code ${verificationCode}`,
         details: {
           url,
-          expected: normalizedExpected,
+          expected: expectedContent.trim(),
           received: normalizedContent.substring(0, 200), // Limit to first 200 chars
         },
       };

@@ -10,8 +10,14 @@ import { Resend } from "resend";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 // Verified sender. Must be a domain/address verified in the Resend dashboard.
-const EMAIL_FROM =
-  process.env.EMAIL_FROM || "ReCopyFast <noreply@recopyfast.com>";
+//
+// The default is `recopyfa.st` — the domain the product actually runs on and
+// the one verified in Resend. It used to read `recopyfast.com`, which is not a
+// domain on the account, so with EMAIL_FROM unset (it is unset) every send was
+// rejected with "The recopyfast.com domain is not verified". That silently
+// broke every staging invite and every editor sign-in code: the row was
+// written, the mail was refused, and the caller reported success.
+const EMAIL_FROM = process.env.EMAIL_FROM || "ReCopyFast <noreply@recopyfa.st>";
 
 // Lazily construct the client so a missing key doesn't crash module import
 // (e.g. during `next build` env collection) — only sends fail, loudly.

@@ -13,17 +13,17 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   StatusBadge,
-  siteStatuses,
+  resolveSiteStatus,
   type SiteStatus,
 } from "@/components/ui/status-badge";
 import {
+  CheckCircle2,
   Globe,
   MoreVertical,
   Eye,
   Settings,
   Trash2,
   Copy,
-  CheckCircle2,
 } from "lucide-react";
 import { ShareButton } from "./ShareButton";
 import { formatDistanceToNow } from "date-fns";
@@ -54,7 +54,9 @@ export function SiteCard({
   onDelete,
 }: SiteCardProps) {
   const [copied, setCopied] = useState(false);
-  const status = site.status || "active";
+  // Was `site.status || "active"`. A site the API said nothing about was drawn
+  // as healthy, which is the one direction a default must never guess in.
+  const statusDefinition = resolveSiteStatus(site.status);
 
   const handleCopyDomain = async () => {
     await navigator.clipboard.writeText(site.domain);
@@ -130,7 +132,7 @@ export function SiteCard({
         </div>
 
         <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1">
-          <StatusBadge status={siteStatuses[status]} />
+          <StatusBadge status={statusDefinition} />
           <span className="text-xs text-muted-foreground">
             Last edited {lastEdited}
           </span>

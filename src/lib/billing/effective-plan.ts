@@ -108,6 +108,49 @@ export function hasAnyEntitlement(entitlement: Entitlement): boolean {
  * and the gates read through, so a `free` row cannot mean one thing to
  * middleware and another to a feature gate.
  */
+/**
+ * Every plan a user holds a PERMANENT grant for. Not their effective plan.
+ *
+ * The difference is the whole point, and getting it wrong cost a sale: the
+ * lifetime duplicate guard first asked `readEffectivePlanId`, which falls back
+ * to a live subscription when there is no grant — so a Pro *monthly subscriber*
+ * resolved to `pro`, matched the plan Lifetime Pro confers, and was refused
+ * with "You already have lifetime access" for something they had never bought.
+ * That refused exactly the customer most likely to buy it.
+ *
+ * "What is in force" and "what have they already paid for outright" are
+ * different questions. This answers the second, and both the checkout guard and
+ * the billing page read it, so the server and the UI cannot disagree about who
+ * is allowed to see — or complete — the offer.
+ *
+ * Returns every granted plan id rather than the newest: an account can hold
+ * several live grants, and holding the one in question is what matters,
+ * regardless of what was granted most recently.
+ */
+export async function readGrantedPlanIds(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("plan_entitlements")
+    .select("plan_id")
+    .eq("user_id", userId)
+    .is("revoked_at", null)
+    .returns<Array<{ plan_id: string }>>();
+
+  if (error) {
+    throw new Error(`Failed to read plan entitlements: ${error.message}`);
+  }
+
+  return Array.from(
+    new Set(
+      (data ?? [])
+        .map((row) => row.plan_id)
+        .filter((planId) => !isRetired(planId)),
+    ),
+  );
+}
+
 export async function readEffectivePlanId(
   supabase: SupabaseClient,
   userId: string,

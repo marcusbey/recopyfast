@@ -95,12 +95,12 @@ export default function Pricing() {
     <section
       id="pricing"
       ref={ref}
-      className="glass-sheet relative overflow-hidden border-y border-white/40 py-32 px-6"
+      className="glass-sheet relative overflow-hidden border-y border-white/40 py-24 sm:py-32 px-6"
     >
       {/* Subtle background */}
       <div className="absolute inset-0">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-sky-100 rounded-full blur-3xl opacity-30" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-emerald-100 rounded-full blur-3xl opacity-30" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-teal-100 rounded-full blur-3xl opacity-30" />
       </div>
 
       <div className="max-w-6xl mx-auto relative z-10">
@@ -111,15 +111,15 @@ export default function Pricing() {
           transition={{ duration: 0.8 }}
           className="text-center mb-16"
         >
-          <span className="inline-block px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-sky-600 bg-sky-50 rounded-full mb-6">
+          <span className="mb-6 inline-block text-sm font-semibold uppercase tracking-[0.075em] text-sky-700">
             Pricing
           </span>
-          <h2 className="text-4xl sm:text-5xl md:text-6xl font-bold text-slate-900 tracking-tight mb-6">
+          <h2 className="font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900 mb-6">
             Simple pricing,
             <br />
             <span className="text-slate-400">no surprises</span>
           </h2>
-          <p className="text-xl text-slate-600 max-w-2xl mx-auto mb-8">
+          <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto mb-8">
             Choose the plan that fits your needs. Upgrade anytime.
           </p>
 
@@ -144,7 +144,7 @@ export default function Pricing() {
               }`}
             >
               Yearly
-              <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">
+              <span className="text-xs px-2 py-0.5 bg-teal-100 text-teal-700 rounded-full">
                 Save 17%
               </span>
             </button>
@@ -212,7 +212,7 @@ export default function Pricing() {
                 >
                   {plan.badge && (
                     <div className="absolute -top-4 left-1/2 -translate-x-1/2">
-                      <span className="rounded-full bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white">
+                      <span className="rounded-full bg-teal-700 px-4 py-1.5 text-sm font-semibold text-white">
                         {plan.badge}
                       </span>
                     </div>
@@ -222,7 +222,7 @@ export default function Pricing() {
                     <div className="w-12 h-12 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
                       <Icon className="w-6 h-6 text-sky-500" />
                     </div>
-                    <h3 className="text-2xl font-bold text-slate-900 mb-2">
+                    <h3 className="text-2xl font-semibold text-slate-900 mb-2">
                       {plan.name}
                     </h3>
                     <p className="text-slate-500 text-sm">{plan.description}</p>
@@ -236,7 +236,7 @@ export default function Pricing() {
                       <span className="text-slate-500">/month</span>
                     </div>
                     {isYearly && plan.monthlyPrice > 0 && (
-                      <p className="text-sm text-emerald-600 mt-1">
+                      <p className="text-sm text-teal-700 mt-1">
                         ${saving} saved yearly
                       </p>
                     )}
@@ -245,7 +245,7 @@ export default function Pricing() {
                   <ul className="space-y-3 mb-8">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex items-start gap-3">
-                        <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                        <Check className="w-5 h-5 text-teal-600 flex-shrink-0 mt-0.5" />
                         <span className="text-slate-600 text-sm">
                           {feature}
                         </span>
@@ -281,7 +281,7 @@ export default function Pricing() {
                   <div className="w-12 h-12 rounded-2xl bg-sky-50 flex items-center justify-center mb-4">
                     <InfinityIcon className="w-6 h-6 text-sky-500" />
                   </div>
-                  <h3 className="text-2xl font-bold text-slate-900 mb-2">
+                  <h3 className="text-2xl font-semibold text-slate-900 mb-2">
                     {lifetime.name}
                   </h3>
                   <p className="text-slate-500 text-sm">
@@ -296,22 +296,30 @@ export default function Pricing() {
                     </span>
                     <span className="text-slate-500">once</span>
                   </div>
-                  <p className="text-sm text-emerald-600 mt-1">
-                    No renewal, ever
-                  </p>
+                  <p className="text-sm text-teal-700 mt-1">No renewal, ever</p>
                 </div>
 
                 <ul className="space-y-3 mb-8">
                   {lifetime.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-3">
-                      <Check className="w-5 h-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                      <Check className="w-5 h-5 text-teal-600 flex-shrink-0 mt-0.5" />
                       <span className="text-slate-600 text-sm">{feature}</span>
                     </li>
                   ))}
                 </ul>
 
+                {/*
+                  Straight to the page that can actually take the $199, not to
+                  /signup. Middleware bounces an unauthenticated visitor from
+                  /dashboard/billing to /login?redirectedFrom=/dashboard/billing
+                  — where they can sign up as well as sign in, and land back on
+                  the offer — while an already-signed-in visitor arrives at it
+                  directly. /signup is a dead end for the latter: middleware
+                  redirects a logged-in session off the auth routes to
+                  /dashboard, which is nowhere near this purchase.
+                */}
                 <Link
-                  href="/signup"
+                  href="/dashboard/billing"
                   className="block w-full py-3 px-6 rounded-xl font-semibold text-center transition-all bg-sky-50 text-sky-700 hover:bg-sky-100"
                 >
                   Buy once
@@ -331,7 +339,7 @@ export default function Pricing() {
           <div className="flex flex-wrap justify-center items-center gap-6 text-sm text-slate-500">
             {TRUST_POINTS.map((point) => (
               <span key={point} className="flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-500" />
+                <Check className="w-4 h-4 text-teal-600" />
                 {point}
               </span>
             ))}

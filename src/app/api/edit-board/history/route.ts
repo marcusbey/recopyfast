@@ -7,6 +7,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
+import {
+  authorizeFirstPartyEditorAccess,
+  requireEditorPermission,
+} from "@/lib/auth/editor-access";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -37,29 +41,47 @@ export async function GET(request: NextRequest) {
     const token = extractStagingToken(request);
     const siteId = request.nextUrl.searchParams.get("siteId");
 
-    if (!token || !siteId) {
+    if (!siteId) {
       return withCors(
-        NextResponse.json(
-          { error: "Missing staging token or siteId" },
-          { status: 401 },
-        ),
+        NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
         origin,
       );
     }
 
-    // Validate staging access
-    const validation = await StagingAccessManager.validateStagingAccess(
-      token,
+    // The site's own owner is signed in and holds a `site_permissions` row;
+    // they carry no staging token and never can. Version history was the third
+    // route in this codebase to model only the invited editor and lock out the
+    // one caller guaranteed to hold every right — see the F-4 and N-1 fixes.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       siteId,
+      "view",
     );
-    if (!validation.valid || !validation.verified) {
-      return withCors(
-        NextResponse.json(
-          { error: validation.error || "Access denied" },
-          { status: 401 },
-        ),
-        origin,
+
+    if (!firstPartyAccess) {
+      if (!token) {
+        return withCors(
+          NextResponse.json(
+            { error: "Missing staging token or siteId" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      // Validate staging access
+      const validation = await StagingAccessManager.validateStagingAccess(
+        token,
+        siteId,
       );
+      if (!validation.valid || !validation.verified) {
+        return withCors(
+          NextResponse.json(
+            { error: validation.error || "Access denied" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
     }
 
     const supabase = createServiceRoleClient();
@@ -116,13 +138,6 @@ export async function POST(request: NextRequest) {
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
 
-    if (!token) {
-      return withCors(
-        NextResponse.json({ error: "Missing staging token" }, { status: 401 }),
-        origin,
-      );
-    }
-
     const { siteId, description, changeType = "manual" } = await request.json();
 
     if (!siteId) {
@@ -132,34 +147,67 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate staging access (edit permission required)
-    const validation = await StagingAccessManager.validateStagingAccess(
-      token,
+    // Signed-in owner first; falls through to the staging token untouched.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       siteId,
+      "view",
     );
-    if (!validation.valid || !validation.verified) {
-      return withCors(
-        NextResponse.json(
-          { error: validation.error || "Access denied" },
-          { status: 401 },
-        ),
-        origin,
-      );
-    }
 
-    const hasEditPermission =
-      validation.permissions.includes("edit") ||
-      validation.permissions.includes("publish") ||
-      validation.permissions.includes("admin");
+    let authorEmail: string | null = null;
 
-    if (!hasEditPermission) {
-      return withCors(
-        NextResponse.json(
-          { error: "Edit permission required" },
-          { status: 403 },
-        ),
-        origin,
+    if (firstPartyAccess) {
+      if (!requireEditorPermission(firstPartyAccess, "edit")) {
+        return withCors(
+          NextResponse.json(
+            { error: "Edit permission required" },
+            { status: 403 },
+          ),
+          origin,
+        );
+      }
+      authorEmail = firstPartyAccess.email ?? null;
+    } else {
+      if (!token) {
+        return withCors(
+          NextResponse.json(
+            { error: "Missing staging token" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      // Validate staging access (edit permission required)
+      const validation = await StagingAccessManager.validateStagingAccess(
+        token,
+        siteId,
       );
+      if (!validation.valid || !validation.verified) {
+        return withCors(
+          NextResponse.json(
+            { error: validation.error || "Access denied" },
+            { status: 401 },
+          ),
+          origin,
+        );
+      }
+
+      const hasEditPermission =
+        validation.permissions.includes("edit") ||
+        validation.permissions.includes("publish") ||
+        validation.permissions.includes("admin");
+
+      if (!hasEditPermission) {
+        return withCors(
+          NextResponse.json(
+            { error: "Edit permission required" },
+            { status: 403 },
+          ),
+          origin,
+        );
+      }
+
+      authorEmail = validation.email ?? null;
     }
 
     const supabase = createServiceRoleClient();
@@ -167,7 +215,7 @@ export async function POST(request: NextRequest) {
     // Use the database function to create version
     const { data, error } = await supabase.rpc("create_content_version", {
       p_site_id: siteId,
-      p_created_by: validation.email || "unknown",
+      p_created_by: authorEmail || "unknown",
       p_description: description || null,
       p_change_type: changeType,
     });

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
@@ -134,6 +135,60 @@ export async function authorizeSiteRequest(options: {
   return {
     site,
     allowedOrigin,
+  };
+}
+
+/**
+ * There are two legitimate callers of the content routes, and they cannot
+ * prove themselves the same way. The embed widget runs on the customer's own
+ * domain, cross-origin from us, and proves itself with a site token whose
+ * Origin must match the registered domain (authorizeSiteRequest, above). The
+ * dashboard is same-origin against our own app — its Origin is never the
+ * customer's domain, so it can never pass that check — but it already carries
+ * an authenticated Supabase session. This function authorizes that second
+ * caller on session + site_permissions instead of Origin, and never inspects
+ * Origin at all. Returns null (not throw) whenever the session path doesn't
+ * apply, so callers fall through to the widget path unchanged.
+ */
+export async function authorizeFirstPartySiteRequest(
+  siteId: string,
+): Promise<SiteAuthContext | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return null;
+  }
+
+  const { data: permission } = await supabase
+    .from("site_permissions")
+    .select("id")
+    .eq("site_id", siteId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (!permission) {
+    return null;
+  }
+
+  const serviceClient = createServiceRoleClient();
+  const { data: site, error } = await serviceClient
+    .from("sites")
+    .select("id, domain, api_key")
+    .eq("id", siteId)
+    .single();
+
+  if (error || !site) {
+    return null;
+  }
+
+  // Same-origin caller: no cross-origin grant is needed, and withCors() in the
+  // route already falls back to NEXT_PUBLIC_APP_URL when this is null.
+  return {
+    site,
+    allowedOrigin: null,
   };
 }
 

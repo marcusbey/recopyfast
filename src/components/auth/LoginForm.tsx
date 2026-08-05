@@ -68,18 +68,18 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
   if (isLinkSent) {
     return (
       <div className="text-center space-y-4">
-        <div className="w-16 h-16 mx-auto bg-green-100 rounded-full flex items-center justify-center">
-          <Mail className="w-8 h-8 text-green-600" />
+        <div className="w-16 h-16 mx-auto bg-tone-success-surface rounded-full flex items-center justify-center">
+          <Mail className="w-8 h-8 text-tone-success-text" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 className="text-lg font-semibold text-foreground">
             Check your email
           </h3>
-          <p className="text-gray-600 text-sm">
+          <p className="text-muted-foreground text-sm">
             We&apos;ve sent a magic link to{" "}
-            <span className="font-medium text-gray-900">{email.trim()}</span>
+            <span className="font-medium text-foreground">{email.trim()}</span>
           </p>
-          <p className="text-gray-500 text-xs">
+          <p className="text-muted-foreground text-xs">
             Click the link in your email to sign in. You can close this window.
           </p>
         </div>
@@ -100,7 +100,7 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
       <div className="space-y-2">
         <Label htmlFor="email">Email address</Label>
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
             id="email"
             name="email"
@@ -125,7 +125,7 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
       <Button
         type="submit"
         size="lg"
-        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200 border-0"
+        className="w-full"
         disabled={isLoading || !email.trim()}
       >
         {isLoading ? (
@@ -141,16 +141,18 @@ export function LoginForm({ onSwitchToSignup }: LoginFormProps) {
         )}
       </Button>
 
-      <div className="text-center text-sm text-gray-500">
+      <div className="text-center text-sm text-muted-foreground">
         <p>We&apos;ll send you a secure link to sign in instantly</p>
       </div>
 
       <div className="text-center text-sm">
-        <span className="text-gray-600">Don&apos;t have an account? </span>
+        <span className="text-muted-foreground">
+          Don&apos;t have an account?{" "}
+        </span>
         <button
           type="button"
           onClick={onSwitchToSignup}
-          className="text-blue-600 hover:text-blue-700 font-medium"
+          className="text-primary hover:underline font-medium"
         >
           Sign up
         </button>

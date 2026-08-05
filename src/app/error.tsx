@@ -34,15 +34,13 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
   }, [error]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center p-4">
-      <Card className="w-full max-w-md border-gray-200 shadow-lg">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="w-8 h-8 text-red-600" />
+          <div className="w-16 h-16 bg-tone-danger-surface rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-tone-danger-text" />
           </div>
-          <CardTitle className="text-2xl font-bold">
-            Something went wrong
-          </CardTitle>
+          <CardTitle>Something went wrong</CardTitle>
           <CardDescription>
             This page couldn&apos;t be loaded. The error has been reported to
             our team.
@@ -50,16 +48,13 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           {process.env.NODE_ENV === "development" && (
-            <p className="text-xs font-mono text-gray-700 break-all bg-gray-100 rounded-md p-3">
+            <p className="text-xs font-mono text-foreground break-all bg-surface-2 rounded-md p-3">
               {error.message}
             </p>
           )}
 
           <div className="flex flex-col gap-3">
-            <Button
-              onClick={reset}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-            >
+            <Button onClick={reset} className="w-full">
               <RefreshCcw className="w-4 h-4 mr-2" />
               Try again
             </Button>
@@ -67,13 +62,13 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
             <Link href="/">
               <Button variant="outline" className="w-full">
                 <Home className="w-4 h-4 mr-2" />
-                Go to Homepage
+                Go to homepage
               </Button>
             </Link>
           </div>
 
           {error.digest && (
-            <p className="text-xs text-gray-500 text-center">
+            <p className="text-xs text-muted-foreground text-center">
               If the problem persists, contact support with error ID:{" "}
               <span className="font-mono">{error.digest}</span>
             </p>

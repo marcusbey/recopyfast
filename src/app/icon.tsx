@@ -17,8 +17,10 @@ export function generateImageMetadata() {
 }
 
 /**
- * The ReCopyFast brand mark: a lucide `Code` glyph on the blue-to-purple
- * gradient tile used by the site header and auth pages.
+ * The ReCopyFast brand mark: a lucide `Code` glyph on the solid teal accent
+ * tile used by the site header and auth pages. The literal matches
+ * `--accent-solid` (light) in globals.css — CSS variables are unavailable
+ * inside ImageResponse.
  */
 export default async function Icon({ id }: { id: Promise<string> }) {
   const dimension = Number(await id);
@@ -33,7 +35,7 @@ export default async function Icon({ id }: { id: Promise<string> }) {
           alignItems: "center",
           justifyContent: "center",
           borderRadius: dimension * 0.22,
-          backgroundImage: "linear-gradient(135deg, #2563eb 0%, #9333ea 100%)",
+          backgroundColor: "hsl(176 54% 28%)",
         }}
       >
         <svg
