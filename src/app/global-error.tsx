@@ -32,9 +32,9 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
   return (
     <html lang="en">
       <body>
-        <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-lg text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <div className="min-h-screen bg-background flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-border bg-card p-8 shadow-sm text-center">
+            <div className="w-16 h-16 bg-tone-danger-surface rounded-full flex items-center justify-center mx-auto mb-4">
               {/* Inline SVG rather than lucide-react: this boundary must not
                   depend on chunks that may have failed to load. */}
               <svg
@@ -45,7 +45,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="w-8 h-8 text-red-600"
+                className="w-8 h-8 text-tone-danger-text"
                 aria-hidden="true"
               >
                 <circle cx="12" cy="12" r="10" />
@@ -54,10 +54,10 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               </svg>
             </div>
 
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            <h1 className="text-xl font-semibold text-foreground mb-2">
               Something went wrong
             </h1>
-            <p className="text-sm text-gray-600 mb-6">
+            <p className="text-sm text-muted-foreground mb-6">
               ReCopyFast hit an unexpected error and couldn&apos;t finish
               loading this page. The problem has been reported to our team.
             </p>
@@ -66,7 +66,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               <button
                 type="button"
                 onClick={reset}
-                className="w-full h-10 rounded-md px-4 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-colors"
+                className="w-full h-10 rounded-md px-4 text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
               >
                 Try again
               </button>
@@ -77,14 +77,14 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
               <a
                 href="/"
-                className="w-full h-10 inline-flex items-center justify-center rounded-md border border-gray-200 px-4 text-sm font-medium text-gray-900 hover:bg-gray-50 transition-colors"
+                className="w-full h-10 inline-flex items-center justify-center rounded-md border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-accent transition-colors"
               >
-                Go to Homepage
+                Go to homepage
               </a>
             </div>
 
             {error.digest && (
-              <p className="text-xs text-gray-500 mt-6">
+              <p className="text-xs text-muted-foreground mt-6">
                 If the problem persists, contact support with error ID:{" "}
                 <span className="font-mono">{error.digest}</span>
               </p>

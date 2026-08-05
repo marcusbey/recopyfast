@@ -27,7 +27,7 @@ export default function TextAlignmentControls({
   onChange,
 }: TextAlignmentControlsProps) {
   return (
-    <div className="flex items-center bg-gray-800 rounded-lg p-1">
+    <div className="flex items-center bg-surface-2 rounded-lg p-1">
       {alignmentOptions.map(({ value: alignValue, icon: Icon, label }) => (
         <button
           key={alignValue}
@@ -36,8 +36,8 @@ export default function TextAlignmentControls({
           title={label}
           className={`p-2 rounded transition-colors ${
             value === alignValue
-              ? "bg-emerald-500 text-white"
-              : "text-gray-400 hover:text-gray-200 hover:bg-gray-700"
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-surface-3"
           }`}
         >
           <Icon className="w-4 h-4" />

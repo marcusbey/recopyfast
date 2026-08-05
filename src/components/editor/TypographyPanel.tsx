@@ -109,13 +109,13 @@ export default function TypographyPanel({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -8, scale: 0.95 }}
           transition={{ duration: 0.15 }}
-          className="absolute top-full left-0 mt-2 w-72 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-50"
+          className="absolute top-full left-0 mt-2 w-72 bg-card border border-border rounded-xl shadow-md overflow-hidden z-50"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="p-4 space-y-4">
             {/* Font Size */}
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
                 Font size
               </label>
               <FontSizeSelector
@@ -126,7 +126,7 @@ export default function TypographyPanel({
 
             {/* Font Weight Slider */}
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
                 Font weight
               </label>
               <div className="space-y-2">
@@ -137,11 +137,11 @@ export default function TypographyPanel({
                   step="100"
                   value={styles.fontWeight}
                   onChange={handleFontWeightChange}
-                  className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                  className="w-full h-2 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
                 />
-                <div className="flex justify-between text-xs text-gray-500">
+                <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Thin</span>
-                  <span className="text-gray-300 font-medium">
+                  <span className="text-foreground font-medium">
                     {currentWeightKey}
                   </span>
                   <span>Black</span>
@@ -151,7 +151,7 @@ export default function TypographyPanel({
 
             {/* Color */}
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
                 Color
               </label>
               <ColorPicker value={styles.color} onChange={handleColorChange} />
@@ -159,7 +159,7 @@ export default function TypographyPanel({
 
             {/* Text Align */}
             <div>
-              <label className="block text-xs font-medium text-gray-400 mb-2">
+              <label className="block text-xs font-medium text-muted-foreground mb-2">
                 Text align
               </label>
               <TextAlignmentControls
@@ -169,13 +169,13 @@ export default function TypographyPanel({
             </div>
 
             {/* Divider */}
-            <div className="border-t border-gray-800" />
+            <div className="border-t border-border" />
 
             {/* Advanced Toggle */}
             <button
               type="button"
               onClick={() => setShowAdvanced(!showAdvanced)}
-              className="flex items-center justify-between w-full text-sm text-gray-400 hover:text-gray-200 transition-colors"
+              className="flex items-center justify-between w-full text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <span>Advanced</span>
               <ChevronDown
@@ -197,7 +197,7 @@ export default function TypographyPanel({
                 >
                   {/* Line Height */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-400 mb-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
                       Line height
                     </label>
                     <input
@@ -207,11 +207,11 @@ export default function TypographyPanel({
                       step="0.1"
                       value={lineHeightValue}
                       onChange={handleLineHeightChange}
-                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      className="w-full h-2 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
                     />
-                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
                       <span>1</span>
-                      <span className="text-gray-300">
+                      <span className="text-foreground">
                         {lineHeightValue.toFixed(1)}
                       </span>
                       <span>3</span>
@@ -220,7 +220,7 @@ export default function TypographyPanel({
 
                   {/* Letter Spacing */}
                   <div>
-                    <label className="block text-xs font-medium text-gray-400 mb-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
                       Letter spacing
                     </label>
                     <input
@@ -230,11 +230,11 @@ export default function TypographyPanel({
                       step="0.01"
                       value={letterSpacingValue}
                       onChange={handleLetterSpacingChange}
-                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                      className="w-full h-2 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
                     />
-                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <div className="flex justify-between text-xs text-muted-foreground mt-1">
                       <span>-0.1em</span>
-                      <span className="text-gray-300">
+                      <span className="text-foreground">
                         {styles.letterSpacing || "0em"}
                       </span>
                       <span>0.5em</span>

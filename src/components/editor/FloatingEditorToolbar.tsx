@@ -100,17 +100,17 @@ export default function FloatingEditorToolbar({
           left: position.left,
         }}
       >
-        <div className="bg-gray-900 border border-gray-800 rounded-lg shadow-xl flex items-center">
+        <div className="bg-card border border-border rounded-lg shadow-md flex items-center">
           {/* AI Input Section */}
           <form onSubmit={handleAISubmit} className="flex items-center">
-            <div className="flex items-center px-3 py-2 border-r border-gray-800">
-              <Sparkles className="w-4 h-4 text-purple-400 mr-2" />
+            <div className="flex items-center px-3 py-2 border-r border-border">
+              <Sparkles className="w-4 h-4 text-primary mr-2" />
               <input
                 type="text"
                 value={aiInput}
                 onChange={(e) => setAIInput(e.target.value)}
                 placeholder="Ask for quick changes..."
-                className="bg-transparent text-gray-200 text-sm placeholder-gray-500 outline-none w-48"
+                className="bg-transparent text-foreground text-sm placeholder:text-muted-foreground outline-none w-48"
               />
             </div>
           </form>
@@ -125,8 +125,8 @@ export default function FloatingEditorToolbar({
                 title="Typography"
                 className={`p-2 rounded transition-colors ${
                   isTypographyOpen
-                    ? "bg-emerald-500/20 text-emerald-400"
-                    : "text-gray-400 hover:text-gray-200 hover:bg-gray-800"
+                    ? "bg-tone-accent-surface text-tone-accent-text"
+                    : "text-muted-foreground hover:text-foreground hover:bg-surface-2"
                 }`}
               >
                 <Type className="w-4 h-4" />
@@ -145,20 +145,20 @@ export default function FloatingEditorToolbar({
               type="button"
               title="Expand (Coming soon)"
               disabled
-              className="p-2 rounded text-gray-600 cursor-not-allowed"
+              className="p-2 rounded text-muted-foreground/50 cursor-not-allowed"
             >
               <Maximize2 className="w-4 h-4" />
             </button>
 
             {/* Divider */}
-            <div className="w-px h-6 bg-gray-800 mx-1" />
+            <div className="w-px h-6 bg-border mx-1" />
 
             {/* Save Button */}
             <button
               type="button"
               onClick={onSave}
               title="Save changes"
-              className="p-2 rounded text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+              className="p-2 rounded text-tone-accent-text hover:bg-tone-accent-surface transition-colors"
             >
               <Check className="w-4 h-4" />
             </button>
@@ -168,7 +168,7 @@ export default function FloatingEditorToolbar({
               type="button"
               onClick={onDelete}
               title="Cancel"
-              className="p-2 rounded text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-2 rounded text-muted-foreground hover:text-tone-danger-text hover:bg-tone-danger-surface transition-colors"
             >
               <Trash2 className="w-4 h-4" />
             </button>

@@ -59,18 +59,18 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
   if (success) {
     return (
       <div className="text-center space-y-4">
-        <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
-          <Mail className="w-8 h-8 text-green-600" />
+        <div className="w-16 h-16 bg-tone-success-surface rounded-full flex items-center justify-center mx-auto">
+          <Mail className="w-8 h-8 text-tone-success-text" />
         </div>
         <div className="space-y-2">
-          <h3 className="text-lg font-semibold text-gray-900">
+          <h3 className="text-lg font-semibold text-foreground">
             Check your email
           </h3>
-          <p className="text-gray-600 text-sm">
+          <p className="text-muted-foreground text-sm">
             We&apos;ve sent a magic link to{" "}
-            <span className="font-medium text-gray-900">{email}</span>
+            <span className="font-medium text-foreground">{email}</span>
           </p>
-          <p className="text-gray-500 text-xs">
+          <p className="text-muted-foreground text-xs">
             Click the link in your email to create your account and sign in. You
             can close this window.
           </p>
@@ -92,7 +92,7 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
       <div className="space-y-2">
         <Label htmlFor="email">Email address</Label>
         <div className="relative">
-          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
             id="email"
             type="email"
@@ -109,7 +109,7 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
       <div className="space-y-2">
         <Label htmlFor="name">Name (optional)</Label>
         <div className="relative">
-          <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <User className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
             id="name"
             type="text"
@@ -131,7 +131,7 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
       <Button
         type="submit"
         size="lg"
-        className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200 border-0"
+        className="w-full"
         disabled={isLoading || !email}
       >
         {isLoading ? (
@@ -147,16 +147,16 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
         )}
       </Button>
 
-      <div className="text-center text-sm text-gray-500">
+      <div className="text-center text-sm text-muted-foreground">
         <p>We&apos;ll send you a secure link to create your account</p>
       </div>
 
       <div className="text-center text-sm">
-        <span className="text-gray-600">Already have an account? </span>
+        <span className="text-muted-foreground">Already have an account? </span>
         <button
           type="button"
           onClick={onSwitchToLogin}
-          className="text-blue-600 hover:text-blue-700 font-medium"
+          className="text-primary hover:underline font-medium"
         >
           Sign in
         </button>

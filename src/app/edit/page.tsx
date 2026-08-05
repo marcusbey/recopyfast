@@ -17,7 +17,7 @@ export const metadata: Metadata = {
  */
 export default function EditHubPage() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12">
+    <main className="flex min-h-screen items-center justify-center bg-background px-4 py-12">
       <EditorSignIn />
     </main>
   );

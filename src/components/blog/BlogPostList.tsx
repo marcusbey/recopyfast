@@ -61,10 +61,10 @@ export function BlogPostList({ posts }: BlogPostListProps) {
               role="tab"
               aria-selected={isActive}
               onClick={() => setActiveCategory(category)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 isActive
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-surface-2 text-muted-foreground hover:bg-surface-3"
               }`}
             >
               {category}
@@ -76,18 +76,16 @@ export function BlogPostList({ posts }: BlogPostListProps) {
       {/* Featured Post */}
       {featured.map((post) => (
         <div key={post.id} className="mb-16">
-          <div className="relative bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-8 md:p-12 text-white">
+          <div className="relative bg-primary rounded-xl p-8 md:p-12 text-primary-foreground">
             <div className="max-w-4xl">
               <Badge
                 variant="secondary"
-                className="mb-4 bg-white/20 text-white border-white/30"
+                className="mb-4 bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
               >
                 Featured
               </Badge>
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                {post.title}
-              </h2>
-              <p className="text-xl text-blue-100 mb-6">{post.excerpt}</p>
+              <h2 className="text-2xl font-semibold mb-4">{post.title}</h2>
+              <p className="text-primary-foreground/80 mb-6">{post.excerpt}</p>
               <div className="flex items-center space-x-6 mb-6">
                 <div className="flex items-center space-x-2">
                   <Calendar className="h-4 w-4" />
@@ -99,21 +97,21 @@ export function BlogPostList({ posts }: BlogPostListProps) {
                 </div>
                 <Badge
                   variant="secondary"
-                  className="bg-white/20 text-white border-white/30"
+                  className="bg-primary-foreground/20 text-primary-foreground border-primary-foreground/30"
                 >
                   {post.category}
                 </Badge>
               </div>
               <Link
                 href={`/blog/${post.slug}`}
-                className="inline-flex items-center px-6 py-3 bg-white text-blue-600 rounded-lg font-semibold hover:bg-gray-50 transition-colors"
+                className="inline-flex items-center px-6 py-3 bg-primary-foreground text-primary rounded-lg font-medium hover:bg-primary-foreground/90 transition-colors"
               >
-                Read More
+                Read more
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Link>
             </div>
-            <div className="absolute top-10 right-10 w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
-            <div className="absolute bottom-10 right-20 w-20 h-20 bg-white/10 rounded-full blur-xl"></div>
+            <div className="absolute top-10 right-10 w-32 h-32 bg-primary-foreground/10 rounded-full blur-2xl"></div>
+            <div className="absolute bottom-10 right-20 w-20 h-20 bg-primary-foreground/10 rounded-full blur-xl"></div>
           </div>
         </div>
       ))}
@@ -121,36 +119,35 @@ export function BlogPostList({ posts }: BlogPostListProps) {
       {/* Blog Posts Grid */}
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
         {rest.map((post) => (
-          <Card
-            key={post.id}
-            className="group hover:shadow-lg transition-all duration-300 hover:-translate-y-1"
-          >
+          <Card key={post.id} className="group">
             <CardHeader className="space-y-4">
               <div className="flex items-center justify-between">
                 <Badge variant="secondary" className="text-xs">
                   {post.category}
                 </Badge>
-                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                   <Clock className="h-3 w-3" />
                   <span>{post.readTime}</span>
                 </div>
               </div>
-              <CardTitle className="text-xl group-hover:text-blue-600 transition-colors">
+              <CardTitle className="group-hover:text-primary transition-colors">
                 {post.title}
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-gray-600 mb-4">{post.excerpt}</p>
+              <p className="text-sm text-muted-foreground mb-4">
+                {post.excerpt}
+              </p>
               <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                   <Calendar className="h-3 w-3" />
                   <span>{new Date(post.publishedAt).toLocaleDateString()}</span>
                 </div>
                 <Link
                   href={`/blog/${post.slug}`}
-                  className="text-blue-600 hover:text-blue-800 font-medium text-sm flex items-center"
+                  className="text-primary hover:underline font-medium text-sm flex items-center"
                 >
-                  Read More
+                  Read more
                   <ArrowRight className="ml-1 h-3 w-3" />
                 </Link>
               </div>
@@ -160,7 +157,7 @@ export function BlogPostList({ posts }: BlogPostListProps) {
       </div>
 
       {visiblePosts.length === 0 && (
-        <p className="text-center text-gray-600 py-12">
+        <p className="text-center text-muted-foreground py-12">
           No posts in {activeCategory} yet.
         </p>
       )}

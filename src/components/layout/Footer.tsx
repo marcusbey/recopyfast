@@ -54,11 +54,11 @@ export default function Footer() {
           <div className="md:col-span-2 lg:col-span-2">
             <div className="flex items-center space-x-3 mb-6">
               <div className="relative">
-                <div className="w-10 h-10 bg-gradient-to-br from-sky-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-lg shadow-sky-500/20">
+                <div className="w-10 h-10 bg-sky-600 rounded-xl flex items-center justify-center">
                   <Zap className="h-5 w-5 text-white" />
                 </div>
               </div>
-              <span className="text-2xl font-bold tracking-tight text-slate-900">
+              <span className="text-2xl font-semibold tracking-tight text-slate-900">
                 ReCopyFast
               </span>
             </div>
@@ -98,7 +98,7 @@ export default function Footer() {
           {/* Link Sections */}
           {Object.entries(footerLinks).map(([category, links]) => (
             <div key={category} className="lg:col-span-1">
-              <h3 className="text-sm font-semibold mb-6 text-slate-900 uppercase tracking-wider">
+              <h3 className="text-sm font-semibold mb-6 text-slate-900 uppercase tracking-[0.075em]">
                 {category}
               </h3>
               <ul className="space-y-4">
@@ -107,7 +107,7 @@ export default function Footer() {
                     {link.href.startsWith("http") ? (
                       <a
                         href={link.href}
-                        className="text-slate-600 hover:text-sky-600 transition-colors duration-200 text-sm"
+                        className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
                         target="_blank"
                         rel="noopener noreferrer"
                       >
@@ -116,7 +116,7 @@ export default function Footer() {
                     ) : (
                       <Link
                         href={link.href}
-                        className="text-slate-600 hover:text-sky-600 transition-colors duration-200 text-sm"
+                        className="text-slate-600 hover:text-slate-900 transition-colors duration-200 text-sm"
                       >
                         {link.name}
                       </Link>

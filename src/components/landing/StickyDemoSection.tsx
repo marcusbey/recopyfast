@@ -37,10 +37,10 @@ export default function StickyDemoSection() {
       <div ref={trackRef} className="relative h-[300vh]">
         <div className="sticky top-0 flex h-svh flex-col overflow-hidden px-6 pt-20 pb-4">
           <div className="mx-auto mb-6 max-w-7xl shrink-0 text-center">
-            <h2 className="mb-3 text-3xl font-bold text-slate-900 md:text-4xl">
-              See It In Action
+            <h2 className="mb-6 font-display text-4xl sm:text-5xl font-bold tracking-tight text-slate-900">
+              See it in action
             </h2>
-            <p className="mx-auto max-w-2xl text-lg text-slate-600">
+            <p className="mx-auto max-w-2xl text-lg sm:text-xl leading-relaxed text-slate-600">
               Three real-looking customer sites, three different designers. Keep
               scrolling to browse each page — click any text or photograph to
               change it.

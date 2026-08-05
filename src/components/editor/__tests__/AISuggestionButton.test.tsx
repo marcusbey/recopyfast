@@ -85,7 +85,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
   });
@@ -98,8 +98,8 @@ describe("AISuggestionButton", () => {
       const triggerButton = screen.getByRole("button", { name: /ai suggest/i });
       await user.click(triggerButton);
 
-      expect(screen.getByText("AI Content Suggestions")).toBeInTheDocument();
-      expect(screen.getByText("Original Text")).toBeInTheDocument();
+      expect(screen.getByText("AI content suggestions")).toBeInTheDocument();
+      expect(screen.getByText("Original text")).toBeInTheDocument();
       expect(screen.getByText(defaultProps.currentText)).toBeInTheDocument();
     });
 
@@ -112,11 +112,11 @@ describe("AISuggestionButton", () => {
       await user.click(triggerButton);
 
       // Close modal
-      const closeButton = screen.getByRole("button", { name: "" }); // X button
+      const closeButton = screen.getByRole("button", { name: "Close" }); // X button
       await user.click(closeButton);
 
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
 
@@ -126,18 +126,18 @@ describe("AISuggestionButton", () => {
 
       // Open modal and generate suggestions
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Use a suggestion
-      const useButton = screen.getAllByText("Use This")[0];
+      const useButton = screen.getAllByText("Use this")[0];
       await user.click(useButton);
 
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
   });
@@ -224,7 +224,7 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const generateButton = screen.getByText("Generate AI Suggestions");
+      const generateButton = screen.getByText("Generate suggestions");
       await user.click(generateButton);
 
       await waitFor(() => {
@@ -265,14 +265,14 @@ describe("AISuggestionButton", () => {
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
-      const generateButton = screen.getByText("Generate AI Suggestions");
+      const generateButton = screen.getByText("Generate suggestions");
       await user.click(generateButton);
 
       expect(screen.getByText("Generating...")).toBeInTheDocument();
       expect(generateButton).toBeDisabled();
 
       await waitFor(() => {
-        expect(screen.getByText("Generate AI Suggestions")).toBeInTheDocument();
+        expect(screen.getByText("Generate suggestions")).toBeInTheDocument();
       });
     });
 
@@ -281,7 +281,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
@@ -296,10 +296,10 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
-        const useButtons = screen.getAllByText("Use This");
+        const useButtons = screen.getAllByText("Use this");
         const copyButtons = screen.getAllByText("Copy");
 
         expect(useButtons).toHaveLength(3);
@@ -320,7 +320,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("AI service unavailable")).toBeInTheDocument();
@@ -335,7 +335,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Network error")).toBeInTheDocument();
@@ -350,7 +350,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(
@@ -371,7 +371,7 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("API Error")).toBeInTheDocument();
@@ -383,7 +383,7 @@ describe("AISuggestionButton", () => {
         json: () => Promise.resolve(mockApiResponse),
       });
 
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       expect(screen.queryByText("API Error")).not.toBeInTheDocument();
     });
@@ -395,17 +395,17 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
     });
 
-    it('should call onSuggestionSelect when "Use This" is clicked', async () => {
+    it('should call onSuggestionSelect when "Use this" is clicked', async () => {
       const user = userEvent.setup();
 
-      const useButton = screen.getAllByText("Use This")[0];
+      const useButton = screen.getAllByText("Use this")[0];
       await user.click(useButton);
 
       expect(defaultProps.onSuggestionSelect).toHaveBeenCalledWith(
@@ -466,7 +466,7 @@ describe("AISuggestionButton", () => {
 
       expect(
         screen.getByText(
-          'Click "Generate AI Suggestions" to get improved versions of your content',
+          'Click "Generate suggestions" to get improved versions of your content',
         ),
       ).toBeInTheDocument();
     });
@@ -492,10 +492,10 @@ describe("AISuggestionButton", () => {
       render(<AISuggestionButton {...defaultProps} />);
 
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       expect(
-        screen.queryByText('Click "Generate AI Suggestions"'),
+        screen.queryByText('Click "Generate suggestions"'),
       ).not.toBeInTheDocument();
     });
   });
@@ -526,9 +526,9 @@ describe("AISuggestionButton", () => {
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
       // The modal still opens and the original-text panel renders empty.
-      expect(screen.getByText("Original Text")).toBeInTheDocument();
+      expect(screen.getByText("Original text")).toBeInTheDocument();
       const originalTextPanel = screen
-        .getByText("Original Text")
+        .getByText("Original text")
         .parentElement!.querySelector("p");
       expect(originalTextPanel).toHaveTextContent("");
     });
@@ -541,23 +541,23 @@ describe("AISuggestionButton", () => {
 
       // Generate suggestions
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Close modal
-      const closeButton = screen.getByRole("button", { name: "" });
+      const closeButton = screen.getByRole("button", { name: "Close" });
       await user.click(closeButton);
 
-      // Reopen modal. Only "Use This" resets the list, so the previous
+      // Reopen modal. Only "Use this" resets the list, so the previous
       // suggestions are still there.
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
 
       expect(screen.getByText("Suggestions")).toBeInTheDocument();
       expect(
-        screen.queryByText('Click "Generate AI Suggestions"'),
+        screen.queryByText('Click "Generate suggestions"'),
       ).not.toBeInTheDocument();
     });
 
@@ -567,14 +567,14 @@ describe("AISuggestionButton", () => {
 
       // Generate suggestions
       await user.click(screen.getByRole("button", { name: /ai suggest/i }));
-      await user.click(screen.getByText("Generate AI Suggestions"));
+      await user.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Use a suggestion
-      const useButton = screen.getAllByText("Use This")[0];
+      const useButton = screen.getAllByText("Use this")[0];
       await user.click(useButton);
 
       // Reopen modal

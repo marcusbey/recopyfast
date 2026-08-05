@@ -136,17 +136,17 @@ export class ErrorBoundary extends Component<Props, State> {
         `}
         >
           <div className="max-w-md mx-auto">
-            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <AlertCircle className="w-12 h-12 text-destructive mx-auto mb-4" />
 
-            <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+            <h2 className="text-2xl font-semibold text-foreground mb-2">
               {level === "page" && "Something went wrong"}
               {level === "section" && "This section encountered an error"}
               {level === "component" && "Component error"}
             </h2>
 
-            <p className="text-gray-600 mb-6">
+            <p className="text-muted-foreground mb-6">
               {level === "page" &&
-                "We apologize for the inconvenience. The error has been reported and we're working on fixing it."}
+                "The error has been reported and we're working on a fix."}
               {level === "section" &&
                 "This section couldn't load properly. You can try refreshing or continue using other parts of the app."}
               {level === "component" &&
@@ -156,15 +156,15 @@ export class ErrorBoundary extends Component<Props, State> {
             {/* Error details in development */}
             {process.env.NODE_ENV === "development" && (
               <details className="mb-6 text-left">
-                <summary className="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
+                <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground">
                   Error details
                 </summary>
-                <div className="mt-2 p-4 bg-gray-100 rounded-md">
-                  <p className="text-xs font-mono text-gray-700 break-all">
+                <div className="mt-2 p-4 bg-surface-2 rounded-md">
+                  <p className="text-xs font-mono text-foreground break-all">
                     {error.message}
                   </p>
                   {errorId && (
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-muted-foreground mt-2">
                       Error ID: {errorId}
                     </p>
                   )}
@@ -197,7 +197,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
             {/* Error ID for support */}
             {errorId && level !== "component" && (
-              <p className="text-xs text-gray-500 mt-6">
+              <p className="text-xs text-muted-foreground mt-6">
                 If the problem persists, please contact support with error ID:{" "}
                 {errorId}
               </p>

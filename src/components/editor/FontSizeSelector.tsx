@@ -51,11 +51,11 @@ export default function FontSizeSelector({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between gap-2 w-full px-3 py-2 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-lg transition-colors text-sm"
+        className="flex items-center justify-between gap-2 w-full px-3 py-2 bg-surface-2 hover:bg-surface-3 text-foreground rounded-lg transition-colors text-sm"
       >
         <span>{FONT_SIZE_LABELS[currentSizeKey]}</span>
         <ChevronDown
-          className={`w-4 h-4 text-gray-400 transition-transform ${
+          className={`w-4 h-4 text-muted-foreground transition-transform ${
             isOpen ? "rotate-180" : ""
           }`}
         />
@@ -69,7 +69,7 @@ export default function FontSizeSelector({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50 max-h-64 overflow-y-auto"
+            className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-md overflow-hidden z-50 max-h-64 overflow-y-auto"
           >
             {(Object.keys(FONT_SIZES) as FontSizeKey[]).map((sizeKey) => (
               <button
@@ -77,21 +77,21 @@ export default function FontSizeSelector({
                 onClick={() => handleSelect(sizeKey)}
                 className={`flex items-center justify-between w-full px-3 py-2 text-sm transition-colors ${
                   sizeKey === currentSizeKey
-                    ? "bg-emerald-500/20 text-emerald-400"
-                    : "text-gray-300 hover:bg-gray-700"
+                    ? "bg-tone-accent-surface text-tone-accent-text"
+                    : "text-foreground hover:bg-surface-2"
                 }`}
               >
                 <span className="flex items-center gap-2">
                   <span
                     style={{ fontSize: FONT_SIZES[sizeKey] }}
-                    className="w-6 h-6 flex items-center justify-center text-gray-500"
+                    className="w-6 h-6 flex items-center justify-center text-muted-foreground"
                   >
                     A
                   </span>
                   <span>{FONT_SIZE_LABELS[sizeKey]}</span>
                 </span>
                 {sizeKey === currentSizeKey && (
-                  <Check className="w-4 h-4 text-emerald-400" />
+                  <Check className="w-4 h-4 text-tone-accent-text" />
                 )}
               </button>
             ))}

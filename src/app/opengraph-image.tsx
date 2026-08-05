@@ -7,8 +7,9 @@ export const contentType = "image/png";
 
 /**
  * Default social preview card, shared by Open Graph and Twitter (see
- * `twitter-image.tsx`). Uses the brand's blue-to-purple gradient mark on a
- * dark ground so the card stays legible in both light and dark timelines.
+ * `twitter-image.tsx`). Uses the brand's solid teal mark on a dark ground so
+ * the card stays legible in both light and dark timelines. Literals match the
+ * globals.css palette — CSS variables are unavailable inside ImageResponse.
  */
 export default function OpenGraphImage() {
   return new ImageResponse(
@@ -21,7 +22,8 @@ export default function OpenGraphImage() {
           flexDirection: "column",
           justifyContent: "center",
           padding: "0 96px",
-          backgroundImage: "linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%)",
+          backgroundImage:
+            "linear-gradient(135deg, hsl(200 18% 7%) 0%, hsl(200 15% 12%) 100%)",
         }}
       >
         <div
@@ -40,8 +42,7 @@ export default function OpenGraphImage() {
               alignItems: "center",
               justifyContent: "center",
               borderRadius: 26,
-              backgroundImage:
-                "linear-gradient(135deg, #2563eb 0%, #9333ea 100%)",
+              backgroundColor: "hsl(174 48% 58%)",
             }}
           >
             <svg
@@ -91,7 +92,7 @@ export default function OpenGraphImage() {
             width: 240,
             height: 10,
             borderRadius: 999,
-            backgroundImage: "linear-gradient(90deg, #2563eb 0%, #9333ea 100%)",
+            backgroundColor: "hsl(174 48% 58%)",
           }}
         />
       </div>

@@ -104,30 +104,35 @@ export default function AISuggestionButton({
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 transition-colors"
+        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-tone-accent-surface text-tone-accent-text rounded-md hover:bg-tone-accent-surface/80 transition-colors"
         title="Get AI suggestions"
       >
         <Wand2 className="h-4 w-4" />
-        AI Suggest
+        AI suggest
       </button>
     );
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-card rounded-xl shadow-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Wand2 className="h-5 w-5 text-purple-600" />
-            <h3 className="text-lg font-semibold">AI Content Suggestions</h3>
+            <Wand2 className="h-5 w-5 text-primary" />
+            <h3 className="text-lg font-semibold">AI content suggestions</h3>
           </div>
+          {/* Its only content is an icon, so without a label this button
+              reaches a screen reader as "button" and nothing else. */}
           <button
+            type="button"
+            aria-label="Close"
             onClick={() => setIsOpen(false)}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-muted-foreground hover:text-foreground"
           >
             <svg
               className="h-6 w-6"
+              aria-hidden="true"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -145,24 +150,24 @@ export default function AISuggestionButton({
         <div className="p-6">
           {/* Original Text */}
           <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Original Text
+            <label className="block text-sm font-medium text-foreground mb-2">
+              Original text
             </label>
-            <div className="bg-gray-50 border border-gray-200 rounded-md p-3">
-              <p className="text-sm text-gray-900">{currentText}</p>
+            <div className="bg-surface-1 border rounded-md p-3">
+              <p className="text-sm text-foreground">{currentText}</p>
             </div>
           </div>
 
           {/* Options */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-foreground mb-2">
                 Goal
               </label>
               <select
                 value={selectedGoal}
                 onChange={(e) => setSelectedGoal(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full border border-input bg-card rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {SUGGESTION_GOALS.map((goal) => (
                   <option key={goal.value} value={goal.value}>
@@ -173,13 +178,13 @@ export default function AISuggestionButton({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-foreground mb-2">
                 Tone
               </label>
               <select
                 value={selectedTone}
                 onChange={(e) => setSelectedTone(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                className="w-full border border-input bg-card rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {TONE_OPTIONS.map((tone) => (
                   <option key={tone.value} value={tone.value}>
@@ -195,48 +200,50 @@ export default function AISuggestionButton({
             <button
               onClick={handleGenerateSuggestions}
               disabled={isLoading}
-              className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <RefreshCw className="h-4 w-4" />
               )}
-              {isLoading ? "Generating..." : "Generate AI Suggestions"}
+              {isLoading ? "Generating..." : "Generate suggestions"}
             </button>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 p-3 bg-red-50 border border-red-200 rounded-md">
-              <p className="text-sm text-red-600">{error}</p>
+            <div className="mb-6 p-3 bg-tone-danger-surface border border-tone-danger-border rounded-md">
+              <p className="text-sm text-tone-danger-text">{error}</p>
             </div>
           )}
 
           {/* Suggestions */}
           {suggestions.length > 0 && (
             <div className="space-y-4">
-              <h4 className="text-sm font-medium text-gray-700">Suggestions</h4>
+              <h4 className="text-sm font-medium text-foreground">
+                Suggestions
+              </h4>
               {suggestions.map((suggestion, index) => (
                 <div
                   key={index}
-                  className="border border-gray-200 rounded-md p-4 hover:border-purple-300 transition-colors"
+                  className="border rounded-md p-4 hover:border-primary/40 transition-colors"
                 >
-                  <p className="text-sm text-gray-900 mb-3">
+                  <p className="text-sm text-foreground mb-3">
                     {suggestion.text}
                   </p>
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleUseSuggestion(suggestion.text)}
-                      className="text-xs bg-purple-600 text-white px-3 py-1 rounded hover:bg-purple-700"
+                      className="text-xs bg-primary text-primary-foreground px-3 py-1 rounded-sm hover:bg-primary/90 transition-colors"
                     >
-                      Use This
+                      Use this
                     </button>
                     <button
                       onClick={() =>
                         handleCopySuggestion(suggestion.text, index)
                       }
-                      className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800"
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                     >
                       {copiedIndex === index ? (
                         <>
@@ -259,10 +266,10 @@ export default function AISuggestionButton({
           {/* Empty State */}
           {!isLoading && suggestions.length === 0 && !error && (
             <div className="text-center py-8">
-              <Wand2 className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-              <p className="text-gray-500">
-                Click &quot;Generate AI Suggestions&quot; to get improved
-                versions of your content
+              <Wand2 className="h-12 w-12 text-muted-foreground/40 mx-auto mb-4" />
+              <p className="text-muted-foreground">
+                Click &quot;Generate suggestions&quot; to get improved versions
+                of your content
               </p>
             </div>
           )}
