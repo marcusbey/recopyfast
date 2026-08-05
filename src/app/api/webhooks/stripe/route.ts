@@ -594,24 +594,41 @@ async function stopBillingForLifetimeOwner(
       .in("status", LIVE_SUBSCRIPTION_STATUSES)
       .returns<Array<{ stripe_subscription_id: string | null }>>();
 
+    // Guarded per subscription, not around the loop. With one `try` outside,
+    // a transient Stripe error on the first row jumped straight to the catch
+    // and every later subscription kept billing untouched — and there is no
+    // second chance: `handleLifetimePurchase` returns early once the grant is
+    // recorded, so a webhook retry never re-enters this function. Each
+    // cancellation is independent, so one failing must not decide the rest.
     for (const subscription of subscriptions ?? []) {
       if (!subscription.stripe_subscription_id) continue;
 
-      await stripe.subscriptions.update(subscription.stripe_subscription_id, {
-        cancel_at_period_end: true,
-        metadata: { cancelled_reason: "lifetime_purchase", paymentIntentId },
-      });
+      try {
+        await stripe.subscriptions.update(subscription.stripe_subscription_id, {
+          cancel_at_period_end: true,
+          metadata: { cancelled_reason: "lifetime_purchase", paymentIntentId },
+        });
 
-      console.log(
-        `Lifetime purchase ${paymentIntentId}: subscription ` +
-          `${subscription.stripe_subscription_id} set to cancel at period end.`,
-      );
+        console.log(
+          `Lifetime purchase ${paymentIntentId}: subscription ` +
+            `${subscription.stripe_subscription_id} set to cancel at period end.`,
+        );
+      } catch (error) {
+        console.error(
+          `Lifetime purchase ${paymentIntentId} granted, but subscription ` +
+            `${subscription.stripe_subscription_id} could not be cancelled — ` +
+            `this customer is being billed for a plan they own. Cancel it by ` +
+            `hand.`,
+          error,
+        );
+      }
     }
   } catch (error) {
+    // The lookup itself failed, so we do not know what to cancel.
     console.error(
-      `Lifetime purchase ${paymentIntentId} granted, but the existing ` +
-        `subscription could not be cancelled — this customer is being billed ` +
-        `for a plan they own. Cancel it by hand.`,
+      `Lifetime purchase ${paymentIntentId} granted, but the customer's ` +
+        `subscriptions could not be read — check whether they are still ` +
+        `being billed for a plan they own.`,
       error,
     );
   }
