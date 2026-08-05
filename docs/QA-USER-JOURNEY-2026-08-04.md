@@ -577,6 +577,10 @@ fall through to the token path unchanged.
 
 ## What did not close
 
+Everything still outstanding is consolidated in **Open backlog** at the end of
+this document; the entry below is kept because it is the only *finding* that
+did not fully close.
+
 ### ⚠️ F-14 — Half closed (P2)
 
 The auth half is fixed and the Stripe half now shares the same resolver
@@ -658,6 +662,120 @@ supabase/migrations/20260804130000_restore_missing_rls_policies.sql   ← applie
 ```
 
 ---
+
+---
+
+# Open backlog — everything still to fix
+
+One list, ordered by what it costs the business. Everything above this line is
+either fixed and verified, or restated here. Nothing else is outstanding from
+the two QA passes.
+
+## P1 — costs money or misleads a paying customer
+
+### B-1. "+$5 per additional website" is advertised and never charged
+
+`plans.additional_site_price` is `5.00` for Pro, surfaced through
+`/api/pricing` and rendered on the pricing card and the billing page. Nothing
+bills for it. `canCreateWebsite` refuses the 6th site outright rather than
+charging for it, so the sentence describes a product that does not exist.
+
+Decide which is true and make both surfaces agree:
+- **Hard limit** (what the code does) — delete the "+$5" copy and the
+  `additional_site_price` column, and the refusal message becomes the whole
+  story. Cheapest, and honest today.
+- **Metered overage** (what the copy sells) — needs a Stripe metered price, a
+  usage record on site creation, and a proration story when a site is deleted.
+  Real work; do not start it because of a stray sentence.
+
+### B-2. No payment has ever been completed except Pro monthly
+
+`qa:journey` proves a Checkout Session is *created* and correctly priced for
+Starter, Pro monthly, Pro yearly, credits and Lifetime. Only **Pro monthly**
+has been paid for end to end. The webhook branches for Starter, for annual
+subscriptions, and for `lifetime_purchase` are therefore unexercised against a
+real payment — and the lifetime branch is the one that grants a $199
+entitlement and now cancels a running subscription (N-5).
+
+Needs a browser against Stripe's hosted page (test mode, `4242…`) with
+`stripe listen` forwarding. Half an hour, and it retires the largest remaining
+unknown in the billing system.
+
+### B-3. Rotate `SUPABASE_PASSWORD`
+
+Outstanding since the register before last. Used again this session to apply
+migrations. Rotating it invalidates the pooler URL in `supabase/.temp`, so
+re-link the CLI afterwards.
+
+## P2 — real cost, no immediate customer harm
+
+### B-4. The widget ships 41 KB of socket.io that never connects
+
+`scripts/build-embed.mjs` compiles `socket.io-client` into the served bundle:
+169.7 KB total, of which 41.2 KB is the socket client. Real-time is opt-in and
+`RECOPYFAST_WS` is unset on every real install, so `establishConnection`
+returns before using it — every visitor to every customer's site downloads a
+quarter of the widget for nothing.
+
+Load it dynamically from `socket.io-client.min.js` (already built and served
+beside the bundle) only when `RECOPYFAST_WS` is set. The fallback loader
+already exists; the inline copy is what needs removing.
+
+### B-5. `server/index.js` is a real-time server nothing can host
+
+An Express + socket.io process that Vercel cannot run, still wired into
+`npm run dev` and still the only listener for the `content-map` event the
+widget no longer relies on. It is the reason F-10 hid for so long: the code
+looked like it had a delivery mechanism.
+
+Either host it somewhere and re-enable real-time deliberately, or delete it and
+the `dev:ws` scripts. Leaving it is what made "the widget reports its content"
+look true.
+
+### B-6. `NEXT_PUBLIC_APP_URL` locally (F-14's remaining half)
+
+Preview deployments are fixed in code. The **local** case is configuration: a
+developer whose `.env` carries the production URL still gets signed in locally
+and redirected to production. A development-only warning now names both hosts
+and the fix, but the fix itself is a `.env.local` entry — see
+`docs/DEPLOYMENT-ENV.md`.
+
+### B-7. Supabase `smtp_max_frequency` is 60 seconds
+
+One auth email per address per minute. Correct as anti-abuse, but a user who
+mistypes their address and retries immediately gets silence with no
+explanation. Worth surfacing in the signup UI rather than changing.
+
+## P3 — quality and maintenance
+
+### B-8. No automated accessibility assertions
+
+F-15 was fixed by hand and is covered by hand-written role assertions. There is
+no `jest-axe` in the project, so the next dialog can regress the same way.
+
+### B-9. 44 pre-existing lint warnings
+
+Unused imports and `react-hooks/exhaustive-deps` across ~25 files. None
+introduced by the QA passes (the count is unchanged), all suppressible or
+fixable mechanically. Worth clearing so a *new* warning is visible.
+
+### B-10. `POST /api/domains/verify` has no server-side tests
+
+The route was rewritten during this pass, including the column-name fix that
+was the root cause of "no verification row was ever created". Its component has
+tests; the route does not, and those tests mock `fetch`, so they prove the
+component reads the contract, not that the route produces it.
+
+## Not defects, but unproven
+
+- **Plan changes, proration and cancellation.** The controls exist and are
+  wired; none was exercised against Stripe.
+- **Rollback beyond one version.** `qa:journey` restores a single snapshot.
+  Multi-version history, and restoring an *older* version after several edits,
+  is untested.
+- **Supabase SMTP at volume.** One signup email was sent and `delivered`
+  through Resend. Nothing has tested a burst.
+
 
 ## The lesson worth keeping
 
