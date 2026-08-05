@@ -197,11 +197,36 @@ export async function POST(request: NextRequest) {
       // The stored value is method-agnostic — the same code goes in a TXT
       // record or in the file — so switching method reuses the live challenge
       // rather than silently handing back instructions for the other one.
+      //
+      // Unless there is nothing to reuse. A row whose `verification_value` is
+      // missing re-issues as `recopyfast-verification=` or
+      // /.well-known/recopyfast-verification-.txt, and `verifyDomainFile` now
+      // refuses an empty code outright — so the owner would follow the
+      // instructions exactly and fail forever, with deleting the record the
+      // only way out. Re-mint into the same row rather than inserting beside
+      // it: the reuse branch exists to keep one live challenge per domain, and
+      // leaving the broken row behind would just hand it back next time.
+      const storedCode = existingRow.verification_value?.trim() ?? "";
+      const replacement = storedCode
+        ? null
+        : createDomainVerification(
+            sanitizedSiteId,
+            normalizedDomain,
+            sanitizedMethod,
+          );
+
       const { data: updatedRow, error: methodError } = await serviceClient
         .from("domain_verifications")
         .update({
           verification_method: sanitizedMethod,
           updated_at: new Date().toISOString(),
+          ...(replacement
+            ? {
+                verification_token: replacement.verificationToken,
+                verification_value: replacement.verificationCode,
+                expires_at: replacement.expiresAt.toISOString(),
+              }
+            : {}),
         })
         .eq("id", existingRow.id)
         .select(VERIFICATION_COLUMNS)
