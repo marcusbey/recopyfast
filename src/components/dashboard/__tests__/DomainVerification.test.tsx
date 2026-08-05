@@ -4,6 +4,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DomainVerification } from "../DomainVerification";
+import { fileDeclaresCode } from "@/lib/security/domain-challenge";
 import "@testing-library/jest-dom";
 
 const IN_A_DAY = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
@@ -97,6 +98,45 @@ describe("DomainVerification", () => {
     expect(screen.getByText("DNS")).toBeInTheDocument();
     expect(
       screen.getByText("recopyfast-verification=abc123"),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * The button used to copy the bare code for the file method, while the block
+   * beside it displayed the path — so an owner who followed it wrote a file the
+   * checker refuses, with nothing to explain why. The instructions panel that
+   * produces a correct file is dismissible and cannot be reopened for a row
+   * that already exists, so this button was the only affordance left.
+   *
+   * Asserted against `fileDeclaresCode` itself rather than against a literal:
+   * the point is not that some particular string is copied, it is that what
+   * lands on the clipboard is what the verifier accepts.
+   */
+  it("copies a file body the verifier will accept, not the bare code", async () => {
+    mockList([
+      aVerification({ verificationMethod: "file", verificationCode: "abc123" }),
+    ]);
+    const user = userEvent.setup();
+    render(<DomainVerification siteId="site-1" siteDomain="example.com" />);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: /Copy file contents for example\.com/i,
+      }),
+    );
+
+    const copied = await waitFor(async () => {
+      const text = await navigator.clipboard.readText();
+      expect(text).not.toBe("");
+      return text;
+    });
+    expect(fileDeclaresCode(copied, "abc123")).toBe(true);
+    // The bare code on its own is exactly what the checker refuses.
+    expect(copied).not.toBe("abc123");
+
+    // And the owner is still told where to put it.
+    expect(
+      screen.getByText("/.well-known/recopyfast-verification-abc123.txt"),
     ).toBeInTheDocument();
   });
 

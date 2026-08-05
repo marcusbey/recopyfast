@@ -129,10 +129,31 @@ export async function PUT(
     // carry no editor token and never can, so validating tokens alone refused
     // the one caller guaranteed to hold every right. Tried first, falls through
     // to the token path untouched — see authorizeFirstPartyEditorAccess.
+    //
+    // Asked at "view" and graded afterwards, matching the GET handler above and
+    // /api/staging/publish. The helper returns null both for "no first-party
+    // access at all" and for "has access, but not at this level", so asking for
+    // "edit" up front made a view-only collaborator indistinguishable from an
+    // anonymous caller: they fell through to the token path and were told their
+    // editor token was invalid, which is unactionable advice for someone who is
+    // plainly signed in and never had a token.
     const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       siteId,
-      "edit",
+      "view",
     );
+
+    if (
+      firstPartyAccess &&
+      !requireEditorPermission(firstPartyAccess, "edit")
+    ) {
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Requires 'edit' permission" },
+          { status: 403 },
+        ),
+        request,
+      );
+    }
 
     let access = firstPartyAccess;
 
