@@ -2888,19 +2888,31 @@
         }
       }
 
+      // Claimed before the request, and given back if the request fails.
+      //
+      // Recording it up front is what stops a rescan storm — a carousel can
+      // mutate the DOM many times a second — from firing a second POST while
+      // the first is still in flight. But a claim that is never released is a
+      // claim that outlives its reason: on a page that never reloads, one
+      // transient failure would leave the fingerprint set, every later rescan
+      // short-circuit on it, and the site sit at "no content yet" for as long
+      // as the visitor stays. A multi-page site papers over this by reloading;
+      // an SPA does not.
+      const previousFingerprint = this.lastContentMapFingerprint;
       this.lastContentMapFingerprint = fingerprint;
 
-      // Whatever we are about to send, the server will hold once this lands, so
-      // a rescan seconds later has nothing left to report. Recorded before the
-      // request rather than in its `.then` because a failed POST leaves the
-      // fingerprint set anyway — the next page load is the retry, and it starts
-      // from a fresh GET.
-      const reported = this.serverKnownElementIds;
-      if (reported) {
+      const known = this.serverKnownElementIds;
+      const claimed = [];
+      if (known) {
         for (let i = 0; i < elementIds.length; i++) {
-          reported.add(elementIds[i]);
+          if (!known.has(elementIds[i])) {
+            known.add(elementIds[i]);
+            claimed.push(elementIds[i]);
+          }
         }
       }
+
+      const self = this;
 
       fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
         method: 'POST',
@@ -2916,8 +2928,17 @@
         // nothing for keepalive to buy.
         body: JSON.stringify(contentMap)
       }).catch(function() {
-        // Offline, blocked by an extension, or the site was deleted. The next
-        // page load tries again; there is nothing useful to say here.
+        // Offline, blocked by an extension, or the site was deleted. Nothing
+        // useful to say on a customer's page — but give the claim back, so the
+        // next rescan or navigation retries instead of inheriting a report that
+        // never happened. Only the ids this call added are removed; ones the
+        // server already held are not ours to forget.
+        self.lastContentMapFingerprint = previousFingerprint;
+        if (known) {
+          for (let i = 0; i < claimed.length; i++) {
+            known.delete(claimed[i]);
+          }
+        }
       });
     }
 

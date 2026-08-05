@@ -90,5 +90,12 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION create_content_version(UUID, TEXT, TEXT, TEXT) TO authenticated;
+-- Service role only. This is SECURITY DEFINER machinery that every caller in
+-- the codebase reaches through the service-role client; granting it to
+-- `authenticated` (or leaving Postgres' implicit PUBLIC grant in place) would
+-- publish it as a PostgREST RPC that overwrites content without asking who is
+-- calling. 20260805190000 revokes that reach for the function production
+-- already has.
+REVOKE ALL ON FUNCTION create_content_version(UUID, TEXT, TEXT, TEXT)
+  FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION create_content_version(UUID, TEXT, TEXT, TEXT) TO service_role;

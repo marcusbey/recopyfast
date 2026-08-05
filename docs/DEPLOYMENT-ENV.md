@@ -60,6 +60,25 @@ volume. Email templates must link to `/auth/confirm?token_hash=…`, never to
 `/auth/callback`, which needs the PKCE verifier cookie and so breaks whenever
 the link is opened on a different device from the one that requested it.
 
+## Applied to the production database by hand
+
+`supabase/migrations/20260805190000_lock_down_content_version_rpcs.sql` was run
+against the live project on 2026-08-05, because what it fixes was live.
+
+`create_content_version` and `restore_content_version` are `SECURITY DEFINER`
+and were executable by `PUBLIC`, `anon` and `authenticated`. PostgREST publishes
+every function in `public` as an RPC, so the anon key — which ships in the
+client bundle by design — could call them, and neither asks who the caller is.
+Confirmed before the fix: `POST /rest/v1/rpc/restore_content_version` with the
+anon key returned `Version not found`, an error raised *inside* the function
+body. With a real version id it would have rewritten another tenant's drafts.
+
+After applying, the same call returns `42501 permission denied`, and the ACL is
+`postgres=X, service_role=X` on both. Every caller in this codebase — the two
+history routes, the styles route, `server/index.js` — uses the service-role
+client, so nothing legitimate lost access; `npm run qa:journey` passes 43/43
+against the live project, rollback included.
+
 ## `NEXT_PUBLIC_APP_URL`
 
 Used to build every absolute URL the app hands back to a user: auth callback

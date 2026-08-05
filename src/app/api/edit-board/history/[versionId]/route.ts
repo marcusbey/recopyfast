@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
 import {
@@ -18,6 +19,39 @@ function extractStagingToken(request: NextRequest): string | null {
     return authHeader.substring(7);
   }
   return request.nextUrl.searchParams.get("rcf_token");
+}
+
+/**
+ * Is this caller carrying anything at all that could authorise them?
+ *
+ * The site a version belongs to is only knowable by reading the version row, so
+ * the lookup genuinely has to precede the permission check. That ordering made
+ * the endpoint answer differently for a version id that exists (401, after the
+ * row was found) and one that does not (404) — an existence oracle for anyone,
+ * signed in or not, since the old short-circuit on a missing staging token no
+ * longer came first.
+ *
+ * Restoring that short-circuit without losing the owner's first-party path
+ * means asking the one question that needs no site: does this request carry a
+ * credential of either kind? A caller with neither cannot be authorised for any
+ * version, so they learn nothing from being refused before the lookup.
+ */
+async function hasAnyCredential(token: string | null): Promise<boolean> {
+  if (token) return true;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  return Boolean(user);
+}
+
+function unauthenticated(origin: string | null) {
+  return withCors(
+    NextResponse.json({ error: "Authentication required" }, { status: 401 }),
+    origin,
+  );
 }
 
 function withCors(response: NextResponse, allowedOrigin: string | null) {
@@ -44,6 +78,10 @@ export async function GET(
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
     const supabase = createServiceRoleClient();
+
+    if (!(await hasAnyCredential(token))) {
+      return unauthenticated(origin);
+    }
 
     // Get the version
     const { data: version, error } = await supabase
@@ -127,6 +165,10 @@ export async function POST(
     const origin = request.headers.get("origin");
     const token = extractStagingToken(request);
     const supabase = createServiceRoleClient();
+
+    if (!(await hasAnyCredential(token))) {
+      return unauthenticated(origin);
+    }
 
     // Get the version
     const { data: version, error: fetchError } = await supabase
