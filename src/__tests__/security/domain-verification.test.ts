@@ -417,6 +417,23 @@ describe("Domain Verification", () => {
       expect(result.error).toContain("missing");
     });
 
+    it("refuses a 404 page that merely echoes the requested path", async () => {
+      // The code is IN the url we fetch, so any domain whose fallback page
+      // reflects the path contains it. A substring match would have verified a
+      // domain for someone who only pointed a hostname at it.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve(
+            "<h1>404</h1><p>Not found: /.well-known/recopyfast-verification-code123.txt</p>",
+          ),
+      });
+
+      const result = await verifyDomainFile("example.com", "code123");
+
+      expect(result.success).toBe(false);
+    });
+
     it("rejects a file that does not carry this domain's code", async () => {
       (global.fetch as jest.Mock).mockResolvedValue({
         ok: true,
@@ -441,7 +458,7 @@ describe("Domain Verification", () => {
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("does not contain the verification code");
+      expect(result.error).toContain("does not declare the verification code");
     });
 
     it("should handle HTTP errors", async () => {

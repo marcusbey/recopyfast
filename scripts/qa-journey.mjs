@@ -690,14 +690,38 @@ async function main() {
 
     if (versions.length > 0) {
       const versionId = versions[0].id;
+
+      // Change the draft AFTER the snapshot, so a restore that silently does
+      // nothing is distinguishable from one that works. Asserting only that
+      // the endpoint returns 200 would pass either way — which is exactly how
+      // a review flagged this line as a possible no-op.
+      const AFTER_SNAPSHOT = "Edited again after the snapshot";
+      await app(`/api/staging/content/${siteId}`, {
+        method: "PUT",
+        body: JSON.stringify({ elementId: ELEMENT, content: AFTER_SNAPSHOT }),
+      });
+
       const restored = await app(`/api/edit-board/history/${versionId}`, {
         method: "POST",
         body: JSON.stringify({}),
       });
-      if (restored.ok) {
-        record("5e.3", "Owner rolls back to a version", "pass");
+
+      const afterRestore = await json(await app(`/api/staging/content/${siteId}`));
+      const restoredEl = (afterRestore.content ?? []).find(
+        (e) => e.element_id === ELEMENT,
+      );
+
+      if (!restored.ok) {
+        record("5e.3", "Owner rolls back to a version", "fail", `${restored.status} ${JSON.stringify(await json(restored)).slice(0, 160)}`);
+      } else if (restoredEl?.staging_content === AFTER_SNAPSHOT) {
+        record(
+          "5e.3",
+          "Owner rolls back to a version",
+          "fail",
+          "restore reported success but the draft still holds the newer edit — a silent no-op",
+        );
       } else {
-        record("5e.3", "Owner rolls back to a version", "fail", `${restored.status} ${JSON.stringify(await json(restored)).slice(0, 180)}`);
+        record("5e.3", "Owner rolls back to a version", "pass", `draft reverted to ${JSON.stringify(restoredEl?.staging_content)}`);
       }
     }
 

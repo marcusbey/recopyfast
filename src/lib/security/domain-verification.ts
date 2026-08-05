@@ -298,6 +298,35 @@ export async function verifyDNSTXTRecord(
 }
 
 /**
+ * Does this file body actually DECLARE the verification code?
+ *
+ * Not a substring search. The code appears in the URL we fetch
+ * (`/.well-known/recopyfast-verification-<code>.txt`), so any domain whose 404
+ * page or SPA fallback echoes the requested path back into the body contains
+ * the code without the owner having uploaded anything — a plain `includes`
+ * would verify a domain for someone who merely pointed a hostname at it.
+ *
+ * So the code has to appear where the file we issued puts it: on its own line,
+ * behind the `Verification Code:` label. A reflected path cannot satisfy that.
+ *
+ * Whole-body equality would be stricter still, and is what this replaced — but
+ * the body we generate embeds `Generated: <ISO timestamp>`, so equality against
+ * a regenerated copy could never match and the method was impossible to
+ * complete for anybody. Matching the labelled line keeps the strength that
+ * mattered and drops the part that made it unusable, while tolerating the
+ * trailing newline and CRLF that real editors and static hosts add.
+ */
+function fileDeclaresCode(body: string, verificationCode: string): boolean {
+  return body
+    .split(/\r?\n/)
+    .some(
+      (line) =>
+        line.trim().toLowerCase() ===
+        `verification code: ${verificationCode}`.toLowerCase(),
+    );
+}
+
+/**
  * Verify file on domain
  */
 export async function verifyDomainFile(
@@ -368,12 +397,12 @@ export async function verifyDomainFile(
       };
     }
 
-    if (normalizedContent.includes(verificationCode)) {
+    if (fileDeclaresCode(normalizedContent, verificationCode)) {
       return { success: true };
     } else {
       return {
         success: false,
-        error: `File does not contain the verification code ${verificationCode}`,
+        error: `File does not declare the verification code ${verificationCode}`,
         details: {
           url,
           expected: expectedContent.trim(),

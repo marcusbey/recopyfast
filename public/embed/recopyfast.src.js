@@ -2858,8 +2858,13 @@
           'Content-Type': 'application/json',
           'Authorization': 'Bearer ' + SITE_TOKEN
         },
-        body: JSON.stringify(contentMap),
-        keepalive: true
+        // No `keepalive`. It caps the request body at 64 KB across the whole
+        // document, and a content-heavy page's map goes well past that — the
+        // browser rejects the request outright, so exactly the biggest customer
+        // sites would never report their content and would sit on "no content
+        // yet" forever. This runs on load rather than on unload, so there is
+        // nothing for keepalive to buy.
+        body: JSON.stringify(contentMap)
       }).catch(function() {
         // Offline, blocked by an extension, or the site was deleted. The next
         // page load tries again; there is nothing useful to say here.
