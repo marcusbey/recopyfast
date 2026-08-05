@@ -199,7 +199,11 @@ export async function GET(req: NextRequest) {
 
     const dateRange =
       startDate && endDate ? { start: startDate, end: endDate } : undefined;
-    const dashboardData = await analytics.getDashboardData(siteId, dateRange);
+    const dashboardData = await analytics.getDashboardData(
+      siteId,
+      dateRange,
+      auth.userId,
+    );
 
     return NextResponse.json(dashboardData);
   } catch (error) {

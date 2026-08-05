@@ -332,17 +332,31 @@ export async function verifyDomainFile(
 
     const content = await response.text();
     const normalizedContent = content.trim();
-    const normalizedExpected = expectedContent.trim();
 
-    if (normalizedContent === normalizedExpected) {
+    // Match on the CODE, not on byte equality with a regenerated body.
+    //
+    // The body carries a `Generated: <ISO timestamp>` line, and this function
+    // used to rebuild it at check time and require an exact match — so the
+    // expected value differed from the file the owner had downloaded by however
+    // many milliseconds had passed. The hosted-file method could therefore
+    // never succeed for anybody, and once the UI was mounted it became a
+    // download button leading to a permanent "File content does not match
+    // expected verification content".
+    //
+    // The code is the secret; the header and timestamp are decoration for the
+    // human who opens the file. Substring containment is also what makes this
+    // survive the things that really happen to a hosted text file: a trailing
+    // newline added by an editor, CRLF from a Windows checkout, or a static
+    // host that appends nothing but serves with different whitespace.
+    if (normalizedContent.includes(verificationCode)) {
       return { success: true };
     } else {
       return {
         success: false,
-        error: "File content does not match expected verification content",
+        error: `File does not contain the verification code ${verificationCode}`,
         details: {
           url,
-          expected: normalizedExpected,
+          expected: expectedContent.trim(),
           received: normalizedContent.substring(0, 200), // Limit to first 200 chars
         },
       };

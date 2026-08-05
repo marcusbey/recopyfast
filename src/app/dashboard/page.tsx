@@ -16,8 +16,7 @@ import { PageHeader, SectionHeader } from "@/components/ui/page-header";
 import { SkeletonList } from "@/components/ui/skeleton";
 import {
   StatusBadge,
-  resolveStatus,
-  siteStatuses,
+  resolveSiteStatus,
   type SiteStatus,
 } from "@/components/ui/status-badge";
 import {
@@ -113,7 +112,17 @@ export default function DashboardPage() {
     void fetchAiUsage();
   }, [user, fetchSites, fetchAiUsage]);
 
-  const activeSiteCount = useMemo(
+  /**
+   * The lead metric used to be "Active sites", which counted only sites the
+   * API flags `active` — and that flag means "we hold content for this site",
+   * nothing more. An owner with two working, script-installed sites read
+   * "Active sites 0" as the first and largest number on the page.
+   *
+   * The number that leads is now the one that is unambiguously true — how many
+   * sites are connected — with the content figure demoted to its hint, where it
+   * cannot be mistaken for a health verdict.
+   */
+  const sitesWithContentCount = useMemo(
     () => sites.filter((site) => site.status === "active").length,
     [sites],
   );
@@ -144,8 +153,9 @@ export default function DashboardPage() {
     [sites],
   );
 
+  // Fires when the site row exists, not when the dialog closes, so the summary
+  // behind the success screen is already right. The modal closes itself.
   const handleSiteRegistrationSuccess = () => {
-    setIsModalOpen(false);
     void fetchSites();
   };
 
@@ -171,16 +181,18 @@ export default function DashboardPage() {
           identical visual weight, which is a grid, not a hierarchy. */}
       <section aria-label="Summary" className="grid gap-3 lg:grid-cols-3">
         <Metric
-          label="Active sites"
-          value={String(activeSiteCount)}
+          label="Connected sites"
+          value={String(sites.length)}
           state={sitesState}
           icon={Globe}
           emphasis="lead"
           href="/dashboard/sites"
           hint={
-            sites.length === activeSiteCount
+            sites.length === 0
               ? undefined
-              : `${sites.length} connected in total`
+              : sitesWithContentCount === 0
+                ? "None have sent content yet"
+                : `${sitesWithContentCount} of ${sites.length} have sent content`
           }
           className="lg:row-span-3"
         />
@@ -301,11 +313,7 @@ export default function DashboardPage() {
                               </p>
                               {site.status && (
                                 <StatusBadge
-                                  status={resolveStatus(
-                                    siteStatuses,
-                                    site.status,
-                                    "inactive",
-                                  )}
+                                  status={resolveSiteStatus(site.status)}
                                   hideIcon
                                   size="sm"
                                   className="shrink-0"

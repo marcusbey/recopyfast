@@ -8,6 +8,7 @@ const mockSupabase = {
   insert: jest.fn().mockReturnThis(),
   select: jest.fn().mockReturnThis(),
   eq: jest.fn().mockReturnThis(),
+  in: jest.fn().mockReturnThis(),
   gte: jest.fn().mockReturnThis(),
   lte: jest.fn().mockReturnThis(),
   single: jest.fn(),
@@ -138,22 +139,21 @@ describe("AnalyticsTracker", () => {
         },
       ];
 
-      mockSupabase.select.mockReturnValueOnce(mockSupabase);
-      mockSupabase.gte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.lte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.eq.mockResolvedValueOnce({ data: mockActivityData });
-
-      mockSupabase.select.mockReturnValueOnce(mockSupabase);
-      mockSupabase.gte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.lte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.eq.mockResolvedValueOnce({ data: mockSiteAnalytics });
-
-      mockSupabase.select.mockReturnValueOnce(mockSupabase);
-      mockSupabase.gte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.lte.mockReturnValueOnce(mockSupabase);
-      mockSupabase.eq.mockResolvedValueOnce({ data: mockPerformanceData });
+      // Each scoped query now terminates in `.in("site_id", [...])` rather
+      // than `.eq`, because the dashboard aggregates over a SET of sites — the
+      // caller's own — instead of the single site or the impossible `id = ""`
+      // filter that used to make the "all sites" view read zero.
+      mockSupabase.in
+        .mockResolvedValueOnce({ data: mockActivityData })
+        .mockResolvedValueOnce({ data: mockSiteAnalytics })
+        .mockResolvedValueOnce({ data: mockPerformanceData });
 
       const result = await tracker.getDashboardData("site-1");
+
+      // Named explicitly, so a regression that silently widened the scope back
+      // to every tenant's rows fails here rather than in production.
+      expect(mockSupabase.in).toHaveBeenCalledWith("site_id", ["site-1"]);
+      expect(result.overview.total_sites).toBe(1);
 
       expect(result).toHaveProperty("overview");
       expect(result).toHaveProperty("trends");
@@ -164,7 +164,7 @@ describe("AnalyticsTracker", () => {
     });
 
     it("should return empty data on error", async () => {
-      mockSupabase.select.mockRejectedValueOnce(new Error("Database error"));
+      mockSupabase.in.mockRejectedValueOnce(new Error("Database error"));
 
       const result = await tracker.getDashboardData("site-1");
 

@@ -830,6 +830,8 @@
       this.observer = null;
       this.isInitialized = false;
       this.selectedElement = null;
+      /** Element-id set last reported, so rescans don't re-POST an identical map. */
+      this.lastContentMapFingerprint = null;
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -896,6 +898,18 @@
         }
 
         await this.establishConnection();
+
+        // Report what we found, regardless of whether a socket came up.
+        //
+        // This used to happen only inside the socket's 'connect' handler, so
+        // with real-time opt-in (and unset on every real install) discovery was
+        // never announced at all. That is what left every site permanently
+        // "Verifying" — see sendContentMap.
+        //
+        // After establishConnection so a live socket, when there is one, is
+        // already attached and gets the same map fanned out in the same pass.
+        this.sendContentMap();
+
         this.setupMutationObserver();
 
         if (this.editMode) {
@@ -2766,13 +2780,6 @@
     }
 
     sendContentMap() {
-      // Callers include the MutationObserver rescan and the public `rescan()`
-      // API, both of which can fire while we're in polling fallback mode with
-      // no socket at all.
-      if (!this.socket) {
-        return;
-      }
-
       const contentMap = {};
 
       this.elements.forEach(function(data, elementId) {
@@ -2783,13 +2790,79 @@
         };
       });
 
-      this.socket.emit('content-map', {
-        siteId: SITE_ID,
-        url: window.location.href,
-        token: SITE_TOKEN,
-        stagingMode: this.stagingMode,
-        stagingToken: this.stagingToken,
-        contentMap: contentMap
+      // Report over HTTP, not over the socket.
+      //
+      // This used to `return` early whenever `this.socket` was null and then
+      // emit 'content-map'. Since real-time became opt-in, RECOPYFAST_WS is
+      // normally unset, so `this.socket` is null on every real install and the
+      // content map was never sent ANYWHERE — server/index.js, the only
+      // listener for that event, is a separate Express process Vercel cannot
+      // host anyway.
+      //
+      // Nothing therefore ever wrote `content_elements` for a live site, and
+      // GET /api/sites derives a site's status from exactly that table
+      // (`elementsCount > 0 ? "active" : "verifying"`). Every customer's site
+      // sat at "Verifying" forever while the widget worked perfectly on their
+      // page — register F-10.
+      //
+      // POST /api/content/:siteId is the same endpoint the dashboard already
+      // reads back, it authorises the widget the way every other widget call is
+      // authorised (site token + registered Origin), and it upserts with
+      // `ignoreDuplicates`, so re-reporting on every page load and every
+      // MutationObserver rescan can never overwrite a published edit.
+      this.postContentMap(contentMap);
+
+      // The socket is an enhancement when something is listening: it fans the
+      // discovery out to other editors viewing the same page live. It is no
+      // longer how the map is delivered.
+      if (this.socket) {
+        this.socket.emit('content-map', {
+          siteId: SITE_ID,
+          url: window.location.href,
+          token: SITE_TOKEN,
+          stagingMode: this.stagingMode,
+          stagingToken: this.stagingToken,
+          contentMap: contentMap
+        });
+      }
+    }
+
+    /**
+     * Announce discovered elements to the API.
+     *
+     * Deliberately fire-and-forget and deliberately quiet. This runs on a
+     * customer's own page in front of their visitors: a failure here means the
+     * dashboard is missing an element, never that the page should break or that
+     * a stranger's console should fill with our errors.
+     */
+    postContentMap(contentMap) {
+      if (!RECOPYFAST_API || !SITE_ID || !SITE_TOKEN) {
+        return;
+      }
+      if (Object.keys(contentMap).length === 0) {
+        return;
+      }
+
+      // Nothing has changed since the last report, so the request would be a
+      // no-op upsert. Rescans fire on every DOM mutation, and a page with a
+      // carousel or a live region can mutate many times a second.
+      const fingerprint = JSON.stringify(Object.keys(contentMap).sort());
+      if (fingerprint === this.lastContentMapFingerprint) {
+        return;
+      }
+      this.lastContentMapFingerprint = fingerprint;
+
+      fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + SITE_TOKEN
+        },
+        body: JSON.stringify(contentMap),
+        keepalive: true
+      }).catch(function() {
+        // Offline, blocked by an extension, or the site was deleted. The next
+        // page load tries again; there is nothing useful to say here.
       });
     }
 

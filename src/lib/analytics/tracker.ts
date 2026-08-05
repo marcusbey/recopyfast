@@ -47,6 +47,48 @@ export class AnalyticsTracker {
   }
 
   /**
+   * The site ids a dashboard call is allowed to aggregate over.
+   *
+   * One site when the caller named one — the route has already authorised it
+   * via `authorizeSiteReadAccess`, so no second check is owed here. Otherwise
+   * every site the caller holds a permission row for, which is the same
+   * predicate `/api/sites` uses.
+   *
+   * An empty result is meaningful and is honoured: no identity and no site
+   * means aggregate nothing. This class holds a SERVICE-ROLE client, which
+   * bypasses row-level security, so the scoping has to be explicit here — an
+   * unfiltered query would return every tenant's rows.
+   */
+  private async resolveScopedSiteIds(
+    siteId?: string,
+    ownerUserId?: string,
+  ): Promise<string[]> {
+    if (siteId) {
+      return [siteId];
+    }
+    if (!ownerUserId) {
+      return [];
+    }
+
+    const { data, error } = await this.supabase
+      .from("site_permissions")
+      .select("site_id")
+      .eq("user_id", ownerUserId);
+
+    if (error) {
+      console.error("Failed to resolve the caller's sites:", error);
+      return [];
+    }
+
+    const rows = (data ?? []) as Array<{ site_id: string | null }>;
+    const ids = rows
+      .map((row) => row.site_id)
+      .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+    return Array.from(new Set(ids));
+  }
+
+  /**
    * Track user activity with detailed metadata
    */
   async trackActivity(params: {
@@ -133,6 +175,7 @@ export class AnalyticsTracker {
       start: string;
       end: string;
     },
+    ownerUserId?: string,
   ): Promise<AnalyticsDashboardData> {
     try {
       const startDate =
@@ -140,13 +183,37 @@ export class AnalyticsTracker {
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const endDate = dateRange?.end || new Date().toISOString();
 
+      // Which sites this call covers.
+      //
+      // The "all sites" view passes no siteId, and every query below used to
+      // fall back to `.eq("id", "")` — a filter that matches nothing. That was
+      // a deliberate stopgap (a cross-tenant leak is far worse than an empty
+      // chart), but it meant the whole dashboard read zero for anyone who did
+      // not pick a single site, which is what the register recorded as
+      // "Analytics reports Total Sites 0" with two sites registered.
+      //
+      // Scoping it to the caller's own sites is what the route's comment says
+      // belongs here, and `site_permissions` is the same table `/api/sites`
+      // authorises through, so the two views cannot disagree about which sites
+      // someone owns.
+      const scopedSiteIds = await this.resolveScopedSiteIds(
+        siteId,
+        ownerUserId,
+      );
+
+      // No identity and no site: keep the old behaviour of returning nothing
+      // rather than every tenant's data.
+      if (scopedSiteIds.length === 0) {
+        return this.getEmptyDashboardData();
+      }
+
       // Get overview statistics — select all columns used by calculateTrends/calculateTopSites
       const { data: activityRaw } = await this.supabase
         .from("user_activity_logs")
         .select("action_type, user_id, site_id, timestamp")
         .gte("timestamp", startDate)
         .lte("timestamp", endDate)
-        .eq(siteId ? "site_id" : "id", siteId || "");
+        .in("site_id", scopedSiteIds);
       // Supabase infers a loose row type from the select string; cast to the
       // precise picked type — all four selected columns match ActivityRow exactly.
       const activityData = activityRaw as ActivityRow[] | null;
@@ -157,7 +224,7 @@ export class AnalyticsTracker {
         .select("*")
         .gte("date", startDate.split("T")[0])
         .lte("date", endDate.split("T")[0])
-        .eq(siteId ? "site_id" : "id", siteId || "");
+        .in("site_id", scopedSiteIds);
 
       // Get performance metrics
       const { data: performanceData } = await this.supabase
@@ -165,7 +232,7 @@ export class AnalyticsTracker {
         .select("metric_type, value, recorded_at")
         .gte("recorded_at", startDate)
         .lte("recorded_at", endDate)
-        .eq(siteId ? "site_id" : "id", siteId || "");
+        .in("site_id", scopedSiteIds);
 
       // Calculate overview statistics
       const totalPageViews =
@@ -176,7 +243,11 @@ export class AnalyticsTracker {
       const uniqueUsers = new Set(
         activityData?.map((a) => a.user_id).filter(Boolean),
       ).size;
-      const uniqueSites = new Set(activityData?.map((a) => a.site_id)).size;
+      // Sites in scope, NOT sites that happened to log activity in this window.
+      // Counting distinct site_ids out of user_activity_logs is what made the
+      // dashboard say "Total Sites 0" next to a sidebar listing two sites: a
+      // site nobody visited this month is still a site you own.
+      const uniqueSites = scopedSiteIds.length;
 
       // Guard against performanceData being null/undefined: default numerator to 0
       // so the division always produces a number rather than undefined/NaN.
