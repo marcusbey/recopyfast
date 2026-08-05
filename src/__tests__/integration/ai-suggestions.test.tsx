@@ -157,9 +157,9 @@ describe("AI Suggestions Integration", () => {
         />,
       );
 
-      expect(screen.getByText("AI Suggest")).toBeInTheDocument();
+      expect(screen.getByText("AI suggest")).toBeInTheDocument();
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
 
@@ -172,14 +172,14 @@ describe("AI Suggestions Integration", () => {
         />,
       );
 
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
-      expect(screen.getByText("AI Content Suggestions")).toBeInTheDocument();
-      expect(screen.getByText("Original Text")).toBeInTheDocument();
+      expect(screen.getByText("AI content suggestions")).toBeInTheDocument();
+      expect(screen.getByText("Original text")).toBeInTheDocument();
       expect(
         screen.getByText("Test content for suggestions"),
       ).toBeInTheDocument();
-      expect(screen.getByText("Generate AI Suggestions")).toBeInTheDocument();
+      expect(screen.getByText("Generate suggestions")).toBeInTheDocument();
     });
 
     it("should close modal when close button is clicked", () => {
@@ -191,20 +191,16 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
-      expect(screen.getByText("AI Content Suggestions")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("AI suggest"));
+      expect(screen.getByText("AI content suggestions")).toBeInTheDocument();
 
-      // Close modal - find the button that contains the X icon
-      const closeButtons = screen.getAllByRole("button");
-      const closeButton = closeButtons.find(
-        (button) =>
-          button.querySelector("svg") &&
-          button.className.includes("text-gray-400"),
-      );
-      fireEvent.click(closeButton!);
+      // Addressed by its accessible name, not by a Tailwind class: a restyle
+      // must not be able to break this, and if the name ever goes missing the
+      // button is broken for screen readers and this should fail.
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
 
@@ -218,10 +214,10 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // Generate suggestions
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Check loading state
       expect(screen.getByText("Generating...")).toBeInTheDocument();
@@ -251,7 +247,7 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // Change goal to 'shorten'
       const goalSelect = screen.getByDisplayValue(
@@ -264,7 +260,7 @@ describe("AI Suggestions Integration", () => {
       fireEvent.change(toneSelect, { target: { value: "casual" } });
 
       // Generate suggestions
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Wait for suggestions
       await waitFor(() => {
@@ -286,16 +282,16 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal and generate suggestions
-      fireEvent.click(screen.getByText("AI Suggest"));
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("AI suggest"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Wait for suggestions
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
-      // Click "Use This" on first suggestion
-      const useButtons = screen.getAllByText("Use This");
+      // Click "Use this" on first suggestion
+      const useButtons = screen.getAllByText("Use this");
       fireEvent.click(useButtons[0]);
 
       // Should call callback and close modal
@@ -303,7 +299,7 @@ describe("AI Suggestions Integration", () => {
         "Enhanced: Select this suggestion",
       );
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
 
@@ -317,8 +313,8 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal and generate suggestions
-      fireEvent.click(screen.getByText("AI Suggest"));
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("AI suggest"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Wait for suggestions
       await waitFor(() => {
@@ -350,10 +346,10 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // Generate suggestions (will trigger error)
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Wait for error
       await waitFor(() => {
@@ -384,8 +380,8 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Step 1: Open suggestion modal
-      fireEvent.click(screen.getByText("AI Suggest"));
-      expect(screen.getByText("AI Content Suggestions")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("AI suggest"));
+      expect(screen.getByText("AI content suggestions")).toBeInTheDocument();
 
       // Step 2: Configure options
       const goalSelect = screen.getByDisplayValue(
@@ -397,7 +393,7 @@ describe("AI Suggestions Integration", () => {
       fireEvent.change(toneSelect, { target: { value: "marketing" } });
 
       // Step 3: Generate suggestions
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       // Step 4: Verify loading state
       expect(screen.getByText("Generating...")).toBeInTheDocument();
@@ -419,7 +415,7 @@ describe("AI Suggestions Integration", () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalled();
 
       // Step 8: Select a suggestion
-      const useButtons = screen.getAllByText("Use This");
+      const useButtons = screen.getAllByText("Use this");
       fireEvent.click(useButtons[1]);
 
       // Step 9: Verify workflow completion
@@ -427,7 +423,7 @@ describe("AI Suggestions Integration", () => {
         expect.stringContaining("This is the original content"),
       );
       expect(
-        screen.queryByText("AI Content Suggestions"),
+        screen.queryByText("AI content suggestions"),
       ).not.toBeInTheDocument();
     });
 
@@ -441,10 +437,10 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // First generation with 'improve' goal
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
@@ -460,7 +456,7 @@ describe("AI Suggestions Integration", () => {
       );
       fireEvent.change(goalSelect, { target: { value: "shorten" } });
 
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
@@ -480,14 +476,14 @@ describe("AI Suggestions Integration", () => {
       );
 
       // Open modal
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // Set custom options
       const toneSelect = screen.getByDisplayValue("Professional");
       fireEvent.change(toneSelect, { target: { value: "technical" } });
 
       // First attempt (will error due to ERROR_TEXT)
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(
@@ -562,17 +558,17 @@ describe("AI Suggestions Integration", () => {
       expect(screen.getByText("Changes: 0")).toBeInTheDocument();
 
       // Open AI suggestions
-      fireEvent.click(screen.getByText("AI Suggest"));
+      fireEvent.click(screen.getByText("AI suggest"));
 
       // Generate and select suggestion
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
       // Select first suggestion
-      const useButtons = screen.getAllByText("Use This");
+      const useButtons = screen.getAllByText("Use this");
       fireEvent.click(useButtons[0]);
 
       // Verify content updated
@@ -586,14 +582,14 @@ describe("AI Suggestions Integration", () => {
       render(<MockContentEditor />);
 
       // Apply AI suggestion
-      fireEvent.click(screen.getByText("AI Suggest"));
-      fireEvent.click(screen.getByText("Generate AI Suggestions"));
+      fireEvent.click(screen.getByText("AI suggest"));
+      fireEvent.click(screen.getByText("Generate suggestions"));
 
       await waitFor(() => {
         expect(screen.getByText("Suggestions")).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getAllByText("Use This")[0]);
+      fireEvent.click(screen.getAllByText("Use this")[0]);
 
       // Verify suggestion applied
       expect(screen.getByTestId("content-textarea")).toHaveValue(
