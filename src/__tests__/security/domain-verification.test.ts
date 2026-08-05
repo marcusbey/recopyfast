@@ -417,6 +417,31 @@ describe("Domain Verification", () => {
       expect(result.error).toContain("missing");
     });
 
+    it("tolerates a retyped label but not a retyped code", async () => {
+      // The label is decoration a human may retype in any casing. The code is
+      // the secret being proved: folding its case would accept a value that was
+      // never issued, so a near-miss transcription — or a smaller search space
+      // for anyone guessing — could verify a domain.
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () =>
+          Promise.resolve("VERIFICATION CODE: abc123def\nGenerated: whenever"),
+      });
+
+      await expect(
+        verifyDomainFile("example.com", "abc123def"),
+      ).resolves.toMatchObject({ success: true });
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve("Verification Code: ABC123DEF"),
+      });
+
+      await expect(
+        verifyDomainFile("example.com", "abc123def"),
+      ).resolves.toMatchObject({ success: false });
+    });
+
     it("refuses a 404 page that merely echoes the requested path", async () => {
       // The code is IN the url we fetch, so any domain whose fallback page
       // reflects the path contains it. A substring match would have verified a

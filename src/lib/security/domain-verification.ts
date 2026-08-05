@@ -315,15 +315,26 @@ export async function verifyDNSTXTRecord(
  * complete for anybody. Matching the labelled line keeps the strength that
  * mattered and drops the part that made it unusable, while tolerating the
  * trailing newline and CRLF that real editors and static hosts add.
+ *
+ * The LABEL is matched case-insensitively; the CODE is not. The label is
+ * decoration a human may retype in their own casing, but the code is the
+ * secret being proved, and folding its case would accept a value the owner was
+ * never issued — collapsing the space an attacker must search and letting a
+ * near-miss transcription verify a domain. Codes are generated as hex, so a
+ * correctly copied file is unaffected.
  */
+const VERIFICATION_LABEL = "verification code:";
+
 function fileDeclaresCode(body: string, verificationCode: string): boolean {
-  return body
-    .split(/\r?\n/)
-    .some(
-      (line) =>
-        line.trim().toLowerCase() ===
-        `verification code: ${verificationCode}`.toLowerCase(),
-    );
+  const expectedCode = verificationCode.trim();
+
+  return body.split(/\r?\n/).some((line) => {
+    const trimmed = line.trim();
+    if (!trimmed.toLowerCase().startsWith(VERIFICATION_LABEL)) {
+      return false;
+    }
+    return trimmed.slice(VERIFICATION_LABEL.length).trim() === expectedCode;
+  });
 }
 
 /**
@@ -373,18 +384,18 @@ export async function verifyDomainFile(
     // expected verification content".
     //
     // The code is the secret; the header and timestamp are decoration for the
-    // human who opens the file. Substring containment is also what makes this
-    // survive the things that really happen to a hosted text file: a trailing
-    // newline added by an editor, CRLF from a Windows checkout, or a static
-    // host that appends nothing but serves with different whitespace.
+    // human who opens the file. Matching the labelled line rather than the
+    // whole body is also what makes this survive the things that really happen
+    // to a hosted text file: a trailing newline added by an editor, CRLF from a
+    // Windows checkout, or a static host that serves with different whitespace.
     // A blank code must never verify anything.
     //
-    // `"anything".includes("")` is true, and an empty code also collapses the
-    // URL to /.well-known/recopyfast-verification-.txt — so on any domain that
-    // serves a catch-all 200 (an SPA fallback, a friendly 404 page) the check
-    // would pass without the owner having uploaded a thing. A missing column, a
-    // half-written row or a caller passing "" was enough to mark a domain
-    // verified.
+    // An empty code collapses the URL to
+    // /.well-known/recopyfast-verification-.txt, and the labelled line degrades
+    // to a bare `Verification Code:` — so on any domain serving a catch-all 200
+    // that happens to render that label the check would pass without the owner
+    // having uploaded a thing. A missing column, a half-written row or a caller
+    // passing "" was enough to mark a domain verified.
     //
     // Deliberately only an emptiness check, not a minimum length: codes are
     // generated as 32 hex characters, and inventing a length policy here would

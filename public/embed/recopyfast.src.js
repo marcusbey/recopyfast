@@ -832,6 +832,14 @@
       this.selectedElement = null;
       /** Element-id set last reported, so rescans don't re-POST an identical map. */
       this.lastContentMapFingerprint = null;
+      /**
+       * Element ids the server is already known to hold, learned from the
+       * content GET every boot performs anyway. `null` means "not known" —
+       * hydration has not run yet or could not be read — in which case
+       * reporting proceeds, because failing to discover is worse than a
+       * redundant write. See postContentMap.
+       */
+      this.serverKnownElementIds = null;
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -2839,18 +2847,60 @@
       if (!RECOPYFAST_API || !SITE_ID || !SITE_TOKEN) {
         return;
       }
-      if (Object.keys(contentMap).length === 0) {
+      const elementIds = Object.keys(contentMap);
+      if (elementIds.length === 0) {
         return;
       }
 
       // Nothing has changed since the last report, so the request would be a
       // no-op upsert. Rescans fire on every DOM mutation, and a page with a
       // carousel or a live region can mutate many times a second.
-      const fingerprint = JSON.stringify(Object.keys(contentMap).sort());
+      const fingerprint = JSON.stringify(elementIds.slice().sort());
       if (fingerprint === this.lastContentMapFingerprint) {
         return;
       }
+
+      // Report only what the server does not already hold.
+      //
+      // This runs on a customer's page for every VISITOR, not just for editors,
+      // so an unconditional POST turns their traffic into our write volume: one
+      // bulk upsert of every element on the page, per page view, forever. The
+      // fingerprint above only dedupes within a single page's lifetime, which
+      // never spans two visitors.
+      //
+      // Discovery is a one-time event per element. `hydrateStoredContent` has
+      // already fetched exactly the set the server holds, so once a site is
+      // discovered every visitor answers "nothing new" locally and sends
+      // nothing at all; a genuinely new element still reports immediately.
+      // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
+      // this is about not paying for a write that can only be a no-op.
+      if (this.serverKnownElementIds) {
+        let hasUnknownElement = false;
+        for (let i = 0; i < elementIds.length; i++) {
+          if (!this.serverKnownElementIds.has(elementIds[i])) {
+            hasUnknownElement = true;
+            break;
+          }
+        }
+        if (!hasUnknownElement) {
+          this.lastContentMapFingerprint = fingerprint;
+          return;
+        }
+      }
+
       this.lastContentMapFingerprint = fingerprint;
+
+      // Whatever we are about to send, the server will hold once this lands, so
+      // a rescan seconds later has nothing left to report. Recorded before the
+      // request rather than in its `.then` because a failed POST leaves the
+      // fingerprint set anyway — the next page load is the retry, and it starts
+      // from a fresh GET.
+      const reported = this.serverKnownElementIds;
+      if (reported) {
+        for (let i = 0; i < elementIds.length; i++) {
+          reported.add(elementIds[i]);
+        }
+      }
 
       fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
         method: 'POST',
@@ -3224,6 +3274,15 @@
       }
 
       if (!Array.isArray(rows)) return;
+
+      // Everything the server already holds for this site. Discovery is only
+      // worth a write when the page shows something absent from this set.
+      this.serverKnownElementIds = new Set();
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i] && rows[i].element_id) {
+          this.serverKnownElementIds.add(rows[i].element_id);
+        }
+      }
 
       let applied = 0;
 

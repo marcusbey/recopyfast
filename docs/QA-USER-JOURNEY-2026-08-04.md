@@ -564,8 +564,22 @@ has, so schema and production disagreed exactly as they did for
 than fixed it. `20260804150000_reconcile_restore_content_version.sql` states the
 live (correct) shape; applied.
 
+Reconciling the restore alone was not enough, and review caught the half left
+behind. `create_content_version` — the function that *writes* the snapshot the
+restore reads — is split the same way. Production keys the snapshot by
+`element_id`, which is what the reconciled restore matches on and why rollback
+works against the live database. `20251230100000_edit_board.sql` keys it by the
+row `id` and reads a column, `element_type`, that exists in no database and no
+migration: on a repository-provisioned schema the first call to record a version
+raises `column "element_type" does not exist`, and had it survived that, every
+restore would have matched zero rows and still reported success.
+`20260805120000_reconcile_create_content_version.sql` states the live shape.
+Nothing to apply — production already holds it; the migration exists so a fresh
+database does too.
+
 **Verified:** `qa:journey` 5e now creates a snapshot, lists history and restores,
-all as the owner.
+all as the owner — asserting the draft comes back to the snapshotted value, not
+merely that the endpoint returned 200.
 
 ### 🔧 N-7 — Three more surfaces locked the owner out (P1, fixed)
 
