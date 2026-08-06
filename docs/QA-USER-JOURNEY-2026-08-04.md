@@ -726,9 +726,15 @@ from the new standing editor model.
 
 Standing editor invitation is **not verified**. The owner hit `POST
 /api/editor/editors` → 500 `server_error` at "Add editor". Vercel logs reported
-that `public.site_editors` and `public.upsert_site_editor(...)` were missing from
-the Supabase schema cache. Attempting to inspect linked Supabase migrations also
-failed because the stored database password was stale.
+that PostgREST could not resolve `public.site_editors` or
+`public.upsert_site_editor(...)` in the Supabase schema cache.
+
+That is a *resolution* failure, and this pass could not tell which cause it had.
+An unapplied migration and a stale schema cache over objects that do exist
+produce the same 500. Attempting to inspect the linked migrations failed because
+the stored database password was stale (B-3), so neither the remote migration
+ledger nor the live database state was ever read. The objects are recorded here
+as **unresolvable, not as proven absent**.
 
 Even after schema deployment, the current code keeps durable device grants
 identity-only and the write routes accept only staging/edit-session
@@ -810,9 +816,10 @@ the counter and overflow guard can contradict one another.
 1. **P0 — generated production tags call the wrong ReCopyFast host.** Apex API
    redirects invalidate CORS preflight, blocking content discovery and editing
    until the integration is manually rewritten to `www.recopyfa.st`.
-2. **P0 — standing editor invitation is broken in production.** Required
-   `site_editors` schema objects are absent, so Add editor returns 500 before
-   OTP or handoff can begin.
+2. **P0 — standing editor invitation is broken in production.** PostgREST cannot
+   resolve the required `site_editors` objects, so Add editor returns 500 before
+   OTP or handoff can begin. Whether they are unapplied or merely uncached is
+   unknown: the audit that would say is blocked by B-3.
 3. **P1 — standing grants still cannot authorize edits after schema repair.**
    Device grants are identity-only, write routes do not consume them, and the
    current bearer binding is not strong enough to grant write access unchanged.
@@ -863,18 +870,21 @@ Generate canonical `www` URLs directly (or make the apex API answer CORS without
 a redirect) and add a foreign-origin browser test against the exact generated
 snippet.
 
-### B-12. Standing-editor production schema is missing — OPEN
+### B-12. Standing-editor schema objects do not resolve in production — OPEN
 
-`POST /api/editor/editors` returned 500 because production could not find
+`POST /api/editor/editors` returned 500 because PostgREST could not find
 `public.site_editors` or `public.upsert_site_editor(...)` in the schema cache.
 The repository contains
-`supabase/migrations/20260801100000_editor_access_2fa.sql`, but the linked
-migration audit is blocked by B-3. No production migration was applied during
-this QA pass.
+`supabase/migrations/20260801100000_editor_access_2fa.sql`; whether that
+migration has been applied to production is **unknown**. The linked migration
+audit is blocked by B-3, so the remote ledger and live schema were never read,
+and no production migration was applied during this QA pass.
 
-Audit the remote migration ledger, apply the missing migration deliberately,
-refresh the schema cache, and repeat invite → OTP → handoff → device grant in a
-browser before calling the invitation path green.
+Two causes produce this identical 500 — the migration was never applied, or it
+was applied and the schema cache is stale — and they have different fixes.
+Resolve B-3 first, then audit the remote migration ledger and live schema, apply
+or reload as that audit indicates, and repeat invite → OTP → handoff → device
+grant in a browser before calling the invitation path green.
 
 ### B-13. Standing-editor grants do not confer safe write authority — OPEN
 
