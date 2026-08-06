@@ -5,12 +5,16 @@ marketing site, signed up with a real address, paid with a real card, registered
 a site, took the generated script, put it on a page served from a different
 origin, and tried to invite somebody to edit it.
 
-Everything below was executed against the **live Supabase project** and **live
-Stripe (test mode)**, in a real browser. Nothing here is inferred from reading
-code alone; every ✅ and every ❌ has an observation behind it.
+The original register and follow-up passes were executed against the **live
+Supabase project**, **live Stripe (test mode)**, real browsers and generated
+sites. Older sections preserve what was observed at the time; the current
+evidence boundary is the third pass dated 2026-08-06. Treat green historical
+rows as "verified in that pass", not as a standing claim that every branch is
+still production-proven today.
 
-**Test account:** `rboboe+rcfqa1@gmail.com` (`87f71f43-…`), Pro, active.
-**Real money paths exercised:** Pro subscription $19/mo, credit pack $19/1,000.
+**Test account:** disposable QA mailbox, redacted user id, Pro, active.
+**Completed payment path observed:** Pro subscription $19/mo. The credit pack
+reached Checkout, but no completed credit-pack payment was proven.
 
 ---
 
@@ -111,7 +115,7 @@ broken · ⚠️ works but misleads the user
 | 6.3 | Share → email invite creates access | ✅ |
 | 6.4 | Invite email actually delivered | 🔧 **F-6 — never sent, UI claimed success** |
 | 6.5 | Failed sends are surfaced to the user | 🔧 fixed with F-6 |
-| 6.6 | Invited editor completes sign-in and edits | 🔧 **verified end to end** (2nd pass, `qa:journey` 5c) |
+| 6.6 | Invited editor completes sign-in and edits | ⚠️ 2nd pass verified **legacy `staging_access`**, not the standing editor invite path |
 
 ### 7. Account
 
@@ -261,7 +265,7 @@ value). The API now returns `emailDelivered`, and the dialog reports the failure
 instead of claiming success.
 
 **Verified:** a new invite produced a Resend record —
-`ReCopyFast <noreply@recopyfa.st>` → `rboboe+rcfeditor2@gmail.com`,
+`ReCopyFast <noreply@recopyfa.st>` → disposable editor mailbox,
 *"Your ReCopyFast staging access code"*, status **delivered**.
 
 ### 🔧 F-8 — Pro subscribers were told to upgrade to Pro (P2, fixed)
@@ -400,7 +404,7 @@ red, then restoring the file.
 | **F-15** Share toggles inaccessible | ✅ CLOSED | Hear the permission toggles as a named group with checked state. |
 | **F-11** overview stale after register | ✅ CLOSED | See the new site without reloading. |
 | **F-10** sites stuck "Verifying" | ✅ CLOSED | See a site go Active on its own, and Analytics count it. |
-| **6.6** invited editor loop | ✅ **now verified** | Invite → code → verify → edit → owner publishes. Was the register's "next thing to test". |
+| **6.6** invited editor loop | ⚠️ **legacy path verified** | `qa:journey` proved the retired-style `staging_access` code path. The standing editor invite flow is not green; see the third pass. |
 | **Edit → save → publish** | ✅ **now verified** | Previously untestable: no content had ever been saved. |
 | **F-16** auth email unusable | ✅ CLOSED | Receive a signup email at all — via Resend, `delivered`. |
 | **Version history & rollback** | ✅ **now verified** | Snapshot, list, restore — rollback had never worked. |
@@ -608,17 +612,24 @@ properly is a configuration change, not a code change — see
 
 ## The guard that would have caught all of it
 
-`npm run qa:journey` — 41 assertions, nothing mocked, against the real Supabase
+`npm run qa:journey` — 43 assertions, nothing mocked, against the real Supabase
 project and real Stripe. It signs up (minting its own magic-link token via the
-admin API, so no inbox is in the loop), is held at the paywall, reaches Stripe
-for all five intents including Lifetime, is admitted once entitled, registers a
-site, discovers content as the widget, edits, publishes, invites an editor,
-verifies that editor by reading the code from `staging_access`, proves the
-editor **cannot** publish, and deletes everything it made.
+admin API, so no inbox is in the loop), is held at the paywall, creates Checkout
+Sessions for all five intents including Lifetime, is admitted after the harness
+seeds a plan entitlement, registers a site, discovers content as the widget,
+edits, publishes, exercises the legacy `staging_access` editor path, proves that
+legacy editor **cannot** publish, and deletes everything it made. It does **not**
+complete hosted Stripe payments for every intent.
 
-`npm run check:stripe` / `check:stripe:live` proves every price resolves in the
-right mode, charges what the catalogue says, and describes the product the way
-the app does.
+Fresh 2026-08-06 production-host run:
+`npm run qa:journey -- --base=https://www.recopyfa.st` reported **42 passed /
+0 failed / 1 warning**.
+The warning is the standing ReCopyFast host mismatch: auth confirmation still
+redirects through the apex host before the harness settles on `www`.
+
+`npm run check:stripe` / `check:stripe:live` proves every configured price
+resolves in the intended mode and the catalogue metadata matches the app. It
+does not prove that each charge completed or that each webhook branch ran.
 
 Both exit non-zero on failure, so they can gate a deploy. This is the "one path,
 run for real, on every deploy" the lesson below asks for — every P0 in the
@@ -630,9 +641,10 @@ original register except the marketing copy would have failed it.
 
 Stated plainly rather than left to look green:
 
-- ~~**The invited editor's side of the journey (6.6).**~~ **Now covered** —
-  `qa:journey` 5c walks invite → code → verify → edit → owner publishes, and
-  asserts the editor is refused publish rights they were not granted.
+- **Invited editor journey (6.6).** `qa:journey` 5c covers the legacy
+  `staging_access` path: invite → code → verify → edit → owner publishes, and
+  asserts the legacy editor is refused publish rights they were not granted.
+  The standing editor invite path is not covered; see the third pass.
 - ~~**Editing → save → publish.**~~ **Now covered** — `qa:journey` 5b walks
   discovery → draft → publish → live. The owner's missing first-party editing
   surface turned out to be a real defect, not a gap in the test; see N-1.
@@ -679,15 +691,216 @@ supabase/migrations/20260804130000_restore_missing_rls_policies.sql   ← applie
 
 ---
 
+# Third pass — 2026-08-06: live www.glimps.es owner + standing editor
+
+This pass tested ReCopyFast on the live customer site `www.glimps.es`, not a
+local fixture. It also separated the historical `staging_access` editor proof
+from the new standing editor model.
+
+## Evidence boundary
+
+- **Owner editing proved only after workarounds.** The owner journey passed after
+  two temporary integration fixes: normalize every ReCopyFast script/API URL to
+  `https://www.recopyfa.st`, and delay SPA widget boot until `window.load`.
+- **The generated apex ReCopyFast endpoints failed.** The generated tag pointed
+  at `https://recopyfa.st`; its API CORS preflights were redirected and refused,
+  so the customer site produced no editable content.
+- **The canonical ReCopyFast service host worked.** Rewriting the integration to
+  `www.recopyfa.st` allowed discovery of 231 elements, posted the content map,
+  and moved the Glimpses site to Active.
+- **Owner UI worked.** The owner UI created an edit session, stripped the token
+  from the visible URL, exposed View/Edit/Publish/Admin controls, saved a draft
+  while visitors still saw the original content, and returned a publish API
+  response containing the marker.
+- **Published content initially did not hydrate.** The visitor React SPA still
+  showed the original DOM because the widget ran before the app mounted. After
+  switching the generated integration to delay until `window.load`, the
+  published copy became visible to visitors.
+- **Inventory proved original vs live.** Content inventory showed both ORIGINAL
+  and LIVE values, so the test distinguished draft storage from visitor-visible
+  published content.
+- **Site stats remained stale.** The dashboard still showed `0 edits` and no
+  activity after the owner save/publish path.
+
+## Standing editor result
+
+Standing editor invitation is **not verified**. The owner hit `POST
+/api/editor/editors` → 500 `server_error` at "Add editor". Vercel logs reported
+that PostgREST could not resolve `public.site_editors` or
+`public.upsert_site_editor(...)` in the Supabase schema cache.
+
+That is a *resolution* failure, and this pass could not tell which cause it had.
+An unapplied migration and a stale schema cache over objects that do exist
+produce the same 500. Attempting to inspect the linked migrations failed because
+the stored database password was stale (B-3), so neither the remote migration
+ledger nor the live database state was ever read. The objects are recorded here
+as **unresolvable, not as proven absent**.
+
+Even after schema deployment, the current code keeps durable device grants
+identity-only and the write routes accept only staging/edit-session
+authorization. A standing invited editor therefore still cannot edit or publish
+without additional route authorization work. No OTP handoff or successful
+standing-editor edit/publish was observed.
+
+Generated `data-ws-url` also retries CORS against a nonexistent Socket.IO
+endpoint. That is noise, but it confirms real-time remnants are still leaking
+into generated installs.
+
+Implementation review found four more editor-lifecycle gaps that the blocked
+browser path could not exercise:
+
+- device grants are identity-only; content and publish routes do not consume
+  their edit permission;
+- the Origin/user-agent binding is browser replay resistance, not bearer-token
+  proof: a stolen grant can be replayed by a server-side caller that supplies
+  the expected headers, so it must not be promoted to write authority as-is;
+- the existing `ActiveEditSessions` revoke UI is not mounted anywhere, so an
+  owner cannot see or revoke active owner edit sessions from the product;
+- there is no owner-facing individual device-grant revoke control, and `/edit`
+  does not restore its site picker from `/api/editor/sites` after a reload.
+
+## Harness and host mismatch
+
+The `recopyfa.st` apex run failed at cookie confirmation because the auth
+confirmation flow redirected between ReCopyFast hosts. Re-running against
+canonical `www.recopyfa.st` passed with the single warning above. This is the
+same host-class defect as F-14/B-6: the harness and auth-confirm URL must agree
+on the ReCopyFast host before the journey can be interpreted.
+
+## Fresh regression evidence
+
+- Jest: 98 passed suites, 1 skipped; 1,503 passed tests, 30 skipped, 0 failed.
+- TypeScript: `tsc` exited 0.
+- ESLint: 44 warnings, 0 errors.
+- Build: success. Warnings observed: Sentry `disableLogger`, Next middleware
+  deprecation, and caught dynamic server usage.
+- Embed bundle: 170.3 KB total; `socket.io-client` still 41.2 KB.
+- Glimpses landing app: Node 24 lint/build passed after `npm install`.
+- Glimpses landing app risk: `npm audit` reported 10 vulnerabilities
+  (2 low, 4 moderate, 3 high, 1 critical). This is a separate generated-app
+  dependency risk, not a ReCopyFast regression.
+- Tooling: the local Vercel CLI was 54.0.0 while the remote build used 58.1.0;
+  upgrade the local CLI before the next deployment investigation.
+
+## Cleanup proof
+
+- Original Glimpses deployment `dpl_6FWdFZGfNkScUasTsSpRdTLsMxov` was restored.
+- Live HTML and browser checks showed no widget, no QA marker and no `rcf` ids.
+- Local tracked tree was clean after cleanup.
+- Disposable site and entitlement count was 0.
+- Auth cleanup returned 404 for the disposable account.
+
+## User screenshot addendum — 08:49–08:51 EDT
+
+An edit tab that had remained open across the cleanup still held the temporary
+toolbar in memory after its disposable session/site was revoked. Saving from
+that stale tab first showed the intentional overflow confirmation and then
+twice surfaced `Invalid or expired edit session`. The rejected credential is
+expected after this QA cleanup; the client behavior is not:
+
+- a terminal 401 leaves edit mode and the unsaveable toolbar active;
+- every retry produces another browser-blocking alert instead of one recovery
+  message and a safe exit/re-authentication path;
+- the selected two-character `5m` mark displayed `2 / 50` while the independent
+  overflow probe warned that it might not fit. `calculateMaxChars` has a hard
+  50-character floor, so this counter is not a trustworthy capacity signal for
+  compact/decorative elements;
+- the counter floated over nearby page copy, obscuring the content being judged.
+
+The screenshot sequence therefore does **not** prove a valid session expired
+spontaneously. It does prove that expiry/revocation is handled too late and that
+the counter and overflow guard can contradict one another.
+
+## Prioritized findings from this pass
+
+1. **P0 — generated production tags call the wrong ReCopyFast host.** Apex API
+   redirects invalidate CORS preflight, blocking content discovery and editing
+   until the integration is manually rewritten to `www.recopyfa.st`.
+2. **P0 — standing editor invitation is broken in production.** PostgREST cannot
+   resolve the required `site_editors` objects, so Add editor returns 500 before
+   OTP or handoff can begin. Whether they are unapplied or merely uncached is
+   unknown: the audit that would say is blocked by B-3.
+3. **P1 — standing grants still cannot authorize edits after schema repair.**
+   Device grants are identity-only, write routes do not consume them, and the
+   current bearer binding is not strong enough to grant write access unchanged.
+4. **P1 — generated SPA installs need delayed boot.** Owner publish can succeed
+   while visitors still see original content if the widget scans before the SPA
+   mounts.
+5. **P2 — auth canonical-host handling is still brittle.** Apex and `www`
+   redirects make an otherwise-green journey fail cookie confirmation.
+6. **P2 — telemetry is not a reliable proof of editing.** The owner journey
+   saved and published content while site stats remained `0 edits` / no
+   activity.
+7. **P2 — editor lifecycle recovery is incomplete.** Active owner sessions have
+   no mounted revoke UI, individual device grants have no revoke control, and a
+   reload does not restore the editor site picker.
+8. **P2 — real-time remnants still ship.** The production widget still contains
+   the Socket.IO client and generated installs retry a nonexistent Socket.IO
+   endpoint.
+9. **P2 — Add editor does not deliver an invitation.** It allowlists the address
+   and leaves the owner to share `/edit`; the editor must request their own OTP.
+10. **P3 — Site Details is transient client state.** Refreshing its
+    `/dashboard/sites` URL returns the owner to the sites list.
+11. **P1 — revoked sessions fail only after the user edits.** The widget keeps
+    stale edit chrome active and repeats native alerts instead of preserving the
+    draft and offering a recovery path.
+12. **P2 — edit capacity feedback contradicts itself.** A two-character compact
+    mark showed `2 / 50` and then triggered the overflow warning; the counter
+    also obscured nearby content.
+
+---
+
 # Open backlog — everything still to fix
 
-One list, ordered by what it costs the business. Everything above this line is
-either fixed and verified, or restated here. Nothing else is outstanding from
-the two QA passes.
+One list, ordered by what it costs the business. Known outstanding items from
+the three QA passes are collected here; the dated evidence sections above remain
+the authority for exactly what was and was not observed.
+
+## P0 — blocks a primary production journey
+
+### B-11. Generated tags use the redirecting ReCopyFast apex — OPEN
+
+The production snippet generated ReCopyFast script, API and WebSocket URLs at
+`https://recopyfa.st`. The script GET followed its redirect, but browser CORS
+preflights for the API were not allowed to follow that redirect. The live
+Glimpses site therefore reported no content until every ReCopyFast integration
+URL was temporarily rewritten to `https://www.recopyfa.st`.
+
+Generate canonical `www` URLs directly (or make the apex API answer CORS without
+a redirect) and add a foreign-origin browser test against the exact generated
+snippet.
+
+### B-12. Standing-editor schema objects do not resolve in production — OPEN
+
+`POST /api/editor/editors` returned 500 because PostgREST could not find
+`public.site_editors` or `public.upsert_site_editor(...)` in the schema cache.
+The repository contains
+`supabase/migrations/20260801100000_editor_access_2fa.sql`; whether that
+migration has been applied to production is **unknown**. The linked migration
+audit is blocked by B-3, so the remote ledger and live schema were never read,
+and no production migration was applied during this QA pass.
+
+Two causes produce this identical 500 — the migration was never applied, or it
+was applied and the schema cache is stale — and they have different fixes.
+Resolve B-3 first, then audit the remote migration ledger and live schema, apply
+or reload as that audit indicates, and repeat invite → OTP → handoff → device
+grant in a browser before calling the invitation path green.
+
+### B-13. Standing-editor grants do not confer safe write authority — OPEN
+
+Even with B-12 repaired, durable device grants identify an editor but the
+content and publish routes accept only legacy staging access or an owner edit
+session. Simply adding device grants to those routes would be unsafe: their
+Origin and user-agent hashes can be reproduced by a server-side bearer-token
+replay.
+
+Design a narrowly scoped, revocable write proof, enforce the stored permission
+set on every mutation, and add negative route tests for view-only, expired,
+revoked, rotated and replayed grants before enabling writes.
 
 ## P1 — costs money or misleads a paying customer
 
-### B-1. "+$5 per additional website" is advertised and never charged
+### B-1. "+$5 per additional website" is advertised and never charged — OPEN
 
 `plans.additional_site_price` is `5.00` for Pro, surfaced through
 `/api/pricing` and rendered on the pricing card and the billing page. Nothing
@@ -702,7 +915,7 @@ Decide which is true and make both surfaces agree:
   usage record on site creation, and a proration story when a site is deleted.
   Real work; do not start it because of a stray sentence.
 
-### B-2. No payment has ever been completed except Pro monthly
+### B-2. No payment has ever been completed except Pro monthly — OPEN
 
 `qa:journey` proves a Checkout Session is *created* and correctly priced for
 Starter, Pro monthly, Pro yearly, credits and Lifetime. Only **Pro monthly**
@@ -711,22 +924,90 @@ subscriptions, and for `lifetime_purchase` are therefore unexercised against a
 real payment — and the lifetime branch is the one that grants a $199
 entitlement and now cancels a running subscription (N-5).
 
+The 2026-08-06 guard still has the same boundary: it creates Checkout Sessions
+and seeds a plan entitlement for downstream journey coverage; it does not
+complete hosted payments for every intent.
+
 Needs a browser against Stripe's hosted page (test mode, `4242…`) with
 `stripe listen` forwarding. Half an hour, and it retires the largest remaining
 unknown in the billing system.
 
-### B-3. Rotate `SUPABASE_PASSWORD`
+### B-3. Rotate `SUPABASE_PASSWORD` — OPEN, actively blocking migration audit
 
 Outstanding since the register before last. Used again this session to apply
 migrations. Rotating it invalidates the pooler URL in `supabase/.temp`, so
 re-link the CLI afterwards.
 
+On 2026-08-06, linked Supabase migration inspection failed with the stale stored
+database password. This is now blocking reliable migration/schema-cache audit,
+not just credential hygiene.
+
+### B-14. SPA integrations can publish without changing the visitor DOM — OPEN
+
+On Glimpses, the classic widget ran before the React/Vite app mounted. It fetched
+published content, then React replaced the scanned DOM. The later mutation
+observer rescanned and reported nodes but did not hydrate the already-fetched
+published values. Save and publish therefore succeeded while a fresh visitor
+still saw the original copy.
+
+The temporary `window.load` loader proved the timing cause. The permanent fix
+needs SPA-aware hydration after newly discovered nodes, with a live visitor
+assertion after publish rather than an API-only assertion.
+
+### B-19. Expired or revoked sessions leave an unsaveable editor active — OPEN
+
+The widget validates an edit session at startup, but a later 401 from Save is
+treated as an ordinary alert. The toolbar and editable DOM remain active, so a
+user can continue writing and repeatedly retry a draft that cannot be persisted.
+This was reproduced when the QA session was deliberately revoked during
+cleanup; the same path applies to the normal two-hour expiry.
+
+Treat authentication failure as a terminal editor state: preserve the draft
+locally, disable mutation controls, show one non-blocking explanation, and offer
+a dashboard/re-authentication path. Add a regression for revocation between
+editor initialization and Save.
+
 ## P2 — real cost, no immediate customer harm
 
-### B-4. The widget ships 41 KB of socket.io that never connects
+### B-15. Edit and activity telemetry stayed at zero — OPEN
+
+After a real owner draft save, publish and multiple visitor loads, Site Details
+still showed `0 edits`, zero page views and no recent activity. Content inventory
+did show ORIGINAL and LIVE values, so these counters are not reliable journey
+evidence and appear disconnected from the successful write path.
+
+### B-16. Editor session recovery and revocation are incomplete — OPEN
+
+`ActiveEditSessions` exists but is not mounted, `revokeGrantById` has no
+owner-facing route/control, and the `/edit` client does not consume
+`GET /api/editor/sites` to restore its site picker after reload. Owners can
+revoke an editor wholesale, but cannot inspect and revoke one device or active
+owner edit session through the product.
+
+### B-17. "Add editor" does not deliver an invitation — OPEN
+
+The standing-editor action creates an allowlist entry but deliberately sends no
+mail. After success the owner is told to share `/edit`, where the editor must
+request an OTP themselves. That behavior is transparent only after the action
+and does not match the ordinary meaning of an invitation. Either send a scoped
+invitation/handoff or rename the action and make the manual handoff explicit
+before submission.
+
+### B-20. Character capacity and overflow feedback disagree — OPEN
+
+The inline counter floors every capacity estimate at 50 characters, while Save
+uses a separate cloned-element height probe. On the compact `5m` mark this
+produced `2 / 50` and an overflow warning for the same edit. The fixed-position
+counter also overlapped the subtitle below the selected element.
+
+Use one layout-aware source of truth for both signals, avoid claiming a numeric
+capacity when it is only a rough minimum, and collision-test the toolbar/counter
+placement on small, transformed and decorative text.
+
+### B-4. The widget ships 41 KB of socket.io that never connects — CONFIRMED
 
 `scripts/build-embed.mjs` compiles `socket.io-client` into the served bundle:
-169.7 KB total, of which 41.2 KB is the socket client. Real-time is opt-in and
+170.3 KB total, of which 41.2 KB is the socket client. Real-time is opt-in and
 `RECOPYFAST_WS` is unset on every real install, so `establishConnection`
 returns before using it — every visitor to every customer's site downloads a
 quarter of the widget for nothing.
@@ -735,7 +1016,7 @@ Load it dynamically from `socket.io-client.min.js` (already built and served
 beside the bundle) only when `RECOPYFAST_WS` is set. The fallback loader
 already exists; the inline copy is what needs removing.
 
-### B-5. `server/index.js` is a real-time server nothing can host
+### B-5. `server/index.js` is a real-time server nothing can host — CONFIRMED
 
 An Express + socket.io process that Vercel cannot run, still wired into
 `npm run dev` and still the only listener for the `content-map` event the
@@ -746,7 +1027,10 @@ Either host it somewhere and re-enable real-time deliberately, or delete it and
 the `dev:ws` scripts. Leaving it is what made "the widget reports its content"
 look true.
 
-### B-6. `NEXT_PUBLIC_APP_URL` locally (F-14's remaining half)
+2026-08-06 added live proof that generated installs still retry CORS against a
+nonexistent Socket.IO endpoint through `data-ws-url`.
+
+### B-6. `NEXT_PUBLIC_APP_URL` locally and canonical-host drift — OPEN
 
 Preview deployments are fixed in code. The **local** case is configuration: a
 developer whose `.env` carries the production URL still gets signed in locally
@@ -754,7 +1038,11 @@ and redirected to production. A development-only warning now names both hosts
 and the fix, but the fix itself is a `.env.local` entry — see
 `docs/DEPLOYMENT-ENV.md`.
 
-### B-7. Supabase `smtp_max_frequency` is 60 seconds
+2026-08-06 added the production-host version of this class: the apex harness run
+failed cookie confirmation, and the `www` run passed with one warning because
+auth confirmation still redirects through apex.
+
+### B-7. Supabase `smtp_max_frequency` is 60 seconds — OPEN
 
 One auth email per address per minute. Correct as anti-abuse, but a user who
 mistypes their address and retries immediately gets silence with no
@@ -762,23 +1050,32 @@ explanation. Worth surfacing in the signup UI rather than changing.
 
 ## P3 — quality and maintenance
 
-### B-8. No automated accessibility assertions
+### B-8. No automated accessibility assertions — OPEN
 
 F-15 was fixed by hand and is covered by hand-written role assertions. There is
 no `jest-axe` in the project, so the next dialog can regress the same way.
 
-### B-9. 44 pre-existing lint warnings
+### B-9. 44 pre-existing lint warnings — CONFIRMED EXACT
 
 Unused imports and `react-hooks/exhaustive-deps` across ~25 files. None
-introduced by the QA passes (the count is unchanged), all suppressible or
-fixable mechanically. Worth clearing so a *new* warning is visible.
+introduced by the QA passes (the count is unchanged). The 2026-08-06 run again
+reported **44 warnings / 0 errors**, all suppressible or fixable mechanically.
+Worth clearing so a *new* warning is visible.
 
-### B-10. `POST /api/domains/verify` has no server-side tests
+### B-10. `POST /api/domains/verify` server-side coverage — PARTIAL
 
 The route was rewritten during this pass, including the column-name fix that
-was the root cause of "no verification row was ever created". Its component has
-tests; the route does not, and those tests mock `fetch`, so they prove the
-component reads the contract, not that the route produces it.
+was the root cause of "no verification row was ever created". Component tests
+still mock `fetch`, but `src/__tests__/api/domains/verify-reuse.test.ts` now
+covers the server-side reuse/remint branch. Live DNS/file verification and the
+remaining route branches are unproven, so this cannot be closed.
+
+### B-18. Site Details is not a durable route — OPEN
+
+The selected site exists only in dashboard client state. Refreshing the Site
+Details view at `/dashboard/sites` drops the owner back to the list instead of
+restoring the same site. Give details a site-id route, or persist and validate
+the selected id in the URL.
 
 ## Not defects, but unproven
 
