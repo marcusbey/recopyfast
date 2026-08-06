@@ -4,12 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { MotionValue } from "framer-motion";
-import { CheckCircle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { CheckCircle, Sparkles } from "lucide-react";
 import { FloatingEditorToolbar, UnsavedChangesBar } from "@/components/editor";
 import { useFloatingPosition } from "@/lib/hooks/useFloatingPosition";
 import type { PendingChange, TypographyStyles } from "@/types/editor";
 import BellaVistaSite from "./demo/BellaVistaSite";
-import BrowserChrome from "./demo/BrowserChrome";
+import BrowserWindow from "./demo/BrowserWindow";
 import EditableImage from "./demo/EditableImage";
 import EditableText from "./demo/EditableText";
 import PremiumAutoSpaSite from "./demo/PremiumAutoSpaSite";
@@ -230,6 +230,42 @@ export default function InteractiveHero({
   const nextSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
   const prevSite = () =>
     goToSite((currentSite - 1 + demoSites.length) % demoSites.length, -1);
+
+  const goToSiteId = (id: string) => {
+    const index = demoSites.findIndex((site) => site.id === id);
+    if (index >= 0) goToSite(index);
+  };
+
+  /**
+   * What the browser's reload button means here: put this site back the way it
+   * shipped. Scoped to the active site — a visitor who edited the restaurant,
+   * moved to the bakery and reloaded expects to have reset the bakery.
+   */
+  const reloadCurrentSite = () => {
+    const site = currentSiteData;
+
+    setTextsBySite((prev) => ({
+      ...prev,
+      [site.id]: site.editableTexts.map((item) => ({
+        ...item,
+        text: item.originalText,
+        isEditing: false,
+      })),
+    }));
+    setImageSources((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([key]) => !key.startsWith(`${site.id}:`)),
+      ),
+    );
+
+    setElementStyles({});
+    setPendingChanges(new Map());
+    setOriginalWidths({});
+    setOriginalHeights({});
+    setPreservedColors({});
+    setPreservedShadows({});
+    clearSelection();
+  };
 
   // --- Editing -------------------------------------------------------------
 
@@ -532,64 +568,22 @@ export default function InteractiveHero({
         )}
       </AnimatePresence>
 
-      {/* Site switcher */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div
-          className="flex items-center gap-1 rounded-xl border border-sky-200 bg-white/70 p-1 backdrop-blur"
-          role="tablist"
-          aria-label="Demo websites"
-        >
-          {demoSites.map((site, index) => {
-            const Icon = site.icon;
-            const isActive = currentSite === index;
-            return (
-              <button
-                key={site.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => goToSite(index)}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-200 ${
-                  isActive
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600 hover:bg-sky-50 hover:text-slate-900"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {site.name}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={prevSite}
-            aria-label="Previous website"
-            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={nextSite}
-            aria-label="Next website"
-            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* The fake browser */}
-      <div
-        className={`overflow-hidden rounded-2xl border border-slate-200 bg-white ${
-          fillHeight ? "flex min-h-0 flex-1 flex-col" : ""
-        }`}
+      {/* The fake browser. Its tabs are the site switcher — see BrowserWindow. */}
+      <BrowserWindow
+        tabs={demoSites}
+        activeId={currentSiteData.id}
+        onSelect={goToSiteId}
+        onBack={prevSite}
+        onForward={nextSite}
+        onReload={reloadCurrentSite}
+        fillHeight={fillHeight}
+        status={
+          <p className="flex items-center justify-center gap-2 text-sm text-slate-600">
+            <Sparkles className="h-4 w-4 text-sky-600" />
+            Click any text or photograph to edit it in place
+          </p>
+        }
       >
-        <BrowserChrome domain={currentSiteData.domain} />
-
         <div
           className={`relative overflow-hidden ${
             fillHeight ? "min-h-0 flex-1" : "h-[640px] md:h-[740px]"
@@ -619,12 +613,7 @@ export default function InteractiveHero({
             </motion.div>
           </AnimatePresence>
         </div>
-      </div>
-
-      <p className="mt-5 flex items-center justify-center gap-2 text-sm text-slate-600">
-        <Sparkles className="h-4 w-4 text-sky-600" />
-        Click any text or photograph above to edit it in place
-      </p>
+      </BrowserWindow>
     </div>
   );
 }
