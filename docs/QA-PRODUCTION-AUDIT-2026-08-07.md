@@ -4,29 +4,63 @@ Ninety-one ways this application can break in production, found by eight
 adversarial read-only audits run in parallel, one per failure domain: auth,
 billing, widget, database, API, frontend, infrastructure, data integrity.
 
-Every finding below was derived by reading the code. Each carries a `file:line`
+Every finding below was reached by reading the code. Each carries a `file:line`
 the auditor read, the exact trigger, the mechanism, and the test that would have
-caught it. Findings that already existed in
+caught it. Four were then also executed; the evidence labels defined in the next
+section say which, and against what. Findings that already existed in
 `docs/QA-USER-JOURNEY-2026-08-04.md` as B-1…B-20 are not repeated here; where an
 audit sharpened one, it says which.
 
 ## What this document is not
 
-It is not a claim that all ninety-one are exploitable today. Three limits, stated
-rather than left to look green:
+It is not a claim that all ninety-one are exploitable today. Most of this was
+read, not run, and the two are not the same kind of evidence — so every result
+carries one of these labels, and nothing is grouped across them:
 
-- **Nothing was executed against production.** The database is unreachable from
-  the repo (B-3, the stale `SUPABASE_PASSWORD`). Two P0s and four other findings
-  are branches of that single unknown.
+- **static** — derived by reading the code in this repo. A hypothesis with a
+  `file:line`, not an observation. Everything here except the four below.
+- **local** — executed in this repo's own Node process, against its own config
+  and dependencies. No database, no network. A-1 and T-1.
+- **scratch** — executed against a throwaway Postgres: `npx supabase start`,
+  this repo's migrations applied. It shows what the migrations produce, which is
+  not what production has. A-3's grant invariant and A-35.
+- **production** — observed against the live system. **No result in this audit
+  is.** One result quoted here is, and it is not ours; see below.
+
+Nothing is labelled **staging**, because there is no staging deployment to run
+against: `PRODUCTION_DEPLOYMENT_CHECKLIST.md:173` still carries standing one up
+as an open item. "Staging" elsewhere in this codebase names the draft-content
+workflow, not an environment.
+
+Three limits follow, stated rather than left to look green:
+
+- **Nothing in this audit was executed against production.** The database is
+  unreachable from the repo (B-3, the stale `SUPABASE_PASSWORD`). Two P0s and
+  four other findings are branches of that single unknown.
+
+  One production observation does exist in the repo, and it is not this audit's:
+  `supabase/migrations/20260805190000_lock_down_content_version_rpcs.sql:17-27`
+  records `POST /rest/v1/rpc/restore_content_version` answering with the
+  function's own `P0001 Version not found` against production on 2026-08-05 —
+  the call ran rather than being refused. That went over PostgREST with the
+  published anon key, so it needed no `SUPABASE_PASSWORD` and does not contradict
+  the paragraph above. It is quoted from that migration's header; this audit did
+  not re-run it, and the repo holds no artefact of it beyond the comment.
 - **The repo does not describe production.**
   `supabase/migrations/20260801200000_missing_base_tables.sql:42-51` records
   **seven migrations marked applied that rolled back in full**. For
   `content_history`, `staging_history`, `content_versions` and `security_events`,
   a database built from this repo and the live one behave differently, and for
-  two of the four we cannot say which side production is on.
-- **Only two findings were run rather than read** — the DOMPurify corruption in
-  A-1, executed against the repo's own config and dependency, and the env
-  precedence in A-8, resolved with the project's own loader.
+  two of the four we cannot say which side production is on. This is also why a
+  **scratch** result is not a production result: the scratch database is built
+  from exactly the migrations whose relationship to production is in doubt.
+- **Four findings were run rather than read**, none of them against production.
+  **Local:** A-1, the DOMPurify corruption, executed against the repo's own
+  config and dependency; T-1, the `.env.production` precedence, resolved with
+  the project's own loader. (An earlier draft of this section credited that
+  second result to "A-8". A-8 is the dispute-lifecycle finding, and it is
+  static — it was never executed.) **Scratch:** A-3, the `pg_proc` grant
+  invariant; A-35, the `content_history` foreign key on delete.
 
 ## Confidence
 
@@ -35,7 +69,7 @@ starting files, are the ones to trust first.
 
 | Finding | Auditors | Note |
 |---|---|---|
-| A-1 discovery corrupts customer copy | 3 | two executed DOMPurify and got identical output |
+| A-1 discovery corrupts customer copy | 3 | two executed DOMPurify locally and got identical output |
 | A-2 site token + optional Origin check | 3 | reached from the widget, the API and the auth lane |
 | A-11 site registration is not atomic | 3 | |
 | A-16 credit deduction is a lost update | 2 | |
@@ -96,9 +130,9 @@ sanitizer and stores the HTML serialization into `original_content`,
 `current_content` **and** `published_content`
 (`src/app/api/content/[siteId]/route.ts:188-200` →
 `src/lib/security/site-auth.ts:195-197` → `content-sanitizer.ts:80-86`).
-Executed against the repo's own config:
+Executed **locally**, against the repo's own config and dependency:
 
-```
+```text
 "Setup in <2 minutes"                   -> "Setup in &lt;2 minutes"
 "Paste the <script> tag into your page" -> "Paste the "
 "Use <div> tags"                        -> "Use  tags"
@@ -178,34 +212,57 @@ None of the three asks who is calling.
 — total silent destruction of unpublished work, no history row.
 `publish_staging_content_atomic` pushes any tenant's drafts live.
 
-**Test.** `src/__tests__/db/function-grants.test.ts` — assert
-`SELECT proname, proacl FROM pg_proc WHERE prosecdef AND pronamespace='public'::regnamespace`
-returns **zero** functions whose ACL contains `anon=X`, `authenticated=X` or a
-bare `=X`. List-wide, not per-function, so the seventh such function fails by
-default. This one assertion also closes A-5.
+**Test.** `src/__tests__/db/function-grants.test.ts`, over every SECURITY DEFINER
+function in `public` — `SELECT proname, proargtypes, proacl FROM pg_proc WHERE
+prosecdef AND pronamespace='public'::regnamespace` — with a NULL `proacl`
+expanded through `acldefault` because NULL means "EXECUTE to PUBLIC", the most
+open state and not the safest. Two assertions:
 
-**Corrected 2026-08-07 after the invariant was run against a real database.**
-An earlier draft claimed it also closed A-22. It does not — A-22 is a hardcoded
-`grantLifetime(userId, "pro", …)` in the webhook and has nothing to do with
-function ACLs. A-22 needs its own owner.
+1. **No function grants EXECUTE to `anon` or to PUBLIC** (a bare `=X`). No
+   exceptions, for any function, ever.
+2. **The only functions granting EXECUTE to `authenticated`** are the three RLS
+   predicates allowlisted immediately below — matched on full identity, name
+   **and** argument types, so a later overload is a fresh decision rather than
+   an inherited exemption.
 
-**And the invariant found more than this audit did.** Against a scratch database
-with the migrations applied it reports **34 offending grants across 12
-functions** — beyond the five named above, also `get_user_ticket_balance`,
-`purge_expired_editor_artifacts`, `update_site_analytics`,
-`update_translation_coverage` and three RLS predicate functions. The root cause
-is broader than the three missed REVOKEs: Supabase's `ALTER DEFAULT PRIVILEGES`
-grants EXECUTE to `anon` and `authenticated` on **every new function in
-`public`**, so the next one is exposed at creation with no migration saying so.
-The default is exposure, and the invariant is what makes that visible.
+Both are list-wide rather than per-function, so the seventh such function fails
+by default. The same pair also closes A-5.
 
-Three RLS predicate functions — `user_has_site_permission`, `user_is_team_member`,
-`user_has_team_role` — are allowlisted for `authenticated` only. That is measured,
-not assumed: revoking them and running `SET ROLE authenticated; SELECT count(*)
-FROM site_editors;` gives `permission denied for function
-user_has_site_permission`, because RLS predicates evaluate with the querying
-role's privileges. Revoking would break every site-scoped policy rather than
-harden anything. `anon` and PUBLIC remain forbidden for all twelve.
+**The one exception, and its exact shape.** Three RLS predicate functions —
+`user_has_site_permission(uuid, text[])`, `user_is_team_member(uuid)` and
+`user_has_team_role(uuid, text[])` — may grant EXECUTE to `authenticated`, and to
+nothing else. That is measured on the scratch database, not assumed: revoking
+them and running `SET ROLE authenticated; SELECT count(*) FROM site_editors;`
+gives `permission denied for function user_has_site_permission`, because RLS
+predicates evaluate with the querying role's privileges. Revoking would break
+every site-scoped policy rather than harden anything. `anon` and PUBLIC stay
+forbidden for these three exactly as for the other nine, and the exemption is
+keyed on the identity — a future `user_has_team_role(uuid, text)` is not covered
+by it.
+
+**Corrected 2026-08-07 after the invariant was run against a scratch database**
+(local Supabase, this repo's migrations applied — not production; see "What this
+document is not"). An earlier draft claimed it also closed A-22. It does not —
+A-22 is a hardcoded `grantLifetime(userId, "pro", …)` in the webhook and has
+nothing to do with function ACLs. A-22 needs its own owner.
+
+**And the invariant found more than this audit did.** On that scratch database it
+reported **34 offending grants across 12 functions** — beyond the five named
+above, also `get_user_ticket_balance`, `purge_expired_editor_artifacts`,
+`update_site_analytics`, `update_translation_coverage` and the three RLS
+predicate functions. Read that number with two qualifications. It is a scratch
+measurement: it describes what these migrations produce, not what production has.
+And it comes from the invariant's first form, which forbade `authenticated`
+everywhere; under the corrected form above, the three `authenticated` grants on
+the RLS predicates are permitted and every other grant in that report — including
+any `anon` or PUBLIC grant on those same three functions — still is not. It has
+not been re-run since the correction.
+
+The root cause is broader than the three missed REVOKEs: Supabase's
+`ALTER DEFAULT PRIVILEGES` grants EXECUTE to `anon` and `authenticated` on
+**every new function in `public`**, so the next one is exposed at creation with
+no migration saying so. The default is exposure, and the invariant is what makes
+that visible.
 
 ## A-4. A collaborator with `manager` can delete the owner's only proof of ownership
 
@@ -355,9 +412,11 @@ rather than an error (`recopyfast.src.js:5650-5653`). **Test:**
 
 ## A-35. Site deletion cannot succeed at all — an AFTER DELETE trigger blocks it
 
-**Found while writing the tests for A-11, and measured against a real database
-rather than inferred.** It makes A-11 understated: the second delete does not
-merely risk failing, it always fails.
+**Found while writing the tests for A-11, and measured against a scratch database
+rather than inferred** — local Supabase with this repo's migrations applied, so
+this is what the migrations produce and not a production observation. It makes
+A-11 understated: the second delete does not merely risk failing, it always
+fails.
 
 `content_change_trigger` is an `AFTER INSERT OR UPDATE OR DELETE` trigger
 (`20250817000000_complete_database_setup.sql:542-544`) whose function inserts the
@@ -365,7 +424,7 @@ affected row into `content_history`, a table whose FK requires that
 `content_elements` row to still exist. On DELETE it does not. Every content
 element delete therefore raises:
 
-```
+```text
 ERROR: insert or update on table "content_history" violates foreign key
 constraint "content_history_content_element_id_fkey"
 CONTEXT: PL/pgSQL function log_content_change() line 10
