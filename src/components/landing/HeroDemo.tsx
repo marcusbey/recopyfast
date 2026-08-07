@@ -82,7 +82,7 @@ export default function HeroDemo() {
       aria-label="Interactive demo"
       /* Above the hero copy it overlaps, and above the problem section pulled
          up underneath it — the whole point of the layering. */
-      className="relative z-20 -mt-[12vh] sm:-mt-[20vh]"
+      className="relative z-20 -mt-[32vh] sm:-mt-[40vh]"
     >
       <div ref={trackRef} className="relative h-[320vh]">
         <div className="sticky top-0 flex h-svh flex-col px-4 pt-16 pb-8 sm:px-6 sm:pt-20">

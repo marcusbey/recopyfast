@@ -46,7 +46,10 @@ export default function Hero() {
       className="relative flex min-h-[100vh] items-center justify-center overflow-hidden bg-transparent"
     >
       <motion.div
-        className="relative z-10 mx-auto max-w-7xl px-6 py-32 text-center"
+        /* The bottom padding is the demo window's share of the fold. The copy
+           centres in what is left above it, so shrinking the type and raising
+           the window are one change, not two that have to be kept in sync. */
+        className="relative z-10 mx-auto max-w-7xl px-6 pt-20 pb-[32vh] text-center sm:pb-[40vh]"
         style={{ opacity }}
       >
         {/* No pane, no border. The bordered glass sheet made the headline read
@@ -63,7 +66,10 @@ export default function Hero() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
-          className="font-display mb-10 text-[3.4rem] font-extrabold leading-[0.92] tracking-[-0.035em] text-slate-900 sm:text-8xl lg:text-[8.5rem]"
+          /* ~60% of what it was. The headline was sized to carry the fold on
+             its own; it now shares the fold with the demo, and the demo is the
+             better argument. */
+          className="font-display mb-6 text-[2.05rem] font-extrabold leading-[0.94] tracking-[-0.035em] text-slate-900 sm:text-[3.6rem] lg:text-[5.1rem]"
         >
           <span className="block">Change your</span>
           <span className="relative mt-4 block">
@@ -71,7 +77,7 @@ export default function Hero() {
                 product's whole claim is that copy is directly editable, so the
                 hero demonstrates it instead of decorating it — and it lets the
                 sky→emerald gradient that appeared on five sections go away. */}
-            <span className="relative inline-flex min-w-[240px] items-center justify-center rounded-2xl bg-white/70 px-5 py-1 text-left ring-2 ring-sky-500/70 sm:min-w-[420px] lg:min-w-[620px]">
+            <span className="relative inline-flex min-w-[150px] items-center justify-center rounded-xl bg-white/70 px-4 py-0.5 text-left ring-2 ring-sky-500/70 sm:min-w-[260px] lg:min-w-[380px]">
               <span
                 className={`text-sky-700 transition-opacity duration-200 ${
                   isTyping ? "opacity-100" : "opacity-0"
@@ -92,7 +98,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.1 }}
-          className="mx-auto mb-12 max-w-2xl text-lg leading-relaxed text-slate-800 sm:text-xl"
+          className="mx-auto mb-8 max-w-xl text-base leading-relaxed text-slate-800 sm:text-lg"
         >
           Stop waiting days for simple text updates. Add one line of code and
           give your team{" "}
@@ -118,7 +124,7 @@ export default function Hero() {
           */}
           <Link
             href="/signup"
-            className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-8 py-4 font-semibold text-white transition-colors hover:bg-sky-700"
+            className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-sky-700"
           >
             <span>Get started</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />

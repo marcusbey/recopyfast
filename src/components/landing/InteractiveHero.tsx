@@ -38,6 +38,25 @@ const DEFAULT_STYLES: TypographyStyles = {
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 /**
+ * The attract loop: what the demo does while nobody has touched it yet.
+ *
+ * Two things about this demo are invisible at rest. That there are three sites
+ * behind the tabs, and that the copy inside them is clickable — both were only
+ * discoverable by hovering something you had no reason to hover. So the demo
+ * shows you: it moves through the tabs on its own, and it draws the hover ring
+ * on one on-screen string at a time, which is the same chrome your pointer
+ * would have produced.
+ *
+ * It stops for good at the first interaction — a tab, a toolbar button, a click
+ * on any text. Once somebody is driving, a demo that keeps moving on its own is
+ * no longer a hint, it is a fight over the caret. It also does not run under
+ * `prefers-reduced-motion`, and only runs while the demo is actually on screen.
+ */
+const TAB_DWELL_MS = 6000;
+const HINT_INTERVAL_MS = 2600;
+const HINT_VISIBLE_MS = 1500;
+
+/**
  * Direction-aware slide. `custom` carries +1 (moved forward) or -1 (moved
  * back); it is derived from the index delta at the call site, so the tab
  * buttons and the arrows both slide the way the user actually travelled.
@@ -132,7 +151,13 @@ export default function InteractiveHero({
     Map<string, PendingChange>
   >(new Map());
 
+  /** Attract-loop state. `hasInteracted` is one-way: nothing turns it back on. */
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const [isOnScreen, setIsOnScreen] = useState(false);
+  const [hintedId, setHintedId] = useState<string | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const hintCursor = useRef(0);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** What the element said when editing started, so Esc can put it back. */
   const editStartText = useRef<{ id: string; text: string } | null>(null);
@@ -227,11 +252,21 @@ export default function InteractiveHero({
     clearSelection();
   };
 
-  const nextSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
-  const prevSite = () =>
+  const advanceSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
+
+  /* The user-driven entry points. They differ from `advanceSite` in one way
+     that matters: reaching the demo through any of them ends the attract loop. */
+  const nextSite = () => {
+    setHasInteracted(true);
+    advanceSite();
+  };
+  const prevSite = () => {
+    setHasInteracted(true);
     goToSite((currentSite - 1 + demoSites.length) % demoSites.length, -1);
+  };
 
   const goToSiteId = (id: string) => {
+    setHasInteracted(true);
     const index = demoSites.findIndex((site) => site.id === id);
     if (index >= 0) goToSite(index);
   };
@@ -242,6 +277,7 @@ export default function InteractiveHero({
    * moved to the bakery and reloaded expects to have reset the bakery.
    */
   const reloadCurrentSite = () => {
+    setHasInteracted(true);
     const site = currentSiteData;
 
     setTextsBySite((prev) => ({
@@ -277,6 +313,7 @@ export default function InteractiveHero({
    * resizing the moment it is clicked.
    */
   const handleElementActivate = (id: string, element: HTMLElement) => {
+    setHasInteracted(true);
     const computed = window.getComputedStyle(element);
 
     setSelectedElementId(id);
@@ -449,6 +486,86 @@ export default function InteractiveHero({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [currentSiteData.id]);
 
+  // --- The attract loop ----------------------------------------------------
+
+  /* Off screen it must not run at all: on the landing page this component sits
+     inside a 320vh track, so without this it would be cycling tabs and painting
+     rings to an empty room for most of the page. */
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsOnScreen(entry.isIntersecting),
+      { threshold: 0.25 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  /* The tab cycle reads its action through a ref so the interval does not have
+     to be rebuilt — and the dwell restarted — on every unrelated render. */
+  const advanceSiteRef = useRef(advanceSite);
+  useEffect(() => {
+    advanceSiteRef.current = advanceSite;
+  });
+
+  const isAttracting = !hasInteracted && !prefersReducedMotion && isOnScreen;
+
+  useEffect(() => {
+    if (!isAttracting) return;
+    const timer = setInterval(() => advanceSiteRef.current(), TAB_DWELL_MS);
+    return () => clearInterval(timer);
+  }, [isAttracting]);
+
+  /* The ring walks the strings that are ACTUALLY in the demo's viewport, which
+     is why it is measured rather than taken from the site's copy list: the demo
+     scrolls under page scroll, so which strings are visible changes constantly
+     and a fixed order would spend most of its time pointing off screen. */
+  useEffect(() => {
+    if (!isAttracting) {
+      setHintedId(null);
+      return;
+    }
+
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
+      const scroller = siteScrollRef.current;
+      if (!scroller) return;
+
+      const view = scroller.getBoundingClientRect();
+      const onScreen = Array.from(
+        scroller.querySelectorAll<HTMLElement>("[data-editable-id]"),
+      ).filter((element) => {
+        const box = element.getBoundingClientRect();
+        if (box.height === 0) return false;
+        /* Mostly visible, not strictly contained. Requiring containment threw
+           away every candidate whenever the demo was mid-scroll, and the ring
+           went dark for whole beats at a time. */
+        const shown =
+          Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top);
+        return shown >= box.height * 0.6;
+      });
+      if (onScreen.length === 0) return;
+
+      const pick = onScreen[hintCursor.current % onScreen.length];
+      hintCursor.current += 1;
+      setHintedId(pick.dataset.editableId ?? null);
+
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => setHintedId(null), HINT_VISIBLE_MS);
+    };
+
+    const timer = setInterval(tick, HINT_INTERVAL_MS);
+    tick();
+
+    return () => {
+      clearInterval(timer);
+      if (hideTimer) clearTimeout(hideTimer);
+      setHintedId(null);
+    };
+  }, [isAttracting, currentSiteData.id]);
+
   // --- Rendering -----------------------------------------------------------
 
   /**
@@ -470,6 +587,9 @@ export default function InteractiveHero({
           item={item}
           typographyClasses={site.textStyles[id] ?? site.textStyles.default}
           isSelected={isSelected}
+          /* Element ids repeat across sites, so the hint is scoped to the site
+             on screen — otherwise the outgoing site lights up mid-slide. */
+          isHinted={site.id === currentSiteData.id && hintedId === id}
           selectedTag={isSelected ? selectedElementTag : ""}
           customStyles={elementStyles[id]}
           pinnedWidth={originalWidths[id]}
@@ -497,6 +617,7 @@ export default function InteractiveHero({
           className={options.className}
           wrapperClassName={options.wrapperClassName}
           onReplace={(nextSrc) => {
+            setHasInteracted(true);
             setImageSources((prev) => ({ ...prev, [key]: nextSrc }));
             flashSuccess();
           }}
