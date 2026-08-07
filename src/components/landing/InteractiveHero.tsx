@@ -55,6 +55,8 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 const TAB_DWELL_MS = 6000;
 const HINT_INTERVAL_MS = 2600;
 const HINT_VISIBLE_MS = 1500;
+/** Demo-scroll progress that counts as "the visitor is now reading this". */
+const SCROLL_ENGAGED_AT = 0.01;
 
 /**
  * Direction-aware slide. `custom` carries +1 (moved forward) or -1 (moved
@@ -181,6 +183,13 @@ export default function InteractiveHero({
     return demoScrollProgress.on("change", (value) => {
       latestDemoProgress.current = value;
       applyDemoScroll(value);
+      /* Scrolling INTO the demo counts as engagement. Past this point the
+         visitor is reading the site the attract loop was there to advertise,
+         and cycling the tabs out from under them — or ringing a string they
+         did not choose — interrupts exactly the thing they came to look at.
+         The threshold only has to clear the resting value; the loop ends on
+         the first real movement of the track. */
+      if (value > SCROLL_ENGAGED_AT) setHasInteracted(true);
     });
   }, [demoScrollProgress, applyDemoScroll]);
 
