@@ -114,6 +114,35 @@ const PGRST200 = {
 
 const mockGetUser = jest.fn();
 
+interface PostgrestError {
+  code: string;
+  message: string;
+  details?: string | null;
+  hint?: string | null;
+}
+
+/** What a resolved query hands back, error branch included. */
+interface Settled {
+  data: unknown;
+  error: PostgrestError | null;
+}
+
+/**
+ * The chainable stand-in for a PostgREST builder. Annotated explicitly because
+ * every method returns the object itself, which TypeScript cannot infer from a
+ * self-referential initializer (TS7022).
+ */
+interface FakeQueryBuilder {
+  select(columns: string): FakeQueryBuilder;
+  eq(column: string, value: unknown): FakeQueryBuilder;
+  order(): FakeQueryBuilder;
+  single(): Promise<Settled>;
+  then(
+    onFulfilled: (value: Settled) => unknown,
+    onRejected: (reason: unknown) => unknown,
+  ): Promise<unknown>;
+}
+
 function makeSupabase() {
   return {
     auth: { getUser: mockGetUser },
@@ -124,7 +153,7 @@ function makeSupabase() {
         filters: [] as Array<[string, unknown]>,
       };
 
-      const settle = () => {
+      const settle = (): Settled => {
         // The whole finding in one branch: a select that names `auth.users`
         // cannot be answered, whatever the data looks like.
         if (state.select.includes("auth.users")) {
@@ -137,13 +166,14 @@ function makeSupabase() {
 
         const rows = TEAM_MEMBERS.filter((row) =>
           state.filters.every(
-            ([column, value]) => (row as any)[column] === value,
+            ([column, value]) =>
+              (row as Record<string, unknown>)[column] === value,
           ),
         );
         return { data: rows, error: null };
       };
 
-      const builder: any = {
+      const builder: FakeQueryBuilder = {
         select(columns: string) {
           state.select = columns ?? "";
           return builder;
@@ -168,7 +198,7 @@ function makeSupabase() {
                 },
           );
         },
-        then(onFulfilled: any, onRejected: any) {
+        then(onFulfilled, onRejected) {
           return Promise.resolve(settle()).then(onFulfilled, onRejected);
         },
       };
@@ -211,6 +241,15 @@ jest.mock("@/lib/supabase/service", () => ({
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/members/route";
+
+/**
+ * A member as the fixed handler would return it — the identity resolved through
+ * `auth.admin.getUserById` and attached to the row. `user` is optional because
+ * today's handler never gets far enough to attach one.
+ */
+interface MemberWithUser {
+  user?: { email?: string };
+}
 
 function getMembers(): Promise<Response> {
   return GET(
@@ -271,10 +310,9 @@ describe("A-12 Teams handlers embed auth.users over PostgREST", () => {
 
       expect(response.status).toBe(200);
       expect(body.members).toHaveLength(2);
-      expect(body.members.map((member: any) => member.user?.email)).toEqual([
-        "owner@example.com",
-        "editor@example.com",
-      ]);
+      expect(
+        body.members.map((member: MemberWithUser) => member.user?.email),
+      ).toEqual(["owner@example.com", "editor@example.com"]);
     },
   );
 });

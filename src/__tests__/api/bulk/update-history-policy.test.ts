@@ -53,8 +53,14 @@ function latestTriggerFunctionBody(): { file: string; body: string } | null {
 
   for (const file of files) {
     const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
+    // Through the statement terminator, not merely to the `language` keyword.
+    // SECURITY DEFINER is legal on either side of the body — before `AS $$`, or
+    // after the LANGUAGE clause, which is where the usual repair puts it
+    // (`$$ LANGUAGE plpgsql SECURITY DEFINER;`). Stopping at `language` would
+    // leave that outside the captured text, so the assertion below could never
+    // see a correct fix and this file would keep reporting it as unfixed.
     const match = sql.match(
-      /CREATE OR REPLACE FUNCTION log_content_change\(\)[\s\S]*?\$\$\s*language/i,
+      /CREATE OR REPLACE FUNCTION log_content_change\(\)[\s\S]*?\$\$[\s\S]*?\$\$[^;]*;/i,
     );
     if (match) latest = { file, body: match[0] };
   }

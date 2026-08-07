@@ -374,8 +374,13 @@ function sitePermissionPolicies(): MigrationPolicy[] {
     if (!file.endsWith(".sql")) continue;
     const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
 
+    // The schema qualifier is optional. `ON site_permissions` and
+    // `ON public.site_permissions` name the same table, and a migration written
+    // the second way must not slip past this scan — the guard below only
+    // asserts that *some* policy was found, so a partially missed set would
+    // still look like a clean read.
     const policies = sql.matchAll(
-      /CREATE POLICY\s+"([^"]+)"\s+ON\s+site_permissions\b([\s\S]*?);/gi,
+      /CREATE POLICY\s+"([^"]+)"\s+ON\s+(?:[a-z_][a-z0-9_$]*\.)?site_permissions\b([\s\S]*?);/gi,
     );
 
     for (const policy of policies) {

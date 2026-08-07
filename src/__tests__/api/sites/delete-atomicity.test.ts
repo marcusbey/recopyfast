@@ -89,12 +89,30 @@ function runQuery(db: FakeDb, state: QueryState) {
     : { data: null, error: PGRST116 };
 }
 
+type Settled = ReturnType<typeof runQuery>;
+
+/**
+ * The chainable stand-in for a PostgREST builder. Annotated explicitly because
+ * every method returns the object itself, which TypeScript cannot infer from a
+ * self-referential initializer (TS7022).
+ */
+interface FakeQueryBuilder {
+  select(): FakeQueryBuilder;
+  delete(): FakeQueryBuilder;
+  eq(column: string, value: unknown): FakeQueryBuilder;
+  single(): Promise<Settled>;
+  then(
+    onFulfilled: (value: Settled) => unknown,
+    onRejected: (reason: unknown) => unknown,
+  ): Promise<unknown>;
+}
+
 function makeServiceClient(db: FakeDb) {
   return {
     from(table: string) {
       const state: QueryState = { table, filters: [], op: "select" };
 
-      const builder: any = {
+      const builder: FakeQueryBuilder = {
         select() {
           return builder;
         },
@@ -110,7 +128,7 @@ function makeServiceClient(db: FakeDb) {
           return Promise.resolve(runQuery(db, state));
         },
         // The route awaits the delete builders directly.
-        then(onFulfilled: any, onRejected: any) {
+        then(onFulfilled, onRejected) {
           return Promise.resolve(runQuery(db, state)).then(
             onFulfilled,
             onRejected,

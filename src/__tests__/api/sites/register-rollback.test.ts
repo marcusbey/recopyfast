@@ -50,6 +50,19 @@ class FakeDb {
   failPermissionWrite = false;
   private nextId = 1;
 
+  /**
+   * Full reset, id counter included. The control test asserts the literal
+   * `site-1`; leaving the counter running would make that assertion depend on
+   * how many tests happened to execute before it, so `-t`, a new test above it
+   * or a randomised order would break it for reasons unrelated to the route.
+   */
+  reset(): void {
+    this.sites = [];
+    this.sitePermissions = [];
+    this.failPermissionWrite = false;
+    this.nextId = 1;
+  }
+
   mintSiteId(): string {
     return `site-${this.nextId++}`;
   }
@@ -125,6 +138,25 @@ function runQuery(db: FakeDb, state: QueryState) {
   throw new Error(`unsupported query: ${state.op} on ${state.table}`);
 }
 
+type Settled = ReturnType<typeof runQuery>;
+
+/**
+ * The chainable stand-in for a PostgREST builder. Annotated explicitly because
+ * every method returns the object itself, which TypeScript cannot infer from a
+ * self-referential initializer (TS7022).
+ */
+interface FakeQueryBuilder {
+  select(): FakeQueryBuilder;
+  eq(column: string, value: unknown): FakeQueryBuilder;
+  insert(payload: Record<string, unknown>): FakeQueryBuilder;
+  upsert(payload: Record<string, unknown>): FakeQueryBuilder;
+  single(): Promise<Settled>;
+  then(
+    onFulfilled: (value: Settled) => unknown,
+    onRejected: (reason: unknown) => unknown,
+  ): Promise<unknown>;
+}
+
 function makeServiceClient(db: FakeDb) {
   return {
     from(table: string) {
@@ -135,7 +167,7 @@ function makeServiceClient(db: FakeDb) {
         payload: null,
       };
 
-      const builder: any = {
+      const builder: FakeQueryBuilder = {
         select() {
           return builder;
         },
@@ -157,7 +189,7 @@ function makeServiceClient(db: FakeDb) {
           return Promise.resolve(runQuery(db, state));
         },
         // PostgREST builders are thenable; the route awaits the upsert directly.
-        then(onFulfilled: any, onRejected: any) {
+        then(onFulfilled, onRejected) {
           return Promise.resolve(runQuery(db, state)).then(
             onFulfilled,
             onRejected,
@@ -217,9 +249,7 @@ describe("A-11 POST /api/sites/register leaves an orphan site on permission fail
   beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
-    db.sites = [];
-    db.sitePermissions = [];
-    db.failPermissionWrite = false;
+    db.reset();
     mockGetUser.mockResolvedValue({
       data: { user: { id: "user-123" } },
       error: null,

@@ -218,39 +218,44 @@ describe("PUT /api/staging/content/[siteId] link and image extras", () => {
   });
 
   describe("what the caller is told", () => {
-    // These document the shape of the defect rather than asserting the fix:
-    // the response is indistinguishable from a successful save, which is why
-    // the widget applies the change locally and the editor believes it stuck.
+    // The confirmation is why the defect is invisible: the widget treats any
+    // 2xx as success and applies the change to the live DOM in the editor's own
+    // tab, so they watch the link change and believe it stuck.
 
-    it("answers 200 for a link edit it did not store", async () => {
+    it("answers 200 with a success body for a link edit", async () => {
       const response = await widgetSave("Docs", {
         href: "https://docs.example.com/v2",
       });
       const body = await response.json();
 
+      // Deliberately not asserting that the href is absent from the write:
+      // that is true only while the bug is present, and the marked tests above
+      // are what pin it. This half stays true after the fix, which is the
+      // point — the confirmation is right once there is something behind it.
       expect(response.status).toBe(200);
       expect(body.success).toBe(true);
-      // Same request, same confirmation — and no href anywhere in the write.
-      expect(JSON.stringify(persistedRow())).not.toContain("docs.example.com");
     });
 
-    it("writes the same three columns whether or not extras were sent", async () => {
-      await widgetSave("Docs");
-      const withoutExtras = Object.keys(persistedRow()).sort();
+    test.failing(
+      "writes more columns when extras are sent than when they are not",
+      async () => {
+        // The mechanism behind the silent 200: the route writes one fixed set
+        // of columns, so a request carrying `href`/`alt` produces byte-for-byte
+        // the same write as one carrying neither. Storing the extras — in
+        // columns of their own or in an existing payload column — is what makes
+        // the two differ, and that is the signal to drop this marker.
+        await widgetSave("Docs");
+        const withoutExtras = Object.keys(persistedRow()).sort();
 
-      updatePayloads = [];
-      await widgetSave("Docs", {
-        href: "https://docs.example.com/v2",
-        alt: "alt text",
-      });
-      const withExtras = Object.keys(persistedRow()).sort();
+        updatePayloads = [];
+        await widgetSave("Docs", {
+          href: "https://docs.example.com/v2",
+          alt: "alt text",
+        });
+        const withExtras = Object.keys(persistedRow()).sort();
 
-      expect(withExtras).toEqual(withoutExtras);
-      expect(withExtras).toEqual([
-        "staging_content",
-        "staging_updated_at",
-        "updated_at",
-      ]);
-    });
+        expect(withExtras).not.toEqual(withoutExtras);
+      },
+    );
   });
 });

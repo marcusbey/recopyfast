@@ -83,9 +83,12 @@ const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 function readConfiguredDbPort(): number {
   try {
     const toml = readFileSync(CONFIG_TOML, "utf8");
-    // Everything from the `[db]` header up to the next section header. This
-    // stops before `[db.pooler]`, whose own `port` is a different thing.
-    const section = /^\[db\][^\n]*\n([\s\S]*?)(?=^\[)/m.exec(toml);
+    // Everything from the `[db]` header up to the next section header, or to
+    // the end of the file when `[db]` is the last section — anchoring only on
+    // `^\[` would silently find nothing there and fall back to a port the
+    // config never asked for. This stops before `[db.pooler]`, whose own `port`
+    // is a different thing.
+    const section = /^\[db\][^\n]*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml);
     const port = section && /^port\s*=\s*(\d+)/m.exec(section[1]);
     return port ? Number(port[1]) : FALLBACK_DB_PORT;
   } catch {

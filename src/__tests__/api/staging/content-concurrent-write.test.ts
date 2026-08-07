@@ -86,6 +86,34 @@ class FakeDb {
 
 const db = new FakeDb();
 
+/** What the route sees back from a write it awaits directly. */
+interface SettledWrite {
+  data: null;
+  error: null;
+}
+
+/** What the route sees back from the read it does before writing. */
+interface SettledRead {
+  data: { id: string; staging_content: string | null };
+}
+
+/**
+ * The chainable stand-in for a PostgREST builder. Annotated explicitly because
+ * every method returns the object itself, which TypeScript cannot infer from a
+ * self-referential initializer (TS7022).
+ */
+interface FakeQueryBuilder {
+  select(): FakeQueryBuilder;
+  eq(): FakeQueryBuilder;
+  update(payload: Record<string, unknown>): FakeQueryBuilder;
+  insert(payload: Record<string, unknown>): FakeQueryBuilder;
+  single(): Promise<SettledRead>;
+  then(
+    onFulfilled: (value: SettledWrite) => unknown,
+    onRejected: (reason: unknown) => unknown,
+  ): Promise<unknown>;
+}
+
 function makeServiceClient() {
   return {
     from(table: string) {
@@ -95,7 +123,7 @@ function makeServiceClient() {
         payload: Record<string, unknown> | null;
       } = { table, op: "select", payload: null };
 
-      const builder: any = {
+      const builder: FakeQueryBuilder = {
         select() {
           return builder;
         },
@@ -116,8 +144,8 @@ function makeServiceClient() {
           const row = await db.read();
           return { data: { id: row.id, staging_content: row.staging_content } };
         },
-        then(onFulfilled: any, onRejected: any) {
-          const run = async () => {
+        then(onFulfilled, onRejected) {
+          const run = async (): Promise<SettledWrite> => {
             if (state.op === "update" && state.table === "content_elements") {
               db.element = {
                 ...db.element,
