@@ -576,7 +576,11 @@ describe("SiteRegistrationModal", () => {
         },
         { timeout: 3000 },
       );
-    });
+      // This test deliberately runs on real timers (see TYPING above), so it
+      // spends a real 2s waiting for the copied state to reset. Registering the
+      // site first costs another second or so, and under full-suite load that
+      // total crosses Jest's 5s default and fails the run rather than the code.
+    }, 15000);
   });
 
   describe("Modal State Management", () => {
