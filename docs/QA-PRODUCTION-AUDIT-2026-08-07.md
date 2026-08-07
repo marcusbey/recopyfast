@@ -182,7 +182,30 @@ None of the three asks who is calling.
 `SELECT proname, proacl FROM pg_proc WHERE prosecdef AND pronamespace='public'::regnamespace`
 returns **zero** functions whose ACL contains `anon=X`, `authenticated=X` or a
 bare `=X`. List-wide, not per-function, so the seventh such function fails by
-default. This one assertion also closes A-5 and A-22.
+default. This one assertion also closes A-5.
+
+**Corrected 2026-08-07 after the invariant was run against a real database.**
+An earlier draft claimed it also closed A-22. It does not — A-22 is a hardcoded
+`grantLifetime(userId, "pro", …)` in the webhook and has nothing to do with
+function ACLs. A-22 needs its own owner.
+
+**And the invariant found more than this audit did.** Against a scratch database
+with the migrations applied it reports **34 offending grants across 12
+functions** — beyond the five named above, also `get_user_ticket_balance`,
+`purge_expired_editor_artifacts`, `update_site_analytics`,
+`update_translation_coverage` and three RLS predicate functions. The root cause
+is broader than the three missed REVOKEs: Supabase's `ALTER DEFAULT PRIVILEGES`
+grants EXECUTE to `anon` and `authenticated` on **every new function in
+`public`**, so the next one is exposed at creation with no migration saying so.
+The default is exposure, and the invariant is what makes that visible.
+
+Three RLS predicate functions — `user_has_site_permission`, `user_is_team_member`,
+`user_has_team_role` — are allowlisted for `authenticated` only. That is measured,
+not assumed: revoking them and running `SET ROLE authenticated; SELECT count(*)
+FROM site_editors;` gives `permission denied for function
+user_has_site_permission`, because RLS predicates evaluate with the querying
+role's privileges. Revoking would break every site-scoped policy rather than
+harden anything. `anon` and PUBLIC remain forbidden for all twelve.
 
 ## A-4. A collaborator with `manager` can delete the owner's only proof of ownership
 
@@ -329,6 +352,38 @@ rather than an error (`recopyfast.src.js:5650-5653`). **Test:**
 `src/__tests__/api/edit-board/staging-token-device.test.ts` — verify a token via
 `POST /api/staging/verify` with a fixed User-Agent, then assert
 `GET /api/edit-board/styles` with the same token and UA returns 200.
+
+## A-35. Site deletion cannot succeed at all — an AFTER DELETE trigger blocks it
+
+**Found while writing the tests for A-11, and measured against a real database
+rather than inferred.** It makes A-11 understated: the second delete does not
+merely risk failing, it always fails.
+
+`content_change_trigger` is an `AFTER INSERT OR UPDATE OR DELETE` trigger
+(`20250817000000_complete_database_setup.sql:542-544`) whose function inserts the
+affected row into `content_history`, a table whose FK requires that
+`content_elements` row to still exist. On DELETE it does not. Every content
+element delete therefore raises:
+
+```
+ERROR: insert or update on table "content_history" violates foreign key
+constraint "content_history_content_element_id_fkey"
+CONTEXT: PL/pgSQL function log_content_change() line 10
+```
+
+and the `ON DELETE CASCADE` from `sites` inherits it. The test harness works
+around this with `session_replication_role = 'replica'`; the product has no such
+escape.
+
+**Blast radius.** No customer can delete a site, and — per A-11 — the attempt
+first removes their `site_permissions` row, so the failure leaves them with a
+site they can no longer see while it keeps serving content to visitors. A
+compliance-motivated deletion does the opposite of what was asked.
+
+**Test.** Covered by `src/__tests__/db/restore-reports-rows.test.ts`'s harness
+discovery and by `src/__tests__/api/sites/delete-atomicity.test.ts`; a dedicated
+DB-gated case asserting `DELETE FROM sites` succeeds and cascades is the direct
+form.
 
 ## A-11. Site registration and deletion are both non-atomic
 

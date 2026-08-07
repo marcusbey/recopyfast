@@ -79,20 +79,18 @@ describe("Auth Guards", () => {
       });
     });
 
-    it("billing subscription route should check auth via getUser", async () => {
-      // Import after mocks — lazy import so missing route is caught gracefully
-      try {
-        const { GET } = await import("@/app/api/billing/subscription/route");
-        const response = await GET();
-        // Should return 401 when not authenticated
-        if (response) {
-          const data = await response.json();
-          expect([401, 500]).toContain(response.status);
-        }
-      } catch {
-        // Error thrown means auth check failed as expected
-        expect(true).toBe(true);
-      }
+    it("billing subscription route refuses an unauthenticated caller with 401", async () => {
+      // Rewritten. Every branch of the previous version passed: the assertion
+      // accepted 500 as well as 401, the `if (response)` skipped it entirely if
+      // the route returned nothing, and the catch asserted `true`. A route that
+      // answered 500 to every caller — or threw — was indistinguishable from one
+      // that correctly refused. 500 in particular was not hypothetical: jsdom
+      // has no `setImmediate`, so winston threw and this handler reached its
+      // outer catch (see the polyfill in jest.setup.js).
+      const { GET } = await import("@/app/api/billing/subscription/route");
+      const response = await GET();
+
+      expect(response.status).toBe(401);
     });
   });
 
