@@ -13,9 +13,9 @@ import { Copy, Check, Code2, Scan, MousePointerClick } from "lucide-react";
     entry guard when `data-site-token` is missing — so the snippet a visitor
     copied from this page could not have started even against the right origin.
     The shape below mirrors buildEmbedScript() in src/lib/sites/embed-script.ts,
-    minus the `data-ws-url` it still emits (nothing listens on it), with the two
-    per-site values left as placeholders so nobody mistakes the template for an
-    installable tag.
+    which now omits `data-ws-url` entirely while no WebSocket origin is
+    configured — the current deployment state — with the two per-site values
+    left as placeholders so nobody mistakes the template for an installable tag.
   - Step 2 claimed links were editable. scanForContent() selects
     `a.rcf-editable-link`, not `a` — links are opt-in on purpose, because the
     alternative is every nav item and footer link becoming an edit target.

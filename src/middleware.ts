@@ -223,11 +223,26 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * - embed/ (the widget, see below)
+     * - robots.txt, sitemap.xml (crawler fetches)
      * - public static assets
      *
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
+     *
+     * `embed/` is excluded as a whole directory rather than by extension.
+     * Everything under it is a static file in `public/` fetched by every
+     * visitor to every customer site that has installed the widget — third
+     * parties on someone else's domain who have no session cookie and could
+     * not have one. This middleware runs on the Node runtime and awaits
+     * `supabase.auth.getUser()`, so leaving those paths in the matcher spent a
+     * GoTrue round trip per widget load and coupled widget availability to
+     * GoTrue's. A directory rule also means the next asset type added there
+     * does not have to be rediscovered in production.
+     *
+     * robots.txt and sitemap.xml are the same trade at lower volume: no
+     * session is possible, and indexability should not depend on auth uptime.
      */
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|embed/|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

@@ -98,25 +98,25 @@ describe("middleware matcher — paths that must never reach the middleware", ()
 
   // The embed script. Requested by every visitor to every customer page, none
   // of whom have — or could have — a recopyfast session cookie.
-  test.failing("does not run on /embed/recopyfast.js", () => {
+  it("does not run on /embed/recopyfast.js", () => {
     expect(middlewareRuns("/embed/recopyfast.js")).toBe(false);
   });
 
-  test.failing("does not run on /embed/socket.io-client.min.js", () => {
+  it("does not run on /embed/socket.io-client.min.js", () => {
     expect(middlewareRuns("/embed/socket.io-client.min.js")).toBe(false);
   });
 
   // Crawler fetches. Not high-volume, but a GoTrue round trip on a robots.txt
   // read is pure waste and couples indexability to auth uptime.
-  test.failing("does not run on /robots.txt", () => {
+  it("does not run on /robots.txt", () => {
     expect(middlewareRuns("/robots.txt")).toBe(false);
   });
 
-  test.failing("does not run on /sitemap.xml", () => {
+  it("does not run on /sitemap.xml", () => {
     expect(middlewareRuns("/sitemap.xml")).toBe(false);
   });
 
-  test.failing("skips every static file under /embed", () => {
+  it("skips every static file under /embed", () => {
     // Stated as a directory rule rather than a filename list: the fix should
     // exclude the whole prefix, not add `.js` to the extension alternation and
     // leave the next asset type to be discovered in production.

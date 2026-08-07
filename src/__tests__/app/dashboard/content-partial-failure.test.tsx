@@ -99,23 +99,20 @@ describe("Content page with one failing site", () => {
     expect(screen.getByText(CONTENT_B)).toBeInTheDocument();
   });
 
-  test.failing(
-    "keeps the working site's content and reports the failing one per site",
-    async () => {
-      mockContentApi(true);
-      render(<ContentPage />);
+  it("keeps the working site's content and reports the failing one per site", async () => {
+    mockContentApi(true);
+    render(<ContentPage />);
 
-      // The point of the finding: site A's content is already in hand.
-      expect(await screen.findByText(CONTENT_A)).toBeInTheDocument();
+    // The point of the finding: site A's content is already in hand.
+    expect(await screen.findByText(CONTENT_A)).toBeInTheDocument();
 
-      // Site B's failure is still reported, with its reason, beside it.
-      expect(
-        screen.getByText(new RegExp(FAILURE_DETAIL, "i")),
-      ).toBeInTheDocument();
-      expect(screen.getByText(new RegExp(SITE_B.name))).toBeInTheDocument();
+    // Site B's failure is still reported, with its reason, beside it.
+    expect(
+      screen.getByText(new RegExp(FAILURE_DETAIL, "i")),
+    ).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(SITE_B.name))).toBeInTheDocument();
 
-      // ...and not as the page-level state that replaces everything else.
-      expect(screen.queryByText("Failed to load content")).toBeNull();
-    },
-  );
+    // ...and not as the page-level state that replaces everything else.
+    expect(screen.queryByText("Failed to load content")).toBeNull();
+  });
 });

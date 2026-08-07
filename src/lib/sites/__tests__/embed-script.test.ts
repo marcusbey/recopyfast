@@ -106,7 +106,7 @@ describe("the snippet a customer pastes when real-time is not configured", () =>
     );
   });
 
-  test.failing("omits data-ws-url entirely", async () => {
+  it("omits data-ws-url entirely", () => {
     const script = buildEmbedScript({
       siteId: "site-123",
       siteToken: "site-token-abc",
@@ -118,7 +118,7 @@ describe("the snippet a customer pastes when real-time is not configured", () =>
     expect(script).not.toContain("data-ws-url");
   });
 
-  test.failing("never points the websocket at the app origin", async () => {
+  it("never points the websocket at the app origin", () => {
     expect(getPublicWebSocketUrl("https://www.recopyfa.st")).not.toBe(
       "https://www.recopyfa.st",
     );
@@ -231,7 +231,7 @@ describe("sendContentMap while the socket is not connected", () => {
     expect(widget.postContentMap).toHaveBeenCalledTimes(1);
   });
 
-  test.failing("does not emit content-map over a disconnected socket", () => {
+  it("does not emit content-map over a disconnected socket", () => {
     const socket: FakeSocket = { connected: false, emit: jest.fn() };
     const widget = makeWidget(socket);
 
@@ -256,20 +256,17 @@ describe("sendContentMap while the socket is not connected", () => {
     expect(widget.postContentMap).toHaveBeenCalledTimes(20);
   });
 
-  test.failing(
-    "does not grow an unbounded buffer across repeated rescans",
-    () => {
-      // A carousel or an infinite-scroll page rescans roughly twice a second.
-      const socket: FakeSocket = { connected: false, emit: jest.fn() };
-      const widget = makeWidget(socket);
+  it("does not grow an unbounded buffer across repeated rescans", () => {
+    // A carousel or an infinite-scroll page rescans roughly twice a second.
+    const socket: FakeSocket = { connected: false, emit: jest.fn() };
+    const widget = makeWidget(socket);
 
-      for (let rescan = 0; rescan < 20; rescan++) {
-        widget.sendContentMap();
-      }
+    for (let rescan = 0; rescan < 20; rescan++) {
+      widget.sendContentMap();
+    }
 
-      expect(socket.emit).toHaveBeenCalledTimes(0);
-    },
-  );
+    expect(socket.emit).toHaveBeenCalledTimes(0);
+  });
 
   // The controls.
   it("reports over HTTP regardless of socket state", () => {

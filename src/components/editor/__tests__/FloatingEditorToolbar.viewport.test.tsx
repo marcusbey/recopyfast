@@ -157,6 +157,20 @@ describe("FloatingEditorToolbar on a 390px viewport", () => {
     expect(Number.parseFloat(toolbar.style.left)).not.toBeNaN();
   });
 
+  /* STAYS `test.failing`, and not because the toolbar is still broken — the two
+     assertions below cannot both hold for any value of `left`, so no production
+     change can retire this marker. 420 is wider than 390, so the second wants
+     `left <= -30` while the first wants `left >= 0`. It fails at 432 vs 390.
+
+     What it is really asking — that the strip fit the phone — is asked by
+     "keeps Save and Cancel on screen" below, which measures the modelled width
+     of what is actually rendered rather than the 420 the positioner was told.
+     That one is enforced, and passes: the toolbar now reflows on a narrow
+     viewport instead of overflowing (FloatingEditorToolbar.tsx).
+
+     Rewriting the arithmetic here would mean choosing a new constant to compare
+     against, which is the assertion doing the test's job for it. Left as-is for
+     whoever revisits what `DECLARED_TOOLBAR_WIDTH` should be at this size. */
   test.failing("keeps the width it declares inside the viewport", () => {
     const toolbar = renderToolbar();
     const left = Number.parseFloat(toolbar.style.left);
@@ -167,7 +181,7 @@ describe("FloatingEditorToolbar on a 390px viewport", () => {
     expect(left + DECLARED_TOOLBAR_WIDTH).toBeLessThanOrEqual(VIEWPORT_WIDTH);
   });
 
-  test.failing("keeps Save and Cancel on screen", () => {
+  it("keeps Save and Cancel on screen", () => {
     const toolbar = renderToolbar();
     const left = Number.parseFloat(toolbar.style.left);
 
