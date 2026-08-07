@@ -1,17 +1,16 @@
 /**
  * @jest-environment jsdom
  *
- * A-32 (reduced-motion half) — the pinned hero demo has no reduced-motion
+ * A-32 (reduced-motion half) — the pinned hero demo needs a reduced-motion
  * escape.
  *
- * `HeroDemo.tsx:43-99` never calls `useReducedMotion`. A reader who has asked
- * their OS for less motion still gets the full apparatus: a 320vh track, a
- * `sticky` window pinned inside it, and a scroll-driven `scale`/`y` transform
- * on the way out — over two viewports of page scroll that move something other
- * than the page.
+ * Without one, a reader who has asked their OS for less motion still gets the
+ * full apparatus: a 320vh track, a `sticky` window pinned inside it, and a
+ * scroll-driven `scale`/`y` transform on the way out — over two viewports of
+ * page scroll that move something other than the page.
  *
- * It is worse than an ignored preference. `useLenis.ts:127` skips Lenis
- * entirely for these readers, so they also inherit the raw two-owners-of-
+ * It would be worse than an ignored preference. `useLenis.ts:127` skips Lenis
+ * entirely for these readers, so they would also inherit the raw two-owners-of-
  * scrollTop conflict the smooth-scroll path papers over (the other half of
  * A-32, covered by `e2e/hero-demo-mobile.spec.ts`).
  *
@@ -27,17 +26,28 @@ jest.mock("../InteractiveHero", () => ({
   default: () => <div data-testid="interactive-hero" />,
 }));
 
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+/**
+ * Matched on the feature name rather than on a whole query string: browsers
+ * spell it `(prefers-reduced-motion: reduce)` and framer-motion asks for the
+ * shorthand `(prefers-reduced-motion)`. Pinning the long form here answered
+ * `false` to the only query the component actually makes, which would have left
+ * this suite testing the default path under a reduced-motion heading.
+ */
+const REDUCED_MOTION_FEATURE = "prefers-reduced-motion";
 
 /**
  * jest.setup.js answers every media query with `matches: false`. This replaces
  * it for the one query under test — the reader has asked for less motion.
+ *
+ * Called before the first render of the file and not undone: framer-motion
+ * reads the preference once per module registry and caches it, so a suite
+ * cannot flip it back mid-file anyway.
  */
 function requestReducedMotion(): void {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: jest.fn((query: string) => ({
-      matches: query === REDUCED_MOTION_QUERY,
+      matches: query.includes(REDUCED_MOTION_FEATURE),
       media: query,
       onchange: null,
       addListener: jest.fn(),
@@ -56,8 +66,6 @@ function demoSection(): HTMLElement {
 afterEach(cleanup);
 
 describe("HeroDemo under prefers-reduced-motion", () => {
-  /* Guards the test below: `test.failing` passes on any failure, a render that
-     throws included, so the mount has to be asserted on its own. */
   it("renders the demo", () => {
     requestReducedMotion();
     render(<HeroDemo />);
@@ -66,7 +74,7 @@ describe("HeroDemo under prefers-reduced-motion", () => {
     expect(screen.getByTestId("interactive-hero")).toBeInTheDocument();
   });
 
-  test.failing("drops the pinned scroll track", () => {
+  it("drops the pinned scroll track", () => {
     requestReducedMotion();
     render(<HeroDemo />);
 
@@ -75,5 +83,15 @@ describe("HeroDemo under prefers-reduced-motion", () => {
        scroll on the demo instead of on the page. */
     expect(section.querySelector('[class*="320vh"]')).toBeNull();
     expect(section.querySelector('[class*="sticky"]')).toBeNull();
+  });
+
+  /* page.tsx pulls the problem section up by 100svh to park it under this one,
+     unconditionally. Drop the track without leaving that viewport of slack
+     behind and the pull lands on top of the demo instead of after it. */
+  it("keeps a viewport of slack for the section stacked under it", () => {
+    requestReducedMotion();
+    render(<HeroDemo />);
+
+    expect(demoSection().querySelector('[class*="h-svh"]')).not.toBeNull();
   });
 });

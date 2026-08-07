@@ -1,6 +1,7 @@
 "use client";
 
-import type { ComponentType, ReactNode } from "react";
+import { useRef } from "react";
+import type { ComponentType, KeyboardEvent, ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Lock, RotateCw } from "lucide-react";
 
 export interface BrowserTab {
@@ -63,7 +64,57 @@ export default function BrowserWindow({
   status,
   children,
 }: BrowserWindowProps) {
-  const activeTab = tabs.find((tab) => tab.id === activeId) ?? tabs[0];
+  const activeIndex = Math.max(
+    tabs.findIndex((tab) => tab.id === activeId),
+    0,
+  );
+  const activeTab = tabs[activeIndex];
+
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  /**
+   * The keyboard half of the tab pattern, which `role="tab"` promises.
+   *
+   * Announcing a tab list and then not answering the arrow keys is worse than
+   * announcing three buttons, because the arrows are the first thing a screen
+   * reader user tries once they have been told what this is. Selection follows
+   * focus — these tabs swap an already-loaded site, so there is nothing to be
+   * gained by making the reader confirm with Enter.
+   *
+   * Roving tabIndex is the other half: only the active tab is tabbable, so the
+   * strip costs one stop on the way to the toolbar rather than three.
+   */
+  const selectTabAt = (index: number) => {
+    const wrapped = (index + tabs.length) % tabs.length;
+    tabRefs.current[wrapped]?.focus();
+    onSelect(tabs[wrapped].id);
+  };
+
+  const handleTabKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) => {
+    let next: number;
+    switch (event.key) {
+      case "ArrowLeft":
+        next = index - 1;
+        break;
+      case "ArrowRight":
+        next = index + 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    // Otherwise Home/End throw the page to its ends and the arrows scroll it.
+    event.preventDefault();
+    selectTabAt(next);
+  };
 
   return (
     <div
@@ -87,16 +138,21 @@ export default function BrowserWindow({
           aria-label="Demo websites"
           className="flex min-w-0 items-end gap-1 overflow-x-auto"
         >
-          {tabs.map((tab) => {
+          {tabs.map((tab, index) => {
             const Icon = tab.icon;
-            const isActive = tab.id === activeId;
+            const isActive = index === activeIndex;
             return (
               <button
                 key={tab.id}
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                tabIndex={isActive ? 0 : -1}
+                ref={(node) => {
+                  tabRefs.current[index] = node;
+                }}
                 onClick={() => onSelect(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
                 /* -mb-px so the active tab's white face swallows the title
                    bar's bottom hairline and joins the toolbar below it. */
                 className={`-mb-px flex shrink-0 items-center gap-2 rounded-t-lg px-3.5 py-2 text-sm font-medium whitespace-nowrap transition-colors duration-200 ${

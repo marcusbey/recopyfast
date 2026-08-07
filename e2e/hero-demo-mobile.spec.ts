@@ -1,22 +1,24 @@
 /**
- * A-32 (touch half) — the pinned hero demo fights touch scrolling.
+ * A-32 (touch half) — the pinned hero demo must not fight touch scrolling.
  *
- * Two things own the demo's `scrollTop` at once. The demo viewport is
- * `overflow-y-auto` (`InteractiveHero.tsx:738`), so a finger over it scrolls it
- * natively; and `applyDemoScroll` (`:172-177`) writes `scrollTop` from the page
- * scroll track on every MotionValue change. Lenis is built without `syncTouch`,
- * `prevent` or `allowNestedScroll` (`useLenis.ts:157-172`) and never calls
- * `preventDefault` on touch, and there is no `overscroll-behavior` or
- * `touch-action` anywhere in `src/`.
+ * Two things used to own the demo's `scrollTop` at once. The demo viewport was
+ * `overflow-y-auto` even while pinned, so a finger over it scrolled it
+ * natively; and `applyDemoScroll` writes `scrollTop` from the page scroll track
+ * on every MotionValue change. Lenis is built without `syncTouch`, `prevent` or
+ * `allowNestedScroll` (`useLenis.ts:157-172`) and never calls `preventDefault`
+ * on touch, so a swipe that scrolled the nested element and then chained to the
+ * page had the page's value written back over it: the demo snapped back toward
+ * its top mid-gesture. Two successive swipes are the shortest sequence that
+ * shows it — the first ends inside the demo, the second chains.
  *
- * So a swipe that scrolls the nested element and then chains to the page has
- * the page's value written back over it: the demo snaps back toward its top
- * mid-gesture. Two successive swipes are the shortest sequence that shows it —
- * the first ends inside the demo, the second chains.
+ * The fix gives page scroll sole ownership wherever it is driving: with a
+ * progress MotionValue supplied the viewport is `overflow-y-hidden`, which
+ * still scrolls programmatically but is not a scroller a finger can drag. On
+ * /demo, where nothing drives it, it stays `overflow-y-auto` and the reader
+ * owns it. This spec pins the result on a phone.
  *
- * UNVERIFIED. This spec has not been executed: it needs a dev server and
- * browser binaries. It is written against the finding, not against an observed
- * run, and `test.fail()` below records the expectation, not a measurement.
+ * NOT EXECUTED HERE. It needs a dev server and browser binaries, neither of
+ * which was available when the fix landed.
  *
  * WHY CDP RATHER THAN dispatchEvent. Synthetic `TouchEvent`s are untrusted and
  * produce no scrolling at all, which would make this test measure nothing.
@@ -29,8 +31,8 @@ import type { Page } from "@playwright/test";
 
 test.use({ ...devices["iPhone 13"] });
 
-/** The demo site's own scrollable viewport — `siteScrollRef` in InteractiveHero. */
-const DEMO_SCROLLER = "[data-demo-surface] .overflow-y-auto";
+/** The demo site's own scrolling viewport — `siteScrollRef` in InteractiveHero. */
+const DEMO_SCROLLER = "[data-demo-scroller]";
 
 /** Enough page scroll to reach the demo's sticky track and pin it. */
 const APPROACH_PX = 400;
@@ -103,9 +105,9 @@ async function openPinnedDemo(page: Page): Promise<void> {
 test.describe("Hero demo on a phone", () => {
   test.setTimeout(90000);
 
-  /* Guards the test below: an expected failure is only meaningful if the thing
-     being measured is actually there and actually scrollable. */
-  test("the demo has its own scrollable viewport", async ({ page }) => {
+  /* Guards the test below: the swipe measures nothing if the thing being
+     swiped is absent or has nothing to scroll through. */
+  test("the demo has its own scrolling viewport", async ({ page }) => {
     await openPinnedDemo(page);
 
     const scroller = page.locator(DEMO_SCROLLER).first();
@@ -119,12 +121,6 @@ test.describe("Hero demo on a phone", () => {
   });
 
   test("two swipes never scroll the demo backwards", async ({ page }) => {
-    /* Expected to fail while A-32 is open. If this ever reports "expected to
-       fail, but passed", check whether the fix landed before deleting the
-       marker — synthetic input is not a finger, and the harness may simply not
-       be reproducing the conflict. */
-    test.fail();
-
     await openPinnedDemo(page);
 
     const samples = [

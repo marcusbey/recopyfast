@@ -51,7 +51,24 @@ const benefits = [
 
 export default function ValueProposition() {
   const ref = useRef(null);
-  const isInView = useInView(ref, { once: true, margin: "-100px" });
+  /**
+   * Why the entrance waits for two thirds of the viewport instead of the usual
+   * -100px.
+   *
+   * On the landing page this section is stacked UNDER the pinned hero demo:
+   * page.tsx pulls it up by 100svh, so its top edge crosses the bottom of the
+   * viewport a full viewport of scroll before the demo window begins lifting
+   * off it. `useInView` fires on geometry and knows nothing about what is
+   * covering the element, so at -100px the whole 1.6s of entrance played out
+   * behind the demo and the reveal uncovered a section that had already
+   * finished animating — the one thing the arrangement exists to avoid.
+   *
+   * -65% is where the lift starts. HeroDemo's track spends 220vh of scroll
+   * between its two pinned edges and begins the lift with the last 0.16 of it
+   * left, which puts this section's top edge 35vh below the viewport top at
+   * that moment — so the header animates in as the window travels off it.
+   */
+  const isInView = useInView(ref, { once: true, margin: "0px 0px -65% 0px" });
 
   return (
     <section

@@ -1,18 +1,18 @@
 /**
  * @jest-environment jsdom
  *
- * A-34 — the attract loop does not stop on `/demo`.
+ * A-34 — the attract loop has to stop on `/demo` too.
  *
  * `InteractiveHero` ends its attract loop (tab cycling + the hover-ring hint)
- * on the first sign the visitor is driving. Scroll is one of those signs, but
- * the signal lives inside the `if (!demoScrollProgress) return` branch of the
- * subscription effect (`InteractiveHero.tsx:180-192`), so it only exists on the
- * landing page, where `HeroDemo` supplies a scroll-progress MotionValue.
+ * on the first sign the visitor is driving. Scroll used to be a sign only where
+ * a scroll-progress MotionValue was supplied, because the signal lived inside
+ * the subscription effect — and that value comes from `HeroDemo`, on the
+ * landing page and nowhere else.
  *
  * `src/app/demo/page.tsx:83` mounts `<InteractiveHero />` with no such prop —
  * the page the hero's own "Watch it work" link targets. There the demo's own
- * scrollable viewport is the only thing the visitor scrolls, nothing listens to
- * it, and the tabs keep cycling every 6s while they read.
+ * scrollable viewport is the only thing the visitor scrolls, so that scroll now
+ * has to count on its own; otherwise the tabs cycle every 6s while they read.
  *
  * Deliberately a separate file from `InteractiveHero.test.tsx`: that suite is a
  * `describe.skip` written against a version of this component that no longer
@@ -59,9 +59,7 @@ class OnScreenObserver implements IntersectionObserver {
 
 /** The demo site's own scrollable viewport — `siteScrollRef` in the component. */
 function getDemoScroller(): HTMLElement {
-  const scroller = document.querySelector<HTMLElement>(
-    "[data-demo-surface] .overflow-y-auto",
-  );
+  const scroller = document.querySelector<HTMLElement>("[data-demo-scroller]");
   if (!scroller) throw new Error("demo scroller not found");
   return scroller;
 }
@@ -82,8 +80,6 @@ afterEach(() => {
 });
 
 describe("InteractiveHero attract loop on /demo", () => {
-  /* Guards the test below: `test.failing` passes on any failure, including a
-     render that throws, so the mount path has to be asserted separately. */
   it("mounts with no scroll-progress prop, the way /demo mounts it", () => {
     render(<InteractiveHero />);
 
@@ -91,21 +87,45 @@ describe("InteractiveHero attract loop on /demo", () => {
     expect(getDemoScroller()).toBeInTheDocument();
   });
 
-  test.failing(
-    "stops cycling tabs once the visitor scrolls the demo itself",
-    () => {
-      render(<InteractiveHero />);
-      const startingTab = activeTabName();
+  /* Vacuous otherwise: if the loop never ran, every assertion about it
+     stopping passes for the wrong reason. */
+  it("cycles tabs while nobody has touched it", () => {
+    render(<InteractiveHero />);
+    const startingTab = activeTabName();
 
-      /* The gesture a reader on /demo actually makes: the demo's own viewport
-       is `overflow-y-auto`, so their scroll lands here and nowhere else. */
-      fireEvent.scroll(getDemoScroller(), { target: { scrollTop: 240 } });
+    act(() => {
+      jest.advanceTimersByTime(TAB_DWELL_MS + 1000);
+    });
 
-      act(() => {
-        jest.advanceTimersByTime(TAB_DWELL_MS + 1000);
-      });
+    expect(activeTabName()).not.toBe(startingTab);
+  });
 
-      expect(activeTabName()).toBe(startingTab);
-    },
-  );
+  it("stops cycling tabs once the visitor scrolls the demo itself", () => {
+    render(<InteractiveHero />);
+    const startingTab = activeTabName();
+
+    /* The gesture a reader on /demo actually makes: the demo's own viewport
+       is `overflow-y-auto` there, so their scroll lands here and nowhere
+       else. */
+    fireEvent.scroll(getDemoScroller(), { target: { scrollTop: 240 } });
+
+    act(() => {
+      jest.advanceTimersByTime(TAB_DWELL_MS + 1000);
+    });
+
+    expect(activeTabName()).toBe(startingTab);
+  });
+
+  it("stops cycling tabs once the visitor points at the demo", () => {
+    render(<InteractiveHero />);
+    const startingTab = activeTabName();
+
+    fireEvent.pointerDown(getDemoScroller());
+
+    act(() => {
+      jest.advanceTimersByTime(TAB_DWELL_MS + 1000);
+    });
+
+    expect(activeTabName()).toBe(startingTab);
+  });
 });

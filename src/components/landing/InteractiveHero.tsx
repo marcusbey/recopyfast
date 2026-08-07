@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, UIEvent } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { MotionValue } from "framer-motion";
 import { CheckCircle, Sparkles } from "lucide-react";
@@ -158,6 +159,11 @@ export default function InteractiveHero({
   const [isOnScreen, setIsOnScreen] = useState(false);
   const [hintedId, setHintedId] = useState<string | null>(null);
 
+  /** The fixed overlays are portalled, and there is no `document` to portal
+      into until this component has mounted on the client. */
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => setIsMounted(true), []);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const hintCursor = useRef(0);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,12 +174,18 @@ export default function InteractiveHero({
   const siteScrollRef = useRef<HTMLDivElement | null>(null);
   /** Last progress seen, so a freshly mounted site starts at the right depth. */
   const latestDemoProgress = useRef(0);
+  /** The last `scrollTop` this component wrote, so its own writes can be told
+      apart from the visitor's — both arrive as the same scroll event. */
+  const appliedScrollTop = useRef<number | null>(null);
 
   const applyDemoScroll = useCallback((progressValue: number) => {
     const el = siteScrollRef.current;
     if (!el) return;
     const maxScroll = el.scrollHeight - el.clientHeight;
-    if (maxScroll > 0) el.scrollTop = progressValue * maxScroll;
+    if (maxScroll > 0) {
+      appliedScrollTop.current = progressValue * maxScroll;
+      el.scrollTop = appliedScrollTop.current;
+    }
   }, []);
 
   useEffect(() => {
@@ -518,6 +530,34 @@ export default function InteractiveHero({
     advanceSiteRef.current = advanceSite;
   });
 
+  /**
+   * The other way somebody takes the wheel: they just scroll, point at, or tab
+   * into the demo without pressing any of the controls above.
+   *
+   * The scroll-progress subscription only exists where a progress MotionValue
+   * is supplied, which is the landing page. On /demo the demo site's own
+   * `overflow-y-auto` viewport is the only thing that moves, nothing was
+   * listening to it, and the tabs went on cycling every six seconds under
+   * somebody who was mid-read. These run in the capture phase because `scroll`
+   * does not bubble, so a listener on this container would never see it.
+   */
+  const handleSurfaceScroll = (event: UIEvent<HTMLDivElement>) => {
+    /* `applyDemoScroll` writes `scrollTop` itself and that write raises a
+       scroll event of its own. Only a position this component did not just set
+       is the visitor; on the landing page their engagement is already measured
+       by SCROLL_ENGAGED_AT against the track. */
+    const target = event.target as HTMLElement;
+    if (
+      appliedScrollTop.current !== null &&
+      Math.abs(target.scrollTop - appliedScrollTop.current) < 1
+    ) {
+      return;
+    }
+    setHasInteracted(true);
+  };
+
+  const handleSurfaceEngage = () => setHasInteracted(true);
+
   const isAttracting = !hasInteracted && !prefersReducedMotion && isOnScreen;
 
   useEffect(() => {
@@ -645,6 +685,9 @@ export default function InteractiveHero({
       className={`relative ${fillHeight ? "flex h-full min-h-0 flex-col" : ""}`}
       data-demo-surface
       ref={containerRef}
+      onScrollCapture={handleSurfaceScroll}
+      onPointerDownCapture={handleSurfaceEngage}
+      onFocusCapture={handleSurfaceEngage}
     >
       <FloatingEditorToolbar
         position={toolbarPosition}
@@ -678,25 +721,34 @@ export default function InteractiveHero({
         changeCount={pendingChanges.size}
       />
 
-      <AnimatePresence>
-        {showSuccessAnimation && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18, ease: EASE }}
-            className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
-          >
-            <CheckCircle className="h-4 w-4" />
-            {/* Was "Content updated instantly", which is the same real-time
-                claim F-12 removed from ValueProposition and HowItWorks — and
-                this component renders on the landing page, so it undid the fix
-                two sections further down. Editing saves a draft; a separate
-                publish is what reaches visitors. */}
-            Saved — ready to publish
-          </motion.div>
+      {/* Portalled to the body, like the toolbar above it. On the landing page
+          this component sits inside a transformed wrapper (HeroDemo's scale/y),
+          and a transformed ancestor becomes the containing block for its
+          `position: fixed` descendants — the toast would stop being fixed to
+          the viewport and ride the window off the top of the screen instead. */}
+      {isMounted &&
+        createPortal(
+          <AnimatePresence>
+            {showSuccessAnimation && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.18, ease: EASE }}
+                className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
+              >
+                <CheckCircle className="h-4 w-4" />
+                {/* Was "Content updated instantly", which is the same real-time
+                    claim F-12 removed from ValueProposition and HowItWorks —
+                    and this component renders on the landing page, so it undid
+                    the fix two sections further down. Editing saves a draft; a
+                    separate publish is what reaches visitors. */}
+                Saved — ready to publish
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
 
       {/* The fake browser. Its tabs are the site switcher — see BrowserWindow. */}
       <BrowserWindow
@@ -735,7 +787,18 @@ export default function InteractiveHero({
               initial="enter"
               animate="center"
               exit="exit"
-              className="absolute inset-0 overflow-x-hidden overflow-y-auto"
+              data-demo-scroller
+              /* One owner of `scrollTop` at a time. Where page scroll drives
+                 the demo, this viewport must not also be a scroller the finger
+                 can drag: a touch swipe used to scroll it natively AND chain to
+                 the page, whose progress was then written straight back over
+                 the position the swipe had just reached, so the demo snapped
+                 backwards mid-gesture. `overflow: hidden` still scrolls
+                 programmatically, so `applyDemoScroll` is unaffected. Without a
+                 progress value — /demo — the reader owns it and it scrolls. */
+              className={`absolute inset-0 overflow-x-hidden ${
+                demoScrollProgress ? "overflow-y-hidden" : "overflow-y-auto"
+              }`}
             >
               {SiteLayout ? (
                 <SiteLayout {...buildRenderProps(currentSiteData)} />
