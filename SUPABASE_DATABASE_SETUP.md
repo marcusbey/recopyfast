@@ -26,7 +26,7 @@
 node setup-db.js
 
 # Or manually with psql
-psql "postgresql://postgres:YOUR_DB_PASSWORD@db.uexwowziiigweobgpmtk.supabase.co:5432/postgres" -f COMPLETE_DATABASE_SETUP_CLEAN.sql
+psql "postgresql://postgres:<YOUR-DB-PASSWORD>@db.uexwowziiigweobgpmtk.supabase.co:5432/postgres" -f COMPLETE_DATABASE_SETUP_CLEAN.sql
 ```
 
 ## Step 3: Verify Tables Created
