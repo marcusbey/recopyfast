@@ -1,11 +1,24 @@
 import '@testing-library/jest-dom'
 import 'whatwg-fetch'
 
-// Polyfill TextEncoder/TextDecoder for Node.js 
+// Polyfill TextEncoder/TextDecoder for Node.js
 if (typeof global.TextEncoder === 'undefined') {
   const { TextEncoder, TextDecoder } = require('util')
   global.TextEncoder = TextEncoder
   global.TextDecoder = TextDecoder
+}
+
+// Polyfill setImmediate for jsdom, which omits it.
+//
+// Winston's transport queue calls it, so `logger.info` THROWS under jsdom —
+// which meant any route that logs on its success path could only ever reach its
+// outer catch and answer 503 in a test. That is not theoretical: it is why
+// `src/__tests__/api/health/route.test.ts` asserted `[200, 503]` and passed on
+// the 503 for as long as it existed, verifying nothing about a healthy handler.
+// Both routes return their real status once logging works.
+if (typeof global.setImmediate === 'undefined') {
+  global.setImmediate = (fn, ...args) => setTimeout(fn, 0, ...args)
+  global.clearImmediate = (id) => clearTimeout(id)
 }
 
 // Polyfill TransformStream for Node.js (required by MSW)

@@ -10,7 +10,7 @@ import HowItWorks from "@/components/sections/HowItWorks";
 import Benefits from "@/components/sections/Benefits";
 import Pricing from "@/components/sections/Pricing";
 import FinalCTA from "@/components/sections/FinalCTA";
-import StickyDemoSection from "@/components/landing/StickyDemoSection";
+import HeroDemo from "@/components/landing/HeroDemo";
 
 // Dynamic import to avoid SSR issues with Three.js. The loading gradient runs
 // the same horizon-to-zenith ramp as the shader, so the hand-off is a sharpening
@@ -41,11 +41,22 @@ export default function Home() {
       <Header />
       <main className="relative z-10">
         <Hero />
-        <ValueProposition />
 
-        {/* Interactive demo websites — pinned while page scroll drives the
-            demo page's own scroll. See StickyDemoSection for the mechanics. */}
-        <StickyDemoSection />
+        {/* The demo, pinned under the headline while page scroll drives the
+            demo site's own scroll. See HeroDemo for the mechanics. */}
+        <HeroDemo />
+
+        {/* The problem section is stacked UNDER the demo, not after it: the
+            negative margin parks it a full viewport beneath the pinned window
+            and the low z-index keeps it there, so the window lifting away at
+            the end of its track uncovers this section from its own first line
+            rather than from the middle. One viewport exactly — that is what
+            makes the two motions line up. Both halves of the effect live here
+            rather than inside either section, because neither one can see the
+            other: the overlap is a fact about their arrangement. */}
+        <div className="relative z-0 -mt-[100svh]">
+          <ValueProposition />
+        </div>
 
         <HowItWorks />
         <Benefits />

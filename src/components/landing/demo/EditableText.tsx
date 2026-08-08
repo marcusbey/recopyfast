@@ -29,6 +29,14 @@ export interface EditableTextProps {
   /** The site's typography for this element id. Shared by both branches. */
   typographyClasses: string;
   isSelected: boolean;
+  /**
+   * Show the click affordance without a pointer — the hover ring and pencil,
+   * drawn for a beat by the demo's attract loop. It is the same chrome hover
+   * produces, on purpose: what it teaches has to be what the visitor then
+   * finds. Driven from `InteractiveHero`, which walks the elements actually on
+   * screen and stops the moment anybody interacts.
+   */
+  isHinted?: boolean;
   selectedTag: string;
   customStyles?: TypographyStyles;
   /** Read-mode `offsetWidth`, captured on click. */
@@ -71,6 +79,7 @@ export default function EditableText({
   item,
   typographyClasses,
   isSelected,
+  isHinted = false,
   selectedTag,
   customStyles,
   pinnedWidth,
@@ -216,10 +225,14 @@ export default function EditableText({
         activate(event.currentTarget);
       }}
       data-editable-id={item.id}
-      className={`${BOX} group cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:outline-dashed focus-visible:outline-emerald-400 ${
+      className={`${BOX} group cursor-pointer transition-colors duration-300 focus:outline-none focus-visible:outline-dashed focus-visible:outline-emerald-400 ${
         isSelected
           ? "outline-emerald-400"
-          : "outline-transparent hover:outline-dashed hover:outline-emerald-400/70"
+          : `hover:outline-dashed hover:outline-emerald-400/70 ${
+              isHinted
+                ? "outline-dashed outline-emerald-400/70"
+                : "outline-transparent"
+            }`
       } ${typographyClasses}`}
       style={inlineStyles}
     >
@@ -242,7 +255,9 @@ export default function EditableText({
       {!isSelected && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-2.5 -right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 opacity-0 transition-opacity group-hover:opacity-100"
+          className={`pointer-events-none absolute -top-2.5 -right-2.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 transition-opacity duration-300 group-hover:opacity-100 ${
+            isHinted ? "opacity-100" : "opacity-0"
+          }`}
         >
           <Edit3 className="h-3 w-3 text-white" />
         </div>

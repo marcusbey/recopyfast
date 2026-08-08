@@ -30,9 +30,12 @@ describe("/api/health", () => {
       const request = new NextRequest("http://localhost:3000/api/health");
       const response = await GET(request);
 
-      // Exercise the real handler: it always returns a structured 200/503 JSON
-      // body carrying status + timestamp (both the healthy and error paths).
-      expect([200, 503]).toContain(response.status);
+      // Was `expect([200, 503]).toContain(...)`, which accepted the crash as a
+      // pass: jsdom has no `setImmediate`, so winston threw and this handler
+      // could only ever reach its outer catch and answer 503. The assertion
+      // therefore held no matter what the health checks did. With the polyfill
+      // in jest.setup.js the healthy path is reachable, so pin it.
+      expect(response.status).toBe(200);
       const body = await response.json();
       expect(body).toHaveProperty("status");
       expect(["healthy", "degraded", "unhealthy"]).toContain(body.status);

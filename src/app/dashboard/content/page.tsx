@@ -3,7 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { FileText, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import {
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  AlertTriangle,
+} from "lucide-react";
 import {
   ContentElementCard,
   getContentStatus,
@@ -37,6 +43,13 @@ interface RawContentElement {
   updated_at?: string;
 }
 
+/** One site's content read that was refused, kept beside the ones that worked. */
+interface SiteContentFailure {
+  siteId: string;
+  siteLabel: string;
+  message: string;
+}
+
 const ITEMS_PER_PAGE = 10;
 
 function PageHeader() {
@@ -52,6 +65,51 @@ function PageHeader() {
   );
 }
 
+/**
+ * The sites whose content could not be read, named and scoped to themselves.
+ *
+ * Deliberately an inline notice rather than a page state: everything else on
+ * this page still works, and the content that did load is right below it.
+ */
+function SiteFailureNotice({
+  failures,
+  onRetry,
+}: {
+  failures: SiteContentFailure[];
+  onRetry: () => void;
+}) {
+  return (
+    <Card className="border-tone-danger-border">
+      <CardContent className="flex flex-col gap-3 p-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <AlertTriangle
+              className="h-4 w-4 text-tone-danger-text"
+              aria-hidden="true"
+            />
+            {failures.length === 1
+              ? "One site's content could not be loaded"
+              : `${failures.length} sites' content could not be loaded`}
+          </h2>
+          <ul className="space-y-1">
+            {failures.map((failure) => (
+              <li
+                key={failure.siteId}
+                className="text-sm text-muted-foreground"
+              >
+                {failure.siteLabel} — {failure.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          Try Again
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ContentPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [siteContents, setSiteContents] = useState<
@@ -59,6 +117,7 @@ export default function ContentPage() {
   >(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [siteFailures, setSiteFailures] = useState<SiteContentFailure[]>([]);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -71,19 +130,32 @@ export default function ContentPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Fetch user's sites
-  const fetchSites = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sites");
-      const data = await res.json();
-      if (data.sites) {
-        setSites(data.sites);
-        return data.sites;
-      }
-      return [];
-    } catch (err) {
-      console.error("Failed to fetch sites:", err);
-      return [];
+  //
+  // Throws on anything that is not a site list. An empty array here means "you
+  // have registered no sites", which is what the page says when it renders the
+  // empty state — so a refused or malformed read must not be able to produce
+  // one. Swallowing the failure told a customer with sites that they had none,
+  // and offered them no way to retry.
+  const fetchSites = useCallback(async (): Promise<Site[]> => {
+    const res = await fetch("/api/sites");
+
+    if (!res.ok) {
+      const detail = await res
+        .json()
+        .then((body) => body?.error)
+        .catch(() => null);
+      throw new Error(detail || `Could not load your sites (${res.status})`);
     }
+
+    const body: unknown = await res.json();
+    const siteList = (body as { sites?: unknown } | null)?.sites;
+    if (!Array.isArray(siteList)) {
+      throw new Error("Could not load your sites: unexpected response");
+    }
+
+    const fetchedSites = siteList as Site[];
+    setSites(fetchedSites);
+    return fetchedSites;
   }, []);
 
   // Fetch content for a specific site
@@ -103,9 +175,9 @@ export default function ContentPage() {
         .json()
         .then((body) => body?.error)
         .catch(() => null);
-      throw new Error(
-        `${site.name || site.domain}: ${detail || `request failed (${res.status})`}`,
-      );
+      // The reason only. Which site it belongs to is the caller's to record,
+      // because the caller is what still has the other sites in hand.
+      throw new Error(detail || `request failed (${res.status})`);
     }
 
     const data = await res.json();
@@ -133,6 +205,7 @@ export default function ContentPage() {
     try {
       setLoading(true);
       setError(null);
+      setSiteFailures([]);
 
       const fetchedSites = await fetchSites();
       if (fetchedSites.length === 0) {
@@ -140,22 +213,41 @@ export default function ContentPage() {
         return;
       }
 
-      const contentMap = new Map<string, ContentElement[]>();
-
-      // A rejected fetch propagates to the catch below and shows the real
-      // reason. Previously every failure was swallowed and the page fell
-      // through to "Register a site and add content elements to see them
-      // here" — telling a customer with content that they have none.
-      await Promise.all(
-        fetchedSites.map(async (site: Site) => {
-          const content = await fetchSiteContent(site);
-          if (content.length > 0) {
-            contentMap.set(site.id, content);
-          }
-        }),
+      // `allSettled`, not `all`. `Promise.all` rejects on the first failure and
+      // discards the results that had already resolved, and the catch below set
+      // a page-level error that replaced the whole view — so one site whose
+      // read was refused took every other site's content down with it. A
+      // customer with two sites, one broken, could not reach the one that
+      // worked. Each site now succeeds or fails on its own terms.
+      const results = await Promise.allSettled(
+        fetchedSites.map((site) => fetchSiteContent(site)),
       );
 
+      const contentMap = new Map<string, ContentElement[]>();
+      const failures: SiteContentFailure[] = [];
+
+      results.forEach((result, index) => {
+        const site: Site = fetchedSites[index];
+
+        if (result.status === "fulfilled") {
+          if (result.value.length > 0) {
+            contentMap.set(site.id, result.value);
+          }
+          return;
+        }
+
+        failures.push({
+          siteId: site.id,
+          siteLabel: site.domain || site.name,
+          message:
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Failed to load content",
+        });
+      });
+
       setSiteContents(contentMap);
+      setSiteFailures(failures);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch content");
     } finally {
@@ -203,6 +295,17 @@ export default function ContentPage() {
     setCurrentPage(1);
   }, [searchQuery, selectedSiteId, selectedStatus]);
 
+  // Keep the current page inside the pages that exist.
+  //
+  // Filters are not the only thing that can shrink the list: a retry that comes
+  // back with fewer elements than the last read does too, and that path sets no
+  // filter state. Without this, page 3 of a list that is now one page long
+  // renders no cards under the words "Page 3 of 1". Clamped rather than reset,
+  // so a retry that changes nothing leaves the reader where they were.
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, Math.max(1, totalPages)));
+  }, [totalPages]);
+
   // Loading state
   if (loading) {
     return (
@@ -219,7 +322,9 @@ export default function ContentPage() {
     );
   }
 
-  // Error state
+  // Error state. Reserved for a failure that leaves nothing to show — a
+  // per-site content refusal is reported inline by SiteFailureNotice instead,
+  // so it can sit beside the sites that loaded.
   if (error) {
     return (
       <div className="space-y-6">
@@ -265,6 +370,11 @@ export default function ContentPage() {
         </CardContent>
       </Card>
 
+      {/* Sites whose content could not be read, beside the ones that could */}
+      {siteFailures.length > 0 && (
+        <SiteFailureNotice failures={siteFailures} onRetry={fetchAllContent} />
+      )}
+
       {/* Content List */}
       {filteredContent.length === 0 ? (
         <Card>
@@ -280,9 +390,19 @@ export default function ContentPage() {
                 No content found
               </h3>
               <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
-                {allContent.length === 0
-                  ? "Register a site and add content elements to see them here."
-                  : "No content matches your current filters. Try adjusting your search or filters."}
+                {allContent.length > 0
+                  ? "No content matches your current filters. Try adjusting your search or filters."
+                  : siteFailures.length > 0 &&
+                      siteFailures.length === sites.length
+                    ? // Not "you have none" — we do not know that. Every site we
+                      // asked refused, and the reasons are listed above.
+                      "None of your sites' content could be read. See the reasons above."
+                    : siteFailures.length > 0
+                      ? // Some sites answered and are genuinely empty; others
+                        // refused. Claiming a total failure here would describe
+                        // an account state that is not the one they are in.
+                        "The sites we could read have no content yet. The rest are listed above with their reasons."
+                      : "Register a site and add content elements to see them here."}
               </p>
             </div>
           </CardContent>

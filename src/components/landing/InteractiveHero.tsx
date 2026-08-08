@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ComponentType } from "react";
+import type { ComponentType, UIEvent } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import type { MotionValue } from "framer-motion";
-import { CheckCircle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { CheckCircle, Sparkles } from "lucide-react";
 import { FloatingEditorToolbar, UnsavedChangesBar } from "@/components/editor";
 import { useFloatingPosition } from "@/lib/hooks/useFloatingPosition";
 import type { PendingChange, TypographyStyles } from "@/types/editor";
 import BellaVistaSite from "./demo/BellaVistaSite";
-import BrowserChrome from "./demo/BrowserChrome";
+import BrowserWindow from "./demo/BrowserWindow";
 import EditableImage from "./demo/EditableImage";
 import EditableText from "./demo/EditableText";
 import PremiumAutoSpaSite from "./demo/PremiumAutoSpaSite";
@@ -36,6 +37,27 @@ const DEFAULT_STYLES: TypographyStyles = {
 
 /** Matches `--ease-out` in globals.css. */
 const EASE = [0.22, 1, 0.36, 1] as const;
+
+/**
+ * The attract loop: what the demo does while nobody has touched it yet.
+ *
+ * Two things about this demo are invisible at rest. That there are three sites
+ * behind the tabs, and that the copy inside them is clickable — both were only
+ * discoverable by hovering something you had no reason to hover. So the demo
+ * shows you: it moves through the tabs on its own, and it draws the hover ring
+ * on one on-screen string at a time, which is the same chrome your pointer
+ * would have produced.
+ *
+ * It stops for good at the first interaction — a tab, a toolbar button, a click
+ * on any text. Once somebody is driving, a demo that keeps moving on its own is
+ * no longer a hint, it is a fight over the caret. It also does not run under
+ * `prefers-reduced-motion`, and only runs while the demo is actually on screen.
+ */
+const TAB_DWELL_MS = 6000;
+const HINT_INTERVAL_MS = 2600;
+const HINT_VISIBLE_MS = 1500;
+/** Demo-scroll progress that counts as "the visitor is now reading this". */
+const SCROLL_ENGAGED_AT = 0.01;
 
 /**
  * Direction-aware slide. `custom` carries +1 (moved forward) or -1 (moved
@@ -132,7 +154,18 @@ export default function InteractiveHero({
     Map<string, PendingChange>
   >(new Map());
 
+  /** Attract-loop state. `hasInteracted` is one-way: nothing turns it back on. */
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const [isOnScreen, setIsOnScreen] = useState(false);
+  const [hintedId, setHintedId] = useState<string | null>(null);
+
+  /** The fixed overlays are portalled, and there is no `document` to portal
+      into until this component has mounted on the client. */
+  const [isMounted, setIsMounted] = useState(false);
+  useEffect(() => setIsMounted(true), []);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const hintCursor = useRef(0);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** What the element said when editing started, so Esc can put it back. */
   const editStartText = useRef<{ id: string; text: string } | null>(null);
@@ -141,12 +174,18 @@ export default function InteractiveHero({
   const siteScrollRef = useRef<HTMLDivElement | null>(null);
   /** Last progress seen, so a freshly mounted site starts at the right depth. */
   const latestDemoProgress = useRef(0);
+  /** The last `scrollTop` this component wrote, so its own writes can be told
+      apart from the visitor's — both arrive as the same scroll event. */
+  const appliedScrollTop = useRef<number | null>(null);
 
   const applyDemoScroll = useCallback((progressValue: number) => {
     const el = siteScrollRef.current;
     if (!el) return;
     const maxScroll = el.scrollHeight - el.clientHeight;
-    if (maxScroll > 0) el.scrollTop = progressValue * maxScroll;
+    if (maxScroll > 0) {
+      appliedScrollTop.current = progressValue * maxScroll;
+      el.scrollTop = appliedScrollTop.current;
+    }
   }, []);
 
   useEffect(() => {
@@ -156,6 +195,13 @@ export default function InteractiveHero({
     return demoScrollProgress.on("change", (value) => {
       latestDemoProgress.current = value;
       applyDemoScroll(value);
+      /* Scrolling INTO the demo counts as engagement. Past this point the
+         visitor is reading the site the attract loop was there to advertise,
+         and cycling the tabs out from under them — or ringing a string they
+         did not choose — interrupts exactly the thing they came to look at.
+         The threshold only has to clear the resting value; the loop ends on
+         the first real movement of the track. */
+      if (value > SCROLL_ENGAGED_AT) setHasInteracted(true);
     });
   }, [demoScrollProgress, applyDemoScroll]);
 
@@ -227,9 +273,56 @@ export default function InteractiveHero({
     clearSelection();
   };
 
-  const nextSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
-  const prevSite = () =>
+  const advanceSite = () => goToSite((currentSite + 1) % demoSites.length, 1);
+
+  /* The user-driven entry points. They differ from `advanceSite` in one way
+     that matters: reaching the demo through any of them ends the attract loop. */
+  const nextSite = () => {
+    setHasInteracted(true);
+    advanceSite();
+  };
+  const prevSite = () => {
+    setHasInteracted(true);
     goToSite((currentSite - 1 + demoSites.length) % demoSites.length, -1);
+  };
+
+  const goToSiteId = (id: string) => {
+    setHasInteracted(true);
+    const index = demoSites.findIndex((site) => site.id === id);
+    if (index >= 0) goToSite(index);
+  };
+
+  /**
+   * What the browser's reload button means here: put this site back the way it
+   * shipped. Scoped to the active site — a visitor who edited the restaurant,
+   * moved to the bakery and reloaded expects to have reset the bakery.
+   */
+  const reloadCurrentSite = () => {
+    setHasInteracted(true);
+    const site = currentSiteData;
+
+    setTextsBySite((prev) => ({
+      ...prev,
+      [site.id]: site.editableTexts.map((item) => ({
+        ...item,
+        text: item.originalText,
+        isEditing: false,
+      })),
+    }));
+    setImageSources((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([key]) => !key.startsWith(`${site.id}:`)),
+      ),
+    );
+
+    setElementStyles({});
+    setPendingChanges(new Map());
+    setOriginalWidths({});
+    setOriginalHeights({});
+    setPreservedColors({});
+    setPreservedShadows({});
+    clearSelection();
+  };
 
   // --- Editing -------------------------------------------------------------
 
@@ -241,6 +334,7 @@ export default function InteractiveHero({
    * resizing the moment it is clicked.
    */
   const handleElementActivate = (id: string, element: HTMLElement) => {
+    setHasInteracted(true);
     const computed = window.getComputedStyle(element);
 
     setSelectedElementId(id);
@@ -413,6 +507,114 @@ export default function InteractiveHero({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [currentSiteData.id]);
 
+  // --- The attract loop ----------------------------------------------------
+
+  /* Off screen it must not run at all: on the landing page this component sits
+     inside a 320vh track, so without this it would be cycling tabs and painting
+     rings to an empty room for most of the page. */
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsOnScreen(entry.isIntersecting),
+      { threshold: 0.25 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  /* The tab cycle reads its action through a ref so the interval does not have
+     to be rebuilt — and the dwell restarted — on every unrelated render. */
+  const advanceSiteRef = useRef(advanceSite);
+  useEffect(() => {
+    advanceSiteRef.current = advanceSite;
+  });
+
+  /**
+   * The other way somebody takes the wheel: they just scroll, point at, or tab
+   * into the demo without pressing any of the controls above.
+   *
+   * The scroll-progress subscription only exists where a progress MotionValue
+   * is supplied, which is the landing page. On /demo the demo site's own
+   * `overflow-y-auto` viewport is the only thing that moves, nothing was
+   * listening to it, and the tabs went on cycling every six seconds under
+   * somebody who was mid-read. These run in the capture phase because `scroll`
+   * does not bubble, so a listener on this container would never see it.
+   */
+  const handleSurfaceScroll = (event: UIEvent<HTMLDivElement>) => {
+    /* `applyDemoScroll` writes `scrollTop` itself and that write raises a
+       scroll event of its own. Only a position this component did not just set
+       is the visitor; on the landing page their engagement is already measured
+       by SCROLL_ENGAGED_AT against the track. */
+    const target = event.target as HTMLElement;
+    if (
+      appliedScrollTop.current !== null &&
+      Math.abs(target.scrollTop - appliedScrollTop.current) < 1
+    ) {
+      return;
+    }
+    setHasInteracted(true);
+  };
+
+  const handleSurfaceEngage = () => setHasInteracted(true);
+
+  const isAttracting = !hasInteracted && !prefersReducedMotion && isOnScreen;
+
+  useEffect(() => {
+    if (!isAttracting) return;
+    const timer = setInterval(() => advanceSiteRef.current(), TAB_DWELL_MS);
+    return () => clearInterval(timer);
+  }, [isAttracting]);
+
+  /* The ring walks the strings that are ACTUALLY in the demo's viewport, which
+     is why it is measured rather than taken from the site's copy list: the demo
+     scrolls under page scroll, so which strings are visible changes constantly
+     and a fixed order would spend most of its time pointing off screen. */
+  useEffect(() => {
+    if (!isAttracting) {
+      setHintedId(null);
+      return;
+    }
+
+    let hideTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const tick = () => {
+      const scroller = siteScrollRef.current;
+      if (!scroller) return;
+
+      const view = scroller.getBoundingClientRect();
+      const onScreen = Array.from(
+        scroller.querySelectorAll<HTMLElement>("[data-editable-id]"),
+      ).filter((element) => {
+        const box = element.getBoundingClientRect();
+        if (box.height === 0) return false;
+        /* Mostly visible, not strictly contained. Requiring containment threw
+           away every candidate whenever the demo was mid-scroll, and the ring
+           went dark for whole beats at a time. */
+        const shown =
+          Math.min(box.bottom, view.bottom) - Math.max(box.top, view.top);
+        return shown >= box.height * 0.6;
+      });
+      if (onScreen.length === 0) return;
+
+      const pick = onScreen[hintCursor.current % onScreen.length];
+      hintCursor.current += 1;
+      setHintedId(pick.dataset.editableId ?? null);
+
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => setHintedId(null), HINT_VISIBLE_MS);
+    };
+
+    const timer = setInterval(tick, HINT_INTERVAL_MS);
+    tick();
+
+    return () => {
+      clearInterval(timer);
+      if (hideTimer) clearTimeout(hideTimer);
+      setHintedId(null);
+    };
+  }, [isAttracting, currentSiteData.id]);
+
   // --- Rendering -----------------------------------------------------------
 
   /**
@@ -434,6 +636,9 @@ export default function InteractiveHero({
           item={item}
           typographyClasses={site.textStyles[id] ?? site.textStyles.default}
           isSelected={isSelected}
+          /* Element ids repeat across sites, so the hint is scoped to the site
+             on screen — otherwise the outgoing site lights up mid-slide. */
+          isHinted={site.id === currentSiteData.id && hintedId === id}
           selectedTag={isSelected ? selectedElementTag : ""}
           customStyles={elementStyles[id]}
           pinnedWidth={originalWidths[id]}
@@ -461,6 +666,7 @@ export default function InteractiveHero({
           className={options.className}
           wrapperClassName={options.wrapperClassName}
           onReplace={(nextSrc) => {
+            setHasInteracted(true);
             setImageSources((prev) => ({ ...prev, [key]: nextSrc }));
             flashSuccess();
           }}
@@ -479,6 +685,9 @@ export default function InteractiveHero({
       className={`relative ${fillHeight ? "flex h-full min-h-0 flex-col" : ""}`}
       data-demo-surface
       ref={containerRef}
+      onScrollCapture={handleSurfaceScroll}
+      onPointerDownCapture={handleSurfaceEngage}
+      onFocusCapture={handleSurfaceEngage}
     >
       <FloatingEditorToolbar
         position={toolbarPosition}
@@ -512,84 +721,51 @@ export default function InteractiveHero({
         changeCount={pendingChanges.size}
       />
 
-      <AnimatePresence>
-        {showSuccessAnimation && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.18, ease: EASE }}
-            className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
-          >
-            <CheckCircle className="h-4 w-4" />
-            {/* Was "Content updated instantly", which is the same real-time
-                claim F-12 removed from ValueProposition and HowItWorks — and
-                this component renders on the landing page, so it undid the fix
-                two sections further down. Editing saves a draft; a separate
-                publish is what reaches visitors. */}
-            Saved — ready to publish
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Site switcher */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div
-          className="flex items-center gap-1 rounded-xl border border-sky-200 bg-white/70 p-1 backdrop-blur"
-          role="tablist"
-          aria-label="Demo websites"
-        >
-          {demoSites.map((site, index) => {
-            const Icon = site.icon;
-            const isActive = currentSite === index;
-            return (
-              <button
-                key={site.id}
-                type="button"
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => goToSite(index)}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors duration-200 ${
-                  isActive
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600 hover:bg-sky-50 hover:text-slate-900"
-                }`}
+      {/* Portalled to the body, like the toolbar above it. On the landing page
+          this component sits inside a transformed wrapper (HeroDemo's scale/y),
+          and a transformed ancestor becomes the containing block for its
+          `position: fixed` descendants — the toast would stop being fixed to
+          the viewport and ride the window off the top of the screen instead. */}
+      {isMounted &&
+        createPortal(
+          <AnimatePresence>
+            {showSuccessAnimation && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.18, ease: EASE }}
+                className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3.5 py-2.5 text-sm font-medium text-emerald-700"
               >
-                <Icon className="h-4 w-4" />
-                {site.name}
-              </button>
-            );
-          })}
-        </div>
+                <CheckCircle className="h-4 w-4" />
+                {/* Was "Content updated instantly", which is the same real-time
+                    claim F-12 removed from ValueProposition and HowItWorks —
+                    and this component renders on the landing page, so it undid
+                    the fix two sections further down. Editing saves a draft; a
+                    separate publish is what reaches visitors. */}
+                Saved — ready to publish
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
+        )}
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={prevSite}
-            aria-label="Previous website"
-            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={nextSite}
-            aria-label="Next website"
-            className="rounded-lg border border-sky-200 p-2 text-slate-500 transition-colors duration-200 hover:border-sky-400 hover:bg-sky-50 hover:text-slate-900"
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* The fake browser */}
-      <div
-        className={`overflow-hidden rounded-2xl border border-slate-200 bg-white ${
-          fillHeight ? "flex min-h-0 flex-1 flex-col" : ""
-        }`}
+      {/* The fake browser. Its tabs are the site switcher — see BrowserWindow. */}
+      <BrowserWindow
+        tabs={demoSites}
+        activeId={currentSiteData.id}
+        onSelect={goToSiteId}
+        onBack={prevSite}
+        onForward={nextSite}
+        onReload={reloadCurrentSite}
+        fillHeight={fillHeight}
+        status={
+          <p className="flex items-center justify-center gap-2 text-sm text-slate-600">
+            <Sparkles className="h-4 w-4 text-sky-600" />
+            Click any text or photograph to edit it in place
+          </p>
+        }
       >
-        <BrowserChrome domain={currentSiteData.domain} />
-
         <div
           className={`relative overflow-hidden ${
             fillHeight ? "min-h-0 flex-1" : "h-[640px] md:h-[740px]"
@@ -611,7 +787,18 @@ export default function InteractiveHero({
               initial="enter"
               animate="center"
               exit="exit"
-              className="absolute inset-0 overflow-x-hidden overflow-y-auto"
+              data-demo-scroller
+              /* One owner of `scrollTop` at a time. Where page scroll drives
+                 the demo, this viewport must not also be a scroller the finger
+                 can drag: a touch swipe used to scroll it natively AND chain to
+                 the page, whose progress was then written straight back over
+                 the position the swipe had just reached, so the demo snapped
+                 backwards mid-gesture. `overflow: hidden` still scrolls
+                 programmatically, so `applyDemoScroll` is unaffected. Without a
+                 progress value — /demo — the reader owns it and it scrolls. */
+              className={`absolute inset-0 overflow-x-hidden ${
+                demoScrollProgress ? "overflow-y-hidden" : "overflow-y-auto"
+              }`}
             >
               {SiteLayout ? (
                 <SiteLayout {...buildRenderProps(currentSiteData)} />
@@ -619,12 +806,7 @@ export default function InteractiveHero({
             </motion.div>
           </AnimatePresence>
         </div>
-      </div>
-
-      <p className="mt-5 flex items-center justify-center gap-2 text-sm text-slate-600">
-        <Sparkles className="h-4 w-4 text-sky-600" />
-        Click any text or photograph above to edit it in place
-      </p>
+      </BrowserWindow>
     </div>
   );
 }

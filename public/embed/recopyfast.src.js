@@ -2823,7 +2823,14 @@
       // The socket is an enhancement when something is listening: it fans the
       // discovery out to other editors viewing the same page live. It is no
       // longer how the map is delivered.
-      if (this.socket) {
+      //
+      // `connected`, not just non-null. socket.io queues an emit made while
+      // disconnected into `sendBuffer` and flushes it on connect; against an
+      // origin that serves no Socket.IO endpoint the connect never comes, so
+      // every rescan — every 500ms on a carousel or an infinite-scroll page —
+      // appended another full content map to a buffer only the garbage
+      // collector ever drains.
+      if (this.socket && this.socket.connected) {
         this.socket.emit('content-map', {
           siteId: SITE_ID,
           url: window.location.href,

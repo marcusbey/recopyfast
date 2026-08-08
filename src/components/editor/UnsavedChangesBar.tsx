@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface UnsavedChangesBarProps {
@@ -12,6 +14,12 @@ interface UnsavedChangesBarProps {
 /**
  * Fixed bottom bar that appears when there are unsaved changes
  * Shows save and discard actions
+ *
+ * Portalled to the body: `position: fixed` is only fixed to the viewport while
+ * no ancestor is transformed, and a transformed ancestor becomes the containing
+ * block instead. The landing page mounts this inside HeroDemo's scale/y
+ * wrapper, where the bar would otherwise pin itself to the moving demo window
+ * and travel off screen with it.
  */
 export default function UnsavedChangesBar({
   hasUnsavedChanges,
@@ -19,7 +27,17 @@ export default function UnsavedChangesBar({
   onDiscard,
   changeCount = 0,
 }: UnsavedChangesBarProps) {
-  return (
+  // Mount check for portal — there is no document to render into on the server.
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
     <AnimatePresence>
       {hasUnsavedChanges && (
         <motion.div
@@ -69,6 +87,7 @@ export default function UnsavedChangesBar({
           </div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
