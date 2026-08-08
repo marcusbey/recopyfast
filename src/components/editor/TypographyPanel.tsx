@@ -109,6 +109,10 @@ export default function TypographyPanel({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -8, scale: 0.95 }}
           transition={{ duration: 0.15 }}
+          // Matches InteractiveHero's click-outside guard. Redundant while the
+          // panel renders inside the marked toolbar, but keeps the guard honest
+          // if it is ever portalled out of that subtree.
+          data-typography-panel=""
           className="absolute top-full left-0 mt-2 w-72 bg-card border border-border rounded-xl shadow-md overflow-hidden z-50"
           onClick={(e) => e.stopPropagation()}
         >

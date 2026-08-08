@@ -152,6 +152,10 @@ export default function FloatingEditorToolbar({
           scale: 0.95,
         }}
         transition={{ duration: 0.15, ease: "easeOut" }}
+        // InteractiveHero's click-outside guard looks for this marker to tell a
+        // press on the toolbar from a press that should dismiss it. Without it
+        // the toolbar tears itself down on mousedown and no action ever fires.
+        data-editor-toolbar=""
         className="fixed z-[9999]"
         style={{
           top: position.top,
