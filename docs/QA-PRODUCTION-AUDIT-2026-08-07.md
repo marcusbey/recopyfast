@@ -5,11 +5,31 @@ adversarial read-only audits run in parallel, one per failure domain: auth,
 billing, widget, database, API, frontend, infrastructure, data integrity.
 
 Every finding below was reached by reading the code. Each carries a `file:line`
-the auditor read, the exact trigger, the mechanism, and the test that would have
-caught it. Four were then also executed; the evidence labels defined in the next
-section say which, and against what. Findings that already existed in
+the auditor read, the trigger, the mechanism, and the test that would have caught
+it. Four were then also executed; the evidence labels defined below say which,
+and against what. Findings that already existed in
 `docs/QA-USER-JOURNEY-2026-08-04.md` as B-1…B-20 are not repeated here; where an
 audit sharpened one, it says which.
+
+## Redaction
+
+**This repository is public, and several defects below are still unfixed.**
+Reproduction detail has therefore been deliberately removed: the ready-to-run
+request shapes, payloads and credential-harvesting steps that turned some of
+these entries into something a reader could run as-is against the live system.
+
+Nothing was dropped to make that easier. Every finding, its identifier, its
+severity, the file and line it lives at, and the mechanism needed to fix it are
+all still here — where the exploit could not be separated from the description,
+the finding says the detail was withheld rather than losing the finding. Entries
+marked *(reproduction withheld)* are redacted, not downgraded.
+
+The unredacted text is held outside this repository. Two limits on what this
+redaction achieves, stated rather than implied: it applies to this revision only
+— the earlier text remains in this repository's pushed history — and a reader
+with the cited `file:line` can still derive most of it, because the defect is in
+the code, not in the description of it. It raises the effort; it does not make
+anything secret. The fix is to close the findings.
 
 ## What this document is not
 
@@ -158,9 +178,9 @@ see this: it mocks `sanitizeIncomingContent` as an identity function.
 
 ## A-2. The public site token is the only credential, and its Origin pin is optional
 
-**Trigger.** View source on any customer page, copy `data-site-id` and
-`data-site-token`, then call the API from a server sending **neither `Origin` nor
-`Referer`**.
+**Trigger.** *(Reproduction withheld — see "Redaction".)* The site credential is
+published in the customer's own page markup, and the check meant to bind that
+credential to one domain does not run at all for a caller that is not a browser.
 
 **Evidence.** `src/lib/security/site-auth.ts:111,128` — the whole domain check
 sits inside `if (requestOriginHost && requestOriginHost !== allowedDomain)`. The
@@ -169,10 +189,10 @@ token ships as a plain HTML attribute (`src/lib/sites/embed-script.ts:53`).
 
 **Mechanism.** `Origin` is browser-enforced, never caller-enforced, so the one
 check that makes a published credential safe is optional for exactly the caller
-it is meant to stop. Element ids are deterministic —
-`'rcf-' + hashPath(structuralPath(element))` (`recopyfast.src.js:819-824`) — so
-an attacker renders the victim's page headlessly and computes the ids the widget
-would use.
+it is meant to stop. Compounding it, element ids are not secrets: they are
+derived deterministically from the element's position in the page
+(`recopyfast.src.js:819-824`), so they are predictable to anyone who can load the
+page at all. *(The exact derivation: reproduction withheld.)*
 
 **Blast radius.** Unauthenticated read of every content row for a site, and
 unbounded service-role writes. `ignoreDuplicates` protects already-recorded rows,
@@ -190,8 +210,10 @@ refused.
 
 ## A-3. Three of six SECURITY DEFINER functions are still open to any anon caller
 
-**Trigger.** `POST /rest/v1/rpc/revert_staging_content {"p_site_id":"<any site>"}`
-with the public anon key. Site ids ship in every customer's snippet.
+**Trigger.** *(Reproduction withheld — see "Redaction".)* All three functions
+named below are reachable over PostgREST by an unauthenticated caller holding
+only the published anon key, and the single argument they need — a site id — is
+shipped in plain text in every customer's snippet.
 
 **Evidence.** `20251230000000_staging_workflow.sql:216,276-277` and
 `20260803020000_restore_atomic_publish.sql:101-104` create
@@ -207,9 +229,9 @@ issues that REVOKE for these three. There is no `FORCE ROW LEVEL SECURITY`
 anywhere, so a definer function owned by the table owner bypasses RLS entirely.
 None of the three asks who is calling.
 
-**Blast radius.** `revert_staging_content(site, NULL)` overwrites
-`staging_content` with `published_content` for every element of any tenant's site
-— total silent destruction of unpublished work, no history row.
+**Blast radius.** `revert_staging_content` can be made to overwrite
+`staging_content` with `published_content` across every element of any tenant's
+site at once — total silent destruction of unpublished work, no history row.
 `publish_staging_content_atomic` pushes any tenant's drafts live.
 
 **Test.** `src/__tests__/db/function-grants.test.ts`, over every SECURITY DEFINER
@@ -266,9 +288,10 @@ that visible.
 
 ## A-4. A collaborator with `manager` can delete the owner's only proof of ownership
 
-**Trigger.** Owner shares a site as `manager`, which maps to
-`permission:"admin"`. The collaborator calls PostgREST directly with their own
-JWT: `DELETE /rest/v1/site_permissions?site_id=eq.<siteId>&user_id=eq.<ownerId>`.
+**Trigger.** *(Reproduction withheld — see "Redaction".)* Owner shares a site as
+`manager`, which maps to `permission:"admin"`. That collaborator can reach
+`site_permissions` directly over PostgREST with their own ordinary session, and
+the DELETE policy does not confine them to their own row.
 
 **Evidence.** `20260731008000_rls_policies_for_locked_tables.sql:125-130` — the
 DELETE policy is `USING (public.user_has_site_permission(site_id, ARRAY['admin']))`.
@@ -294,13 +317,16 @@ that deleting the last `admin` row for a site is refused.
 
 ## A-5. Any signed-in user can mint their own wallet balance or zero someone else's
 
-**Trigger.** `POST /rest/v1/rpc/add_tickets {"user_uuid":"<self>","ticket_amount":1000000}`
-or `consume_tickets` against another user's id.
+**Trigger.** *(Reproduction withheld — see "Redaction".)* `add_tickets` and
+`consume_tickets` are callable by any signed-in user, and each takes the account
+it acts on as a caller-supplied argument — their own, to credit, or anyone
+else's, to drain.
 
 **Evidence.** `20260731009000_billing_status_and_ticket_idempotency.sql:152-154`
 and `20260617001000_ticket_wallet_compat.sql:176-178` — SECURITY DEFINER with
 EXECUTE to `authenticated`; `user_uuid` is caller-supplied and never compared to
-`auth.uid()`. The idempotency guard is bypassed by omitting the payment intent
+`auth.uid()`. The idempotency guard is conditional on a payment-intent argument
+the caller controls, so it does not constrain a caller who supplies none
 (`20260731009000:118-119`).
 
 **Blast radius.** Bounded *today*: the wallet is orphaned — no caller anywhere in
@@ -410,13 +436,13 @@ rather than an error (`recopyfast.src.js:5650-5653`). **Test:**
 `POST /api/staging/verify` with a fixed User-Agent, then assert
 `GET /api/edit-board/styles` with the same token and UA returns 200.
 
-## A-35. Site deletion cannot succeed at all — an AFTER DELETE trigger blocks it
+## A-35. Deleting a site with any content in it cannot succeed — an AFTER DELETE trigger blocks it
 
 **Found while writing the tests for A-11, and measured against a scratch database
 rather than inferred** — local Supabase with this repo's migrations applied, so
 this is what the migrations produce and not a production observation. It makes
-A-11 understated: the second delete does not merely risk failing, it always
-fails.
+A-11 understated: for any site that holds content, the second delete does not
+merely risk failing, it always fails.
 
 `content_change_trigger` is an `AFTER INSERT OR UPDATE OR DELETE` trigger
 (`20250817000000_complete_database_setup.sql:542-544`) whose function inserts the
@@ -434,15 +460,26 @@ and the `ON DELETE CASCADE` from `sites` inherits it. The test harness works
 around this with `session_replication_role = 'replica'`; the product has no such
 escape.
 
-**Blast radius.** No customer can delete a site, and — per A-11 — the attempt
-first removes their `site_permissions` row, so the failure leaves them with a
-site they can no longer see while it keeps serving content to visitors. A
-compliance-motivated deletion does the opposite of what was asked.
+**The scope is content, not sites.** The trigger is declared on
+`content_elements`, and there is no DELETE-firing trigger on `sites` at all —
+`sites` carries only `update_sites_updated_at`, a `BEFORE UPDATE` (`:508`).
+Nothing in the schema requires a site to have content elements, so a site with no
+`content_elements` rows deletes cleanly: the cascade finds nothing to delete and
+`log_content_change()` never runs. That is a registered-but-never-installed site,
+and the exception rather than the case that matters.
+
+**Blast radius.** No customer can delete a site they have actually used — which
+is every site with a widget on it, since installing the widget is what creates
+the `content_elements` rows. Per A-11, the attempt first removes their
+`site_permissions` row, so the failure leaves them with a site they can no longer
+see while it keeps serving content to visitors. A compliance-motivated deletion
+does the opposite of what was asked.
 
 **Test.** Covered by `src/__tests__/db/restore-reports-rows.test.ts`'s harness
 discovery and by `src/__tests__/api/sites/delete-atomicity.test.ts`; a dedicated
-DB-gated case asserting `DELETE FROM sites` succeeds and cascades is the direct
-form.
+DB-gated case asserting `DELETE FROM sites` succeeds and cascades — for a site
+with at least one `content_elements` row, since an empty one passes today — is
+the direct form.
 
 ## A-11. Site registration and deletion are both non-atomic
 
