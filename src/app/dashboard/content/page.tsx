@@ -392,11 +392,17 @@ export default function ContentPage() {
               <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
                 {allContent.length > 0
                   ? "No content matches your current filters. Try adjusting your search or filters."
-                  : siteFailures.length > 0
+                  : siteFailures.length > 0 &&
+                      siteFailures.length === sites.length
                     ? // Not "you have none" — we do not know that. Every site we
                       // asked refused, and the reasons are listed above.
                       "None of your sites' content could be read. See the reasons above."
-                    : "Register a site and add content elements to see them here."}
+                    : siteFailures.length > 0
+                      ? // Some sites answered and are genuinely empty; others
+                        // refused. Claiming a total failure here would describe
+                        // an account state that is not the one they are in.
+                        "The sites we could read have no content yet. The rest are listed above with their reasons."
+                      : "Register a site and add content elements to see them here."}
               </p>
             </div>
           </CardContent>
