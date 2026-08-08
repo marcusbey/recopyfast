@@ -1,31 +1,60 @@
 /**
- * A-24 — the middleware matcher runs Node middleware on static assets.
+ * A-24 — what the widget script costs, and what it is still owed.
  *
- * `src/middleware.ts:231` excludes `_next/static`, `_next/image`, `favicon.ico`
- * and five image extensions. It does not exclude `.js`, `.txt` or `.xml`, so
- * `/embed/recopyfast.js` — a plain file in `public/`, fetched by every visitor
- * to every customer site that has installed the widget — is served through a
- * Node middleware (`:10`) that awaits `supabase.auth.getUser()` (`:84`), a
- * GoTrue round trip, before any bytes are returned. The caller has no cookie and
- * cannot have one: it is a third-party visitor on the customer's domain.
+ * `/embed/recopyfast.js` is a plain file in `public/`, fetched by every visitor
+ * to every customer site that has installed the widget. The caller has no
+ * session cookie and cannot have one: it is a third party on someone else's
+ * domain. Two things must hold at once for that request.
  *
- * Two costs, both scaling with *customers'* traffic rather than ours: a GoTrue
- * call per widget load, and widget availability coupled to GoTrue availability.
+ * It must not reach GoTrue. This middleware runs on the Node runtime and awaits
+ * `supabase.auth.getUser()`, so a session lookup here is a round trip per widget
+ * load, on customers' traffic rather than ours, and it couples widget
+ * availability to GoTrue's.
+ *
+ * It must still carry the security headers. It is executable JavaScript loaded
+ * cross-origin onto other people's pages — the single response on this domain
+ * that can least afford to be served without `X-Content-Type-Options: nosniff`.
+ *
+ * The two pull against each other, because `config.matcher` is the only lever
+ * that skips the middleware and it skips the headers with it. So the paths stay
+ * matched and the saving is made inside: `isSessionlessPath` short-circuits
+ * before the Supabase client is constructed. This file pins both halves —
+ * dropping either one is the regression.
  *
  * Deliberately a separate file from `src/__tests__/middleware.test.ts`. That
- * suite stubs `next/server` to observe redirect-vs-next, which is about what the
- * middleware *does* once it runs. This one is about which paths reach it at all,
- * and needs no stubbing of the response at all — only `config.matcher`.
+ * suite is about who gets redirected where once the auth block runs. This one
+ * is about the paths that must never get that far.
  */
 
-// The middleware module body constructs nothing at import time, but it does
-// import `@supabase/ssr`, which must not be resolved for real under jsdom.
+interface StubResponse {
+  headers: Headers;
+  cookies: { set: jest.Mock; getAll: () => never[] };
+}
+
+jest.mock("next/server", () => ({
+  NextResponse: {
+    next: (): StubResponse => ({
+      headers: new Headers(),
+      cookies: { set: jest.fn(), getAll: () => [] },
+    }),
+    redirect: () => {
+      throw new Error("no path in this suite should redirect");
+    },
+  },
+}));
+
+const getUser = jest.fn();
+
 jest.mock("@supabase/ssr", () => ({
-  createServerClient: jest.fn(),
+  createServerClient: jest.fn(() => ({ auth: { getUser } })),
 }));
 
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
-import { config } from "@/middleware";
+import type { NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+import { config, middleware } from "@/middleware";
+
+const asMock = (fn: unknown) => fn as jest.Mock;
 
 /**
  * Compile the matcher the way Next itself does.
@@ -43,28 +72,52 @@ function middlewareRuns(pathname: string): boolean {
   return matchers.some((match) => match(pathname) !== false);
 }
 
+/** The middleware reads `nextUrl` and the request cookies. Nothing else. */
+function request(pathname: string): NextRequest {
+  return {
+    url: `https://app.test${pathname}`,
+    nextUrl: new URL(pathname, "https://app.test"),
+    cookies: { getAll: () => [], set: jest.fn() },
+  } as unknown as NextRequest;
+}
+
+async function run(pathname: string): Promise<StubResponse> {
+  return (await middleware(request(pathname))) as unknown as StubResponse;
+}
+
 /**
- * Every file `public/embed/` serves. Named once so the guard and the assertion
- * below cannot drift apart — a guard that checks a different list than the
- * test it guards is not a guard.
+ * The files `public/embed/` serves today, plus a `.map` it does not, because
+ * the rule under test is the directory and not the extension list: the next
+ * asset type added there must not have to be rediscovered in production.
  */
 const EMBED_ASSETS = [
   "/embed/recopyfast.js",
   "/embed/recopyfast.src.js",
+  "/embed/recopyfast-secure.js",
   "/embed/socket.io-client.min.js",
   "/embed/recopyfast.js.map",
 ];
 
-describe("middleware matcher — paths that must never reach the middleware", () => {
-  it("does not run on a request that already carries a session", () => {
+/** Crawler fetches. Same shape of caller: no session is possible. */
+const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml"];
+
+const SESSIONLESS_PATHS = [...EMBED_ASSETS, ...CRAWLER_ASSETS];
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  getUser.mockResolvedValue({ data: { user: null } });
+});
+
+describe("middleware matcher", () => {
+  it("runs on a page request", () => {
     // Guards every assertion below. If the compiled matcher matched nothing,
-    // the `test.failing` cases would fail for the wrong reason and would start
-    // reporting "fixed" the moment the matcher was broken outright.
+    // "the widget path is matched" would be the only claim left standing and it
+    // would be true of a matcher that had stopped working entirely.
     expect(middlewareRuns("/dashboard")).toBe(true);
     expect(middlewareRuns("/dashboard/sites")).toBe(true);
   });
 
-  it("already skips the exclusions it does list", () => {
+  it("skips the build output and image assets it lists", () => {
     expect(middlewareRuns("/_next/static/chunks/main.js")).toBe(false);
     expect(middlewareRuns("/_next/image")).toBe(false);
     expect(middlewareRuns("/favicon.ico")).toBe(false);
@@ -72,54 +125,64 @@ describe("middleware matcher — paths that must never reach the middleware", ()
     expect(middlewareRuns("/icon.svg")).toBe(false);
   });
 
-  /**
-   * One guard per `test.failing` below.
-   *
-   * `test.failing` passes on ANY throw, so a bad import, a `config.matcher`
-   * that stopped compiling, or a typo in `middlewareRuns` would all read as a
-   * confirmed defect. These run the identical code path against the identical
-   * inputs and assert only that it produced an answer — so a green
-   * `test.failing` beside a green guard means the matcher really does match.
-   */
-  it.each([
-    "/embed/recopyfast.js",
-    "/embed/socket.io-client.min.js",
-    "/robots.txt",
-    "/sitemap.xml",
-  ])("evaluates the compiled matcher against %s", (pathname) => {
-    expect(typeof middlewareRuns(pathname)).toBe("boolean");
+  it.each(SESSIONLESS_PATHS)(
+    "keeps %s matched, so it can be given headers",
+    (pathname) => {
+      // Excluding these from the matcher is the tempting fix and the wrong one:
+      // it skips the header block along with the session lookup.
+      expect(middlewareRuns(pathname)).toBe(true);
+    },
+  );
+});
+
+describe("a request that cannot carry a session", () => {
+  it.each(SESSIONLESS_PATHS)(
+    "spends no GoTrue round trip on %s",
+    async (pathname) => {
+      await run(pathname);
+
+      expect(asMock(createServerClient)).not.toHaveBeenCalled();
+      expect(getUser).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does the round trip on an ordinary page, so the above means something", async () => {
+    // Without this, `not.toHaveBeenCalled()` would also pass against a broken
+    // mock that never wired up, or a middleware that had stopped calling
+    // Supabase at all.
+    await run("/pricing");
+
+    expect(asMock(createServerClient)).toHaveBeenCalled();
+    expect(getUser).toHaveBeenCalled();
   });
 
-  it("evaluates the compiled matcher against every embed asset", () => {
-    expect(
-      EMBED_ASSETS.map(middlewareRuns).every((ran) => typeof ran === "boolean"),
-    ).toBe(true);
-  });
+  it.each(SESSIONLESS_PATHS)(
+    "is still served with nosniff: %s",
+    async (pathname) => {
+      const response = await run(pathname);
 
-  // The embed script. Requested by every visitor to every customer page, none
-  // of whom have — or could have — a recopyfast session cookie.
-  it("does not run on /embed/recopyfast.js", () => {
-    expect(middlewareRuns("/embed/recopyfast.js")).toBe(false);
-  });
+      expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    },
+  );
 
-  it("does not run on /embed/socket.io-client.min.js", () => {
-    expect(middlewareRuns("/embed/socket.io-client.min.js")).toBe(false);
-  });
+  it("carries the same header set an ordinary page gets", async () => {
+    // Named individually rather than compared as a whole object so a header
+    // added for pages but forgotten here shows up as its own failure.
+    const widget = await run("/embed/recopyfast.js");
+    const page = await run("/pricing");
 
-  // Crawler fetches. Not high-volume, but a GoTrue round trip on a robots.txt
-  // read is pure waste and couples indexability to auth uptime.
-  it("does not run on /robots.txt", () => {
-    expect(middlewareRuns("/robots.txt")).toBe(false);
-  });
-
-  it("does not run on /sitemap.xml", () => {
-    expect(middlewareRuns("/sitemap.xml")).toBe(false);
-  });
-
-  it("skips every static file under /embed", () => {
-    // Stated as a directory rule rather than a filename list: the fix should
-    // exclude the whole prefix, not add `.js` to the extension alternation and
-    // leave the next asset type to be discovered in production.
-    expect(EMBED_ASSETS.filter(middlewareRuns)).toEqual([]);
+    for (const header of [
+      "X-Content-Type-Options",
+      "X-Frame-Options",
+      "X-XSS-Protection",
+      "Referrer-Policy",
+      "Permissions-Policy",
+      "Content-Security-Policy",
+    ]) {
+      expect([header, widget.headers.get(header)]).toEqual([
+        header,
+        page.headers.get(header),
+      ]);
+    }
   });
 });

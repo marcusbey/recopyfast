@@ -130,19 +130,32 @@ export default function ContentPage() {
   const [currentPage, setCurrentPage] = useState(1);
 
   // Fetch user's sites
-  const fetchSites = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sites");
-      const data = await res.json();
-      if (data.sites) {
-        setSites(data.sites);
-        return data.sites;
-      }
-      return [];
-    } catch (err) {
-      console.error("Failed to fetch sites:", err);
-      return [];
+  //
+  // Throws on anything that is not a site list. An empty array here means "you
+  // have registered no sites", which is what the page says when it renders the
+  // empty state — so a refused or malformed read must not be able to produce
+  // one. Swallowing the failure told a customer with sites that they had none,
+  // and offered them no way to retry.
+  const fetchSites = useCallback(async (): Promise<Site[]> => {
+    const res = await fetch("/api/sites");
+
+    if (!res.ok) {
+      const detail = await res
+        .json()
+        .then((body) => body?.error)
+        .catch(() => null);
+      throw new Error(detail || `Could not load your sites (${res.status})`);
     }
+
+    const body: unknown = await res.json();
+    const siteList = (body as { sites?: unknown } | null)?.sites;
+    if (!Array.isArray(siteList)) {
+      throw new Error("Could not load your sites: unexpected response");
+    }
+
+    const fetchedSites = siteList as Site[];
+    setSites(fetchedSites);
+    return fetchedSites;
   }, []);
 
   // Fetch content for a specific site
@@ -207,7 +220,7 @@ export default function ContentPage() {
       // customer with two sites, one broken, could not reach the one that
       // worked. Each site now succeeds or fails on its own terms.
       const results = await Promise.allSettled(
-        fetchedSites.map((site: Site) => fetchSiteContent(site)),
+        fetchedSites.map((site) => fetchSiteContent(site)),
       );
 
       const contentMap = new Map<string, ContentElement[]>();
@@ -281,6 +294,17 @@ export default function ContentPage() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, selectedSiteId, selectedStatus]);
+
+  // Keep the current page inside the pages that exist.
+  //
+  // Filters are not the only thing that can shrink the list: a retry that comes
+  // back with fewer elements than the last read does too, and that path sets no
+  // filter state. Without this, page 3 of a list that is now one page long
+  // renders no cards under the words "Page 3 of 1". Clamped rather than reset,
+  // so a retry that changes nothing leaves the reader where they were.
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(page, Math.max(1, totalPages)));
+  }, [totalPages]);
 
   // Loading state
   if (loading) {

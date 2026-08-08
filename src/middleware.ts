@@ -47,9 +47,42 @@ async function isUnentitled(
   }
 }
 
+/**
+ * Paths whose caller cannot have a session, so asking about one is pure cost.
+ *
+ * Everything under `embed/` is a static file in `public/` fetched by every
+ * visitor to every customer site that has installed the widget — third parties
+ * on someone else's domain who have no session cookie and could not have one.
+ * This middleware runs on the Node runtime and awaits `supabase.auth.getUser()`,
+ * so letting those paths through the auth block spends a GoTrue round trip per
+ * widget load and couples widget availability to GoTrue's. A directory rule
+ * rather than a file list, so the next asset type added there does not have to
+ * be rediscovered in production. robots.txt and sitemap.xml are the same trade
+ * at lower volume: no session is possible, and indexability should not depend
+ * on auth uptime.
+ *
+ * These paths stay *in* `config.matcher`. Skipping the middleware entirely
+ * would also skip the security headers below, and `/embed/recopyfast.js` is
+ * executable JavaScript loaded cross-origin onto every customer site — the one
+ * response on this domain that can least afford to be served without `nosniff`.
+ */
+function isSessionlessPath(pathname: string): boolean {
+  return (
+    pathname.startsWith("/embed/") ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml"
+  );
+}
+
 export async function middleware(request: NextRequest) {
   // This middleware now focuses on auth and page-level security
   // API-level security is handled within individual API routes
+
+  // Headers, but no session work. Deliberately before the Supabase client is
+  // even constructed: the point is that nothing on this path can reach GoTrue.
+  if (isSessionlessPath(request.nextUrl.pathname)) {
+    return withSecurityHeaders(NextResponse.next({ request }));
+  }
 
   let supabaseResponse = NextResponse.next({
     request,
@@ -137,9 +170,18 @@ export async function middleware(request: NextRequest) {
     return redirect;
   }
 
-  // Add security headers to all responses
-  const response = supabaseResponse;
+  return withSecurityHeaders(supabaseResponse);
+}
 
+/**
+ * The security headers every response leaving this app carries.
+ *
+ * Separated from the auth block above so a path that must not pay for a session
+ * can still be given headers — see `isSessionlessPath`. Redirects are the one
+ * exception: they carry no body to protect, and the destination they point at
+ * comes back through here.
+ */
+function withSecurityHeaders(response: NextResponse): NextResponse {
   // Security headers
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("X-Frame-Options", "DENY");
@@ -223,26 +265,19 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - embed/ (the widget, see below)
-     * - robots.txt, sitemap.xml (crawler fetches)
      * - public static assets
      *
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
-     * `embed/` is excluded as a whole directory rather than by extension.
-     * Everything under it is a static file in `public/` fetched by every
-     * visitor to every customer site that has installed the widget — third
-     * parties on someone else's domain who have no session cookie and could
-     * not have one. This middleware runs on the Node runtime and awaits
-     * `supabase.auth.getUser()`, so leaving those paths in the matcher spent a
-     * GoTrue round trip per widget load and coupled widget availability to
-     * GoTrue's. A directory rule also means the next asset type added there
-     * does not have to be rediscovered in production.
-     *
-     * robots.txt and sitemap.xml are the same trade at lower volume: no
-     * session is possible, and indexability should not depend on auth uptime.
+     * `embed/`, robots.txt and sitemap.xml are deliberately NOT excluded here.
+     * They must not pay for a session — but the matcher is all-or-nothing, and
+     * excluding them would drop the security headers too. The widget script is
+     * executable JavaScript loaded cross-origin onto every customer site, so
+     * serving it without `nosniff` is the worst place on this domain to save a
+     * round trip. The saving is made inside the middleware instead, by
+     * `isSessionlessPath`, which returns headers without touching GoTrue.
      */
-    "/((?!_next/static|_next/image|favicon.ico|embed/|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
