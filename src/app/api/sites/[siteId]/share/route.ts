@@ -302,11 +302,28 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Check if current user has permission to view site permissions
+    // Managers and owners only — NOT every collaborator.
+    //
+    // This narrowed when the query below moved to the service role. While it ran
+    // as the caller, a restrictive SELECT policy meant a viewer asking for the
+    // roster got back their own row; the response was wrong (that is the bug
+    // A-9's GET fix addresses) but it was not a disclosure. Service-scoped, the
+    // same request returns every collaborator on the site, and each row is then
+    // decorated with that person's email address from the Admin API. Fixing the
+    // read without narrowing the reader would have turned "the list is broken"
+    // into "any viewer can harvest the address of everyone they work with".
+    //
+    // Manager/owner is the right line rather than a redaction fallback because a
+    // roster carrying identities is a management view and there is no
+    // viewer-facing surface that needs it: no component in this repo fetches this
+    // endpoint at all. ShareSiteDialog — the obvious candidate — talks to
+    // /api/staging/access instead. So nothing in the product loses a capability
+    // here, and if a viewer-facing roster is ever wanted it should be a separate
+    // projection that omits identities, not a widening of this one.
     const permissionCheck = await permissions.checkSitePermission(
       user.id,
       siteId,
-      ["viewer", "editor", "manager", "owner"],
+      ["manager", "owner"],
     );
     if (!permissionCheck.hasPermission) {
       return NextResponse.json(

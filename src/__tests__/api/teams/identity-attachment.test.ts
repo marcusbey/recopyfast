@@ -84,6 +84,13 @@ function newTables(): Record<string, Row[]> {
 }
 
 let tables = newTables();
+/**
+ * Who is making the request. Drives BOTH the session and what the caller's
+ * client is allowed to see, so the two can never drift apart — a fixture where
+ * the session says one person and the policy filter says another would prove
+ * nothing.
+ */
+let callerId = OWNER_ID;
 const mockGetUser = jest.fn();
 
 interface Settled {
@@ -98,8 +105,17 @@ interface Settled {
  * Embeds of `public` relations (`team:teams(name)`) are resolved from the same
  * store, so a handler that keeps the legitimate embeds still passes. Anything
  * naming `auth.users` — as a table or as an embed — is refused.
+ *
+ * `restrictToCaller` models the policy set recorded as applied
+ * (`20260804130000`): `authenticated` may SELECT `team_members` only where
+ * `user_id = auth.uid()` and `teams` only where `owner_id = auth.uid()`, has no
+ * policy at all on `team_invitations`, and may not write any of them. Passed for
+ * the caller's client and not for the service client, which is precisely the
+ * asymmetry the migration creates — and the reason a handler that asks the
+ * caller about other people's rows gets a confidently wrong answer rather than
+ * an error.
  */
-function makeSupabase() {
+function makeSupabase(options: { restrictToCaller?: string } = {}) {
   return {
     auth: { getUser: mockGetUser },
     from(table: string) {
@@ -109,16 +125,40 @@ function makeSupabase() {
       let pendingInsert: Row | null = null;
       let pendingUpdate: Row | null = null;
 
+      const caller = options.restrictToCaller;
+
+      /** What the policy set lets this role see of `table`. */
+      const visible = (rows: Row[]): Row[] => {
+        if (!caller) return rows;
+        if (table === "team_members") {
+          return rows.filter((row) => row.user_id === caller);
+        }
+        if (table === "teams") {
+          return rows.filter((row) => row.owner_id === caller);
+        }
+        if (table === "team_invitations") {
+          // RLS enabled, no authenticated policy on this branch.
+          return [];
+        }
+        return rows;
+      };
+
       const matching = () =>
-        (tables[table] ?? []).filter((row) =>
-          filters.every(([column, value]) => row[column] === value),
+        visible(
+          (tables[table] ?? []).filter((row) =>
+            filters.every(([column, value]) => row[column] === value),
+          ),
         );
 
       /** `team:teams(name)` / `team:teams(owner_id)` — same store, public schema. */
       const decorate = (row: Row): Row => {
         if (!/team:teams\(/.test(selectColumns)) return row;
         const team = (tables.teams ?? []).find(
-          (candidate) => candidate.id === row.team_id,
+          (candidate) =>
+            candidate.id === row.team_id &&
+            // An embed is subject to the embedded table's own policy, so a
+            // non-owning caller gets null here rather than the team.
+            (!caller || candidate.owner_id === caller),
         );
         const requested = selectColumns.match(/team:teams\(([^)]*)\)/)?.[1];
         const fields = (requested ?? "")
@@ -136,6 +176,12 @@ function makeSupabase() {
           selectColumns.includes("auth.users")
         ) {
           return { data: null, error: PGRST200, count: null };
+        }
+
+        // Writes as the caller match zero rows on this branch — the policy set
+        // grants INSERT/UPDATE/DELETE on these tables to `service_role` only.
+        if ((pendingInsert || pendingUpdate) && caller) {
+          return { data: [], error: null };
         }
 
         if (pendingInsert) {
@@ -221,9 +267,17 @@ function makeSupabase() {
   };
 }
 
+// The caller's client is restricted to what the applied policy set actually
+// permits an `authenticated` role. Any handler query that needs to see another
+// member, another invitation, or a team it does not own must therefore go
+// through the service client — which is the whole point of these tests.
 jest.mock("@/lib/supabase/server", () => ({
-  createServerClient: jest.fn(() => Promise.resolve(makeSupabase())),
-  createClient: jest.fn(() => Promise.resolve(makeSupabase())),
+  createServerClient: jest.fn(() =>
+    Promise.resolve(makeSupabase({ restrictToCaller: callerId })),
+  ),
+  createClient: jest.fn(() =>
+    Promise.resolve(makeSupabase({ restrictToCaller: callerId })),
+  ),
 }));
 
 const mockGetUserById = jest.fn(async (userId: string) => {
@@ -242,9 +296,12 @@ const mockGetUserById = jest.fn(async (userId: string) => {
     : { data: { user: null }, error: { message: "User not found" } };
 });
 
+// Unrestricted, and carrying `from` as well as the Admin API: `service_role` is
+// granted FOR ALL on these tables under both candidate policy sets.
 jest.mock("@/lib/supabase/service", () => ({
   createServiceRoleClient: jest.fn(() => ({
     auth: { admin: { getUserById: mockGetUserById } },
+    from: makeSupabase().from,
   })),
 }));
 
@@ -281,15 +338,22 @@ function invite(email: string, role = "editor"): Promise<Response> {
   ) as unknown as Promise<Response>;
 }
 
+/** Make `who` the requester, for both the session and the policy filter. */
+function actAs(who: string) {
+  callerId = who;
+  mockGetUser.mockResolvedValue({
+    data: { user: { id: who, email: AUTH_USERS[who]?.email } },
+    error: null,
+  });
+}
+
 beforeEach(() => {
   tables = newTables();
+  callerId = OWNER_ID;
   jest.clearAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
   jest.spyOn(console, "warn").mockImplementation(() => {});
-  mockGetUser.mockResolvedValue({
-    data: { user: { id: OWNER_ID, email: AUTH_USERS[OWNER_ID].email } },
-    error: null,
-  });
+  actAs(OWNER_ID);
 });
 
 afterEach(() => {
@@ -389,9 +453,17 @@ describe("A-12 — POST /api/teams/:teamId/invitations", () => {
   });
 
   it("refuses to invite someone who is already a member", async () => {
-    // The guard that never fired. It used to look the address up via
-    // `.from("auth.users")` with the error discarded, so `inviteeUser` was
-    // always null and this returned 201 over an existing member.
+    // Two separate reasons this used to pass an existing member through, and the
+    // fixture now reproduces both:
+    //
+    //   1. the address was looked up via `.from("auth.users")` with the error
+    //      discarded, so the lookup always failed and the guard never fired;
+    //   2. after that was fixed, the roster was read with the caller's client,
+    //      which under the applied policy set returns only the caller's own row
+    //      — so the invitee was compared against a roster of one.
+    //
+    // Ed Editor is a member and is NOT the caller, so nothing but a
+    // service-scoped roster read can see him.
     const response = await invite(AUTH_USERS[EDITOR_ID].email);
     const body = await response.json();
 
@@ -402,6 +474,41 @@ describe("A-12 — POST /api/teams/:teamId/invitations", () => {
         (row) => row.email === AUTH_USERS[EDITOR_ID].email,
       ),
     ).toBe(false);
+  });
+
+  it("counts the whole roster against the member cap, not just the caller", async () => {
+    // The size limit read the same one-row roster, so a full team counted as 1
+    // and grew without bound. Two members, cap of two.
+    tables.teams = [{ ...tables.teams[0], max_members: 2 }];
+
+    const response = await invite("newcomer@example.com");
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body.error).toBe("Team is at maximum capacity");
+  });
+
+  it("lets a manager who does not own the team invite", async () => {
+    // The `teams` SELECT policy is `owner_id = auth.uid()`, so reading the team
+    // as the caller told a non-owning manager "Team not found" — for a role the
+    // membership check had just accepted as allowed to invite.
+    tables.team_members = [
+      ...tables.team_members,
+      {
+        id: "member-3",
+        team_id: TEAM_ID,
+        user_id: "user-manager",
+        role: "manager",
+        joined_at: "2026-04-01T00:00:00.000Z",
+      },
+    ];
+    actAs("user-manager");
+
+    const response = await invite("newcomer@example.com");
+    const body = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(body.invitation.email).toBe("newcomer@example.com");
   });
 
   it("matches the existing member regardless of address casing", async () => {

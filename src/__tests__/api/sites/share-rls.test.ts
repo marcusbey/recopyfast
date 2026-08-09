@@ -290,10 +290,26 @@ async function share(branch: "A" | "B") {
   };
 }
 
+/**
+ * The role the caller holds on the site, for the run in progress.
+ *
+ * `checkSitePermission` is mocked role-aware rather than always-true: it answers
+ * from this value against the roles each handler asks for, which is what the real
+ * implementation does. A blanket `hasPermission: true` cannot tell a handler that
+ * admits viewers from one that admits only managers, so it would pass whatever
+ * the authz line happened to be — including a widening.
+ */
+let callerRole: "viewer" | "editor" | "manager" | "owner" = "owner";
+
+/** Every user id the route asked the Admin API to resolve, in order. */
+const identityLookups: string[] = [];
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
 
+  callerRole = "owner";
+  identityLookups.length = 0;
   mockCanShareSite.mockResolvedValue({ allowed: true } as Awaited<
     ReturnType<typeof canShareSite>
   >);
@@ -302,7 +318,12 @@ beforeEach(() => {
       ({
         checkSitePermission: jest
           .fn()
-          .mockResolvedValue({ hasPermission: true }),
+          .mockImplementation((_userId, _siteId, allowedRoles: string[]) =>
+            Promise.resolve({
+              hasPermission: allowedRoles.includes(callerRole),
+              userRole: callerRole,
+            }),
+          ),
       }) as unknown as CollaborationPermissions,
   );
 });
@@ -342,8 +363,9 @@ function wireClients(store: Store, branch: "A" | "B") {
   });
   const service = makeClient(store, { label: "service" });
 
-  const getUserById = jest.fn().mockImplementation((userId: string) =>
-    Promise.resolve({
+  const getUserById = jest.fn().mockImplementation((userId: string) => {
+    identityLookups.push(userId);
+    return Promise.resolve({
       data: {
         user: {
           id: userId,
@@ -352,8 +374,8 @@ function wireClients(store: Store, branch: "A" | "B") {
         },
       },
       error: null,
-    }),
-  );
+    });
+  });
 
   mockCreateServerClient.mockResolvedValue({
     auth: {
@@ -444,6 +466,57 @@ describe("A-9 — GET /api/sites/:siteId/share", () => {
 
     const invitee = permissions.find((row) => row.user_id === INVITEE_ID);
     expect(invitee?.user?.email).toBe(`${INVITEE_ID}@corp.example`);
+  });
+
+  // Reading the roster service-scoped means the response now carries every
+  // collaborator's email address, resolved through the Admin API. That is a
+  // management view, so the reader has to be narrowed to match — otherwise
+  // fixing the list turned it into an address-harvesting endpoint for anyone
+  // with view access.
+  it.each([["viewer"], ["editor"]] as const)(
+    "refuses a %s the decorated roster",
+    async (role) => {
+      callerRole = role;
+
+      const { status, permissions } = await listCollaborators("B");
+
+      expect(status).toBe(403);
+      expect(permissions).toEqual([]);
+    },
+  );
+
+  it.each([["manager"], ["owner"]] as const)(
+    "serves a %s the full decorated roster",
+    async (role) => {
+      callerRole = role;
+
+      const { status, permissions } = await listCollaborators("B");
+
+      expect(status).toBe(200);
+      expect(permissions.map((row) => row.id).sort()).toEqual(
+        ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+      );
+      expect(
+        permissions.find((row) => row.user_id === INVITEE_ID)?.user?.email,
+      ).toBe(`${INVITEE_ID}@corp.example`);
+    },
+  );
+
+  it("does not resolve any identity for a refused caller", async () => {
+    // The stronger form of the 403 above: a rejected request must not have
+    // reached the Admin API at all. A handler that authorised late — decorating
+    // first and checking afterwards — would still leak through logs, latency and
+    // whatever the next refactor does with the already-fetched rows.
+    callerRole = "viewer";
+    const store = storeWithCollaborator();
+    wireClients(store, "B");
+
+    await GET(
+      new NextRequest(`https://app.recopyfast.test/api/sites/${SITE_ID}/share`),
+      context,
+    );
+
+    expect(identityLookups).toEqual([]);
   });
 });
 

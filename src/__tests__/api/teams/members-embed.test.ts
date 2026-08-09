@@ -244,8 +244,15 @@ jest.mock("@/lib/supabase/server", () => ({
 // The supported way to read `auth.users`, and the one this repo already uses in
 // sites/[siteId]/share/route.ts. Provided here so a handler rewritten that way
 // passes without touching this file.
+//
+// `from` is provided too, and must be: the roster read moved to this client
+// because the applied policy set restricts `authenticated` to its own
+// `team_members` row. Without it the handler throws on an undefined `.from`, is
+// swallowed by its catch-all, and answers 500 — which looks identical to the
+// embed failure this file exists to detect.
 jest.mock("@/lib/supabase/service", () => ({
   createServiceRoleClient: jest.fn(() => ({
+    from: makeSupabase().from,
     auth: {
       admin: {
         getUserById: jest.fn(async (userId: string) => {

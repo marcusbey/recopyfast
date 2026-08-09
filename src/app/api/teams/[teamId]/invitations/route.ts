@@ -1,5 +1,34 @@
+/**
+ * Team invitations.
+ *
+ * WHICH CLIENT READS WHAT, AND WHY
+ * --------------------------------
+ * Under `20260804130000_restore_missing_rls_policies.sql` — the policy set
+ * recorded as applied — `authenticated` may SELECT `team_members` only where
+ * `user_id = auth.uid()` (:214-217), may SELECT `teams` only where
+ * `owner_id = auth.uid()` (:204-206), and has NO policy at all on
+ * `team_invitations`, whose only policies live in `20260731008000` (status
+ * unknown, B-3) while RLS on it is enabled by the base migration. So for a
+ * caller-scoped client on that branch:
+ *   - the membership check sees its own row            — works, and is the authz
+ *   - the `teams` read sees nothing unless caller owns  — a manager gets 404
+ *   - `team_invitations` reads see nothing              — the pending-invitation
+ *     guard never fires and the list comes back empty
+ *   - the `team_invitations` insert matches zero rows   — every invite 500s
+ *   - the roster read sees one row, the inviter's       — the size limit counts 1
+ *     and the already-a-member guard misses everyone
+ *
+ * The rule this file follows: a query that asks about the CALLER stays on the
+ * caller's client, because that is the authorisation and it must be subject to
+ * the caller's own rights. A query that asks about OTHER rows — the roster, the
+ * team, the invitations — runs on the service client, after authorisation has
+ * already passed. The service role makes an authorised question answerable; it
+ * never decides whether it may be asked.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { InviteTeamMemberPayload, TeamRole } from "@/types";
 import {
   attachUserIdentities,
@@ -44,12 +73,15 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get pending invitations. `team:teams(name)` embeds fine — it is in the
-    // `public` schema. The `inviter:auth.users!...` embed that used to sit
-    // beside it did not: PostgREST does not expose `auth`, so it failed the
-    // whole select and this endpoint answered 500 to every caller. The inviter's
-    // identity is attached afterwards through the Admin API.
-    const { data: invitations, error } = await supabase
+    // Get pending invitations. Service-scoped — these are other people's
+    // invitations, see the module header.
+    //
+    // `team:teams(name)` embeds fine, being in the `public` schema. The
+    // `inviter:auth.users!...` embed that used to sit beside it did not:
+    // PostgREST does not expose `auth`, so it failed the whole select and this
+    // endpoint answered 500 to every caller. The inviter's identity is attached
+    // afterwards through the Admin API.
+    const { data: invitations, error } = await createServiceRoleClient()
       .from("team_invitations")
       .select(
         `
@@ -142,8 +174,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Check if team exists and get team info
-    const { data: team, error: teamError } = await supabase
+    // Everything below asks about rows other than the caller's own — see the
+    // module header. Authorisation is the manager/owner membership check above.
+    const serviceClient = createServiceRoleClient();
+
+    // Check if team exists and get team info. Service-scoped because the `teams`
+    // SELECT policy is `owner_id = auth.uid()`: a manager who does not own the
+    // team reads nothing and would be told "Team not found" while holding a role
+    // that is explicitly allowed to invite.
+    const { data: team, error: teamError } = await serviceClient
       .from("teams")
       .select("id, name, max_members")
       .eq("id", teamId)
@@ -155,10 +194,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     // The current membership, read once and used twice: for the capacity check
     // and for the already-a-member check below. `max_members` bounds it.
-    const { data: currentMembers, error: currentMembersError } = await supabase
-      .from("team_members")
-      .select("user_id")
-      .eq("team_id", teamId);
+    //
+    // Read as the caller this returned exactly one row — the inviter's own — so
+    // the size limit counted 1 against `max_members` and let a full team grow
+    // without bound, and the duplicate check compared the invitee against a
+    // roster of one and missed every existing member. Both of the failures these
+    // two checks exist to prevent, from the same one-row read.
+    const { data: currentMembers, error: currentMembersError } =
+      await serviceClient
+        .from("team_members")
+        .select("user_id")
+        .eq("team_id", teamId);
 
     if (currentMembersError) {
       // Not swallowed. Without this list neither check below can answer, and
@@ -207,8 +253,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Check if there's already a pending invitation
-    const { data: existingInvitation } = await supabase
+    // Check if there's already a pending invitation. Service-scoped: an invite
+    // addressed to someone else is not visible to the caller under any branch,
+    // so this guard could only ever answer "no duplicate".
+    const { data: existingInvitation } = await serviceClient
       .from("team_invitations")
       .select("id")
       .eq("team_id", teamId)
@@ -224,7 +272,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Create invitation.
+    // Create invitation. Service-scoped: `team_invitations` has RLS enabled by
+    // the base migration and its only INSERT policy lives in `20260731008000`,
+    // so on the branch where that is not applied the write matched zero rows and
+    // every invitation 500'd — the same shape as the collaborator invite in A-9.
     //
     // The echo names only `public` relations. The `inviter:auth.users!...` embed
     // it used to carry made the insert report failure *after* the row had been
@@ -240,7 +291,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       created_at: string;
       team: { name: string } | null;
     };
-    const { data: invitationRaw, error } = await supabase
+    const { data: invitationRaw, error } = await serviceClient
       .from("team_invitations")
       .insert({
         team_id: teamId,
