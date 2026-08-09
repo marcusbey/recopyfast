@@ -5,16 +5,24 @@ import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
-  sanitizeIncomingContent,
 } from "@/lib/security/site-auth";
 
 jest.mock("@/lib/supabase/service");
-jest.mock("@/lib/security/site-auth", () => ({
-  authorizeFirstPartySiteRequest: jest.fn(),
-  authorizeSiteRequest: jest.fn(),
-  authorizeSiteOrigin: jest.fn(),
-  sanitizeIncomingContent: jest.fn((value: string) => value),
-}));
+// Only authorization is stubbed, and only because it needs a database. This file
+// used to add `sanitizeIncomingContent: jest.fn((value) => value)` — an identity
+// stub over the one component that was corrupting the customer's copy, which is
+// what let A-1 sit here unseen while these tests passed. What the route does to
+// content is now the shipped implementation on every path below.
+jest.mock("@/lib/security/site-auth", () => {
+  const actual = jest.requireActual("@/lib/security/site-auth");
+  return {
+    __esModule: true,
+    ...actual,
+    authorizeFirstPartySiteRequest: jest.fn(),
+    authorizeSiteRequest: jest.fn(),
+    authorizeSiteOrigin: jest.fn(),
+  };
+});
 
 const mockAuthorizeFirstPartySiteRequest =
   authorizeFirstPartySiteRequest as jest.MockedFunction<
@@ -26,10 +34,6 @@ const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<
 const mockAuthorizeSiteOrigin = authorizeSiteOrigin as jest.MockedFunction<
   typeof authorizeSiteOrigin
 >;
-const mockSanitizeIncomingContent =
-  sanitizeIncomingContent as jest.MockedFunction<
-    typeof sanitizeIncomingContent
-  >;
 
 type MockServiceClient = {
   from: jest.Mock;
@@ -75,7 +79,6 @@ describe("/api/content/[siteId]", () => {
       site: { id: "site-123", domain: "example.com" },
       allowedOrigin: "https://example.com",
     } as unknown as Awaited<ReturnType<typeof authorizeSiteOrigin>>);
-    mockSanitizeIncomingContent.mockImplementation((value: string) => value);
 
     mockServiceClient.from.mockReturnValue(mockServiceClient);
     mockServiceClient.select.mockReturnValue(mockServiceClient);
@@ -260,14 +263,17 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual({ success: true });
-      expect(mockSanitizeIncomingContent).toHaveBeenCalledWith(
-        "Welcome to our site",
-      );
       expect(mockServiceClient.upsert).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
             site_id: "site-123",
             element_id: "header-1",
+            // The customer's text, unchanged. src/__tests__/api/content/
+            // discovery-fidelity.test.ts covers the copy that used to be
+            // rewritten (angle brackets, tag-shaped prose, long paragraphs).
+            original_content: "Welcome to our site",
+            current_content: "Welcome to our site",
+            published_content: "Welcome to our site",
           }),
         ]),
         {
@@ -356,9 +362,8 @@ describe("/api/content/[siteId]", () => {
       expect(data.error).toBe(
         "Live content updates must use /api/staging/content and publish explicitly",
       );
-      // Nothing is written and no content is sanitized on this path.
+      // Nothing is written on this path.
       expect(mockServiceClient.update).not.toHaveBeenCalled();
-      expect(mockSanitizeIncomingContent).not.toHaveBeenCalled();
     });
 
     it("should echo the allowed origin on the refusal so browsers can read it", async () => {

@@ -114,8 +114,9 @@ export async function authorizeSiteRequest(options: {
     requestOriginHost?.startsWith("127.0.0.1");
   const isDemoToken = token === "demo-site-token";
   const isDevelopment = process.env.NODE_ENV !== "production";
+  const isLocalDemo = isDevelopment && isLocalhost && isDemoToken;
 
-  if (!(isDevelopment && isLocalhost && isDemoToken)) {
+  if (!isLocalDemo) {
     if (!verifySiteTokenSignature(site.id, site.api_key, token)) {
       throw new Error("Invalid site token");
     }
@@ -123,11 +124,23 @@ export async function authorizeSiteRequest(options: {
 
   const allowedDomain = normalizeDomain(site.domain);
 
-  // Skip domain validation for localhost demo mode
-  if (!(isDevelopment && isLocalhost && isDemoToken)) {
-    if (requestOriginHost && requestOriginHost !== allowedDomain) {
-      throw new Error("Origin not allowed");
-    }
+  // The domain pin is mandatory, not conditional on a header being offered.
+  //
+  // `data-site-token` ships as a plain attribute in the customer's page markup
+  // (src/lib/sites/embed-script.ts:76), so the token is readable with View
+  // Source and this check is the only thing that makes a published credential
+  // safe. It used to read `if (requestOriginHost && requestOriginHost !==
+  // allowedDomain)`. Origin and Referer are set by browsers and cannot be forged
+  // cross-origin — but nothing obliges a non-browser caller to send either, so
+  // treating "no header" as "nothing to check" enforced the pin only against
+  // the caller that could never have beaten it, and skipped it entirely for
+  // curl. A caller that cannot present the registered domain is refused. (A-2)
+  //
+  // The localhost demo token stays exempt: it is the only bypass, it requires a
+  // non-production build, and `isLocalhost` is itself derived from a present
+  // Origin or Referer.
+  if (!isLocalDemo && requestOriginHost !== allowedDomain) {
+    throw new Error("Origin not allowed");
   }
 
   const allowedOrigin = requestOriginHost ? `${origin ?? referer}` : null;
@@ -215,7 +228,12 @@ export async function authorizeSiteOrigin(
   const allowedDomain = normalizeDomain(site.domain);
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
 
-  if (requestOriginHost && requestOriginHost !== allowedDomain) {
+  // Unconditional, for the same reason as authorizeSiteRequest above: a caller
+  // that sends no parseable Origin has not proved it is on the registered
+  // domain, and this function is what stands between an unknown caller and the
+  // knowledge that a site id exists. Every real caller of this path is a browser
+  // preflight, which always sends Origin. (A-2)
+  if (requestOriginHost !== allowedDomain) {
     throw new Error("Origin not allowed");
   }
 

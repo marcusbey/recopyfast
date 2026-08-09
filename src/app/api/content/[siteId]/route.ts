@@ -4,16 +4,68 @@ import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
-  sanitizeIncomingContent,
 } from "@/lib/security/site-auth";
-
-// Content validation constants
-const MAX_CONTENT_LENGTH = 2000;
+import { validateDiscoveredText } from "@/lib/security/discovered-text";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 interface ContentMapData {
   selector: string;
   content: string;
   type: string;
+}
+
+interface ContentElementRow {
+  site_id: string;
+  element_id: string;
+  selector: string;
+  original_content: string;
+  current_content: string;
+  published_content: string;
+  language: string;
+  variant: string;
+  metadata: { type: string };
+}
+
+type DiscoveryRows =
+  | { ok: true; rows: ContentElementRow[] }
+  | { ok: false; error: string };
+
+/**
+ * Turn a reported content map into rows, or refuse the whole map.
+ *
+ * The customer's text is stored exactly as the widget read it off their page.
+ * It is not markup and no consumer treats it as markup, so it is not sanitized
+ * as markup — see `@/lib/security/discovered-text` for why that mattered and
+ * what is checked instead (A-1). A map is all-or-nothing: writing the elements
+ * that happened to validate and dropping the rest is the silent partial failure
+ * this route was already guilty of, one layer up.
+ */
+function buildDiscoveryRows(
+  siteId: string,
+  contentMap: Record<string, ContentMapData>,
+): DiscoveryRows {
+  const rows: ContentElementRow[] = [];
+
+  for (const [elementId, data] of Object.entries(contentMap)) {
+    const validated = validateDiscoveredText(data?.content);
+    if (!validated.ok) {
+      return { ok: false, error: `Element ${elementId}: ${validated.error}` };
+    }
+
+    rows.push({
+      site_id: siteId,
+      element_id: elementId,
+      selector: data.selector,
+      original_content: validated.value,
+      current_content: validated.value,
+      published_content: validated.value,
+      language: "en",
+      variant: "default",
+      metadata: { type: data.type },
+    });
+  }
+
+  return { ok: true, rows };
 }
 
 function extractToken(request: NextRequest) {
@@ -86,6 +138,21 @@ export async function GET(
         );
       }
     }
+
+    // Bucketed by IP, not by site: this is the read every visitor to the
+    // customer's page makes, so a per-site counter would throttle popular sites
+    // first and hardest. Fails OPEN — the widget's only fallback is to leave the
+    // authored markup in place (recopyfast.src.js:3293), so a Redis outage that
+    // denied here would un-publish every customer's copy at once. An
+    // unmetered window on a read is the cheaper failure.
+    const limited = await enforceRateLimit(request, {
+      limit: "IP_GENERAL",
+      endpoint: "content/read",
+      identifierType: "ip",
+      onStoreFailure: "allow",
+      message: "Too many content requests. Please try again shortly.",
+    });
+    if (limited) return withCors(limited, allowedOrigin);
 
     // Get language and variant from query params
     const searchParams = request.nextUrl.searchParams;
@@ -166,6 +233,23 @@ export async function POST(
       );
     }
 
+    // Bucketed by site, and fails CLOSED. This is the one path that writes
+    // content_elements with the service-role key, and the credential that opens
+    // it is published in the customer's own page markup — so the limit is what
+    // bounds the damage a copied token can do, and losing Redis must not remove
+    // it. Discovery is a one-time event per element (the widget reports only ids
+    // the server does not already hold), so a legitimate site never approaches
+    // this, and a refused report is retried by the next visitor's scan.
+    const limited = await enforceRateLimit(request, {
+      limit: "API_CONTENT",
+      endpoint: "content/discovery",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Content discovery rate limit exceeded for this site.",
+    });
+    if (limited) return withCors(limited, allowedOrigin);
+
     // Verify site exists
     const { data: site } = await supabase
       .from("sites")
@@ -180,35 +264,23 @@ export async function POST(
       );
     }
 
-    // Process content map with length validation
-    const contentElements = (
-      Object.entries(contentMap) as [string, ContentMapData][]
-    ).map(([elementId, data]) => {
-      // Truncate content that exceeds max length
-      const truncatedContent =
-        data.content && data.content.length > MAX_CONTENT_LENGTH
-          ? data.content.substring(0, MAX_CONTENT_LENGTH)
-          : data.content;
-      const sanitizedContent = sanitizeIncomingContent(truncatedContent);
+    const discovered = buildDiscoveryRows(
+      siteId,
+      contentMap as Record<string, ContentMapData>,
+    );
 
-      return {
-        site_id: siteId,
-        element_id: elementId,
-        selector: data.selector,
-        original_content: sanitizedContent,
-        current_content: sanitizedContent,
-        published_content: sanitizedContent,
-        language: "en",
-        variant: "default",
-        metadata: { type: data.type },
-      };
-    });
+    if (!discovered.ok) {
+      return withCors(
+        NextResponse.json({ error: discovered.error }, { status: 400 }),
+        allowedOrigin,
+      );
+    }
 
     // Insert newly discovered elements only. Existing rows may already carry
     // published edits, so content discovery must not overwrite published_content.
     const { error } = await supabase
       .from("content_elements")
-      .upsert(contentElements, {
+      .upsert(discovered.rows, {
         onConflict: "site_id,element_id,language,variant",
         ignoreDuplicates: true,
       });
