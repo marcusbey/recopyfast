@@ -4,12 +4,14 @@
 > `tsc` 0 errors, `lint` 0 errors, **1352 tests passing**, pre-commit hook run
 > on every commit.
 >
-> ## 🔴 ROTATE THE DATABASE PASSWORD
+> ## ✅ DATABASE PASSWORD ROTATED
 >
 > `SUPABASE_PASSWORD` was printed in full into an agent session transcript on
-> 2026-08-02 (a `psql` connection-string parse error echoed it). Rotate it in
-> the Supabase dashboard and update `.env` and any CI secret. Unlike the cron
-> secret this was never committed, but treat a transcript as untrusted storage.
+> 2026-08-02 (a `psql` connection-string parse error echoed it). **Rotated by
+> the owner on 2026-08-09** (audit finding T-2 closed). Remaining follow-through:
+> update the value in local `.env` and any CI secret that carries it — the six
+> findings T-2 blocked can only be verified against production once the new
+> password is in the environment.
 >
 > `CRON_SECRET` has already been rotated (see below) — that one is done.
 >
