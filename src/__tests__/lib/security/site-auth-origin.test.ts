@@ -496,9 +496,52 @@ describe("OPTIONS /api/content/[siteId] preflight", () => {
     );
   });
 
+  /**
+   * "Local" is an exact host, never a prefix.
+   *
+   * The check read `host.startsWith("127.0.0.1")`, which is true of
+   * `127.0.0.1.attacker.example` — a domain anyone can register and point wherever
+   * they like. That handed the development exemptions to an attacker-controlled
+   * origin: the demo-token bypass in `authorizeSiteRequest` and the preflight grant
+   * here. The prefix existed to tolerate a port that `parseOrigin` already strips.
+   */
+  it.each([
+    [
+      "a domain that merely starts with the loopback IP",
+      "http://127.0.0.1.attacker.example",
+    ],
+    ["a subdomain of it", "http://127.0.0.1.evil.test"],
+    [
+      "a host that merely starts with localhost",
+      "http://localhost.attacker.example",
+    ],
+    ["a look-alike loopback", "http://127.0.0.10"],
+  ])("does not treat %s as local", async (_label, origin) => {
+    const response = await preflight(origin);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
+      origin,
+    );
+  });
+
+  it("refuses a site token presented from a loopback look-alike domain", async () => {
+    // The same exactness on the request path, where the demo token would otherwise
+    // be honoured for an origin the attacker controls.
+    await expect(
+      authorizeSiteRequest({
+        siteId: SITE_ID,
+        token: "demo-site-token",
+        origin: "http://127.0.0.1.attacker.example",
+        referer: null,
+      }),
+    ).rejects.toThrow();
+  });
+
   it.each([
     ["localhost", "http://localhost:8080"],
     ["127.0.0.1", "http://127.0.0.1:8080"],
+    ["the IPv6 loopback", "http://[::1]:8080"],
   ])(
     "admits a %s demo page in development, against a non-local registered domain",
     async (_label, origin) => {

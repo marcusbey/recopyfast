@@ -570,6 +570,29 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       );
     });
 
+    it("redacts control characters out of a rejected element id", async () => {
+      // The id is refused BECAUSE it carries control characters, and the refusal
+      // repeats the id back — in the response body and in a console.warn. Without
+      // redaction a CR/LF in the id forges a second log line on its way to being
+      // rejected for containing CR/LF.
+      const elementId = `rcf-a${String.fromCharCode(0x0d)}${String.fromCharCode(
+        0x0a,
+      )}[content] site evil: forged log line`;
+
+      const body = await postAndReport({
+        [elementId]: { selector: "h1", content: "copy", type: "h1" },
+      });
+
+      expect(body.skippedCount).toBe(1);
+      const echoed = body.skipped?.[0].elementId ?? "";
+      expect(echoed).not.toContain(String.fromCharCode(0x0d));
+      expect(echoed).not.toContain(String.fromCharCode(0x0a));
+      // Redacted, not dropped: the shape of what was sent is still legible.
+      expect(echoed).toContain("rcf-a");
+      expect(echoed).toContain(String.fromCharCode(0xfffd));
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
     it("skips an over-long element id without echoing it back", async () => {
       const elementId = "a".repeat(300);
 

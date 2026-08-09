@@ -16,6 +16,7 @@ import {
   MAX_DISCOVERED_TEXT_LENGTH,
   MAX_ELEMENT_ID_LENGTH,
   MAX_SELECTOR_LENGTH,
+  redactControlCharacters,
   validateDiscoveredElement,
   validateDiscoveredText,
   validateElementId,
@@ -28,6 +29,7 @@ const SPACE = String.fromCharCode(0x20); // first printable
 const DEL = String.fromCharCode(0x7f); // first C1
 const APC = String.fromCharCode(0x9f); // last C1
 const NBSP = String.fromCharCode(0xa0); // first printable above C1
+const REPLACEMENT = String.fromCharCode(0xfffd); // U+FFFD, what redaction writes
 const TAB = String.fromCharCode(0x09);
 const LINE_FEED = String.fromCharCode(0x0a);
 const CARRIAGE_RETURN = String.fromCharCode(0x0d);
@@ -140,6 +142,42 @@ describe("validateDiscoveredText", () => {
   });
 });
 
+describe("redactControlCharacters", () => {
+  // Stricter than the content policy on purpose: this is for strings echoed into a
+  // log line or a JSON error, where CR/LF is not whitespace but a way to forge a
+  // second entry.
+  it.each([
+    ["NUL", NUL],
+    ["backspace", BACKSPACE],
+    ["unit separator", UNIT_SEPARATOR],
+    ["DEL", DEL],
+    ["APC", APC],
+    ["tab", TAB],
+    ["line feed", LINE_FEED],
+    ["carriage return", CARRIAGE_RETURN],
+  ])("replaces %s", (_label, character) => {
+    expect(redactControlCharacters(`a${character}b`)).toBe(`a${REPLACEMENT}b`);
+  });
+
+  it("leaves ordinary text alone", () => {
+    const text = "rcf-headline Setup in <2 minutes";
+
+    expect(redactControlCharacters(text)).toBe(text);
+  });
+
+  it("leaves the characters just outside the control ranges alone", () => {
+    const text = `a${SPACE}b${NBSP}c`;
+
+    expect(redactControlCharacters(text)).toBe(text);
+  });
+
+  it("keeps the string's length, so an excerpt taken after it still bounds", () => {
+    const forged = `id${CARRIAGE_RETURN}${LINE_FEED}forged`;
+
+    expect(redactControlCharacters(forged)).toHaveLength(forged.length);
+  });
+});
+
 describe("validateElementId", () => {
   it("accepts the id the widget generates", () => {
     expect(validateElementId("rcf-1k3j4h5")).toEqual({
@@ -170,8 +208,17 @@ describe("validateElementId", () => {
     );
   });
 
-  it("refuses an id carrying a control character", () => {
-    const result = validateElementId(`rcf-${NUL}abc`);
+  // Stricter than the content rule: an id is a machine token, and it is the value
+  // that gets echoed into refusals and logs, so the three whitespace controls a
+  // text node may contain are refused here.
+  it.each([
+    ["NUL", NUL],
+    ["DEL", DEL],
+    ["a carriage return", CARRIAGE_RETURN],
+    ["a line feed", LINE_FEED],
+    ["a tab", TAB],
+  ])("refuses an id carrying %s", (_label, character) => {
+    const result = validateElementId(`rcf-${character}abc`);
 
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toBe(

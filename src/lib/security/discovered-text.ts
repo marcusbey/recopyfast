@@ -85,6 +85,31 @@ function hasControlCharacter(text: string): boolean {
   return false;
 }
 
+/** U+FFFD REPLACEMENT CHARACTER, written by code point to keep this source ASCII. */
+const REPLACEMENT_CHARACTER = String.fromCharCode(0xfffd);
+
+/**
+ * Replace every C0 and C1 control character — tab, newline and carriage return
+ * included — with U+FFFD.
+ *
+ * Deliberately stricter than `hasControlCharacter` above, which tolerates those
+ * three because a text node legitimately contains them. This is for a string
+ * about to be echoed into a log line or a JSON error, where a carriage return is
+ * not whitespace but a way to forge a second log entry. A value that is refused
+ * must not be able to write the record of its own refusal.
+ */
+export function redactControlCharacters(text: string): string {
+  let redacted = "";
+
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    const isControl = code <= C0_END || (code >= C1_START && code <= C1_END);
+    redacted += isControl ? REPLACEMENT_CHARACTER : text[index];
+  }
+
+  return redacted;
+}
+
 export type DiscoveredTextResult =
   | { ok: true; value: string }
   | { ok: false; error: string };
@@ -127,7 +152,14 @@ export function validateElementId(elementId: unknown): DiscoveredTextResult {
     };
   }
 
-  if (hasControlCharacter(elementId)) {
+  // Stricter than the rule for content, and tab, newline and carriage return are
+  // the difference. Content is prose and legitimately contains all three; an id is
+  // a machine-generated token (`rcf-<hash>`) that never does — and unlike content
+  // it gets echoed back, into a JSON refusal and a log line, where a carriage
+  // return is how a rejected value forges the record of its own rejection. Written
+  // as a comparison against the redaction so there is only one definition of
+  // "control character" to keep in step.
+  if (redactControlCharacters(elementId) !== elementId) {
     return { ok: false, error: "element id contains control characters" };
   }
 

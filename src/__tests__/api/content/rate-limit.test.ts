@@ -7,26 +7,36 @@
  * the damage a copied token can do — the audit filed "carries no rate limit"
  * alongside the missing Origin pin for that reason.
  *
- * The two methods make opposite calls on a store outage, and both are deliberate:
+ * TWO LIMITERS, DIFFERENT JOBS. Every method meters per client IP BEFORE it looks
+ * at credentials, because every method does database work to decide who the caller
+ * is — the `sites` lookup, and a Supabase session check on GET. A limiter behind
+ * that work cannot protect it. POST then meters a second time, per site, behind
+ * authorization, because that is the path that writes with the service-role key.
+ * Neither replaces the other: the first sheds anonymous floods, the second caps
+ * what a caller holding a published token can write.
  *
- *  - POST fails CLOSED. It is the only path that writes content_elements with
- *    the service-role key. Losing Redis must not quietly remove the ceiling on
- *    that, and a refused discovery report is retried by the next visitor's scan.
- *  - GET fails OPEN. It is the read every visitor to the customer's page makes,
- *    and the widget's only fallback is to leave the authored markup in place
- *    (recopyfast.src.js:3293) — so denying here during an outage would
- *    un-publish every customer's copy at once.
+ * The two also make opposite calls on a store outage, and both are deliberate:
+ *
+ *  - The per-site POST limiter fails CLOSED. Losing Redis must not quietly remove
+ *    the ceiling on service-role writes, and a refused discovery report is retried
+ *    by the next visitor's scan.
+ *  - The per-IP limiter fails OPEN. It sits in front of every legitimate widget
+ *    request, and the widget's only fallback is to leave the authored markup in
+ *    place (recopyfast.src.js:3293) — so denying here during an outage would
+ *    un-publish every customer's copy at once. The fail-closed limiter behind it
+ *    still bounds the write.
  *
  * Only the store is stubbed: `enforceRateLimit`, its header construction and its
  * failure policy are the shipped implementations.
  */
 
 import { NextRequest } from "next/server";
-import { GET, POST } from "@/app/api/content/[siteId]/route";
+import { GET, OPTIONS, POST, PUT } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { rateLimiter } from "@/lib/security/rate-limiter";
 import {
   authorizeFirstPartySiteRequest,
+  authorizeSiteOrigin,
   authorizeSiteRequest,
 } from "@/lib/security/site-auth";
 
@@ -90,7 +100,9 @@ function resolveContentQuery(rows: unknown[]) {
     );
 }
 
-function widgetRequest(method: "GET" | "POST") {
+type Method = "GET" | "POST" | "PUT" | "OPTIONS";
+
+function widgetRequest(method: Method) {
   return new NextRequest(`https://recopyfast.com/api/content/${SITE_ID}`, {
     method,
     headers: {
@@ -99,7 +111,7 @@ function widgetRequest(method: "GET" | "POST") {
       "Content-Type": "application/json",
     },
     body:
-      method === "GET"
+      method === "GET" || method === "OPTIONS"
         ? undefined
         : JSON.stringify({
             "rcf-headline": {
@@ -183,7 +195,7 @@ describe("/api/content/[siteId] rate limiting", () => {
     expect(serviceClient.upsert).toHaveBeenCalled();
   });
 
-  it("refuses a read over the limit with a 429 the browser can read", async () => {
+  it("refuses a read over the limit, before it knows whose read it is", async () => {
     checkLimit.mockResolvedValue({
       allowed: false,
       remaining: 0,
@@ -195,11 +207,11 @@ describe("/api/content/[siteId] rate limiting", () => {
 
     expect(response.status).toBe(429);
     expect(response.headers.get("Retry-After")).not.toBeNull();
-    // Without the CORS header the widget cannot tell a 429 from a dead network,
-    // which is the same trap the authorization refusals fell into.
-    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
-      WIDGET_ORIGIN,
-    );
+    // No CORS grant, deliberately: the limiter runs before the site is looked up,
+    // so there is no origin this route has agreed to echo yet. The widget cannot
+    // read the body — it lands in the same `.catch` as any blocked fetch and keeps
+    // the authored copy, which is what it would do with a readable 429 anyway.
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
 
   it("refuses a discovery write over the limit without touching the table", async () => {
@@ -225,6 +237,81 @@ describe("/api/content/[siteId] rate limiting", () => {
     // Fails open on purpose: an unmetered window on a read costs less than every
     // customer's published copy disappearing for the length of a Redis outage.
     expect(response.status).toBe(200);
+  });
+
+  /**
+   * The limiter has to run in front of the work, not behind it.
+   *
+   * Every method does database work to decide who the caller is — the `sites`
+   * lookup in `authorizeSiteRequest`/`authorizeSiteOrigin`, and a Supabase session
+   * check on GET. Metering after that meant a caller holding no credential at all
+   * could drive those round trips at whatever rate it liked, because the limiter it
+   * would have tripped sat behind them.
+   */
+  describe("sheds load before spending anything on authorization", () => {
+    beforeEach(() => {
+      checkLimit.mockResolvedValue({
+        allowed: false,
+        remaining: 0,
+        resetTime: Date.now() + 30_000,
+        totalRequests: 201,
+      });
+    });
+
+    it.each([
+      ["GET", () => GET(widgetRequest("GET"), params)],
+      ["POST", () => POST(widgetRequest("POST"), params)],
+      ["PUT", () => PUT(widgetRequest("PUT"), params)],
+      ["OPTIONS", () => OPTIONS(widgetRequest("OPTIONS"), params)],
+    ] as const)(
+      "%s answers 429 without authorizing or reaching the database",
+      async (_method, call) => {
+        const response = await call();
+
+        expect(response.status).toBe(429);
+        expect(authorizeFirstPartySiteRequest).not.toHaveBeenCalled();
+        expect(authorizeSiteRequest).not.toHaveBeenCalled();
+        expect(authorizeSiteOrigin).not.toHaveBeenCalled();
+        expect(serviceClient.from).not.toHaveBeenCalled();
+      },
+    );
+
+    it("buckets that limiter by IP, never by site", async () => {
+      // Per site, an anonymous flood would spend the customer's own discovery
+      // budget and lock their widget out — a worse denial of service than the one
+      // being closed.
+      await POST(widgetRequest("POST"), params);
+
+      const config = checkLimit.mock.calls[0][0];
+      expect(config.identifierType).toBe("ip");
+      expect(config.identifier).not.toBe(SITE_ID);
+    });
+  });
+
+  it("meters the write path twice: per IP in front, per site behind", async () => {
+    // The per-IP limiter admits the request; the per-site one refuses it. Two
+    // buckets, two jobs — neither is a substitute for the other.
+    checkLimit
+      .mockResolvedValueOnce({
+        allowed: true,
+        remaining: 199,
+        resetTime: Date.now() + 60_000,
+        totalRequests: 1,
+      })
+      .mockResolvedValueOnce({
+        allowed: false,
+        remaining: 0,
+        resetTime: Date.now() + 30_000,
+        totalRequests: 101,
+      });
+
+    const response = await POST(widgetRequest("POST"), params);
+
+    expect(checkLimit).toHaveBeenCalledTimes(2);
+    expect(checkLimit.mock.calls[0][0].identifierType).toBe("ip");
+    expect(checkLimit.mock.calls[1][0].identifier).toBe(SITE_ID);
+    expect(response.status).toBe(429);
+    expect(serviceClient.upsert).not.toHaveBeenCalled();
   });
 
   it("refuses discovery writes when the limiter store is unreachable", async () => {

@@ -40,15 +40,25 @@ function parseOrigin(originHeader?: string | null) {
 }
 
 /**
- * A host that can only be a developer's own machine.
+ * The exact hosts that can only be a developer's own machine.
  *
  * Shared by the request and preflight paths below so the two cannot drift into
  * disagreeing about what "local" means — they did, and the disagreement was
  * invisible because only one of them is reached without a browser.
+ *
+ * EXACT, never a prefix. This read `host.startsWith("127.0.0.1")`, which is true
+ * of `127.0.0.1.attacker.example` — a domain anyone can register and point
+ * anywhere. That handed the development bypasses (the demo-token exemption in
+ * `authorizeSiteRequest`, the preflight grant in `authorizeSiteOrigin`) to an
+ * attacker-controlled origin. The prefix was there to tolerate a port, which
+ * `parseOrigin` already strips: it returns `URL.hostname`, so `127.0.0.1:8080`
+ * arrives as `127.0.0.1` and an IPv6 loopback as the bracketed `[::1]`.
  */
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 function isLocalhostHost(host: string | null): boolean {
   if (!host) return false;
-  return host === "localhost" || host.startsWith("127.0.0.1");
+  return LOCALHOST_HOSTS.has(host);
 }
 
 export function buildSiteToken(siteId: string, apiKey: string) {

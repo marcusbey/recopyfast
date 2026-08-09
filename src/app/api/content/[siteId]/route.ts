@@ -6,6 +6,7 @@ import {
   authorizeSiteOrigin,
 } from "@/lib/security/site-auth";
 import {
+  redactControlCharacters,
   validateDiscoveredElement,
   validateElementId,
 } from "@/lib/security/discovered-text";
@@ -45,10 +46,20 @@ type DiscoveryRows =
   | { ok: true; rows: ContentElementRow[]; skipped: SkippedElement[] }
   | { ok: false; error: string };
 
+/**
+ * Make a rejected element id safe to repeat back.
+ *
+ * Redaction comes first, then the cut. `validateElementId` refuses an id carrying
+ * control characters — but this excerpt appears in that very refusal, in the
+ * response body and in a `console.warn`, so an id containing CR/LF would forge a
+ * log line on its way to being rejected for containing CR/LF.
+ */
 function idExcerpt(elementId: string): string {
-  return elementId.length > MAX_ECHOED_ID_LENGTH
-    ? `${elementId.slice(0, MAX_ECHOED_ID_LENGTH)}...`
-    : elementId;
+  const safe = redactControlCharacters(elementId);
+
+  return safe.length > MAX_ECHOED_ID_LENGTH
+    ? `${safe.slice(0, MAX_ECHOED_ID_LENGTH)}...`
+    : safe;
 }
 
 /**
@@ -172,11 +183,51 @@ function withCors(response: NextResponse, allowedOrigin: string | null) {
   return response;
 }
 
+/**
+ * Shed load before spending anything on deciding who the caller is.
+ *
+ * Every method here does database work before it can know whether the request is
+ * authorized at all: the `sites` lookup inside `authorizeSiteRequest` and
+ * `authorizeSiteOrigin`, plus a Supabase session check on GET. Metering only
+ * after that left those round trips unbounded for a caller holding no credential
+ * — the flood never reached the limiter, because the limiter was behind the work
+ * it was supposed to protect.
+ *
+ * PER IP, NEVER PER SITE. Bucketing this by site id would let an unauthenticated
+ * flood spend a customer's discovery budget and lock their real widget out — a
+ * worse denial of service than the one it closes. A per-IP bucket can only
+ * exhaust itself.
+ *
+ * FAILS OPEN, unlike the per-site limiter on POST. This sits in front of every
+ * legitimate widget request too, so a Redis outage must not stop content reaching
+ * visitors on every customer site at once. POST keeps its fail-closed per-site
+ * limiter behind this one, so the service-role write stays bounded even in the
+ * window where this is unmetered — which is why the two coexist rather than one
+ * replacing the other.
+ *
+ * The refusal is deliberately not CORS-wrapped: nothing is known about the site
+ * yet, so there is no origin this route would be willing to echo. A browser
+ * therefore cannot read the 429 body — it lands in the widget's `.catch`, the same
+ * place any blocked fetch does, and the page keeps its authored copy.
+ */
+function shedUnauthenticatedLoad(request: NextRequest, endpoint: string) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint,
+    identifierType: "ip",
+    onStoreFailure: "allow",
+    message: "Too many content requests. Please try again shortly.",
+  });
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    const shed = await shedUnauthenticatedLoad(request, "content/read");
+    if (shed) return shed;
+
     const { siteId } = await params;
     const supabase = createServiceRoleClient();
 
@@ -219,21 +270,6 @@ export async function GET(
         );
       }
     }
-
-    // Bucketed by IP, not by site: this is the read every visitor to the
-    // customer's page makes, so a per-site counter would throttle popular sites
-    // first and hardest. Fails OPEN — the widget's only fallback is to leave the
-    // authored markup in place (recopyfast.src.js:3293), so a Redis outage that
-    // denied here would un-publish every customer's copy at once. An
-    // unmetered window on a read is the cheaper failure.
-    const limited = await enforceRateLimit(request, {
-      limit: "IP_GENERAL",
-      endpoint: "content/read",
-      identifierType: "ip",
-      onStoreFailure: "allow",
-      message: "Too many content requests. Please try again shortly.",
-    });
-    if (limited) return withCors(limited, allowedOrigin);
 
     // Get language and variant from query params
     const searchParams = request.nextUrl.searchParams;
@@ -281,6 +317,9 @@ export async function POST(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    const shed = await shedUnauthenticatedLoad(request, "content/discovery-ip");
+    if (shed) return shed;
+
     const { siteId } = await params;
     const contentMap = await request.json();
     const supabase = createServiceRoleClient();
@@ -314,13 +353,16 @@ export async function POST(
       );
     }
 
-    // Bucketed by site, and fails CLOSED. This is the one path that writes
-    // content_elements with the service-role key, and the credential that opens
-    // it is published in the customer's own page markup — so the limit is what
-    // bounds the damage a copied token can do, and losing Redis must not remove
-    // it. Discovery is a one-time event per element (the widget reports only ids
-    // the server does not already hold), so a legitimate site never approaches
-    // this, and a refused report is retried by the next visitor's scan.
+    // The second limiter, behind authorization: bucketed by site, and fails
+    // CLOSED. This is the one path that writes content_elements with the
+    // service-role key, and the credential that opens it is published in the
+    // customer's own page markup — so this is what bounds the damage a copied
+    // token can do, and losing Redis must not remove it. The per-IP limiter in
+    // front sheds anonymous floods; this one caps what an authenticated caller can
+    // write, and neither substitutes for the other. Discovery is a one-time event
+    // per element (the widget reports only ids the server does not already hold),
+    // so a legitimate site never approaches this, and a refused report is retried
+    // by the next visitor's scan.
     const limited = await enforceRateLimit(request, {
       limit: "API_CONTENT",
       endpoint: "content/discovery",
@@ -411,6 +453,12 @@ export async function PUT(
   { params }: { params: Promise<{ siteId: string }> },
 ) {
   try {
+    // Metered too, even though every authorized answer here is a 403: the refusal
+    // sits behind the same `sites` lookup as the other methods, so leaving this
+    // method alone would just move an anonymous flood one verb to the left.
+    const shed = await shedUnauthenticatedLoad(request, "content/update");
+    if (shed) return shed;
+
     const { siteId } = await params;
     const token = extractToken(request);
     const origin = request.headers.get("origin");
@@ -481,6 +529,14 @@ export async function OPTIONS(
   // never sent. Same outcome the 403 produced, minus the oracle. And admitting
   // one grants nothing on its own — a preflight carries no content, and the real
   // request still has to pass the whole token-and-origin check.
+  // Metered like the rest: `authorizeSiteOrigin` does a `sites` lookup, so an
+  // unlimited preflight is an unlimited query, and a preflight is the one request
+  // on this route a caller can make with no credential of any kind. A 429 here
+  // does not reintroduce the oracle the uniform 204 closed — it depends on the
+  // caller's own request rate, not on whether the site id exists.
+  const shed = await shedUnauthenticatedLoad(request, "content/preflight");
+  if (shed) return shed;
+
   let siteId = "unknown";
   let allowedOrigin: string | null = null;
 
