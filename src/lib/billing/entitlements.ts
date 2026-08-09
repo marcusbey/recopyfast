@@ -72,6 +72,18 @@ export interface GrantEntitlementResult {
 const LIFETIME_PURCHASE_SOURCE = "lifetime_purchase";
 
 /**
+ * `source` recorded when a payment's entitlement is taken away, which is also
+ * the record of WHY. Only a chargeback revocation is reversible, so the value
+ * has to be produced in one place and matched in another — hence a function
+ * rather than two template literals that could drift apart.
+ */
+function revocationSource(reason: string): string {
+  return `revoked:${reason}`;
+}
+
+const DISPUTE_REVOCATION_SOURCE = revocationSource("dispute");
+
+/**
  * Record a permanent plan grant.
  *
  * Called from the Stripe webhook with the service-role client, because
@@ -127,7 +139,7 @@ export async function revokeEntitlementForPayment(
     .from("plan_entitlements")
     .update({
       revoked_at: new Date().toISOString(),
-      source: `revoked:${reason}`,
+      source: revocationSource(reason),
     })
     .eq("stripe_payment_intent_id", stripePaymentIntentId)
     .is("revoked_at", null)
@@ -154,6 +166,13 @@ export async function revokeEntitlementForPayment(
  * Reads before writing rather than filtering on "still revoked" in the predicate
  * so that an entitlement which was never revoked is left exactly as it is:
  * restoring one would overwrite whatever `source` it carries with the default.
+ *
+ * Only a revocation whose `source` says CHARGEBACK is reversible, and that is
+ * the whole reason `source` is read here. A refund is final — the customer has
+ * the money — and the two revocations are indistinguishable by `revoked_at`
+ * alone. Without this check, settling an early-fraud warning the standard way
+ * (refund the charge, Stripe then closes the dispute as `warning_closed`) handed
+ * the customer their money back AND their lifetime access.
  */
 export async function restoreEntitlementForPayment(
   stripePaymentIntentId: string,
@@ -162,9 +181,9 @@ export async function restoreEntitlementForPayment(
 
   const { data: entitlement, error: readError } = await supabase
     .from("plan_entitlements")
-    .select("id, revoked_at")
+    .select("id, revoked_at, source")
     .eq("stripe_payment_intent_id", stripePaymentIntentId)
-    .maybeSingle<{ id: string; revoked_at: string | null }>();
+    .maybeSingle<{ id: string; revoked_at: string | null; source: string }>();
 
   if (readError) {
     throw new Error(
@@ -173,6 +192,15 @@ export async function restoreEntitlementForPayment(
   }
 
   if (!entitlement || entitlement.revoked_at === null) {
+    return { restored: false };
+  }
+
+  if (entitlement.source !== DISPUTE_REVOCATION_SOURCE) {
+    console.error(
+      `Refusing to restore the entitlement for ${stripePaymentIntentId}: it was ` +
+        `revoked as "${entitlement.source}", not by a chargeback. Only a ` +
+        `chargeback revocation is reversible.`,
+    );
     return { restored: false };
   }
 

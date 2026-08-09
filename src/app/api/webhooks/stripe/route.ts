@@ -841,18 +841,48 @@ async function catalogueLifetimeGrant(
  * are compared as well because it is false while a full refund is still pending.
  */
 async function handleChargeRefunded(charge: Stripe.Charge) {
-  const refunded = charge.amount_refunded ?? 0;
-  const fullyRefunded = charge.refunded === true || refunded >= charge.amount;
-
-  if (!fullyRefunded) {
+  if (!isFullyRefunded(charge)) {
     console.log(
-      `partial refund on ${charge.id}: ${refunded} of ${charge.amount} returned — ` +
-        `entitlement and credits left in place.`,
+      `partial refund on ${charge.id}: ${charge.amount_refunded ?? 0} of ` +
+        `${charge.amount} returned — entitlement and credits left in place.`,
     );
     return;
   }
 
   await handleMoneyReturned(charge, "refund");
+}
+
+/**
+ * Is there nothing left on this charge?
+ *
+ * `refunded` is Stripe's own flag; the amounts are compared as well because it
+ * is false while a full refund is still pending. Shared by the refund handler
+ * and the dispute-closed handler so the two can never disagree about what
+ * "fully refunded" means.
+ */
+function isFullyRefunded(charge: Stripe.Charge): boolean {
+  return (
+    charge.refunded === true || (charge.amount_refunded ?? 0) >= charge.amount
+  );
+}
+
+/**
+ * The charge a dispute was filed against.
+ *
+ * Webhook payloads carry `charge` as a bare id, so this is a round trip to
+ * Stripe. Errors are left to propagate: a 500 that Stripe redelivers is
+ * recoverable, whereas guessing the refund state either hands out a product we
+ * have already refunded or strands a customer who won.
+ */
+async function disputedCharge(
+  dispute: Stripe.Dispute,
+): Promise<Stripe.Charge | null> {
+  const charge = dispute.charge;
+
+  if (!charge) return null;
+  if (typeof charge !== "string") return charge;
+
+  return stripe.charges.retrieve(charge);
 }
 
 /**
@@ -925,6 +955,31 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
   if (dispute.status !== "won" && dispute.status !== "warning_closed") {
     console.log(
       `dispute on ${paymentIntentId} closed as "${dispute.status}" — ` +
+        `entitlement and credits stay revoked.`,
+    );
+    return;
+  }
+
+  // Winning on paper is not the same as keeping the money. The standard way to
+  // settle an early-fraud warning is to REFUND the charge, after which Stripe
+  // closes the dispute as `warning_closed` (sometimes `won`) — a status that
+  // otherwise reads as "restore everything". Restoring there would hand the
+  // customer the refund AND the product they no longer paid for.
+  const charge = await disputedCharge(dispute);
+
+  if (!charge) {
+    console.error(
+      `dispute ${dispute.id} on ${paymentIntentId} closed as ` +
+        `"${dispute.status}" with no charge to check for a refund — leaving the ` +
+        `revocation in place rather than restoring what may have been refunded.`,
+    );
+    return;
+  }
+
+  if (isFullyRefunded(charge)) {
+    console.log(
+      `dispute on ${paymentIntentId} closed as "${dispute.status}", but charge ` +
+        `${charge.id} was fully refunded — the customer has the money, so the ` +
         `entitlement and credits stay revoked.`,
     );
     return;

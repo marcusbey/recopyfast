@@ -17,11 +17,17 @@
 
 const mockConstructEvent = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
+/**
+ * `charge.dispute.closed` carries the charge as a bare id, so deciding whether
+ * the dispute was settled by refunding means asking Stripe for the charge.
+ */
+const mockChargeRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { update: mockSubscriptionUpdate },
+    charges: { retrieve: (...args: unknown[]) => mockChargeRetrieve(...args) },
   })),
 );
 
@@ -139,6 +145,7 @@ jest.mock("@/lib/supabase/server", () => ({
 }));
 
 import { POST } from "@/app/api/webhooks/stripe/route";
+import { restoreEntitlementForPayment } from "@/lib/billing/entitlements";
 
 interface WebhookResponse {
   status: number;
@@ -146,7 +153,19 @@ interface WebhookResponse {
 }
 
 const PAYMENT_INTENT = "pi_lifetime_1";
+const CHARGE_ID = "ch_1";
 const LIFETIME_PRICE_CENTS = 19900;
+
+/** What Stripe reports for the disputed charge. */
+function chargeState(amountRefunded: number, refunded: boolean) {
+  return {
+    id: CHARGE_ID,
+    payment_intent: PAYMENT_INTENT,
+    amount: LIFETIME_PRICE_CENTS,
+    amount_refunded: amountRefunded,
+    refunded,
+  };
+}
 
 async function deliver(event: unknown): Promise<WebhookResponse> {
   mockConstructEvent.mockReturnValue(event);
@@ -162,6 +181,7 @@ function disputeEvent(eventId: string, type: string, status: string): unknown {
       object: {
         id: "dp_1",
         payment_intent: PAYMENT_INTENT,
+        charge: CHARGE_ID,
         amount: LIFETIME_PRICE_CENTS,
         status,
       },
@@ -179,12 +199,8 @@ function refundEvent(
     type: "charge.refunded",
     data: {
       object: {
-        id: "ch_1",
+        ...chargeState(amountRefunded, refunded),
         customer: "cus_1",
-        payment_intent: PAYMENT_INTENT,
-        amount: LIFETIME_PRICE_CENTS,
-        amount_refunded: amountRefunded,
-        refunded,
       },
     },
   };
@@ -203,6 +219,9 @@ describe("A-8 / A-20: money coming back out", () => {
     jest.clearAllMocks();
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
+    // Default: the charge still stands. A dispute settled by refunding is the
+    // exception, and the tests that model it say so.
+    mockChargeRetrieve.mockResolvedValue(chargeState(0, false));
     db = {
       billing_events: [],
       billing_customers: [
@@ -363,6 +382,117 @@ describe("A-8 / A-20: money coming back out", () => {
       expect(wallet()?.credits_remaining).toBe(0);
     });
 
+    /**
+     * The hole Devin found in the first version of this fix.
+     *
+     * Refunding the charge is the STANDARD way to settle an early-fraud warning
+     * or inquiry, and Stripe then closes the dispute as `warning_closed` (or
+     * `won`) — a status the handler read as "restore everything". The customer
+     * ended up with the $199 back, lifetime access, and a refilled wallet.
+     *
+     * Note the middle step is a no-op for our tables: `revokeEntitlementForPayment`
+     * filters on `revoked_at IS NULL`, so the dispute revocation is already in
+     * place and `source` still says `revoked:dispute`. Checking the source alone
+     * cannot catch this sequence — only the charge can.
+     */
+    it("does not restore when the dispute was settled by refunding the charge", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      // The merchant refunds in full to settle it.
+      mockChargeRetrieve.mockResolvedValue(
+        chargeState(LIFETIME_PRICE_CENTS, true),
+      );
+      await deliver(refundEvent("evt_refund", LIFETIME_PRICE_CENTS, true));
+
+      // Stripe closes the dispute off the back of that refund.
+      const closed = await deliver(
+        disputeEvent(
+          "evt_dispute_closed",
+          "charge.dispute.closed",
+          "warning_closed",
+        ),
+      );
+
+      expect(closed.status).toBe(200);
+      expect(entitlement()?.revoked_at).not.toBeNull();
+      expect(wallet()?.credits_remaining).toBe(0);
+    });
+
+    it("does not restore a won dispute whose charge was refunded anyway", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      mockChargeRetrieve.mockResolvedValue(
+        chargeState(LIFETIME_PRICE_CENTS, true),
+      );
+      await deliver(
+        disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
+      );
+
+      expect(entitlement()?.revoked_at).not.toBeNull();
+      expect(wallet()?.credits_remaining).toBe(0);
+    });
+
+    it("checks the disputed charge before restoring anything", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+      await deliver(
+        disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
+      );
+
+      // The restore path is only reachable through the charge lookup, so the
+      // clean-win cases above cannot pass by skipping the refund check.
+      expect(mockChargeRetrieve).toHaveBeenCalledWith(CHARGE_ID);
+      expect(entitlement()?.revoked_at).toBeNull();
+      expect(wallet()?.credits_remaining).toBe(1000);
+    });
+
+    it("leaves the revocation in place when the dispute names no charge", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      const closed = await deliver({
+        id: "evt_dispute_closed",
+        type: "charge.dispute.closed",
+        data: {
+          object: {
+            id: "dp_1",
+            payment_intent: PAYMENT_INTENT,
+            charge: null,
+            amount: LIFETIME_PRICE_CENTS,
+            status: "won",
+          },
+        },
+      });
+
+      // Unverifiable, so it fails closed: a support ticket is recoverable,
+      // giving away a product we may have refunded is not.
+      expect(closed.status).toBe(200);
+      expect(mockChargeRetrieve).not.toHaveBeenCalled();
+      expect(entitlement()?.revoked_at).not.toBeNull();
+    });
+
     it("leaves a dispute lost by us revoked", async () => {
       await deliver(
         disputeEvent(
@@ -444,6 +574,56 @@ describe("A-8 / A-20: money coming back out", () => {
       );
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  /**
+   * The second layer of the same defence, exercised directly.
+   *
+   * No webhook sequence can isolate it: a refund revocation implies a refunded
+   * charge, which `handleDisputeClosed` already refuses on. This is what stops a
+   * future caller — or a dispute closed while Stripe reports the charge as
+   * un-refunded — from reversing a revocation that was never a chargeback.
+   */
+  describe("restoreEntitlementForPayment only reverses a chargeback", () => {
+    it("refuses a row revoked by a refund", async () => {
+      db.plan_entitlements = [
+        {
+          id: "ent_1",
+          user_id: "user-1",
+          plan_id: "pro",
+          source: "revoked:refund",
+          stripe_payment_intent_id: PAYMENT_INTENT,
+          revoked_at: "2026-08-08T00:00:00.000Z",
+        },
+      ];
+
+      await expect(
+        restoreEntitlementForPayment(PAYMENT_INTENT),
+      ).resolves.toEqual({ restored: false });
+
+      expect(entitlement()?.revoked_at).toBe("2026-08-08T00:00:00.000Z");
+      expect(entitlement()?.source).toBe("revoked:refund");
+    });
+
+    it("restores a row revoked by a dispute", async () => {
+      db.plan_entitlements = [
+        {
+          id: "ent_1",
+          user_id: "user-1",
+          plan_id: "pro",
+          source: "revoked:dispute",
+          stripe_payment_intent_id: PAYMENT_INTENT,
+          revoked_at: "2026-08-08T00:00:00.000Z",
+        },
+      ];
+
+      await expect(
+        restoreEntitlementForPayment(PAYMENT_INTENT),
+      ).resolves.toEqual({ restored: true });
+
+      expect(entitlement()?.revoked_at).toBeNull();
+      expect(entitlement()?.source).toBe("lifetime_purchase");
     });
   });
 });
