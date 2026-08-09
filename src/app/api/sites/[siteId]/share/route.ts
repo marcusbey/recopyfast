@@ -1,3 +1,33 @@
+/**
+ * Collaborator management for a site.
+ *
+ * WHY EVERY `site_permissions` QUERY HERE USES THE SERVICE ROLE
+ * ------------------------------------------------------------
+ * Which RLS policies production actually has is unknown from the repo, and the
+ * two candidate migrations disagree. Only `20260731008000` grants
+ * `authenticated` anything beyond SELECT on this table; `20260804130000` — the
+ * one recorded as applied — restores SELECT-for-your-own-rows and FOR ALL to
+ * `service_role`, and nothing else.
+ *
+ * Under that restrictive branch a caller-scoped client gives each handler a
+ * different partial failure, and they compound into a feature that looks
+ * half-alive:
+ *   - POST   the INSERT matches zero rows, `.single()` returns PGRST116, 500.
+ *   - GET    the list returns only the caller's own row, so an owner who has
+ *            just added a teammate cannot see them.
+ *   - DELETE the pre-read cannot see anyone else's row, so revoking a
+ *            collaborator answers "Permission not found" — the owner can add a
+ *            teammate and then never remove them.
+ * Each of those is invisible to a test that only checks the happy branch, which
+ * is why the first pass at this fix moved the writes and left the reads behind.
+ *
+ * The service role makes an already-authorised operation land; it never decides
+ * whether it may. Every handler completes its own authorisation first —
+ * `checkSitePermission` in all three, plus the `canShareSite` seat quota in
+ * POST — and the queries below are scoped to `siteId` so a permission row from
+ * another site is unreachable regardless of what RLS would have allowed.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -22,20 +52,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
 
-    // Every read and write of `site_permissions` below goes through this client
-    // rather than the caller's. Which RLS policies production actually has is
-    // unknown from the repo, and the two candidate migrations disagree: only
-    // 20260731008000 grants `authenticated` an INSERT on this table, while
-    // 20260804130000 — the one recorded as applied — grants nothing beyond
-    // SELECT-for-self and FOR ALL to `service_role`. Writing as the caller
-    // therefore either works or 500s every collaborator invite depending on
-    // which migration is live; writing as `service_role` works under both.
-    //
-    // This does not widen access. Authorisation is complete before any of it
-    // runs: checkSitePermission(["manager","owner"]) below establishes that the
-    // caller may share this site at all, and canShareSite enforces the plan's
-    // seat quota. The service role is used to make an already-authorised write
-    // land, not to decide whether it may.
+    // Every `site_permissions` query below goes through this client — see the
+    // module header. Authorisation for this request is checkSitePermission
+    // (["manager","owner"]) plus the canShareSite seat quota, both below.
     const serviceClient = createServiceRoleClient();
 
     // Get current user
@@ -296,10 +315,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Service-scoped, like the write paths — see the module header. This list is
+    // the whole point of the screen, and under a SELECT-own-rows-only policy the
+    // caller's client returns just their own row: an owner sees an empty
+    // collaborator list immediately after successfully adding someone.
+    //
     // `auth.users` cannot be embedded — PostgREST does not expose that schema,
-    // so the previous embed made this whole query fail. Teams still embed
-    // normally; user identities are resolved separately through the Admin API.
-    const { data: sitePermissions, error } = await supabase
+    // so the previous embed made this whole query fail. `teams` is in `public`
+    // and embeds normally; user identities are resolved through the Admin API.
+    const serviceClient = createServiceRoleClient();
+
+    const { data: sitePermissions, error } = await serviceClient
       .from("site_permissions")
       .select(
         `
@@ -376,9 +402,16 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get the permission to be deleted
+    // Service-scoped, like the other two handlers — see the module header. Under
+    // a SELECT-own-rows-only policy this pre-read cannot see the row being
+    // revoked, so revoking anyone but yourself answered "Permission not found"
+    // and a collaborator could be added but never removed.
+    const serviceClient = createServiceRoleClient();
+
+    // Get the permission to be deleted. Scoped to `site_id`, so a permissionId
+    // belonging to another site is a 404 rather than a cross-site read.
     const { data: targetPermission, error: targetPermissionError } =
-      await supabase
+      await serviceClient
         .from("site_permissions")
         .select("*")
         .eq("id", permissionId)
@@ -392,11 +425,51 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Delete the permission
-    const { error } = await supabase
+    // The site creator's row is not revocable through this endpoint.
+    //
+    // THIS GUARD IS PART OF THE SERVICE-ROLE CHANGE, not a separate feature.
+    // `sites` has no owner column, so the creator's `site_permissions` row is the
+    // entire record that they own the site — delete it and they lose read, edit,
+    // publish, analytics and re-share, with no admin surface to grant it back,
+    // while a collaborator whose row survives holds the tenant (audit A-4).
+    //
+    // The only thing that used to stop that on this path was an accident: the
+    // pre-read ran as the caller, and under the restrictive SELECT policy it
+    // could not see anyone else's row, so the request 404'd. Moving the read to
+    // `service_role` — which is what makes revoking a collaborator work at all —
+    // removes that accident, so the protection has to become deliberate here or
+    // the fix for one finding arms another.
+    //
+    // `granted_by IS NULL` is the marker: sites/register/route.ts creates the
+    // creator's row without it, and this route always sets it (see the POST
+    // insert), so a null means "nobody granted this — it came with the site".
+    //
+    // NOT the whole of A-4. A site can still be left with no admin by revoking
+    // the last non-creator admin, which needs a count this route does not make;
+    // that remains open and its marker in share-owner-lockout.test.ts stays red.
+    if (targetPermission.granted_by === null) {
+      return NextResponse.json(
+        {
+          error:
+            "The site creator's access cannot be revoked. Transfer ownership first.",
+        },
+        { status: 403 },
+      );
+    }
+
+    // Delete the permission, scoped to `site_id` as well as `id`.
+    //
+    // The pre-read above already establishes that this row belongs to `siteId`,
+    // so the filter is redundant on today's control flow — but it is the filter
+    // that makes the DELETE safe *on its own terms* rather than only as a
+    // consequence of the check above, and RLS is no longer behind it to catch a
+    // future refactor that reorders or drops that check. Same reasoning as the
+    // team-scoped delete in teams/[teamId]/members/route.ts.
+    const { error } = await serviceClient
       .from("site_permissions")
       .delete()
-      .eq("id", permissionId);
+      .eq("id", permissionId)
+      .eq("site_id", siteId);
 
     if (error) {
       console.error("Error deleting site permission:", error);

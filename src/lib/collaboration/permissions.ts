@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { TeamRole } from "@/types";
+import { attachUserIdentities } from "@/lib/auth/user-identity";
 
 export interface PermissionCheck {
   hasPermission: boolean;
@@ -385,7 +386,23 @@ export class CollaborationPermissions {
   }
 
   /**
-   * Get active editing sessions for a content element
+   * Get active editing sessions for a content element.
+   *
+   * The sixth site of the `auth.users` embed defect (audit A-12, which counted
+   * five in `src/app/api/teams`). PostgREST does not expose the `auth` schema, so
+   * `user:auth.users!content_editing_sessions_user_id_fkey(...)` was a hard
+   * PGRST200 that failed the whole select — meaning this returned `[]` on every
+   * call, not merely on error. Identities now come from the Admin API, the same
+   * as everywhere else.
+   *
+   * `[]` IS STILL THE RIGHT ANSWER ON FAILURE, and deliberately so: presence is
+   * advisory decoration, not authorisation. Nobody is denied an edit because we
+   * could not say who else was in the document, so a failed presence read must
+   * degrade to "no badges" rather than break the editor around it. What was
+   * wrong before was not the fallback but that the fallback was permanent and
+   * unreachable-by-design. The error is logged at error level on both branches
+   * so the difference between "nobody is editing" and "we could not tell" is
+   * visible in the logs even though the caller cannot distinguish them.
    */
   async getActiveEditingSessions(
     contentElementId: string,
@@ -394,15 +411,7 @@ export class CollaborationPermissions {
       const client = await this.supabase;
       const { data: sessions, error } = await client
         .from("content_editing_sessions")
-        .select(
-          `
-          *,
-          user:auth.users!content_editing_sessions_user_id_fkey(
-            email,
-            raw_user_meta_data
-          )
-        `,
-        )
+        .select("*")
         .eq("content_element_id", contentElementId)
         .is("ended_at", null)
         .gt(
@@ -415,7 +424,11 @@ export class CollaborationPermissions {
         return [];
       }
 
-      return (sessions as unknown as Record<string, unknown>[]) || [];
+      return await attachUserIdentities(
+        (sessions as unknown as Record<string, unknown>[]) || [],
+        "user_id",
+        "user",
+      );
     } catch (error) {
       console.error("Error getting active editing sessions:", error);
       return [];

@@ -1,6 +1,5 @@
 /**
- * A-12 — the Teams feature embeds `auth.users` over PostgREST, which cannot
- * resolve it.
+ * A-12 — handlers embed `auth.users` over PostgREST, which cannot resolve it.
  *
  * PostgREST only exposes the schemas listed in its config (`public`, plus
  * whatever is added explicitly). `auth` is not one of them, so
@@ -8,21 +7,34 @@
  * partial query — it is a hard PGRST200 "could not find a relationship", and
  * the handler answers 500 to every caller.
  *
- * Four handlers do this:
+ * Six sites did this. Five in the Teams feature, which is what the audit counted:
  *   - teams/[teamId]/members/route.ts:44   (GET member list)
  *   - teams/[teamId]/members/route.ts:174  (PATCH role update)
  *   - teams/[teamId]/invitations/route.ts:49, :237
  *   - teams/[teamId]/activity/route.ts:48
- * plus `.from("auth.users")` at invitations/route.ts:169, whose error is
- * discarded — so the "already a member" guard silently never runs.
+ * plus `.from("auth.users")` at invitations/route.ts:169, whose error was
+ * discarded — so the "already a member" guard silently never ran. And a sixth,
+ * found while fixing those, in `lib/collaboration/permissions.ts`
+ * (`getActiveEditingSessions`), which failed the same way but returned `[]`, so
+ * editor presence read as "nobody is editing" instead of erroring.
  *
- * The repo already knows the answer. sites/[siteId]/share/route.ts:14-38
- * documents this exact failure and resolves identities through
- * `auth.admin.getUserById` on a service-role client. Teams never got the fix.
+ * The repo already knew the answer: sites/[siteId]/share/route.ts resolves
+ * identities through `auth.admin.getUserById` on a service-role client. That is
+ * now `@/lib/auth/user-identity`, and every one of the six goes through it.
+ *
+ * WHY THE SCAN COVERS ALL OF `src` AND NOT JUST THE TEAMS ROUTES
+ * -------------------------------------------------------------
+ * Scoped to `src/app/api/teams`, this scan was green while the sixth site shipped
+ * — it could not see the file. A tripwire that only watches where the bug was
+ * already found tells you nothing about where it goes next, and this bug is a
+ * copy-paste idiom, so the next instance will be somewhere new. Production
+ * sources are therefore all in scope.
+ *
+ * Test files are excluded: their Supabase stand-ins have to name `auth.users`
+ * to refuse it, which is the opposite of the defect.
  *
  * Two tests, deliberately:
- *   1. A source scan, which catches the whole class across all five call sites
- *      including the two that no handler test currently reaches.
+ *   1. The source scan, which catches the whole class repo-wide.
  *   2. A handler test on GET members, which pins the behaviour a caller sees.
  *      Its Supabase stand-in refuses any `.select()` naming `auth.users` with
  *      the real PGRST200 error, and offers `auth.admin.getUserById` — so the
@@ -37,7 +49,23 @@ import { NextRequest } from "next/server";
 // 1. Source scan
 // ---------------------------------------------------------------------------
 
+const SRC_DIR = path.join(process.cwd(), "src");
 const TEAMS_API_DIR = path.join(process.cwd(), "src/app/api/teams");
+
+/** Production TypeScript under a directory. Tests are not production sources. */
+function collectSourceFiles(dir: string): string[] {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      return entry.name === "__tests__" ? [] : collectSourceFiles(full);
+    }
+    if (!/\.tsx?$/.test(entry.name)) return [];
+    if (/\.test\.tsx?$/.test(entry.name)) return [];
+
+    return [full];
+  });
+}
 
 function collectRouteFiles(dir: string): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -57,7 +85,7 @@ function isCommentLine(line: string): boolean {
 }
 
 function findAuthUsersReferences(): string[] {
-  return collectRouteFiles(TEAMS_API_DIR).flatMap((file) => {
+  return collectSourceFiles(SRC_DIR).flatMap((file) => {
     const relative = path.relative(process.cwd(), file);
     return fs
       .readFileSync(file, "utf8")
@@ -272,13 +300,29 @@ describe("A-12 Teams handlers embed auth.users over PostgREST", () => {
     jest.restoreAllMocks();
   });
 
-  it("finds the team route handlers to scan (guards against a silent no-op)", () => {
+  it("finds the sources to scan (guards against a silent no-op)", () => {
+    // Guard for the scan below: an empty file list makes `toEqual([])` pass for
+    // the wrong reason, which is precisely how the teams-only version of this
+    // scan stayed green while a sixth embed shipped outside its directory.
+    const sources = collectSourceFiles(SRC_DIR);
+
     expect(collectRouteFiles(TEAMS_API_DIR).length).toBeGreaterThanOrEqual(4);
+    // Wide enough to reach the places the class actually spread to.
+    expect(sources.length).toBeGreaterThan(100);
+    expect(sources).toContain(
+      path.join(process.cwd(), "src/lib/collaboration/permissions.ts"),
+    );
+    expect(sources).toContain(
+      path.join(process.cwd(), "src/app/api/teams/[teamId]/members/route.ts"),
+    );
+    // And it must not be reading the stand-ins that name auth.users on purpose.
+    expect(sources.filter((file) => /\.test\.tsx?$/.test(file))).toEqual([]);
   });
 
-  it("no handler under src/app/api/teams references auth.users", () => {
-    // `auth` is not in PostgREST's exposed schemas. Every reference below is
-    // a query that can only fail; the fix is auth.admin.getUserById.
+  it("no production source references auth.users", () => {
+    // `auth` is not in PostgREST's exposed schemas, so every reference this
+    // returns is a query that can only fail. The fix is always the same:
+    // resolve through @/lib/auth/user-identity.
     expect(findAuthUsersReferences()).toEqual([]);
   });
 

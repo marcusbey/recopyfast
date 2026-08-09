@@ -129,13 +129,7 @@ export interface ContentEditingSession {
   started_at: string;
   last_activity: string;
   ended_at?: string;
-  user?: {
-    email: string;
-    raw_user_meta_data?: {
-      name?: string;
-      avatar_url?: string;
-    };
-  };
+  user?: AttachedUserIdentity | null;
 }
 
 export interface CollaborationNotification {

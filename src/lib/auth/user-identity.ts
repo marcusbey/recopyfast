@@ -26,15 +26,25 @@ export interface UserIdentity {
 }
 
 /**
- * One user's email and display name, or null when the id resolves to nothing.
+ * How many Admin API lookups are in flight at once.
  *
- * Null is a real answer, not only an error: a row may point at a deleted user.
- * Callers must render around that rather than failing the whole response.
+ * The Admin API has no batch-by-id call, so a list of N distinct users costs N
+ * requests however they are arranged. Sequentially that is N round trips of
+ * latency — for the activity feed, which pages 100 rows, enough to dominate the
+ * response. Unbounded `Promise.all` trades that for a burst of 100 concurrent
+ * requests at GoTrue, which is how a decorated list turns into a rate-limit
+ * incident. Ten at a time keeps the wall clock proportional to N/10 while
+ * leaving the burst small enough to be unremarkable.
  */
-export async function resolveUserIdentity(
+const IDENTITY_LOOKUP_CONCURRENCY = 10;
+
+type ServiceClient = ReturnType<typeof createServiceRoleClient>;
+
+/** The lookup itself, over a client the caller owns. */
+async function lookupIdentity(
+  service: ServiceClient,
   userId: string,
 ): Promise<UserIdentity | null> {
-  const service = createServiceRoleClient();
   const { data, error } = await service.auth.admin.getUserById(userId);
 
   if (error || !data?.user?.email) {
@@ -53,15 +63,30 @@ export async function resolveUserIdentity(
 }
 
 /**
+ * One user's email and display name, or null when the id resolves to nothing.
+ *
+ * Null is a real answer, not only an error: a row may point at a deleted user.
+ * Callers must render around that rather than failing the whole response.
+ */
+export async function resolveUserIdentity(
+  userId: string,
+): Promise<UserIdentity | null> {
+  return lookupIdentity(createServiceRoleClient(), userId);
+}
+
+/**
  * Identities for a set of ids, keyed by id. Unresolvable ids are absent from the
  * map rather than present-and-null, so `map.get(id) ?? null` is the whole
  * caller-side contract.
  *
- * One request per distinct id: the Admin API has no batch-by-id call. The lists
- * this decorates are a team's members, a site's permission rows and a page of
- * activity — all small and already bounded by the query that produced them. If
- * one ever is not, the answer is a `profiles` table in `public`, not a wider
- * query here.
+ * One client for the whole batch, and the lookups run in bounded parallel — see
+ * IDENTITY_LOOKUP_CONCURRENCY. Building a client per id, as the first version
+ * did, re-read the environment and constructed a fresh Supabase instance for
+ * every row of a list.
+ *
+ * The lists this decorates are a team's members, a site's permission rows and a
+ * page of activity — bounded by the query that produced them. If one ever is
+ * not, the answer is a `profiles` table in `public`, not a wider query here.
  */
 export async function resolveUserIdentities(
   userIds: readonly (string | null | undefined)[],
@@ -72,14 +97,31 @@ export async function resolveUserIdentities(
     ),
   );
 
+  const service = createServiceRoleClient();
   const identities = new Map<string, UserIdentity>();
 
-  for (const userId of distinct) {
-    const identity = await resolveUserIdentity(userId);
-    if (identity) {
-      identities.set(userId, identity);
-    } else {
-      console.warn(`Could not resolve the identity of user ${userId}`);
+  // Chunked rather than a semaphore: the bound is the only requirement, and a
+  // slice loop needs no queue to reason about. Insertion order stays that of
+  // `distinct`, because Promise.all resolves in argument order.
+  for (
+    let offset = 0;
+    offset < distinct.length;
+    offset += IDENTITY_LOOKUP_CONCURRENCY
+  ) {
+    const batch = distinct.slice(offset, offset + IDENTITY_LOOKUP_CONCURRENCY);
+    const resolved = await Promise.all(
+      batch.map(
+        async (userId) =>
+          [userId, await lookupIdentity(service, userId)] as const,
+      ),
+    );
+
+    for (const [userId, identity] of resolved) {
+      if (identity) {
+        identities.set(userId, identity);
+      } else {
+        console.warn(`Could not resolve the identity of user ${userId}`);
+      }
     }
   }
 

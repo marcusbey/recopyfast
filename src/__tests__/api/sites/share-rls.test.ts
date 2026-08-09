@@ -38,7 +38,7 @@ import path from "path";
 
 import { NextRequest } from "next/server";
 
-import { POST } from "@/app/api/sites/[siteId]/share/route";
+import { DELETE, GET, POST } from "@/app/api/sites/[siteId]/share/route";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { CollaborationPermissions } from "@/lib/collaboration/permissions";
@@ -77,6 +77,7 @@ const MockPermissions = CollaborationPermissions as jest.MockedClass<
 const SITE_ID = "site-123";
 const ADMIN_ID = "owner-1";
 const INVITEE_ID = "teammate-1";
+const GRANTED_PERMISSION_ID = "perm-teammate";
 
 /**
  * The rows the request touches, shared by both clients so "was it written"
@@ -108,14 +109,28 @@ function newStore(): Store {
 /**
  * A PostgREST-shaped client over `store`.
  *
- * `writesRefused` is how branch B is expressed: an RLS-blocked INSERT is not an
- * exception, it is a write that matches zero rows, which supabase-js surfaces
- * as PGRST116 from `.single()`. That distinction is the whole reason the route
- * 500s rather than logging something legible.
+ * Branch B is expressed by two options, because the restrictive policy set
+ * restricts two different things and each one breaks a different handler:
+ *
+ *   `writesRefused`   — an RLS-blocked INSERT or DELETE is not an exception, it
+ *                       is a statement that matches zero rows, which supabase-js
+ *                       surfaces as PGRST116 from `.single()`. That distinction
+ *                       is why POST 500s rather than logging something legible.
+ *
+ *   `selfOnlyUserId`  — `20260804130000` restores SELECT only for
+ *                       `user_id = auth.uid()`, so the caller's client can read
+ *                       its OWN permission row and no other. This is what makes
+ *                       GET return a one-row collaborator list and makes the
+ *                       DELETE pre-read answer "Permission not found" for
+ *                       everyone but yourself.
  */
 function makeClient(
   store: Store,
-  options: { writesRefused?: boolean; label: string },
+  options: {
+    writesRefused?: boolean;
+    selfOnlyUserId?: string;
+    label: string;
+  },
 ) {
   const writes: Array<{ table: string; by: string }> = [];
 
@@ -126,23 +141,45 @@ function makeClient(
       | Array<Record<string, unknown>>
       | null = null;
     let isInsert = false;
+    let isDelete = false;
 
-    const matching = () =>
-      (store[table] ?? []).filter((row) =>
+    const matching = () => {
+      const rows = (store[table] ?? []).filter((row) =>
         filters.every(([column, value]) => row[column] === value),
       );
 
+      // The SELECT-for-self policy applies to site_permissions only.
+      if (options.selfOnlyUserId && table === "site_permissions") {
+        return rows.filter((row) => row.user_id === options.selfOnlyUserId);
+      }
+      return rows;
+    };
+
     const commit = () => {
-      if (!isInsert) return matching();
-      if (options.writesRefused) return [];
+      if (isInsert) {
+        if (options.writesRefused) return [];
 
-      const inserted = (Array.isArray(pending) ? pending : [pending]).map(
-        (row, index) => ({ id: `${table}-new-${index}`, ...row }),
-      ) as Array<Record<string, unknown>>;
+        const inserted = (Array.isArray(pending) ? pending : [pending]).map(
+          (row, index) => ({ id: `${table}-new-${index}`, ...row }),
+        ) as Array<Record<string, unknown>>;
 
-      store[table] = [...store[table], ...inserted];
-      writes.push({ table, by: options.label });
-      return inserted;
+        store[table] = [...store[table], ...inserted];
+        writes.push({ table, by: options.label });
+        return inserted;
+      }
+
+      if (isDelete) {
+        // A DELETE is subject to the same visibility as a SELECT: it can only
+        // remove rows the policy lets this role see.
+        const doomed = options.writesRefused ? [] : matching();
+        if (doomed.length > 0) {
+          store[table] = store[table].filter((row) => !doomed.includes(row));
+          writes.push({ table, by: options.label });
+        }
+        return doomed;
+      }
+
+      return matching();
     };
 
     const resolve = (one: boolean) => {
@@ -163,6 +200,10 @@ function makeClient(
       insert: (payload: Record<string, unknown>) => {
         isInsert = true;
         pending = payload;
+        return builder;
+      },
+      delete: () => {
+        isDelete = true;
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -206,6 +247,7 @@ async function share(branch: "A" | "B") {
 
   const user = makeClient(store, {
     writesRefused: branch === "B",
+    selfOnlyUserId: branch === "B" ? ADMIN_ID : undefined,
     label: "user",
   });
   const service = makeClient(store, { label: "service" });
@@ -267,6 +309,193 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// The rest of the collaborator lifecycle, under the same two branches
+// ---------------------------------------------------------------------------
+
+/** A store that already holds the invitee, so listing and revoking have a subject. */
+function storeWithCollaborator(): Store {
+  const store = newStore();
+  store.site_permissions = [
+    ...store.site_permissions,
+    {
+      id: GRANTED_PERMISSION_ID,
+      site_id: SITE_ID,
+      user_id: INVITEE_ID,
+      team_id: null,
+      permission: "admin",
+      role: "manager",
+      granted_by: ADMIN_ID,
+    },
+  ];
+  return store;
+}
+
+/** Wire both clients over one store, as `share()` does. */
+function wireClients(store: Store, branch: "A" | "B") {
+  const user = makeClient(store, {
+    writesRefused: branch === "B",
+    selfOnlyUserId: branch === "B" ? ADMIN_ID : undefined,
+    label: "user",
+  });
+  const service = makeClient(store, { label: "service" });
+
+  const getUserById = jest.fn().mockImplementation((userId: string) =>
+    Promise.resolve({
+      data: {
+        user: {
+          id: userId,
+          email: `${userId}@corp.example`,
+          user_metadata: { name: userId },
+        },
+      },
+      error: null,
+    }),
+  );
+
+  mockCreateServerClient.mockResolvedValue({
+    auth: {
+      getUser: jest
+        .fn()
+        .mockResolvedValue({ data: { user: { id: ADMIN_ID } }, error: null }),
+    },
+    from: user.from,
+  } as unknown as Awaited<ReturnType<typeof createServerClient>>);
+
+  mockCreateServiceRoleClient.mockReturnValue({
+    auth: { admin: { getUserById } },
+    from: service.from,
+  } as unknown as ReturnType<typeof createServiceRoleClient>);
+
+  return { user, service };
+}
+
+interface ListedPermission {
+  id: string;
+  user_id: string | null;
+  user: { email: string } | null;
+}
+
+async function listCollaborators(branch: "A" | "B") {
+  const store = storeWithCollaborator();
+  wireClients(store, branch);
+
+  const response = await GET(
+    new NextRequest(`https://app.recopyfast.test/api/sites/${SITE_ID}/share`),
+    context,
+  );
+
+  return {
+    status: response.status,
+    permissions: ((await response.json()).permissions ??
+      []) as ListedPermission[],
+  };
+}
+
+async function revokeCollaborator(branch: "A" | "B") {
+  const store = storeWithCollaborator();
+  wireClients(store, branch);
+
+  const response = await DELETE(
+    new NextRequest(
+      `https://app.recopyfast.test/api/sites/${SITE_ID}/share?permissionId=${GRANTED_PERMISSION_ID}`,
+      { method: "DELETE" },
+    ),
+    context,
+  );
+
+  return {
+    status: response.status,
+    body: await response.json(),
+    remaining: store.site_permissions.map((row) => row.id),
+  };
+}
+
+describe("A-9 — GET /api/sites/:siteId/share", () => {
+  it("lists every collaborator under branch A", async () => {
+    // The control: with a permissive SELECT policy the caller's own client can
+    // see the whole list, which is why this path looked fine.
+    const { status, permissions } = await listCollaborators("A");
+
+    expect(status).toBe(200);
+    expect(permissions.map((row) => row.id).sort()).toEqual(
+      ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+    );
+  });
+
+  it("lists every collaborator under branch B", async () => {
+    // The invariant, and the half the first pass at this fix missed. Moving only
+    // the writes to the service role left an owner who could add a teammate and
+    // then not see them: SELECT-for-self returns exactly one row, their own.
+    const { status, permissions } = await listCollaborators("B");
+
+    expect(status).toBe(200);
+    expect(permissions.map((row) => row.id).sort()).toEqual(
+      ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+    );
+  });
+
+  it("resolves each listed collaborator's identity", async () => {
+    // Guard against the list being "complete" but empty of identities, which is
+    // what an unresolvable embed produced before A-12.
+    const { permissions } = await listCollaborators("B");
+
+    const invitee = permissions.find((row) => row.user_id === INVITEE_ID);
+    expect(invitee?.user?.email).toBe(`${INVITEE_ID}@corp.example`);
+  });
+});
+
+describe("A-9 — DELETE /api/sites/:siteId/share", () => {
+  it("revokes the collaborator under branch A", async () => {
+    const { status, remaining } = await revokeCollaborator("A");
+
+    expect(status).toBe(200);
+    expect(remaining).toEqual(["perm-creator"]);
+  });
+
+  it("revokes the collaborator under branch B", async () => {
+    // Under SELECT-for-self the pre-read could not see the row being revoked, so
+    // this answered 404 and the seat could never be reclaimed — the owner pays
+    // for a collaborator they cannot remove.
+    const { status, body, remaining } = await revokeCollaborator("B");
+
+    expect(status).toBe(200);
+    expect(body.error).toBeUndefined();
+    expect(remaining).toEqual(["perm-creator"]);
+  });
+
+  it("still refuses a permissionId belonging to another site", async () => {
+    // The service role removes RLS as a backstop, so the site scoping in the
+    // handler is now the only thing standing between a guessed id and a
+    // cross-site revoke. It has to hold on its own.
+    const store = storeWithCollaborator();
+    store.site_permissions = [
+      ...store.site_permissions,
+      {
+        id: "perm-other-site",
+        site_id: "site-elsewhere",
+        user_id: "someone-else",
+        team_id: null,
+        permission: "admin",
+      },
+    ];
+    wireClients(store, "A");
+
+    const response = await DELETE(
+      new NextRequest(
+        `https://app.recopyfast.test/api/sites/${SITE_ID}/share?permissionId=perm-other-site`,
+        { method: "DELETE" },
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(404);
+    expect(store.site_permissions.map((row) => row.id)).toContain(
+      "perm-other-site",
+    );
+  });
 });
 
 describe("A-9 — POST /api/sites/:siteId/share", () => {
