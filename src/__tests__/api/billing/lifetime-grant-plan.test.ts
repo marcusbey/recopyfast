@@ -1,17 +1,19 @@
 /**
  * A-22 — `checkout.session.completed` hardcodes the granted plan.
  *
- * `src/app/api/webhooks/stripe/route.ts:723` calls
- * `grantLifetime(userId, "pro", paymentIntentId)` while `:691` — the
- * `payment_intent.succeeded` path to the same function — passes
- * `metadata.grants_plan_id`. Session metadata deliberately omits that key
- * (`src/lib/stripe/checkout.ts:215`; only `payment_intent_data.metadata`
- * carries it), so the literal is all this path ever has.
+ * `handleCheckoutSessionCompleted` used to call
+ * `grantLifetime(userId, "pro", paymentIntentId)` while the
+ * `payment_intent.succeeded` path to the same function passed
+ * `metadata.grants_plan_id`. Session metadata omitted that key —
+ * `src/lib/stripe/checkout.ts` carried it on `payment_intent_data.metadata`
+ * only — so the literal was all the session path ever had.
  *
  * `plan_entitlements.stripe_payment_intent_id` is UNIQUE, so whichever of the
- * two events Stripe happens to deliver first silently decides what a $199
+ * two events Stripe happened to deliver first silently decided what a $199
  * purchase bought — and `grantLifetime`'s own "a lifetime purchase with no
- * grants_plan_id" guard (`:543-548`) can never fire on this path.
+ * grants_plan_id" guard could never fire on this path. Checkout now writes
+ * `grants_plan_id` at session level too, and the session handler reads it,
+ * falling back to the catalogue only for sessions minted before that.
  *
  * The real `grantPlanEntitlement` runs against an in-memory `plan_entitlements`
  * that enforces the UNIQUE constraint, so every assertion is on the stored row.
@@ -251,11 +253,12 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
   });
 
   /**
-   * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-   * including a broken mock or an event that never reaches the switch, so each
-   * marker needs a sibling proving the path ran. Here: a production-shaped
-   * session is accepted and DOES write exactly one entitlement — so the
-   * failing case is about which plan, not about whether anything happened.
+   * Companion to the test below, kept from when that was a `test.failing`
+   * marker: a marker passes on ANY failure, including a broken mock or an event
+   * that never reaches the switch, so each one needed a sibling proving the path
+   * ran. Here: a production-shaped session is accepted and DOES write exactly
+   * one entitlement — so the case below is about which plan, not about whether
+   * anything happened.
    */
   it("guard: grantLifetime and the entitlements store work for this fixture", async () => {
     // Driven through `payment_intent.succeeded`, which reaches the very same
@@ -277,7 +280,7 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     );
   });
 
-  test.failing("does not grant a plan the catalogue never sold", async () => {
+  it("does not grant a plan the catalogue never sold", async () => {
     // Production shape: the session carries no `grants_plan_id` at all, and
     // the lifetime product on sale grants `starter`.
     await deliver(
@@ -302,7 +305,7 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     );
 
     // Signature verification, the idempotency read and the audit insert all
-    // ran, so whatever the failing case reads next was produced by the route.
+    // ran, so whatever the case below reads next was produced by the route.
     expect(mockConstructEvent).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
     expect(
@@ -310,7 +313,7 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     ).toBe(true);
   });
 
-  test.failing("grants the plan the purchase actually names", async () => {
+  it("grants the plan the purchase actually names", async () => {
     await deliver(
       checkoutSessionEvent("evt_session", {
         user_id: USER_ID,
@@ -339,25 +342,22 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     expect(db.plan_entitlements).toHaveLength(0);
   });
 
-  test.failing(
-    "refuses a lifetime session when nothing says what it grants",
-    async () => {
-      // Lifetime Pro is not on sale, so there is no catalogue answer either.
-      // `grantLifetime` has exactly this guard at :543-548; the hardcoded
-      // literal is what stops it ever firing on the session path.
-      lifetimeGrantPlanId = null;
+  it("refuses a lifetime session when nothing says what it grants", async () => {
+    // Lifetime Pro is not on sale, so there is no catalogue answer either.
+    // `grantLifetime` has exactly this guard; the hardcoded literal is what
+    // stopped it ever firing on the session path.
+    lifetimeGrantPlanId = null;
 
-      const response = await deliver(
-        checkoutSessionEvent("evt_session", {
-          user_id: USER_ID,
-          type: "lifetime_purchase",
-        }),
-      );
+    const response = await deliver(
+      checkoutSessionEvent("evt_session", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+      }),
+    );
 
-      expect(response.status).toBe(500);
-      expect(db.plan_entitlements).toHaveLength(0);
-    },
-  );
+    expect(response.status).toBe(500);
+    expect(db.plan_entitlements).toHaveLength(0);
+  });
 
   /**
    * Fix-stable: the two events key off the same payment intent and the UNIQUE

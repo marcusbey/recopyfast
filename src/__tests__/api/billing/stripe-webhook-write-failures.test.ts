@@ -69,6 +69,15 @@ const CUSTOMER_ROW = {
  * supabase-js returns on a failed write.
  */
 function buildClient(writeResult: { error: unknown }) {
+  // `update().eq()` is awaitable on its own AND chainable into `.select("id")`,
+  // because the subscription handlers ask for the affected rows back (a zero-row
+  // update is not an error — see assertRowMatched) while customer.updated does
+  // not. A successful write returns one row so the affected-row guard passes;
+  // a failed one returns the `{ error }` shape supabase-js really produces.
+  const updateResult = writeResult.error
+    ? { data: null, ...writeResult }
+    : { data: [{ id: "row_1" }], error: null };
+
   // Table-aware: billing_events must read empty (that is the idempotency probe
   // saying "not seen before"), while billing_customers must resolve a row or
   // the handler correctly refuses to attribute the event to anyone.
@@ -81,9 +90,17 @@ function buildClient(writeResult: { error: unknown }) {
       maybeSingle: jest.fn(async () => ({ data: row, error: null })),
       insert: jest.fn(async () => ({ error: null })),
       upsert: jest.fn(async () => writeResult),
-      update: jest.fn(() => ({
-        eq: jest.fn(async () => writeResult),
-      })),
+      update: jest.fn(() => {
+        const updateChain: Record<string, unknown> = {
+          eq: jest.fn(() => updateChain),
+          select: jest.fn(() => updateChain),
+          then: <T>(
+            resolve: (value: typeof updateResult) => T,
+            reject?: (reason: unknown) => T,
+          ) => Promise.resolve(updateResult).then(resolve, reject),
+        };
+        return updateChain;
+      }),
     };
     return thenable;
   };

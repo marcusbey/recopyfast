@@ -2,11 +2,13 @@
  * A-8 — winning a dispute leaves the entitlement revoked forever.
  * A-20 — a partial refund revokes the entire entitlement and the whole wallet.
  *
- * `src/app/api/webhooks/stripe/route.ts:218-223` routes both `charge.refunded`
- * and `charge.dispute.created` into `handleMoneyReturned` (`:736-756`), which
- * reads only `payment_intent` and revokes unconditionally. There is no
- * `charge.dispute.closed` case anywhere in the switch (`:177-240`), and neither
- * `amount_refunded` nor the `refunded` boolean is ever consulted.
+ * `charge.refunded` and `charge.dispute.created` both used to route into
+ * `handleMoneyReturned`, which read only `payment_intent` and revoked
+ * unconditionally: there was no `charge.dispute.closed` case anywhere in the
+ * switch, and neither `amount_refunded` nor the `refunded` boolean was ever
+ * consulted. The route now reverses a dispute it wins (`handleDisputeClosed`)
+ * and revokes on a refund only when the whole charge came back
+ * (`handleChargeRefunded`).
  *
  * The real `revokeEntitlementForPayment` and `revokePurchasedCredits` run here
  * against an in-memory `plan_entitlements` / `credit_purchases`, so every
@@ -232,12 +234,12 @@ describe("A-8 / A-20: money coming back out", () => {
 
   describe("A-8: a dispute that closes in our favour", () => {
     /**
-     * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-     * including a broken mock or a typo in this file, so each one needs a
-     * sibling proving the harness reaches the code under test. Here: both
-     * deliveries are accepted, and the `created` one really does revoke — so
-     * the failing case is asserting on a revocation that genuinely happened,
-     * not on an empty fixture. True on both sides of the fix.
+     * Companion to the test below, kept from when that was a `test.failing`
+     * marker: a marker passes on ANY failure, so each one needed a sibling
+     * proving the harness reaches the code under test. Here: both deliveries
+     * are accepted, and the `created` one really does revoke — so the test
+     * below asserts on a revocation that genuinely happened, not on an empty
+     * fixture. True on both sides of the fix.
      */
     it("guard: both dispute events reach the handler, and created revokes", async () => {
       const created = await deliver(
@@ -259,23 +261,20 @@ describe("A-8 / A-20: money coming back out", () => {
       expect(db.plan_entitlements).toHaveLength(1);
     });
 
-    test.failing(
-      "restores the entitlement when the dispute is won",
-      async () => {
-        await deliver(
-          disputeEvent(
-            "evt_dispute_created",
-            "charge.dispute.created",
-            "needs_response",
-          ),
-        );
-        await deliver(
-          disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
-        );
+    it("restores the entitlement when the dispute is won", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+      await deliver(
+        disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
+      );
 
-        expect(entitlement()?.revoked_at).toBeNull();
-      },
-    );
+      expect(entitlement()?.revoked_at).toBeNull();
+    });
 
     it("guard: the wallet row is reachable by payment intent and survives revocation", async () => {
       expect(wallet()?.credits_remaining).toBe(1000);
@@ -295,23 +294,20 @@ describe("A-8 / A-20: money coming back out", () => {
       expect(wallet()?.credits_purchased).toBe(1000);
     });
 
-    test.failing(
-      "restores the purchased credits when the dispute is won",
-      async () => {
-        await deliver(
-          disputeEvent(
-            "evt_dispute_created",
-            "charge.dispute.created",
-            "needs_response",
-          ),
-        );
-        await deliver(
-          disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
-        );
+    it("restores the purchased credits when the dispute is won", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+      await deliver(
+        disputeEvent("evt_dispute_closed", "charge.dispute.closed", "won"),
+      );
 
-        expect(wallet()?.credits_remaining).toBe(1000);
-      },
-    );
+      expect(wallet()?.credits_remaining).toBe(1000);
+    });
 
     it("guard: a withdrawn-dispute event is delivered and accepted", async () => {
       const withdrawn = await deliver(
@@ -322,33 +318,30 @@ describe("A-8 / A-20: money coming back out", () => {
         ),
       );
 
-      // Reaches the route and is answered — the failing case below is about
-      // what it does with it, not about whether it arrives.
+      // Reaches the route and is answered — the case below is about what it
+      // does with it, not about whether it arrives.
       expect(mockConstructEvent).toHaveBeenCalledTimes(1);
       expect(withdrawn.status).toBe(200);
     });
 
-    test.failing(
-      "restores the entitlement when the customer withdraws the dispute",
-      async () => {
-        await deliver(
-          disputeEvent(
-            "evt_dispute_created",
-            "charge.dispute.created",
-            "needs_response",
-          ),
-        );
-        await deliver(
-          disputeEvent(
-            "evt_dispute_closed",
-            "charge.dispute.closed",
-            "warning_closed",
-          ),
-        );
+    it("restores the entitlement when the customer withdraws the dispute", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_dispute_created",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+      await deliver(
+        disputeEvent(
+          "evt_dispute_closed",
+          "charge.dispute.closed",
+          "warning_closed",
+        ),
+      );
 
-        expect(entitlement()?.revoked_at).toBeNull();
-      },
-    );
+      expect(entitlement()?.revoked_at).toBeNull();
+    });
 
     /**
      * Fix-stable: revoking on dispute *creation* is intended — the money is
@@ -389,8 +382,8 @@ describe("A-8 / A-20: money coming back out", () => {
 
   describe("A-20: a refund smaller than the payment", () => {
     /**
-     * Guard for the `test.failing` below — see the A-8 guard for why every
-     * marker needs one. A `billing_events` row means the partial-refund payload
+     * Companion to the test below — see the A-8 guard for why every marker
+     * needed one. A `billing_events` row means the partial-refund payload
      * travelled the whole route: signature, idempotency read, the switch, the
      * customer lookup and the audit insert.
      */
@@ -405,17 +398,14 @@ describe("A-8 / A-20: money coming back out", () => {
       ).toBe(true);
     });
 
-    test.failing(
-      "a $10 goodwill refund on a $199 purchase does not revoke the entitlement",
-      async () => {
-        const response = await deliver(refundEvent("evt_partial", 1000, false));
+    it("a $10 goodwill refund on a $199 purchase does not revoke the entitlement", async () => {
+      const response = await deliver(refundEvent("evt_partial", 1000, false));
 
-        expect(response.status).toBe(200);
-        expect(entitlement()?.revoked_at).toBeNull();
-      },
-    );
+      expect(response.status).toBe(200);
+      expect(entitlement()?.revoked_at).toBeNull();
+    });
 
-    it("guard: the failing assertion below is reading the right wallet row", async () => {
+    it("guard: the assertion below is reading the right wallet row", async () => {
       expect(wallet()?.stripe_payment_intent_id).toBe(PAYMENT_INTENT);
 
       await deliver(refundEvent("evt_partial", 1000, false));
@@ -424,14 +414,11 @@ describe("A-8 / A-20: money coming back out", () => {
       expect(wallet()?.credits_purchased).toBe(1000);
     });
 
-    test.failing(
-      "a partial refund does not empty the credit wallet",
-      async () => {
-        await deliver(refundEvent("evt_partial", 1000, false));
+    it("a partial refund does not empty the credit wallet", async () => {
+      await deliver(refundEvent("evt_partial", 1000, false));
 
-        expect(wallet()?.credits_remaining).toBe(1000);
-      },
-    );
+      expect(wallet()?.credits_remaining).toBe(1000);
+    });
 
     /**
      * Fix-stable: a full refund must still take the product back. Any fix that

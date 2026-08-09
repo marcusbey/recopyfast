@@ -357,6 +357,45 @@ export async function refundCredits(
   return { success: true };
 }
 
+/** The `credit_purchases` grant a single Stripe payment created. */
+export interface PurchasedCreditGrant {
+  id: string;
+  user_id: string;
+  credits_purchased: number;
+  credits_remaining: number;
+}
+
+async function readGrantForPayment(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  stripePaymentIntentId: string,
+): Promise<PurchasedCreditGrant | null> {
+  const { data, error } = await supabase
+    .from("credit_purchases")
+    .select("id, user_id, credits_purchased, credits_remaining")
+    .eq("stripe_payment_intent_id", stripePaymentIntentId)
+    .maybeSingle<PurchasedCreditGrant>();
+
+  if (error) {
+    throw new Error(`Failed to look up credit purchase: ${error.message}`);
+  }
+
+  return data;
+}
+
+/**
+ * The wallet a payment created, before anything is done to it.
+ *
+ * Exists because a clawback is not reversible from the row it leaves behind:
+ * once `credits_remaining` is 0 the grant cannot say how much of it was revoked
+ * rather than spent. The dispute path reads the balance through here and records
+ * it *before* revoking — see `src/lib/billing/credit-revocations.ts`.
+ */
+export async function getPurchasedCreditGrant(
+  stripePaymentIntentId: string,
+): Promise<PurchasedCreditGrant | null> {
+  return readGrantForPayment(createServiceRoleClient(), stripePaymentIntentId);
+}
+
 /**
  * Revoke outstanding purchased credits from a refunded or disputed payment.
  *
@@ -367,16 +406,7 @@ export async function revokePurchasedCredits(
   stripePaymentIntentId: string,
 ): Promise<{ revoked: number }> {
   const supabase = createServiceRoleClient();
-
-  const { data: purchase, error } = await supabase
-    .from("credit_purchases")
-    .select("id, credits_remaining")
-    .eq("stripe_payment_intent_id", stripePaymentIntentId)
-    .maybeSingle<{ id: string; credits_remaining: number }>();
-
-  if (error) {
-    throw new Error(`Failed to look up credit purchase: ${error.message}`);
-  }
+  const purchase = await readGrantForPayment(supabase, stripePaymentIntentId);
 
   if (!purchase || purchase.credits_remaining <= 0) {
     return { revoked: 0 };
@@ -392,6 +422,57 @@ export async function revokePurchasedCredits(
   }
 
   return { revoked: purchase.credits_remaining };
+}
+
+/**
+ * Give back credits a chargeback clawed back, once the dispute closes in our
+ * favour.
+ *
+ * Restored in place rather than granted afresh, so the wallet ends up as it was
+ * rather than gaining a second row that inflates `totalPurchased` and the
+ * transaction history. Raising `credits_remaining` is allowed here and nowhere
+ * else: `enforce_credit_purchase_monotonicity`
+ * (20260731003000_missing_tables_billing_credits.sql:109-124) refuses an
+ * increase for every role EXCEPT service_role, precisely so that a customer
+ * cannot refill their own wallet while a webhook can reverse a clawback.
+ *
+ * Capped at what the pack originally held: whatever survived plus whatever was
+ * revoked can never exceed the purchase.
+ */
+export async function restorePurchasedCredits(
+  stripePaymentIntentId: string,
+  credits: number,
+): Promise<{ restored: number }> {
+  if (!Number.isInteger(credits) || credits <= 0) {
+    return { restored: 0 };
+  }
+
+  const supabase = createServiceRoleClient();
+  const purchase = await readGrantForPayment(supabase, stripePaymentIntentId);
+
+  if (!purchase) {
+    return { restored: 0 };
+  }
+
+  const target = Math.min(
+    purchase.credits_purchased,
+    purchase.credits_remaining + credits,
+  );
+
+  if (target <= purchase.credits_remaining) {
+    return { restored: 0 };
+  }
+
+  const { error: restoreError } = await supabase
+    .from("credit_purchases")
+    .update({ credits_remaining: target })
+    .eq("id", purchase.id);
+
+  if (restoreError) {
+    throw new Error(`Failed to restore credits: ${restoreError.message}`);
+  }
+
+  return { restored: target - purchase.credits_remaining };
 }
 
 /**

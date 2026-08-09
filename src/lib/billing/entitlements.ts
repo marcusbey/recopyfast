@@ -64,6 +64,14 @@ export interface GrantEntitlementResult {
 }
 
 /**
+ * Default `source` for a grant bought through Checkout, and what a reversed
+ * revocation restores. `revokeEntitlementForPayment` overwrites `source` with
+ * `revoked:<reason>`, so the original value is gone by then — this is the only
+ * thing it can go back to, and the only value the webhook ever writes.
+ */
+const LIFETIME_PURCHASE_SOURCE = "lifetime_purchase";
+
+/**
  * Record a permanent plan grant.
  *
  * Called from the Stripe webhook with the service-role client, because
@@ -79,7 +87,7 @@ export async function grantPlanEntitlement(
   userId: string,
   planId: string,
   stripePaymentIntentId: string,
-  source: string = "lifetime_purchase",
+  source: string = LIFETIME_PURCHASE_SOURCE,
 ): Promise<GrantEntitlementResult> {
   const supabase = createServiceRoleClient();
 
@@ -132,4 +140,53 @@ export async function revokeEntitlementForPayment(
   }
 
   return { revoked: (data?.length ?? 0) > 0 };
+}
+
+/**
+ * Put back an entitlement a chargeback took away, once the dispute closes in
+ * our favour.
+ *
+ * The inverse of `revokeEntitlementForPayment`, and the only thing that ever
+ * un-revokes: revocation fires on dispute *creation*, which is provisional,
+ * while winning has no other compensating path — there is no admin surface and
+ * a lifetime grant has no renewal to re-grant it.
+ *
+ * Reads before writing rather than filtering on "still revoked" in the predicate
+ * so that an entitlement which was never revoked is left exactly as it is:
+ * restoring one would overwrite whatever `source` it carries with the default.
+ */
+export async function restoreEntitlementForPayment(
+  stripePaymentIntentId: string,
+): Promise<{ restored: boolean }> {
+  const supabase = createServiceRoleClient();
+
+  const { data: entitlement, error: readError } = await supabase
+    .from("plan_entitlements")
+    .select("id, revoked_at")
+    .eq("stripe_payment_intent_id", stripePaymentIntentId)
+    .maybeSingle<{ id: string; revoked_at: string | null }>();
+
+  if (readError) {
+    throw new Error(
+      `Failed to read the entitlement for ${stripePaymentIntentId}: ${readError.message}`,
+    );
+  }
+
+  if (!entitlement || entitlement.revoked_at === null) {
+    return { restored: false };
+  }
+
+  const { data, error } = await supabase
+    .from("plan_entitlements")
+    .update({ revoked_at: null, source: LIFETIME_PURCHASE_SOURCE })
+    .eq("id", entitlement.id)
+    .select("id");
+
+  if (error) {
+    throw new Error(
+      `Failed to restore entitlement for ${stripePaymentIntentId}: ${error.message}`,
+    );
+  }
+
+  return { restored: (data?.length ?? 0) > 0 };
 }

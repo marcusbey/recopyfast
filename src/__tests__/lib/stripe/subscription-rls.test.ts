@@ -17,9 +17,9 @@
  * that behaves like the production policy set: SELECT sees the row, UPDATE
  * matches nothing.
  *
- * The service-role client CAN write, so once the three writes move onto it (the
- * fix every other billing write already has) these `test.failing` cases start
- * passing and the marker must be deleted.
+ * The service-role client CAN write, and the three writes now run on it — the
+ * fix every other billing write already had. These cases were `test.failing`
+ * markers while the defect stood; they are enforced now.
  */
 
 interface SubscriptionRow {
@@ -226,9 +226,9 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
   });
 
   /**
-   * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-   * including a bad mock or a typo in this file, so each one needs a sibling
-   * that proves the harness reaches the code under test. Getting as far as
+   * Companion to the test below, kept from when that was a `test.failing`
+   * marker: a marker passes on ANY failure, so each one needed a sibling
+   * proving the harness reached the code under test. Getting as far as
    * `stripe.subscriptions.update` means the imports resolved, the plan lookup
    * answered, and the SELECT found the seeded row — everything except the
    * write. True on both sides of the fix.
@@ -244,17 +244,14 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     expect(mockStripeUpdate).toHaveBeenCalledTimes(1);
   });
 
-  test.failing(
-    "updateSubscription stores the plan the customer was charged for",
-    async () => {
-      await expect(
-        updateSubscription("user-1", { planId: "starter" }),
-      ).resolves.toMatchObject({ subscription: { plan_id: "starter" } });
+  it("updateSubscription stores the plan the customer was charged for", async () => {
+    await expect(
+      updateSubscription("user-1", { planId: "starter" }),
+    ).resolves.toMatchObject({ subscription: { plan_id: "starter" } });
 
-      // The assertion that matters: the row, not the return value.
-      expect(stored.plan).toBe("starter");
-    },
-  );
+    // The assertion that matters: the row, not the return value.
+    expect(stored.plan).toBe("starter");
+  });
 
   it("guard: cancelSubscription reaches Stripe with cancel_at_period_end", async () => {
     expect(stored.cancel_at).toBeNull();
@@ -266,30 +263,27 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     });
   });
 
-  test.failing(
-    "cancelSubscription stores the cancellation Stripe accepted",
-    async () => {
-      mockStripeUpdate.mockImplementation(async () => {
-        effects.push("stripe.update");
-        return {
-          id: STRIPE_SUBSCRIPTION_ID,
-          status: "active",
-          cancel_at: 1788163200,
-          canceled_at: null,
-        };
-      });
+  it("cancelSubscription stores the cancellation Stripe accepted", async () => {
+    mockStripeUpdate.mockImplementation(async () => {
+      effects.push("stripe.update");
+      return {
+        id: STRIPE_SUBSCRIPTION_ID,
+        status: "active",
+        cancel_at: 1788163200,
+        canceled_at: null,
+      };
+    });
 
-      await expect(cancelSubscription("user-1")).resolves.toMatchObject({
-        cancel_at_period_end: true,
-      });
+    await expect(cancelSubscription("user-1")).resolves.toMatchObject({
+      cancel_at_period_end: true,
+    });
 
-      expect(stored.cancel_at).toBe(new Date(1788163200 * 1000).toISOString());
-    },
-  );
+    expect(stored.cancel_at).toBe(new Date(1788163200 * 1000).toISOString());
+  });
 
   it("guard: reactivateSubscription reaches Stripe once a cancellation is scheduled", async () => {
     // Without `cancel_at` the function throws before touching Stripe, so this
-    // also proves the fixture the failing test depends on is doing its job.
+    // also proves the fixture the test below depends on is doing its job.
     stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
 
     await reactivateSubscription("user-1").catch(() => undefined);
@@ -299,18 +293,15 @@ describe("A-6: subscription writes run under the caller's RLS policy set", () =>
     });
   });
 
-  test.failing(
-    "reactivateSubscription clears the scheduled cancellation it just undid at Stripe",
-    async () => {
-      stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
+  it("reactivateSubscription clears the scheduled cancellation it just undid at Stripe", async () => {
+    stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
 
-      await expect(reactivateSubscription("user-1")).resolves.toMatchObject({
-        cancel_at_period_end: false,
-      });
+    await expect(reactivateSubscription("user-1")).resolves.toMatchObject({
+      cancel_at_period_end: false,
+    });
 
-      expect(stored.cancel_at).toBeNull();
-    },
-  );
+    expect(stored.cancel_at).toBeNull();
+  });
 
   /**
    * Fix-stable: whichever client the write lands on, Stripe is mutated first
