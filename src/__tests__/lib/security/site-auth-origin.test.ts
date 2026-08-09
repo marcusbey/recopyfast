@@ -525,6 +525,28 @@ describe("OPTIONS /api/content/[siteId] preflight", () => {
     );
   });
 
+  it("never falls back to a wildcard grant when the app URL is unset", async () => {
+    // "No grant" must be the ABSENCE of the header. withCors used to fall back
+    // to NEXT_PUBLIC_APP_URL || "*", so on a deployment without the env var a
+    // REFUSED preflight granted every origin — the exact grant the uniform 204
+    // exists to withhold ("*" is also invalid beside Allow-Credentials: true).
+    const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    try {
+      const response = await preflight("https://not-the-registered-domain.com");
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(
+        response.headers.get("Access-Control-Allow-Credentials"),
+      ).toBeNull();
+    } finally {
+      if (originalAppUrl !== undefined) {
+        process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
+      }
+    }
+  });
+
   it("refuses a site token presented from a loopback look-alike domain", async () => {
     // The same exactness on the request path, where the demo token would otherwise
     // be honoured for an origin the attacker controls.

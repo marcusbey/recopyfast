@@ -170,10 +170,16 @@ function extractToken(request: NextRequest) {
 }
 
 function withCors(response: NextResponse, allowedOrigin: string | null) {
-  const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || "*";
-  const originHeader = allowedOrigin || defaultOrigin;
-  response.headers.set("Access-Control-Allow-Origin", originHeader);
-  response.headers.set("Access-Control-Allow-Credentials", "true");
+  // "No grant" is expressed by the ABSENCE of the header, never by "*".
+  // Refused preflights flow through here with a null origin, and
+  // NEXT_PUBLIC_APP_URL is not guaranteed to be set on every deployment —
+  // a "*" fallback would hand the grant this route just withheld to every
+  // caller ("*" is also invalid alongside Allow-Credentials: true).
+  const originHeader = allowedOrigin || process.env.NEXT_PUBLIC_APP_URL || null;
+  if (originHeader) {
+    response.headers.set("Access-Control-Allow-Origin", originHeader);
+    response.headers.set("Access-Control-Allow-Credentials", "true");
+  }
   response.headers.set(
     "Access-Control-Allow-Headers",
     "Authorization, Content-Type",
