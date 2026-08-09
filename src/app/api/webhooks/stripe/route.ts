@@ -123,6 +123,7 @@ type StripeInvoiceWithSubscription = Stripe.Invoice & {
 type BillingEventObject = {
   metadata?: Record<string, string> | null;
   customer?: string | Stripe.Customer | Stripe.DeletedCustomer | null;
+  payment_intent?: string | Stripe.PaymentIntent | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -918,15 +919,62 @@ async function handleMoneyReturned(
 }
 
 /**
+ * Did this dispute end with the money staying with us?
+ *
+ * `won` = the bank ruled for us. `warning_closed` = an early-warning enquiry the
+ * customer dropped before it became a chargeback. Every other status either
+ * means the money is gone (`lost`) or that the dispute is still running.
+ */
+function isDisputeClosedInOurFavour(status: Stripe.Dispute.Status): boolean {
+  return status === "won" || status === "warning_closed";
+}
+
+/**
  * A chargeback was filed.
  *
- * Revoking here is provisional — the bank holds the money from this moment — and
- * a dispute we go on to win has to give the wallet back. The balance about to be
- * clawed back is therefore recorded against THIS dispute before it is zeroed,
- * while the row can still say what it was. A refund is final and needs no such
- * record, which is why this lives here and not in `handleMoneyReturned`.
+ * Revoking is provisional — the bank holds the money from this moment — and a
+ * dispute we go on to win has to give the wallet back.
+ *
+ * WHY IT ASKS STRIPE FOR THE STATUS — a `created` can be processed AFTER its own
+ * `closed`, and re-running the revocation then would silently undo a correct
+ * restoration with nothing left to reverse it: the dispute is over, so no further
+ * event is coming. Two things make that reachable. Delivery is at-least-once and
+ * explicitly unordered, so a first-time `created` can simply arrive late. And
+ * dispute events used to miss the route's idempotency short-circuit entirely —
+ * it reads `billing_events` rows keyed by Stripe event id, which `logBillingEvent`
+ * only writes once it can attribute the event to a user, and a Dispute object
+ * carries neither `metadata.user_id` nor `customer`. So every redelivery re-ran
+ * this handler. `logBillingEvent` now resolves disputes through the payment
+ * intent, which closes the redelivery half; the live status is what makes the
+ * handler safe whatever order the events arrive in.
+ *
+ * A dispute still open (or `lost`) is revoked as normal: both revocation and its
+ * record are idempotent, so re-applying is harmless, and a crash between the two
+ * is COMPLETED by the redelivery rather than skipped.
  */
 async function handleDisputeCreated(dispute: Stripe.Dispute) {
+  const live = await stripe.disputes.retrieve(dispute.id);
+
+  if (isDisputeClosedInOurFavour(live.status)) {
+    console.log(
+      `dispute ${dispute.id} is already closed as "${live.status}" — not ` +
+        `re-revoking what winning it restored.`,
+    );
+    return;
+  }
+
+  await revokeForDispute(dispute);
+}
+
+/**
+ * Take back what the disputed payment bought.
+ *
+ * The balance about to be clawed back is recorded against THIS dispute before it
+ * is zeroed, while the row can still say what it was — see
+ * `src/lib/billing/credit-revocations.ts`. A refund needs no such record, which
+ * is why this lives here and not in `handleMoneyReturned`.
+ */
+async function revokeForDispute(dispute: Stripe.Dispute) {
   const paymentIntentId = idOf(dispute.payment_intent);
 
   if (paymentIntentId) {
@@ -963,14 +1011,18 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
     return;
   }
 
-  // `won` = the bank ruled for us; `warning_closed` = an early-warning enquiry
-  // the customer dropped before it became a chargeback. Anything else (`lost`
-  // above all) leaves the revocation standing, because the money is gone.
-  if (dispute.status !== "won" && dispute.status !== "warning_closed") {
+  // `lost` above all: the money is gone, so the revocation stands. It is applied
+  // rather than assumed, because `created` is not guaranteed to have been
+  // processed first — it can be delivered after this event, or its deliveries can
+  // fail until Stripe gives up. Assuming left the worst case uncovered: a
+  // chargeback that took the money AND left the customer holding the product.
+  // Revoking again is a no-op.
+  if (!isDisputeClosedInOurFavour(dispute.status)) {
     console.log(
       `dispute on ${paymentIntentId} closed as "${dispute.status}" — ` +
         `entitlement and credits stay revoked.`,
     );
+    await revokeForDispute(dispute);
     return;
   }
 
@@ -1057,6 +1109,35 @@ async function handleCustomerUpdated(
 }
 
 /**
+ * Whose payment was this? Answered from our own tables, which key both kinds of
+ * one-off purchase on the payment intent.
+ *
+ * Best-effort, like the customer lookup beside it: a failure here costs an audit
+ * row, and throwing would fail an event whose real work has already succeeded.
+ */
+async function readUserIdForPayment(
+  paymentIntentId: string | null,
+  supabase: ServiceClient,
+): Promise<string | null> {
+  if (!paymentIntentId) return null;
+
+  const [entitlement, credits] = await Promise.all([
+    supabase
+      .from("plan_entitlements")
+      .select("user_id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .maybeSingle<{ user_id: string }>(),
+    supabase
+      .from("credit_purchases")
+      .select("user_id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .maybeSingle<{ user_id: string }>(),
+  ]);
+
+  return entitlement.data?.user_id ?? credits.data?.user_id ?? null;
+}
+
+/**
  * Log billing events for audit trail
  */
 async function logBillingEvent(event: Stripe.Event, supabase: ServiceClient) {
@@ -1079,6 +1160,13 @@ async function logBillingEvent(event: Stripe.Event, supabase: ServiceClient) {
       .eq("stripe_customer_id", customerId)
       .single();
     userId = customer?.user_id ?? null;
+  } else if (obj.payment_intent) {
+    // A Dispute carries neither of the above, so before this arm every dispute
+    // event went unlogged — no audit row, and no entry in the seen-list the
+    // idempotency short-circuit at the top of POST reads, which is why a
+    // redelivered `charge.dispute.created` used to re-run its handler. What a
+    // dispute does carry is the payment intent, and our own rows are keyed on it.
+    userId = await readUserIdForPayment(idOf(obj.payment_intent), supabase);
   }
 
   if (userId) {

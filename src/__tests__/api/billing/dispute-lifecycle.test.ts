@@ -22,12 +22,20 @@ const mockSubscriptionUpdate = jest.fn();
  * the dispute was settled by refunding means asking Stripe for the charge.
  */
 const mockChargeRetrieve = jest.fn();
+/**
+ * `charge.dispute.created` asks Stripe for the dispute's CURRENT status, because
+ * the event payload only says what it was when the event was minted.
+ */
+const mockDisputeRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { update: mockSubscriptionUpdate },
     charges: { retrieve: (...args: unknown[]) => mockChargeRetrieve(...args) },
+    disputes: {
+      retrieve: (...args: unknown[]) => mockDisputeRetrieve(...args),
+    },
   })),
 );
 
@@ -258,6 +266,14 @@ describe("A-8 / A-20: money coming back out", () => {
     // Default: the charge still stands. A dispute settled by refunding is the
     // exception, and the tests that model it say so.
     mockChargeRetrieve.mockResolvedValue(chargeState(0, false));
+    // Default: the dispute is still running, so a `created` applies normally.
+    mockDisputeRetrieve.mockImplementation(async (disputeId: string) => ({
+      id: disputeId,
+      status: "needs_response",
+      payment_intent: PAYMENT_INTENT,
+      charge: CHARGE_ID,
+      amount: LIFETIME_PRICE_CENTS,
+    }));
     db = {
       billing_events: [],
       billing_customers: [
@@ -611,6 +627,144 @@ describe("A-8 / A-20: money coming back out", () => {
 
       expect(response.status).toBe(200);
     });
+  });
+
+  /**
+   * A `charge.dispute.created` processed after its own `closed`.
+   *
+   * Two ways in. Delivery is at-least-once and explicitly unordered, so a
+   * first-time `created` can arrive late; and dispute events used to miss the
+   * route's idempotency short-circuit altogether, because `logBillingEvent` only
+   * writes the seen-list row once it can attribute an event to a user and a
+   * Dispute object carries neither `metadata.user_id` nor `customer`. Either way
+   * the handler re-revoked, and with the dispute already closed nothing was left
+   * to restore it: the customer paid and held nothing.
+   */
+  describe("a created that arrives after the dispute has closed", () => {
+    it("does not re-revoke what winning the dispute restored", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_created_first",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+      await deliver(disputeEvent("evt_closed", "charge.dispute.closed", "won"));
+      expect(entitlement()?.revoked_at).toBeNull();
+      expect(wallet()?.credits_remaining).toBe(1000);
+
+      // The late arrival. A distinct event id on purpose: the seen-list cannot
+      // answer this one, so it is the live status doing the work.
+      mockDisputeRetrieve.mockResolvedValue({
+        id: "dp_1",
+        status: "won",
+        payment_intent: PAYMENT_INTENT,
+        charge: CHARGE_ID,
+        amount: LIFETIME_PRICE_CENTS,
+      });
+
+      const late = await deliver(
+        disputeEvent(
+          "evt_created_late",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      expect(late.status).toBe(200);
+      expect(entitlement()?.revoked_at).toBeNull();
+      expect(entitlement()?.source).toBe("lifetime_purchase");
+      expect(wallet()?.credits_remaining).toBe(1000);
+    });
+
+    it("still applies a redelivery while the dispute is running", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_created_first",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      // Same dispute, still open — a retry after a crash must COMPLETE the
+      // revocation, not skip it, and re-applying must not double anything.
+      const again = await deliver(
+        disputeEvent(
+          "evt_created_again",
+          "charge.dispute.created",
+          "needs_response",
+        ),
+      );
+
+      expect(again.status).toBe(200);
+      expect(entitlement()?.revoked_at).not.toBeNull();
+      expect(wallet()?.credits_remaining).toBe(0);
+      // One dispute, one clawback record, still holding the truthful amount.
+      expect(
+        db.billing_events?.filter(
+          (row) => row.stripe_event_id === "credits_revoked:dp_1",
+        ),
+      ).toHaveLength(1);
+      await expect(readRevokedCredits("dp_1")).resolves.toBe(1000);
+    });
+
+    it("500s rather than guessing when the dispute cannot be read", async () => {
+      mockDisputeRetrieve.mockRejectedValue(new Error("Stripe is unreachable"));
+
+      const response = await deliver(
+        disputeEvent("evt_created", "charge.dispute.created", "needs_response"),
+      );
+
+      // Stripe redelivers, which is recoverable; acting on an unknown status is
+      // not. Nothing was touched.
+      expect(response.status).toBe(500);
+      expect(entitlement()?.revoked_at).toBeNull();
+      expect(wallet()?.credits_remaining).toBe(1000);
+    });
+
+    it("logs dispute events, so a genuine redelivery short-circuits", async () => {
+      const created = disputeEvent(
+        "evt_created",
+        "charge.dispute.created",
+        "needs_response",
+      );
+
+      await deliver(created);
+      const redelivery = await deliver(created);
+
+      // The belt-and-braces half: `logBillingEvent` resolves a dispute's user
+      // through the payment intent now, so the event reaches the seen-list and
+      // the same event id never runs the handler twice.
+      expect(await redelivery.json()).toEqual({
+        received: true,
+        duplicate: true,
+      });
+      expect(
+        db.billing_events?.filter(
+          (row) => row.stripe_event_id === "evt_created",
+        ),
+      ).toHaveLength(1);
+    });
+  });
+
+  /**
+   * A `closed` whose `created` never landed.
+   *
+   * `lost` used to be a bare early return that assumed `created` had already
+   * revoked. Nothing guarantees that: `created` can be delivered after this
+   * event, or fail until Stripe stops trying. The assumption's worst case is the
+   * one that costs most — a chargeback that took the money and left the customer
+   * holding the product.
+   */
+  it("revokes on a lost dispute even if the created never arrived", async () => {
+    const response = await deliver(
+      disputeEvent("evt_closed_lost", "charge.dispute.closed", "lost"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(entitlement()?.revoked_at).not.toBeNull();
+    expect(entitlement()?.source).toBe("revoked:dispute");
+    expect(wallet()?.credits_remaining).toBe(0);
   });
 
   /**
