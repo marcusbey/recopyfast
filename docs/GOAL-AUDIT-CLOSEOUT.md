@@ -108,7 +108,31 @@ Original scope (for reference):
 
 A-6…A-22 all touch `webhooks/stripe/route.ts` + stripe libs → single branch. A-1/A-2 can be a sibling branch same phase.
 
-### Phase 2 — security lockdown migrations + access fixes — flips 12 markers
+### Phase 2 — security lockdown migrations + access fixes — ✅ DONE (PR #14, merged 2026-08-09, `08bf2d8`)
+
+Closed: A-3, A-5, A-9, A-10, A-11 (both halves), A-12, A-13 (code side), A-35 —
+plus 2 of A-4's 5 markers (creator-row guard; last-admin count + branch-A
+policy still open for M-6). Markers 57 → 43. Both migrations EXECUTED against
+a real Postgres 15.8 (Docker revived mid-review): grants invariant measured
+live, trigger split verified, `function-grants` marker converted per its
+convert-on-first-real-run protocol. Two review rounds added: one
+caller-vs-service scoping rule across all Teams handlers (every invitation
+POST was a 500 under the applied policy branch), share GET tightened to
+manager/owner, sixth `auth.users` embed closed (tripwire now scans all of src).
+
+New findings routed to the backlog by this phase:
+- **N-1 (image grants):** current Supabase images default ALL API roles to no
+  table DML; a fresh migrations-built DB refuses every write (production
+  predates the image change). Needs a deliberate schema-wide GRANT migration —
+  own blast radius, own owner. Pinned as `test.failing` in
+  update-history-policy.test.ts with measured ACLs. Blocks CI/E2E against
+  disposable Supabase projects (Phase 7 sequencing).
+- **N-2 (dead surface):** `/api/sites/[siteId]/share` has NO consumer — the
+  dashboard shares via `/api/staging/access`. Wire it up or delete it.
+- **B-3 reminder:** every service-role swap in Phase 2 is shaped by not
+  knowing which migrations production received. O1 unblocks answering it.
+
+Original scope (for reference):
 | Item | Fix | Effort | Markers |
 |---|---|---|---|
 | M-1 migration | A-3 + A-5 (after D1) | M | 1 (shared) |
