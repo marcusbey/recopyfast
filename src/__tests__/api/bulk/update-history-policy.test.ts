@@ -26,7 +26,9 @@
  *
  *   1. A source assertion that runs everywhere: the trigger must not depend on
  *      the invoker's policy set at all. That is what SECURITY DEFINER buys, and
- *      it makes the answer to B-3 irrelevant. `test.failing` today.
+ *      it makes the answer to B-3 irrelevant. Closed by
+ *      20260809130000_content_history_definer_and_delete_split.sql and enforced
+ *      from here on.
  *   2. A database test, gated on a reachable Postgres, that performs the write
  *      as `authenticated` for real. Its outcome IS the answer to B-3 — see the
  *      two branches documented on it.
@@ -75,21 +77,28 @@ describe("A-13 content_history is written by the invoking role", () => {
     expect(latest!.body).toContain("INSERT INTO content_history");
   });
 
-  test.failing(
-    "log_content_change() does not depend on the caller's policy set",
-    () => {
-      // SECURITY DEFINER makes the audit write run as the function owner, so a
-      // missing `authenticated` INSERT policy can no longer abort a customer's
-      // UPDATE. Without it the trigger is judged against whoever happens to be
-      // calling — today the anon-key user client.
-      //
-      // If the fix taken is instead "guarantee the INSERT policy in a migration
-      // production has actually applied", that is verified by the gated test
-      // below, and this marker should be removed with it.
-      const latest = latestTriggerFunctionBody();
-      expect(latest!.body.toUpperCase()).toContain("SECURITY DEFINER");
-    },
-  );
+  it("log_content_change() does not depend on the caller's policy set", () => {
+    // SECURITY DEFINER makes the audit write run as the function owner, so a
+    // missing `authenticated` INSERT policy can no longer abort a customer's
+    // UPDATE. Without it the trigger is judged against whoever happens to be
+    // calling — today the anon-key user client.
+    //
+    // Closed by 20260809130000_content_history_definer_and_delete_split.sql,
+    // which is now the latest definition of the function. Enforced rather than
+    // `test.failing` from that migration onwards: this is the regression guard
+    // that stops a later CREATE OR REPLACE dropping the qualifier again, which
+    // would silently make the answer to B-3 load-bearing a second time.
+    const latest = latestTriggerFunctionBody();
+    expect(latest!.body.toUpperCase()).toContain("SECURITY DEFINER");
+  });
+
+  // The other half of the same qualifier: a SECURITY DEFINER function with a
+  // caller-controlled `search_path` lets the caller choose which
+  // `content_history` receives the audit row.
+  it("pins the search_path it runs under", () => {
+    const latest = latestTriggerFunctionBody();
+    expect(latest!.body).toMatch(/SET\s+search_path\s*=\s*public,\s*pg_temp/i);
+  });
 });
 
 // ---------------------------------------------------------------------------

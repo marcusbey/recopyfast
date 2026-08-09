@@ -15,10 +15,11 @@
  * correct and is not the defect. What must be true after a failed registration
  * is that no `sites` row survives for that domain.
  *
- * Both cases are `test.failing`: they pass while the bug is present and start
- * failing the moment registration is made atomic (a transaction, an RPC, or a
- * compensating delete on the permission failure), which is the signal to drop
- * the marker.
+ * Closed by the compensating delete at src/app/api/sites/register/route.ts:150-181
+ * and enforced from here on. That is a compensation and not a transaction —
+ * PostgREST cannot span two statements — so the window still exists in principle,
+ * and the case named "reports the site id when the rollback itself fails" pins
+ * what happens when the compensation is the thing that fails.
  */
 
 import { NextRequest } from "next/server";
@@ -48,6 +49,8 @@ class FakeDb {
   sitePermissions: PermissionRow[] = [];
   /** Flipped on to simulate the transient failure the route mishandles. */
   failPermissionWrite = false;
+  /** Fails the compensating delete too — the one path that can still orphan. */
+  failSiteRollback = false;
   private nextId = 1;
 
   /**
@@ -60,6 +63,7 @@ class FakeDb {
     this.sites = [];
     this.sitePermissions = [];
     this.failPermissionWrite = false;
+    this.failSiteRollback = false;
     this.nextId = 1;
   }
 
@@ -73,7 +77,7 @@ const PGRST116 = { code: "PGRST116", message: "No rows found" };
 interface QueryState {
   table: string;
   filters: Array<[string, unknown]>;
-  op: "select" | "insert" | "upsert";
+  op: "select" | "insert" | "upsert" | "delete";
   payload: Record<string, unknown> | null;
 }
 
@@ -126,6 +130,27 @@ function runQuery(db: FakeDb, state: QueryState) {
     return { data: payload, error: null };
   }
 
+  // The compensating delete the route issues when the permission write fails.
+  // `site_permissions.site_id` is ON DELETE CASCADE (20250817000000:55), so a
+  // real database would drop the permission rows with the site; modelled here so
+  // the double cannot make the route look more correct than it is.
+  if (state.op === "delete") {
+    if (db.failSiteRollback) {
+      return {
+        data: null,
+        error: { code: "57014", message: "canceling statement due to timeout" },
+      };
+    }
+
+    const doomed = db.sites.filter((row) => matches(row, state.filters));
+    const doomedIds = new Set(doomed.map((row) => row.id));
+    db.sites = db.sites.filter((row) => !doomedIds.has(row.id));
+    db.sitePermissions = db.sitePermissions.filter(
+      (row) => !doomedIds.has(row.site_id),
+    );
+    return { data: null, error: null };
+  }
+
   if (state.op === "select") {
     const source: object[] =
       state.table === "sites" ? db.sites : db.sitePermissions;
@@ -150,6 +175,7 @@ interface FakeQueryBuilder {
   eq(column: string, value: unknown): FakeQueryBuilder;
   insert(payload: Record<string, unknown>): FakeQueryBuilder;
   upsert(payload: Record<string, unknown>): FakeQueryBuilder;
+  delete(): FakeQueryBuilder;
   single(): Promise<Settled>;
   then(
     onFulfilled: (value: Settled) => unknown,
@@ -183,6 +209,10 @@ function makeServiceClient(db: FakeDb) {
         upsert(payload: Record<string, unknown>) {
           state.op = "upsert";
           state.payload = payload;
+          return builder;
+        },
+        delete() {
+          state.op = "delete";
           return builder;
         },
         single() {
@@ -286,19 +316,37 @@ describe("A-11 POST /api/sites/register leaves an orphan site on permission fail
     expect(body.error).toBe("Failed to assign site permissions");
   });
 
-  test.failing(
-    "rolls the site row back when the permission write fails",
-    async () => {
-      db.failPermissionWrite = true;
+  it("rolls the site row back when the permission write fails", async () => {
+    db.failPermissionWrite = true;
 
-      await register();
+    await register();
 
-      // The 500 is the right answer. The `sites` row surviving it is not:
-      // no user can see it, and no user can remove it.
-      expect(db.sitePermissions).toHaveLength(0);
-      expect(db.sites.filter((site) => site.domain === DOMAIN)).toHaveLength(0);
-    },
-  );
+    // The 500 is the right answer. The `sites` row surviving it is not:
+    // no user can see it, and no user can remove it.
+    expect(db.sitePermissions).toHaveLength(0);
+    expect(db.sites.filter((site) => site.domain === DOMAIN)).toHaveLength(0);
+  });
+
+  // The compensation is not a transaction, so it can fail on its own. When it
+  // does the orphan is back — and the only mitigation available is that the site
+  // id is on the record, so say so explicitly rather than leaving it implied by
+  // the absence of a test.
+  it("reports the site id when the rollback itself fails", async () => {
+    const logged = jest.spyOn(console, "error");
+    db.failPermissionWrite = true;
+    db.failSiteRollback = true;
+
+    const response = await register();
+
+    // The caller still gets the registration failure; a failed cleanup is not
+    // a different outcome for them.
+    expect(response.status).toBe(500);
+    expect(db.sites.filter((site) => site.domain === DOMAIN)).toHaveLength(1);
+
+    const orphanId = db.sites.find((site) => site.domain === DOMAIN)!.id;
+    const messages = logged.mock.calls.map((call) => String(call[0]));
+    expect(messages.some((message) => message.includes(orphanId))).toBe(true);
+  });
 
   // Guard for the lockout case below: the duplicate-domain refusal is real and
   // reachable after a *successful* registration, which is correct behaviour.
@@ -314,22 +362,19 @@ describe("A-11 POST /api/sites/register leaves an orphan site on permission fail
     expect(body.error).toBe("Domain already registered");
   });
 
-  test.failing(
-    "does not lock the customer out of their own domain after a failed attempt",
-    async () => {
-      db.failPermissionWrite = true;
-      await register();
+  it("does not lock the customer out of their own domain after a failed attempt", async () => {
+    db.failPermissionWrite = true;
+    await register();
 
-      // The transient failure is over; the same customer retries.
-      db.failPermissionWrite = false;
-      const retry = await register();
-      const body = await retry.json();
+    // The transient failure is over; the same customer retries.
+    db.failPermissionWrite = false;
+    const retry = await register();
+    const body = await retry.json();
 
-      expect(body.error).not.toBe("Domain already registered");
-      expect(retry.status).toBe(200);
-      expect(db.sitePermissions).toEqual([
-        expect.objectContaining({ user_id: "user-123", permission: "admin" }),
-      ]);
-    },
-  );
+    expect(body.error).not.toBe("Domain already registered");
+    expect(retry.status).toBe(200);
+    expect(db.sitePermissions).toEqual([
+      expect.objectContaining({ user_id: "user-123", permission: "admin" }),
+    ]);
+  });
 });

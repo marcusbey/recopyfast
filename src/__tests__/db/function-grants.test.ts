@@ -167,6 +167,23 @@ describeDb(
       }
     });
 
+    // STILL `test.failing`, but expected to have been fixed — read this before
+    // concluding it reproduced.
+    //
+    // 20260809120000_lock_down_definer_functions.sql (A-3/A-5) and
+    // 20260809130000_content_history_definer_and_delete_split.sql together revoke
+    // anon and PUBLIC from every SECURITY DEFINER function this migration set
+    // creates, and `authenticated` from all but the three allowlisted predicates.
+    // That was verified statically — by parsing every migration with Postgres' own
+    // grammar and matching each REVOKE's identity against the CREATE FUNCTION that
+    // defines it — and NOT by running this test, because no Docker daemon was
+    // available to start a local Supabase.
+    //
+    // So the marker is left in place rather than converted on a static argument.
+    // When this next runs against a real database it should FAIL — `test.failing`
+    // fails when its body passes — and that failure is the signal to turn it into
+    // a plain `test`, not a regression. If it still passes, the offender list it
+    // prints is the real answer and something in those two migrations did not take.
     test.failing(
       "anon and PUBLIC hold no EXECUTE, and only the allowlisted RLS predicates are executable by authenticated",
       async () => {

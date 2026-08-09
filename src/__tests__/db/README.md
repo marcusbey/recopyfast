@@ -47,6 +47,7 @@ Two details worth knowing:
 | File                                  | Finding                                                                      | Marker         |
 | ------------------------------------- | ---------------------------------------------------------------------------- | -------------- |
 | `function-grants.test.ts`             | A-3, A-5 — SECURITY DEFINER functions executable with the published anon key | `test.failing` |
+| `site-delete-cascade.test.ts`         | A-35, A-13 — a site holding content could not be deleted at all              | `test`         |
 | `rls-policies.test.ts`                | P2 permissive-policy class                                                   | `test`         |
 | `content-version-i18n.test.ts`        | A-15 — snapshot/restore collapse language and variant                        | `test.failing` |
 | `restore-reports-rows.test.ts`        | A-16 — restore reports success while restoring nothing                       | `test.failing` |
@@ -55,6 +56,13 @@ Two details worth knowing:
 `test.failing` passes while the defect exists and **fails the moment it is
 fixed**, which is the signal to delete the marker. See "Test conventions for
 this backlog" in `docs/QA-PRODUCTION-AUDIT-2026-08-07.md`.
+
+`function-grants.test.ts` is a known exception to read carefully:
+`20260809120000_lock_down_definer_functions.sql` is intended to close A-3/A-5, and
+that was checked by parsing every migration rather than by running this suite (no
+Docker daemon was available). Its marker is therefore still in place. **Expect it
+to fail on the first run against a real database — that is the fix landing, not a
+regression.** Convert it to a plain `test` at that point.
 
 ## Every `test.failing` has a `guard:` sibling
 
@@ -82,11 +90,11 @@ confirmed". The guards are what named the real problem. If you add a
 Each suite creates sites named `rcf-dbtest-<label>-<suffix>.invalid` and deletes
 them, with their content elements and versions, in `afterAll`.
 
-That deletion is deliberately not a plain `DELETE FROM sites`. It cannot be:
-`content_change_trigger` is an `AFTER DELETE` trigger that inserts the deleted
-row into `content_history`, whose foreign key requires the `content_elements`
-row to still exist. So every delete of a content element raises 23503, and the
-`ON DELETE CASCADE` from `sites` inherits it:
+That deletion is a plain `DELETE FROM sites`, and until recently it could not be.
+`content_change_trigger` used to be an `AFTER DELETE` trigger that inserted the
+deleted row into `content_history`, whose foreign key requires the
+`content_elements` row to still exist. So every delete of a content element
+raised 23503, and the `ON DELETE CASCADE` from `sites` inherited it (A-35):
 
 ```
 ERROR:  insert or update on table "content_history" violates foreign key
@@ -94,6 +102,15 @@ ERROR:  insert or update on table "content_history" violates foreign key
 CONTEXT: PL/pgSQL function log_content_change() line 10
 ```
 
-`deleteSites` works around it with `session_replication_role = 'replica'` and
-deletes the children explicitly. That is a workaround for the test harness, not
-a fix — the same trigger makes site deletion fail in the product.
+`deleteSites` worked around that with `session_replication_role = 'replica'` and
+deleted the children explicitly — a workaround for the harness, while the same
+trigger made site deletion fail in the product.
+
+`20260809130000_content_history_definer_and_delete_split.sql` splits the trigger
+into `AFTER INSERT OR UPDATE` plus a separate `BEFORE DELETE`, so the history row
+is written while its parent still exists and the cascade completes. The
+workaround is **removed** rather than left in place: while it was there, this
+harness was the only caller in the repository that could delete a site, and its
+teardown hid the defect from every suite that used it. Teardown now takes the
+same path the product does, so a regression surfaces here first —
+`site-delete-cascade.test.ts` is the dedicated case.

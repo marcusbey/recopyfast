@@ -60,12 +60,7 @@ interface PgClient {
   ): Promise<QueryResult<R>>;
 }
 
-interface PgPoolClient extends PgClient {
-  release(): void;
-}
-
 interface PgPool extends PgClient {
-  connect(): Promise<PgPoolClient>;
   end(): Promise<void>;
 }
 
@@ -183,9 +178,8 @@ export interface DbSuite {
     values?: unknown[],
   ) => Promise<QueryResult<R>>;
   /**
-   * Inserts a `sites` row with a collision-proof domain and arranges for it,
-   * its content elements and its versions to be removed after the suite (see
-   * `deleteSites` for why that is not a one-liner).
+   * Inserts a `sites` row with a collision-proof domain and arranges for it, and
+   * everything the FK cascade reaches from it, to be removed after the suite.
    */
   createSite: (label: string) => Promise<string>;
 }
@@ -193,50 +187,31 @@ export interface DbSuite {
 /**
  * Removes the sites a suite created, plus everything that hangs off them.
  *
- * This is more ceremony than `DELETE FROM sites` because a plain delete does
- * not work at all. `content_change_trigger` is an AFTER DELETE trigger that
- * inserts the deleted row into `content_history`, whose FK requires the
- * `content_elements` row to still exist — so *every* delete of a content
- * element raises 23503, and the ON DELETE CASCADE from `sites` inherits that:
+ * One statement, deliberately. This used to be a five-statement transaction that
+ * set `session_replication_role = 'replica'` to suppress triggers *and*
+ * referential integrity, then deleted `content_history`, `content_elements`,
+ * `content_versions` and `sites` by hand in that order — because a plain
+ * `DELETE FROM sites` did not work at all. `content_change_trigger` was an AFTER
+ * DELETE trigger inserting the deleted row into `content_history`, whose FK
+ * requires the `content_elements` row to still exist, so every content element
+ * delete raised 23503 and the cascade from `sites` inherited it (A-35):
  *
  *   ERROR: insert or update on table "content_history" violates foreign key
  *          constraint "content_history_content_element_id_fkey"
  *   CONTEXT: PL/pgSQL function log_content_change() line 10
  *
- * `session_replication_role = 'replica'` suppresses both the trigger and the
- * RI actions, which is why the children are then deleted explicitly and in
- * order: with RI off, the cascades do not fire either.
+ * 20260809130000_content_history_definer_and_delete_split.sql moved the DELETE
+ * branch onto a BEFORE DELETE trigger, so the cascade completes. The workaround
+ * is removed rather than left in place on purpose: while it was here, this
+ * harness was the one caller in the repository that could delete a site, and its
+ * own teardown hid the defect from every suite that used it. Cleaning up the way
+ * the product does means a regression shows up here first.
+ *
+ * Every FK into `sites` and into `content_elements` is ON DELETE CASCADE (26 and
+ * counting; verified across supabase/migrations), so this reaches the whole tree.
  */
 async function deleteSites(pool: PgPool, siteIds: string[]): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SET LOCAL session_replication_role = 'replica'");
-    await client.query(
-      `DELETE FROM content_history
-        WHERE content_element_id IN (
-          SELECT id FROM content_elements WHERE site_id = ANY($1::uuid[])
-        )`,
-      [siteIds],
-    );
-    await client.query(
-      "DELETE FROM content_elements WHERE site_id = ANY($1::uuid[])",
-      [siteIds],
-    );
-    await client.query(
-      "DELETE FROM content_versions WHERE site_id = ANY($1::uuid[])",
-      [siteIds],
-    );
-    await client.query("DELETE FROM sites WHERE id = ANY($1::uuid[])", [
-      siteIds,
-    ]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw error;
-  } finally {
-    client.release();
-  }
+  await pool.query("DELETE FROM sites WHERE id = ANY($1::uuid[])", [siteIds]);
 }
 
 /**
