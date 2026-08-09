@@ -81,6 +81,20 @@ export interface Team {
   updated_at: string;
 }
 
+/**
+ * A display identity attached by the API, not a column.
+ *
+ * `auth.users` cannot be embedded over PostgREST, so these fields come from the
+ * Admin API — see `resolveUserIdentity` in @/lib/auth/user-identity. `null` means
+ * the row points at a user that no longer resolves; the row itself is still real.
+ * The old shape here mirrored the raw column (`raw_user_meta_data.name`) and
+ * described a query that could never run.
+ */
+export interface AttachedUserIdentity {
+  email: string;
+  name: string;
+}
+
 export interface TeamMember {
   id: string;
   team_id: string;
@@ -88,13 +102,7 @@ export interface TeamMember {
   role: TeamRole;
   joined_at: string;
   invited_by?: string;
-  user?: {
-    email: string;
-    raw_user_meta_data?: {
-      name?: string;
-      avatar_url?: string;
-    };
-  };
+  user?: AttachedUserIdentity | null;
 }
 
 export interface TeamInvitation {
@@ -110,12 +118,7 @@ export interface TeamInvitation {
   team?: {
     name: string;
   };
-  inviter?: {
-    email: string;
-    raw_user_meta_data?: {
-      name?: string;
-    };
-  };
+  inviter?: AttachedUserIdentity | null;
 }
 
 export interface ContentEditingSession {
@@ -126,13 +129,7 @@ export interface ContentEditingSession {
   started_at: string;
   last_activity: string;
   ended_at?: string;
-  user?: {
-    email: string;
-    raw_user_meta_data?: {
-      name?: string;
-      avatar_url?: string;
-    };
-  };
+  user?: AttachedUserIdentity | null;
 }
 
 export interface CollaborationNotification {
@@ -155,12 +152,7 @@ export interface TeamActivityLog {
   resource_id?: string;
   details: Record<string, unknown>;
   created_at: string;
-  user?: {
-    email: string;
-    raw_user_meta_data?: {
-      name?: string;
-    };
-  };
+  user?: AttachedUserIdentity | null;
 }
 
 export interface ContentUpdatePayload {

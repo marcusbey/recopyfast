@@ -38,7 +38,7 @@ import path from "path";
 
 import { NextRequest } from "next/server";
 
-import { POST } from "@/app/api/sites/[siteId]/share/route";
+import { DELETE, GET, POST } from "@/app/api/sites/[siteId]/share/route";
 import { createServerClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { CollaborationPermissions } from "@/lib/collaboration/permissions";
@@ -77,6 +77,7 @@ const MockPermissions = CollaborationPermissions as jest.MockedClass<
 const SITE_ID = "site-123";
 const ADMIN_ID = "owner-1";
 const INVITEE_ID = "teammate-1";
+const GRANTED_PERMISSION_ID = "perm-teammate";
 
 /**
  * The rows the request touches, shared by both clients so "was it written"
@@ -108,14 +109,28 @@ function newStore(): Store {
 /**
  * A PostgREST-shaped client over `store`.
  *
- * `writesRefused` is how branch B is expressed: an RLS-blocked INSERT is not an
- * exception, it is a write that matches zero rows, which supabase-js surfaces
- * as PGRST116 from `.single()`. That distinction is the whole reason the route
- * 500s rather than logging something legible.
+ * Branch B is expressed by two options, because the restrictive policy set
+ * restricts two different things and each one breaks a different handler:
+ *
+ *   `writesRefused`   — an RLS-blocked INSERT or DELETE is not an exception, it
+ *                       is a statement that matches zero rows, which supabase-js
+ *                       surfaces as PGRST116 from `.single()`. That distinction
+ *                       is why POST 500s rather than logging something legible.
+ *
+ *   `selfOnlyUserId`  — `20260804130000` restores SELECT only for
+ *                       `user_id = auth.uid()`, so the caller's client can read
+ *                       its OWN permission row and no other. This is what makes
+ *                       GET return a one-row collaborator list and makes the
+ *                       DELETE pre-read answer "Permission not found" for
+ *                       everyone but yourself.
  */
 function makeClient(
   store: Store,
-  options: { writesRefused?: boolean; label: string },
+  options: {
+    writesRefused?: boolean;
+    selfOnlyUserId?: string;
+    label: string;
+  },
 ) {
   const writes: Array<{ table: string; by: string }> = [];
 
@@ -126,23 +141,45 @@ function makeClient(
       | Array<Record<string, unknown>>
       | null = null;
     let isInsert = false;
+    let isDelete = false;
 
-    const matching = () =>
-      (store[table] ?? []).filter((row) =>
+    const matching = () => {
+      const rows = (store[table] ?? []).filter((row) =>
         filters.every(([column, value]) => row[column] === value),
       );
 
+      // The SELECT-for-self policy applies to site_permissions only.
+      if (options.selfOnlyUserId && table === "site_permissions") {
+        return rows.filter((row) => row.user_id === options.selfOnlyUserId);
+      }
+      return rows;
+    };
+
     const commit = () => {
-      if (!isInsert) return matching();
-      if (options.writesRefused) return [];
+      if (isInsert) {
+        if (options.writesRefused) return [];
 
-      const inserted = (Array.isArray(pending) ? pending : [pending]).map(
-        (row, index) => ({ id: `${table}-new-${index}`, ...row }),
-      ) as Array<Record<string, unknown>>;
+        const inserted = (Array.isArray(pending) ? pending : [pending]).map(
+          (row, index) => ({ id: `${table}-new-${index}`, ...row }),
+        ) as Array<Record<string, unknown>>;
 
-      store[table] = [...store[table], ...inserted];
-      writes.push({ table, by: options.label });
-      return inserted;
+        store[table] = [...store[table], ...inserted];
+        writes.push({ table, by: options.label });
+        return inserted;
+      }
+
+      if (isDelete) {
+        // A DELETE is subject to the same visibility as a SELECT: it can only
+        // remove rows the policy lets this role see.
+        const doomed = options.writesRefused ? [] : matching();
+        if (doomed.length > 0) {
+          store[table] = store[table].filter((row) => !doomed.includes(row));
+          writes.push({ table, by: options.label });
+        }
+        return doomed;
+      }
+
+      return matching();
     };
 
     const resolve = (one: boolean) => {
@@ -163,6 +200,10 @@ function makeClient(
       insert: (payload: Record<string, unknown>) => {
         isInsert = true;
         pending = payload;
+        return builder;
+      },
+      delete: () => {
+        isDelete = true;
         return builder;
       },
       eq: (column: string, value: unknown) => {
@@ -206,6 +247,7 @@ async function share(branch: "A" | "B") {
 
   const user = makeClient(store, {
     writesRefused: branch === "B",
+    selfOnlyUserId: branch === "B" ? ADMIN_ID : undefined,
     label: "user",
   });
   const service = makeClient(store, { label: "service" });
@@ -248,10 +290,26 @@ async function share(branch: "A" | "B") {
   };
 }
 
+/**
+ * The role the caller holds on the site, for the run in progress.
+ *
+ * `checkSitePermission` is mocked role-aware rather than always-true: it answers
+ * from this value against the roles each handler asks for, which is what the real
+ * implementation does. A blanket `hasPermission: true` cannot tell a handler that
+ * admits viewers from one that admits only managers, so it would pass whatever
+ * the authz line happened to be — including a widening.
+ */
+let callerRole: "viewer" | "editor" | "manager" | "owner" = "owner";
+
+/** Every user id the route asked the Admin API to resolve, in order. */
+const identityLookups: string[] = [];
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
 
+  callerRole = "owner";
+  identityLookups.length = 0;
   mockCanShareSite.mockResolvedValue({ allowed: true } as Awaited<
     ReturnType<typeof canShareSite>
   >);
@@ -260,13 +318,257 @@ beforeEach(() => {
       ({
         checkSitePermission: jest
           .fn()
-          .mockResolvedValue({ hasPermission: true }),
+          .mockImplementation((_userId, _siteId, allowedRoles: string[]) =>
+            Promise.resolve({
+              hasPermission: allowedRoles.includes(callerRole),
+              userRole: callerRole,
+            }),
+          ),
       }) as unknown as CollaborationPermissions,
   );
 });
 
 afterEach(() => {
   jest.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// The rest of the collaborator lifecycle, under the same two branches
+// ---------------------------------------------------------------------------
+
+/** A store that already holds the invitee, so listing and revoking have a subject. */
+function storeWithCollaborator(): Store {
+  const store = newStore();
+  store.site_permissions = [
+    ...store.site_permissions,
+    {
+      id: GRANTED_PERMISSION_ID,
+      site_id: SITE_ID,
+      user_id: INVITEE_ID,
+      team_id: null,
+      permission: "admin",
+      role: "manager",
+      granted_by: ADMIN_ID,
+    },
+  ];
+  return store;
+}
+
+/** Wire both clients over one store, as `share()` does. */
+function wireClients(store: Store, branch: "A" | "B") {
+  const user = makeClient(store, {
+    writesRefused: branch === "B",
+    selfOnlyUserId: branch === "B" ? ADMIN_ID : undefined,
+    label: "user",
+  });
+  const service = makeClient(store, { label: "service" });
+
+  const getUserById = jest.fn().mockImplementation((userId: string) => {
+    identityLookups.push(userId);
+    return Promise.resolve({
+      data: {
+        user: {
+          id: userId,
+          email: `${userId}@corp.example`,
+          user_metadata: { name: userId },
+        },
+      },
+      error: null,
+    });
+  });
+
+  mockCreateServerClient.mockResolvedValue({
+    auth: {
+      getUser: jest
+        .fn()
+        .mockResolvedValue({ data: { user: { id: ADMIN_ID } }, error: null }),
+    },
+    from: user.from,
+  } as unknown as Awaited<ReturnType<typeof createServerClient>>);
+
+  mockCreateServiceRoleClient.mockReturnValue({
+    auth: { admin: { getUserById } },
+    from: service.from,
+  } as unknown as ReturnType<typeof createServiceRoleClient>);
+
+  return { user, service };
+}
+
+interface ListedPermission {
+  id: string;
+  user_id: string | null;
+  user: { email: string } | null;
+}
+
+async function listCollaborators(branch: "A" | "B") {
+  const store = storeWithCollaborator();
+  wireClients(store, branch);
+
+  const response = await GET(
+    new NextRequest(`https://app.recopyfast.test/api/sites/${SITE_ID}/share`),
+    context,
+  );
+
+  return {
+    status: response.status,
+    permissions: ((await response.json()).permissions ??
+      []) as ListedPermission[],
+  };
+}
+
+async function revokeCollaborator(branch: "A" | "B") {
+  const store = storeWithCollaborator();
+  wireClients(store, branch);
+
+  const response = await DELETE(
+    new NextRequest(
+      `https://app.recopyfast.test/api/sites/${SITE_ID}/share?permissionId=${GRANTED_PERMISSION_ID}`,
+      { method: "DELETE" },
+    ),
+    context,
+  );
+
+  return {
+    status: response.status,
+    body: await response.json(),
+    remaining: store.site_permissions.map((row) => row.id),
+  };
+}
+
+describe("A-9 — GET /api/sites/:siteId/share", () => {
+  it("lists every collaborator under branch A", async () => {
+    // The control: with a permissive SELECT policy the caller's own client can
+    // see the whole list, which is why this path looked fine.
+    const { status, permissions } = await listCollaborators("A");
+
+    expect(status).toBe(200);
+    expect(permissions.map((row) => row.id).sort()).toEqual(
+      ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+    );
+  });
+
+  it("lists every collaborator under branch B", async () => {
+    // The invariant, and the half the first pass at this fix missed. Moving only
+    // the writes to the service role left an owner who could add a teammate and
+    // then not see them: SELECT-for-self returns exactly one row, their own.
+    const { status, permissions } = await listCollaborators("B");
+
+    expect(status).toBe(200);
+    expect(permissions.map((row) => row.id).sort()).toEqual(
+      ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+    );
+  });
+
+  it("resolves each listed collaborator's identity", async () => {
+    // Guard against the list being "complete" but empty of identities, which is
+    // what an unresolvable embed produced before A-12.
+    const { permissions } = await listCollaborators("B");
+
+    const invitee = permissions.find((row) => row.user_id === INVITEE_ID);
+    expect(invitee?.user?.email).toBe(`${INVITEE_ID}@corp.example`);
+  });
+
+  // Reading the roster service-scoped means the response now carries every
+  // collaborator's email address, resolved through the Admin API. That is a
+  // management view, so the reader has to be narrowed to match — otherwise
+  // fixing the list turned it into an address-harvesting endpoint for anyone
+  // with view access.
+  it.each([["viewer"], ["editor"]] as const)(
+    "refuses a %s the decorated roster",
+    async (role) => {
+      callerRole = role;
+
+      const { status, permissions } = await listCollaborators("B");
+
+      expect(status).toBe(403);
+      expect(permissions).toEqual([]);
+    },
+  );
+
+  it.each([["manager"], ["owner"]] as const)(
+    "serves a %s the full decorated roster",
+    async (role) => {
+      callerRole = role;
+
+      const { status, permissions } = await listCollaborators("B");
+
+      expect(status).toBe(200);
+      expect(permissions.map((row) => row.id).sort()).toEqual(
+        ["perm-creator", GRANTED_PERMISSION_ID].sort(),
+      );
+      expect(
+        permissions.find((row) => row.user_id === INVITEE_ID)?.user?.email,
+      ).toBe(`${INVITEE_ID}@corp.example`);
+    },
+  );
+
+  it("does not resolve any identity for a refused caller", async () => {
+    // The stronger form of the 403 above: a rejected request must not have
+    // reached the Admin API at all. A handler that authorised late — decorating
+    // first and checking afterwards — would still leak through logs, latency and
+    // whatever the next refactor does with the already-fetched rows.
+    callerRole = "viewer";
+    const store = storeWithCollaborator();
+    wireClients(store, "B");
+
+    await GET(
+      new NextRequest(`https://app.recopyfast.test/api/sites/${SITE_ID}/share`),
+      context,
+    );
+
+    expect(identityLookups).toEqual([]);
+  });
+});
+
+describe("A-9 — DELETE /api/sites/:siteId/share", () => {
+  it("revokes the collaborator under branch A", async () => {
+    const { status, remaining } = await revokeCollaborator("A");
+
+    expect(status).toBe(200);
+    expect(remaining).toEqual(["perm-creator"]);
+  });
+
+  it("revokes the collaborator under branch B", async () => {
+    // Under SELECT-for-self the pre-read could not see the row being revoked, so
+    // this answered 404 and the seat could never be reclaimed — the owner pays
+    // for a collaborator they cannot remove.
+    const { status, body, remaining } = await revokeCollaborator("B");
+
+    expect(status).toBe(200);
+    expect(body.error).toBeUndefined();
+    expect(remaining).toEqual(["perm-creator"]);
+  });
+
+  it("still refuses a permissionId belonging to another site", async () => {
+    // The service role removes RLS as a backstop, so the site scoping in the
+    // handler is now the only thing standing between a guessed id and a
+    // cross-site revoke. It has to hold on its own.
+    const store = storeWithCollaborator();
+    store.site_permissions = [
+      ...store.site_permissions,
+      {
+        id: "perm-other-site",
+        site_id: "site-elsewhere",
+        user_id: "someone-else",
+        team_id: null,
+        permission: "admin",
+      },
+    ];
+    wireClients(store, "A");
+
+    const response = await DELETE(
+      new NextRequest(
+        `https://app.recopyfast.test/api/sites/${SITE_ID}/share?permissionId=perm-other-site`,
+        { method: "DELETE" },
+      ),
+      context,
+    );
+
+    expect(response.status).toBe(404);
+    expect(store.site_permissions.map((row) => row.id)).toContain(
+      "perm-other-site",
+    );
+  });
 });
 
 describe("A-9 — POST /api/sites/:siteId/share", () => {
@@ -299,20 +601,17 @@ describe("A-9 — POST /api/sites/:siteId/share", () => {
     expect(store.sites).toHaveLength(1);
   });
 
-  test.failing(
-    "records the collaborator when the user client may not write (branch B)",
-    async () => {
-      // The invariant. Adding a teammate is a primary journey; it must not
-      // depend on which of two migrations reached production.
-      const { grantedRow } = await share("B");
+  it("records the collaborator when the user client may not write (branch B)", async () => {
+    // The invariant. Adding a teammate is a primary journey; it must not
+    // depend on which of two migrations reached production.
+    const { grantedRow } = await share("B");
 
-      expect(grantedRow).toMatchObject({
-        site_id: SITE_ID,
-        user_id: INVITEE_ID,
-        permission: "admin",
-      });
-    },
-  );
+    expect(grantedRow).toMatchObject({
+      site_id: SITE_ID,
+      user_id: INVITEE_ID,
+      permission: "admin",
+    });
+  });
 
   it("records exactly one site_permissions write under branch A", async () => {
     // Guard for the assertion below, which pins both the count and the client.
@@ -325,24 +624,21 @@ describe("A-9 — POST /api/sites/:siteId/share", () => {
     ).toHaveLength(1);
   });
 
-  test.failing(
-    "writes the permission row with a client both branches permit",
-    async () => {
-      // The mechanism behind the failure above, stated so a fix is unambiguous:
-      // `service_role` is granted FOR ALL in both `20260731008000` and
-      // `20260804130000`, so it is the only client under which this write is
-      // policy-independent.
-      const { writes } = await share("A");
+  it("writes the permission row with a client both branches permit", async () => {
+    // The mechanism behind the failure above, stated so a fix is unambiguous:
+    // `service_role` is granted FOR ALL in both `20260731008000` and
+    // `20260804130000`, so it is the only client under which this write is
+    // policy-independent.
+    const { writes } = await share("A");
 
-      const permissionWrites = writes.filter(
-        (write) => write.table === "site_permissions",
-      );
+    const permissionWrites = writes.filter(
+      (write) => write.table === "site_permissions",
+    );
 
-      expect(permissionWrites).toEqual([
-        { table: "site_permissions", by: "service" },
-      ]);
-    },
-  );
+    expect(permissionWrites).toEqual([
+      { table: "site_permissions", by: "service" },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -399,23 +695,20 @@ describe("A-9 — the INSERT path is policy-independent", () => {
     ).toContain("ON site_permissions");
   });
 
-  test.failing(
-    "either the route uses service_role, or the applied migration grants the insert",
-    () => {
-      // A disjunction on purpose: both fixes are legitimate, and pinning one
-      // would make this test fail on a correct implementation of the other.
-      //
-      // `20260804130000` is the migration recorded as applied to production;
-      // `20260731008000` is the one whose status is unknown (B-3). If the route
-      // keeps writing with the user client, the applied migration has to carry
-      // the policy — and it does not.
-      const routeUsesServiceRole = /service/i.test(
-        insertClientIdentifier() ?? "",
-      );
+  it("either the route uses service_role, or the applied migration grants the insert", () => {
+    // A disjunction on purpose: both fixes are legitimate, and pinning one
+    // would make this test fail on a correct implementation of the other.
+    //
+    // `20260804130000` is the migration recorded as applied to production;
+    // `20260731008000` is the one whose status is unknown (B-3). If the route
+    // keeps writing with the user client, the applied migration has to carry
+    // the policy — and it does not.
+    const routeUsesServiceRole = /service/i.test(
+      insertClientIdentifier() ?? "",
+    );
 
-      expect(routeUsesServiceRole || appliedMigrationGrantsInsert()).toBe(true);
-    },
-  );
+    expect(routeUsesServiceRole || appliedMigrationGrantsInsert()).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

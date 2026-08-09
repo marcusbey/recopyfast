@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
+import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import {
   authorizeFirstPartyEditorAccess,
   requireEditorPermission,
@@ -119,6 +120,7 @@ export async function GET(
       const validation = await StagingAccessManager.validateStagingAccess(
         token,
         version.site_id,
+        readStagingDeviceFingerprint(request),
       );
       if (!validation.valid || !validation.verified) {
         return withCors(
@@ -219,6 +221,7 @@ export async function POST(
       const validation = await StagingAccessManager.validateStagingAccess(
         token,
         version.site_id,
+        readStagingDeviceFingerprint(request),
       );
       if (!validation.valid || !validation.verified) {
         return withCors(

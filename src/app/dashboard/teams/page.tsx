@@ -30,10 +30,13 @@ interface TeamMember {
   role: string;
   joined_at: string;
   status?: string;
+  // Attached by the API from the Admin API, not embedded from `auth.users` —
+  // see AttachedUserIdentity in @/types. Null when the member's account no
+  // longer resolves.
   user?: {
     email?: string;
-    raw_user_meta_data?: { name?: string };
-  };
+    name?: string;
+  } | null;
 }
 
 /** Roles the invitations endpoint accepts. */
@@ -212,9 +215,7 @@ export default function TeamsPage() {
   };
 
   const getMemberName = (member: TeamMember): string => {
-    return (
-      member.user?.raw_user_meta_data?.name ?? member.user?.email ?? "Unknown"
-    );
+    return member.user?.name ?? member.user?.email ?? "Unknown";
   };
 
   const getMemberEmail = (member: TeamMember): string => {

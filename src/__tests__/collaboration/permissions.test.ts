@@ -15,6 +15,8 @@ type QueryResult = { data: unknown; error: unknown };
  */
 let resultQueue: QueryResult[] = [];
 const fromCalls: string[] = [];
+/** Every column list passed to `.select()`, so a query's shape is assertable. */
+const selectCalls: string[] = [];
 
 const CHAIN_METHODS = [
   "select",
@@ -42,7 +44,12 @@ const makeBuilder = (result: QueryResult) => {
     maybeSingle: jest.fn(() => Promise.resolve(result)),
   };
   for (const method of CHAIN_METHODS) {
-    builder[method] = jest.fn(() => builder);
+    builder[method] = jest.fn((...args: unknown[]) => {
+      if (method === "select" && typeof args[0] === "string") {
+        selectCalls.push(args[0]);
+      }
+      return builder;
+    });
   }
   return builder;
 };
@@ -74,6 +81,40 @@ jest.mock("@/lib/supabase/server", () => ({
   createServerClient: jest.fn(() => Promise.resolve(mockSupabase)),
 }));
 
+/**
+ * `auth.users` is not reachable over PostgREST, so identities come from the Admin
+ * API on a service-role client — see @/lib/auth/user-identity. Mocked explicitly
+ * rather than left to ambient env: the real factory throws without
+ * SUPABASE_SERVICE_ROLE_KEY, and `getActiveEditingSessions` catches, which would
+ * turn a missing variable into a silently empty presence list.
+ */
+const AUTH_USERS: Record<string, { email: string; name: string }> = {
+  user1: { email: "u1@example.com", name: "User One" },
+  user2: { email: "u2@example.com", name: "User Two" },
+};
+
+const mockGetUserById = jest.fn(async (userId: string) => {
+  const record = AUTH_USERS[userId];
+  return record
+    ? {
+        data: {
+          user: {
+            id: userId,
+            email: record.email,
+            user_metadata: { name: record.name },
+          },
+        },
+        error: null,
+      }
+    : { data: { user: null }, error: { message: "User not found" } };
+});
+
+jest.mock("@/lib/supabase/service", () => ({
+  createServiceRoleClient: jest.fn(() => ({
+    auth: { admin: { getUserById: mockGetUserById } },
+  })),
+}));
+
 describe("CollaborationPermissions", () => {
   let permissions: CollaborationPermissions;
 
@@ -81,6 +122,7 @@ describe("CollaborationPermissions", () => {
     jest.clearAllMocks();
     resultQueue = [];
     fromCalls.length = 0;
+    selectCalls.length = 0;
     permissions = new CollaborationPermissions();
   });
 
@@ -327,18 +369,88 @@ describe("CollaborationPermissions", () => {
   });
 
   describe("getActiveEditingSessions", () => {
-    it("returns the active sessions for a content element", async () => {
-      const mockSessions = [
-        { id: "session1", user_id: "user1", user: { email: "u1@example.com" } },
-        { id: "session2", user_id: "user2", user: { email: "u2@example.com" } },
-      ];
-
-      queueResults(ok(mockSessions));
+    it("returns the active sessions with their resolved identities", async () => {
+      queueResults(
+        ok([
+          { id: "session1", user_id: "user1" },
+          { id: "session2", user_id: "user2" },
+        ]),
+      );
 
       const sessions = await permissions.getActiveEditingSessions("content-id");
 
-      expect(sessions).toEqual(mockSessions);
       expect(fromCalls).toEqual(["content_editing_sessions"]);
+      expect(sessions).toEqual([
+        {
+          id: "session1",
+          user_id: "user1",
+          user: { email: "u1@example.com", name: "User One" },
+        },
+        {
+          id: "session2",
+          user_id: "user2",
+          user: { email: "u2@example.com", name: "User Two" },
+        },
+      ]);
+    });
+
+    it("does not ask PostgREST to embed auth.users", async () => {
+      // The sixth site of A-12. This select carried
+      // `user:auth.users!content_editing_sessions_user_id_fkey(...)`, which
+      // PostgREST answers with PGRST200 — so the handler's error branch ran on
+      // every call and presence was permanently empty. Asserted on the query
+      // rather than the result because the result of the broken version and the
+      // result of a genuinely idle element are both `[]`.
+      queueResults(ok([{ id: "session1", user_id: "user1" }]));
+
+      await permissions.getActiveEditingSessions("content-id");
+
+      expect(selectCalls).not.toEqual([]);
+      expect(
+        selectCalls.some((columns) => columns.includes("auth.users")),
+      ).toBe(false);
+    });
+
+    it("renders a session whose user no longer resolves rather than dropping it", async () => {
+      // Someone is holding the lock even if we cannot say who. Dropping the row
+      // would report the element as free to edit.
+      const errorLog = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      const warnLog = jest.spyOn(console, "warn").mockImplementation(() => {});
+      queueResults(ok([{ id: "session1", user_id: "deleted-user" }]));
+
+      const sessions = await permissions.getActiveEditingSessions("content-id");
+
+      expect(sessions).toEqual([
+        { id: "session1", user_id: "deleted-user", user: null },
+      ]);
+      // And the gap is recorded, not passed over.
+      expect(warnLog.mock.calls.flat().join(" ")).toContain("deleted-user");
+
+      errorLog.mockRestore();
+      warnLog.mockRestore();
+    });
+
+    it("logs at error level when the query fails, and still returns []", async () => {
+      // Presence is advisory, so `[]` is the right answer for the caller — a
+      // failed presence read must not break the editor around it. But the two
+      // cases the caller cannot distinguish ("nobody is editing" and "we could
+      // not tell") must be distinguishable in the logs, or this degrades in
+      // silence the way it did for the whole life of the embed.
+      const errorLog = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+      queueResults(notFound());
+
+      const sessions = await permissions.getActiveEditingSessions("content-id");
+
+      expect(sessions).toEqual([]);
+      expect(errorLog.mock.calls.flat().join(" ")).toContain(
+        "Error getting active editing sessions",
+      );
+
+      errorLog.mockRestore();
     });
   });
 });

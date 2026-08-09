@@ -1,24 +1,28 @@
 /**
- * A-11 (deletion half) — DELETE /api/sites/[siteId] destroys ownership first.
+ * A-11 (deletion half) — DELETE /api/sites/[siteId] used to destroy ownership
+ * first.
  *
- * src/app/api/sites/[siteId]/route.ts:47-71 deletes every `site_permissions`
- * row for the site, then deletes the `sites` row as a separate statement. If
- * the second one fails the first is already committed, and the two halves
- * disagree in the worst possible direction:
+ * The route deleted every `site_permissions` row for the site, then deleted the
+ * `sites` row as a separate statement. If the second one failed the first was
+ * already committed, and the two halves disagreed in the worst possible
+ * direction:
  *
- *   - the customer can no longer see the site (the `sites` SELECT policy
- *     authorises through `site_permissions`, which is now empty), so they can
+ *   - the customer could no longer see the site (the `sites` SELECT policy
+ *     authorises through `site_permissions`, which was now empty), so they could
  *     neither retry the delete nor edit it;
- *   - the widget keeps serving its content, because the widget authorises on
+ *   - the widget kept serving its content, because the widget authorises on
  *     the site token, not on permissions.
  *
- * The site is live on the public internet and nobody owns it.
+ * The site was live on the public internet and nobody owned it.
  *
- * Order matters here, not just atomicity: deleting `sites` first and letting
- * the FK cascade take the permissions would leave nothing behind on failure.
+ * Order is the fix, not atomicity: the route now deletes `sites` alone and lets
+ * `site_permissions.site_id`'s ON DELETE CASCADE take the rest, so a failure
+ * leaves every row where it was — the ownership row included.
  *
- * `test.failing` — these pass while the bug is present and start failing once
- * deletion is made atomic or reordered.
+ * Two of these were `test.failing` markers and are now enforced. They depended on
+ * 20260809130000_content_history_definer_and_delete_split.sql landing in the same
+ * branch: until it did, the single `sites` delete this file now requires could not
+ * succeed at all against a real database for any site holding content (A-35).
  */
 
 import { NextRequest } from "next/server";
@@ -41,8 +45,10 @@ const OWNER_ID = "user-123";
 class FakeDb {
   sites: SiteRow[] = [];
   sitePermissions: PermissionRow[] = [];
-  /** Simulates the second statement failing after the first has committed. */
+  /** Simulates the site delete failing. */
   failSiteDelete = false;
+  /** Every table the route issued a DELETE against, in order. */
+  deletes: string[] = [];
 }
 
 const PGRST116 = { code: "PGRST116", message: "No rows found" };
@@ -60,6 +66,8 @@ function matches(row: object, filters: QueryState["filters"]) {
 
 function runQuery(db: FakeDb, state: QueryState) {
   if (state.op === "delete") {
+    db.deletes.push(state.table);
+
     if (state.table === "sites") {
       if (db.failSiteDelete) {
         return {
@@ -71,7 +79,19 @@ function runQuery(db: FakeDb, state: QueryState) {
           },
         };
       }
-      db.sites = db.sites.filter((row) => !matches(row, state.filters));
+
+      // `site_permissions.site_id REFERENCES sites(id) ON DELETE CASCADE`
+      // (20250817000000_complete_database_setup.sql:55). The route relies on that
+      // cascade instead of issuing a second statement, so the double has to model
+      // it — otherwise the control case below would demand a delete the schema
+      // already performs, and the reordering this file is about could not be
+      // expressed at all.
+      const doomed = db.sites.filter((row) => matches(row, state.filters));
+      const doomedIds = new Set(doomed.map((row) => row.id));
+      db.sites = db.sites.filter((row) => !doomedIds.has(row.id));
+      db.sitePermissions = db.sitePermissions.filter(
+        (row) => !doomedIds.has(row.site_id),
+      );
       return { data: null, error: null };
     }
 
@@ -174,6 +194,7 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
       { site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" },
     ];
     db.failSiteDelete = false;
+    db.deletes = [];
     mockGetUser.mockResolvedValue({
       data: { user: { id: OWNER_ID } },
       error: null,
@@ -205,22 +226,19 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     expect(body.error).toBe("Failed to delete site");
   });
 
-  test.failing(
-    "keeps the caller's ownership row when the site delete fails",
-    async () => {
-      db.failSiteDelete = true;
+  it("keeps the caller's ownership row when the site delete fails", async () => {
+    db.failSiteDelete = true;
 
-      await deleteSite();
+    await deleteSite();
 
-      // The site is still there, so the permission that authorises it must be
-      // too — otherwise nobody can see, retry or manage a site that is still
-      // being served to the public.
-      expect(db.sites).toHaveLength(1);
-      expect(db.sitePermissions).toEqual([
-        { site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" },
-      ]);
-    },
-  );
+    // The site is still there, so the permission that authorises it must be
+    // too — otherwise nobody can see, retry or manage a site that is still
+    // being served to the public.
+    expect(db.sites).toHaveLength(1);
+    expect(db.sitePermissions).toEqual([
+      { site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" },
+    ]);
+  });
 
   // Guard for the retry case below: the 403 gate is real and reachable once
   // ownership is gone. That is correct after a *successful* delete; the case
@@ -235,7 +253,7 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     expect(body.error).toBe("Site not found or insufficient permissions");
   });
 
-  test.failing("lets the owner retry a failed deletion", async () => {
+  it("lets the owner retry a failed deletion", async () => {
     db.failSiteDelete = true;
     await deleteSite();
 
@@ -243,10 +261,24 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     db.failSiteDelete = false;
     const retry = await deleteSite();
 
-    // The permission check at :26-38 is the gate. With ownership already gone
-    // it answers 403 "Site not found or insufficient permissions", and the site
-    // row can never be removed by anyone.
+    // The permission check at :26-38 is the gate. While ownership was destroyed
+    // first it answered 403 "Site not found or insufficient permissions" here,
+    // and the site row could never be removed by anyone.
     expect(retry.status).toBe(200);
     expect(db.sites).toHaveLength(0);
+  });
+
+  // The reordering IS the fix, so pin the order itself and not only its
+  // consequences. A future change that reintroduces an explicit
+  // `site_permissions` delete before the `sites` delete would restore the defect
+  // while both cases above still passed, because a run in which nothing fails
+  // cannot tell the two orders apart.
+  it("deletes only sites, and leaves site_permissions to the cascade", async () => {
+    const response = await deleteSite();
+
+    expect(response.status).toBe(200);
+    // `site_permissions` is read once for the authorisation check at :26-31.
+    // The only DELETE the route may issue is the one against `sites`.
+    expect(db.deletes).toEqual(["sites"]);
   });
 });

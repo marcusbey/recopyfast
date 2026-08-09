@@ -149,6 +149,37 @@ export async function POST(request: NextRequest) {
 
     if (permissionError) {
       console.error("Error creating site permissions:", permissionError);
+
+      // Compensating delete. Without it the `sites` row survives the 500, and
+      // it is not merely untidy: `domain` is UNIQUE and the `sites` SELECT
+      // policy authorises *through* `site_permissions`, which was just proven
+      // empty. So the row is invisible to everybody, deletable by nobody, and
+      // every later attempt to register the same domain is answered "Domain
+      // already registered" — a transient failure locks the customer out of
+      // their own domain permanently.
+      //
+      // This is a compensation, not a transaction: PostgREST cannot span two
+      // statements, so there is a window in which the site exists without an
+      // owner. Narrowing it is what is available here; closing it entirely
+      // needs both writes inside one RPC.
+      const { error: rollbackError } = await serviceClient
+        .from("sites")
+        .delete()
+        .eq("id", site.id);
+
+      if (rollbackError) {
+        // Loudly, and with the site id: this is the one path that can still
+        // strand an unowned row, and the id is the only way to find it again.
+        // The response stays 500 either way — the registration failed, and
+        // whether the cleanup also failed is not the caller's problem.
+        console.error(
+          `Failed to roll back orphaned site ${site.id} (${normalizedDomain}) ` +
+            `after permission write failed — it is now invisible to every user ` +
+            `and blocks re-registration of that domain:`,
+          rollbackError,
+        );
+      }
+
       return NextResponse.json(
         { error: "Failed to assign site permissions" },
         { status: 500 },

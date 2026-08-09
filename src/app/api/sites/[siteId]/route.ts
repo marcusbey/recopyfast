@@ -44,21 +44,32 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Delete site permissions first (foreign key constraint)
-    const { error: deletePermissionsError } = await serviceClient
-      .from("site_permissions")
-      .delete()
-      .eq("site_id", siteId);
-
-    if (deletePermissionsError) {
-      console.error("Error deleting site permissions:", deletePermissionsError);
-      return NextResponse.json(
-        { error: "Failed to delete site permissions" },
-        { status: 500 },
-      );
-    }
-
-    // Delete the site
+    // Delete the site and let the schema cascade the rest.
+    //
+    // Order is the whole fix here, not just atomicity. This used to delete every
+    // `site_permissions` row first and the `sites` row second, as two statements
+    // PostgREST cannot wrap in a transaction. When the second one failed, the
+    // first was already committed and the two halves disagreed in the worst
+    // possible direction: the caller could no longer see the site — the `sites`
+    // SELECT policy authorises *through* `site_permissions` — so they could
+    // neither retry this delete nor edit it, while the widget kept serving its
+    // content, because the widget authorises on the site token and not on
+    // permissions. The site stayed live on the public internet owned by nobody,
+    // and the permission check above answered 403 on every retry.
+    //
+    // Deleting `sites` first inverts that. `site_permissions.site_id`,
+    // `content_elements.site_id` and `content_history.content_element_id` are all
+    // ON DELETE CASCADE (20250817000000_complete_database_setup.sql:55, :28, :44),
+    // so one statement removes the whole tree and a failure leaves every row
+    // exactly where it was — including the permission row that lets the caller
+    // try again.
+    //
+    // That cascade only actually completes because
+    // 20260809130000_content_history_definer_and_delete_split.sql moved the
+    // content-history DELETE branch onto a BEFORE DELETE trigger. While it was
+    // AFTER DELETE its history insert violated the very FK that cascades here, so
+    // this statement failed for any site holding content — which is every site a
+    // widget was ever installed on (A-35).
     const { error: deleteSiteError } = await serviceClient
       .from("sites")
       .delete()

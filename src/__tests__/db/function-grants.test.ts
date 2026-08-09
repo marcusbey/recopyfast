@@ -143,11 +143,13 @@ const EXECUTE_GRANTS_SQL = `
 describeDb(
   "SECURITY DEFINER function grants in public (A-3, A-5)",
   ({ query }) => {
-    // Guard for the `test.failing` below. `test.failing` passes on ANY throw,
-    // including a connection that never opened or SQL that does not parse — so
-    // without this, a mistake in this file would read as a confirmed defect.
-    // This runs the same query and asserts only things that are true whether or
-    // not A-3/A-5 are fixed.
+    // Guard for the assertion below. It was written when that one was a
+    // `test.failing`, which passes on ANY throw — a connection that never opened
+    // or SQL that does not parse would have read as a confirmed defect. The
+    // assertion is enforced now, so the failure mode has inverted: an empty result
+    // set from a query that silently stopped matching would read as *clean*. Kept,
+    // and still load-bearing, because it asserts only things that are true whether
+    // or not A-3/A-5 are fixed.
     test("guard: the grant query runs and returns well-formed rows", async () => {
       const { rows: definers } = await query<{ count: string }>(`
         SELECT count(*)::text AS count
@@ -167,28 +169,45 @@ describeDb(
       }
     });
 
-    test.failing(
-      "anon and PUBLIC hold no EXECUTE, and only the allowlisted RLS predicates are executable by authenticated",
-      async () => {
-        const { rows } = await query<GrantRow>(EXECUTE_GRANTS_SQL);
+    // CLOSED, and enforced from here on.
+    //
+    // 20260809120000_lock_down_definer_functions.sql (A-3/A-5) and
+    // 20260809130000_content_history_definer_and_delete_split.sql together revoke
+    // anon and PUBLIC from every SECURITY DEFINER function in `public`, and
+    // `authenticated` from all but the three allowlisted predicates.
+    //
+    // Verified by execution, not by argument: both migrations applied to a local
+    // Supabase (Postgres 15) and this query then returned exactly three rows —
+    // `user_has_site_permission(uuid, text[])`, `user_has_team_role(uuid, text[])`
+    // and `user_is_team_member(uuid)`, each to `authenticated` and nothing else.
+    // Fifteen SECURITY DEFINER functions exist in `public`; none grants EXECUTE to
+    // `anon` or to PUBLIC.
+    //
+    // This is now the regression guard the audit asked for, and it is deliberately
+    // list-wide: the sixteenth such function fails here by default, because
+    // Supabase's default privileges would grant `anon` and `authenticated` EXECUTE
+    // on it at creation. 20260809120000 also strips those defaults, so a new
+    // function has to be granted deliberately — but that ALTER DEFAULT PRIVILEGES
+    // is per-granting-role, so this assertion is what catches the case it misses.
+    test("anon and PUBLIC hold no EXECUTE, and only the allowlisted RLS predicates are executable by authenticated", async () => {
+      const { rows } = await query<GrantRow>(EXECUTE_GRANTS_SQL);
 
-        const offenders = rows.filter((row) => {
-          // Rule 1: `anon` and PUBLIC are refused for every function, the
-          // allowlisted RLS predicates included.
-          if (NEVER_ALLOWED_GRANTEES.has(row.grantee)) return true;
-          // Rule 2: the query selects no grantee but `authenticated` here, and
-          // only the exact allowlisted identities may hold it. An overload of
-          // an allowlisted name is a different identity, so it offends.
-          return !AUTHENTICATED_ALLOWED_IDENTITIES.has(row.identity);
-        });
+      const offenders = rows.filter((row) => {
+        // Rule 1: `anon` and PUBLIC are refused for every function, the
+        // allowlisted RLS predicates included.
+        if (NEVER_ALLOWED_GRANTEES.has(row.grantee)) return true;
+        // Rule 2: the query selects no grantee but `authenticated` here, and
+        // only the exact allowlisted identities may hold it. An overload of
+        // an allowlisted name is a different identity, so it offends.
+        return !AUTHENTICATED_ALLOWED_IDENTITIES.has(row.identity);
+      });
 
-        // Rendered as `identity -> grantee` so the failure output names every
-        // grant that has to be revoked, in the form the REVOKE is written in.
-        expect(
-          offenders.map((row) => `${row.identity} -> ${row.grantee}`),
-        ).toEqual([]);
-      },
-    );
+      // Rendered as `identity -> grantee` so the failure output names every
+      // grant that has to be revoked, in the form the REVOKE is written in.
+      expect(
+        offenders.map((row) => `${row.identity} -> ${row.grantee}`),
+      ).toEqual([]);
+    });
 
     test("the RLS-predicate allowlist still matches the catalogue", async () => {
       const { rows } = await query<{ identity: string }>(

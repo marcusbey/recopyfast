@@ -35,15 +35,31 @@
  *
  * THE INVARIANT ASSERTED HERE HOLDS UNDER EITHER BRANCH:
  * a collaborator must not be able to remove the creator's row, and a site must
- * never be left with zero admins. Under branch B the database enforces it by
- * accident; under branch A nothing does. Neither branch has a last-admin guard
- * or a creator guard in application code, which is what the route-level tests
- * below pin down — those hold no matter which migration is live.
+ * never be left with zero admins.
  *
- * Assertions are on whether the DELETE was issued, not on the status code. The
- * audit notes the HTTP path currently 404s under branch A only because a
- * pre-read runs under the caller's client and the SELECT policy hides the row —
- * an accident of a read policy, absent on the PostgREST path.
+ * WHAT IS FIXED, AND WHAT IS STILL OPEN
+ * -------------------------------------
+ * The creator's row is now protected in application code: the DELETE handler
+ * refuses any target whose `granted_by IS NULL`. That guard arrived with A-9,
+ * and not by coincidence — A-9 moved this route's `site_permissions` queries to
+ * the service-role client so that collaborator invites and revokes work under
+ * either policy set, which also removed the only thing that had been stopping
+ * this attack on the HTTP path. Under branch B the pre-read used to run as the
+ * caller and the SELECT-for-self policy hid the row, so the request 404'd; that
+ * was an accident of a read policy, it never applied to the direct PostgREST
+ * path, and it is gone now. The protection had to become deliberate.
+ *
+ * STILL OPEN: there is no last-admin count. Revoking the last *non-creator*
+ * admin still leaves a site with one admin only because the creator's row cannot
+ * be removed — nothing counts admins before revoking one, and the marker below
+ * ("counts the remaining admins before revoking one") stays red for that reason.
+ *
+ * ALSO STILL OPEN, and outside application code entirely: under branch A the
+ * site-scoped `FOR DELETE` policy authorises the same attack straight against
+ * PostgREST with the collaborator's own JWT, where no handler runs and no guard
+ * applies. The migration-level test below is the oracle for that.
+ *
+ * Assertions are on whether the DELETE was issued, not on the status code.
  */
 
 import fs from "fs";
@@ -53,13 +69,12 @@ import { NextRequest } from "next/server";
 
 import { DELETE } from "@/app/api/sites/[siteId]/share/route";
 import { createServerClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import { CollaborationPermissions } from "@/lib/collaboration/permissions";
 
 jest.mock("@/lib/supabase/server", () => ({ createServerClient: jest.fn() }));
 jest.mock("@/lib/supabase/service", () => ({
-  createServiceRoleClient: jest.fn(() => ({
-    auth: { admin: { getUserById: jest.fn() } },
-  })),
+  createServiceRoleClient: jest.fn(),
 }));
 jest.mock("@/lib/collaboration/permissions", () => ({
   CollaborationPermissions: jest.fn(),
@@ -71,6 +86,10 @@ jest.mock("@/lib/collaboration/permissions", () => ({
 const mockCreateServerClient = createServerClient as jest.MockedFunction<
   typeof createServerClient
 >;
+const mockCreateServiceRoleClient =
+  createServiceRoleClient as jest.MockedFunction<
+    typeof createServiceRoleClient
+  >;
 const MockPermissions = CollaborationPermissions as jest.MockedClass<
   typeof CollaborationPermissions
 >;
@@ -123,7 +142,17 @@ interface Op {
 }
 
 /**
- * A user-scoped client over a fixed `site_permissions` table.
+ * A client over a fixed `site_permissions` table, wired as BOTH the caller's
+ * client and the service-role client.
+ *
+ * One shared `ops` log on purpose. This file's assertions are about whether the
+ * route issued a DELETE against a given row — see the header — and that question
+ * has the same answer and the same consequence whichever client carried it.
+ * Since A-9 the route reads and writes `site_permissions` through the
+ * service-role client, so a fixture that only instrumented the caller's client
+ * recorded nothing at all: every "no delete was issued" assertion passed, and the
+ * finding read as fixed while the route was in fact crashing on an undefined
+ * `.from`. A false green on a privilege-escalation test is worse than a red one.
  *
  * `single()` answers the route's targeted read; an unfiltered resolution
  * answers the "how many admins does this site have" query a fixed route would
@@ -188,8 +217,22 @@ function makeClient(rows: Array<Record<string, unknown>>, callerId: string) {
       },
       from,
     } as unknown as Awaited<ReturnType<typeof createServerClient>>,
+    serviceClient: {
+      auth: { admin: { getUserById: jest.fn() } },
+      from,
+    } as unknown as ReturnType<typeof createServiceRoleClient>,
     ops,
   };
+}
+
+/** Install both clients for one fixture and hand back the shared op log. */
+function install(rows: Array<Record<string, unknown>>, callerId: string) {
+  const { client, serviceClient, ops } = makeClient(rows, callerId);
+
+  mockCreateServerClient.mockResolvedValue(client);
+  mockCreateServiceRoleClient.mockReturnValue(serviceClient);
+
+  return { ops };
 }
 
 /** Did the route actually issue a DELETE against this permission row? */
@@ -237,15 +280,28 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
   it("revokes an ordinary collaborator", async () => {
     // The control. If this did not delete, every assertion below would pass
     // for the trivial reason that the route deletes nothing at all.
-    const { client, ops } = makeClient(
+    const { ops } = install(
       [CREATOR_ROW, COLLABORATOR_ADMIN_ROW, VIEWER_ROW],
       COLLABORATOR_ID,
     );
-    mockCreateServerClient.mockResolvedValue(client);
 
     await DELETE(deleteRequest(VIEWER_ROW.id), context);
 
     expect(deletedRowIds(ops)).toEqual([VIEWER_ROW.id]);
+  });
+
+  it("answers 403 rather than 404 when the target is the creator's row", async () => {
+    // The distinction matters. A 404 was the old, accidental behaviour — the
+    // caller's client could not see the row, so the route could not tell "no
+    // such row" from "not that one". The guard knows the difference, and saying
+    // so is what tells an owner their site is intact rather than missing.
+    install([CREATOR_ROW, COLLABORATOR_ADMIN_ROW], COLLABORATOR_ID);
+
+    const response = await DELETE(deleteRequest(CREATOR_ROW.id), context);
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toMatch(/creator/i);
   });
 
   /**
@@ -262,11 +318,10 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
     ["a collaborator targeting the creator's row", COLLABORATOR_ID],
     ["the owner targeting their own row", OWNER_ID],
   ])("reaches the target-row read for %s", async (_label, callerId) => {
-    const { client, ops } = makeClient(
+    const { ops } = install(
       [CREATOR_ROW, COLLABORATOR_ADMIN_ROW, VIEWER_ROW],
       callerId,
     );
-    mockCreateServerClient.mockResolvedValue(client);
 
     await DELETE(deleteRequest(CREATOR_ROW.id), context);
 
@@ -282,31 +337,26 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
     expect(targetRead).toBeDefined();
   });
 
-  test.failing(
-    "does not let a collaborator delete the creator's row",
-    async () => {
-      const { client, ops } = makeClient(
-        [CREATOR_ROW, COLLABORATOR_ADMIN_ROW],
-        COLLABORATOR_ID,
-      );
-      mockCreateServerClient.mockResolvedValue(client);
+  it("does not let a collaborator delete the creator's row", async () => {
+    const { ops } = install(
+      [CREATOR_ROW, COLLABORATOR_ADMIN_ROW],
+      COLLABORATOR_ID,
+    );
 
-      await DELETE(deleteRequest(CREATOR_ROW.id), context);
+    await DELETE(deleteRequest(CREATOR_ROW.id), context);
 
-      // The creator's row must survive. Asserted on the write that was issued,
-      // because under branch A the same call over PostgREST removes the row for
-      // real and the owner has no way back — there is no owner column to recover
-      // from and no admin surface to re-grant through.
-      expect(deletedRowIds(ops)).toEqual([]);
-    },
-  );
+    // The creator's row must survive. Asserted on the write that was issued,
+    // because under branch A the same call over PostgREST removes the row for
+    // real and the owner has no way back — there is no owner column to recover
+    // from and no admin surface to re-grant through.
+    expect(deletedRowIds(ops)).toEqual([]);
+  });
 
-  test.failing("does not let a site be left with no admin", async () => {
+  it("does not let a site be left with no admin", async () => {
     // The creator is the only admin. Removing them leaves a site nobody can
     // administer, which no caller — collaborator or owner — should be able to
     // reach by accident.
-    const { client, ops } = makeClient([CREATOR_ROW, VIEWER_ROW], OWNER_ID);
-    mockCreateServerClient.mockResolvedValue(client);
+    const { ops } = install([CREATOR_ROW, VIEWER_ROW], OWNER_ID);
 
     await DELETE(deleteRequest(CREATOR_ROW.id), context);
 
@@ -317,11 +367,10 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
     // Guard for the assertion below, which asks whether any query filtered on
     // `permission`. An empty op log — from a handler that never ran — answers
     // "no" just as convincingly as a handler that ran and never counted.
-    const { client, ops } = makeClient(
+    const { ops } = install(
       [CREATOR_ROW, COLLABORATOR_ADMIN_ROW],
       COLLABORATOR_ID,
     );
-    mockCreateServerClient.mockResolvedValue(client);
 
     await DELETE(deleteRequest(CREATOR_ROW.id), context);
 
@@ -336,11 +385,10 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
     // The mechanism behind both failures above: the route reads exactly one
     // row — the target — and never asks how many admins the site has left.
     // Nothing in `site_permissions` is consulted beyond `id` and `site_id`.
-    const { client, ops } = makeClient(
+    const { ops } = install(
       [CREATOR_ROW, COLLABORATOR_ADMIN_ROW],
       COLLABORATOR_ID,
     );
-    mockCreateServerClient.mockResolvedValue(client);
 
     await DELETE(deleteRequest(CREATOR_ROW.id), context);
 
