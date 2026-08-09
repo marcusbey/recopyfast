@@ -436,8 +436,14 @@ export async function revokePurchasedCredits(
  * increase for every role EXCEPT service_role, precisely so that a customer
  * cannot refill their own wallet while a webhook can reverse a clawback.
  *
- * Capped at what the pack originally held: whatever survived plus whatever was
- * revoked can never exceed the purchase.
+ * `credits` is the balance to return TO, not an amount to add — revocation
+ * zeroes the row, so the balance that was taken away and the balance to end up
+ * with are the same number. Applying it as a floor rather than a delta is what
+ * makes a replayed `charge.dispute.closed` a no-op instead of a second helping;
+ * were revocation ever to become partial, this would have to become additive and
+ * grow a way to mark the record spent.
+ *
+ * Never lowers the balance, and never exceeds what the pack originally held.
  */
 export async function restorePurchasedCredits(
   stripePaymentIntentId: string,
@@ -456,7 +462,7 @@ export async function restorePurchasedCredits(
 
   const target = Math.min(
     purchase.credits_purchased,
-    purchase.credits_remaining + credits,
+    Math.max(purchase.credits_remaining, credits),
   );
 
   if (target <= purchase.credits_remaining) {

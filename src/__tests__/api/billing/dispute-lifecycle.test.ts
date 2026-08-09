@@ -44,6 +44,15 @@ type RowsResult = { data: Row[] | null; error: FakeError | null };
 
 let db: Record<string, Row[]> = {};
 
+/**
+ * UNIQUE constraints the code relies on. `billing_events.stripe_event_id` is
+ * what makes each dispute's credit-revocation record write-once, so the fake has
+ * to raise on a second insert the way Postgres does.
+ */
+const UNIQUE_COLUMN: Record<string, string> = {
+  billing_events: "stripe_event_id",
+};
+
 /** supabase-js-shaped client over `db`. See stripe-webhook-ordering.test.ts. */
 function createFakeClient() {
   const from = (table: string) => {
@@ -57,9 +66,26 @@ function createFakeClient() {
 
     const run = (): RowsResult => {
       switch (operation) {
-        case "insert":
+        case "insert": {
+          const unique = UNIQUE_COLUMN[table];
+          const clashes =
+            unique !== undefined &&
+            values[unique] !== undefined &&
+            rows().some((row) => row[unique] === values[unique]);
+
+          if (clashes) {
+            return {
+              data: null,
+              error: {
+                code: "23505",
+                message: `duplicate key value violates unique constraint "${table}_${unique}_key"`,
+              },
+            };
+          }
+
           db[table] = [...rows(), { ...values }];
           return { data: [{ ...values }], error: null };
+        }
 
         case "update": {
           const hits = matched();
@@ -146,6 +172,11 @@ jest.mock("@/lib/supabase/server", () => ({
 
 import { POST } from "@/app/api/webhooks/stripe/route";
 import { restoreEntitlementForPayment } from "@/lib/billing/entitlements";
+import {
+  readRevokedCredits,
+  recordCreditRevocation,
+} from "@/lib/billing/credit-revocations";
+import { restorePurchasedCredits } from "@/lib/credits/system";
 
 interface WebhookResponse {
   status: number;
@@ -173,13 +204,18 @@ async function deliver(event: unknown): Promise<WebhookResponse> {
   return POST(request as never) as unknown as WebhookResponse;
 }
 
-function disputeEvent(eventId: string, type: string, status: string): unknown {
+function disputeEvent(
+  eventId: string,
+  type: string,
+  status: string,
+  disputeId: string = "dp_1",
+): unknown {
   return {
     id: eventId,
     type,
     data: {
       object: {
-        id: "dp_1",
+        id: disputeId,
         payment_intent: PAYMENT_INTENT,
         charge: CHARGE_ID,
         amount: LIFETIME_PRICE_CENTS,
@@ -574,6 +610,139 @@ describe("A-8 / A-20: money coming back out", () => {
       );
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  /**
+   * A payment can be disputed more than once, and the clawbacks differ.
+   *
+   * The record of "how much this took away" used to be keyed per PAYMENT with
+   * insert-ignore-duplicates, so a second dispute silently reused the first
+   * one's number. `credits_purchased` does not cap that away — the stale number
+   * IS what the pack held — so winning twice handed back credits that had been
+   * spent in between. Keyed per dispute now.
+   */
+  describe("a payment disputed twice", () => {
+    /** What `credit_usage` would leave behind: the customer spent 600. */
+    function spendCredits(remaining: number): void {
+      db.credit_purchases = (db.credit_purchases ?? []).map((row) => ({
+        ...row,
+        credits_remaining: remaining,
+      }));
+    }
+
+    it("gives back only what the second dispute took, not what the first did", async () => {
+      // Dispute #1 takes the whole 1,000 and is won.
+      await deliver(
+        disputeEvent(
+          "evt_created_1",
+          "charge.dispute.created",
+          "needs_response",
+          "dp_1",
+        ),
+      );
+      await deliver(
+        disputeEvent("evt_closed_1", "charge.dispute.closed", "won", "dp_1"),
+      );
+      expect(wallet()?.credits_remaining).toBe(1000);
+
+      // The customer spends 600 of what came back.
+      spendCredits(400);
+
+      // Dispute #2 can only take the 400 that is left.
+      await deliver(
+        disputeEvent(
+          "evt_created_2",
+          "charge.dispute.created",
+          "needs_response",
+          "dp_2",
+        ),
+      );
+      expect(wallet()?.credits_remaining).toBe(0);
+
+      await deliver(
+        disputeEvent("evt_closed_2", "charge.dispute.closed", "won", "dp_2"),
+      );
+
+      // 400, not the 1,000 dispute #1 recorded: the 600 was already spent.
+      expect(wallet()?.credits_remaining).toBe(400);
+    });
+
+    it("keeps a record per dispute rather than one per payment", async () => {
+      await deliver(
+        disputeEvent(
+          "evt_created_1",
+          "charge.dispute.created",
+          "needs_response",
+          "dp_1",
+        ),
+      );
+      await deliver(
+        disputeEvent("evt_closed_1", "charge.dispute.closed", "won", "dp_1"),
+      );
+      spendCredits(400);
+      await deliver(
+        disputeEvent(
+          "evt_created_2",
+          "charge.dispute.created",
+          "needs_response",
+          "dp_2",
+        ),
+      );
+
+      await expect(readRevokedCredits("dp_1")).resolves.toBe(1000);
+      await expect(readRevokedCredits("dp_2")).resolves.toBe(400);
+    });
+  });
+
+  describe("the credit-revocation record", () => {
+    it("survives a second delivery of the same dispute without changing", async () => {
+      // The first delivery's number is the truthful one: by the time a retry
+      // runs, the wallet it measured has already been zeroed.
+      await recordCreditRevocation({
+        stripeDisputeId: "dp_1",
+        stripePaymentIntentId: PAYMENT_INTENT,
+        credits: 1000,
+        userId: "user-1",
+      });
+
+      // A redelivery reaching the insert hits the UNIQUE constraint, which is
+      // tolerated rather than thrown — and must not lower the recorded amount.
+      await expect(
+        recordCreditRevocation({
+          stripeDisputeId: "dp_1",
+          stripePaymentIntentId: PAYMENT_INTENT,
+          credits: 1,
+          userId: "user-1",
+        }),
+      ).resolves.toBeUndefined();
+
+      await expect(readRevokedCredits("dp_1")).resolves.toBe(1000);
+      expect(
+        db.billing_events?.filter(
+          (row) => row.stripe_event_id === "credits_revoked:dp_1",
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("restores to a balance rather than adding to one, so a replay is a no-op", async () => {
+      // As revocation leaves it.
+      db.credit_purchases = (db.credit_purchases ?? []).map((row) => ({
+        ...row,
+        credits_remaining: 0,
+      }));
+
+      await expect(
+        restorePurchasedCredits(PAYMENT_INTENT, 400),
+      ).resolves.toEqual({ restored: 400 });
+      expect(wallet()?.credits_remaining).toBe(400);
+
+      // A `charge.dispute.closed` processed twice must not pay out twice. Were
+      // this additive, the balance would climb to 800.
+      await expect(
+        restorePurchasedCredits(PAYMENT_INTENT, 400),
+      ).resolves.toEqual({ restored: 0 });
+      expect(wallet()?.credits_remaining).toBe(400);
     });
   });
 

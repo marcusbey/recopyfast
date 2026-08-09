@@ -231,7 +231,7 @@ export async function POST(req: NextRequest) {
         break;
 
       case "charge.dispute.created":
-        await handleMoneyReturned(event.data.object, "dispute");
+        await handleDisputeCreated(event.data.object);
         break;
 
       case "charge.dispute.closed":
@@ -906,21 +906,6 @@ async function handleMoneyReturned(
     return;
   }
 
-  // A dispute can still be won, and winning it has to put the wallet back — so
-  // the balance about to be clawed back is recorded before it is zeroed, while
-  // the row can still say what it was. A refund is final and needs no record.
-  if (reason === "dispute") {
-    const wallet = await getPurchasedCreditGrant(paymentIntentId);
-    if (wallet && wallet.credits_remaining > 0) {
-      await recordCreditRevocation(
-        paymentIntentId,
-        wallet.credits_remaining,
-        reason,
-        wallet.user_id,
-      );
-    }
-  }
-
   const [entitlement, credits] = await Promise.all([
     revokeEntitlementForPayment(paymentIntentId, reason),
     revokePurchasedCredits(paymentIntentId),
@@ -930,6 +915,35 @@ async function handleMoneyReturned(
     `${reason} on ${paymentIntentId}: entitlement revoked=${entitlement.revoked}, ` +
       `credits revoked=${credits.revoked}`,
   );
+}
+
+/**
+ * A chargeback was filed.
+ *
+ * Revoking here is provisional — the bank holds the money from this moment — and
+ * a dispute we go on to win has to give the wallet back. The balance about to be
+ * clawed back is therefore recorded against THIS dispute before it is zeroed,
+ * while the row can still say what it was. A refund is final and needs no such
+ * record, which is why this lives here and not in `handleMoneyReturned`.
+ */
+async function handleDisputeCreated(dispute: Stripe.Dispute) {
+  const paymentIntentId = idOf(dispute.payment_intent);
+
+  if (paymentIntentId) {
+    const wallet = await getPurchasedCreditGrant(paymentIntentId);
+
+    if (wallet && wallet.credits_remaining > 0) {
+      await recordCreditRevocation({
+        stripeDisputeId: dispute.id,
+        stripePaymentIntentId: paymentIntentId,
+        credits: wallet.credits_remaining,
+        userId: wallet.user_id,
+      });
+    }
+  }
+
+  // Reports the missing payment intent, if that is the case.
+  await handleMoneyReturned(dispute, "dispute");
 }
 
 /**
@@ -986,7 +1000,9 @@ async function handleDisputeClosed(dispute: Stripe.Dispute) {
   }
 
   const entitlement = await restoreEntitlementForPayment(paymentIntentId);
-  const revokedCredits = await readRevokedCredits(paymentIntentId);
+  // This dispute's own clawback, not whatever an earlier dispute on the same
+  // payment took: the customer may have spent some of what that one gave back.
+  const revokedCredits = await readRevokedCredits(dispute.id);
   const credits = await restorePurchasedCredits(
     paymentIntentId,
     revokedCredits,
