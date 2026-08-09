@@ -46,7 +46,7 @@ Two details worth knowing:
 
 | File                                  | Finding                                                                      | Marker         |
 | ------------------------------------- | ---------------------------------------------------------------------------- | -------------- |
-| `function-grants.test.ts`             | A-3, A-5 — SECURITY DEFINER functions executable with the published anon key | `test.failing` |
+| `function-grants.test.ts`             | A-3, A-5 — SECURITY DEFINER functions executable with the published anon key | `test`         |
 | `site-delete-cascade.test.ts`         | A-35, A-13 — a site holding content could not be deleted at all              | `test`         |
 | `rls-policies.test.ts`                | P2 permissive-policy class                                                   | `test`         |
 | `content-version-i18n.test.ts`        | A-15 — snapshot/restore collapse language and variant                        | `test.failing` |
@@ -57,12 +57,17 @@ Two details worth knowing:
 fixed**, which is the signal to delete the marker. See "Test conventions for
 this backlog" in `docs/QA-PRODUCTION-AUDIT-2026-08-07.md`.
 
-`function-grants.test.ts` is a known exception to read carefully:
-`20260809120000_lock_down_definer_functions.sql` is intended to close A-3/A-5, and
-that was checked by parsing every migration rather than by running this suite (no
-Docker daemon was available). Its marker is therefore still in place. **Expect it
-to fail on the first run against a real database — that is the fix landing, not a
-regression.** Convert it to a plain `test` at that point.
+`function-grants.test.ts` has been through that cycle and records it.
+`20260809120000_lock_down_definer_functions.sql` closed A-3/A-5; the marker was
+first left in place because no Docker daemon was available, then run against a
+local Supabase, where it reported
+
+```text
+Failing test passed even though it was supposed to fail.
+```
+
+which is precisely the signal above. It is a plain `test` now, and the query
+returns exactly the three allowlisted RLS predicates.
 
 ## Every `test.failing` has a `guard:` sibling
 
@@ -75,7 +80,7 @@ true whether or not the defect is fixed.
 Measured, not assumed. Breaking the seed in `content-version-i18n.test.ts` so it
 writes a nonexistent column gives:
 
-```
+```text
 ● … › guard: the four seeded rows exist and a version is written        FAILED
 ● … › guard: restore overwrites the clobbered rows with snapshot values FAILED
 Tests: 2 failed, 2 passed, 4 total
@@ -96,7 +101,7 @@ deleted row into `content_history`, whose foreign key requires the
 `content_elements` row to still exist. So every delete of a content element
 raised 23503, and the `ON DELETE CASCADE` from `sites` inherited it (A-35):
 
-```
+```text
 ERROR:  insert or update on table "content_history" violates foreign key
         constraint "content_history_content_element_id_fkey"
 CONTEXT: PL/pgSQL function log_content_change() line 10
