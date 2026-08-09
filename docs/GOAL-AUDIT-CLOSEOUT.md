@@ -77,7 +77,25 @@ Webhook branch: A-6/A-7/A-8/A-20/A-22 all edit src/app/api/webhooks/stripe/route
 
 Each phase = one branch/PR, review + full gates (`tsc`, lint, jest, build) before merge. Marker deltas are the acceptance evidence.
 
-### Phase 1 — P0 money + data corruption, code-only (no external deps) — flips 24 markers
+### Phase 1 — P0 money + data corruption, code-only (no external deps) — ✅ DONE (PR #13, merged 2026-08-09, `5195f73`)
+
+All seven findings closed. Marker count 85 → 57. Six bot-review rounds on the PR
+surfaced and closed five additional real defects in/around the new code:
+- restore-after-refund: a dispute settled by refunding restored the entitlement
+  to a refunded customer (both orderings guarded; refund predicate shared with A-20)
+- per-dispute revocation records + floor-based credit restore (replay-safe)
+- redelivered `dispute.created` after a win re-revoked permanently; `closed(lost)`
+  now applies revocation itself; dispute events enter the webhook seen-list
+- one oversized element (base64 `data:` img src) permanently blocked a page's
+  whole discovery → per-element skips, reported and capped
+- `isLocalhostHost` prefix match handed both dev bypasses to
+  `127.0.0.1.attacker.example`; CR/LF element ids were accepted and could forge
+  log lines; refused preflights could fall back to a wildcard CORS grant
+New follow-ups filed: widget should stop reporting `data:` srcs as content
+(cached-widget rollout); staging editor path still sanitizes like pre-A-1
+discovery (already Phase 3). Deflaked the slow-Supabase session test.
+
+Original scope (for reference):
 | Finding | Fix (short) | Effort | Markers |
 |---|---|---|---|
 | A-6 | service-role client in update/cancel/reactivateSubscription + keep `.eq(user_id)` predicate; Stripe call after ownership check. Do NOT add authenticated UPDATE policy. | S | 3 |
