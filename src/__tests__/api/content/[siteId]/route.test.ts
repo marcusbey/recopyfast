@@ -433,7 +433,11 @@ describe("/api/content/[siteId]", () => {
       );
     });
 
-    it("should return 403 when origin not allowed", async () => {
+    it("should withhold the grant, not the answer, when origin not allowed", async () => {
+      // The status is uniform on purpose: varying it made the preflight an
+      // existence oracle for site ids. What stops the caller is the missing
+      // grant — a 204 whose Access-Control-Allow-Origin is not theirs is one the
+      // browser will not act on, so the real request is never sent.
       mockAuthorizeSiteOrigin.mockRejectedValueOnce(
         new Error("Origin not allowed"),
       );
@@ -448,10 +452,11 @@ describe("/api/content/[siteId]", () => {
       const response = await OPTIONS(request, {
         params: Promise.resolve({ siteId: "site-123" }),
       });
-      const data = await response.json();
 
-      expect(response.status).toBe(403);
-      expect(data.error).toBe("Origin not allowed");
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
+        "https://malicious.com",
+      );
     });
   });
 });

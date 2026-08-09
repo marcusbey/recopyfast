@@ -238,27 +238,31 @@ export async function authorizeSiteOrigin(
   const allowedDomain = normalizeDomain(site.domain);
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
 
-  // The preflight has to agree with the request it precedes.
+  // What this decides is narrower than it looks: whether the caller's origin is
+  // granted, never what the preflight answers. The OPTIONS handler returns 204 to
+  // everyone and varies only the `Access-Control-Allow-Origin` it echoes, so a
+  // throw here withholds the grant rather than producing a distinguishable status
+  // — see the comment on OPTIONS in api/content/[siteId]/route.ts.
   //
+  // The preflight still has to agree with the request it precedes.
   // `authorizeSiteRequest` exempts the localhost demo token on a non-production
   // build, but the browser sends an OPTIONS before any cross-origin GET or POST,
-  // and this function — which answers it — has no token to inspect. Refusing here
-  // blocked the very request that exemption exists to allow: the local test page
-  // in docs/PROJECT_REPORT.md:435 never got past its preflight, so its fetch was
-  // never sent, and the exemption on the other side could not be reached.
+  // and this function — which answers it — has no token to inspect. Refusing the
+  // grant here blocked the very request that exemption exists to allow: the local
+  // test page in docs/PROJECT_REPORT.md:435 never got past its preflight, so its
+  // fetch was never sent and the exemption on the other side was unreachable.
   //
-  // Development only, and it grants nothing by itself. A 204 preflight carries no
-  // content; the GET or POST behind it still needs a site token, and any token but
-  // the demo one still needs the exact registered domain. In production this
-  // branch is dead and the domain pin is absolute.
+  // Development only, and it admits nothing by itself: the GET or POST behind the
+  // preflight still needs a site token, and any token but the demo one still needs
+  // the exact registered domain. In production this branch is dead and the domain
+  // pin is absolute.
   const isLocalDevPreflight =
     process.env.NODE_ENV !== "production" && isLocalhostHost(requestOriginHost);
 
   // Otherwise unconditional, for the same reason as authorizeSiteRequest above: a
   // caller that sends no parseable Origin has not proved it is on the registered
-  // domain, and this function is what stands between an unknown caller and the
-  // knowledge that a site id exists. A browser preflight always sends Origin, so
-  // a missing one is never a preflight. (A-2)
+  // domain. A browser preflight always sends Origin, so a missing one is never a
+  // preflight. (A-2)
   if (!isLocalDevPreflight && requestOriginHost !== allowedDomain) {
     throw new Error("Origin not allowed");
   }

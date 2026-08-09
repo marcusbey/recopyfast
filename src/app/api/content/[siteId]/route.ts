@@ -465,44 +465,52 @@ export async function OPTIONS(
   request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> },
 ) {
+  // A preflight is not an authorization decision, so it does not get to be an
+  // information channel either. The status is now the same for every caller;
+  // only the grant differs.
+  //
+  // It used to answer 403 whenever `authorizeSiteOrigin` threw — and that throws
+  // both "Origin not allowed" AND "Site not found". Uniformly refusing hid the
+  // difference, but once a localhost origin was admitted on dev builds, 204
+  // versus 403 told any page on a developer's machine whether a given site id
+  // existed. Nothing about a preflight needs the answer to vary.
+  //
+  // Withholding the *grant* is what actually stops a wrong origin, and it always
+  // was: a 204 whose `Access-Control-Allow-Origin` is not the caller's own is a
+  // preflight the browser refuses to act on, so the GET or POST behind it is
+  // never sent. Same outcome the 403 produced, minus the oracle. And admitting
+  // one grants nothing on its own — a preflight carries no content, and the real
+  // request still has to pass the whole token-and-origin check.
+  let siteId = "unknown";
+  let allowedOrigin: string | null = null;
+
   try {
-    const { siteId } = await params;
-    const { allowedOrigin } = await authorizeSiteOrigin(
+    ({ siteId } = await params);
+    const granted = await authorizeSiteOrigin(
       siteId,
       request.headers.get("origin"),
       request.headers.get("referer"),
     );
-
-    // `new NextResponse(null, …)`, not `NextResponse.json({}, …)`. 204 means
-    // No Content and the Response constructor rejects a body with it, so the
-    // json form threw on every single call — the handler never reached its
-    // return and answered 403 unconditionally, from the catch below.
-    //
-    // The preflight for this route has therefore never succeeded. Since the
-    // widget's content fetch is cross-origin and carries headers that force a
-    // preflight, the browser blocked it before it was ever sent: published
-    // copy could not reach a visitor on any real customer site. That is the
-    // defect 47e414e set out to fix, still live, because the fixture that
-    // verified it did not cross an origin.
-    return withCors(
-      new NextResponse(null, { status: 204 }),
-      allowedOrigin ?? null,
-    );
+    allowedOrigin = granted.allowedOrigin ?? null;
   } catch (error) {
-    // The client still gets an undifferentiated 403 — telling an unknown caller
-    // whether a site id exists is exactly what this check is for. But the
-    // server must not lose the reason: `authorizeSiteOrigin` throws both
-    // "Origin not allowed" and "Site not found", and a database failure throws
-    // something else again. Collapsing all three into one silent 403 meant a
-    // blocked preflight was indistinguishable from a missing row, and the
-    // visitor content fetch that depends on this preflight simply never
-    // happened, with nothing anywhere saying why.
+    // The answer no longer carries the reason, so the log has to. "Origin not
+    // allowed", "Site not found" and a database failure are three very different
+    // things to be looking at when a customer's widget has gone quiet.
     console.error(
-      `[content] preflight refused for site ${await params
-        .then((p) => p.siteId)
-        .catch(() => "unknown")}:`,
+      `[content] preflight not granted for site ${siteId}:`,
       error instanceof Error ? error.message : error,
     );
-    return NextResponse.json({ error: "Origin not allowed" }, { status: 403 });
   }
+
+  // `new NextResponse(null, …)`, not `NextResponse.json({}, …)`. 204 means No
+  // Content and the Response constructor rejects a body with it, so the json form
+  // threw on every single call — the handler never reached its return and answered
+  // 403 from the catch instead.
+  //
+  // The preflight for this route therefore never succeeded. Since the widget's
+  // content fetch is cross-origin and carries headers that force a preflight, the
+  // browser blocked it before it was ever sent: published copy could not reach a
+  // visitor on any real customer site. That is the defect 47e414e set out to fix,
+  // still live, because the fixture that verified it did not cross an origin.
+  return withCors(new NextResponse(null, { status: 204 }), allowedOrigin);
 }

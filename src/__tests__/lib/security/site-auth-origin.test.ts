@@ -453,9 +453,16 @@ describe("the element id an attacker has to guess", () => {
  * `authorizeSiteRequest` has to be mirrored, or the request it exempts is blocked
  * before it is sent (docs/PROJECT_REPORT.md:435).
  *
- * The exemption is development-only and localhost-only. The absent-Origin case
- * stays refused: that is A-2 itself, and a caller with no Origin is exactly the
- * one this check exists to stop.
+ * WHAT A REFUSED PREFLIGHT LOOKS LIKE. Every caller gets 204. Refusing means
+ * withholding the `Access-Control-Allow-Origin` grant, not varying the status: a
+ * 204 that does not name the caller's origin is one the browser will not act on,
+ * so the request behind it is never sent. The status used to vary, and since
+ * `authorizeSiteOrigin` throws "Site not found" as well as "Origin not allowed",
+ * that made the preflight an existence oracle for site ids.
+ *
+ * The exemption is development-only and localhost-only. The absent-Origin case is
+ * still refused the grant: that is A-2 itself, and a caller with no Origin is
+ * exactly the one this check exists to stop.
  */
 describe("OPTIONS /api/content/[siteId] preflight", () => {
   const originalNodeEnv = process.env.NODE_ENV;
@@ -505,25 +512,115 @@ describe("OPTIONS /api/content/[siteId] preflight", () => {
     },
   );
 
-  it("refuses the same localhost preflight in production", async () => {
+  it("withholds the grant from the same localhost preflight in production", async () => {
     Reflect.set(process.env, "NODE_ENV", "production");
 
     const response = await preflight("http://localhost:8080");
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
+      "http://localhost:8080",
+    );
   });
 
-  it("refuses an origin that is neither local nor the registered domain", async () => {
+  it("withholds the grant from an origin that is neither local nor registered", async () => {
     const response = await preflight("https://attacker.example.net");
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
+      "https://attacker.example.net",
+    );
   });
 
-  it("refuses a preflight that sends no Origin at all", async () => {
+  it("withholds the grant from a preflight that sends no Origin at all", async () => {
     // Not a browser, therefore not a preflight. The development exemption is for
     // localhost, not for the absence of a header — that absence is A-2.
     const response = await preflight(null);
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(204);
+    expect(serviceClient.from).toHaveBeenCalledWith("sites");
+  });
+
+  /**
+   * The oracle Devin flagged, pinned shut — and the part of it that cannot close,
+   * written down rather than papered over.
+   *
+   * `authorizeSiteOrigin` throws both for a site that does not exist and for an
+   * origin that is not allowed. The handler used to turn both into 403, which was
+   * uniform until the localhost exemption turned one of them into a 204. The status
+   * is now 204 for everyone, so it carries nothing.
+   *
+   * What cannot be uniform is the GRANT, because a CORS grant *is* "this origin
+   * matches the site's registered domain" — answering that is the header's whole
+   * job. So a caller who can already name the registered domain (or is on localhost
+   * against a dev build) can still tell a known site id from an unknown one by
+   * whether their origin comes back echoed. In a browser that requires already
+   * being on the registered domain, where the site token is readable from the
+   * page's own markup; outside a browser it confirms "this id belongs to that
+   * domain" for someone who had to know both to ask. Every caller who cannot state
+   * the registered domain — which is the attacker this check exists for — gets a
+   * byte-identical answer, asserted below.
+   */
+  describe("does not tell a caller whether a site id exists", () => {
+    function withMissingSite() {
+      serviceClient.single.mockResolvedValue({
+        data: null,
+        error: { message: "No rows returned" },
+      });
+    }
+
+    it.each([
+      ["a wrong origin", "https://attacker.example.net"],
+      ["no origin at all", null],
+    ])(
+      "answers a known and an unknown site id identically, given %s",
+      async (_label, origin) => {
+        const known = await preflight(origin);
+        const knownAnswer = {
+          status: known.status,
+          allowOrigin: known.headers.get("Access-Control-Allow-Origin"),
+          vary: known.headers.get("Vary"),
+        };
+
+        withMissingSite();
+        const unknown = await preflight(origin);
+
+        expect({
+          status: unknown.status,
+          allowOrigin: unknown.headers.get("Access-Control-Allow-Origin"),
+          vary: unknown.headers.get("Vary"),
+        }).toEqual(knownAnswer);
+      },
+    );
+
+    it.each([
+      ["the registered domain", `https://${REGISTERED_DOMAIN}`],
+      ["a localhost demo origin", "http://localhost:8080"],
+      ["a wrong origin", "https://attacker.example.net"],
+      ["no origin at all", null],
+    ])(
+      "answers 204 for a site id that does not exist, given %s",
+      async (_label, origin) => {
+        // The status is the channel that closed: it is the same for a missing row,
+        // a mismatched origin and a granted one.
+        withMissingSite();
+
+        const response = await preflight(origin);
+
+        expect(response.status).toBe(204);
+      },
+    );
+
+    it("never echoes an origin for a site id that does not exist", async () => {
+      // The grant is not the leak in the other direction: an unknown site id grants
+      // nobody, not even a caller naming the registered domain.
+      withMissingSite();
+
+      const response = await preflight(`https://${REGISTERED_DOMAIN}`);
+
+      expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
+        `https://${REGISTERED_DOMAIN}`,
+      );
+    });
   });
 });
