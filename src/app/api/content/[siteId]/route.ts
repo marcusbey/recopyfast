@@ -23,23 +23,63 @@ interface ContentElementRow {
   metadata: { type?: string };
 }
 
-type DiscoveryRows =
-  | { ok: true; rows: ContentElementRow[] }
-  | { ok: false; error: string };
+/** One element that could not be stored, and why. */
+interface SkippedElement {
+  elementId: string;
+  reason: string;
+}
 
 /**
- * Turn a reported content map into rows, or refuse the whole map.
+ * How many skips a response will list.
+ *
+ * A page has tens of elements; a caller sending junk can name thousands, and
+ * echoing every reason back turns a refusal into an amplifier. The count is
+ * always exact even when the list is cut.
+ */
+const MAX_REPORTED_SKIPS = 50;
+
+/** Longest element id a report will echo, for the same reason. */
+const MAX_ECHOED_ID_LENGTH = 64;
+
+type DiscoveryRows =
+  | { ok: true; rows: ContentElementRow[]; skipped: SkippedElement[] }
+  | { ok: false; error: string };
+
+function idExcerpt(elementId: string): string {
+  return elementId.length > MAX_ECHOED_ID_LENGTH
+    ? `${elementId.slice(0, MAX_ECHOED_ID_LENGTH)}...`
+    : elementId;
+}
+
+/**
+ * Turn a reported content map into rows, skipping the entries that cannot be
+ * stored and naming them.
  *
  * The customer's text is stored exactly as the widget read it off their page.
  * It is not markup and no consumer treats it as markup, so it is not sanitized
  * as markup — see `@/lib/security/discovered-text` for why that mattered, and for
- * what every field is checked against instead (A-1). Nothing here reaches the
+ * what every field is checked against instead (A-1). Nothing reaches the
  * service-role upsert unvalidated, including the element id, which is part of the
  * upsert's conflict key.
  *
- * A map is all-or-nothing: writing the elements that happened to validate and
- * dropping the rest is the silent partial failure this route was already guilty
- * of, one layer up.
+ * WHY ONE BAD ELEMENT DOES NOT SINK THE MAP. The widget reports an `<img>` by its
+ * `src` (recopyfast.src.js:2362) and only skips images under 48px (:2400-2404), so
+ * a visible inline `data:` URI arrives as one enormous "text" value. Refusing the
+ * whole map for it meant a single base64 image blocked every heading and paragraph
+ * on that page from ever being discovered — permanently, because the widget claims
+ * its report before sending and only releases the claim on a network error, so
+ * every later visitor re-sent the same map and got the same refusal. That is worse
+ * than the truncation this fix replaced: truncation at least landed the rest.
+ *
+ * Cap-exempting such a value would be worse again: content is copied into
+ * `original_content`, `current_content` AND `published_content`, and then served to
+ * every visitor on every page load, so a 100 KB data URI is 300 KB of row and 100 KB
+ * on the wire, forever. The element is skipped instead — it is simply not editable —
+ * and the skip is reported rather than swallowed, which is the whole point of the
+ * audit this fix belongs to.
+ *
+ * A malformed map is still refused whole: null, an array or a scalar is not a
+ * partially-valid content map, it is a caller that is not the widget.
  */
 function buildDiscoveryRows(
   siteId: string,
@@ -58,18 +98,19 @@ function buildDiscoveryRows(
   }
 
   const rows: ContentElementRow[] = [];
+  const skipped: SkippedElement[] = [];
 
   for (const [elementId, data] of Object.entries(contentMap)) {
-    // Reported without echoing the key back: an id can itself be the malformed
-    // part, and a refusal must not reflect an unbounded string to the caller.
     const id = validateElementId(elementId);
     if (!id.ok) {
-      return { ok: false, error: id.error };
+      skipped.push({ elementId: idExcerpt(elementId), reason: id.error });
+      continue;
     }
 
     const element = validateDiscoveredElement(data);
     if (!element.ok) {
-      return { ok: false, error: `Element ${id.value}: ${element.error}` };
+      skipped.push({ elementId: id.value, reason: element.error });
+      continue;
     }
 
     rows.push({
@@ -85,7 +126,27 @@ function buildDiscoveryRows(
     });
   }
 
-  return { ok: true, rows };
+  return { ok: true, rows, skipped };
+}
+
+/**
+ * The answer to a discovery report.
+ *
+ * `{ success: true }` when everything landed — the shape this route has always
+ * returned, so nothing that reads it has to learn a new one for the ordinary case.
+ * Skips are additive, and counted separately from the list because the list is
+ * capped.
+ */
+function discoveryResult(skipped: SkippedElement[]) {
+  if (skipped.length === 0) {
+    return { success: true };
+  }
+
+  return {
+    success: true,
+    skippedCount: skipped.length,
+    skipped: skipped.slice(0, MAX_REPORTED_SKIPS),
+  };
 }
 
 function extractToken(request: NextRequest) {
@@ -293,24 +354,49 @@ export async function POST(
       );
     }
 
-    // Insert newly discovered elements only. Existing rows may already carry
-    // published edits, so content discovery must not overwrite published_content.
-    const { error } = await supabase
-      .from("content_elements")
-      .upsert(discovered.rows, {
-        onConflict: "site_id,element_id,language,variant",
-        ignoreDuplicates: true,
-      });
-
-    if (error) {
-      console.error("Error upserting content:", error);
-      return withCors(
-        NextResponse.json({ error: "Failed to save content" }, { status: 500 }),
-        allowedOrigin,
+    if (discovered.skipped.length > 0) {
+      // The widget sends this report fire-and-forget and never reads the body
+      // (recopyfast.src.js:2924-2950), so the log is where a skipped element is
+      // visible to us. Bounded for the same reason the response list is.
+      console.warn(
+        `[content] site ${siteId}: skipped ${discovered.skipped.length} element(s) during discovery:`,
+        discovered.skipped
+          .slice(0, MAX_REPORTED_SKIPS)
+          .map((skip) => `${skip.elementId} (${skip.reason})`)
+          .join("; "),
       );
     }
 
-    return withCors(NextResponse.json({ success: true }), allowedOrigin);
+    // Insert newly discovered elements only. Existing rows may already carry
+    // published edits, so content discovery must not overwrite published_content.
+    //
+    // Guarded on there being something to write: a map whose every entry was
+    // skipped is not a reason to spend a service-role round trip on an empty
+    // upsert.
+    if (discovered.rows.length > 0) {
+      const { error } = await supabase
+        .from("content_elements")
+        .upsert(discovered.rows, {
+          onConflict: "site_id,element_id,language,variant",
+          ignoreDuplicates: true,
+        });
+
+      if (error) {
+        console.error("Error upserting content:", error);
+        return withCors(
+          NextResponse.json(
+            { error: "Failed to save content" },
+            { status: 500 },
+          ),
+          allowedOrigin,
+        );
+      }
+    }
+
+    return withCors(
+      NextResponse.json(discoveryResult(discovered.skipped)),
+      allowedOrigin,
+    );
   } catch (error) {
     console.error("Error in content save:", error);
     return NextResponse.json(

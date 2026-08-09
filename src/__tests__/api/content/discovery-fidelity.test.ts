@@ -141,6 +141,37 @@ async function postContentMap(contentMap: ContentMap): Promise<StoredRow[]> {
   return storedRows;
 }
 
+interface DiscoveryBody {
+  success?: boolean;
+  error?: string;
+  skippedCount?: number;
+  skipped?: ReadonlyArray<{ elementId: string; reason: string }>;
+}
+
+/**
+ * POST a map the route must accept, and hand back what it said about the entries
+ * it could not store.
+ */
+async function postAndReport(contentMap: unknown): Promise<DiscoveryBody> {
+  const response = await post(contentMap);
+
+  expect(response.status).toBe(200);
+
+  return response.json();
+}
+
+function skipFor(body: DiscoveryBody, elementId: string) {
+  const skip = (body.skipped ?? []).find(
+    (candidate) => candidate.elementId === elementId,
+  );
+  if (!skip) {
+    throw new Error(
+      `no skip was reported for ${elementId}; body was ${JSON.stringify(body)}`,
+    );
+  }
+  return skip;
+}
+
 function storedFor(rows: StoredRow[], elementId: string): StoredRow {
   const row = rows.find((candidate) => candidate.element_id === elementId);
   if (!row) {
@@ -153,6 +184,9 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
+    // The route warns about every skipped element, which is deliberate — see the
+    // skip cases below — and is not something this suite needs to read off stderr.
+    jest.spyOn(console, "warn").mockImplementation(() => {});
 
     (
       createServiceRoleClient as jest.MockedFunction<
@@ -198,11 +232,11 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
   // proof that the real content path runs is that it still refuses what it must.
   // If someone stubs it out, this fails first and says why.
   it("runs the repository's real validator, not an identity stub", async () => {
-    const response = await post({
+    const body = await postAndReport({
       "rcf-probe": { selector: "p", content: 42, type: "text" },
     });
 
-    expect(response.status).toBe(400);
+    expect(skipFor(body, "rcf-probe").reason).toBe("content must be a string");
     expect(serviceClient.upsert).not.toHaveBeenCalled();
   });
 
@@ -356,11 +390,11 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
     expect(stored).toBe(content);
   });
 
-  // The length limit that replaced truncation. It refuses rather than repairs:
-  // a truncated string is indistinguishable from copy the customer wrote, and
-  // the write is permanent.
-  it("refuses text past the storage limit instead of cutting it", async () => {
-    const response = await post({
+  // The length limit that replaced truncation. It refuses the element rather than
+  // repairing it: a truncated string is indistinguishable from copy the customer
+  // wrote, and the write is permanent.
+  it("skips text past the storage limit instead of cutting it", async () => {
+    const body = await postAndReport({
       "rcf-oversize": {
         selector: "p",
         content: "A".repeat(MAX_DISCOVERED_TEXT_LENGTH + 1),
@@ -368,8 +402,10 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       },
     });
 
-    expect(response.status).toBe(400);
-    expect((await response.json()).error).toContain("rcf-oversize");
+    expect(skipFor(body, "rcf-oversize").reason).toContain(
+      String(MAX_DISCOVERED_TEXT_LENGTH),
+    );
+    // Nothing truncated was stored in its place, which is the point.
     expect(serviceClient.upsert).not.toHaveBeenCalled();
   });
 
@@ -383,20 +419,92 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
     expect(storedFor(rows, "rcf-at-limit").original_content).toBe(content);
   });
 
-  it("refuses the whole map when one element is unstorable", async () => {
-    // All-or-nothing on purpose: persisting the elements that validated and
-    // dropping the rest is the silent partial write this defect was made of.
-    const response = await post({
-      "rcf-good": { selector: "h1", content: "Fine", type: "text" },
-      "rcf-bad": {
-        selector: "p",
-        content: "A".repeat(MAX_DISCOVERED_TEXT_LENGTH + 1),
-        type: "text",
-      },
+  /**
+   * One unstorable element must not take the page down with it.
+   *
+   * This replaced an all-or-nothing refusal, which was worse than the truncation
+   * it was meant to fix. The widget reports an `<img>` by its `src`
+   * (recopyfast.src.js:2362) and only skips images under 48px, so a visible inline
+   * `data:` URI arrives as one enormous "text" value — and refusing the whole map
+   * for it meant every heading and paragraph on that page was never discovered.
+   * Permanently: the widget claims its report before sending and releases the claim
+   * only on a network error, so each later visitor re-sent the same map and got the
+   * same refusal, leaving the site stuck with nothing recorded at all.
+   */
+  describe("a map with one unstorable element among good ones", () => {
+    const OVERSIZED_DATA_URI = `data:image/png;base64,${"iVBORw0KGgo".repeat(2000)}`;
+
+    function pageWithInlineImage() {
+      return {
+        "rcf-headline": {
+          selector: "h1",
+          content: "Setup in <2 minutes",
+          type: "h1",
+        },
+        "rcf-body": {
+          selector: "p",
+          content: "Ship content edits without a deploy.",
+          type: "p",
+        },
+        "rcf-hero-image": {
+          selector: "img.hero",
+          content: OVERSIZED_DATA_URI,
+          type: "img",
+        },
+      };
+    }
+
+    it("is longer than the cap, so this fixture exercises the real branch", () => {
+      expect(OVERSIZED_DATA_URI.length).toBeGreaterThan(
+        MAX_DISCOVERED_TEXT_LENGTH,
+      );
     });
 
-    expect(response.status).toBe(400);
-    expect(serviceClient.upsert).not.toHaveBeenCalled();
+    it("stores every element that could be stored", async () => {
+      const rows = await postContentMap(pageWithInlineImage());
+
+      expect(storedFor(rows, "rcf-headline").original_content).toBe(
+        "Setup in <2 minutes",
+      );
+      expect(storedFor(rows, "rcf-body").original_content).toBe(
+        "Ship content edits without a deploy.",
+      );
+      expect(rows).toHaveLength(2);
+    });
+
+    it("does not store the oversized element in any form", async () => {
+      const rows = await postContentMap(pageWithInlineImage());
+
+      expect(rows.some((row) => row.element_id === "rcf-hero-image")).toBe(
+        false,
+      );
+      // Not truncated into a broken src either — a cut data URI is not an image.
+      expect(
+        rows.some((row) => row.original_content.includes("iVBORw0KGgo")),
+      ).toBe(false);
+    });
+
+    it("reports the skip rather than swallowing it", async () => {
+      // Silent partial success is the failure class this audit exists to kill, so
+      // the caller is told which element did not make it and why.
+      const body = await postAndReport(pageWithInlineImage());
+
+      expect(body.success).toBe(true);
+      expect(body.skippedCount).toBe(1);
+      expect(skipFor(body, "rcf-hero-image").reason).toContain(
+        String(MAX_DISCOVERED_TEXT_LENGTH),
+      );
+    });
+
+    it("says nothing about skips when everything landed", async () => {
+      // The ordinary answer keeps the shape it always had: an empty `skipped` key
+      // on every successful discovery would make the exceptional case invisible.
+      const response = await post({
+        "rcf-headline": { selector: "h1", content: "All good", type: "h1" },
+      });
+
+      expect(await response.json()).toEqual({ success: true });
+    });
   });
 
   /**
@@ -424,10 +532,12 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
     it.each([
       ["a string", "just the copy"],
       ["null", null],
-    ])("refuses %s as an entry", async (_label, entry) => {
-      const response = await post({ "rcf-headline": entry });
+    ])("skips %s as an entry", async (_label, entry) => {
+      const body = await postAndReport({ "rcf-headline": entry });
 
-      expect(response.status).toBe(400);
+      expect(skipFor(body, "rcf-headline").reason).toBe(
+        "entry must be an object",
+      );
       expect(serviceClient.upsert).not.toHaveBeenCalled();
     });
 
@@ -440,27 +550,54 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
         { selector: "h1", content: "copy", type: "h1 onclick=x" },
       ],
       ["a non-string type", { selector: "h1", content: "copy", type: {} }],
-    ])("refuses %s, naming the element", async (_label, entry) => {
-      const response = await post({ "rcf-headline": entry });
+    ])("skips %s, naming the element", async (_label, entry) => {
+      const body = await postAndReport({ "rcf-headline": entry });
 
-      expect(response.status).toBe(400);
-      expect((await response.json()).error).toContain("rcf-headline");
+      expect(skipFor(body, "rcf-headline").reason).toEqual(expect.any(String));
       expect(serviceClient.upsert).not.toHaveBeenCalled();
     });
 
-    it("refuses an over-long element id without echoing it back", async () => {
+    it("keeps a good sibling when one entry is malformed", async () => {
+      const body = await postAndReport({
+        "rcf-good": { selector: "h1", content: "Fine", type: "h1" },
+        "rcf-bad": { selector: 42, content: "copy", type: "h1" },
+      });
+
+      expect(storedFor(storedRows, "rcf-good").original_content).toBe("Fine");
+      expect(body.skippedCount).toBe(1);
+      expect(skipFor(body, "rcf-bad").reason).toBe(
+        "selector must be a non-empty string",
+      );
+    });
+
+    it("skips an over-long element id without echoing it back", async () => {
       const elementId = "a".repeat(300);
 
-      const response = await post({
+      const body = await postAndReport({
         [elementId]: { selector: "h1", content: "copy", type: "h1" },
       });
-      const body = await response.json();
 
-      expect(response.status).toBe(400);
+      expect(body.skippedCount).toBe(1);
       // Reflecting an unbounded caller-supplied key into the response body is how
-      // a refusal becomes an amplifier.
-      expect(String(body.error)).not.toContain(elementId);
+      // a report becomes an amplifier, so the id is excerpted.
+      expect(JSON.stringify(body)).not.toContain(elementId);
+      expect(body.skipped?.[0].reason).toContain("element id exceeds");
       expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
+    it("caps how many skips it lists, but not the count it reports", async () => {
+      // A caller can name more junk entries than are worth echoing back.
+      const map = Object.fromEntries(
+        Array.from({ length: 60 }, (_unused, index) => [
+          `rcf-junk-${index}`,
+          "not an object",
+        ]),
+      );
+
+      const body = await postAndReport(map);
+
+      expect(body.skippedCount).toBe(60);
+      expect(body.skipped).toHaveLength(50);
     });
 
     it("accepts a report that carries no type at all", async () => {
