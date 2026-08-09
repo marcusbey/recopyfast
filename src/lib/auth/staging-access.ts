@@ -224,25 +224,42 @@ export class StagingAccessManager {
         };
       }
 
+      // A caller that supplies no fingerprint is refused rather than exempted:
+      // "I did not bring evidence" must not be a stronger position than
+      // bringing the wrong evidence.
+      //
+      // Refused HERE, explicitly, rather than by substituting an empty
+      // fingerprint and letting the comparison below fail. The empty-hash
+      // default was indistinguishable from a real mismatch — it logged
+      // `device_mismatch`, which reads as a forwarded link — and fifteen Edit
+      // Board call sites sat on it for every request while the logs said the
+      // control was working as designed. A missing argument is a bug in the
+      // caller, so it is reported as one, at error level.
+      if (!device) {
+        console.error(
+          `[staging-access] validateStagingAccess called without a device fingerprint (site ${siteId}) — refusing. Pass readStagingDeviceFingerprint(request).`,
+        );
+        return {
+          valid: true,
+          verified: false,
+          permissions: [],
+          email: access.email,
+          expiresAt: new Date(access.expires_at),
+          requiresVerification: true,
+        };
+      }
+
       // The flag alone is not enough — it is permanent, and the token it hangs
       // off travels in a URL. Re-check that this request comes from the device
       // that actually entered the code, recently enough to still be trusted.
       // Without this, forwarding the URL forwards the authorisation. See the
       // module header of src/lib/auth/staging-device.ts.
-      //
-      // A caller that supplies no fingerprint is refused rather than exempted:
-      // "I did not bring evidence" must not be a stronger position than
-      // bringing the wrong evidence.
       const binding = checkStagingDeviceBinding(
         {
           userAgentHash: access.verified_user_agent_hash ?? null,
           verifiedAt: access.verified_at ?? null,
         },
-        device ?? {
-          userAgentHash: "",
-          originHash: "",
-          ipPrefix: null,
-        },
+        device,
       );
 
       if (!binding.ok) {

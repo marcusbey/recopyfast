@@ -299,20 +299,17 @@ describe("A-9 — POST /api/sites/:siteId/share", () => {
     expect(store.sites).toHaveLength(1);
   });
 
-  test.failing(
-    "records the collaborator when the user client may not write (branch B)",
-    async () => {
-      // The invariant. Adding a teammate is a primary journey; it must not
-      // depend on which of two migrations reached production.
-      const { grantedRow } = await share("B");
+  it("records the collaborator when the user client may not write (branch B)", async () => {
+    // The invariant. Adding a teammate is a primary journey; it must not
+    // depend on which of two migrations reached production.
+    const { grantedRow } = await share("B");
 
-      expect(grantedRow).toMatchObject({
-        site_id: SITE_ID,
-        user_id: INVITEE_ID,
-        permission: "admin",
-      });
-    },
-  );
+    expect(grantedRow).toMatchObject({
+      site_id: SITE_ID,
+      user_id: INVITEE_ID,
+      permission: "admin",
+    });
+  });
 
   it("records exactly one site_permissions write under branch A", async () => {
     // Guard for the assertion below, which pins both the count and the client.
@@ -325,24 +322,21 @@ describe("A-9 — POST /api/sites/:siteId/share", () => {
     ).toHaveLength(1);
   });
 
-  test.failing(
-    "writes the permission row with a client both branches permit",
-    async () => {
-      // The mechanism behind the failure above, stated so a fix is unambiguous:
-      // `service_role` is granted FOR ALL in both `20260731008000` and
-      // `20260804130000`, so it is the only client under which this write is
-      // policy-independent.
-      const { writes } = await share("A");
+  it("writes the permission row with a client both branches permit", async () => {
+    // The mechanism behind the failure above, stated so a fix is unambiguous:
+    // `service_role` is granted FOR ALL in both `20260731008000` and
+    // `20260804130000`, so it is the only client under which this write is
+    // policy-independent.
+    const { writes } = await share("A");
 
-      const permissionWrites = writes.filter(
-        (write) => write.table === "site_permissions",
-      );
+    const permissionWrites = writes.filter(
+      (write) => write.table === "site_permissions",
+    );
 
-      expect(permissionWrites).toEqual([
-        { table: "site_permissions", by: "service" },
-      ]);
-    },
-  );
+    expect(permissionWrites).toEqual([
+      { table: "site_permissions", by: "service" },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -399,23 +393,20 @@ describe("A-9 — the INSERT path is policy-independent", () => {
     ).toContain("ON site_permissions");
   });
 
-  test.failing(
-    "either the route uses service_role, or the applied migration grants the insert",
-    () => {
-      // A disjunction on purpose: both fixes are legitimate, and pinning one
-      // would make this test fail on a correct implementation of the other.
-      //
-      // `20260804130000` is the migration recorded as applied to production;
-      // `20260731008000` is the one whose status is unknown (B-3). If the route
-      // keeps writing with the user client, the applied migration has to carry
-      // the policy — and it does not.
-      const routeUsesServiceRole = /service/i.test(
-        insertClientIdentifier() ?? "",
-      );
+  it("either the route uses service_role, or the applied migration grants the insert", () => {
+    // A disjunction on purpose: both fixes are legitimate, and pinning one
+    // would make this test fail on a correct implementation of the other.
+    //
+    // `20260804130000` is the migration recorded as applied to production;
+    // `20260731008000` is the one whose status is unknown (B-3). If the route
+    // keeps writing with the user client, the applied migration has to carry
+    // the policy — and it does not.
+    const routeUsesServiceRole = /service/i.test(
+      insertClientIdentifier() ?? "",
+    );
 
-      expect(routeUsesServiceRole || appliedMigrationGrantsInsert()).toBe(true);
-    },
-  );
+    expect(routeUsesServiceRole || appliedMigrationGrantsInsert()).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

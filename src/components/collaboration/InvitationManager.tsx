@@ -82,8 +82,13 @@ export function InvitationManager() {
             team: {
               name: n.data.team_name || "Unknown Team",
             },
+            // Only the address is available here — a notification carries no
+            // display name. Falling back to the address is what
+            // `resolveUserIdentity` itself does for a user with no name in
+            // their metadata, so the two agree.
             inviter: {
               email: n.data.inviter_email || "Unknown",
+              name: n.data.inviter_email || "Unknown",
             },
           }),
         );

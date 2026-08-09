@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
+import { attachUserIdentities } from "@/lib/auth/user-identity";
 
 interface RouteContext {
   params: Promise<{ teamId: string }>;
@@ -39,18 +40,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100);
     const offset = parseInt(searchParams.get("offset") || "0");
 
-    // Get team activity
+    // Get team activity. Identities are attached afterwards rather than embedded:
+    // PostgREST cannot resolve `auth.users`, so the embed this select used to
+    // carry failed the whole query. `user_id` is nullable here (system-generated
+    // entries have none), which `attachUserIdentities` renders as `user: null`.
     const { data: activities, error } = await supabase
       .from("team_activity_log")
-      .select(
-        `
-        *,
-        user:auth.users!team_activity_log_user_id_fkey(
-          email,
-          raw_user_meta_data
-        )
-      `,
-      )
+      .select("*")
       .eq("team_id", teamId)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -63,7 +59,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json({ activities });
+    const activitiesWithUsers = await attachUserIdentities(
+      activities ?? [],
+      "user_id",
+      "user",
+    );
+
+    return NextResponse.json({ activities: activitiesWithUsers });
   } catch (error) {
     console.error("Error in team activity GET:", error);
     return NextResponse.json(

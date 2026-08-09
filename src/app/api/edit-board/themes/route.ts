@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
+import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -56,6 +57,7 @@ export async function GET(request: NextRequest) {
     const validation = await StagingAccessManager.validateStagingAccess(
       token,
       siteId,
+      readStagingDeviceFingerprint(request),
     );
     if (!validation.valid || !validation.verified) {
       return withCors(
@@ -150,6 +152,7 @@ export async function POST(request: NextRequest) {
     const validation = await StagingAccessManager.validateStagingAccess(
       token,
       siteId,
+      readStagingDeviceFingerprint(request),
     );
     if (!validation.valid || !validation.verified) {
       return withCors(
@@ -251,6 +254,7 @@ export async function PUT(request: NextRequest) {
     const validation = await StagingAccessManager.validateStagingAccess(
       token,
       siteId,
+      readStagingDeviceFingerprint(request),
     );
     if (!validation.valid || !validation.verified) {
       return withCors(
@@ -368,6 +372,7 @@ export async function DELETE(request: NextRequest) {
     const validation = await StagingAccessManager.validateStagingAccess(
       token,
       siteId,
+      readStagingDeviceFingerprint(request),
     );
     if (!validation.valid || !validation.verified) {
       return withCors(

@@ -276,14 +276,11 @@ describe("A-12 Teams handlers embed auth.users over PostgREST", () => {
     expect(collectRouteFiles(TEAMS_API_DIR).length).toBeGreaterThanOrEqual(4);
   });
 
-  test.failing(
-    "no handler under src/app/api/teams references auth.users",
-    () => {
-      // `auth` is not in PostgREST's exposed schemas. Every reference below is
-      // a query that can only fail; the fix is auth.admin.getUserById.
-      expect(findAuthUsersReferences()).toEqual([]);
-    },
-  );
+  it("no handler under src/app/api/teams references auth.users", () => {
+    // `auth` is not in PostgREST's exposed schemas. Every reference below is
+    // a query that can only fail; the fix is auth.admin.getUserById.
+    expect(findAuthUsersReferences()).toEqual([]);
+  });
 
   // Guard for the handler case below. The membership check at :24-29 uses a
   // select that does NOT name auth.users, so it resolves through the same
@@ -302,17 +299,14 @@ describe("A-12 Teams handlers embed auth.users over PostgREST", () => {
     expect(body.error).toBe("Not a member of this team");
   });
 
-  test.failing(
-    "GET /api/teams/[teamId]/members returns members with their email",
-    async () => {
-      const response = await getMembers();
-      const body = await response.json();
+  it("GET /api/teams/[teamId]/members returns members with their email", async () => {
+    const response = await getMembers();
+    const body = await response.json();
 
-      expect(response.status).toBe(200);
-      expect(body.members).toHaveLength(2);
-      expect(
-        body.members.map((member: MemberWithUser) => member.user?.email),
-      ).toEqual(["owner@example.com", "editor@example.com"]);
-    },
-  );
+    expect(response.status).toBe(200);
+    expect(body.members).toHaveLength(2);
+    expect(
+      body.members.map((member: MemberWithUser) => member.user?.email),
+    ).toEqual(["owner@example.com", "editor@example.com"]);
+  });
 });

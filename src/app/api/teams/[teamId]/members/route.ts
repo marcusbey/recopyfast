@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { UpdateTeamMemberRolePayload } from "@/types";
+import {
+  attachUserIdentities,
+  resolveUserIdentity,
+} from "@/lib/auth/user-identity";
 
 interface RouteContext {
   params: Promise<{ teamId: string }>;
@@ -35,18 +39,15 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get all team members
+    // Get all team members.
+    //
+    // No `user:auth.users!...` embed: PostgREST does not expose the `auth`
+    // schema, so that embed was a hard PGRST200 and this endpoint answered 500
+    // to every caller. Identities are attached afterwards through the Admin API
+    // — see @/lib/auth/user-identity.
     const { data: members, error } = await supabase
       .from("team_members")
-      .select(
-        `
-        *,
-        user:auth.users!team_members_user_id_fkey(
-          email,
-          raw_user_meta_data
-        )
-      `,
-      )
+      .select("*")
       .eq("team_id", teamId)
       .order("joined_at", { ascending: true });
 
@@ -58,7 +59,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json({ members });
+    const membersWithUsers = await attachUserIdentities(
+      members ?? [],
+      "user_id",
+      "user",
+    );
+
+    return NextResponse.json({ members: membersWithUsers });
   } catch (error) {
     console.error("Error in team members GET:", error);
     return NextResponse.json(
@@ -163,20 +170,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Update member role
+    // Update member role. The echo of the updated row carries no `auth.users`
+    // embed for the same reason as the GET above — it made this write report
+    // failure after it had already succeeded.
     const { data: updatedMember, error } = await supabase
       .from("team_members")
       .update({ role: body.role })
       .eq("id", body.memberId)
-      .select(
-        `
-        *,
-        user:auth.users!team_members_user_id_fkey(
-          email,
-          raw_user_meta_data
-        )
-      `,
-      )
+      .select("*")
       .single();
 
     if (error) {
@@ -186,6 +187,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         { status: 500 },
       );
     }
+
+    const updatedMemberWithUser = {
+      ...updatedMember,
+      user: await resolveUserIdentity(targetMember.user_id),
+    };
 
     // Create notification for the updated member
     await supabase.from("collaboration_notifications").insert({
@@ -201,7 +207,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     });
 
-    return NextResponse.json({ member: updatedMember });
+    return NextResponse.json({ member: updatedMemberWithUser });
   } catch (error) {
     console.error("Error in team members PATCH:", error);
     return NextResponse.json(

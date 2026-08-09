@@ -7,36 +7,10 @@ import {
   teamRoleToSitePermission,
 } from "@/lib/collaboration/permissions";
 import { canShareSite } from "@/lib/feature-gating/permissions";
-
-/**
- * Resolve a user's email and display name.
- *
- * `auth.users` is not exposed over PostgREST, so the previous
- * `.from("auth.users")` calls could only ever fail — the POST path 404'd every
- * user-targeted share before reaching the insert, and the GET path dropped its
- * embed. The Admin API is the supported way to read that table, and it requires
- * the service-role key, hence the separate client.
- */
-async function resolveUserIdentity(
-  userId: string,
-): Promise<{ email: string; name: string } | null> {
-  const service = createServiceRoleClient();
-  const { data, error } = await service.auth.admin.getUserById(userId);
-
-  if (error || !data?.user?.email) {
-    if (error) {
-      console.error("Error resolving target user:", error.message);
-    }
-    return null;
-  }
-
-  const metadata = data.user.user_metadata as
-    | Record<string, unknown>
-    | undefined;
-  const name = typeof metadata?.name === "string" ? metadata.name : null;
-
-  return { email: data.user.email, name: name ?? data.user.email };
-}
+import {
+  attachUserIdentities,
+  resolveUserIdentity,
+} from "@/lib/auth/user-identity";
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
@@ -47,6 +21,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const { siteId } = await context.params;
     const supabase = await createServerClient();
     const permissions = new CollaborationPermissions();
+
+    // Every read and write of `site_permissions` below goes through this client
+    // rather than the caller's. Which RLS policies production actually has is
+    // unknown from the repo, and the two candidate migrations disagree: only
+    // 20260731008000 grants `authenticated` an INSERT on this table, while
+    // 20260804130000 — the one recorded as applied — grants nothing beyond
+    // SELECT-for-self and FOR ALL to `service_role`. Writing as the caller
+    // therefore either works or 500s every collaborator invite depending on
+    // which migration is live; writing as `service_role` works under both.
+    //
+    // This does not widen access. Authorisation is complete before any of it
+    // runs: checkSitePermission(["manager","owner"]) below establishes that the
+    // caller may share this site at all, and canShareSite enforces the plan's
+    // seat quota. The service role is used to make an already-authorised write
+    // land, not to decide whether it may.
+    const serviceClient = createServiceRoleClient();
 
     // Get current user
     const {
@@ -121,8 +111,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       targetName = targetUser.name;
 
-      // Check if user already has permissions
-      const { data: existingPermission } = await supabase
+      // Read with the same client that writes. Under the no-INSERT-policy
+      // branch the caller's client cannot see other people's rows either, so
+      // this check answered "no existing permission" for everyone and the
+      // duplicate guard below never fired.
+      const { data: existingPermission } = await serviceClient
         .from("site_permissions")
         .select("id")
         .eq("site_id", siteId)
@@ -152,8 +145,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       targetName = targetTeam.name;
 
-      // Check if team already has permissions
-      const { data: existingPermission } = await supabase
+      // Same client as the write, for the same reason as the user branch above.
+      const { data: existingPermission } = await serviceClient
         .from("site_permissions")
         .select("id")
         .eq("site_id", siteId)
@@ -195,7 +188,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // every authorisation check in the codebase reads `permission` and none read
     // `role`. Writing only `role` left the recipient with a row that looked like
     // access in the UI and granted nothing in practice.
-    const { data: sitePermission, error } = await supabase
+    const { data: sitePermission, error } = await serviceClient
       .from("site_permissions")
       .insert({
         site_id: siteId,
@@ -327,39 +320,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const rows = sitePermissions ?? [];
-    const userIds = Array.from(
-      new Set(
-        rows
-          .map((row) => row.user_id)
-          .filter((id): id is string => typeof id === "string"),
-      ),
+    // A permission row pointing at a deleted user is real and must not blank the
+    // whole response — such a row comes back with `user: null`.
+    const permissionsWithUsers = await attachUserIdentities(
+      sitePermissions ?? [],
+      "user_id",
+      "user",
     );
-
-    // One lookup per distinct user. The Admin API has no batch-by-id call, and a
-    // site's permission list is small enough that this stays cheap; if it ever
-    // is not, the fix is a profiles table, not a wider query here.
-    const identities = new Map<string, { email: string; name: string }>();
-    for (const userId of userIds) {
-      const identity = await resolveUserIdentity(userId);
-      if (identity) {
-        identities.set(userId, identity);
-      } else {
-        // A permission row pointing at a deleted user is real and must not blank
-        // the whole response — surface the row without an identity instead.
-        console.warn(
-          `Site permission references a user that could not be resolved: ${userId}`,
-        );
-      }
-    }
-
-    const permissionsWithUsers = rows.map((row) => ({
-      ...row,
-      user:
-        typeof row.user_id === "string"
-          ? (identities.get(row.user_id) ?? null)
-          : null,
-    }));
 
     return NextResponse.json({ permissions: permissionsWithUsers });
   } catch (error) {

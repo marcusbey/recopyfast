@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/supabase/server";
 import { InviteTeamMemberPayload, TeamRole } from "@/types";
+import {
+  attachUserIdentities,
+  resolveUserIdentities,
+  resolveUserIdentity,
+} from "@/lib/auth/user-identity";
 
 interface RouteContext {
   params: Promise<{ teamId: string }>;
@@ -39,17 +44,17 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get pending invitations
+    // Get pending invitations. `team:teams(name)` embeds fine — it is in the
+    // `public` schema. The `inviter:auth.users!...` embed that used to sit
+    // beside it did not: PostgREST does not expose `auth`, so it failed the
+    // whole select and this endpoint answered 500 to every caller. The inviter's
+    // identity is attached afterwards through the Admin API.
     const { data: invitations, error } = await supabase
       .from("team_invitations")
       .select(
         `
         *,
-        team:teams(name),
-        inviter:auth.users!team_invitations_invited_by_fkey(
-          email,
-          raw_user_meta_data
-        )
+        team:teams(name)
       `,
       )
       .eq("team_id", teamId)
@@ -64,7 +69,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    return NextResponse.json({ invitations });
+    const invitationsWithInviters = await attachUserIdentities(
+      invitations ?? [],
+      "invited_by",
+      "inviter",
+    );
+
+    return NextResponse.json({ invitations: invitationsWithInviters });
   } catch (error) {
     console.error("Error in invitations GET:", error);
     return NextResponse.json(
@@ -142,49 +153,58 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Team not found" }, { status: 404 });
     }
 
-    // Check current member count
-    const { count: memberCount, error: countError } = await supabase
+    // The current membership, read once and used twice: for the capacity check
+    // and for the already-a-member check below. `max_members` bounds it.
+    const { data: currentMembers, error: currentMembersError } = await supabase
       .from("team_members")
-      .select("*", { count: "exact", head: true })
+      .select("user_id")
       .eq("team_id", teamId);
 
-    if (countError) {
+    if (currentMembersError) {
+      // Not swallowed. Without this list neither check below can answer, and
+      // treating "I could not look" as "not a member" is exactly the bug being
+      // fixed here.
+      console.error("Error checking team membership:", currentMembersError);
       return NextResponse.json(
         { error: "Failed to check team capacity" },
         { status: 500 },
       );
     }
 
-    if (memberCount !== null && memberCount >= team.max_members) {
+    const members = currentMembers ?? [];
+
+    if (members.length >= team.max_members) {
       return NextResponse.json(
         { error: "Team is at maximum capacity" },
         { status: 400 },
       );
     }
 
-    // Check if the invitee email is already a member of this team.
-    // We look up auth.users by email to get their user_id, then check
-    // team_members — using the invitee's email, NOT the inviter's user.id.
-    const { data: inviteeUser } = await supabase
-      .from("auth.users")
-      .select("id")
-      .eq("email", body.email.toLowerCase())
-      .maybeSingle();
+    // Check whether the invitee is already a member of this team.
+    //
+    // The previous implementation asked PostgREST for `.from("auth.users")` and
+    // destructured the error away. That table is not exposed, so the lookup
+    // always failed, `inviteeUser` was always null, and this guard never ran
+    // once — after which the pending-invitation check below answered
+    // "Invitation already sent" and left the inviter with no way forward.
+    //
+    // Resolved the other way round: compare against the addresses of the members
+    // this team already has. There is no admin lookup-by-email in the API —
+    // `listUsers` pages through every user in the project and takes no filter —
+    // and the question here is only ever about one team.
+    const memberIdentities = await resolveUserIdentities(
+      members.map((member) => member.user_id),
+    );
+    const inviteeEmail = body.email.toLowerCase();
+    const alreadyAMember = [...memberIdentities.values()].some(
+      (identity) => identity.email.toLowerCase() === inviteeEmail,
+    );
 
-    if (inviteeUser) {
-      const { data: existingMember } = await supabase
-        .from("team_members")
-        .select("id")
-        .eq("team_id", teamId)
-        .eq("user_id", inviteeUser.id)
-        .maybeSingle();
-
-      if (existingMember) {
-        return NextResponse.json(
-          { error: "User is already a team member" },
-          { status: 400 },
-        );
-      }
+    if (alreadyAMember) {
+      return NextResponse.json(
+        { error: "User is already a team member" },
+        { status: 400 },
+      );
     }
 
     // Check if there's already a pending invitation
@@ -204,10 +224,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Create invitation
-    // The cross-schema join `auth.users!...` causes Supabase's type generator to
-    // produce a ParserError for the `inviter` field; cast to the actual runtime shape.
-    type InvitationWithInviter = {
+    // Create invitation.
+    //
+    // The echo names only `public` relations. The `inviter:auth.users!...` embed
+    // it used to carry made the insert report failure *after* the row had been
+    // written, so a retry then hit the pending-invitation check and dead-ended.
+    type InvitationRow = {
       id: string;
       team_id: string;
       email: string;
@@ -217,10 +239,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
       expires_at: string;
       created_at: string;
       team: { name: string } | null;
-      inviter: {
-        email: string;
-        raw_user_meta_data: Record<string, unknown>;
-      } | null;
     };
     const { data: invitationRaw, error } = await supabase
       .from("team_invitations")
@@ -233,23 +251,24 @@ export async function POST(request: NextRequest, context: RouteContext) {
       .select(
         `
         *,
-        team:teams(name),
-        inviter:auth.users!team_invitations_invited_by_fkey(
-          email,
-          raw_user_meta_data
-        )
+        team:teams(name)
       `,
       )
       .single();
-    const invitation = invitationRaw as InvitationWithInviter | null;
+    const invitationRow = invitationRaw as InvitationRow | null;
 
-    if (error || !invitation) {
+    if (error || !invitationRow) {
       console.error("Error creating invitation:", error);
       return NextResponse.json(
         { error: "Failed to create invitation" },
         { status: 500 },
       );
     }
+
+    const invitation = {
+      ...invitationRow,
+      inviter: await resolveUserIdentity(user.id),
+    };
 
     // TODO: Send invitation email
     // await sendInvitationEmail(invitation);

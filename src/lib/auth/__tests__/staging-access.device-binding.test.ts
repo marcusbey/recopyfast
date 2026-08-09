@@ -132,6 +132,7 @@ describe("validateStagingAccess — device binding", () => {
   });
 
   it("refuses a caller that presents no fingerprint", async () => {
+    const errorLog = jest.spyOn(console, "error").mockImplementation(() => {});
     mockCreateServiceRoleClient.mockReturnValue(
       mockSupabaseReturning(verifiedRow()) as unknown as ReturnType<
         typeof createServiceRoleClient
@@ -146,6 +147,13 @@ describe("validateStagingAccess — device binding", () => {
     expect(result.verified).toBe(false);
     expect(result.requiresVerification).toBe(true);
     expect(result.permissions).toEqual([]);
+    // Refused loudly, and as a caller bug rather than as a device mismatch.
+    // Substituting an empty fingerprint and letting the hash comparison fail
+    // produced the same refusal while logging `device_mismatch`, which is what
+    // let fifteen Edit Board call sites sit broken and look correct (A-10).
+    expect(errorLog.mock.calls.flat().join(" ")).toContain(
+      "without a device fingerprint",
+    );
   });
 
   it("refuses a row verified before the binding existed", async () => {
