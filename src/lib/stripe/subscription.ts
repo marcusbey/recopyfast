@@ -1,5 +1,6 @@
 import { stripe } from "./config";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   getPaidPlan,
   resolveStripePriceId,
@@ -37,6 +38,27 @@ interface SubscriptionRow {
   trial_end: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Client for the three writes in this file.
+ *
+ * Reads stay on the caller's RLS-scoped client — that is what proves the
+ * subscription is theirs. The writes cannot: production RLS
+ * (`20260804130000_restore_missing_rls_policies.sql:54-62`) grants
+ * `authenticated` SELECT only on `billing_subscriptions`, and deliberately so —
+ * an UPDATE policy there would let a customer rewrite their own plan. With no
+ * such policy Postgres updated zero rows and reported no error, so
+ * `.select().single()` answered PGRST116 and the function threw *after* Stripe
+ * had already invoiced the proration: card charged, UI says it failed.
+ *
+ * Tenancy moves into the predicate instead. Every write below is keyed on both
+ * the row id — read a moment earlier under the caller's own policy set — and
+ * `user_id`, so a mismatched pair matches nothing rather than writing across
+ * tenants.
+ */
+function createSubscriptionWriteClient() {
+  return createServiceRoleClient();
 }
 
 function toSubscription(row: SubscriptionRow): Subscription {
@@ -144,24 +166,26 @@ export async function updateSubscription(
       ? latestInvoice
       : null;
 
-  const { data: updatedSubscription, error } = await supabase
-    .from("billing_subscriptions")
-    .update({
-      plan: updates.planId,
-      status: stripeSubscription.status,
-      current_period_start: new Date(
-        (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
-      ).toISOString(),
-      current_period_end: new Date(
-        (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
-      ).toISOString(),
-      cancel_at: stripeSubscription.cancel_at
-        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
-        : null,
-    })
-    .eq("id", currentSubscription.id)
-    .select()
-    .single<SubscriptionRow>();
+  const { data: updatedSubscription, error } =
+    await createSubscriptionWriteClient()
+      .from("billing_subscriptions")
+      .update({
+        plan: updates.planId,
+        status: stripeSubscription.status,
+        current_period_start: new Date(
+          (stripeSubscription.items.data[0]?.current_period_start ?? 0) * 1000,
+        ).toISOString(),
+        current_period_end: new Date(
+          (stripeSubscription.items.data[0]?.current_period_end ?? 0) * 1000,
+        ).toISOString(),
+        cancel_at: stripeSubscription.cancel_at
+          ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
+          : null,
+      })
+      .eq("id", currentSubscription.id)
+      .eq("user_id", userId)
+      .select()
+      .single<SubscriptionRow>();
 
   if (error || !updatedSubscription) {
     throw new Error(
@@ -211,21 +235,23 @@ export async function cancelSubscription(
         },
       );
 
-  // Update subscription in our database
-  const { data: updatedSubscription, error } = await supabase
-    .from("billing_subscriptions")
-    .update({
-      status: stripeSubscription.status,
-      cancel_at: stripeSubscription.cancel_at
-        ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
-        : null,
-      canceled_at: stripeSubscription.canceled_at
-        ? new Date(stripeSubscription.canceled_at * 1000).toISOString()
-        : null,
-    })
-    .eq("id", currentSubscription.id)
-    .select()
-    .single<SubscriptionRow>();
+  // Update subscription in our database — see createSubscriptionWriteClient.
+  const { data: updatedSubscription, error } =
+    await createSubscriptionWriteClient()
+      .from("billing_subscriptions")
+      .update({
+        status: stripeSubscription.status,
+        cancel_at: stripeSubscription.cancel_at
+          ? new Date(stripeSubscription.cancel_at * 1000).toISOString()
+          : null,
+        canceled_at: stripeSubscription.canceled_at
+          ? new Date(stripeSubscription.canceled_at * 1000).toISOString()
+          : null,
+      })
+      .eq("id", currentSubscription.id)
+      .eq("user_id", userId)
+      .select()
+      .single<SubscriptionRow>();
 
   if (error || !updatedSubscription) {
     throw new Error(
@@ -269,16 +295,18 @@ export async function reactivateSubscription(
     },
   );
 
-  // Update subscription in our database
-  const { data: updatedSubscription, error } = await supabase
-    .from("billing_subscriptions")
-    .update({
-      cancel_at: null,
-      canceled_at: null,
-    })
-    .eq("id", currentSubscription.id)
-    .select()
-    .single<SubscriptionRow>();
+  // Update subscription in our database — see createSubscriptionWriteClient.
+  const { data: updatedSubscription, error } =
+    await createSubscriptionWriteClient()
+      .from("billing_subscriptions")
+      .update({
+        cancel_at: null,
+        canceled_at: null,
+      })
+      .eq("id", currentSubscription.id)
+      .eq("user_id", userId)
+      .select()
+      .single<SubscriptionRow>();
 
   if (error || !updatedSubscription) {
     throw new Error(

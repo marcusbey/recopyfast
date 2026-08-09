@@ -529,9 +529,15 @@ describe("/api/auth/session - GET", () => {
 
   describe("Performance scenarios", () => {
     it("should handle slow Supabase responses", async () => {
+      // Asserting on a Date.now() delta here was flaky: setTimeout(100) can
+      // resolve at a measured 99ms (timer coalescing + millisecond rounding).
+      // The behaviour under test is that the route awaits the slow call
+      // instead of racing past it, so assert resolution order, not wall clock.
+      let slowCallResolved = false;
       mockSupabaseAuth.getUser.mockImplementationOnce(async () => {
         // Simulate slow response
         await new Promise((resolve) => setTimeout(resolve, 100));
+        slowCallResolved = true;
         return {
           data: { user: { id: "user-123", email: "test@example.com" } },
           error: null,
@@ -542,12 +548,10 @@ describe("/api/auth/session - GET", () => {
         method: "GET",
       });
 
-      const startTime = Date.now();
       const response = await GET(request);
-      const endTime = Date.now();
 
+      expect(slowCallResolved).toBe(true);
       expect(response.status).toBe(200);
-      expect(endTime - startTime).toBeGreaterThanOrEqual(100);
     });
 
     it("should handle rapid successive session checks", async () => {

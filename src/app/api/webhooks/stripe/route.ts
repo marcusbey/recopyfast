@@ -2,16 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import type Stripe from "stripe";
 import { stripe, requireWebhookSecret } from "@/lib/stripe/config";
-import { isPaidPlanId, resolveStripePriceId } from "@/lib/stripe/plans";
+import {
+  getLifetimeGrantPlanId,
+  isPaidPlanId,
+  resolveStripePriceId,
+} from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   addPurchasedCredits,
+  getPurchasedCreditGrant,
+  restorePurchasedCredits,
   revokePurchasedCredits,
 } from "@/lib/credits/system";
 import {
   grantPlanEntitlement,
+  restoreEntitlementForPayment,
   revokeEntitlementForPayment,
 } from "@/lib/billing/entitlements";
+import {
+  readRevokedCredits,
+  recordCreditRevocation,
+} from "@/lib/billing/credit-revocations";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
@@ -112,6 +123,7 @@ type StripeInvoiceWithSubscription = Stripe.Invoice & {
 type BillingEventObject = {
   metadata?: Record<string, string> | null;
   customer?: string | Stripe.Customer | Stripe.DeletedCustomer | null;
+  payment_intent?: string | Stripe.PaymentIntent | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -216,11 +228,15 @@ export async function POST(req: NextRequest) {
         break;
 
       case "charge.refunded":
-        await handleMoneyReturned(event.data.object, "refund");
+        await handleChargeRefunded(event.data.object);
         break;
 
       case "charge.dispute.created":
-        await handleMoneyReturned(event.data.object, "dispute");
+        await handleDisputeCreated(event.data.object);
+        break;
+
+      case "charge.dispute.closed":
+        await handleDisputeClosed(event.data.object);
         break;
 
       case "payment_intent.payment_failed":
@@ -307,6 +323,37 @@ function assertWritten(
 }
 
 /**
+ * Turn an UPDATE that matched no row into a throw.
+ *
+ * WHY — `assertWritten` cannot see this one: supabase-js reports a zero-row
+ * UPDATE as `{ error: null }`, identical to a successful one. Stripe states its
+ * events are unordered, and the normal SCA sequence delivers
+ * `customer.subscription.updated` for a subscription that was born `incomplete`.
+ * If that `updated` overtakes its `created` the update matches nothing, the
+ * route answers 200, and Stripe discards the event permanently: the row settles
+ * at `incomplete`, which is absent from LIVE_SUBSCRIPTION_STATUSES, so a paying
+ * customer sits behind the paywall forever and nothing reconciles from Stripe.
+ *
+ * A 500 puts the event back on Stripe's retry schedule, which is what makes it
+ * land *after* the `created` it overtook.
+ *
+ * Deliberately a refusal rather than an upsert: creating the row is
+ * `handleSubscriptionCreated`'s job — it resolves the `billing_customers`
+ * attribution and the fields only the `created` payload is authoritative for —
+ * and an `updated` that invented a row would race the `created` still in flight.
+ */
+function assertRowMatched(
+  rows: readonly unknown[] | null,
+  operation: string,
+): void {
+  if ((rows?.length ?? 0) > 0) return;
+
+  throw new Error(
+    `${operation} matched no row. Returning 5xx so Stripe redelivers once it does.`,
+  );
+}
+
+/**
  * Handle subscription creation
  */
 async function handleSubscriptionCreated(
@@ -364,7 +411,7 @@ async function handleSubscriptionUpdated(
   subscription: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
-  const { error: updateError } = await supabase
+  const { data: updatedRows, error: updateError } = await supabase
     .from("billing_subscriptions")
     .update({
       plan: subscription.metadata?.plan_id || "pro",
@@ -384,8 +431,13 @@ async function handleSubscriptionUpdated(
         ? new Date(subscription.trial_end * 1000).toISOString()
         : null,
     })
-    .eq("stripe_subscription_id", subscription.id);
+    .eq("stripe_subscription_id", subscription.id)
+    .select("id");
   assertWritten(updateError, "billing_subscriptions update");
+  assertRowMatched(
+    updatedRows,
+    `billing_subscriptions update for ${subscription.id}`,
+  );
 }
 
 /**
@@ -395,14 +447,21 @@ async function handleSubscriptionDeleted(
   subscription: Stripe.Subscription,
   supabase: ServiceClient,
 ) {
-  const { error: cancelError } = await supabase
+  const { data: canceledRows, error: cancelError } = await supabase
     .from("billing_subscriptions")
     .update({
       status: "canceled",
       canceled_at: new Date().toISOString(),
     })
-    .eq("stripe_subscription_id", subscription.id);
+    .eq("stripe_subscription_id", subscription.id)
+    .select("id");
   assertWritten(cancelError, "billing_subscriptions cancel");
+  // A lost `deleted` leaves the account on a plan nobody is paying for, so the
+  // zero-row case has to be as loud here as it is for `updated`.
+  assertRowMatched(
+    canceledRows,
+    `billing_subscriptions cancel for ${subscription.id}`,
+  );
 }
 
 /**
@@ -544,6 +603,17 @@ async function grantLifetime(
     throw new Error(
       `payment ${paymentIntentId} is a lifetime purchase with no ` +
         `grants_plan_id — the customer paid but nothing says what for`,
+    );
+  }
+
+  // The grant is permanent and worth $199, so the plan it names has to be one
+  // this app actually sells. `plan_entitlements.plan_id` is a foreign key, but
+  // it would happily accept any plan in the catalogue, including one that is no
+  // longer on sale.
+  if (!isPaidPlanId(grantsPlanId)) {
+    throw new Error(
+      `payment ${paymentIntentId} names "${grantsPlanId}" as the plan it ` +
+        `grants, which is not a plan this app sells`,
     );
   }
 
@@ -720,11 +790,104 @@ async function handleCheckoutSessionCompleted(
 
   // Subscriptions and credit packs are provisioned by their own events; only
   // the lifetime grant needs the belt-and-braces second path.
-  await grantLifetime(userId, "pro", paymentIntentId);
+  //
+  // `grants_plan_id` is what the customer bought — createCheckoutSession writes
+  // it onto the session from the catalogue. This used to be the literal "pro",
+  // so whichever of this event and payment_intent.succeeded arrived first
+  // decided the plan (the UNIQUE payment-intent id makes the loser a no-op), and
+  // a catalogue selling lifetime Starter handed out Pro.
+  await grantLifetime(
+    userId,
+    metadata.grants_plan_id ??
+      (await catalogueLifetimeGrant(session.id, paymentIntentId)),
+    paymentIntentId,
+  );
 }
 
 /**
- * Money came back out: a refund or a chargeback.
+ * What Lifetime Pro confers, for a session that does not say.
+ *
+ * Only sessions minted before `grants_plan_id` was written at session level can
+ * reach this. The payment has already been captured, so refusing outright would
+ * strand a paid customer once Stripe gives up retrying; the catalogue is the
+ * same source the session was built from, and is right unless the product has
+ * been repointed since. Logged as an error either way, because that caveat is
+ * real and this branch should stop appearing after the transition window.
+ */
+async function catalogueLifetimeGrant(
+  sessionId: string,
+  paymentIntentId: string,
+): Promise<string | undefined> {
+  const catalogued = await getLifetimeGrantPlanId();
+
+  console.error(
+    `Checkout session ${sessionId} (payment ${paymentIntentId}) carries no ` +
+      `session-level grants_plan_id — it predates this deploy. Falling back to ` +
+      `the catalogue, which currently grants ` +
+      `${catalogued ?? "nothing (Lifetime Pro is not on sale)"}.`,
+  );
+
+  return catalogued ?? undefined;
+}
+
+/**
+ * A refund was issued.
+ *
+ * Stripe emits `charge.refunded` for PARTIAL refunds too, and the amount is the
+ * whole point: a $10 goodwill refund on a $199 purchase used to revoke Lifetime
+ * Pro and empty the credit wallet, because the handler read only
+ * `payment_intent`. Only a refund of the full charge takes the product back.
+ *
+ * `refunded` is Stripe's own "nothing is left on this charge" flag; the amounts
+ * are compared as well because it is false while a full refund is still pending.
+ */
+async function handleChargeRefunded(charge: Stripe.Charge) {
+  if (!isFullyRefunded(charge)) {
+    console.log(
+      `partial refund on ${charge.id}: ${charge.amount_refunded ?? 0} of ` +
+        `${charge.amount} returned — entitlement and credits left in place.`,
+    );
+    return;
+  }
+
+  await handleMoneyReturned(charge, "refund");
+}
+
+/**
+ * Is there nothing left on this charge?
+ *
+ * `refunded` is Stripe's own flag; the amounts are compared as well because it
+ * is false while a full refund is still pending. Shared by the refund handler
+ * and the dispute-closed handler so the two can never disagree about what
+ * "fully refunded" means.
+ */
+function isFullyRefunded(charge: Stripe.Charge): boolean {
+  return (
+    charge.refunded === true || (charge.amount_refunded ?? 0) >= charge.amount
+  );
+}
+
+/**
+ * The charge a dispute was filed against.
+ *
+ * Webhook payloads carry `charge` as a bare id, so this is a round trip to
+ * Stripe. Errors are left to propagate: a 500 that Stripe redelivers is
+ * recoverable, whereas guessing the refund state either hands out a product we
+ * have already refunded or strands a customer who won.
+ */
+async function disputedCharge(
+  dispute: Stripe.Dispute,
+): Promise<Stripe.Charge | null> {
+  const charge = dispute.charge;
+
+  if (!charge) return null;
+  if (typeof charge !== "string") return charge;
+
+  return stripe.charges.retrieve(charge);
+}
+
+/**
+ * Money came back out: a full refund or a chargeback.
  *
  * Both revoke whatever the payment bought. Without this a customer could buy
  * Lifetime Pro, charge it back, and keep the entitlement permanently — there is
@@ -752,6 +915,154 @@ async function handleMoneyReturned(
   console.log(
     `${reason} on ${paymentIntentId}: entitlement revoked=${entitlement.revoked}, ` +
       `credits revoked=${credits.revoked}`,
+  );
+}
+
+/**
+ * Did this dispute end with the money staying with us?
+ *
+ * `won` = the bank ruled for us. `warning_closed` = an early-warning enquiry the
+ * customer dropped before it became a chargeback. Every other status either
+ * means the money is gone (`lost`) or that the dispute is still running.
+ */
+function isDisputeClosedInOurFavour(status: Stripe.Dispute.Status): boolean {
+  return status === "won" || status === "warning_closed";
+}
+
+/**
+ * A chargeback was filed.
+ *
+ * Revoking is provisional — the bank holds the money from this moment — and a
+ * dispute we go on to win has to give the wallet back.
+ *
+ * WHY IT ASKS STRIPE FOR THE STATUS — a `created` can be processed AFTER its own
+ * `closed`, and re-running the revocation then would silently undo a correct
+ * restoration with nothing left to reverse it: the dispute is over, so no further
+ * event is coming. Two things make that reachable. Delivery is at-least-once and
+ * explicitly unordered, so a first-time `created` can simply arrive late. And
+ * dispute events used to miss the route's idempotency short-circuit entirely —
+ * it reads `billing_events` rows keyed by Stripe event id, which `logBillingEvent`
+ * only writes once it can attribute the event to a user, and a Dispute object
+ * carries neither `metadata.user_id` nor `customer`. So every redelivery re-ran
+ * this handler. `logBillingEvent` now resolves disputes through the payment
+ * intent, which closes the redelivery half; the live status is what makes the
+ * handler safe whatever order the events arrive in.
+ *
+ * A dispute still open (or `lost`) is revoked as normal: both revocation and its
+ * record are idempotent, so re-applying is harmless, and a crash between the two
+ * is COMPLETED by the redelivery rather than skipped.
+ */
+async function handleDisputeCreated(dispute: Stripe.Dispute) {
+  const live = await stripe.disputes.retrieve(dispute.id);
+
+  if (isDisputeClosedInOurFavour(live.status)) {
+    console.log(
+      `dispute ${dispute.id} is already closed as "${live.status}" — not ` +
+        `re-revoking what winning it restored.`,
+    );
+    return;
+  }
+
+  await revokeForDispute(dispute);
+}
+
+/**
+ * Take back what the disputed payment bought.
+ *
+ * The balance about to be clawed back is recorded against THIS dispute before it
+ * is zeroed, while the row can still say what it was — see
+ * `src/lib/billing/credit-revocations.ts`. A refund needs no such record, which
+ * is why this lives here and not in `handleMoneyReturned`.
+ */
+async function revokeForDispute(dispute: Stripe.Dispute) {
+  const paymentIntentId = idOf(dispute.payment_intent);
+
+  if (paymentIntentId) {
+    const wallet = await getPurchasedCreditGrant(paymentIntentId);
+
+    if (wallet && wallet.credits_remaining > 0) {
+      await recordCreditRevocation({
+        stripeDisputeId: dispute.id,
+        stripePaymentIntentId: paymentIntentId,
+        credits: wallet.credits_remaining,
+        userId: wallet.user_id,
+      });
+    }
+  }
+
+  // Reports the missing payment intent, if that is the case.
+  await handleMoneyReturned(dispute, "dispute");
+}
+
+/**
+ * A dispute finished.
+ *
+ * `charge.dispute.created` revokes provisionally — the bank holds the money from
+ * the moment the chargeback is filed — so a dispute that closes in our favour
+ * has to undo it. Nothing else does: a lifetime grant has no renewal to
+ * re-grant it and there is no admin surface, so before this existed winning a
+ * dispute left the customer paying $199 for nothing.
+ */
+async function handleDisputeClosed(dispute: Stripe.Dispute) {
+  const paymentIntentId = idOf(dispute.payment_intent);
+
+  if (!paymentIntentId) {
+    console.error(`dispute ${dispute.id} closed with no payment_intent`);
+    return;
+  }
+
+  // `lost` above all: the money is gone, so the revocation stands. It is applied
+  // rather than assumed, because `created` is not guaranteed to have been
+  // processed first — it can be delivered after this event, or its deliveries can
+  // fail until Stripe gives up. Assuming left the worst case uncovered: a
+  // chargeback that took the money AND left the customer holding the product.
+  // Revoking again is a no-op.
+  if (!isDisputeClosedInOurFavour(dispute.status)) {
+    console.log(
+      `dispute on ${paymentIntentId} closed as "${dispute.status}" — ` +
+        `entitlement and credits stay revoked.`,
+    );
+    await revokeForDispute(dispute);
+    return;
+  }
+
+  // Winning on paper is not the same as keeping the money. The standard way to
+  // settle an early-fraud warning is to REFUND the charge, after which Stripe
+  // closes the dispute as `warning_closed` (sometimes `won`) — a status that
+  // otherwise reads as "restore everything". Restoring there would hand the
+  // customer the refund AND the product they no longer paid for.
+  const charge = await disputedCharge(dispute);
+
+  if (!charge) {
+    console.error(
+      `dispute ${dispute.id} on ${paymentIntentId} closed as ` +
+        `"${dispute.status}" with no charge to check for a refund — leaving the ` +
+        `revocation in place rather than restoring what may have been refunded.`,
+    );
+    return;
+  }
+
+  if (isFullyRefunded(charge)) {
+    console.log(
+      `dispute on ${paymentIntentId} closed as "${dispute.status}", but charge ` +
+        `${charge.id} was fully refunded — the customer has the money, so the ` +
+        `entitlement and credits stay revoked.`,
+    );
+    return;
+  }
+
+  const entitlement = await restoreEntitlementForPayment(paymentIntentId);
+  // This dispute's own clawback, not whatever an earlier dispute on the same
+  // payment took: the customer may have spent some of what that one gave back.
+  const revokedCredits = await readRevokedCredits(dispute.id);
+  const credits = await restorePurchasedCredits(
+    paymentIntentId,
+    revokedCredits,
+  );
+
+  console.log(
+    `dispute on ${paymentIntentId} closed as "${dispute.status}": entitlement ` +
+      `restored=${entitlement.restored}, credits restored=${credits.restored}`,
   );
 }
 
@@ -798,6 +1109,35 @@ async function handleCustomerUpdated(
 }
 
 /**
+ * Whose payment was this? Answered from our own tables, which key both kinds of
+ * one-off purchase on the payment intent.
+ *
+ * Best-effort, like the customer lookup beside it: a failure here costs an audit
+ * row, and throwing would fail an event whose real work has already succeeded.
+ */
+async function readUserIdForPayment(
+  paymentIntentId: string | null,
+  supabase: ServiceClient,
+): Promise<string | null> {
+  if (!paymentIntentId) return null;
+
+  const [entitlement, credits] = await Promise.all([
+    supabase
+      .from("plan_entitlements")
+      .select("user_id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .maybeSingle<{ user_id: string }>(),
+    supabase
+      .from("credit_purchases")
+      .select("user_id")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .maybeSingle<{ user_id: string }>(),
+  ]);
+
+  return entitlement.data?.user_id ?? credits.data?.user_id ?? null;
+}
+
+/**
  * Log billing events for audit trail
  */
 async function logBillingEvent(event: Stripe.Event, supabase: ServiceClient) {
@@ -820,6 +1160,13 @@ async function logBillingEvent(event: Stripe.Event, supabase: ServiceClient) {
       .eq("stripe_customer_id", customerId)
       .single();
     userId = customer?.user_id ?? null;
+  } else if (obj.payment_intent) {
+    // A Dispute carries neither of the above, so before this arm every dispute
+    // event went unlogged — no audit row, and no entry in the seen-list the
+    // idempotency short-circuit at the top of POST reads, which is why a
+    // redelivered `charge.dispute.created` used to re-run its handler. What a
+    // dispute does carry is the payment intent, and our own rows are keyed on it.
+    userId = await readUserIdForPayment(idOf(obj.payment_intent), supabase);
   }
 
   if (userId) {

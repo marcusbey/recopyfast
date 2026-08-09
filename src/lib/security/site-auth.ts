@@ -39,6 +39,28 @@ function parseOrigin(originHeader?: string | null) {
   }
 }
 
+/**
+ * The exact hosts that can only be a developer's own machine.
+ *
+ * Shared by the request and preflight paths below so the two cannot drift into
+ * disagreeing about what "local" means — they did, and the disagreement was
+ * invisible because only one of them is reached without a browser.
+ *
+ * EXACT, never a prefix. This read `host.startsWith("127.0.0.1")`, which is true
+ * of `127.0.0.1.attacker.example` — a domain anyone can register and point
+ * anywhere. That handed the development bypasses (the demo-token exemption in
+ * `authorizeSiteRequest`, the preflight grant in `authorizeSiteOrigin`) to an
+ * attacker-controlled origin. The prefix was there to tolerate a port, which
+ * `parseOrigin` already strips: it returns `URL.hostname`, so `127.0.0.1:8080`
+ * arrives as `127.0.0.1` and an IPv6 loopback as the bracketed `[::1]`.
+ */
+const LOCALHOST_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+function isLocalhostHost(host: string | null): boolean {
+  if (!host) return false;
+  return LOCALHOST_HOSTS.has(host);
+}
+
 export function buildSiteToken(siteId: string, apiKey: string) {
   const issuedAt = Math.floor(Date.now() / 1000);
   const payload = `${siteId}.${issuedAt}`;
@@ -109,13 +131,12 @@ export async function authorizeSiteRequest(options: {
 
   // Allow demo mode for localhost in development
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
-  const isLocalhost =
-    requestOriginHost === "localhost" ||
-    requestOriginHost?.startsWith("127.0.0.1");
+  const isLocalhost = isLocalhostHost(requestOriginHost);
   const isDemoToken = token === "demo-site-token";
   const isDevelopment = process.env.NODE_ENV !== "production";
+  const isLocalDemo = isDevelopment && isLocalhost && isDemoToken;
 
-  if (!(isDevelopment && isLocalhost && isDemoToken)) {
+  if (!isLocalDemo) {
     if (!verifySiteTokenSignature(site.id, site.api_key, token)) {
       throw new Error("Invalid site token");
     }
@@ -123,11 +144,23 @@ export async function authorizeSiteRequest(options: {
 
   const allowedDomain = normalizeDomain(site.domain);
 
-  // Skip domain validation for localhost demo mode
-  if (!(isDevelopment && isLocalhost && isDemoToken)) {
-    if (requestOriginHost && requestOriginHost !== allowedDomain) {
-      throw new Error("Origin not allowed");
-    }
+  // The domain pin is mandatory, not conditional on a header being offered.
+  //
+  // `data-site-token` ships as a plain attribute in the customer's page markup
+  // (src/lib/sites/embed-script.ts:76), so the token is readable with View
+  // Source and this check is the only thing that makes a published credential
+  // safe. It used to read `if (requestOriginHost && requestOriginHost !==
+  // allowedDomain)`. Origin and Referer are set by browsers and cannot be forged
+  // cross-origin — but nothing obliges a non-browser caller to send either, so
+  // treating "no header" as "nothing to check" enforced the pin only against
+  // the caller that could never have beaten it, and skipped it entirely for
+  // curl. A caller that cannot present the registered domain is refused. (A-2)
+  //
+  // The localhost demo token stays exempt: it is the only bypass, it requires a
+  // non-production build, and `isLocalhost` is itself derived from a present
+  // Origin or Referer.
+  if (!isLocalDemo && requestOriginHost !== allowedDomain) {
+    throw new Error("Origin not allowed");
   }
 
   const allowedOrigin = requestOriginHost ? `${origin ?? referer}` : null;
@@ -215,7 +248,32 @@ export async function authorizeSiteOrigin(
   const allowedDomain = normalizeDomain(site.domain);
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
 
-  if (requestOriginHost && requestOriginHost !== allowedDomain) {
+  // What this decides is narrower than it looks: whether the caller's origin is
+  // granted, never what the preflight answers. The OPTIONS handler returns 204 to
+  // everyone and varies only the `Access-Control-Allow-Origin` it echoes, so a
+  // throw here withholds the grant rather than producing a distinguishable status
+  // — see the comment on OPTIONS in api/content/[siteId]/route.ts.
+  //
+  // The preflight still has to agree with the request it precedes.
+  // `authorizeSiteRequest` exempts the localhost demo token on a non-production
+  // build, but the browser sends an OPTIONS before any cross-origin GET or POST,
+  // and this function — which answers it — has no token to inspect. Refusing the
+  // grant here blocked the very request that exemption exists to allow: the local
+  // test page in docs/PROJECT_REPORT.md:435 never got past its preflight, so its
+  // fetch was never sent and the exemption on the other side was unreachable.
+  //
+  // Development only, and it admits nothing by itself: the GET or POST behind the
+  // preflight still needs a site token, and any token but the demo one still needs
+  // the exact registered domain. In production this branch is dead and the domain
+  // pin is absolute.
+  const isLocalDevPreflight =
+    process.env.NODE_ENV !== "production" && isLocalhostHost(requestOriginHost);
+
+  // Otherwise unconditional, for the same reason as authorizeSiteRequest above: a
+  // caller that sends no parseable Origin has not proved it is on the registered
+  // domain. A browser preflight always sends Origin, so a missing one is never a
+  // preflight. (A-2)
+  if (!isLocalDevPreflight && requestOriginHost !== allowedDomain) {
     throw new Error("Origin not allowed");
   }
 

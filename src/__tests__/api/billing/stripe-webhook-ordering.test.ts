@@ -2,12 +2,13 @@
  * A-7 — `customer.subscription.updated` / `.deleted` silently succeed on zero
  * rows.
  *
- * `src/app/api/webhooks/stripe/route.ts:367-388` and `:398-405` issue
+ * `handleSubscriptionUpdated` and `handleSubscriptionDeleted` used to issue
  * `.update(...).eq("stripe_subscription_id", ...)` with no `.select()`, and the
- * guard `assertWritten` (`:295-307`) inspects only `error`. supabase-js returns
+ * guard `assertWritten` inspects only `error`. supabase-js returns
  * `{ error: null }` for an update that matched zero rows, so the handler
- * reports success, the route answers 200, and Stripe discards the event
- * permanently.
+ * reported success, the route answered 200, and Stripe discarded the event
+ * permanently. Both now `.select("id")` and refuse an empty result through
+ * `assertRowMatched`.
  *
  * The fake client below reproduces exactly that: a zero-row update is not an
  * error. Nothing else in this file is stubbed out — the real route handler runs
@@ -228,9 +229,9 @@ describe("A-7: subscription webhooks that match no row", () => {
    * from LIVE_SUBSCRIPTION_STATUSES — a paying customer held at the paywall.
    */
   /**
-   * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-   * including a broken mock or a typo in this file, so each one needs a sibling
-   * proving the harness actually reaches the handler. Here: the same three
+   * Companion to the test below, kept from when that was a `test.failing`
+   * marker: a marker passes on ANY failure, so each one needed a sibling
+   * proving the harness actually reached the handler. Here: the same three
    * deliveries land exactly one subscription row, which means the signature
    * mock, the idempotency read, `requireBillingCustomer` and the upsert all
    * ran. True on both sides of the fix.
@@ -257,38 +258,35 @@ describe("A-7: subscription webhooks that match no row", () => {
     expect(storedSubscription()?.plan).toBe("pro");
   });
 
-  test.failing(
-    "an out-of-order updated survives long enough to land once created arrives",
-    async () => {
-      const outOfOrder = subscriptionEvent(
-        "evt_updated",
-        "customer.subscription.updated",
-        "active",
-      );
+  it("an out-of-order updated survives long enough to land once created arrives", async () => {
+    const outOfOrder = subscriptionEvent(
+      "evt_updated",
+      "customer.subscription.updated",
+      "active",
+    );
 
-      // 1. `updated` arrives first. There is no row to update.
-      await deliver(outOfOrder);
-      // 2. `created` lands the row, born `incomplete` as an SCA subscription is.
-      await deliver(
-        subscriptionEvent(
-          "evt_created",
-          "customer.subscription.created",
-          "incomplete",
-        ),
-      );
-      // 3. Stripe redelivers the same event id on its retry schedule — which it
-      //    only does if step 1 was refused. Answering 200 there logs the event
-      //    to `billing_events`, so this redelivery short-circuits as a duplicate
-      //    and the `active` status is gone for good.
-      await deliver(outOfOrder);
+    // 1. `updated` arrives first. There is no row to update.
+    await deliver(outOfOrder);
+    // 2. `created` lands the row, born `incomplete` as an SCA subscription is.
+    await deliver(
+      subscriptionEvent(
+        "evt_created",
+        "customer.subscription.created",
+        "incomplete",
+      ),
+    );
+    // 3. Stripe redelivers the same event id on its retry schedule — which it
+    //    only does if step 1 was refused. Answering 200 there logs the event
+    //    to `billing_events`, so this redelivery short-circuits as a duplicate
+    //    and the `active` status is gone for good.
+    await deliver(outOfOrder);
 
-      expect(storedSubscription()?.status).toBe("active");
-    },
-  );
+    expect(storedSubscription()?.status).toBe("active");
+  });
 
   /**
    * Guard: the very same event fixture DOES land when the row exists, so the
-   * failing case below is genuinely about matching zero rows and not about a
+   * case below is genuinely about matching zero rows and not about a
    * malformed payload or a handler that was never reached.
    */
   it("guard: the update fixture lands when the subscription row exists", async () => {
@@ -315,21 +313,18 @@ describe("A-7: subscription webhooks that match no row", () => {
     expect(storedSubscription()?.status).toBe("active");
   });
 
-  test.failing(
-    "refuses an update for a subscription it has never seen, so Stripe redelivers",
-    async () => {
-      const response = await deliver(
-        subscriptionEvent(
-          "evt_updated",
-          "customer.subscription.updated",
-          "active",
-        ),
-      );
+  it("refuses an update for a subscription it has never seen, so Stripe redelivers", async () => {
+    const response = await deliver(
+      subscriptionEvent(
+        "evt_updated",
+        "customer.subscription.updated",
+        "active",
+      ),
+    );
 
-      expect(response.status).toBe(500);
-      expect(db.billing_subscriptions).toHaveLength(0);
-    },
-  );
+    expect(response.status).toBe(500);
+    expect(db.billing_subscriptions).toHaveLength(0);
+  });
 
   it("guard: the deletion fixture lands when the subscription row exists", async () => {
     db.billing_subscriptions = [
@@ -355,21 +350,18 @@ describe("A-7: subscription webhooks that match no row", () => {
     expect(storedSubscription()?.status).toBe("canceled");
   });
 
-  test.failing(
-    "refuses a deletion for a subscription it has never seen",
-    async () => {
-      const response = await deliver(
-        subscriptionEvent(
-          "evt_deleted",
-          "customer.subscription.deleted",
-          "canceled",
-        ),
-      );
+  it("refuses a deletion for a subscription it has never seen", async () => {
+    const response = await deliver(
+      subscriptionEvent(
+        "evt_deleted",
+        "customer.subscription.deleted",
+        "canceled",
+      ),
+    );
 
-      // A lost `deleted` leaves the account on a plan nobody is paying for.
-      expect(response.status).toBe(500);
-    },
-  );
+    // A lost `deleted` leaves the account on a plan nobody is paying for.
+    expect(response.status).toBe(500);
+  });
 
   it("still short-circuits a genuine redelivery of an event it did apply", async () => {
     db.billing_subscriptions = [

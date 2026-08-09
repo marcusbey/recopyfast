@@ -212,7 +212,16 @@ export async function createCheckoutSession(
             type: "lifetime_purchase",
           },
         },
-        metadata: { user_id: userId, type: "lifetime_purchase" },
+        // `grants_plan_id` is repeated at session level because
+        // checkout.session.completed is the second path to the same grant and
+        // sees only this object. While it was omitted here, that path had
+        // nothing to read and granted a hardcoded "pro" — whichever of the two
+        // events Stripe delivered first silently decided what $199 bought.
+        metadata: {
+          user_id: userId,
+          grants_plan_id: product.grantsPlanId,
+          type: "lifetime_purchase",
+        },
       };
       break;
     }
