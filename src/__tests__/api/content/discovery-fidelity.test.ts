@@ -74,7 +74,7 @@ interface StoredRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type: string };
+  metadata: { type?: string };
 }
 
 let storedRows: StoredRow[] = [];
@@ -104,11 +104,16 @@ const serviceClient: MockServiceClient = {
 
 type ContentMap = Record<
   string,
-  { selector: string; content: unknown; type: string }
+  { selector: string; content: unknown; type?: string }
 >;
 
-/** POST a content map exactly as the widget builds it, and hand back the answer. */
-async function post(contentMap: ContentMap) {
+/**
+ * POST a body exactly as the widget builds it, and hand back the answer.
+ *
+ * Typed `unknown` rather than `ContentMap`: several cases below are about what the
+ * route does with a body that is not a content map at all.
+ */
+async function post(contentMap: unknown) {
   storedRows = [];
 
   const request = new NextRequest(
@@ -392,6 +397,92 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
 
     expect(response.status).toBe(400);
     expect(serviceClient.upsert).not.toHaveBeenCalled();
+  });
+
+  /**
+   * `content` is not the only field that reaches the service-role upsert. The
+   * element id keys it, and `selector` is `NOT NULL` in the schema — so a request
+   * that omits or mistypes either used to be answered by Postgres, as a 500, long
+   * after the route had already decided to write it.
+   */
+  describe("the rest of the row", () => {
+    it.each([
+      ["null", null],
+      ["an array", [{ selector: "h1", content: "seeded", type: "h1" }]],
+      ["a string", "not a map"],
+      ["a number", 7],
+    ])("refuses %s as the content map, without a 500", async (_label, body) => {
+      const response = await post(body);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "Content map must be an object",
+      );
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a string", "just the copy"],
+      ["null", null],
+    ])("refuses %s as an entry", async (_label, entry) => {
+      const response = await post({ "rcf-headline": entry });
+
+      expect(response.status).toBe(400);
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["a missing selector", { content: "copy", type: "h1" }],
+      ["a non-string selector", { selector: 42, content: "copy", type: "h1" }],
+      ["an empty selector", { selector: "", content: "copy", type: "h1" }],
+      [
+        "a junk type",
+        { selector: "h1", content: "copy", type: "h1 onclick=x" },
+      ],
+      ["a non-string type", { selector: "h1", content: "copy", type: {} }],
+    ])("refuses %s, naming the element", async (_label, entry) => {
+      const response = await post({ "rcf-headline": entry });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("rcf-headline");
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
+    it("refuses an over-long element id without echoing it back", async () => {
+      const elementId = "a".repeat(300);
+
+      const response = await post({
+        [elementId]: { selector: "h1", content: "copy", type: "h1" },
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(400);
+      // Reflecting an unbounded caller-supplied key into the response body is how
+      // a refusal becomes an amplifier.
+      expect(String(body.error)).not.toContain(elementId);
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
+    });
+
+    it("accepts a report that carries no type at all", async () => {
+      // scripts/qa-journey.mjs reports `{ content, selector }` and nothing else,
+      // and `metadata` defaults to `{}` in the schema, so a missing type is a
+      // legitimate report rather than a malformed one.
+      const rows = await postContentMap({
+        "rcf-headline": { selector: "h1", content: "Original headline" },
+      });
+      const row = storedFor(rows, "rcf-headline");
+
+      expect(row.original_content).toBe("Original headline");
+      expect(row.metadata).toEqual({});
+    });
+
+    it("keeps the type when the widget sends one", async () => {
+      const rows = await postContentMap({
+        "rcf-headline": { selector: "h1", content: "copy", type: "h1" },
+      });
+
+      expect(storedFor(rows, "rcf-headline").metadata).toEqual({ type: "h1" });
+    });
   });
 
   // Not a defect — the counterexample. Copy with no angle bracket survived even

@@ -5,14 +5,11 @@ import {
   authorizeSiteRequest,
   authorizeSiteOrigin,
 } from "@/lib/security/site-auth";
-import { validateDiscoveredText } from "@/lib/security/discovered-text";
+import {
+  validateDiscoveredElement,
+  validateElementId,
+} from "@/lib/security/discovered-text";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
-
-interface ContentMapData {
-  selector: string;
-  content: string;
-  type: string;
-}
 
 interface ContentElementRow {
   site_id: string;
@@ -23,7 +20,7 @@ interface ContentElementRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type: string };
+  metadata: { type?: string };
 }
 
 type DiscoveryRows =
@@ -35,33 +32,56 @@ type DiscoveryRows =
  *
  * The customer's text is stored exactly as the widget read it off their page.
  * It is not markup and no consumer treats it as markup, so it is not sanitized
- * as markup — see `@/lib/security/discovered-text` for why that mattered and
- * what is checked instead (A-1). A map is all-or-nothing: writing the elements
- * that happened to validate and dropping the rest is the silent partial failure
- * this route was already guilty of, one layer up.
+ * as markup — see `@/lib/security/discovered-text` for why that mattered, and for
+ * what every field is checked against instead (A-1). Nothing here reaches the
+ * service-role upsert unvalidated, including the element id, which is part of the
+ * upsert's conflict key.
+ *
+ * A map is all-or-nothing: writing the elements that happened to validate and
+ * dropping the rest is the silent partial failure this route was already guilty
+ * of, one layer up.
  */
 function buildDiscoveryRows(
   siteId: string,
-  contentMap: Record<string, ContentMapData>,
+  contentMap: unknown,
 ): DiscoveryRows {
+  // `Object.entries(null)` throws, and the outer catch would turn a malformed
+  // body into a 500 — an answer that reads as "our fault" for a request that was
+  // never well-formed. An array passes `typeof === "object"` and would index its
+  // members as element ids, so it is refused by name.
+  if (
+    typeof contentMap !== "object" ||
+    contentMap === null ||
+    Array.isArray(contentMap)
+  ) {
+    return { ok: false, error: "Content map must be an object" };
+  }
+
   const rows: ContentElementRow[] = [];
 
   for (const [elementId, data] of Object.entries(contentMap)) {
-    const validated = validateDiscoveredText(data?.content);
-    if (!validated.ok) {
-      return { ok: false, error: `Element ${elementId}: ${validated.error}` };
+    // Reported without echoing the key back: an id can itself be the malformed
+    // part, and a refusal must not reflect an unbounded string to the caller.
+    const id = validateElementId(elementId);
+    if (!id.ok) {
+      return { ok: false, error: id.error };
+    }
+
+    const element = validateDiscoveredElement(data);
+    if (!element.ok) {
+      return { ok: false, error: `Element ${id.value}: ${element.error}` };
     }
 
     rows.push({
       site_id: siteId,
-      element_id: elementId,
-      selector: data.selector,
-      original_content: validated.value,
-      current_content: validated.value,
-      published_content: validated.value,
+      element_id: id.value,
+      selector: element.value.selector,
+      original_content: element.value.content,
+      current_content: element.value.content,
+      published_content: element.value.content,
       language: "en",
       variant: "default",
-      metadata: { type: data.type },
+      metadata: element.value.type ? { type: element.value.type } : {},
     });
   }
 
@@ -264,10 +284,7 @@ export async function POST(
       );
     }
 
-    const discovered = buildDiscoveryRows(
-      siteId,
-      contentMap as Record<string, ContentMapData>,
-    );
+    const discovered = buildDiscoveryRows(siteId, contentMap);
 
     if (!discovered.ok) {
       return withCors(

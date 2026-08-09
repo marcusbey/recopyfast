@@ -48,7 +48,7 @@ import {
   authorizeSiteOrigin,
   buildSiteToken,
 } from "@/lib/security/site-auth";
-import { POST, GET } from "@/app/api/content/[siteId]/route";
+import { POST, GET, OPTIONS } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { NextRequest } from "next/server";
 
@@ -440,5 +440,90 @@ describe("the element id an attacker has to guess", () => {
         referer: null,
       }),
     ).rejects.toThrow("Invalid site token");
+  });
+});
+
+/**
+ * The preflight is the half of the pin a non-browser caller never sees.
+ *
+ * A cross-origin GET or POST from the widget is preceded by an OPTIONS, and
+ * `authorizeSiteOrigin` answers it with no token to inspect. That makes it the one
+ * place where "is this the registered domain?" has to be decided on the header
+ * alone — so it is also the place where the localhost demo exemption in
+ * `authorizeSiteRequest` has to be mirrored, or the request it exempts is blocked
+ * before it is sent (docs/PROJECT_REPORT.md:435).
+ *
+ * The exemption is development-only and localhost-only. The absent-Origin case
+ * stays refused: that is A-2 itself, and a caller with no Origin is exactly the
+ * one this check exists to stop.
+ */
+describe("OPTIONS /api/content/[siteId] preflight", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    Reflect.set(process.env, "NODE_ENV", originalNodeEnv);
+  });
+
+  function preflight(origin: string | null) {
+    const headers: Record<string, string> = {
+      "Access-Control-Request-Method": "GET",
+      "Access-Control-Request-Headers": "authorization",
+    };
+    if (origin) headers.Origin = origin;
+
+    return OPTIONS(
+      new NextRequest(`https://recopyfast.com/api/content/${SITE_ID}`, {
+        method: "OPTIONS",
+        headers,
+      }),
+      { params: Promise.resolve({ siteId: SITE_ID }) },
+    );
+  }
+
+  it("admits the widget on the registered domain", async () => {
+    const response = await preflight(`https://${REGISTERED_DOMAIN}`);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+      `https://${REGISTERED_DOMAIN}`,
+    );
+  });
+
+  it.each([
+    ["localhost", "http://localhost:8080"],
+    ["127.0.0.1", "http://127.0.0.1:8080"],
+  ])(
+    "admits a %s demo page in development, against a non-local registered domain",
+    async (_label, origin) => {
+      // The site is registered to example.com, and the demo page is served from
+      // the developer's own machine — the shape docs/PROJECT_REPORT.md documents.
+      const response = await preflight(origin);
+
+      expect(response.status).toBe(204);
+      // Echoed, or the browser discards the 204 and blocks the request anyway.
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    },
+  );
+
+  it("refuses the same localhost preflight in production", async () => {
+    Reflect.set(process.env, "NODE_ENV", "production");
+
+    const response = await preflight("http://localhost:8080");
+
+    expect(response.status).toBe(403);
+  });
+
+  it("refuses an origin that is neither local nor the registered domain", async () => {
+    const response = await preflight("https://attacker.example.net");
+
+    expect(response.status).toBe(403);
+  });
+
+  it("refuses a preflight that sends no Origin at all", async () => {
+    // Not a browser, therefore not a preflight. The development exemption is for
+    // localhost, not for the absence of a header — that absence is A-2.
+    const response = await preflight(null);
+
+    expect(response.status).toBe(403);
   });
 });

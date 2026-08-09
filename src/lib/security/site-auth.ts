@@ -39,6 +39,18 @@ function parseOrigin(originHeader?: string | null) {
   }
 }
 
+/**
+ * A host that can only be a developer's own machine.
+ *
+ * Shared by the request and preflight paths below so the two cannot drift into
+ * disagreeing about what "local" means — they did, and the disagreement was
+ * invisible because only one of them is reached without a browser.
+ */
+function isLocalhostHost(host: string | null): boolean {
+  if (!host) return false;
+  return host === "localhost" || host.startsWith("127.0.0.1");
+}
+
 export function buildSiteToken(siteId: string, apiKey: string) {
   const issuedAt = Math.floor(Date.now() / 1000);
   const payload = `${siteId}.${issuedAt}`;
@@ -109,9 +121,7 @@ export async function authorizeSiteRequest(options: {
 
   // Allow demo mode for localhost in development
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
-  const isLocalhost =
-    requestOriginHost === "localhost" ||
-    requestOriginHost?.startsWith("127.0.0.1");
+  const isLocalhost = isLocalhostHost(requestOriginHost);
   const isDemoToken = token === "demo-site-token";
   const isDevelopment = process.env.NODE_ENV !== "production";
   const isLocalDemo = isDevelopment && isLocalhost && isDemoToken;
@@ -228,12 +238,28 @@ export async function authorizeSiteOrigin(
   const allowedDomain = normalizeDomain(site.domain);
   const requestOriginHost = parseOrigin(origin) || parseOrigin(referer);
 
-  // Unconditional, for the same reason as authorizeSiteRequest above: a caller
-  // that sends no parseable Origin has not proved it is on the registered
+  // The preflight has to agree with the request it precedes.
+  //
+  // `authorizeSiteRequest` exempts the localhost demo token on a non-production
+  // build, but the browser sends an OPTIONS before any cross-origin GET or POST,
+  // and this function — which answers it — has no token to inspect. Refusing here
+  // blocked the very request that exemption exists to allow: the local test page
+  // in docs/PROJECT_REPORT.md:435 never got past its preflight, so its fetch was
+  // never sent, and the exemption on the other side could not be reached.
+  //
+  // Development only, and it grants nothing by itself. A 204 preflight carries no
+  // content; the GET or POST behind it still needs a site token, and any token but
+  // the demo one still needs the exact registered domain. In production this
+  // branch is dead and the domain pin is absolute.
+  const isLocalDevPreflight =
+    process.env.NODE_ENV !== "production" && isLocalhostHost(requestOriginHost);
+
+  // Otherwise unconditional, for the same reason as authorizeSiteRequest above: a
+  // caller that sends no parseable Origin has not proved it is on the registered
   // domain, and this function is what stands between an unknown caller and the
-  // knowledge that a site id exists. Every real caller of this path is a browser
-  // preflight, which always sends Origin. (A-2)
-  if (requestOriginHost !== allowedDomain) {
+  // knowledge that a site id exists. A browser preflight always sends Origin, so
+  // a missing one is never a preflight. (A-2)
+  if (!isLocalDevPreflight && requestOriginHost !== allowedDomain) {
     throw new Error("Origin not allowed");
   }
 
