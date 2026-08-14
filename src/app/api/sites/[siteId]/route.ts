@@ -22,10 +22,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify the user has admin permission on this site
+    // Verify the user is the creator. Invited managers map to permission
+    // "admin" (teamRoleToSitePermission), so admin alone is not enough —
+    // they could wipe the tenant. The creator's row is the one written at
+    // registration without granted_by (sites/register + share A-4).
     const { data: permission, error: permissionError } = await serviceClient
       .from("site_permissions")
-      .select("permission")
+      .select("permission, granted_by")
       .eq("site_id", siteId)
       .eq("user_id", user.id)
       .single();
@@ -37,9 +40,9 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
-    if (permission.permission !== "admin") {
+    if (permission.permission !== "admin" || permission.granted_by !== null) {
       return NextResponse.json(
-        { error: "Only site admins can delete sites" },
+        { error: "Only the site creator can delete this site" },
         { status: 403 },
       );
     }

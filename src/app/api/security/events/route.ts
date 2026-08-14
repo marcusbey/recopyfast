@@ -131,103 +131,20 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const supabase = await createClient();
-
-    const body = await request.json();
-    const {
-      eventType,
-      siteId,
-      userId,
-      ipAddress,
-      userAgent,
-      endpoint,
-      payload,
-      severity = "medium",
-    } = body;
-
-    // Validate required fields
-    const sanitizedEventType = validateAndSanitizeInput(eventType);
-    if (!sanitizedEventType) {
-      return NextResponse.json(
-        { error: "Missing event type" },
-        { status: 400 },
-      );
-    }
-
-    // Validate event type
-    const validEventTypes = [
-      "rate_limit_exceeded",
-      "invalid_domain",
-      "xss_attempt",
-      "suspicious_activity",
-    ];
-    if (!validEventTypes.includes(sanitizedEventType)) {
-      return NextResponse.json(
-        { error: "Invalid event type" },
-        { status: 400 },
-      );
-    }
-
-    // Validate severity
-    const validSeverities = ["low", "medium", "high", "critical"];
-    const sanitizedSeverity = validateAndSanitizeInput(severity);
-    if (!validSeverities.includes(sanitizedSeverity)) {
-      return NextResponse.json(
-        { error: "Invalid severity level" },
-        { status: 400 },
-      );
-    }
-
-    // Sanitize optional fields
-    const sanitizedSiteId = siteId ? validateAndSanitizeInput(siteId) : null;
-    const sanitizedUserId = userId ? validateAndSanitizeInput(userId) : null;
-    const sanitizedIpAddress = ipAddress
-      ? validateAndSanitizeInput(ipAddress)
-      : null;
-    const sanitizedUserAgent = userAgent
-      ? validateAndSanitizeInput(userAgent)
-      : null;
-    const sanitizedEndpoint = endpoint
-      ? validateAndSanitizeInput(endpoint)
-      : null;
-
-    // Insert security event
-    const { data: event, error: insertError } = await supabase
-      .from("security_events")
-      .insert([
-        {
-          event_type: sanitizedEventType,
-          site_id: sanitizedSiteId,
-          user_id: sanitizedUserId,
-          ip_address: sanitizedIpAddress,
-          user_agent: sanitizedUserAgent,
-          endpoint: sanitizedEndpoint,
-          payload: payload || null,
-          severity: sanitizedSeverity,
-        },
-      ])
-      .select()
-      .single();
-
-    if (insertError) {
-      console.error("Security event creation error:", insertError);
-      return NextResponse.json(
-        { error: "Failed to log security event" },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({
-      event,
-      message: "Security event logged successfully",
-    });
-  } catch (error) {
-    console.error("Security event logging API error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
-  }
+/**
+ * Writes used to land here with no session and caller-chosen userId / siteId.
+ * Nothing in the product POSTs this route — the dashboard only GETs — and
+ * server-side logging should not go through a public HTTP surface.
+ */
+export async function POST(_request: NextRequest) {
+  return NextResponse.json(
+    {
+      error:
+        "Client writes to /api/security/events are disabled. Security events are recorded server-side only.",
+    },
+    {
+      status: 405,
+      headers: { Allow: "GET" },
+    },
+  );
 }

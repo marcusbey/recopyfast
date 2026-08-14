@@ -94,9 +94,19 @@ export async function GET(request: NextRequest) {
           lastActivity = activityRow;
         }
 
-        // Generate site token
-        const siteToken = buildSiteToken(site.id, site.api_key);
-        const embedScript = buildEmbedScript({ siteId: site.id, siteToken });
+        const permission = permissions.find((row) => row.site_id === site.id);
+        const canInstall = permission?.permission === "admin";
+
+        // The HMAC secret and a minted token are install credentials, not a
+        // membership perk. Viewers and editors must not receive a fresh 90-day
+        // token just because they can see the site.
+        const siteToken =
+          canInstall && site.api_key
+            ? buildSiteToken(site.id, site.api_key)
+            : undefined;
+        const embedScript = siteToken
+          ? buildEmbedScript({ siteId: site.id, siteToken })
+          : undefined;
 
         return {
           id: site.id,
@@ -111,8 +121,7 @@ export async function GET(request: NextRequest) {
             views: 0, // TODO: Implement views tracking
             last_activity: lastActivity?.created_at || null,
           },
-          siteToken,
-          embedScript,
+          ...(canInstall ? { siteToken, embedScript } : {}),
         };
       }),
     );

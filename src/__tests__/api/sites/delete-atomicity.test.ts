@@ -37,6 +37,7 @@ interface PermissionRow {
   site_id: string;
   user_id: string;
   permission: string;
+  granted_by: string | null;
 }
 
 const SITE_ID = "site-1";
@@ -191,7 +192,12 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     jest.spyOn(console, "error").mockImplementation(() => {});
     db.sites = [{ id: SITE_ID, domain: "kept.example.com", name: "Kept Co" }];
     db.sitePermissions = [
-      { site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" },
+      {
+        site_id: SITE_ID,
+        user_id: OWNER_ID,
+        permission: "admin",
+        granted_by: null,
+      },
     ];
     db.failSiteDelete = false;
     db.deletes = [];
@@ -236,7 +242,12 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     // being served to the public.
     expect(db.sites).toHaveLength(1);
     expect(db.sitePermissions).toEqual([
-      { site_id: SITE_ID, user_id: OWNER_ID, permission: "admin" },
+      {
+        site_id: SITE_ID,
+        user_id: OWNER_ID,
+        permission: "admin",
+        granted_by: null,
+      },
     ]);
   });
 
@@ -280,5 +291,49 @@ describe("A-11 DELETE /api/sites/[siteId] deletes ownership before the site", ()
     // `site_permissions` is read once for the authorisation check at :26-31.
     // The only DELETE the route may issue is the one against `sites`.
     expect(db.deletes).toEqual(["sites"]);
+  });
+});
+
+describe("DELETE /api/sites/[siteId] refuses invited managers", () => {
+  const MANAGER_ID = "manager-456";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    db.sites = [{ id: SITE_ID, domain: "kept.example.com", name: "Kept Co" }];
+    db.sitePermissions = [
+      {
+        site_id: SITE_ID,
+        user_id: OWNER_ID,
+        permission: "admin",
+        granted_by: null,
+      },
+      {
+        site_id: SITE_ID,
+        user_id: MANAGER_ID,
+        permission: "admin",
+        granted_by: OWNER_ID,
+      },
+    ];
+    db.failSiteDelete = false;
+    db.deletes = [];
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: MANAGER_ID } },
+      error: null,
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("does not let an invited manager delete the site", async () => {
+    const response = await deleteSite();
+    const body = await response.json();
+
+    expect(response.status).toBe(403);
+    expect(body.error).toMatch(/creator/i);
+    expect(db.sites).toHaveLength(1);
+    expect(db.deletes).toEqual([]);
   });
 });

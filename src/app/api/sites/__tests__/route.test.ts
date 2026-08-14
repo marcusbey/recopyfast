@@ -270,4 +270,40 @@ describe("GET /api/sites", () => {
 
     expect(JSON.stringify(data)).not.toContain("test-api-key-1");
   });
+
+  it("does not mint a site token or embed script for a viewer", async () => {
+    queryQueue.push({
+      data: [{ site_id: "site-1", permission: "view" }],
+    });
+    queryQueue.push({ data: mockSites });
+    queueSiteStats();
+
+    const response = await GET(
+      new NextRequest("http://localhost:3000/api/sites"),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mockBuildSiteToken).not.toHaveBeenCalled();
+    expect(data.sites[0].siteToken).toBeUndefined();
+    expect(data.sites[0].embedScript).toBeUndefined();
+    expect(JSON.stringify(data)).not.toContain("test-api-key-1");
+  });
+
+  it("does not mint a site token for an editor either", async () => {
+    queryQueue.push({
+      data: [{ site_id: "site-1", permission: "edit" }],
+    });
+    queryQueue.push({ data: mockSites });
+    queueSiteStats();
+
+    const response = await GET(
+      new NextRequest("http://localhost:3000/api/sites"),
+    );
+    const data = await response.json();
+
+    expect(mockBuildSiteToken).not.toHaveBeenCalled();
+    expect(data.sites[0].siteToken).toBeUndefined();
+    expect(data.sites[0].embedScript).toBeUndefined();
+  });
 });
