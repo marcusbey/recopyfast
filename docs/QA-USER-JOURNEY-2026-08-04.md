@@ -5,14 +5,16 @@ marketing site, signed up with a real address, paid with a real card, registered
 a site, took the generated script, put it on a page served from a different
 origin, and tried to invite somebody to edit it.
 
-The original register and follow-up passes were executed against the **live
-Supabase project**, **live Stripe (test mode)**, real browsers and generated
-sites. Older sections preserve what was observed at the time; the current
-evidence boundary is the third pass dated 2026-08-06. Treat green historical
-rows as "verified in that pass", not as a standing claim that every branch is
-still production-proven today.
+The original register and first follow-up passes were executed against the
+**live Supabase project**, **live Stripe (test mode)**, real browsers and
+generated sites. The fourth pass also inspected Stripe live-mode endpoint and
+event metadata read-only. Older sections preserve what was observed at the
+time; the current evidence boundary is the fourth pass dated 2026-08-10. Treat
+green historical rows as "verified in that pass", not as a standing claim that
+every branch is still production-proven today.
 
-**Test account:** disposable QA mailbox, redacted user id, Pro, active.
+**Original test account (historical):** disposable QA mailbox, redacted user id,
+Pro, active during the recorded payment pass.
 **Completed payment path observed:** Pro subscription $19/mo. The credit pack
 reached Checkout, but no completed credit-pack payment was proven.
 
@@ -76,7 +78,7 @@ broken · ⚠️ works but misleads the user
 | 3.3 | "Continue to payment" reaches Stripe Checkout | 🔧 **F-1 — was totally broken** |
 | 3.4 | Stripe page shows the right product and price | 🔧 **F-13** — projected from the catalogue (2nd pass) |
 | 3.5 | Paying with `4242…` succeeds | ✅ |
-| 3.6 | All webhooks return 200 | ✅ 10/10 |
+| 3.6 | All webhooks return 200 | ✅ historical test-mode 10/10 · ❌ live endpoint redirects, **B-21** |
 | 3.7 | `billing_customers` + `billing_subscriptions` written (`pro`, `active`) | ✅ |
 | 3.8 | Paid user can then reach the dashboard | 🔧 **F-2 — was totally broken** |
 | 3.9 | Billing page shows plan, period, next billing date | ✅ |
@@ -850,10 +852,125 @@ the counter and overflow guard can contradict one another.
 
 ---
 
+# Fourth pass — 2026-08-10: live owner journey + live Stripe webhook
+
+This pass repeated the requested production owner journey on the canonical
+`https://www.recopyfa.st` application, then checked the Stripe warning against
+the live provider configuration. All created data was disposable and removed.
+No deployment, customer integration, payment, or Stripe endpoint was changed.
+
+## Evidence boundary
+
+- **Sign-in was browser-observed, but inbox delivery was not provider-proved.**
+  The signed-out production UI accepted the disposable address and showed its
+  "Check your email" state. To continue deterministically without depending on
+  the mailbox, the authenticated session was completed with an admin-generated
+  one-time link for that same disposable user.
+- **The downstream owner journey did not prove payment.** A disposable Pro
+  entitlement was inserted specifically to reach the dashboard. Hosted
+  Checkout, payment settlement and webhook-created entitlement were not part of
+  this run.
+- **Site creation and script generation were browser-observed.** Two disposable
+  sites were registered through the production UI. Both success dialogs
+  generated the same apex-hosted script/API URLs described in B-11.
+- **Widget activation was proved on a controlled same-origin production
+  fixture.** After replacing only the generated apex service host with the
+  fixture's non-redirecting service host, content fetch, active-test fetch and
+  content-map POST all returned 200. The dashboard then reported the disposable
+  site Active with 82 discovered elements.
+- **Stripe was inspected read-only.** The endpoint configuration came from
+  Stripe API `GET /v1/webhook_endpoints`; the seven-day event inventory and
+  `pending_webhooks` counters came from paginated `GET /v1/events` calls in live
+  mode. No endpoint update, event retry or signed synthetic delivery was
+  performed.
+
+## Owner journey result
+
+The requested sequence is functionally reachable: submit sign-in, authenticate,
+add a website and generate an embed script. It is not production-clean:
+
+1. The generated script still uses `https://recopyfa.st/embed/recopyfast.js`
+   and `data-api-url="https://recopyfa.st/api"`. The apex API preflight returned
+   308 to `www`; the canonical preflight returned 204.
+2. "Go to Site Dashboard" closed the registration success dialog but left the
+   browser on the dashboard overview instead of the new site's dashboard.
+3. The site card action labelled "Settings" opened an "Edit Website" workflow,
+   not settings.
+4. Site Details called the embed credential a secret that must "never" be
+   exposed publicly even though the generated public script necessarily embeds
+   it. Either the token is a public site identifier and the copy is wrong, or
+   the installation model is exposing a credential that was intended to be
+   secret.
+
+The script dialog's Copy action changed to "Copied!". An independent operating-
+system clipboard read was blocked by the automated browser's clipboard
+permission boundary, so this run does not claim cross-process clipboard proof
+or classify that limitation as a product defect.
+
+## Revoked-session and overflow result
+
+B-19 and B-20 both reproduced again from a newly valid owner edit session:
+
+- A transformed two-character `5m` mark displayed `2 / 50`. After changing it
+  to `6m`, the live overflow probe returned true and Save presented "This
+  content may overflow the container and affect layout. Save anyway?" The
+  counter and inline toolbar rectangles overlapped.
+- The session was then deliberately revoked with the `6m` draft still dirty.
+  Save showed `Invalid or expired edit session`; a second Save showed the same
+  blocking alert again. After both failures the element was still
+  `contenteditable`, the edit toolbar remained mounted, Save remained enabled
+  and the unsaved `6m` draft remained only in the page.
+
+This is controlled revocation evidence. It does not claim that the session
+expired spontaneously.
+
+## Stripe webhook result
+
+The screenshot warning is current and its failure mechanism is confirmed:
+
+- Stripe live mode has exactly one enabled webhook endpoint, configured as
+  `https://recopyfa.st/api/webhooks/stripe`, with eight subscribed event types.
+- The event selection is independently wrong. Only
+  `checkout.session.completed` overlaps the route's 13 handled types. Twelve
+  handled types are not subscribed, including all subscription created,
+  updated, deleted and invoice success/failure events required by the setup
+  guide; seven subscribed account/async/expired types are not handled.
+- An unsigned POST to that exact apex URL returned 308 and redirected to
+  `https://www.recopyfa.st/api/webhooks/stripe`.
+- The same unsigned POST sent directly to the canonical `www` route returned
+  the expected 400 `Webhook signature verification failed`, proving that the
+  deployed handler is reachable and enforcing its signature gate.
+- Six of the eleven live Stripe events inspected from the previous seven days
+  still had `pending_webhooks=1`. All six were
+  `checkout.session.expired`, created within seconds of one another on
+  2026-08-07.
+- The focused webhook regression command remained green: 3 suites, 30 tests, 0
+  failures. It ran `npm test -- --runTestsByPath` over
+  `stripe-webhook-write-failures.test.ts`, `stripe-webhook-ordering.test.ts` and
+  `src/lib/stripe/__tests__/config.test.ts`.
+
+[Stripe treats a redirect response as a failed webhook
+delivery](https://docs.stripe.com/webhooks#fix-http-status-codes). The provider
+is therefore posting to the redirecting host while the functioning route is on
+the canonical host. Update the Stripe endpoint to
+`https://www.recopyfa.st/api/webhooks/stripe`, update the setup guide that still
+documents the apex URL, and correct the subscribed event set. Then retry recent
+representative events and verify signed 2xx deliveries plus their intended
+database side effects before closing B-21.
+
+## Cleanup proof
+
+- Both disposable site ids returned zero rows after cleanup.
+- The disposable entitlement and edit-session queries returned zero rows.
+- The disposable Auth user was absent from the admin user list.
+- The tracked tree was clean before this QA record was updated.
+
+---
+
 # Open backlog — everything still to fix
 
 One list, ordered by what it costs the business. Known outstanding items from
-the three QA passes are collected here; the dated evidence sections above remain
+the four QA passes are collected here; the dated evidence sections above remain
 the authority for exactly what was and was not observed.
 
 ## P0 — blocks a primary production journey
@@ -869,6 +986,9 @@ URL was temporarily rewritten to `https://www.recopyfa.st`.
 Generate canonical `www` URLs directly (or make the apex API answer CORS without
 a redirect) and add a foreign-origin browser test against the exact generated
 snippet.
+
+The 2026-08-10 production UI generated the apex URLs again. A fresh apex API
+preflight returned 308 to `www`, while the canonical preflight returned 204.
 
 ### B-12. Standing-editor schema objects do not resolve in production — OPEN
 
@@ -897,6 +1017,29 @@ replay.
 Design a narrowly scoped, revocable write proof, enforce the stored permission
 set on every mutation, and add negative route tests for view-only, expired,
 revoked, rotated and replayed grants before enabling writes.
+
+### B-21. Stripe live webhook routing and event selection are wrong — OPEN
+
+Stripe's only enabled live endpoint is
+`https://recopyfa.st/api/webhooks/stripe`. The endpoint returns 308 to `www`,
+which Stripe records as a failed delivery rather than following it. The
+canonical route is live and rejects an unsigned probe with the expected
+signature-verification 400. Because Stripe does not follow webhook redirects,
+the apex host response prevents delivery from reaching that handler.
+
+Even after the host is corrected, the live endpoint's event selection does not
+match the deployed route. Only one of eight subscribed types is handled, while
+12 of the route's 13 handled types are not subscribed. The missing set includes
+all five subscription/invoice lifecycle events that `STRIPE_PRODUCT_SETUP.md`
+explicitly requires, so renewals, failures and cancellations cannot reach their
+implemented handlers through the current endpoint.
+
+Six of eleven inspected live events had one pending webhook, and all six were
+`checkout.session.expired` events from 2026-08-07. Change the provider endpoint
+and `STRIPE_PRODUCT_SETUP.md` to the canonical `www` URL, reconcile the enabled
+events with the handler contract, retry representative recent events, and
+require signed 2xx provider deliveries plus the intended database side effects
+before closing this issue.
 
 ## P1 — costs money or misleads a paying customer
 
@@ -967,6 +1110,19 @@ locally, disable mutation controls, show one non-blocking explanation, and offer
 a dashboard/re-authentication path. Add a regression for revocation between
 editor initialization and Save.
 
+The 2026-08-10 controlled run reproduced this from a newly valid session: after
+explicit revocation, two Save attempts produced two blocking alerts while the
+dirty `6m` element, toolbar and enabled editing controls all remained active.
+
+### B-22. Site-token security copy contradicts the installation model — OPEN
+
+Site Details says the token must be kept secure and "never" exposed publicly,
+while the generated installation snippet puts that same token into public page
+markup. Resolve the contract explicitly: if it is an abuse-limited public site
+identifier, rename it and explain the actual boundary; if it is intended as a
+secret, replace the browser-exposed credential design rather than softening the
+warning.
+
 ## P2 — real cost, no immediate customer harm
 
 ### B-15. Edit and activity telemetry stayed at zero — OPEN
@@ -1003,6 +1159,10 @@ counter also overlapped the subtitle below the selected element.
 Use one layout-aware source of truth for both signals, avoid claiming a numeric
 capacity when it is only a rough minimum, and collision-test the toolbar/counter
 placement on small, transformed and decorative text.
+
+The 2026-08-10 run reproduced all three parts independently: `2 / 50`, a true
+overflow result for the two-character replacement, and intersecting counter and
+toolbar rectangles.
 
 ### B-4. The widget ships 41 KB of socket.io that never connects — CONFIRMED
 
@@ -1076,6 +1236,13 @@ The selected site exists only in dashboard client state. Refreshing the Site
 Details view at `/dashboard/sites` drops the owner back to the list instead of
 restoring the same site. Give details a site-id route, or persist and validate
 the selected id in the URL.
+
+### B-23. Post-registration and site-card actions are misdirected — OPEN
+
+"Go to Site Dashboard" closed the successful registration dialog but kept the
+owner on the dashboard overview. On the sites list, "Settings" opened the
+"Edit Website" session flow. Route the success action to the newly created
+site's durable detail page and label the edit-session action for what it does.
 
 ## Not defects, but unproven
 
