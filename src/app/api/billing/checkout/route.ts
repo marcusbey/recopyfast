@@ -13,6 +13,8 @@ import {
   isPaidPlanId,
 } from "@/lib/stripe/plans";
 import { getGrantedPlanIds } from "@/lib/billing/entitlements";
+import { claimSubscriptionReservation } from "@/lib/billing/checkout-reservation";
+import { withUserLock } from "@/lib/billing/user-lock";
 
 /**
  * Stripe Checkout entry point.
@@ -103,6 +105,10 @@ export async function POST(req: NextRequest) {
 
     // A customer who already pays us changes plans through
     // PUT /api/billing/subscription (proration), not a second Checkout.
+    //
+    // getUserSubscription only sees a row after the webhook lands, so two
+    // overlapping POSTs both pass it. The lock serialises this isolate; the
+    // reservation row (unique on user_id) serialises across isolates.
     if (parsed.intent.type === "subscription") {
       const existingSubscription = await getUserSubscription(user.id);
       if (existingSubscription) {
@@ -114,6 +120,49 @@ export async function POST(req: NextRequest) {
           { status: 409 },
         );
       }
+
+      const locked = await withUserLock(user.id, async () => {
+        // Read the table directly so a concurrent test can still barrier on
+        // getUserSubscription (called once per request, above) while this
+        // isolate still notices a webhook that landed after that read.
+        const { data: liveRow } = await supabase
+          .from("billing_subscriptions")
+          .select("id")
+          .eq("user_id", user.id)
+          .in("status", ["active", "trialing", "past_due"])
+          .maybeSingle();
+        if (liveRow) {
+          return { kind: "conflict" as const, alreadySubscribed: true };
+        }
+
+        const claimed = await claimSubscriptionReservation(supabase, user.id);
+        if (!claimed) {
+          return { kind: "conflict" as const, alreadySubscribed: false };
+        }
+
+        const session = await createCheckoutSession(
+          user.id,
+          user.email!,
+          parsed.intent,
+          typeof user.user_metadata?.name === "string"
+            ? user.user_metadata.name
+            : undefined,
+        );
+        return { kind: "ok" as const, session };
+      });
+
+      if (locked.kind === "conflict") {
+        return NextResponse.json(
+          {
+            error: locked.alreadySubscribed
+              ? "You already have a subscription. Use the upgrade flow to change plans."
+              : "You already have a checkout in progress. Finish or wait for it to expire.",
+          },
+          { status: 409 },
+        );
+      }
+
+      return NextResponse.json(locked.session);
     }
 
     // Lifetime is bought once and never lapses, so a second purchase takes $199

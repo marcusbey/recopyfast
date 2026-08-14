@@ -261,31 +261,28 @@ describe("A-18: credit deduction under concurrency and failure", () => {
     expect(db.credit_usage).toHaveLength(2);
   });
 
-  test.failing(
-    "two concurrent 5-credit spends against a 10-credit balance deduct 10",
-    async () => {
-      // Both spends are held at the deduction write until both have taken their
-      // snapshot of `credits_remaining` — the window the read-modify-write
-      // leaves open every time two AI operations overlap.
-      const bothReadFirst = createBarrier(2);
-      beforeRun = async (table, operation) => {
-        if (table === "credit_purchases" && operation === "update") {
-          await bothReadFirst();
-        }
-      };
+  it("two concurrent 5-credit spends against a 10-credit balance deduct 10", async () => {
+    // Both spends are held at the deduction write until both have taken their
+    // snapshot of `credits_remaining` — the window the read-modify-write
+    // leaves open every time two AI operations overlap.
+    const bothReadFirst = createBarrier(2);
+    beforeRun = async (table, operation) => {
+      if (table === "credit_purchases" && operation === "update") {
+        await bothReadFirst();
+      }
+    };
 
-      const [first, second] = await Promise.all([
-        consumeCredits(USER_ID, 5, "ai_translation"),
-        consumeCredits(USER_ID, 5, "ai_translation"),
-      ]);
+    const [first, second] = await Promise.all([
+      consumeCredits(USER_ID, 5, "ai_translation"),
+      consumeCredits(USER_ID, 5, "ai_translation"),
+    ]);
 
-      expect(first.success).toBe(true);
-      expect(second.success).toBe(true);
-      expect(recordedUsage()).toBe(10);
-      expect(spendableBalance()).toBe(0);
-      expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
-    },
-  );
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(recordedUsage()).toBe(10);
+    expect(spendableBalance()).toBe(0);
+    expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
+  });
 
   it("guard: the injected deduction failure is the one the code reports", async () => {
     failPurchaseUpdate = true;
@@ -298,20 +295,17 @@ describe("A-18: credit deduction under concurrency and failure", () => {
     expect(spendableBalance()).toBe(STARTING_BALANCE);
   });
 
-  test.failing(
-    "a deduction that fails does not leave the usage on the customer's ledger",
-    async () => {
-      failPurchaseUpdate = true;
+  it("a deduction that fails does not leave the usage on the customer's ledger", async () => {
+    failPurchaseUpdate = true;
 
-      const result = await consumeCredits(USER_ID, 5, "ai_translation");
+    const result = await consumeCredits(USER_ID, 5, "ai_translation");
 
-      expect(result.success).toBe(false);
-      // The wallet still holds 10 and the ledger says 5 were spent. The customer
-      // is billed for an operation that did not happen, and `refundCredits`
-      // cannot compensate it — nothing calls it on this path.
-      expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
-    },
-  );
+    expect(result.success).toBe(false);
+    // The wallet still holds 10 and the ledger says 5 were spent. The customer
+    // is billed for an operation that did not happen, and `refundCredits`
+    // cannot compensate it — nothing calls it on this path.
+    expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
+  });
 
   it("guard: a single refund lands, so the collision below is about the key", async () => {
     jest.spyOn(Date, "now").mockReturnValue(1785484800000);
@@ -328,24 +322,21 @@ describe("A-18: credit deduction under concurrency and failure", () => {
     ).toBe(true);
   });
 
-  test.failing(
-    "two refunds for one user in the same millisecond both land",
-    async () => {
-      // `refund_${reason}_${userId}_${Date.now()}` is the whole idempotency key,
-      // so two refunds inside one millisecond are indistinguishable to the
-      // UNIQUE constraint. A pinned clock is the deterministic form of a real
-      // burst; the resolution is milliseconds, not the microseconds a retry
-      // loop or a batch would actually take.
-      jest.spyOn(Date, "now").mockReturnValue(1785484800000);
+  it("two refunds for one user in the same millisecond both land", async () => {
+    // `refund_${reason}_${userId}_${Date.now()}` is the whole idempotency key,
+    // so two refunds inside one millisecond are indistinguishable to the
+    // UNIQUE constraint. A pinned clock is the deterministic form of a real
+    // burst; the resolution is milliseconds, not the microseconds a retry
+    // loop or a batch would actually take.
+    jest.spyOn(Date, "now").mockReturnValue(1785484800000);
 
-      const first = await refundCredits(USER_ID, 5, "translation_failed");
-      const second = await refundCredits(USER_ID, 5, "translation_failed");
+    const first = await refundCredits(USER_ID, 5, "translation_failed");
+    const second = await refundCredits(USER_ID, 5, "translation_failed");
 
-      expect(first.success).toBe(true);
-      expect(second.success).toBe(true);
-      expect(spendableBalance()).toBe(STARTING_BALANCE + 10);
-    },
-  );
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(spendableBalance()).toBe(STARTING_BALANCE + 10);
+  });
 
   /**
    * Fix-stable: the sequential path is correct today and must stay correct.

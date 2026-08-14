@@ -127,7 +127,11 @@ CREATE POLICY "Site admins can revoke site permissions"
   ON site_permissions
   FOR DELETE
   TO authenticated
-  USING (public.user_has_site_permission(site_id, ARRAY['admin']));
+  USING (
+    user_id IS NOT NULL
+    AND granted_by IS NOT NULL
+    AND public.user_has_site_permission(site_id, ARRAY['admin'])
+  );
 
 DROP POLICY IF EXISTS "Service role can manage site permissions" ON site_permissions;
 CREATE POLICY "Service role can manage site permissions"

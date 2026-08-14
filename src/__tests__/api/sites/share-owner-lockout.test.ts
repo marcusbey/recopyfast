@@ -381,7 +381,7 @@ describe("A-4 — DELETE /api/sites/:siteId/share", () => {
     expect(permissionQueries.length).toBeGreaterThan(0);
   });
 
-  test.failing("counts the remaining admins before revoking one", async () => {
+  it("counts the remaining admins before revoking one", async () => {
     // The mechanism behind both failures above: the route reads exactly one
     // row — the target — and never asks how many admins the site has left.
     // Nothing in `site_permissions` is consulted beyond `id` and `site_id`.
@@ -453,7 +453,7 @@ describe("A-4 — the DELETE policy on site_permissions", () => {
     );
   });
 
-  test.failing("authorises per row, not per site", () => {
+  it("authorises per row, not per site", () => {
     // This is the assertion that names the branch. Under branch B no matching
     // policy exists and the filter below is empty, so this passes; under
     // branch A the policy exists with a site-scoped predicate and it fails.

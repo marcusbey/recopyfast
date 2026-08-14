@@ -442,6 +442,22 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Count admins before any revoke. A site with one admin row must keep it,
+    // whether that row is the creator's or the last invited manager.
+    const { data: adminRows, error: adminCountError } = await serviceClient
+      .from("site_permissions")
+      .select("id")
+      .eq("site_id", siteId)
+      .eq("permission", "admin");
+
+    if (adminCountError) {
+      console.error("Error counting site admins:", adminCountError);
+      return NextResponse.json(
+        { error: "Failed to revoke site access" },
+        { status: 500 },
+      );
+    }
+
     // The site creator's row is not revocable through this endpoint.
     //
     // THIS GUARD IS PART OF THE SERVICE-ROLE CHANGE, not a separate feature.
@@ -469,6 +485,19 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         {
           error:
             "The site creator's access cannot be revoked. Transfer ownership first.",
+        },
+        { status: 403 },
+      );
+    }
+
+    if (
+      targetPermission.permission === "admin" &&
+      (adminRows?.length ?? 0) <= 1
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "The last admin on this site cannot be revoked. Transfer ownership first.",
         },
         { status: 403 },
       );

@@ -200,28 +200,25 @@ describe("A-21: two checkouts started at once", () => {
     expect(responses.every((response) => response.status !== 400)).toBe(true);
   });
 
-  test.failing(
-    "only one Checkout Session is created when two requests arrive together",
-    async () => {
-      const bothReadFirst = createBarrier(2);
-      const readsBillingSubscriptions =
-        mockGetUserSubscription.getMockImplementation();
-      mockGetUserSubscription.mockImplementation(async (...args) => {
-        await bothReadFirst();
-        return readsBillingSubscriptions?.(...args) ?? null;
-      });
+  it("only one Checkout Session is created when two requests arrive together", async () => {
+    const bothReadFirst = createBarrier(2);
+    const readsBillingSubscriptions =
+      mockGetUserSubscription.getMockImplementation();
+    mockGetUserSubscription.mockImplementation(async (...args) => {
+      await bothReadFirst();
+      return readsBillingSubscriptions?.(...args) ?? null;
+    });
 
-      const responses = await Promise.all([
-        post({ intent: "subscription", planId: "pro" }),
-        post({ intent: "subscription", planId: "pro" }),
-      ]);
+    const responses = await Promise.all([
+      post({ intent: "subscription", planId: "pro" }),
+      post({ intent: "subscription", planId: "pro" }),
+    ]);
 
-      const statuses = responses.map((response) => response.status).sort();
+    const statuses = responses.map((response) => response.status).sort();
 
-      expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
-      expect(statuses).toEqual([200, 409]);
-    },
-  );
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(statuses).toEqual([200, 409]);
+  });
 
   it("guard: the first checkout succeeds and returns a session URL", async () => {
     const first = await post({ intent: "subscription", planId: "pro" });
@@ -235,20 +232,17 @@ describe("A-21: two checkouts started at once", () => {
     expect(db.billing_subscriptions).toHaveLength(0);
   });
 
-  test.failing(
-    "a second subscription checkout is refused while the first is still unconfirmed",
-    async () => {
-      // Sequential, not concurrent: the first Checkout Session exists and the
-      // customer is on Stripe's payment page. Nothing has reached
-      // `billing_subscriptions` yet, and nothing stops them opening a second.
-      const first = await post({ intent: "subscription", planId: "pro" });
-      const second = await post({ intent: "subscription", planId: "pro" });
+  it("a second subscription checkout is refused while the first is still unconfirmed", async () => {
+    // Sequential, not concurrent: the first Checkout Session exists and the
+    // customer is on Stripe's payment page. Nothing has reached
+    // `billing_subscriptions` yet, and nothing stops them opening a second.
+    const first = await post({ intent: "subscription", planId: "pro" });
+    const second = await post({ intent: "subscription", planId: "pro" });
 
-      expect(first.status).toBe(200);
-      expect(second.status).toBe(409);
-      expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
-    },
-  );
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+  });
 
   /**
    * Fix-stable: once the webhook has written the row, the guard works. This is

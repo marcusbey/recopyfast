@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
@@ -188,6 +189,86 @@ export async function hasEnoughCredits(
 /**
  * Consume credits for an AI operation
  */
+const MAX_DEDUCT_ATTEMPTS = 8;
+
+/**
+ * Decrement purchased credits with compare-and-swap so two overlapping spends
+ * cannot both write the same `credits_remaining` snapshot.
+ *
+ * A missed CAS is a retry, not a silent success. Usage is written only after
+ * this returns ok, so a failed deduct cannot leave the customer billed.
+ */
+async function deductPurchasedCredits(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  amount: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (amount <= 0) {
+    return { ok: true };
+  }
+
+  for (let attempt = 0; attempt < MAX_DEDUCT_ATTEMPTS; attempt++) {
+    const { data: purchases, error: purchasesError } = await supabase
+      .from("credit_purchases")
+      .select("id, credits_remaining")
+      .eq("user_id", userId)
+      .gt("credits_remaining", 0)
+      .or(spendableFilter())
+      .order("created_at", { ascending: true });
+
+    if (purchasesError) {
+      console.error("Error loading credit purchases:", purchasesError);
+      return { ok: false, error: "Failed to deduct purchased credits" };
+    }
+
+    let remainingToDeduct = amount;
+    const steps: Array<{ id: string; from: number; to: number }> = [];
+
+    for (const purchase of purchases || []) {
+      if (remainingToDeduct <= 0) break;
+      const available = Number(purchase.credits_remaining);
+      const toDeduct = Math.min(remainingToDeduct, available);
+      steps.push({
+        id: purchase.id,
+        from: available,
+        to: available - toDeduct,
+      });
+      remainingToDeduct -= toDeduct;
+    }
+
+    if (remainingToDeduct > 0) {
+      return { ok: false, error: "Failed to deduct purchased credits" };
+    }
+
+    let collided = false;
+
+    for (const step of steps) {
+      const { data: updated, error: deductError } = await supabase
+        .from("credit_purchases")
+        .update({ credits_remaining: step.to })
+        .eq("id", step.id)
+        .eq("credits_remaining", step.from)
+        .select("id");
+
+      if (deductError) {
+        console.error("Error deducting purchased credits:", deductError);
+        return { ok: false, error: "Failed to deduct purchased credits" };
+      }
+
+      if (!updated || updated.length === 0) {
+        collided = true;
+        break;
+      }
+    }
+
+    if (!collided) {
+      return { ok: true };
+    }
+  }
+
+  return { ok: false, error: "Failed to deduct purchased credits" };
+}
+
 export async function consumeCredits(
   userId: string,
   credits: number,
@@ -204,6 +285,22 @@ export async function consumeCredits(
     };
   }
 
+  // Purchased credits are only touched once the included allowance is spent.
+  const includedRemaining = Math.max(
+    0,
+    balance.included - balance.usedThisMonth,
+  );
+  const creditsToDeductFromPurchased = credits - includedRemaining;
+
+  const deducted = await deductPurchasedCredits(
+    supabase,
+    userId,
+    creditsToDeductFromPurchased,
+  );
+  if (!deducted.ok) {
+    return { success: false, error: deducted.error };
+  }
+
   const { error: usageError } = await supabase.from("credit_usage").insert({
     user_id: userId,
     credits_used: credits,
@@ -213,51 +310,14 @@ export async function consumeCredits(
 
   if (usageError) {
     console.error("Error recording credit usage:", usageError);
+    if (creditsToDeductFromPurchased > 0) {
+      await refundCredits(
+        userId,
+        creditsToDeductFromPurchased,
+        `usage_insert_failed_${operation}`,
+      );
+    }
     return { success: false, error: "Failed to record credit usage" };
-  }
-
-  // Purchased credits are only touched once the included allowance is spent.
-  const includedRemaining = Math.max(
-    0,
-    balance.included - balance.usedThisMonth,
-  );
-  const creditsToDeductFromPurchased = credits - includedRemaining;
-
-  if (creditsToDeductFromPurchased > 0) {
-    const { data: purchases, error: purchasesError } = await supabase
-      .from("credit_purchases")
-      .select("id, credits_remaining")
-      .eq("user_id", userId)
-      .gt("credits_remaining", 0)
-      .or(spendableFilter())
-      .order("created_at", { ascending: true });
-
-    if (purchasesError) {
-      // The usage row is already written, so the credits are spent either way.
-      // Surfacing this stops a silent drift between usage and remaining.
-      console.error("Error loading credit purchases:", purchasesError);
-      return { success: false, error: "Failed to deduct purchased credits" };
-    }
-
-    let remainingToDeduct = creditsToDeductFromPurchased;
-
-    for (const purchase of purchases || []) {
-      if (remainingToDeduct <= 0) break;
-
-      const toDeduct = Math.min(remainingToDeduct, purchase.credits_remaining);
-
-      const { error: deductError } = await supabase
-        .from("credit_purchases")
-        .update({ credits_remaining: purchase.credits_remaining - toDeduct })
-        .eq("id", purchase.id);
-
-      if (deductError) {
-        console.error("Error deducting purchased credits:", deductError);
-        return { success: false, error: "Failed to deduct purchased credits" };
-      }
-
-      remainingToDeduct -= toDeduct;
-    }
   }
 
   const newBalance = await getUserCreditBalance(userId);
@@ -346,7 +406,7 @@ export async function refundCredits(
     credits_purchased: credits,
     credits_remaining: credits,
     price_cents: 0,
-    stripe_payment_intent_id: `refund_${reason}_${userId}_${Date.now()}`,
+    stripe_payment_intent_id: `refund_${reason}_${userId}_${randomUUID()}_${Date.now()}`,
   });
 
   if (error) {
