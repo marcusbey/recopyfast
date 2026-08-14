@@ -8,6 +8,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
+import { withPublicCors } from "@/lib/http/public-cors";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -17,18 +18,8 @@ function extractStagingToken(request: NextRequest): string | null {
   return request.nextUrl.searchParams.get("rcf_token");
 }
 
-function withCors(response: NextResponse, allowedOrigin: string | null) {
-  const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || "*";
-  const originHeader = allowedOrigin || defaultOrigin;
-  response.headers.set("Access-Control-Allow-Origin", originHeader);
-  response.headers.set("Access-Control-Allow-Credentials", "true");
-  response.headers.set(
-    "Access-Control-Allow-Headers",
-    "Authorization, Content-Type",
-  );
-  response.headers.set("Access-Control-Allow-Methods", "POST,OPTIONS");
-  response.headers.set("Vary", "Origin");
-  return response;
+function withCors(response: NextResponse, origin?: string | null) {
+  return withPublicCors(response, origin, "POST,OPTIONS");
 }
 
 interface TransformedContent {

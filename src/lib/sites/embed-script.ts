@@ -17,9 +17,31 @@ function escapeAttribute(value: string) {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * The apex host 308s to www. Browser CORS preflights cannot follow that
+ * redirect, so a snippet that points at recopyfa.st makes the widget look
+ * dead on every customer site (B-11). Rewrite only that exact hostname;
+ * previews, localhost, and an already-canonical www stay as configured.
+ */
+const CANONICAL_APEX_HOST = "recopyfa.st";
+const CANONICAL_WWW_HOST = "www.recopyfa.st";
+
+export function canonicalizePublicAppUrl(origin: string): string {
+  try {
+    const url = new URL(origin.includes("://") ? origin : `https://${origin}`);
+    if (url.hostname.toLowerCase() === CANONICAL_APEX_HOST) {
+      url.hostname = CANONICAL_WWW_HOST;
+      return normalizeOrigin(url.toString());
+    }
+  } catch {
+    // An unparseable value is returned unchanged; callers already tolerate that.
+  }
+  return origin;
+}
+
 export function getPublicAppUrl() {
-  return normalizeOrigin(
-    process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  return canonicalizePublicAppUrl(
+    normalizeOrigin(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   );
 }
 

@@ -26,7 +26,11 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { buildEmbedScript, getPublicWebSocketUrl } from "../embed-script";
+import {
+  buildEmbedScript,
+  getPublicAppUrl,
+  getPublicWebSocketUrl,
+} from "../embed-script";
 
 describe("buildEmbedScript", () => {
   const originalEnv = process.env;
@@ -138,6 +142,51 @@ describe("the snippet a customer pastes when real-time is not configured", () =>
     // `npm run dev` really does start server/index.js there, so this fallback
     // resolves to something that answers.
     expect(getPublicWebSocketUrl("http://localhost:3000")).toContain(":4001");
+  });
+});
+
+describe("getPublicAppUrl canonical host (B-11)", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
+  });
+
+  it("rewrites the apex recopyfa.st origin to www so CORS preflights are not redirected", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://recopyfa.st";
+
+    expect(getPublicAppUrl()).toBe("https://www.recopyfa.st");
+  });
+
+  it("points the generated snippet at www when NEXT_PUBLIC_APP_URL is the apex", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://recopyfa.st/";
+    delete process.env.NEXT_PUBLIC_WS_URL;
+
+    const script = buildEmbedScript({
+      siteId: "site-123",
+      siteToken: "site-token-abc",
+    });
+
+    expect(script).toContain(
+      'src="https://www.recopyfa.st/embed/recopyfast.js"',
+    );
+    expect(script).toContain('data-api-url="https://www.recopyfa.st/api"');
+    expect(script).not.toContain("https://recopyfa.st/");
+  });
+
+  it("leaves www and non-production origins alone", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://www.recopyfa.st";
+    expect(getPublicAppUrl()).toBe("https://www.recopyfa.st");
+
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    expect(getPublicAppUrl()).toBe("http://localhost:3000");
+
+    process.env.NEXT_PUBLIC_APP_URL = "https://recopyfast-git-main.vercel.app";
+    expect(getPublicAppUrl()).toBe("https://recopyfast-git-main.vercel.app");
   });
 });
 

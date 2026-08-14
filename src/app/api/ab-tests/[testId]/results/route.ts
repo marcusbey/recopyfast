@@ -97,75 +97,27 @@ export async function GET(
   }
 }
 
+/**
+ * Writes used to land here with the service-role key and no auth at all.
+ * Ingest belongs on POST /api/ab-tests/track, which pins a site token to the
+ * registered origin. This method is kept only so a stale client gets a
+ * directed 405 instead of a silent drop.
+ */
 export async function POST(
-  req: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ testId: string }> },
 ) {
-  try {
-    const { testId } = await params;
-    const body = await req.json();
-    const { variant_id, event_type, value, metadata, user_id, session_id } =
-      body;
-
-    if (!variant_id || !event_type) {
-      return NextResponse.json(
-        { error: "Missing required fields: variant_id, event_type" },
-        { status: 400 },
-      );
-    }
-
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        cookies: {
-          get: () => "",
-          set: () => {},
-          remove: () => {},
-        },
-      },
-    );
-
-    // Verify variant belongs to test
-    const { data: variant, error: variantError } = await supabase
-      .from("ab_test_variants")
-      .select("test_id")
-      .eq("id", variant_id)
-      .eq("test_id", testId)
-      .single();
-
-    if (variantError || !variant) {
-      return NextResponse.json({ error: "Invalid variant" }, { status: 400 });
-    }
-
-    // Record test result
-    const { data: result, error } = await supabase
-      .from("ab_test_results")
-      .insert({
-        test_id: testId,
-        variant_id,
-        user_id,
-        session_id,
-        event_type,
-        value: value || 1,
-        metadata: metadata || {},
-        recorded_at: new Date().toISOString(),
-      })
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    return NextResponse.json(result);
-  } catch (error) {
-    console.error("Record A/B test result error:", error);
-    return NextResponse.json(
-      { error: "Failed to record test result" },
-      { status: 500 },
-    );
-  }
+  await params;
+  return NextResponse.json(
+    {
+      error:
+        "Recording results through this endpoint is disabled. Use POST /api/ab-tests/track with a site token.",
+    },
+    {
+      status: 405,
+      headers: { Allow: "GET" },
+    },
+  );
 }
 
 interface TestResult {

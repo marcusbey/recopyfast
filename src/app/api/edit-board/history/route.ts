@@ -12,6 +12,7 @@ import {
   authorizeFirstPartyEditorAccess,
   requireEditorPermission,
 } from "@/lib/auth/editor-access";
+import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -21,18 +22,10 @@ function extractStagingToken(request: NextRequest): string | null {
   return request.nextUrl.searchParams.get("rcf_token");
 }
 
-function withCors(response: NextResponse, allowedOrigin: string | null) {
-  const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || "*";
-  const originHeader = allowedOrigin || defaultOrigin;
-  response.headers.set("Access-Control-Allow-Origin", originHeader);
-  response.headers.set("Access-Control-Allow-Credentials", "true");
-  response.headers.set(
-    "Access-Control-Allow-Headers",
-    "Authorization, Content-Type",
-  );
-  response.headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.headers.set("Vary", "Origin");
-  return response;
+const CORS_METHODS = "GET,POST,OPTIONS";
+
+function withCors(response: NextResponse, origin?: string | null) {
+  return withPublicCors(response, origin, CORS_METHODS);
 }
 
 // GET: List all versions for a site
@@ -250,7 +243,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function OPTIONS(request: NextRequest) {
-  const origin = request.headers.get("origin");
-  return withCors(new NextResponse(null, { status: 204 }), origin);
+export async function OPTIONS() {
+  return publicOptions(undefined, CORS_METHODS);
 }

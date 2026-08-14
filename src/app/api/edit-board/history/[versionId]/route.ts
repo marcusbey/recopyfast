@@ -13,6 +13,7 @@ import {
   authorizeFirstPartyEditorAccess,
   requireEditorPermission,
 } from "@/lib/auth/editor-access";
+import { withPublicCors } from "@/lib/http/public-cors";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -55,18 +56,8 @@ function unauthenticated(origin: string | null) {
   );
 }
 
-function withCors(response: NextResponse, allowedOrigin: string | null) {
-  const defaultOrigin = process.env.NEXT_PUBLIC_APP_URL || "*";
-  const originHeader = allowedOrigin || defaultOrigin;
-  response.headers.set("Access-Control-Allow-Origin", originHeader);
-  response.headers.set("Access-Control-Allow-Credentials", "true");
-  response.headers.set(
-    "Access-Control-Allow-Headers",
-    "Authorization, Content-Type",
-  );
-  response.headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  response.headers.set("Vary", "Origin");
-  return response;
+function withCors(response: NextResponse, origin?: string | null) {
+  return withPublicCors(response, origin, "GET,POST,OPTIONS");
 }
 
 // GET: Get specific version snapshot
