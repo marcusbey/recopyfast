@@ -3,16 +3,33 @@
 const { Client } = require('pg');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 
-// Database configuration
-const client = new Client({
-  host: 'db.uexwowziiigweobgpmtk.supabase.co',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: 'compozitComxmal1985%%',
-  ssl: { rejectUnauthorized: false }
-});
+// Database configuration — credentials come from the environment only.
+// Set DATABASE_URL, or SUPABASE_DB_HOST + SUPABASE_PASSWORD.
+const connectionString = process.env.DATABASE_URL;
+const host = process.env.SUPABASE_DB_HOST;
+const password = process.env.SUPABASE_PASSWORD;
+
+if (!connectionString && !(host && password)) {
+  console.error(
+    '❌ Missing database credentials. Set DATABASE_URL, or SUPABASE_DB_HOST and SUPABASE_PASSWORD.'
+  );
+  process.exit(1);
+}
+
+const client = new Client(
+  connectionString
+    ? { connectionString, ssl: { rejectUnauthorized: false } }
+    : {
+        host,
+        port: Number(process.env.SUPABASE_DB_PORT || 5432),
+        database: process.env.SUPABASE_DB_NAME || 'postgres',
+        user: process.env.SUPABASE_DB_USER || 'postgres',
+        password,
+        ssl: { rejectUnauthorized: false }
+      }
+);
 
 async function setupDatabase() {
   console.log('🚀 Setting up database...');
