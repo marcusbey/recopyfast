@@ -3,44 +3,103 @@
 > One story = one shippable slice, written to be executed by an agent.
 > Id format: `s<number>-<short-slug>` — reused in every pipeline file and in the branch name.
 > Scope authority: [`prd.md`](./prd.md). Nothing from the PRD graveyard appears here.
+> Review: [`reviews/stories.md`](./reviews/stories.md). This revision closes every issue it raised.
 
 ## Reading this file
 
-**This is a delta backlog, not a build plan.** RecopyFast is in production. The core loop —
-site registration, embed runtime, inline editing, non-account email grants, versioning,
-staging, AI rewrite/translate, image replace, real-time sync, billing, bulk import/export,
-API keys — is **built and passing 1954 tests**. Writing stories for it would be
-re-implementing working software.
+**This is a delta backlog, not a build plan.** RecopyFast is in production and its suite
+is green (1954 passing). Most of the PRD core loop is genuinely built, and writing stories
+for it would re-implement working software.
 
-Every story below is one of four things:
+**But "built" was verified, not assumed.** The first revision of this file claimed the
+whole core loop was in production. A fresh-context review checked that claim against the
+code and found two features listed as shipped that are not usable: real-time sync is
+switched off in production, and bulk import/export has no user-facing surface. Both are
+now stories (`s07`, `s05`). The lesson is recorded here because it will apply again: on a
+brownfield product, *"there is a route and a test"* is not the same as *"a stranger can
+use it"*, and only the second one satisfies the PRD.
+
+Every story below is one of five things:
 
 1. **A gap** — in the PRD perimeter, not in the code (impressions, Agency plan, trial).
-2. **A breach** — built, but violating a stated constraint (embed size).
-3. **A reversal** — built, then deliberately disabled, now back in scope (A/B).
-4. **A surface** — the acquisition machinery the PRD's SEO/GTM sections require.
+2. **A dark feature** — code exists, no reachable surface (bulk portability, real-time).
+3. **A breach** — built, but violating a stated constraint (embed size).
+4. **A reversal** — built, then deliberately disabled, now back in scope (A/B).
+5. **A surface** — the acquisition machinery the PRD's SEO/GTM sections require.
 
 Reference implementation for every story: **TinaCMS** (tina.io) and **CloudCannon**
 (cloudcannon.com) both run in production. Where they have an equivalent screen, the
 agentic notes name it.
 
+### Renumbered at review
+
+Ids shifted when `s05` and `s07` were inserted and the old `s05` was split. No branches or
+pipeline files existed yet, so ids were still free, and keeping numeric order aligned with
+dependency order matters more than id stability at this stage. Map for reading
+[`reviews/stories.md`](./reviews/stories.md), which cites the old numbering:
+
+| Old | New | Old | New |
+|---|---|---|---|
+| s01–s04 | unchanged | s10 | **s13** |
+| s05 | **split → s06 + s08** | s11 | **s14** |
+| s06 | **s09** | s12 | **s15** |
+| s07 | **s10** | s13 | **s16** |
+| s08 | **s11** | s14 | **s17** |
+| s09 | **s12** | s15 | **s18** |
+| — | **s05** (new, C2) | s16 | **s19** |
+| — | **s07** (new, C1) | | |
+
 ### Dependency order
 
 ```
-s01 ─┬─> s03 ──> (metrics live)
-     ├─> s07
-     └─> s10 ──> s11 ──> s12
-s02 ─┴─> s03
-s04  (independent, any time)
-s05 ─┬─> s06 ──> s07
-     └─> s08 ──> s09
-s13  (independent)
-s14 ─┬─> s15   (s15 also needs s02)
-     └─> s16
+s01 ─┬─────────────> s03                    s01 also gates entitlement in s09, s11, s13
+     └─> s13 ──> s14 ──> s15
+s02 ─┴─────────────> s03
+s02 ──────────────────────────> s18
+s04   (independent)
+s05   (independent)
+s06 ─┬─> s09 ──> s10 ──┐
+     ├─> s11 ──────────┴─> s12
+     └─> s08
+s07 ─────────────────> s08
+s16   (independent)
+s17 ─┬─> s18
+     └─> s19
 ```
 
-**s05 blocks s06 and s08.** Both add code to an embed script that is already 57% over
-budget. Adding to it first and shrinking later means shipping a regression to customer
-sites and then asking them to reload it.
+Reading the graph:
+
+- **`s06` gates every embed change.** `s09` (impressions) and `s11` (A/B) both add code to
+  the widget. Until the budget is measured and enforced, "does this fit?" is unanswerable.
+- **`s07` gates `s08`.** The transport replacement needs a running WebSocket service to
+  replace the transport *of*. There isn't one today.
+- **`s12` needs `s09`.** A/B results are counted in impressions, which `s09` builds.
+- **`s06` and `s08` are separate on purpose.** Shrinking the widget and swapping its
+  transport were one story; the review showed that story was a complexity 5 whose
+  arithmetic did not close. Split, each is a 4 with a real target.
+
+### Byte budget
+
+The PRD constraint is **≤ 30KB gzipped** for `public/embed/recopyfast.js`
+(`docs/architecture/overview.md:326`). Measured on this revision:
+
+| Component | gzipped |
+|---|---|
+| `recopyfast.js` as shipped | **46,781** |
+| — of which `socket.io-client` | 13,085 |
+| — of which widget code | **34,063** |
+
+The widget alone is over budget with socket.io entirely removed. Allocation, so that three
+stories are not each asserting the same ceiling and silently competing for it:
+
+| Owner | Allowance (gz) |
+|---|---|
+| Widget core after `s06` | ≤ 24,000 |
+| Transport after `s08` (native `WebSocket`) | 0 |
+| Impressions (`s09`) | ≤ 2,000 |
+| A/B bucketing (`s11`) | ≤ 2,000 |
+| Reserve | ≤ 2,000 |
+| **Total ceiling** | **30,000** |
 
 ---
 
@@ -51,41 +110,43 @@ without entering a card **so that** I can prove it works on a real client site b
 asking anyone to pay.
 
 ### Complexity
-4 — billing, entitlements and quota enforcement. Touches the path that decides whether
-any request is allowed.
+4 — billing, entitlements and quota enforcement.
+
+**Risk:** this story edits the single function every authorization gate calls. A defect in
+`getEffectivePlan` does not fail loudly in one feature — it silently grants or denies
+across the whole product, including on accounts that are paying.
 
 ### Acceptance criteria
-- [ ] A new account, immediately after email confirmation, has Pro-level entitlements without any Stripe customer or payment method existing.
-- [ ] `getEffectivePlan` returns an entitled result for a trialling account, and the returned limits equal the `pro` plan's limits.
-- [ ] The trial expires exactly 14 days after confirmation; on expiry the same account resolves to unentitled and site/editor creation is refused with `upgradeRequired: true`.
-- [ ] Content already created during the trial remains readable and the installed embed script keeps serving current content after expiry — expiry blocks writes and new resources, never public content delivery.
-- [ ] Subscribing during the trial converts the account without a gap: entitlements never flicker to unentitled at any point during checkout.
-- [ ] An account that has already trialled cannot start a second trial, including after deleting and recreating its sites.
-- [ ] The dashboard shows days remaining, and shows an expired state with a single upgrade action once elapsed.
-- [ ] AI features during the trial consume credits from a granted trial allowance and stop at zero — a trial never grants uncapped OpenAI spend.
+- [ ] A new account, immediately after email confirmation, has Pro-level entitlements with no Stripe customer and no payment method in existence.
+- [ ] `getEffectivePlan` returns an entitled result for a trialling account whose limits equal the `pro` plan's limits.
+- [ ] The trial expires 14 days after confirmation; the same account then resolves to unentitled and site/editor creation is refused with `upgradeRequired: true`.
+- [ ] After expiry, content stays readable and the installed embed keeps serving current content — expiry blocks writes and new resources, never public content delivery.
+- [ ] Subscribing during the trial converts without a gap: no request observes an unentitled state at any point during checkout.
+- [ ] An account that has trialled cannot start a second trial, including after deleting and recreating its sites.
+- [ ] The dashboard shows days remaining, and an expired state with a single upgrade action.
+- [ ] AI features during the trial draw on a granted trial credit allowance and stop at zero — a trial never grants uncapped OpenAI spend.
 
 ### Dependencies
 None.
 
 ### Agentic notes
-- Core files: `src/lib/billing/entitlements.ts` (`getEffectivePlan` — this is the single
-  chokepoint, every gate reads it), `src/lib/feature-gating/permissions.ts`,
-  `src/lib/stripe/plans.ts`, `src/lib/credits/system.ts`.
-- **Do not add a `trial` plan row.** The catalogue is DB-driven and Stripe-mirrored;
-  a plan with no Stripe price will break `resolveStripePriceId` and the public pricing
-  feed. Model the trial as a **time-boxed grant of the existing `pro` plan** — the same
-  mechanism `lifetime_pro` already uses via `grants_plan_id`. Read how lifetime
-  entitlements resolve before writing anything.
-- The header comment in `permissions.ts` is explicit that there is no free tier to fall
-  through to. Update it; a stale comment there will mislead the next agent working on gates.
+- Core files: `src/lib/billing/entitlements.ts` (`getEffectivePlan` — the chokepoint),
+  `src/lib/feature-gating/permissions.ts`, `src/lib/stripe/plans.ts`,
+  `src/lib/credits/system.ts`.
+- **Do not add a `trial` plan row.** The catalogue is DB-driven and Stripe-mirrored; a plan
+  with no Stripe price breaks `resolveStripePriceId` and the public pricing feed. Model the
+  trial as a **time-boxed grant of the existing `pro` plan** — the mechanism `lifetime_pro`
+  already uses via `grants_plan_id` (`plans.ts:462`). Read how lifetime entitlements
+  resolve before writing anything.
+- `permissions.ts:21` states there is no free tier to fall through to. Update that comment;
+  a stale one there will mislead the next agent working on gates.
 - **Trap — clock source.** Expiry must be computed server-side from a stored timestamp,
   never from a client-supplied date. Trial expiry is an authorization boundary.
 - **Trap — the flicker.** `checkout-reservation.ts` and `user-lock.ts` already serialize
-  checkout. Trial→paid conversion must run inside that same lock, or a concurrent request
-  mid-conversion can observe neither trial nor subscription.
-- Target reference: CloudCannon offers a 14-day free trial with no card; TinaCMS gates on
-  a free tier instead. We match CloudCannon here deliberately — see PRD open decision 1,
-  now resolved.
+  checkout. Conversion must run inside that same lock, or a concurrent request mid-conversion
+  observes neither trial nor subscription.
+- Target reference: CloudCannon offers a 14-day trial with no card; TinaCMS gates on a free
+  tier instead. We match CloudCannon — PRD decisions log, item 1.
 
 ---
 
@@ -99,54 +160,57 @@ itself that it can see my site **so that** I know the install worked without ask
 
 ### Acceptance criteria
 - [ ] A registered site starts in an explicit `awaiting-install` state, visibly distinct from `live`.
-- [ ] The first authenticated beacon from the embed script on the registered domain flips the site to `live` without any user action.
+- [ ] The first authenticated content report from the embed on the registered domain flips the site to `live` with no user action.
 - [ ] The dashboard reflects the flip within 10 seconds while the page stays open — no manual refresh.
-- [ ] A beacon from a domain other than the registered one does not verify the site and is recorded as a mismatch.
-- [ ] The `awaiting-install` state shows the exact snippet, a copy control, and per-platform install locations (at minimum WordPress, Next.js, plain HTML).
-- [ ] A site that was live and has received no beacon for a configurable window is shown as `stale`, and `stale` never blocks content delivery or editing.
-- [ ] The state and its transition timestamps are readable via the sites API, so s03 can consume them.
+- [ ] A report from a domain other than the registered one does not verify the site and is recorded as a mismatch.
+- [ ] The `awaiting-install` state shows the snippet, a copy control, and the install location for WordPress, Next.js and plain HTML.
+- [ ] Install recipes are stored as typed data in one module, and both this state and `s18`'s public pages render from it — this story owns that module.
+- [ ] A site that was live and has reported nothing for a configurable window shows as `stale`, and `stale` never blocks content delivery or editing.
+- [ ] State and transition timestamps are readable via the sites API, so `s03` can consume them.
 
 ### Dependencies
-None.
+None. **Owns the install-recipe data consumed by `s18`.**
 
 ### Agentic notes
-- Existing pieces: `src/components/dashboard/DomainVerification.tsx`,
-  `src/app/api/domains/verify/route.ts`, `src/components/dashboard/SiteDetailView.tsx`,
+- Existing: `src/components/dashboard/DomainVerification.tsx` (live, rendered at
+  `SiteDetailView.tsx:369`), `src/app/api/domains/verify/route.ts`,
   `src/app/api/sites/[siteId]/route.ts`.
-- The embed already posts to `/api/analytics/track` with a site token — derive first-contact
-  from that existing authenticated ingest rather than adding a second beacon endpoint. One
-  ingest path, not two.
-- Authorization already exists in `src/lib/security/ingest-auth.ts`. Reuse
-  `authorizeIngestRequest`; do not write a new auth path for a status ping.
+- **First-contact signal is `POST /api/content/:siteId`,** reached via `postContentMap()`
+  at `recopyfast.src.js:2853` and `:2924`. An earlier revision of this story named
+  `/api/analytics/track` — the embed never calls it. Verified: grepping the widget for
+  `analytics/track` and `page_view` returns nothing.
+- A partial version of this already exists: `SiteDetailView.tsx:91` computes
+  `hasReportedContent` from `site.stats.content_elements_count > 0`. That is a derived
+  count, not a state machine and not a timestamp — this story replaces it with both.
+- Authorization exists in `src/lib/security/ingest-auth.ts`. Reuse `authorizeIngestRequest`;
+  do not write a new auth path for a status transition.
 - **Trap — origin trust.** `src/lib/security/site-auth.ts` already resolves and validates
-  request origin, including the localhost case documented in its comments. Verification
-  must use that resolution, not a raw `Referer` header.
-- **Trap — the stale state must be advisory only.** A customer whose site gets low traffic
-  will go quiet. Marking them stale is a nudge; blocking their content would take down
-  their site.
-- This story is a prerequisite for s15: each `/cms-for/<stack>` page must link to a verified
-  install location, and this is where that location gets validated.
-- Target reference: CloudCannon's site-connection status; TinaCMS has no equivalent because
-  its install is a repo change, not a paste — this is a direct win to make visible.
+  request origin, including the localhost case its comments document. Use that resolution,
+  not a raw `Referer`.
+- **Trap — stale must be advisory.** A low-traffic customer will go quiet. Marking them
+  stale is a nudge; blocking them would take their site down.
+- Target reference: CloudCannon's site-connection status. TinaCMS has no equivalent because
+  its install is a repo change, not a paste — worth making visible.
 
 ---
 
 ## Story s03-activation-funnel — measure time-to-first-edit
 
 **As the** operator of RecopyFast **I want** the signup → first-edit funnel instrumented
-end to end **so that** I can tell whether the product's primary claim is true.
+**so that** I can tell whether the product's primary claim is true.
 
 ### Complexity
 3 — read models and event plumbing over existing data.
 
 ### Acceptance criteria
-- [ ] Four timestamps are persisted per account: account confirmed, first site registered, first verified install beacon, first persisted content update.
+- [ ] Four timestamps persist per account: account confirmed, first site registered, first verified install, first persisted content update.
 - [ ] Time-to-first-edit is queryable as p50 and p90 over an arbitrary date range.
 - [ ] Step-to-step drop-off is queryable: how many accounts reached each of the four steps.
-- [ ] Each timestamp is written exactly once per account and is never overwritten by a later event.
-- [ ] Backfill produces correct values for accounts that existed before this story shipped, or explicitly marks them as unmeasurable — it never emits a wrong number.
-- [ ] Edits made by non-account grant holders are attributed to the site's owning account for funnel purposes, and are separately countable as non-account edits.
-- [ ] The funnel is visible to the operator without running SQL by hand.
+- [ ] Each timestamp is written exactly once per account and is never overwritten by a later event, asserted by a test that replays a duplicate event.
+- [ ] Accounts that predate this story are marked `unmeasurable` and are excluded from p50/p90, and a test asserts an unmeasurable account contributes to no percentile.
+- [ ] Edits by non-account grant holders are attributed to the site's owning account, and are separately countable as non-account edits.
+- [ ] The funnel is readable at `/dashboard/analytics` without running SQL by hand.
+- [ ] This story's `account_milestones` table is the single source for account-level edit activity; `s14` and `s15` read from it rather than re-aggregating the activity log.
 
 ### Dependencies
 `s01-trial-signup` (defines account start), `s02-install-verified` (defines the install step).
@@ -154,112 +218,252 @@ end to end **so that** I can tell whether the product's primary claim is true.
 ### Agentic notes
 - Existing: `src/lib/analytics/tracker.ts`, `src/app/api/analytics/track/route.ts`,
   `src/app/api/analytics/performance/route.ts`, `src/app/dashboard/analytics/page.tsx`.
-- The PRD names time-to-first-edit < 5 min as the **primary success metric**. It is not
-  instrumented today. Until this ships, every claim about activation is unfalsifiable.
-- Model as a narrow `account_milestones` table with nullable timestamp columns and a
-  write-once constraint, not as a scan over the activity log. The activity log is
-  high-volume and will be pruned; milestones must survive pruning.
-- **Trap — non-account edits.** The angle predicts ≥50% of edits come from grant holders
-  with no account. If attribution keys on `user_id`, those edits vanish from the funnel
-  and the metric reads as failure. Key on site ownership.
-- `tracker.ts` has two known-dead locals (`siteAnalytics`, `date`) flagged by lint; clean
-  them while you are in the file.
+- The PRD names time-to-first-edit < 5 min the **primary success metric**. It is not
+  instrumented — confirmed, no milestone table across the 43 files in
+  `supabase/migrations/`. Until this ships, every activation claim is unfalsifiable.
+- Model as a narrow `account_milestones` table with nullable timestamps and a write-once
+  constraint, not as a scan over the activity log. The activity log is high-volume and will
+  be pruned; milestones must survive pruning.
+- **Trap — non-account edits.** The angle predicts ≥ 50% of edits come from grant holders
+  with no account. Attribution keyed on `user_id` makes those edits vanish and the metric
+  read as failure. Key on site ownership.
+- `tracker.ts` has two dead locals (`siteAnalytics`, `date`) flagged by lint; clean them
+  while in the file.
 
 ---
 
-## Story s04-retire-teams-surface — a dashboard with only what I use
+## Story s04-retire-graveyard-surfaces — a dashboard and an editor with only what I use
 
-**As a** site owner **I want** the dashboard to show only features I can actually use
-**so that** I am not asked to understand an org chart to change my opening hours.
+**As a** site owner **I want** to be shown only features I can actually use **so that** I am
+not asked to understand an org chart, or given a way to restyle my site by accident.
 
 ### Complexity
-2 — routing and navigation, plus a redirect.
+2 — routing, navigation and removing two widget tabs.
 
 ### Acceptance criteria
 - [ ] "Teams" is absent from the dashboard navigation.
-- [ ] `/dashboard/teams` returns a redirect to the site sharing surface, not a 404 and not a broken page.
-- [ ] No remaining dashboard route renders `TeamSelector`, `InvitationManager`, `NotificationCenter` or `SecurityDashboard`.
-- [ ] `/api/teams/*`, `/api/notifications`, `/api/security/events`, `/api/security/stats`, `/api/audit/*` continue to respond exactly as before — frozen means unexposed, not deleted.
-- [ ] Existing tests for those API routes still pass unchanged.
-- [ ] Email invitation to edit a site (the grant flow) is unaffected and remains reachable.
+- [ ] `/dashboard/teams` redirects to the site sharing surface — not a 404, not a broken page.
+- [ ] No dashboard route renders `TeamSelector`, `InvitationManager`, `NotificationCenter` or `SecurityDashboard`.
+- [ ] The embed widget's Edit Board no longer renders the **Styles** and **Themes** tabs; the remaining tabs are Elements, Languages and History.
+- [ ] The widget makes no request to `/edit-board/styles/apply` or `/edit-board/themes`.
+- [ ] Per-element typography and colour controls in the floating editor toolbar still work — this story does not touch them.
+- [ ] `/api/teams/*`, `/api/notifications`, `/api/security/*`, `/api/audit/*`, `/api/edit-board/styles/apply` and `/api/edit-board/themes` all respond exactly as before, and their existing tests pass unchanged.
+- [ ] Email invitation to edit a site is unaffected and remains reachable.
 
 ### Dependencies
 None.
 
 ### Agentic notes
-- Files: `src/components/dashboard/DashboardNavigation.tsx` (lines ~59–60 carry the Teams
-  entry), `src/app/dashboard/teams/page.tsx`.
-- The four components listed above are already imported nowhere outside their own files
-  and tests — verified. This story removes the last live entry point, the nav link and
-  the route.
-- **Do not delete API routes or their tests.** The PRD graveyard says frozen, not deleted.
-  A deletion here is unrecoverable scope loss if an agency later asks for real teams.
-- Precedent to follow: `src/app/dashboard/_ab-tests/` — the underscore prefix makes a route
-  private in the App Router without deleting anything. Same reversible technique applies,
-  but this story additionally needs a redirect so existing bookmarks land somewhere sane.
-- Note the PRD graveyard entry for the theme/style editor now reads **site-wide themes only**
-  (`edit-board/themes`, `edit-board/styles/apply`). The editor toolbar's per-element
-  typography and colour controls are content-adjacent and stay. Do not remove
-  `TypographyPanel`, `ColorPicker`, `FontSizeSelector` or `TextAlignmentControls`.
+- Dashboard side: `src/components/dashboard/DashboardNavigation.tsx:59-60` (the Teams
+  entry), `src/app/dashboard/teams/page.tsx`. The four components above are already imported
+  nowhere but their own files and `src/__tests__/integration/collaboration.test.tsx` —
+  verified. This removes the last dashboard entry point.
+- **Widget side — the part the first revision of this file missed.** The Edit Board's tab
+  list at `public/embed/recopyfast.src.js:5454-5460` ships five tabs, two of which are the
+  PRD graveyard's site-wide style editor verbatim: `styles` → `:5726`
+  `fetch(RECOPYFAST_API + '/edit-board/styles/apply')`, and `themes` → `:6028, :6129, :6159`
+  `fetch(RECOPYFAST_API + '/edit-board/themes')`. This runs on **every customer site**,
+  which is precisely the surface the graveyard rule exists for.
+- **Do not delete API routes or their tests.** Frozen means unexposed, not deleted. A
+  deletion is unrecoverable scope loss if an agency later asks for real teams.
+- Precedent: `src/app/dashboard/_ab-tests/` — the underscore prefix makes a route private
+  without deleting it, and `DashboardNavigation.tsx:49-51` documents why. Same reversible
+  technique; this story additionally needs a redirect so bookmarks land somewhere sane.
+- Remember the widget is a built artifact: edit `recopyfast.src.js`, never `recopyfast.js`,
+  then rebuild.
 
 ---
 
-## Story s05-embed-budget — get the embed script back under 30KB gzipped
+## Story s05-bulk-content-portability — get my content out, and back in
 
-**As a** site owner **I want** RecopyFast to not slow my site down **so that** installing
-it never costs me search ranking or visitors.
+**As a** site owner **I want** to export all my content and re-import it **so that** my copy
+is mine and switching away from RecopyFast is never a hostage situation.
 
 ### Complexity
-4 — third-party runtime, CSP interaction, real regression risk on the feature that is the
-product's demo.
-
-**Risk, stated plainly:** this story rewrites the transport of the live editing feature.
-Done wrong it breaks real-time sync on customer sites, or breaks it only on
-CSP-restricted customer sites, which is worse because it will pass local testing.
+2 — form, persistence and list over API routes that already exist and are tested.
 
 ### Acceptance criteria
-- [ ] `public/embed/recopyfast.js` is ≤ 30KB gzipped, measured in CI, with the check failing the build above the threshold.
-- [ ] A page with the script installed and no editing session open opens **zero** WebSocket connections and downloads no real-time transport code.
-- [ ] Entering edit mode establishes real-time sync, and an edit in one browser appears in a second browser in under 1 second — unchanged from today.
-- [ ] Real-time sync works on a host page served with `Content-Security-Policy: script-src 'self'`.
-- [ ] Real-time sync works on a host page served with `connect-src 'self'`, or degrades to a documented read-only state with an explicit console warning — it never fails silently.
-- [ ] The script contributes 0 to the host page's Cumulative Layout Shift.
-- [ ] No uncaught exception reaches the host page's window under any of the above conditions.
-- [ ] `node scripts/build-embed.mjs --check` still detects a stale artifact.
+- [ ] A control in the dashboard exports one site's content elements as CSV and as JSON.
+- [ ] The export includes element id, selector, current content, language and variant.
+- [ ] An exported file re-imported unchanged produces zero content differences, asserted by a round-trip test.
+- [ ] Import reports per-row outcomes — created, updated, skipped, failed with a reason — and a malformed row fails that row alone without aborting the import.
+- [ ] Import refuses a file targeting a site the caller has no permission on.
+- [ ] Import of a file larger than a stated size limit is refused before parsing.
+- [ ] Imported changes appear in version history as normal, revertible edits.
 
 ### Dependencies
-None. **Blocks s06 and s08.**
+None.
 
 ### Agentic notes
-- Current measured state: `recopyfast.js` is 174KB raw / **47KB gzipped** against the
-  30KB budget stated in `docs/architecture/overview.md` and in the PRD constraints. The
-  overage is `socket.io-client`, compiled in by `scripts/build-embed.mjs`.
-- **Read the build script's header comment before proposing anything.** It records why
-  socket.io was inlined: the widget used to pull it from `cdn.socket.io`, which any site
-  serving `script-src 'self'` blocks outright, killing real-time editing. That failure
-  mode must not be reintroduced.
-- **The obvious fix is wrong.** Lazy-loading `/embed/socket.io-client.min.js` from our
-  origin fails on exactly the same `script-src 'self'` customers, because our origin is
-  not their `'self'`. It reintroduces the original bug in a form that passes local testing.
-- Recommended approach: **speak plain WebSocket from the embed.** Native `WebSocket` costs
-  zero bytes. Add a plain-WS endpoint on the `server/` Socket.io service for embed clients
-  and keep socket.io for the first-party dashboard, where CSP is ours and not a constraint.
-  The embed→server protocol is small: `content-map`, `content-update`, `join`.
-- Files: `scripts/build-embed.mjs`, `public/embed/recopyfast.src.js` (source of truth —
-  never hand-edit `recopyfast.js`), `server/index.js`, `src/lib/editingRules.core.ts`
-  (spliced into the bundle at the inject markers; leave that mechanism intact).
-- **Trap — reconnection.** socket.io provides automatic reconnection with backoff. Native
-  WebSocket does not. Reconnection with jittered backoff must be written explicitly, or a
-  server deploy silently ends every open editing session.
-- **Trap — the artifact is a public URL.** `/embed/recopyfast.js` is baked into every
-  snippet already issued. It must keep working for scripts installed before this change.
-- Target reference: TinaCMS ships no third-party runtime at all (it is build-time), so this
-  is a constraint they do not have. Being slower than a competitor that adds zero bytes is
-  not survivable — this is a competitive requirement, not housekeeping.
+- **This is a dark feature.** `src/app/api/bulk/{import,export,update}/route.ts` exist and
+  are tested (`src/__tests__/api/bulk/*`). Their only caller,
+  `src/components/dashboard/BulkOperations.tsx`, is imported by **nothing** — grep across
+  `src/app/` returns no matches. There is no export control anywhere a user can reach.
+- Start from `BulkOperations.tsx` rather than rewriting: the work is wiring, permission
+  checks and the round-trip guarantee, not new endpoints.
+- The PRD scores this feature 2 and calls it the item that *"kills the lock-in objection in
+  the sales call"*. Its parity criterion is explicitly scoped to *"a stranger, unaided"* —
+  an endpoint with no UI does not satisfy it.
+- `BulkOperations.tsx` has three lint warnings (unused `sites`, unused `_`, a missing
+  `fetchOperations` dependency); fix them while wiring it up.
+- **Trap — import is a content write.** Route it through the same path as a human edit so
+  version history, staging state and webhooks all behave normally. A direct database write
+  bypasses all three.
+- Target reference: both TinaCMS (git — content is already the customer's) and CloudCannon
+  (source-file export) make portability trivially true. We have to demonstrate it.
 
 ---
 
-## Story s06-section-impressions — see which sections of my page people actually look at
+## Story s06-embed-budget-gate — measure the widget, enforce a ceiling, shrink it
+
+**As a** site owner **I want** RecopyFast to not slow my site down **so that** installing it
+never costs me search ranking or visitors.
+
+### Complexity
+4 — no new integrations, but it touches the whole widget and regressions are invisible
+until a customer's Core Web Vitals move.
+
+**Risk:** aggressive minification or dead-code removal on a 5,397-line widget can drop a
+branch that only fires on a customer's DOM shape. The embed has no error surface on the
+host page by design, so a broken branch will not page us — it will present as "editing
+stopped working on one site".
+
+### Acceptance criteria
+- [ ] `scripts/build-embed.mjs` measures and prints the gzipped size of the artifact and of the widget code alone, excluding the concatenated transport library.
+- [ ] The build fails when the artifact exceeds a declared ceiling, and the ceiling is a committed constant.
+- [ ] The ceiling is set to today's measured size on the first commit, then lowered — the gate ratchets and never regresses.
+- [ ] Widget code alone is ≤ 24,000 bytes gzipped on completion (from 34,063 today).
+- [ ] The existing `--check` stale-artifact detection still works.
+- [ ] The full embed test suite passes unchanged — no test is modified to accommodate a size change.
+- [ ] Editing, publishing, staging, history, languages and image replacement each still work against a real fixture page after the shrink.
+- [ ] The widget contributes 0 to the host page's Cumulative Layout Shift.
+
+### Dependencies
+None. **Gates `s08`, `s09` and `s11`.**
+
+### Agentic notes
+- Measured on this revision, and these are measurements not estimates:
+  `recopyfast.js` **46,781** gz, of which `socket.io-client` **13,085** and widget code
+  **34,063**. Budget is 30,000 (`docs/architecture/overview.md:326`).
+  **Removing socket.io alone does not reach budget** — hence this story exists separately
+  from `s08`.
+- Reproduce with `gzip -9c public/embed/recopyfast.js | wc -c`; isolate the widget by
+  removing the `socket.io-client.min.js` prefix that `build-embed.mjs:225` concatenates.
+- Files: `scripts/build-embed.mjs`, `public/embed/recopyfast.src.js` (source of truth —
+  never hand-edit the output), `src/lib/editingRules.core.ts` (spliced in at the inject
+  markers; leave that mechanism intact).
+- Where the bytes likely are: five Edit Board tab implementations, inline CSS strings, and
+  duplicated DOM-building helpers. `s04` removes two of those tabs — **sequence `s04` first
+  if both are in flight**, since it deletes code this story would otherwise spend effort
+  minifying.
+- **Trap — the artifact is a public URL.** `/embed/recopyfast.js` is baked into every
+  snippet already issued. It must keep working for existing installs.
+- Target reference: TinaCMS ships no third-party runtime at all — it is build-time. Being
+  slower than a competitor that adds zero bytes is not survivable.
+
+---
+
+## Story s07-realtime-service — turn real-time on
+
+**As a** site owner **I want** my edits to appear immediately for anyone else looking at the
+page **so that** working with my agency on a page feels like one shared surface.
+
+### Complexity
+4 — external system: a second deployed service, its own configuration, its own uptime.
+
+**Risk:** this stands up a service the product has been running without. Everything
+currently works over HTTP; enabling a second write path introduces ordering and
+consistency questions that do not exist today. It must be provably additive — if the
+WebSocket service is down, editing must continue exactly as it does now.
+
+### Acceptance criteria
+- [ ] `server/index.js` is deployed and reachable at a stable origin, with a documented deploy procedure.
+- [ ] `NEXT_PUBLIC_WS_URL` is set in production, and newly issued snippets carry `data-ws-url`.
+- [ ] The health endpoint reports the service up, and its status is visible alongside the app's existing health checks.
+- [ ] An edit made in one browser appears in a second browser viewing the same page in under 1 second — the PRD's real-time parity criterion, demonstrated against a fixture page on a non-RecopyFast domain.
+- [ ] With the WebSocket service stopped, editing, saving, staging and publishing all still work over HTTP with no user-visible error.
+- [ ] A site whose snippet predates this story — no `data-ws-url` — keeps working unchanged.
+- [ ] Two editors changing different elements on one page both persist; neither overwrites the other.
+- [ ] Socket connections are authorized per site, and a connection cannot join a site room it has no grant or permission for.
+
+### Dependencies
+None. **Gates `s08`.**
+
+### Agentic notes
+- **The PRD calls real-time sync "the demo" and scores it 5. It is off.** Evidence:
+  `src/lib/sites/embed-script.ts:63-81` — `getPublicWebSocketUrl()` returns `""` unless
+  `NEXT_PUBLIC_WS_URL` is set; `:93-96` then omits `data-ws-url` entirely.
+  `public/embed/recopyfast.src.js:2703-2705` — `if (!RECOPYFAST_WS) { return; }`, commented
+  *"nothing is listening: server/index.js is a separate Express process that Vercel cannot
+  host."* `:2801-2821` — `sendContentMap()` reports over HTTP because *"`this.socket` is
+  null on every real install."* `docs/quality/qa-register.md:83-86` records
+  `NEXT_PUBLIC_WS_URL` being removed from production.
+- Deploy assets exist but were never used: `server/Dockerfile`, `server/fly.toml` — the
+  latter still reads `app = "recopyfast-ws"   # change to your chosen Fly app name` at
+  line 22. Vercel cannot host a long-lived Express process; Fly, Railway or Render can.
+- Redis is already a dependency and is the intended pub/sub layer for running more than one
+  instance. One instance is acceptable to start; say so explicitly rather than assuming it.
+- **Trap — the HTTP path must remain authoritative.** Content is persisted over HTTP today.
+  Real-time should broadcast, not become a second source of truth. If both write, they will
+  disagree.
+- **Trap — CORS and origin.** The service accepts connections from arbitrary customer
+  domains. Reuse the origin validation in `src/lib/security/site-auth.ts` rather than the
+  permissive default in `server/index.js`; commit `3099c07` already tightened edit-board
+  CORS and this must not regress it.
+- Existing tests: `src/__tests__/websocket/server.test.ts`.
+
+---
+
+## Story s08-embed-transport — real-time without the 13KB
+
+**As a** site owner **I want** real-time editing that does not cost my visitors a payload
+**so that** I get the feature without paying for it on every page load.
+
+### Complexity
+4 — a new wire protocol and hand-written reconnection, on top of a service that `s07` has
+already proven works.
+
+**Risk:** the failure mode is silent and environment-specific. A transport that works in
+development and on our own domain can fail only on customers serving a restrictive CSP —
+the exact customers least likely to file a useful bug report.
+
+Scored 4 rather than 5 because `s07` supplies the running service and `s06` supplies the
+byte gate; what remains is replacing a client library on a system that already works.
+
+### Acceptance criteria
+- [ ] `public/embed/recopyfast.js` is ≤ 30,000 bytes gzipped, enforced by `s06`'s build gate.
+- [ ] The widget contains no bundled socket.io client.
+- [ ] A page with the script installed and no editing session open opens zero WebSocket connections.
+- [ ] Entering edit mode establishes sync, and the two-browser under-1-second criterion from `s07` still passes.
+- [ ] Sync works on a host page served with `Content-Security-Policy: script-src 'self'`.
+- [ ] On a host page served with `connect-src 'self'`, the widget degrades to the HTTP path, logs one explicit console warning, and editing still works — a silent failure fails this criterion.
+- [ ] A dropped connection reconnects with jittered exponential backoff, capped, and a server restart does not end an open editing session.
+- [ ] No uncaught exception reaches the host page's window under any of the above.
+
+### Dependencies
+`s07-realtime-service`, `s06-embed-budget-gate`.
+
+### Agentic notes
+- Approach: **speak plain WebSocket from the widget.** Native `WebSocket` costs zero bytes.
+  Add a plain-WS endpoint to the `server/` service for embed clients and keep socket.io for
+  the first-party dashboard, where CSP is ours and not a constraint. The embed↔server
+  protocol is three messages: `content-map`, `content-update`, `join`.
+- **Read `scripts/build-embed.mjs`'s header before proposing anything else.** It records why
+  socket.io was inlined: the widget used to pull it from `cdn.socket.io`, which any site
+  serving `script-src 'self'` blocks outright, killing real-time editing.
+- **The obvious alternative is wrong.** Lazy-loading `/embed/socket.io-client.min.js` from
+  our origin fails on exactly those `script-src 'self'` customers, because our origin is not
+  their `'self'`. It reintroduces the original bug in a form that passes local testing.
+  `recopyfast.src.js:64` already derives that URL from the script URL — the trap is live.
+- **Trap — reconnection.** socket.io provides reconnection with backoff for free. Native
+  `WebSocket` does not. Write it explicitly, with jitter, or a deploy silently ends every
+  open editing session.
+- **Trap — protocol versioning.** Old snippets may still carry a socket.io `data-ws-url`.
+  The server must handle both, or version the endpoint path.
+
+---
+
+## Story s09-section-impressions — see which sections people actually look at
 
 **As a** marketer on Pro **I want** to see how many people actually saw each section of my
 page **so that** I edit the copy that is being read instead of guessing.
@@ -268,288 +472,309 @@ page **so that** I edit the copy that is being read instead of guessing.
 4 — high-volume ingest plus third-party runtime work.
 
 **Risk:** impression events are orders of magnitude more numerous than edit events. An
-unbatched, unsampled implementation will generate ingest volume that costs more than the
-plan it is gating.
+unbatched, unsampled implementation generates ingest volume that costs more than the plan
+it gates.
 
 ### Acceptance criteria
-- [ ] The embed script records an impression for a tracked section when ≥ 50% of it has been in the viewport for ≥ 1 continuous second.
-- [ ] A section scrolled past faster than 1 second records no impression.
-- [ ] A section that leaves and re-enters the viewport within the same page view records exactly one impression.
-- [ ] Impressions are batched and flushed on `visibilitychange` and on unload; a visitor who closes the tab immediately after scrolling still has their impressions recorded.
-- [ ] Impression ingest requires a valid site token, exactly as content ingest does — no unauthenticated write path.
-- [ ] Impression counts per section are visible in the dashboard against the section's current text, so the user can see the copy and its number together.
-- [ ] The feature is gated: entitled Pro and trialling accounts see counts; unentitled accounts see an upgrade prompt and the embed sends no impression events for them.
-- [ ] Adding impression tracking keeps `recopyfast.js` ≤ 30KB gzipped.
-- [ ] Impression tracking respects Do Not Track and records no per-visitor identifier.
+- [ ] The widget records an impression for a tracked section when ≥ 50% of it has been in the viewport for ≥ 1 continuous second.
+- [ ] A section scrolled past in under 1 second records no impression.
+- [ ] A section that leaves and re-enters the viewport within one page view records exactly one impression.
+- [ ] Impressions batch and flush on `visibilitychange` and on unload; a visitor closing the tab immediately after scrolling still has their impressions recorded.
+- [ ] Impression ingest requires a valid site token — no unauthenticated write path.
+- [ ] Impression counts per section appear in the dashboard next to that section's current text.
+- [ ] Entitled Pro and trialling accounts see counts; unentitled accounts see an upgrade prompt and the widget sends no impression events for them.
+- [ ] Impression code adds ≤ 2,000 bytes gzipped to the widget, and the total stays ≤ 30,000.
+- [ ] Do Not Track is respected, and no per-visitor identifier is stored.
 
 ### Dependencies
-`s05-embed-budget` (must not add code to an over-budget script), `s01-trial-signup` (defines
-who is entitled).
+`s06-embed-budget-gate`, `s01-trial-signup` (defines who is entitled).
 
 ### Agentic notes
-- **Nothing here exists yet.** `IntersectionObserver` appears nowhere in the codebase —
-  verified. `analytics/track` accepts only `page_view`, `content_edit`, `login`, `logout`,
-  `api_call`.
+- **No impression tracking exists.** `IntersectionObserver` appears nowhere in
+  `public/embed/` — it does appear elsewhere in the repo
+  (`src/components/landing/InteractiveHero.tsx:518`,
+  `src/components/three/sky/SkyBackground.tsx:235`, `public/demo-site/scripts.js:66,207`),
+  so a repo-wide grep will mislead. `analytics/track` accepts only `page_view`,
+  `content_edit`, `login`, `logout`, `api_call` (`route.ts:29-35`).
+- **`jest.setup.js:177-178` mocks `IntersectionObserver` globally** with a no-op `observe`.
+  Tests for this story must supply their own controllable mock, or every impression
+  assertion will pass vacuously.
 - This is angle 4 of 5 in the PRD and the stated reason Pro exists. Neither TinaCMS nor
-  CloudCannon has any equivalent — **there is no reference implementation to copy.**
-- Do not extend `/api/analytics/track` with an `impression` action type. That endpoint
-  writes one row per event into the activity log. Impressions need their own batched
-  endpoint writing pre-aggregated counts, or the activity log becomes the bottleneck for
-  everything else including s03's milestones.
-- Reuse `src/lib/security/ingest-auth.ts#authorizeIngestRequest` and
-  `src/lib/api/rate-limit.ts`. Rate limits must be sized for impression volume, not edit
-  volume — an existing limit applied unchanged will drop real data.
-- A "section" is an already-mapped content element. Do not invent a second element
-  identity scheme; reuse `content_elements.element_id` and the existing selector generation.
-- **Trap — SPA route changes.** `MutationObserver` already handles DOM churn for editing.
-  Impressions must reset per logical page view, and a client-side route change is a new
-  page view with no full page load to hook.
-- **Trap — privacy.** No cookie, no fingerprint, no visitor id. Aggregate counts only.
-  This keeps the feature out of GDPR consent scope, which is itself a selling point for
-  the European local-business segment.
+  CloudCannon has an equivalent — **there is no reference implementation to copy.**
+- Do not extend `/api/analytics/track`. It writes one row per event into the activity log;
+  impressions need their own batched endpoint writing pre-aggregated counts, or the activity
+  log becomes the bottleneck for everything else including `s03`'s milestones.
+- Reuse `authorizeIngestRequest` and `src/lib/api/rate-limit.ts`, but size the limits for
+  impression volume — an existing limit applied unchanged will drop real data.
+- A "section" is an already-mapped content element. Reuse `content_elements.element_id` and
+  the existing `computeStableElementId`; do not invent a second identity scheme.
+- **Trap — SPA route changes.** Impressions reset per logical page view, and a client-side
+  route change is a new page view with no page load to hook. `MutationObserver` already
+  handles DOM churn for editing — follow that pattern.
+- **Trap — privacy.** No cookie, no fingerprint, no visitor id. Aggregate counts only. This
+  keeps the feature out of GDPR consent scope, itself a selling point for the European
+  local-business segment.
 
 ---
 
-## Story s07-impression-history — impressions over time, and what changed
+## Story s10-impression-history — impressions over time, and what changed
 
-**As a** marketer **I want** to see a section's impressions over time alongside when its
-copy changed **so that** I can tell whether my edit did anything.
+**As a** marketer **I want** a section's impressions over time alongside when its copy
+changed **so that** I can tell whether my edit did anything.
 
 ### Complexity
-3 — aggregation and read models over data s06 already collects.
+3 — aggregation and read models over data `s09` already collects.
 
 ### Acceptance criteria
-- [ ] Per-section impressions are queryable by day over at least a 90-day window.
-- [ ] The timeline marks the points at which that section's content was edited, sourced from the existing version history.
+- [ ] Per-section impressions are queryable by day over a 90-day window.
+- [ ] The timeline marks points at which that section's content changed, sourced from existing version history.
 - [ ] Raw impression events older than the retention window are pruned by a scheduled job, and pruning never removes daily aggregates.
 - [ ] Aggregation is idempotent: running it twice over the same period produces identical totals.
-- [ ] A section with zero impressions is shown explicitly as zero, distinct from "not tracked".
-- [ ] Retention window length is a documented configuration value, not a literal in code.
+- [ ] A section with zero impressions shows as zero, distinct from "not tracked".
+- [ ] Retention window and the aggregation timezone are documented configuration values, not literals in code.
 
 ### Dependencies
-`s06-section-impressions`.
+`s09-section-impressions`.
 
 ### Agentic notes
-- Version history already exists: `src/app/api/edit-board/history/route.ts`,
-  `src/components/dashboard/VersionHistoryPanel.tsx`. Join against it rather than
-  recording a second edit timeline.
-- Aggregate on write into daily buckets; do not aggregate on read. Read-time aggregation
-  over raw impressions will not survive the first customer with real traffic.
-- **Trap — timezone.** "Per day" must be defined in one timezone and stated in the schema.
-  A bucket boundary that shifts with the viewer's locale makes totals irreproducible.
-- PRD success metric this serves: ≥ 40% of Pro accounts make at least one
-  impression-informed edit. That is only measurable once the edit and the impression
-  appear on the same timeline.
+- Version history exists: `src/app/api/edit-board/history/route.ts`,
+  `src/components/dashboard/VersionHistoryPanel.tsx` (live, rendered at
+  `SiteDetailView.tsx:374`). Join against it; do not record a second edit timeline.
+- Aggregate on write into daily buckets. Read-time aggregation over raw impressions will not
+  survive the first customer with real traffic.
+- **Trap — timezone.** "Per day" must be defined in one timezone and stated in the schema. A
+  bucket boundary that shifts with the viewer's locale makes totals irreproducible.
+- PRD metric served: ≥ 40% of Pro accounts make at least one impression-informed edit —
+  measurable only once edit and impression share a timeline.
 
 ---
 
-## Story s08-ab-run-test — run an A/B test on a section
+## Story s11-ab-run-test — run an A/B test on a section
 
 **As a** marketer on Pro **I want** to test two versions of a headline against real traffic
 **so that** I ship the one that performs instead of the one I prefer.
 
 ### Complexity
-4 — traffic bucketing inside a third-party runtime, with correctness that is hard to
-observe after the fact.
+4 — traffic bucketing inside a third-party runtime, with correctness that is hard to observe
+after the fact.
 
 **Risk:** a bucketing bug is silent. Visitors get served variants, numbers accumulate, and
 the results are wrong with no error anywhere. The bucketing function needs tests before it
 needs a UI.
 
 ### Acceptance criteria
-- [ ] `/dashboard/ab-tests` is a live route and reachable from the dashboard navigation for entitled accounts.
+- [ ] `/dashboard/ab-tests` is a live route, reachable from the navigation for entitled accounts.
 - [ ] An owner can create a test on an existing content element with two or more text variants and a traffic split.
 - [ ] A returning visitor is served the same variant on every visit for the test's duration — bucketing is deterministic from a stable input, never random per request.
-- [ ] Bucket assignment matches the configured split within a stated tolerance over 10,000 simulated assignments, asserted in a unit test.
-- [ ] A visitor to a site with no active test receives the default content, and the embed makes no additional network request.
-- [ ] Variant content is served without a visible flash of the original content.
-- [ ] Only one test can be active per content element at a time; a second attempt is refused with a clear reason.
-- [ ] Adding bucketing keeps `recopyfast.js` ≤ 30KB gzipped.
+- [ ] Over 10,000 simulated assignments, each bucket's share is within ±2 percentage points of its configured split, asserted in a unit test.
+- [ ] A visitor to a site with no active test receives default content and the widget makes no additional network request.
+- [ ] Variant content is applied before first paint; a test asserts the original text is never painted when a variant is assigned.
+- [ ] Only one test can be active per content element; a second attempt is refused with a clear reason.
+- [ ] Bucketing code adds ≤ 2,000 bytes gzipped to the widget, and the total stays ≤ 30,000.
 
 ### Dependencies
-`s05-embed-budget`.
+`s06-embed-budget-gate`, `s01-trial-signup` (entitlement).
 
 ### Agentic notes
-- **This was built, then deliberately switched off.** Commit `2026-08-03`,
-  *"feat: take A/B testing out of the launch, reversibly"*, renamed the route to
-  `src/app/dashboard/_ab-tests/`. Read that commit before starting — the reasons it was
-  parked may still apply to parts of it.
-- Already built and dormant: `/api/ab-tests` (create/list), `/ab-tests/active/[siteId]`,
+- **This was built, then deliberately switched off.** Commit `2026-08-03`, *"feat: take A/B
+  testing out of the launch, reversibly"*, renamed the route to
+  `src/app/dashboard/_ab-tests/`; `DashboardNavigation.tsx:49-51` carries the matching
+  comment. Read that commit first — the reasons it was parked may still apply in part.
+- Built and dormant: `/api/ab-tests` (create/list), `/ab-tests/active/[siteId]`,
   `/ab-tests/bucket/[siteId]`, `/ab-tests/track`, `/ab-tests/generate`,
   `/ab-tests/[testId]/results`, `/api/cron/ab-test-lifecycle`, and
-  `src/components/dashboard/ab-create/ABTestElementPicker.tsx`. **Audit what works before
-  writing anything new** — most of this story may be re-enabling and finishing rather than
-  building.
-- A prior security pass closed unauthenticated A/B writes (commit `3099c07`). Do not
-  regress that: re-check `bucket` and `track` require a site token.
-- **Trap — flash of original content.** The host page renders its own HTML first. Variant
-  swapping after paint is visible and will be reported as a bug by the customer's client.
-  Decide and document the approach: swap before first paint, or accept and hide.
-- **Trap — the split test is on someone else's site.** A slow or failed bucket call must
-  fall back to default content immediately. Never block the host page's render on our
-  network call.
-- Target reference: neither TinaCMS nor CloudCannon offers A/B testing. Closest comparables
-  are Optimizely and Mutiny, both of which are script-tag products — their *bucketing and
-  anti-flicker* behaviour is the thing worth studying, not their feature set.
+  `src/components/dashboard/ab-create/ABTestElementPicker.tsx`. The widget already calls
+  `/ab-tests/{active,bucket,track}`. **Audit what works before writing anything** — much of
+  this story is re-enabling and finishing.
+- Commit `3099c07` closed unauthenticated A/B writes. Do not regress it: re-check that
+  `bucket` and `track` require a site token.
+- **Trap — flash of original content.** The host page renders its own HTML first. Swapping
+  after paint is visible and will be reported as a bug by the customer's client. The
+  criterion above requires solving it, not accepting it.
+- **Trap — it runs on someone else's site.** A slow or failed bucket call must fall back to
+  default content immediately and must never block the host page's render.
+- Target reference: neither target offers A/B. Study Optimizely's and Mutiny's *anti-flicker
+  and bucketing* behaviour — both are script-tag products with the same constraint.
 
 ---
 
-## Story s09-ab-results — call the winner
+## Story s12-ab-results — call the winner
 
-**As a** marketer **I want** to see which variant won and have the test end by itself
-**so that** I get a decision, not a spreadsheet.
+**As a** marketer **I want** to see which variant won and have the test end by itself **so
+that** I get a decision, not a spreadsheet.
 
 ### Complexity
 4 — statistics that must not lie, plus scheduled lifecycle.
 
+**Risk:** a wrong significance calculation does not error — it produces a confident,
+plausible, incorrect recommendation, and the customer acts on it. This is the story where a
+silent defect does the most commercial damage.
+
 ### Acceptance criteria
 - [ ] Each variant's impressions and conversions are shown with the observed rate.
-- [ ] A result is only labelled a winner once it reaches a stated significance threshold and a stated minimum sample; below either, it is explicitly labelled inconclusive.
-- [ ] The significance calculation is unit-tested against known inputs with known outputs.
+- [ ] A conversion is defined as a click on a tracked CTA within the same page view as an impression of the tested section, and that definition is documented in the UI.
+- [ ] A winner is declared only at ≥ 95% confidence and ≥ 1,000 assignments per variant; below either threshold the result reads "inconclusive".
+- [ ] The significance calculation is unit-tested against at least three known input/output pairs, including one that must not reach significance.
+- [ ] No significance figure is displayed while a test is running and below the minimum sample — the UI shows progress toward the sample instead.
 - [ ] The lifecycle cron ends tests at their configured end date and records the outcome.
-- [ ] Ending a test promotes the winning variant to be the element's live content, and that promotion appears in version history as a normal, revertible edit.
+- [ ] Ending a test promotes the winning variant to the element's live content, and that promotion appears in version history as a normal, revertible edit.
 - [ ] A test ended while inconclusive keeps the original content and says so.
 - [ ] The cron is idempotent: a duplicate run promotes nothing twice.
 
 ### Dependencies
-`s08-ab-run-test`.
+`s11-ab-run-test`, `s09-section-impressions` (supplies the impression half of the conversion
+definition).
 
 ### Agentic notes
 - Existing: `src/app/api/ab-tests/[testId]/results/route.ts`,
   `src/app/api/cron/ab-test-lifecycle/route.ts`.
-- Conversions need a definition before this can be built. Given the product, the honest
-  default is **section impression → subsequent click on a tracked CTA**, which reuses s06's
-  observer. Agree this definition before implementing; a vague conversion makes every
-  number meaningless.
+- The conversion definition above resolves PRD open decision 6. It depends on `s09`'s
+  observer, which is why `s09` is a declared dependency — an earlier revision of this
+  backlog omitted that edge and the graph was not executable.
 - **Trap — peeking.** Showing a running significance figure invites stopping the test the
-  moment it looks good, which inflates false positives. Either withhold significance until
-  the minimum sample is met, or use a sequential test designed for continuous monitoring.
-  Do not show a naive p-value on a live test.
-- **Trap — promotion is a content write.** It must go through the same path as a human edit
-  so that version history, staging state and webhooks all behave normally. A direct database
-  update here will silently bypass all three.
+  moment it looks good, which inflates false positives. The "no significance below minimum
+  sample" criterion exists for this reason; do not relax it into a tooltip.
+- **Trap — promotion is a content write.** Route it through the same path as a human edit so
+  version history, staging state and webhooks behave normally. A direct database update
+  silently bypasses all three.
 
 ---
 
-## Story s10-agency-plan — one subscription for all my client sites
+## Story s13-agency-plan — one subscription for all my client sites
 
 **As a** web agency **I want** a plan priced for many sites under one bill **so that** adding
-a client site is a decision I make in seconds, not a purchase I have to justify.
+a client site is a decision I make in seconds, not a purchase I justify.
 
 ### Complexity
 4 — payments, quotas and catalogue changes on the live billing path.
 
+**Risk:** this changes the plan catalogue, which is mirrored in Stripe and read by the
+public pricing feed. A mismatch between the two shows up as a price changing at checkout —
+the failure mode the codebase already removed a hardcoded fallback to prevent.
+
 ### Acceptance criteria
-- [ ] An `agency` plan exists in the plan catalogue with its own site limit, editor limit and monthly credit allowance.
-- [ ] The plan appears in the public pricing feed with live Stripe amounts, alongside the existing plans.
-- [ ] An agency account can create sites up to its limit; the limit is enforced by the existing site-count gate.
-- [ ] Exceeding the site limit offers additional sites at the plan's per-site price rather than a hard refusal, if `additional_site_price` is configured.
-- [ ] Upgrading from Pro to Agency preserves all existing sites, content and grants, and prorates through Stripe.
-- [ ] Downgrading below the current site count is refused with a message naming how many sites must be removed first — it never silently orphans a site.
+- [ ] An `agency` plan exists in the catalogue with its own site limit, editor limit and monthly credit allowance.
+- [ ] The plan appears in the public pricing feed with live Stripe amounts, alongside existing plans.
+- [ ] An agency account can create sites up to its limit, enforced by the existing site-count gate.
+- [ ] Exceeding the limit offers additional sites at the plan's per-site price rather than a hard refusal, when `additional_site_price` is configured.
+- [ ] Upgrading Pro → Agency preserves all sites, content and grants, and prorates through Stripe.
+- [ ] Downgrading below the current site count is refused **before** the Stripe call, naming how many sites must be removed first.
 - [ ] One invoice covers all sites on the account.
+- [ ] An agency can serve its sites from a branded subdomain, and content delivered through it is identical to content delivered through the default origin.
 - [ ] `npm run check:stripe` passes against the new plan in both test and live mode.
 
 ### Dependencies
 `s01-trial-signup` (shares the entitlement resolution path).
 
 ### Agentic notes
-- **The plan does not exist.** The catalogue is `starter`, `pro`, `credits`,
-  `lifetime_pro` — confirmed in `src/lib/stripe/plans.ts`. The PRD names agencies as the
-  primary buyer, which makes this the largest single gap in the product.
-- The catalogue is DB-driven: `plans` table is source of truth, Stripe price ids come from
-  env via `PRICE_ID_ENV_VARS`. Adding a plan means a migration **and** new env vars in
-  every environment. `scripts/sync-stripe-catalogue.mjs` exists for this — use it.
-- There is deliberately **no hardcoded fallback catalogue**; the header comment in
-  `src/app/api/pricing/route.ts` explains that a previous fallback silently served drifted
+- **The plan does not exist.** `src/lib/stripe/plans.ts:66-90` holds exactly `starter`,
+  `pro`, `credits`, `lifetime_pro`. The PRD names agencies the primary buyer, which makes
+  this the largest single gap in the product.
+- The branded subdomain criterion is included because `prd.md:159-160` explicitly rules it
+  **in** scope while ruling full white-label out. It was missing from the first revision.
+- **Client sub-accounts are deliberately not in this story.** The PRD's pricing table names
+  them, but implementing them means per-client identities with roles under one org — which
+  is the graveyard's org-teams model returning under another name. `s14` delivers the same
+  user value through scoped grants instead. Recorded in "Not stories, deliberately".
+- The catalogue is DB-driven: `plans` is source of truth, Stripe price ids come from env via
+  `PRICE_ID_ENV_VARS`. A new plan means a migration **and** new env vars in every
+  environment. Use `scripts/sync-stripe-catalogue.mjs`.
+- There is deliberately **no hardcoded fallback catalogue** — the header comment in
+  `src/app/api/pricing/route.ts` records that a previous fallback silently served drifted
   prices. Do not add one.
-- Site ownership is an `admin` row in `site_permissions`, not a column on `sites` — see
-  `countOwnedSites` in `permissions.ts`, whose comment records that a previous `sites.user_id`
-  filter silently returned 0 and let every quota check pass. Any new counting must use the
+- Site ownership is an `admin` row in `site_permissions`, not a column on `sites`. See
+  `countOwnedSites` (`permissions.ts:79`) whose comment at `:150` records that a previous
+  `sites.user_id` filter silently returned 0 and let every quota check pass. Count via the
   permissions table.
-- **Trap — downgrade.** Stripe will happily accept a downgrade that leaves the account over
-  quota. The refusal must happen before the Stripe call, not after.
-- Target reference: CloudCannon prices per site, which is precisely the pain this plan
-  removes. The comparison page from s14 should say so with real arithmetic.
+- Target reference: CloudCannon prices per site, which is exactly the pain this removes. The
+  comparison page in `s17` should say so with real arithmetic.
 
 ---
 
-## Story s11-agency-client-handoff — hand a client the keys to their own copy
+## Story s14-agency-client-handoff — hand a client the keys to their own copy
 
 **As a** web agency **I want** to invite each client to edit only their own site in one
 action **so that** I can stop being the person who changes their phone number.
 
 ### Complexity
-4 — permissions and expiry across many sites, with a real defacement risk if scoped wrong.
+4 — permissions and expiry across many sites.
+
+**Risk:** a leaked or over-scoped grant is a defacement of a customer's live site, performed
+with our credentials, visible to their visitors. This is the highest-consequence security
+surface in the backlog and the one the product's main angle depends on.
 
 ### Acceptance criteria
 - [ ] An agency can invite an editor to a specific site by email from that site's view, in one action.
-- [ ] The invited editor can edit only that site — an attempt to reach any other site on the agency's account is refused.
+- [ ] The invited editor can edit only that site; reaching any other site on the account is refused.
 - [ ] Invitations can be sent to several sites at once, each producing an independently scoped grant.
-- [ ] Revoking a grant takes effect on the next request, and an open editing session cannot continue saving after revocation.
-- [ ] Grants expire on their configured schedule, and expiry is enforced server-side.
-- [ ] The agency can see, per site, who currently holds a grant and when each expires.
-- [ ] A single view lists recent edits across all of the agency's sites, showing site, editor and element.
-- [ ] An expired or revoked grant link shows a clear message and a way to request a new one — never a stack trace or a blank page.
+- [ ] Revoking a grant takes effect on the next request, and an open editing session cannot continue saving after revocation — including over an established WebSocket connection.
+- [ ] Grants expire on schedule, enforced server-side.
+- [ ] The agency sees, per site, who holds a grant and when each expires.
+- [ ] One view lists recent edits across all the agency's sites, showing site, editor and element, read from `s03`'s milestone and activity data.
+- [ ] An expired or revoked link shows a clear message and a way to request a new one — never a stack trace or a blank page.
+- [ ] The invite flow does not reveal whether an email already has an account.
 
 ### Dependencies
-`s10-agency-plan`.
+`s13-agency-plan`, `s03-activation-funnel` (owns the edit-activity read model).
 
 ### Agentic notes
-- The single-site version already works: `src/app/edit/EditorSignIn.tsx`,
-  `/api/editor/request-code`, `/submit-code`, `/handoff/create`, `/handoff/redeem`,
-  `/refresh-grant`, `/validate-grant`, `/api/edit-sessions/*`,
-  `src/components/dashboard/ShareSiteDialog.tsx`, `SiteEditorsCard.tsx`. This story makes
-  it plural and adds the cross-site view.
-- **This is the product's stated angle 2 and its largest security surface.** A leaked or
-  over-scoped grant is a defacement of a customer's live site. Treat scope, expiry and
-  revocation as the acceptance criteria that matter most.
-- Prior hardening to preserve: commit `728b646` hid site install credentials and restricted
-  site deletion; `aca2eb2` fixed last-admin revoke. Re-read both before touching permissions.
-- **Trap — enumeration.** The invite flow must not reveal whether an email already has an
-  account, and a grant code must not be guessable or reusable across sites.
-- **Trap — revocation and the open socket.** Revoking a grant must also terminate any live
-  editing connection held by that grant. An HTTP-only check leaves an open WebSocket
+- The single-site version works: `src/app/edit/EditorSignIn.tsx`,
+  `/api/editor/{request-code,submit-code,handoff/create,handoff/redeem,refresh-grant,validate-grant}`,
+  `/api/edit-sessions/*`, `src/components/dashboard/ShareSiteDialog.tsx`,
+  `SiteEditorsCard.tsx`, and `rcf_handoff` in the widget with coverage in
+  `src/__tests__/embed/handoff-roundtrip.test.ts`. This story makes it plural and adds the
+  cross-site view.
+- **This uses the grant model and touches no `/api/teams/*` route.** Stated explicitly
+  because a cross-site activity view resembles the graveyard's "org activity". The
+  distinction is real: grants are per-site and expiring, roles are per-org and persistent.
+  Do not introduce a role.
+- Prior hardening to preserve: `728b646` (hid site install credentials, restricted site
+  delete), `aca2eb2` (last-admin revoke). Re-read both before touching permissions.
+- **Trap — revocation and the open socket.** Once `s07`/`s08` land, revoking a grant must
+  also terminate any live editing connection it holds. An HTTP-only check leaves a socket
   writing content after revocation.
-- Target reference: TinaCMS and CloudCannon both require the client to have an account.
-  Not requiring one is the differentiator — protect it by making the grant genuinely narrow.
+- **Trap — enumeration.** A grant code must not be guessable, reusable across sites, or
+  valid after redemption by someone else.
+- Target reference: TinaCMS and CloudCannon both require the client to have an account. Not
+  requiring one is the differentiator — protect it by keeping the grant genuinely narrow.
 
 ---
 
-## Story s12-agency-digest — show the agency what it saved
+## Story s15-agency-digest — show the agency what it saved
 
-**As a** web agency **I want** a monthly summary of what my clients changed themselves
-**so that** the subscription justifies itself without me thinking about it.
+**As a** web agency **I want** a monthly summary of what my clients changed themselves **so
+that** the subscription justifies itself without me thinking about it.
 
 ### Complexity
 3 — scheduled job, aggregation and email.
 
 ### Acceptance criteria
-- [ ] A monthly email to each agency account reports edits per client site for the period.
-- [ ] The email states a total edit count and an estimated time saved, using a stated, documented per-edit assumption.
+- [ ] A monthly email to each agency account reports edits per client site for the period, read from `s03`'s activity data.
+- [ ] The email states a total edit count and an estimated time saved, and names the per-edit assumption used.
 - [ ] An account with zero edits in the period receives no email.
-- [ ] The digest is idempotent: a re-run for the same period sends nothing twice.
-- [ ] The email renders correctly in plain text as well as HTML.
+- [ ] The digest is idempotent: what was sent is recorded before sending, and a re-run for the same period sends nothing twice.
+- [ ] The email renders correctly as plain text, asserted by a test on the text part — no HTML tags, all links present as URLs.
 - [ ] Recipients can unsubscribe from the digest without affecting transactional email.
-- [ ] Send failures are logged with the account and period, and are retryable without duplicating successful sends.
+- [ ] Send failures are logged with account and period, and are retryable without duplicating successful sends.
 
 ### Dependencies
-`s11-agency-client-handoff`.
+`s14-agency-client-handoff`, `s03-activation-funnel`.
 
 ### Agentic notes
-- Existing: `src/lib/email/`, Resend is already a dependency, `src/app/api/cron/` holds the
-  scheduled-job pattern, `vercel.json` carries the cron configuration.
+- Existing: `src/lib/email/`, Resend already a dependency, `src/app/api/cron/` holds the
+  scheduled-job pattern, `vercel.json` carries cron configuration.
 - The PRD's retention argument: a local business logs in around four times a year, so
-  measuring end-client MAU will read as catastrophic churn and mean nothing. Retention lives
-  with the agency, and this email is the mechanism that makes value legible to the payer.
-- **Be honest about the time-saved number.** State the assumption in the email itself
-  ("we count 10 minutes per edit"). An invented figure presented as measurement is the kind
-  of thing that loses an agency's trust permanently.
-- **Trap — idempotency under retry.** Cron platforms retry. Record what was sent per
-  account per period before sending, not after.
+  end-client MAU reads as catastrophic churn and means nothing. Retention lives with the
+  agency, and this email makes value legible to the payer.
+- **Be honest about time saved.** State the assumption in the email itself ("we count 10
+  minutes per edit"). An invented figure presented as measurement loses an agency's trust
+  permanently.
+- **Trap — idempotency under retry.** Cron platforms retry. Record what was sent before
+  sending, not after.
 
 ---
 
-## Story s13-webhook-config — tell my system when content changes
+## Story s16-webhook-config — tell my system when content changes
 
 **As a** developer running a static site **I want** RecopyFast to call my endpoint when
 content changes **so that** my site rebuilds without me watching for it.
@@ -558,11 +783,11 @@ content changes **so that** my site rebuilds without me watching for it.
 3 — outbound integration with delivery guarantees.
 
 ### Acceptance criteria
-- [ ] An owner can configure a webhook URL per site and see its recent delivery history.
-- [ ] A content change delivers a signed POST to that URL, and the signature is verifiable with a secret shown once at creation.
-- [ ] A failed delivery retries with exponential backoff up to a stated limit, then is marked failed and visible as such.
-- [ ] Rapid successive edits are coalesced so a burst of edits does not trigger a burst of rebuilds.
-- [ ] The configured URL is validated against SSRF: private, loopback and link-local addresses are refused at configuration time and again at delivery time.
+- [ ] An owner can configure a webhook URL per site and see recent delivery history.
+- [ ] A content change delivers a signed POST, verifiable with a secret shown once at creation.
+- [ ] A failed delivery retries with exponential backoff to a stated limit, then is marked failed and visible as such.
+- [ ] Rapid successive edits are coalesced within a configurable window so a burst of edits does not trigger a burst of rebuilds; the default is stated in the UI.
+- [ ] The URL is validated against SSRF — private, loopback and link-local addresses refused — at configuration time **and** again at delivery time.
 - [ ] A slow or hanging endpoint times out and does not delay the edit that triggered it.
 - [ ] Test delivery can be triggered manually from the dashboard.
 
@@ -573,22 +798,19 @@ None.
 - Existing: `/api/webhooks/route.ts`, `/api/webhooks/test/route.ts`, `src/lib/webhooks/`.
   Stripe's inbound webhook at `/api/webhooks/stripe` is a different concern — do not
   entangle them.
-- `ipaddr.js` is already a dependency and is the right tool for the SSRF check.
+- `ipaddr.js@^2.2.0` is already a dependency and is the right tool for the SSRF check.
 - **Trap — DNS rebinding.** Validating the hostname at configuration time is not enough;
-  resolve and re-check the address at delivery time.
-- **Trap — coalescing window.** Too short and every keystroke-debounced save triggers a
-  rebuild; too long and the customer thinks it is broken. Make it configurable with a sane
-  default and state the default in the UI.
-- Target reference: CloudCannon's build hooks and TinaCMS's git-commit-triggered rebuilds.
-  This is parity work — it exists to remove an objection from static-site customers, who
-  are exactly the target's core audience.
+  resolve and re-check the address at delivery time. Hence the two-point criterion.
+- Target reference: CloudCannon's build hooks, TinaCMS's git-commit-triggered rebuilds. This
+  is parity work that removes an objection from static-site customers — the target's core
+  audience.
 
 ---
 
-## Story s14-cluster-engine — comparison pages that rank
+## Story s17-cluster-engine — comparison pages that rank
 
-**As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that**
-I can tell in one screen whether this fits my site.
+**As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that** I
+can tell in one screen whether this fits my site.
 
 ### Complexity
 3 — content-driven routes with structured data and generated sitemap entries.
@@ -604,25 +826,25 @@ I can tell in one screen whether this fits my site.
 - [ ] Page content lives in typed, validated data, so adding a competitor requires no new route code.
 
 ### Dependencies
-None.
+None. **Gates `s18` and `s19`.**
 
 ### Agentic notes
 - Existing SEO surface: `src/app/sitemap.ts`, `robots.ts`, `blog/[slug]`,
   `opengraph-image.tsx`, `manifest.ts`. No cluster routes exist.
-- This story builds the **engine**; s15 and s16 are additional clusters riding on it. Build
-  it so a new cluster is a data file plus a template, not a new subsystem.
-- **The honesty requirement is not a value statement, it is the mechanism.** AI search
-  surfaces cite comparisons that acknowledge trade-offs and skip pure marketing. The
-  PRD's SEO section depends on being cited, not only ranked.
-- **Trap — thin content at scale.** Pages that differ only by a swapped noun get demoted
-  under the Helpful Content system, and the demotion is site-wide, not per-page. Every page
-  needs genuinely distinct substance.
-- `cron/generate-blog-post` exists and can draft this content, but the PRD is explicit:
-  **it drafts, a human publishes.** Do not wire auto-publish.
+- This builds the **engine**; `s18` and `s19` are clusters riding on it. Build it so a new
+  cluster is a data file plus a template, not a new subsystem.
+- **The honesty requirement is a mechanism, not a value statement.** AI search surfaces cite
+  comparisons that acknowledge trade-offs and skip pure marketing. The PRD's SEO plan depends
+  on being cited, not only ranked.
+- **Trap — thin content at scale.** Pages differing only by a swapped noun get demoted under
+  the Helpful Content system, and the demotion is site-wide. Every page needs distinct
+  substance.
+- `cron/generate-blog-post` exists and can draft this content, but the PRD is explicit: **it
+  drafts, a human publishes.** Do not wire auto-publish.
 
 ---
 
-## Story s15-stack-recipes — a verified install page for my stack
+## Story s18-stack-recipes — a verified install page for my stack
 
 **As a** developer with a site on some specific stack **I want** the exact snippet and the
 exact place to paste it **so that** I am installed in a minute instead of guessing.
@@ -632,30 +854,30 @@ exact place to paste it **so that** I am installed in a minute instead of guessi
 
 ### Acceptance criteria
 - [ ] `/cms-for/<stack>` renders for at least wordpress, shopify, webflow, squarespace, framer, next-js, astro and plain-html.
+- [ ] Each page renders from the install-recipe module `s02` owns — no second copy of the instructions exists.
 - [ ] Each page names the exact file or admin location where the snippet goes for that stack.
-- [ ] Each stack's snippet has been installed on a real instance of that stack and verified live, with the evidence recorded in the repository.
-- [ ] Each page links to the same content used by the dashboard's install instructions — one source, two surfaces.
+- [ ] Each stack's snippet has been installed on a real instance of that stack and verified live, with evidence committed to the repository.
 - [ ] Each page is reachable from the comparison cluster and appears in the sitemap.
 - [ ] A stack where install is not actually possible is documented as unsupported rather than omitted silently.
 
 ### Dependencies
-`s14-cluster-engine`, `s02-install-verified` (supplies the in-product install content).
+`s17-cluster-engine`, `s02-install-verified` (owns the recipe data).
 
 ### Agentic notes
-- The PRD's success criteria require ≥ 8 stacks with a verified install recipe. This is the
-  story that produces that evidence.
-- **This is documentation and marketing at once.** Write the recipe once and render it in
-  both the dashboard's `awaiting-install` state and the public page. Two copies will drift,
-  and a wrong install instruction is an activation failure.
+- The PRD requires ≥ 8 stacks with a verified install recipe. This story produces that
+  evidence.
+- **Documentation and marketing at once.** `s02` owns the data; this story adds stacks and
+  the public rendering. Two copies will drift, and a wrong install instruction is an
+  activation failure.
 - Verification is manual and cannot be faked — a screenshot or recorded check per stack,
-  committed. "It should work" is not the acceptance criterion.
-- Known constraint to surface honestly per stack: sites that render content client-side
-  after our scan need the MutationObserver path, and some platform editors strip injected
-  scripts. Where a stack is genuinely hostile, say so on the page.
+  committed. "It should work" is not an acceptance criterion.
+- Surface honestly per stack: sites rendering content client-side after our scan need the
+  MutationObserver path, and some platform editors strip injected scripts. Where a stack is
+  genuinely hostile, say so on the page.
 
 ---
 
-## Story s16-audience-pages — pages for the people who actually buy
+## Story s19-audience-pages — pages for the people who actually buy
 
 **As a** dentist or an agency owner **I want** a page that describes my situation **so that**
 I recognise the product as being for me.
@@ -666,39 +888,62 @@ I recognise the product as being for me.
 ### Acceptance criteria
 - [ ] `/for/<vertical>` renders for at least restaurants, dental-practices, law-firms and gyms.
 - [ ] `/agencies/<use-case>` renders for at least client-content-updates and multi-site-management.
-- [ ] Each vertical page names the content that actually changes for that business — hours, prices, menu, staff — rather than generic feature copy.
+- [ ] Each vertical page names the content that actually changes for that business — hours, prices, menu, staff — not generic feature copy.
 - [ ] Each page carries valid structured data and appears in the sitemap.
 - [ ] Each page has one primary call to action leading to trial signup.
 - [ ] No page duplicates another page's body content.
 
 ### Dependencies
-`s14-cluster-engine`.
+`s17-cluster-engine`.
 
 ### Agentic notes
-- Runs on s14's engine. If this story requires new route code, s14 was built wrong — treat
-  that as a signal to fix s14 rather than to special-case here.
-- The agency pages carry the PRD's wedge message — *"stop doing free copy changes for your
-  clients"* — and should use the real arithmetic from s10's comparison against per-site
-  pricing.
-- Lowest complexity in this backlog and the closest to the money. It is last only because
-  it depends on the engine, not because it matters least.
+- Runs on `s17`'s engine. If this needs new route code, `s17` was built wrong — fix `s17`
+  rather than special-casing here.
+- The agency pages carry the PRD's wedge — *"stop doing free copy changes for your clients"*
+  — and should use the real arithmetic from `s13`'s comparison against per-site pricing.
+- Lowest complexity here and closest to the money. Last only because it depends on the
+  engine.
 
 ---
 
 ## Not stories, deliberately
 
-Recorded so a future agent does not mistake these for missing work:
+Recorded so a future agent does not mistake these for missing work. **Each "built" claim
+below was verified against code during the story review, not assumed.**
 
-- **The core loop.** Site registration, embed runtime, inline editing, non-account email
-  grants, versioning and rollback, staging and publish, AI rewrite and translate, image
-  replace, real-time sync, Stripe subscriptions and credits, bulk import/export, API keys.
-  Built, tested, in production. Changes to these arrive as bugs or as new stories, not as
-  a rebuild.
-- **Everything in the PRD graveyard.** Org teams and roles, audit console, security events
-  dashboard, notification centre, site-wide theme editor. `s04` removes their last live
-  entry points; no story develops them.
-- **Per-element typography and colour controls.** In scope and shipped. The graveyard entry
-  covers site-wide themes only.
-- **Free-forever tier.** Resolved against: the trial in `s01` is the answer.
-- **WordPress plugin.** Named in the PRD's GTM as the first post-launch investment. Not in
-  this backlog — it belongs to the launch that follows it.
+**Built, reachable, and in production:** auth and accounts; site registration and snippet
+generation; the embed runtime (scan, stable ids, MutationObserver); inline editing;
+non-account email grants; content versioning and rollback; staging and publish; AI rewrite
+via the widget's suggestion path; AI translate via the Edit Board Languages tab; image
+replace; Stripe subscriptions, credits and entitlements; analytics dashboard and export;
+public API v1 and API keys.
+
+> Note on AI translate: `/api/ai/translate`'s only caller,
+> `src/components/dashboard/TranslationDashboard.tsx`, is orphaned — but the feature ships
+> through a different path (`/api/edit-board/languages` → `aiService.translateText`). It is
+> delivered. Recorded so it is not re-raised as a gap.
+
+**Was claimed built, actually was not — now stories:** real-time sync (`s07`, `s08`) and
+bulk import/export (`s05`).
+
+**Graveyard — frozen, not deleted.** Org teams and roles, audit console, security events
+dashboard, notification centre, site-wide theme editor. `s04` removes their last live entry
+points, in the dashboard **and** in the widget's Edit Board. Their API routes and tests stay.
+
+**Client sub-accounts.** Named in the PRD's Agency pricing row, deliberately not built:
+per-client identities with roles under one org is the graveyard's teams model under another
+name. `s14` delivers the same value through scoped, expiring grants.
+
+**Per-element typography and colour controls.** In scope and shipped. The graveyard entry
+covers site-wide themes only.
+
+**Free-forever tier.** Resolved against — the trial in `s01` is the answer.
+
+**PRD SEO/GTM items with no story, by choice:** the "Edited with RecopyFast" badge (PRD open
+decision 8, unresolved); the public embed perf-budget page (write it once `s06` produces a
+number worth publishing); the two free public tools (content extractor, translate preview);
+the agency partner directory and affiliate program. All are post-launch marketing, none
+blocks a story.
+
+**WordPress plugin.** The PRD's first post-launch investment. Belongs to the launch that
+follows this backlog, not to it.
