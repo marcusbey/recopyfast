@@ -1,194 +1,263 @@
-# Stories Review — RecopyFast
+# Stories Review — RecopyFast (second pass)
 
-> Fresh-context review of `docs/stories.md` against `docs/prd.md`. Each issue classified: critical / major / minor.
-> Because `docs/stories.md` declares itself a **delta backlog**, every perimeter feature it leaves uncovered was checked against the actual codebase rather than accepted on the file's word.
+> Fresh-context re-review of `docs/stories.md` (revision `6f11b3f`) against `docs/prd.md`. Two halves: disposition of the 17 issues raised by the prior report, then a full re-run of the checklist on the revised file as if new.
+> Every "already built" and "already measured" claim in the revision was checked against code rather than accepted on the file's word — the prior report's core finding was that this file made "already built" claims that were false when checked, so the same skepticism was applied to the revision's own claims.
 
 ## Perimeter coverage
 
 | PRD feature (core loop) | Covered by | OK? |
 |---|---|---|
-| 1 Auth + account | Built — `src/app/login/page.tsx`, `src/app/signup/page.tsx`, `src/app/api/auth/*`, `src/middleware.ts`, `src/__tests__/api/auth/*` | ✅ |
-| 2 Site registration → token + snippet | Built — `src/app/api/sites/register/route.ts`, `src/lib/sites/embed-script.ts`, `SiteRegistrationModal.tsx`, `src/__tests__/api/sites/register/route.test.ts` | ✅ |
-| 3 Script generation + sharing + install verification | `s02-install-verified`; existing `DomainVerification.tsx` is live (rendered at `src/components/dashboard/SiteDetailView.tsx:369`), `ShareSiteDialog` live | ✅ |
-| 4 Embed runtime (scan, selectors, MutationObserver) | Built — `public/embed/recopyfast.src.js` (5,397 non-empty lines), `computeStableElementId`, `src/__tests__/embed/*`; budget handled by `s05` | ✅ |
+| 1 Auth + account | Built — `src/app/login`, `src/app/signup`, `src/app/api/auth/*`, `src/middleware.ts` | ✅ |
+| 2 Site registration → token + snippet | Built — `src/lib/sites/embed-script.ts:83-99` (`buildEmbedScript`), `api/sites/register` | ✅ |
+| 3 Script generation + sharing + install verification | `s02-install-verified` | ✅ |
+| 4 Embed runtime (scan, selectors, MutationObserver) | Built; the budget breach is owned by `s06-embed-budget-gate` | ✅ |
 | 5 Inline editing on the live page | Built — widget edit mode + inline toolbar | ✅ |
-| 6 Email invite → non-account grant | Built — `src/app/api/editor/{request-code,submit-code,handoff/create,handoff/redeem,refresh-grant,validate-grant}`, `rcf_handoff` present in `recopyfast.src.js`, `SiteEditorsCard.tsx`; extended by `s11` | ✅ |
-| 7 Payment flow (Stripe + credits + entitlements) | Built — `src/lib/billing/{entitlements,checkout-reservation,user-lock}.ts`, `src/lib/stripe/*`, `api/webhooks/stripe`, ~15 billing test files | ✅ |
-| 8 AI edit — suggest / rewrite in place | Built — `recopyfast.src.js:4901 showAISuggestions` → `:5024 fetch(RECOPYFAST_API + '/ai/suggest')` | ✅ |
-| 9 AI translate + language variants | Built — widget Edit Board "Languages" tab (`recopyfast.src.js:5459, 5845-5877`, "Auto-translate with AI") → `POST /api/edit-board/languages` → `aiService.translateText` (`route.ts:240`) | ✅ |
-| 10 Images — upload / replace in place | Built — widget image modal `recopyfast.src.js:4357-4621` → `/api/upload/image` | ✅ |
-| 11 Real-time multi-user sync (Socket.io) | **No story — and disabled in production** | ❌ **critical** |
-| 12 Content versioning + rollback | Built — `api/edit-board/history{,/[versionId]}`, `VersionHistoryPanel` rendered at `SiteDetailView.tsx:374`, widget History tab, `src/__tests__/db/content-version-*.test.ts` | ✅ |
-| 13 Staging → publish | Built — `api/staging/{access,content,publish,validate,verify}`, widget publish button, `publish_staging_content_atomic` | ✅ |
-| 14 A/B testing | `s08-ab-run-test`, `s09-ab-results` | ✅ |
-| 15 Per-section impressions | `s06-section-impressions`, `s07-impression-history` | ✅ |
-| 16 Analytics dashboard + export | Built — `src/app/dashboard/analytics/page.tsx`, `api/analytics/export/route.ts` | ✅ |
-| 17 Public API v1 + API keys | Built — `api/v1/content`, `api/api-keys`, `ApiKeysPanel` rendered at `src/app/dashboard/settings/page.tsx:16` | ✅ |
-| 18 Outgoing webhooks | `s13-webhook-config` | ✅ |
-| 19 Bulk import / export | **No story — and no user-facing surface** | ❌ **critical** |
+| 6 Email invite → non-account grant | Built (single-site); made plural by `s14-agency-client-handoff` | ✅ |
+| 7 Payment flow (Stripe + credits + entitlements) | Built — `src/lib/stripe/plans.ts:67,77,84,90`, `src/lib/billing/*` | ✅ |
+| 8 AI edit — suggest / rewrite in place | Built — widget `/ai/suggest` path | ✅ |
+| 9 AI translate + language variants | Built — Edit Board Languages tab → `/api/edit-board/languages` → `aiService.translateText` | ✅ |
+| 10 Images — upload / replace in place | Built — widget image modal → `/api/upload/image` | ✅ |
+| 11 Real-time multi-user sync | `s07-realtime-service` + `s08-embed-transport` | ✅ (was ❌ critical) |
+| 12 Content versioning + rollback | Built — `VersionHistoryPanel` rendered in `SiteDetailView` | ✅ |
+| 13 Staging → publish | Built — `api/staging/*`, widget publish, `publish_staging_content_atomic` | ✅ |
+| 14 A/B testing | `s11-ab-run-test`, `s12-ab-results` | ✅ (definition defect — M2) |
+| 15 Per-section impressions | `s09-section-impressions`, `s10-impression-history` | ✅ |
+| 16 Analytics dashboard + export | Built — `dashboard/analytics/page.tsx:37` renders `AnalyticsDashboard`, which calls `/api/analytics/export` | ✅ |
+| 17 Public API v1 + API keys | Built — `ApiKeysPanel` imported and rendered at `src/app/dashboard/settings/page.tsx:16,374` | ✅ |
+| 18 Outgoing webhooks | `s16-webhook-config` | ✅ |
+| 19 Bulk import / export | `s05-bulk-content-portability` | ✅ (was ❌ critical) |
 
-- [ ] Every feature of the PRD "Replicated (core loop)" table is delivered by at least one story — **NO** (11, 19)
+- [x] Every feature of the PRD "Replicated (core loop)" table is delivered by at least one story or a verified-built claim — **YES**. Both prior coverage criticals are genuinely closed.
 
 ## Scope
-- [x] No story reintroduces an item from the PRD graveyard ("Explicitly NOT replicated") — no story *develops* graveyard scope. `s04` correctly excludes `TypographyPanel` / `ColorPicker` / `FontSizeSelector` / `TextAlignmentControls` per the narrowed entry.
-- [ ] No story goes beyond the perimeter — `s10` under-delivers the Agency tier the PRD defines (see M5); `s11`'s cross-site activity view sits close to the graveyard's "org activity" without saying so.
-- [ ] Graveyard has **no live UI surface** — **NO**. The widget's Edit Board still ships a "Styles" and a "Themes" tab on every customer site (see M4).
+- [x] No story reintroduces an item from the PRD graveyard. `s04` now removes the widget's graveyard surface as well as the dashboard's; `s14` states explicitly that it uses grants and touches no `/api/teams/*` route; `s13` records client sub-accounts as deliberately dropped for being org-teams under another name.
+- [ ] No story goes beyond the perimeter — `s13`'s branded-subdomain criterion is in-perimeter per `prd.md:159-160` but is greenfield origin/DNS infrastructure bolted onto a billing story without a score change (M4). `s08`'s protocol-versioning trap asks for backwards compatibility the PRD explicitly disclaims (m5).
+- [x] Graveyard has no live UI surface once `s04` lands — verified: `recopyfast.src.js:5454-5460` ships `styles` and `themes` tabs today, calling `/edit-board/styles/apply` (`:5726`) and `/edit-board/themes` (`:6028, :6129, :6159`). `s04` criteria 4 and 5 remove both.
 
 ## Story quality
-- [x] Each story is an end-to-end shippable slice, not a technical layer — no pure layers. `s03` (operator-facing) and `s14` ("builds the engine") are the closest calls; both ship an observable result, so both pass.
-- [ ] Every acceptance criterion can become a test — mostly yes; several criteria are not decidable as written (m4, m5).
-- [x] Agentic notes present and useful — consistently strong: real files, real commit hashes, real traps. Four of the factual claims are wrong (M2, M3, m1).
-- [ ] Complexity scored; no unsplit 5; every 4 states its risk — no story is scored 5, but `s05` is a 5 wearing a 4 (M1); four of the seven 4s state no risk (m2).
+- [x] Each story is an end-to-end shippable slice, not a technical layer — no pure layers. `s06` and `s17` are the closest calls; both ship an observable outcome.
+- [ ] Every acceptance criterion can become a test — much improved, but three do not survive contact: `s11`'s "original text is never painted" (M3), `s12`'s conversion definition (M2), and `s14`'s WebSocket-revocation criterion in the orderings the graph permits (M5).
+- [x] Agentic notes present and useful — strong, with real files, real line numbers and real commit hashes. Every claim I could check is now accurate (see Claim verification).
+- [ ] Complexity scored; no unsplit 5; every 4 states its risk — all nine 4s now carry an explicit **Risk** paragraph (prior m2 closed). `s13` reads as a 5 after the branded-subdomain criterion was added (M4). `s08`'s downgrade to 4 is earned — ruling below.
 
 ## The list as a whole
-- [ ] Dependency order executable: no cycle, no forward reference — no cycles, but `s09` has an undeclared dependency on `s06` (M3), and the header graph disagrees with the stories' own Dependencies sections (m3).
-- [x] Ids well-formed (`s<number>-<slug>`), unique and stable — `s01`…`s16`, all conforming, all unique.
-- [ ] No overlap or duplication between stories — mild overlaps: `s02`/`s15` on install recipes, `s03`/`s11`/`s12` on edit-activity aggregation (m6, m7).
+- [ ] Dependency order executable: no cycle, no forward reference — no cycles, and every id cross-reference **inside** `stories.md` resolves correctly under the new numbering (all of them walked individually). But the renumbering left four stale references in `prd.md`, the scope-authority document (M1), and the header graph again disagrees with three stories' own Dependencies sections (m1).
+- [x] Ids well-formed (`s<number>-<slug>`), unique — `s01`…`s19`, all conforming, all unique. The old→new map is complete and arithmetically correct (16 + 1 split + 2 new = 19), and each mapped pair matches the story content it claims.
+- [x] No overlap or duplication between stories — the prior overlaps are resolved by explicit ownership: `s02` owns the install-recipe module, `s03` owns the edit-activity read model. One accounting overlap remains in the byte table (m2).
 
 ---
 
-## Findings
+## Part A — disposition of the 17 prior issues
+
+**12 fully closed, 5 partially closed, 0 untouched.** Four of the five partials are cases where the fix worked but created a new defect underneath it; those are carried into Part B rather than left here.
+
+### Closed (12)
+
+**C1 — real-time sync uncovered.** Closed. `s07-realtime-service` delivers it, and every piece of evidence the story cites is accurate: `src/lib/sites/embed-script.ts:63-81` returns `""` without `NEXT_PUBLIC_WS_URL`; `:92-96` omits `data-ws-url` on the empty string; `public/embed/recopyfast.src.js:2703-2705` is the `if (!RECOPYFAST_WS) { return; }` early return, with the surrounding comment at `:2700-2702` stating "nothing is listening: server/index.js is a separate Express process that Vercel cannot host"; `server/fly.toml:22` still reads `app = "recopyfast-ws"   # change to your chosen Fly app name`, an uncustomised template. The PRD's two-browser < 1s criterion is now `s07` AC 4.
+
+**C2 — bulk import/export uncovered.** Closed. `s05-bulk-content-portability` delivers it, and the dark-feature premise holds: grepping `src/` for `BulkOperations` returns only `src/components/dashboard/BulkOperations.tsx:28` and `:33` — its own interface and its own export. Nothing imports it, not even a test.
+
+**M1 — embed budget story was a 5 whose arithmetic did not close.** Closed. Split into `s06` (measure, gate, shrink), `s07` (stand up the service) and `s08` (swap the transport), each with a stated numeric target, and the arithmetic now closes against measured figures. See the `s08` ruling for the scoring question that split raises.
+
+**M2 — `s02` named an ingest path the embed never calls.** Closed, and the correction is right. `postContentMap` is defined at `recopyfast.src.js:2853`; it posts to `RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID)` at `:2924`. `SiteDetailView.tsx:91` computes `hasReportedContent` from `site.stats?.content_elements_count`, exactly as the story now describes. The `/api/analytics/track` route does accept only `page_view`, `content_edit`, `login`, `logout`, `api_call` (`route.ts:30-34`).
+
+**M4 — widget Styles/Themes tabs still live.** Closed. The tab list at `recopyfast.src.js:5454-5460` is exactly the five tabs named, and both graveyard endpoints are called from the widget at the cited lines. `s04` AC 4 and AC 5 remove the tabs and the requests while AC 7 keeps the routes and their tests intact.
+
+**m1 — the `IntersectionObserver` claim.** Closed. Narrowed to `public/embed/`, the other repo occurrences are listed so a repo-wide grep does not mislead, and the global mock is flagged. Verified: `jest.setup.js:177-182` is a `global.IntersectionObserver` mock with a no-op `observe`, so tests written against it would pass vacuously — precisely the trap `s09` now names.
+
+**m2 — four of seven 4s stated no risk.** Closed. All nine complexity-4 stories (`s01`, `s06`, `s07`, `s08`, `s09`, `s11`, `s12`, `s13`, `s14`) now carry an explicit **Risk** paragraph, and each names a plausible silent-failure mode rather than restating the complexity.
+
+**m4 — three undecidable acceptance criteria.** Closed, all three. The CSP disjunction became `s08`'s "degrades to the HTTP path, logs one explicit console warning, and editing still works — a silent failure fails this criterion". The backfill disjunction became `s03` AC 5's `unmeasurable` marking plus a test asserting such an account contributes to no percentile. "Visible to the operator without SQL" became `s03` AC 7's named route, `/dashboard/analytics`.
+
+**m6 — `s02` and the stack-recipes story both owned install recipes.** Closed. `s02` AC 6 declares the typed recipe module and says "this story owns that module"; `s18` AC 2 renders from it and forbids a second copy; `s18` declares `s02` as a dependency.
+
+**m7 — three independent edit-activity read models.** Closed. `s03` AC 8 makes `account_milestones` the single source for account-level edit activity, and `s14` AC 7 and `s15` AC 1 both say they read from it.
+
+**m9 — PRD SEO/GTM items with neither story nor entry.** Closed. "Not stories, deliberately" now carries the badge, the public perf-budget page, the two free tools, the partner directory and the affiliate program, each with a reason.
+
+**m10 — cross-site view sitting near "org activity".** Closed. `s14`'s notes state that it uses the grant model, touches no `/api/teams/*` route, and must not introduce a role, with the grants-vs-roles distinction spelled out.
+
+### Partially closed (5)
+
+**M3 — undeclared `s06` dependency on the A/B results story.** Partially closed. The edge is now declared (`s12` Dependencies name `s09`) and drawn. But the dependency it declares is incoherent: `s12`'s conversion definition cannot be computed from `s09`'s data model. Carried forward as **M2** in Part B.
+
+**M5 — Agency tier under-delivered.** Partially closed. Coverage is fixed: the branded subdomain is now `s13` AC 8, and client sub-accounts are recorded in "Not stories, deliberately" with the org-teams reasoning. But the criterion was added without adjusting the complexity score, and the work behind it is a second external-systems axis. Carried forward as **M4**.
+
+**m3 — header graph disagreed with stories' Dependencies.** Partially closed. The old `s01`-edge misplacement is gone; three new mismatches took its place. Carried forward as **m1**.
+
+**m5 — four criteria deferred the number that would make them testable.** Partially closed. Three are fixed with real numbers: `s11`'s ±2 percentage points over 10,000 simulated assignments, `s12`'s ≥ 95% confidence and ≥ 1,000 assignments per variant, `s15`'s "asserted by a test on the text part — no HTML tags, all links present as URLs". The fourth, "without a visible flash", swapped a missing number for an unachievable criterion. Carried forward as **M3**.
+
+**m8 — no byte budget allocated across the embed stories.** Partially closed. The allocation table is the right structural fix and the numbers behind it are real (see Byte budget). But it double-counts A/B, whose code is already inside the measured baseline. Carried forward as **m2**.
+
+---
+
+## Part B — findings on the revised file
 
 ### Critical
-
-**C1 — coverage — PRD feature 11 (real-time sync, complexity 5, "the demo") is not delivered, and no story delivers it. The delta framing hides this behind a false "in production" claim.**
-
-`docs/stories.md:694` lists "real-time sync" under *"Built, tested, in production."* The code says otherwise:
-
-- `src/lib/sites/embed-script.ts:63-81` — `getPublicWebSocketUrl()` returns `""` unless `NEXT_PUBLIC_WS_URL` is set. Its own header comment: *"an unconfigured websocket now reports itself as unconfigured."*
-- `src/lib/sites/embed-script.ts:94-96` — on `""` the `data-ws-url` attribute is **omitted from the snippet**.
-- `public/embed/recopyfast.src.js:2703-2705` — `if (!RECOPYFAST_WS) { return; }` inside `establishConnection()`, with the comment *"nothing is listening: server/index.js is a separate Express process that Vercel cannot host, and the configured endpoint refuses connections."*
-- `public/embed/recopyfast.src.js:2801-2821` — `sendContentMap()` explicitly reports over HTTP because *"RECOPYFAST_WS is normally unset, so `this.socket` is null on every real install."*
-- `docs/quality/qa-register.md:83-86` — *"Real-time is opt-in… `NEXT_PUBLIC_WS_URL` is removed from production. Editing and publishing are entirely HTTP."*
-- `server/fly.toml:22` still reads `app = "recopyfast-ws"   # change to your chosen Fly app name` — the deploy target is an uncustomised template, i.e. no evidence the service was ever launched.
-
-Consequences that make this critical rather than major:
-1. The PRD parity checklist item *"change persists and appears in a second browser in < 1s (real-time parity)"* (`docs/prd.md:247`) cannot be demonstrated today and no story makes it demonstrable.
-2. `s05`'s acceptance criterion `docs/stories.md:223` — *"an edit in one browser appears in a second browser in under 1 second — **unchanged from today**"* — is unverifiable, because "today" is off. `s05` therefore cannot be accepted as written.
-3. `s05`'s recommended approach (`docs/stories.md:243-246`) is *"Add a plain-WS endpoint on the `server/` Socket.io service"* — an undeclared dependency on standing up a service that has no running instance.
-
-**Remediation.** Add a story before `s05` that turns real-time on end to end: deploy `server/index.js` (the `Dockerfile` + `fly.toml` exist), set `NEXT_PUBLIC_WS_URL`, and prove the PRD's two-browser < 1s criterion against a real customer-domain fixture. Then rewrite `s05`'s criterion to reference that story's baseline instead of "today", and remove "real-time sync" from `docs/stories.md:694`.
-
-**C2 — coverage — PRD feature 19 (bulk import / export) has API routes but no user-facing surface, and no story gives it one.**
-
-`docs/stories.md:694` lists "bulk import/export" as built and in production. The routes exist and are tested (`src/app/api/bulk/{import,export,update}/route.ts`, `src/__tests__/api/bulk/*`). The only caller of any of them is `src/components/dashboard/BulkOperations.tsx:105,156,208,245,268` — and that component is imported by **nothing**: grep for `BulkOperations` across `src/app/` returns no matches, and across `src/components/` only its own file. There is no Import/Export control anywhere in `src/app/dashboard/`, and the embed widget's Edit Board has no bulk tab.
-
-This directly fails a PRD parity criterion that is scoped to a stranger acting unaided: *"Export all content and re-import it losslessly"* (`docs/prd.md:256`, under *"each must be demonstrable by a stranger, unaided"*). It is also the item the PRD says *"kills the lock-in objection in the sales call"* (`docs/prd.md:126`).
-
-**Remediation.** Add a story (~complexity 2, matching the PRD's own score) that wires content export/import into the dashboard: pick the site, download CSV/JSON, upload, see a per-row result, and a round-trip test asserting losslessness. `BulkOperations.tsx` already exists and can be the starting point.
+None. Both prior criticals are genuinely closed, and no PRD perimeter feature is left uncovered.
 
 ### Major
 
-**M1 — `s05-embed-budget` — scored 4, but it is a 5, and the arithmetic behind its plan does not close the gap.**
+**M1 — the renumbering left four stale story references in `prd.md`, the scope-authority document. Two of them now resolve to a different, real story.**
 
-Two separate problems in one story.
+`stories.md:34-51` says the old→new map exists "for reading `reviews/stories.md`, which cites the old numbering." It missed that `prd.md` also cites story ids — and `prd.md` is the file every downstream stage reads first:
 
-*It is a 5.* By the PRD's own scale (`docs/prd.md:128-129`: *"5 real-time, migrations, external systems"*), `s05` is real-time **and** external systems: a new wire protocol, a new endpoint on a separately deployed service, hand-written jittered reconnection replacing socket.io's, and a CSP compatibility matrix on third-party domains. The PRD scored feature 11 a 5 for exactly this list of reasons. The skill's rule is that a surviving 5 must already be split.
+- `prd.md:121` — *"Decision: re-enabled — see stories s08/s09."* A/B is now `s11`/`s12`. `s08` is the embed transport; `s09` is impressions.
+- `prd.md:424` — *"Stories `s08` and `s09`."* The same error in the decisions log.
+- `prd.md:428` — *"Impression definition → … Story `s06`."* Impressions are now `s09`. **`s06` is the embed budget gate** — an agent following this reference lands on a story about gzip and finds no impression definition.
+- `prd.md:434-435` — *"`s10` assumes agency-only, single invoice. Confirm before `s10` reaches `/ks-plan`."* The agency plan is now `s13`. **`s10` is impression-history** — so PRD open decision 5 currently gates the wrong story, and the gate on the agency plan is silently gone.
 
-*The plan probably does not reach 30KB.* `docs/stories.md:234-236` attributes the whole overage to socket.io: *"174KB raw / 47KB gzipped… The overage is `socket.io-client`."* I could not run gzip, so this is an estimate, clearly flagged as such: socket.io-client 4.8.1 as an IIFE is roughly 43KB raw / ~13-14KB gzipped, which leaves the widget itself at roughly **30-33KB gzipped on its own** — at or over budget with socket.io entirely removed. That is consistent with a 5,397-line source file. If so, "speak plain WebSocket, native `WebSocket` costs zero bytes" does not by itself satisfy the story's first acceptance criterion, and nothing in the story covers shrinking the widget.
+`prd.md:166` and `:422` both cite `s01-trial-signup`, which is still correct — the slug saved those two.
 
-**Remediation.** Split into (a) *measure and enforce*: add the gzip check to CI, publish the current number, and shrink the widget itself to a stated target — this is independently shippable and unblocks nothing else; and (b) *replace the transport*: the plain-WS protocol, reconnection, and the CSP matrix, sequenced after C1. Then have (a) state the measured widget-only size so the split is grounded in a number rather than an assumption.
+These are not cosmetic. Two of the four resolve to a real story with different content, which is worse than a dangling reference because nothing errors and the reader gets a confident wrong answer.
 
-**M2 — `s02-install-verified` — the agentic note names an ingest path the embed script never calls.**
+**Remediation.** Update `prd.md:121`, `:424`, `:428` and `:434-435` to the new ids. Add a line to the renumbering note in `stories.md` recording that `prd.md` was swept, so the next renumbering does not repeat the omission.
 
-`docs/stories.md:116-118`: *"The embed already posts to `/api/analytics/track` with a site token — derive first-contact from that existing authenticated ingest rather than adding a second beacon endpoint."*
+**M2 — `s12`'s conversion definition cannot be computed from `s09`'s data model. The dependency added to close the prior M3 joins two incompatible identity models.**
 
-The embed does not post there. Grepping `recopyfast.src.js` for `analytics/track` and `page_view` returns nothing. Every widget call goes through `RECOPYFAST_API + '/...'` and the complete list is: `/staging/{validate,verify,publish}`, `/upload/image`, `/staging/content/…`, `/content/…`, `/ab-tests/{active,bucket,track}`, `/ai/suggest`, `/edit-board/{styles,styles/apply,languages,history,history/…,themes}`.
+`s12` AC 2: *"A conversion is defined as a click on a tracked CTA **within the same page view as an impression of the tested section**."* Its Dependencies name `s09` as the supplier of the impression half, and its notes say the omission of that edge is what made the earlier graph non-executable.
 
-The signal the story wants already exists under a different name: `postContentMap()` → `POST /api/content/:siteId` (`recopyfast.src.js:2821, 2924`), which `SiteDetailView.tsx:92` already reads as `hasReportedContent`. Left uncorrected, an agent will either instrument a call site that does not exist or add the second beacon endpoint the note was written to prevent.
+`s09` forbids exactly what the join requires. AC 9: *"Do Not Track is respected, and **no per-visitor identifier is stored**."* Its notes: *"No cookie, no fingerprint, no visitor id. Aggregate counts only."* Its ingest writes *"pre-aggregated counts"* (`stories.md:506`). You cannot establish that a click occurred "within the same page view as" an impression from an aggregate count carrying no page-view or visitor key. As specified, `s12` is unbuildable.
 
-**Remediation.** Replace the note with `POST /api/content/:siteId` as the first-contact signal, and point at `hasReportedContent` in `SiteDetailView.tsx` as the existing partial implementation. The `authorizeIngestRequest` / `site-auth.ts` guidance in the same story is correct and should stay.
+It is also unnecessary, because the A/B pipeline **already has its own per-visitor event stream in the widget** — which neither `s11` nor `s12` mentions:
 
-**M3 — `s09-ab-results` — undeclared dependency on `s06`; the graph as drawn is not executable.**
+- `recopyfast.src.js:3113` `trackImpressions()` emits `event_type: 'view'`
+- `:3100` emits `event_type: 'click'`
+- `:3137` `trackConversion()` emits `event_type: 'conversion'`
 
-`docs/stories.md:420-422`: *"the honest default is **section impression → subsequent click on a tracked CTA**, which reuses s06's observer."* But `s09`'s Dependencies section (`:414`) lists only `s08`, and the header graph (`:28-39`) puts `s09` on the `s05 → s08 → s09` branch, structurally parallel to and independent of `s06`. Following the graph, `s09` can be scheduled with no impression observer in existence — and its first acceptance criterion (*"Each variant's impressions and conversions are shown"*) then has no impressions to show.
+each carrying `site_id`, `test_id`, `variant_id` and `visitor_id`, posted to `/ab-tests/track` (`:3165`) via `sendBeacon`. The correlation `s12` needs exists there today.
 
-**Remediation.** Add `s06-section-impressions` to `s09`'s Dependencies and draw the edge in the graph, or replace the conversion definition with one that does not require `s06` (and resolve PRD open decision 6 first — the PRD itself says this needs agreement before the significance work starts).
+Worth noting: `prd.md:436` lists the conversion definition as an **open** decision requiring agreement before the significance work starts. `s12` states it as resolved.
 
-**M4 — `s04-retire-teams-surface` / "Not stories, deliberately" — the site-wide style and theme editor still has a live customer-facing surface, and the file claims it does not.**
+**Remediation.** Define conversion over the existing A/B event stream — `view` → `click` on the same `visitor_id` within a test — then drop `s09` from `s12`'s Dependencies and remove the edge from the graph. Extend `s11`'s "audit what works before writing anything" note to name `trackImpressions`, `trackConversion` and the `sendTrackEvent` payload shape explicitly. If the section-impression join is genuinely wanted instead, `s09` must gain a page-view identifier, which contradicts its own privacy criterion and its GDPR argument, and that trade should go back to the PRD as a decision rather than being settled inside a story.
 
-`docs/stories.md:698-699`: *"Everything in the PRD graveyard… site-wide theme editor. `s04` removes their last live entry points."* That is false for the theme editor, and `s04` does not touch it.
+**M3 — `s11` AC 6 ("original text is never painted") requires a change to the snippet contract that no story owns.**
 
-The embed widget's Edit Board ships five tabs (`public/embed/recopyfast.src.js:5454-5460`): `elements`, `styles`, `languages`, `history`, **`themes`**. Those tabs call the two endpoints the PRD graveyard names verbatim — `:5726 fetch(RECOPYFAST_API + '/edit-board/styles/apply')` and `:6028, :6129, :6159 fetch(RECOPYFAST_API + '/edit-board/themes')` (`docs/prd.md:145-146`). This runs on every customer site, not in an internal dashboard, which is the surface the graveyard's *"no surface in the UI"* rule was written for and the one that produces the *"you broke my site"* support load the PRD cites.
+AC 6: *"Variant content is applied before first paint; a test asserts the original text is never painted when a variant is assigned."*
 
-The four dashboard components `s04` targets, by contrast, check out: `TeamSelector`, `InvitationManager`, `NotificationCenter` and `SecurityDashboard` are referenced only inside their own files and `src/__tests__/integration/collaboration.test.tsx`. The Teams nav entry is where the story says it is — `DashboardNavigation.tsx:59-60`. Those claims are accurate.
+The PRD's embed constraint is an **async** script (`prd.md:210`), and the snippet `buildEmbedScript` issues is a single async `<script>` tag (`src/lib/sites/embed-script.ts:98`). An async external script cannot execute before the host page paints its own HTML — the original text is painted by construction. Anti-flicker in script-tag products (the story itself points at Optimizely and Mutiny) is achieved with a *synchronous inline* hide-and-reveal, i.e. a second, blocking snippet fragment.
 
-**Remediation.** Either extend `s04` with an acceptance criterion removing the Styles and Themes tabs from the Edit Board (keeping the routes, per "frozen not deleted"), or record the widget tabs explicitly in "Not stories, deliberately" as a knowingly-retained graveyard surface. Do not leave the file asserting they are gone.
+That change is neither free nor local. The snippet shape is owned by `s02`'s install-recipe module, republished per stack by `s18`, and `s06`'s own trap records that `/embed/recopyfast.js` is *"baked into every snippet already issued"* and must keep working. No story carries that cost, and no dependency edge connects `s11` to `s02`.
 
-**M5 — `s10-agency-plan` — delivers only part of the Agency tier the PRD sells, with no note about the remainder.**
+**Remediation.** Either (a) keep the strong criterion, give `s11` a declared dependency on `s02`, and add an AC covering the amended snippet and the behaviour of already-issued single-tag installs; or (b) restate the criterion in terms a single async script can meet — for example *"no original text is painted after the widget's first frame; time-to-swap is measured, stated, and a variant is never applied later than N ms after script execution."* Do not leave it as written: an agent will hit the wall, weaken the criterion unilaterally, and the weakened version will never be reviewed.
 
-The PRD's pricing ladder (`docs/prd.md:388`) defines Agency as *"N sites, client sub-accounts, branded subdomain, bulk seat handoff, consolidated billing."* `s10`'s criteria cover the site limit, overage pricing, proration, downgrade refusal and one invoice. `s11` covers bulk seat handoff. **Nothing covers the branded subdomain** — which the graveyard explicitly rules *in* (`docs/prd.md:159-160`: *"a branded subdomain in the Agency plan is in scope"*) — and nothing covers client sub-accounts. Neither appears in "Not stories, deliberately".
+**M4 — `s13` is scored 4, but the branded-subdomain criterion added to close the prior M5 makes it a 5.**
 
-Client sub-accounts are arguably correctly omitted, since they would resurrect the graveyard's org-roles model. Branded subdomain has no such excuse.
+`s13` was correctly a 4 for *"payments, quotas and catalogue changes on the live billing path."* AC 8 now adds: *"An agency can serve its sites from a branded subdomain, and content delivered through it is identical to content delivered through the default origin."*
 
-**Remediation.** Add an acceptance criterion or a follow-up story for the branded subdomain, and add a line to "Not stories, deliberately" recording that client sub-accounts are dropped because they would reintroduce org teams. Both belong in PRD open decision 5, which already says the Agency plan shape must be confirmed before `s10` reaches `/ks-plan`.
+None of that exists. Grepping `src/` for `subdomain|custom_domain|customDomain` returns only `src/types/index.ts` and three test files (`src/__tests__/lib/security/site-auth-origin.test.ts`, `src/components/dashboard/__tests__/SiteRegistrationModal.test.tsx`, `src/__tests__/security/domain-verification.test.ts`) — no serving path, no DNS or certificate handling, no origin registration. It is a second external-systems axis: wildcard host routing, cert provisioning, and a new trusted origin threaded through `src/lib/security/site-auth.ts`, which `s02` and `s07` both build on. Under the PRD's own scale (`prd.md:129`, *"5 real-time, migrations, external systems"*), billing-catalogue work plus custom-origin serving in one story is a 5, and a 5 must be split.
+
+The other half of the prior M5 fix — recording client sub-accounts as deliberately dropped — is correct and stays.
+
+**Remediation.** Split AC 8 into its own story (`branded subdomain`, complexity 3-4, depending on `s13`), leaving `s13` a clean 4. Add it to the dependency graph and fold it into the PRD's open decision 5, which already says the Agency plan shape must be confirmed before this reaches `/ks-plan`.
+
+**M5 — `s14` AC 4 requires terminating a live WebSocket on revocation, but `s14` declares no dependency on `s07`/`s08` and sits on a branch that never reaches them.**
+
+AC 4: *"Revoking a grant takes effect on the next request, and an open editing session cannot continue saving after revocation — **including over an established WebSocket connection**."* Its declared Dependencies are `s13` and `s03`. The header graph puts `s14` on `s01 → s13 → s14 → s15`; `s07` and `s08` are on a structurally disconnected branch.
+
+The agentic note is aware of the coupling — *"Once `s07`/`s08` land, revoking a grant must also terminate any live editing connection it holds. An HTTP-only check leaves a socket writing content after revocation"* — but the criterion is written unconditionally, and neither `s07` nor `s08` claims the work in its own criteria. So in the ordering the graph permits (`s14` before `s08`), the criterion is vacuous when tested and the socket-revocation path ends up owned by nobody. The result is a revoked editor still writing content over an open socket — the exact defacement scenario `s14` names as its own risk and the PRD calls *"security-critical: a leaked grant is a defacement"* (`prd.md:113`).
+
+**Remediation.** Pick one: add `s08` to `s14`'s Dependencies and draw the edge, or move the socket clause into `s08` as its own AC ("an established connection is terminated when its grant is revoked or expires") and leave `s14`'s criterion HTTP-scoped. Either closes it. Leaving the criterion floating between two stories does not.
+
+**M6 — `s07` and `s08` disagree on who holds a real-time connection, and the disagreement is the difference between every visitor and only editors.**
+
+- `s07` AC 4: *"An edit made in one browser appears in a second browser **viewing** the same page in under 1 second."*
+- `s08` AC 3: *"A page with the script installed and **no editing session open** opens zero WebSocket connections."*
+- `s08` AC 4: *"Entering edit mode establishes sync, and the two-browser under-1-second criterion from `s07` still passes."*
+
+`s08` AC 4 only holds if `s07`'s "second browser viewing the page" is read as a second browser *in edit mode*. `s07` never says that, and today's widget connects on load irrespective of edit mode — `establishConnection` gates on `RECOPYFAST_WS` alone (`recopyfast.src.js:2703`) and passes `editMode` merely as a query param (`:2713`). An agent executing `s07` literally will connect every visitor of every customer site to the new service; `s08` then rips that out. That is rework, plus a live scaling hazard against a service `s07` explicitly says may start as a single instance.
+
+The PRD does not settle it either: `prd.md:118` sells *"the page updates while you watch"* and `prd.md:247` says *"appears in a second browser in < 1s"* — both readable as passive viewers.
+
+**Remediation.** Decide once, in `s07`, and use the same words in both stories. If editors-only — my recommendation, as it is cheaper, matches `s08` AC 3, and the demo is two people editing the same page — then say so in `s07` AC 4 and note in `s07`'s risk paragraph that the PRD's "updates while you watch" means two edit-mode sessions rather than a visitor.
 
 ### Minor
 
-**m1 — `s06-section-impressions` — "`IntersectionObserver` appears nowhere in the codebase — verified" (`docs/stories.md:290`) is false as written.** It appears at `src/components/landing/InteractiveHero.tsx:518`, `src/components/three/sky/SkyBackground.tsx:235`, `public/demo-site/scripts.js:66,207`, and is globally mocked at `jest.setup.js:177-178`. The substantive point — no impression tracking exists, and `analytics/track` accepts only `page_view` / `content_edit` / `login` / `logout` / `api_call` (`src/app/api/analytics/track/route.ts:29-35`) — is correct. Narrow the claim to "nowhere in the embed script", and mention the existing global jest mock, which will shape how the story's tests are written.
+**m1 — the header dependency graph disagrees with three stories' own Dependencies sections.** `s14` declares `s13` and `s03`; the graph (`stories.md:54-68`) draws only `s13 → s14`. `s15` declares `s14` and `s03`; the graph draws only `s14 → s15`. Conversely the graph's `s09 ──> s10 ──┐ … s11 ──────────┴─> s12` asserts an `s10 → s12` edge that `s12` does not declare (`s12` declares `s11` and `s09`). Execution order survives in each case, but the graph is the artefact a planner reads first, and this is the same defect class as the prior m3. Fix: draw the two `s03` edges, drop the spurious `s10 → s12`.
 
-**m2 — four of the seven complexity-4 stories state no risk.** `s05`, `s06` and `s08` carry an explicit **Risk** paragraph. `s01`, `s09`, `s10` and `s11` do not — they carry traps instead, which is close but not the same thing. `s11` in particular ("a leaked or over-scoped grant is a defacement of a customer's live site") has its risk written in the notes but not surfaced where a planner reads it.
+**m2 — the byte allocation double-counts A/B.** The table charges *"A/B bucketing (`s11`) ≤ 2,000"* as new spend, but that code is already in the widget and therefore already inside the measured 34,063 baseline: `fetchActiveTests` (`recopyfast.src.js:2978`), `bucketVisitor` (`:2993`), `trackImpressions` (`:3113`), `trackConversion` (`:3137`), `sendTrackEvent` (`:3163`), plus the `rcf_vid` cookie write (`:2975`) and the geo fields. Impressions (`s09`) are genuinely new — `IntersectionObserver` is absent from `public/embed/`. Fix: state that `s11`'s allowance covers *net* change against the post-`s06` baseline, or reclaim the 2,000 into reserve.
 
-**m3 — the header dependency graph disagrees with two stories' own Dependencies sections.** `docs/stories.md:28-39` draws `s01 → s07`; `s07`'s Dependencies (`:330`) lists only `s06`. Conversely `s06`'s Dependencies (`:286-287`) list `s01`, and the graph has no `s01 → s06` edge. The `s01` edge is attached one node too far down. Execution order is unaffected (`s01` precedes both either way), but the graph is the artefact a planner reads first.
+**m3 — `s06`'s 24,000 target leans on deletions `s04` does not promise to make.** `s06`'s notes say *"`s04` removes two of those tabs — **sequence `s04` first if both are in flight**, since it deletes code this story would otherwise spend effort minifying."* But `s04` AC 4 only requires that the Edit Board *no longer renders* Styles and Themes, and AC 5 that no request is made to their endpoints. Not rendering leaves the implementation bytes in the artifact and yields `s06` nothing. Fix: make `s04` AC 4 require that the two tab implementations are removed from `recopyfast.src.js` (API routes and their tests untouched, consistent with "frozen means unexposed, not deleted" — deleting widget code is reversible by git, deleting a route is not), and promote the sequencing hint to a declared dependency.
 
-**m4 — three acceptance criteria are not decidable as written.**
-- `s05`, `docs/stories.md:225`: *"Real-time sync works on a host page served with `connect-src 'self'`, **or** degrades to a documented read-only state…"* — both branches pass, so the criterion asserts nothing. The first branch is also impossible by definition of the header; require the degrade.
-- `s03`, `:147`: *"Backfill produces correct values… **or** explicitly marks them as unmeasurable — it never emits a wrong number."* Same disjunction problem, plus "never emits a wrong number" has no observable failure case.
-- `s03`, `:149`: *"The funnel is visible to the operator without running SQL by hand."* — no named surface, so no test target. Name the route or the artefact.
+**m4 — `s11` is silent on the `rcf_vid` visitor cookie it re-enables, while `s09` sells the opposite position on the same widget.** `s09`'s privacy trap: *"No cookie, no fingerprint, no visitor id … keeps the feature out of GDPR consent scope, itself a selling point for the European local-business segment."* The A/B path sets a one-year first-party `rcf_vid` cookie at `recopyfast.src.js:2975`, and `s11` AC 3 ("deterministic from a stable input, never random per request") depends on having such an identifier. Both features can be live on one customer's page. Fix: state `s11`'s position on `rcf_vid` and DNT explicitly, and scope `s09`'s consent claim to sites not running A/B.
 
-**m5 — four criteria defer the number that would make them testable.** `s08:363` ("within a stated tolerance"), `s09:407` ("a stated significance threshold and a stated minimum sample"), `s08:365` ("without a visible flash" — the story's own trap says the approach is still undecided), `s12:531` ("renders correctly in plain text as well as HTML"). Each is fine as an intent, but none can become a test until the value or the method is chosen. Either fix the numbers now or mark them as decisions owed at `/ks-plan`.
+**m5 — `s08`'s protocol-versioning trap asks for a compatibility obligation the PRD disclaims.** *"Old snippets may still carry a socket.io `data-ws-url`. The server must handle both, or version the endpoint path."* `prd.md:221-222`: *"0 users today: **no migration debt, no backwards-compatibility obligation.** This is a one-time window to cut scope hard."* The only socket.io-carrying snippets that could exist are ones `s07` itself issued days earlier, to zero users. Supporting two protocols on one service is real work and is the single item most likely to push `s08` back toward a 5. Strike it, or replace it with "reissue snippets".
 
-**m6 — `s02` and `s15` both own the install-recipe content.** `s02:105` requires per-platform install locations for at least WordPress, Next.js and plain HTML; `s15:634-637` requires eight stacks and says the page must link to *"the same content used by the dashboard's install instructions — one source, two surfaces."* The single-source intent is right, but neither story says which one owns the data structure. Assign it to `s02` explicitly and scope `s15` to the additional stacks plus the verification evidence.
+**m6 — `s19` depends on `s13`'s output with no edge.** *"should use the real arithmetic from `s13`'s comparison against per-site pricing."* `s19` declares only `s17`, and the two sit on branches with no ordering between them, so the agency pricing may not exist when `s19` runs. Fix: declare it, or soften the requirement to "if the Agency plan has shipped".
 
-**m7 — three stories aggregate edit activity independently.** `s03:148` (edits attributed to the owning account, non-account edits separately countable), `s11:490` ("A single view lists recent edits across all of the agency's sites"), `s12:527` (edits per client site per month). Not duplication yet, but three separate read models over the same rows. Worth naming one as the source.
+**m7 — `s11` should update the navigation comment it invalidates.** `DashboardNavigation.tsx:49-51` currently reads *"A/B Tests is deliberately absent. The feature is not being pursued, and the route it pointed at now 404s — see src/app/dashboard/ab-tests. The components and API routes are kept so the decision is reversible."* `s11` reverses that decision; leaving the comment turns it into exactly the stale-comment trap `s01` is careful to fix in `permissions.ts:21`. Add it as an AC or a note. (Small aside: the comment says `src/app/dashboard/ab-tests`, while the directory is `_ab-tests` — worth correcting in the same pass.)
 
-**m8 — no byte budget is allocated across `s05`, `s06` and `s08`.** All three assert `recopyfast.js ≤ 30KB gzipped` (`:221`, `:282`, `:367`). If `s05` lands at 29.9KB, the two features that depend on it have no headroom and will each fail their own last criterion. Give `s05` a target with margin and state the per-feature allowance.
+**m8 — `s01` AC 8 defers the trial credit allowance.** *"AI features during the trial draw on a granted trial credit allowance and stop at zero — a trial never grants uncapped OpenAI spend."* The stop-at-zero half is testable; the allowance size is unstated and is a pricing decision with a direct COGS consequence. Fix the number, or mark it as owed at `/ks-plan` alongside PRD open decision 5.
 
-**m9 — several PRD SEO/GTM items have neither a story nor an entry in "Not stories, deliberately."** The "Edited with RecopyFast" badge (`prd.md:334-340`, open decision 8 — the file says it *"affects no story"*, which is true but leaves it unowned), the public embed perf-budget page (`prd.md:330-332`), the two free public tools (`prd.md:341-343`), and the agency partner directory / affiliate program (`prd.md:344-345`, `:374`). Add them to the "deliberately not" list so the next agent does not rediscover them as gaps.
+---
 
-**m10 — `s11`'s cross-site view sits close to a graveyard item without saying so.** The graveyard kills *"Teams with org roles (`/api/teams/*`, members, **org activity**)"*. `s11:490` adds an activity view across an account's sites. It is defensible — grants, not roles — but the story should state that it uses the grant model and touches no `/api/teams/*` route, so a later reader does not read it as teams returning through the side door.
+## Ruling: is `s08-embed-transport` a 4?
+
+**The downgrade is earned. Keep it at 4.**
+
+1. The PRD scored feature 11 a 5 for a specific bundle: *"separate deployed service, reconnection, Redis pub/sub for horizontal scale, conflict handling"* (`prd.md:118`). `s07` absorbs the separate service, its deploy procedure, its uptime, its per-site connection authorization and its origin/CORS surface. That is the larger half of the 5, and it is now a different story with its own risk paragraph. A 5 split into two 4s is precisely the outcome the split rule asks for — the objection would be a 5 relabelled as a 4, and this is not that.
+2. `s08`'s contracted scope — its eight acceptance criteria — moves on one axis only: the transport. No migration, no new external dependency, no billing or statistical correctness, no new UI. The server-side addition is bounded and named: three messages (`join`, `content-map`, `content-update`) on a service `s07` already runs and already authorizes.
+3. The byte ceiling is not `s08`'s to hit. `s06` owns reaching 24,000; `s08` only has to spend zero, which native `WebSocket` does by definition. The prior story's 5 came substantially from owning the shrink *and* the transport at once, and that coupling is gone.
+4. The genuinely nasty part — silent, environment-specific CSP failure on customers least likely to file a useful bug report — is written into the criteria as a testable requirement (*"degrades to the HTTP path, logs one explicit console warning, and editing still works — a silent failure fails this criterion"*) rather than left as a hope. Hard is not the same as 5; a 5 is *broad*.
+
+Two conditions attach, both already itemised above and both cheap:
+
+- **Strike the dual-protocol back-compat trap (m5).** Carrying socket.io and plain-WS simultaneously on one service is a second axis and would put `s08` back at 5 on merit. The PRD's zero-users clause means it is not owed.
+- **Settle the connection model in `s07` (M6)** so `s08` is not silently reinterpreting a criterion it inherited. As written, `s08` AC 4 asserts that `s07`'s criterion "still passes" under a reading `s07` never states.
+
+With those two edits, `s08` is a 4 and does not need to split further.
+
+---
+
+## Byte budget — measured and confirmed
+
+**I could not measure this myself.** This review session had Read, Grep and Glob only — no shell — so `gzip -9c public/embed/recopyfast.js | wc -c` was not available to me, exactly as in the prior pass. What I could establish from the file alone was that the table is internally consistent in a way that indicates real measurement rather than estimation: 34,063 + 13,085 = 47,148 against a stated bundle of 46,781, and that 367-byte shortfall is the expected effect of gzip finding cross-file redundancy when the two inputs are compressed as one stream. Invented figures typically sum exactly. Separately, 13,085 gz for `socket.io-client` 4.x as an IIFE is consistent with that library's published size.
+
+**The measurement was subsequently supplied by the main session, which ran it with a shell.** `gzip -9`:
+
+| Component | gzipped | Status |
+|---|---|---|
+| `recopyfast.js` as shipped | **46,781** | measured |
+| — of which `socket.io-client.min.js` | 13,085 | measured |
+| — of which widget code alone | **34,063** | measured (bundle minus the concatenated socket.io prefix) |
+
+The table in `stories.md:83-102` is therefore **confirmed, not estimated**, and the prior review's M1 — which flagged its own arithmetic as an estimate and could not settle whether removing socket.io reaches budget — is resolved: it does not. The widget alone is 34,063 gz against a 30,000 ceiling (`docs/architecture/overview.md:326`), which is what justifies `s06` existing separately from `s08`. Recorded here with its provenance so the next reader knows which claims in this report rest on my own verification and which do not.
+
+Structurally, the right answer is the one `s06` AC 1 already proposes: have the build measure and print it, and fail on a committed ceiling, so the number is never again a claim anyone has to take on trust. Note that `scripts/build-embed.mjs:232-245` already prints *raw* sizes for bundle, widget and socket.io separately and has no gzip check — so `s06` AC 1 is a small, well-targeted extension of code that exists, not new machinery.
 
 ---
 
 ## Claim verification
 
-Recorded because these claims drive the plan.
+Recorded because these claims drive the plan. Everything below was checked against code during this review.
 
 **Verified accurate:**
 
-- **A/B parked at `dashboard/_ab-tests`** ✅ — `src/app/dashboard/_ab-tests/page.tsx` exists, and `DashboardNavigation.tsx:49-51` carries the matching comment explaining the route is deliberately absent and reversible.
-- **No `agency` plan in the Stripe catalogue** ✅ — `src/lib/stripe/plans.ts:66-90`, `PRICE_ID_ENV_VARS` holds exactly `starter`, `pro`, `credits`, `lifetime_pro`.
-- **Time-to-first-edit is not instrumented** ✅ — no milestone or activation table across the 43 files in `supabase/migrations/`, and no equivalent code in `src/`.
-- **Teams still linked in the dashboard nav** ✅ — `DashboardNavigation.tsx:59-60`, exactly the lines `s04` cites.
-- **`s05`'s reading of `scripts/build-embed.mjs`** ✅ — the header comment records the CDN / `script-src 'self'` failure mode (lines 5-8), socket.io is concatenated ahead of the widget (line 225), `--check` detects a stale artifact (lines 191-210), and there is no size check in the build today. The same-origin lazy-load trap the story warns about is real: `recopyfast.src.js:64` derives `socket.io-client.min.js` from the script URL.
-- **`s01`'s file map** ✅ — `src/lib/billing/{entitlements,checkout-reservation,user-lock}.ts` all exist; `permissions.ts:21` reads *"There is no free tier to fall through to"*; `lifetime_pro` resolves via `grantsPlanId` (`plans.ts:462`).
-- **`s10`'s file map** ✅ — `countOwnedSites` at `permissions.ts:79`, with the documented *"`sites` has no owner column"* comment at `:150`; `npm run check:stripe` exists in both test and live form (`package.json:33-34`).
-- **`s13`'s dependencies** ✅ — `ipaddr.js@^2.2.0` at `package.json:72`; `api/webhooks/route.ts`, `api/webhooks/test/route.ts` and `src/lib/webhooks/` all present.
-- **`s04`'s orphan claim** ✅ — the four named components are referenced only in their own files and one test file. See M4 for what the story misses elsewhere.
-- **The 30KB budget is documented where the story says** ✅ — `docs/architecture/overview.md:326`.
-- **`s08`/`s11` commit references** ✅ — `3099c07` (closed unauthenticated A/B writes), `728b646` (hid site install credentials, restricted site delete) and `aca2eb2` (last-admin revoke) all match the repository history.
+- **`s07`'s real-time-is-off premise** ✅ — `embed-script.ts:63-81` (`getPublicWebSocketUrl` returns `""`), `:92-96` (attribute omitted), `recopyfast.src.js:2703-2705` (early return with the "nothing is listening" comment above it), `server/fly.toml:22` (uncustomised `app = "recopyfast-ws"   # change to your chosen Fly app name`). The Dockerfile and fly.toml exist but show no sign of ever having been deployed.
+- **`s05`'s dark-feature premise** ✅ — `BulkOperations` appears only at `BulkOperations.tsx:28,33`. No importer anywhere in `src/`, including tests.
+- **`s02`'s corrected first-contact signal** ✅ — `postContentMap` at `:2853`, `fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID))` at `:2924`, `hasReportedContent` at `SiteDetailView.tsx:91`. `analytics/track` accepts only the five event types the story lists (`route.ts:30-34`).
+- **`s04`'s widget claim** ✅ — five-tab list at `:5454-5460`; `/edit-board/styles/apply` at `:5726`; `/edit-board/themes` at `:6028`, `:6129`, `:6159`. Teams nav entry at `DashboardNavigation.tsx:59-60`. The `_ab-tests` precedent exists (`src/app/dashboard/_ab-tests/page.tsx`) with its documenting comment at `:49-51`.
+- **`s09`'s jest note** ✅ — `jest.setup.js:177-182` is a global `IntersectionObserver` mock with a no-op `observe`. Impression assertions written against it would pass vacuously.
+- **`s13`'s catalogue claim** ✅ — `plans.ts` holds `starter` (`:67`), `pro` (`:77`), `credits` (`:84`), `lifetime_pro` (`:90`), and no `agency`. `additional_site_price` already exists as a concept in `plan-types.ts` and `permissions.ts`, so AC 4 is grounded in something real.
+- **The 30KB budget lives where the story says** ✅ — `docs/architecture/overview.md:326`.
+- **`s06`'s reading of the build script** ✅ — socket.io concatenated first at `build-embed.mjs:225`, `--check` staleness detection at `:191-210`, raw-size reporting at `:232-245`, and no gzip check today.
+- **Coverage spot-checks on "built" claims** ✅ — analytics export is reachable (`dashboard/analytics/page.tsx:37` renders `AnalyticsDashboard`, which calls `/api/analytics/export`), and API keys are reachable (`settings/page.tsx:16,374`). Neither is an orphan of the `BulkOperations` kind.
 
-**Corrected:**
+**Newly discovered, not mentioned by any story:**
 
-- **`IntersectionObserver` "appears nowhere in the codebase — verified"** ❌ — false as written. See m1. The material conclusion (no impression tracking, nothing in the embed) holds, which is why this is minor rather than major, but the global jest mock at `jest.setup.js:177-178` is directly relevant to how `s06`'s tests must be written.
+- **The widget already emits A/B `view`, `click` and `conversion` events** with `visitor_id`, `test_id`, `variant_id` and geo fields (`recopyfast.src.js:3100`, `:3113`, `:3137`, posted at `:3165`), and sets a one-year `rcf_vid` cookie at `:2975`. This is load-bearing for M2, m2 and m4.
 
 **Could not verify:**
 
-- **`recopyfast.js` is 174KB raw / 47KB gzipped.** I have no shell in this review, so neither number was measured. Both are plausible and nothing contradicts them. The size estimate in M1 is therefore an estimate, not a measurement — `gzip -c public/embed/recopyfast.js | wc -c` settles both the story's premise and M1.
-- **"1954 tests passing"** (`docs/stories.md:11`) — not verifiable without running the suite. See the staleness note below.
-
-**False alarm, cleared:**
-
-- **AI translate (PRD feature 9) initially looked like a third critical.** `/api/ai/translate`'s only caller is `src/components/dashboard/TranslationDashboard.tsx:87`, and that component is orphaned — imported by nothing but its own test, exactly like `BulkOperations.tsx` in C2. It is **not** a coverage gap: the feature ships through a different path. The widget's Edit Board has a Languages tab (`recopyfast.src.js:5459`) whose "Auto-translate with AI" checkbox (`:5845-5877`) posts to `/api/edit-board/languages`, which calls `aiService.translateText` server-side (`src/app/api/edit-board/languages/route.ts:240`). Feature 9 is delivered, in place, on the live page. Recorded so the next reviewer does not re-raise it.
-
-## Note on `docs/quality/qa-register.md`
-
-The register is stale and should not be read as current state. It reports **1352 tests** against the stories file's 1954, and still lists as open two items that the code contradicts: *"P0-1 Magic-code system has no client… The widget has zero references to `rcf_handoff`"* (`:357-362`) — `rcf_handoff` is now present in `public/embed/recopyfast.src.js` with coverage in `src/__tests__/embed/handoff-roundtrip.test.ts` and `src/__tests__/embed/editor-auth.test.ts` — and *"A-27 `data-ws-url` is always emitted"*, which `embed-script.ts:94-96` now contradicts by omitting the attribute.
-
-None of the register's open items were treated as current without checking them against the code first. The one register claim this review does rely on — that `NEXT_PUBLIC_WS_URL` was removed from Vercel production (`:83-86`) — is corroborated independently by the code path in C1, which is written on the explicit assumption that the variable is normally unset.
+- **"suite is green (1954 passing)"** (`stories.md:11`) — no shell, no test run. Unchanged from the prior pass.
 
 ---
 
 ## Verdict
-Max severity: critical
+
+The revision is a substantial improvement and the corrections it makes about itself hold up under checking. Both criticals are genuinely closed — I checked the code rather than the claims, and the code agrees. Twelve of seventeen prior issues are fully closed and the remaining five are partials whose residue is carried forward here. Coverage of the PRD perimeter is complete, no graveyard item is reintroduced, all nine complexity-4 stories now state a real risk, and the ids are clean and correctly mapped.
+
+What blocks readiness is a second generation of defects, most of them created by the fixes: the renumbering broke four references in the PRD, two of which now resolve to a different real story; the dependency edge added to close the prior M3 joins two incompatible data models; the criterion added to close the prior M5 pushed `s13` to a 5; and the two new real-time stories disagree with each other about who holds a connection. All six majors are mechanical to fix, and none requires re-architecting the backlog.
+
+Max severity: major
 Stories ready: no
