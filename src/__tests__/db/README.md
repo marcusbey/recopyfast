@@ -55,7 +55,7 @@ Two details worth knowing:
 
 `test.failing` passes while the defect exists and **fails the moment it is
 fixed**, which is the signal to delete the marker. See "Test conventions for
-this backlog" in `docs/QA-PRODUCTION-AUDIT-2026-08-07.md`.
+this backlog" in `docs/archive/2026-08-07-qa-production-audit.md`.
 
 `function-grants.test.ts` has been through that cycle and records it.
 `20260809120000_lock_down_definer_functions.sql` closed A-3/A-5; the marker was

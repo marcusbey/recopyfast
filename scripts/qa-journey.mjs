@@ -2,7 +2,7 @@
 /**
  * The one path, run for real, on every deploy.
  *
- * docs/QA-USER-JOURNEY-2026-08-04.md ends on this conclusion and this script is
+ * docs/archive/2026-08-04-qa-user-journey.md ends on this conclusion and this script is
  * it: "1,300 passing tests over a product that could not take a payment and
  * could not admit a customer who had paid." Every P0 in that register was
  * invisible to the unit suite for one reason — the tests mock Supabase, and the

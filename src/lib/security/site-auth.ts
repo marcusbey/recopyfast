@@ -259,7 +259,7 @@ export async function authorizeSiteOrigin(
   // build, but the browser sends an OPTIONS before any cross-origin GET or POST,
   // and this function — which answers it — has no token to inspect. Refusing the
   // grant here blocked the very request that exemption exists to allow: the local
-  // test page in docs/PROJECT_REPORT.md:435 never got past its preflight, so its
+  // test page in docs/archive/project-report.md:435 never got past its preflight, so its
   // fetch was never sent and the exemption on the other side was unreachable.
   //
   // Development only, and it admits nothing by itself: the GET or POST behind the

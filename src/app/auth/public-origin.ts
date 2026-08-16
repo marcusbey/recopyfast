@@ -60,7 +60,7 @@ function warnIfConfiguredOriginIsElsewhere(
         `${configuredOrigin}, so you are about to be redirected there — where the ` +
         `session cookie just set for ${requestHost} does not exist, and you will ` +
         `land signed out. Set NEXT_PUBLIC_APP_URL in .env.local to ` +
-        `http://${requestHost}. See docs/DEPLOYMENT-ENV.md.`,
+        `http://${requestHost}. See docs/operations/deployment-env.md.`,
     );
   } catch {
     // A URL we cannot parse is not worth warning about.

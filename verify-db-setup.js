@@ -116,7 +116,7 @@ async function verifyDatabaseSetup() {
     
     console.log('\n📖 Next steps:');
     console.log('   1. Open: https://supabase.com/dashboard/project/uexwowziiigweobgpmtk/sql');
-    console.log('   2. Execute schema files in order (see database-setup-instructions.md)');
+    console.log('   2. Execute schema files in order (see docs/operations/database-setup.md)');
     console.log('   3. Run this verification script again');
   }
 
@@ -231,7 +231,7 @@ async function main() {
     console.log('   You can now run: npm run dev');
   } else {
     console.log('\n⏳ Complete the database setup first');
-    console.log('   See: database-setup-instructions.md');
+    console.log('   See: docs/operations/database-setup.md');
   }
 }
 

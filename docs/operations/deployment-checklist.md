@@ -53,7 +53,7 @@ VERCEL_URL=https://recopyfa.st
 ```
 
 ### 2. Stripe Setup ❌
-- [ ] Create products in Stripe Dashboard (see STRIPE_PRODUCT_SETUP.md)
+- [ ] Create products in Stripe Dashboard (see docs/operations/stripe-setup.md)
 - [ ] Update Price IDs in environment variables
 - [ ] Configure webhook endpoint: `https://recopyfa.st/api/webhooks/stripe`
 - [ ] Save webhook signing secret

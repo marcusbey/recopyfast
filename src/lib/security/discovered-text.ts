@@ -13,7 +13,7 @@
  * deleted along with the rest of the string — "Setup in <2 minutes" became
  * "Setup in &lt;2 minutes", "Paste the <script> tag into your page" became
  * "Paste the ". Truncation ran first, so a cut could also land mid-entity. See
- * A-1 in docs/QA-PRODUCTION-AUDIT-2026-08-07.md.
+ * A-1 in docs/archive/2026-08-07-qa-production-audit.md.
  *
  * What is left to check is therefore not "is this safe markup" but "is this a
  * plain string worth storing": no control characters, and a bounded length.

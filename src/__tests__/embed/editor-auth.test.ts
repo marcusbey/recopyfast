@@ -13,7 +13,7 @@
  *
  *   - `nextAction` has three values, not two. `refresh` means a sibling tab
  *     rotated the token and wrote the replacement to shared storage — re-read
- *     and retry, do not prompt (QA-REGISTER.md, P0-1 note).
+ *     and retry, do not prompt (docs/quality/qa-register.md, P0-1 note).
  *   - A forwarded grant fails the User-Agent binding and must land on the code
  *     prompt. Nothing here may retry its way past that.
  *   - A 5xx is our outage, not a verdict, and must never discard a credential.

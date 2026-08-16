@@ -451,7 +451,7 @@ describe("the element id an attacker has to guess", () => {
  * place where "is this the registered domain?" has to be decided on the header
  * alone — so it is also the place where the localhost demo exemption in
  * `authorizeSiteRequest` has to be mirrored, or the request it exempts is blocked
- * before it is sent (docs/PROJECT_REPORT.md:435).
+ * before it is sent (docs/archive/project-report.md:435).
  *
  * WHAT A REFUSED PREFLIGHT LOOKS LIKE. Every caller gets 204. Refusing means
  * withholding the `Access-Control-Allow-Origin` grant, not varying the status: a
@@ -568,7 +568,7 @@ describe("OPTIONS /api/content/[siteId] preflight", () => {
     "admits a %s demo page in development, against a non-local registered domain",
     async (_label, origin) => {
       // The site is registered to example.com, and the demo page is served from
-      // the developer's own machine — the shape docs/PROJECT_REPORT.md documents.
+      // the developer's own machine — the shape docs/archive/project-report.md documents.
       const response = await preflight(origin);
 
       expect(response.status).toBe(204);

@@ -8,7 +8,7 @@
  * time** whether to register the real tests at all.
  *
  * Why collection time and not `beforeAll`: several tests here use
- * `test.failing()` (the convention in docs/QA-PRODUCTION-AUDIT-2026-08-07.md
+ * `test.failing()` (the convention in docs/archive/2026-08-07-qa-production-audit.md
  * for a defect that is not yet fixed). `test.failing` fails when its body
  * *passes*, so a body that quietly no-ops without a database would turn the
  * suite red. The decision has to be made before the test is registered, which

@@ -70,6 +70,6 @@ console.log('');
 console.log('🎉 Ready for database setup and deployment!');
 console.log('');
 console.log('Instructions:');
-console.log('- See execute-sql-commands.md for database setup');
+console.log('- See docs/operations/database-setup.md for database setup');
 console.log('- Use live Price IDs in production environment');
 console.log('- Configure webhook endpoint: https://recopyfa.st/api/webhooks/stripe');

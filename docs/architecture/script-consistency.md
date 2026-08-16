@@ -140,12 +140,12 @@ This document ensures that the demo implementation and the live embed script (`r
 ### **Demo Implementation**
 - **Primary**: `/src/components/landing/InteractiveHero.tsx`
 - **Rules**: `/src/lib/editingRules.ts`
-- **Documentation**: `EDITING_SYSTEM.md`
+- **Documentation**: `../product/editing-system.md`
 
 ### **Live Script Implementation**  
 - **Primary**: `/public/embed/recopyfast.js`
 - **Styles**: Embedded CSS within script
-- **Documentation**: This file (`SCRIPT_CONSISTENCY.md`)
+- **Documentation**: This file (`docs/architecture/script-consistency.md`)
 
 ## 🚀 **Deployment Considerations**
 
