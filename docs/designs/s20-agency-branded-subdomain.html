@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s20-agency-branded-subdomain</title>
+<style>
+  /* ============================================================
+     Tokens copied from src/app/globals.css (light values only —
+     this is a low-fidelity static reference, not the app).
+     Every value here traces back to docs/design-system.md.
+     ============================================================ */
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: #ffffff;
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-lg: 0 8px 24px var(--shadow-b), 0 2px 8px var(--shadow-a);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .reference-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    padding: 0.625rem 1.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .page {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+
+  .text-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--accent-solid);
+    margin: 0 0 0.375rem;
+  }
+
+  .text-display {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0 0 0.375rem;
+  }
+
+  .page-intro {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: 0 0 2.5rem;
+    max-width: 44rem;
+    line-height: 1.55;
+  }
+
+  .section-heading {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.008em;
+    margin: 2.75rem 0 1rem;
+    padding-top: 1.75rem;
+    border-top: 1px solid var(--line);
+  }
+  .section-heading:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+  .section-note {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin: -0.5rem 0 1.25rem;
+    max-width: 46rem;
+    line-height: 1.5;
+  }
+
+  .state-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem 1.75rem;
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .grid.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 1100px) {
+    .grid.grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Card (matches src/components/ui/card.tsx "default" variant) ---- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg); /* rounded-xl */
+    box-shadow: var(--shadow-sm);
+  }
+  .card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 1.5rem 1.5rem 0;
+  }
+  .card-content {
+    padding: 1.25rem 1.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .card-title-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 1.125rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .text-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0;
+  }
+  .text-title.mono {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    letter-spacing: 0;
+  }
+
+  /* ---- IconTile (src/components/ui/icon-tile.tsx) ---- */
+  .icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-md); /* rounded-lg */
+    border: 1px solid;
+    flex-shrink: 0;
+  }
+  .icon-tile svg { width: 1rem; height: 1rem; }
+  .icon-tile.tone-neutral { background: var(--surface-2); border-color: var(--line); color: var(--text-muted); }
+  .icon-tile.tone-info { background: var(--tone-info-surface); border-color: var(--tone-info-line); color: var(--tone-info-text); }
+  .icon-tile.tone-success { background: var(--tone-success-surface); border-color: var(--tone-success-line); color: var(--tone-success-text); }
+  .icon-tile.tone-warning { background: var(--tone-warning-surface); border-color: var(--tone-warning-line); color: var(--tone-warning-text); }
+
+  /* pulse — composed from existing motion tokens, not a new primitive (see gap #1) */
+  .icon-tile.pulsing { animation: rcf-pulse 1.8s var(--ease-out) infinite; }
+  @keyframes rcf-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--tone-info-line); }
+    50% { box-shadow: 0 0 0 4px transparent; }
+  }
+
+  /* ---- StatusBadge (src/components/ui/status-badge.tsx + badge.tsx) ---- */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    border-radius: 999px;
+    border: 1px solid;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .status-badge svg { width: 0.75rem; height: 0.75rem; }
+  .status-badge.tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .status-badge.tone-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .status-badge.tone-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .status-badge.tone-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .status-badge.tone-danger { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+  .status-badge.dot svg { animation: rcf-spin 1.1s linear infinite; }
+  @keyframes rcf-spin { to { transform: rotate(360deg); } }
+
+  /* ---- Label + Input (src/components/ui/{label,input}.tsx) ---- */
+  .field { display: flex; flex-direction: column; gap: 0.4375rem; }
+  .field label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-strong);
+  }
+  .input-suffix-group {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    overflow: hidden;
+  }
+  .input-suffix-group input {
+    border: none;
+    outline: none;
+    padding: 0.5625rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--text-strong);
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+  }
+  .input-suffix-group input::placeholder { color: var(--text-muted); font-family: var(--font-sans); }
+  .input-suffix-group input:focus-visible { box-shadow: none; }
+  .input-suffix {
+    display: flex;
+    align-items: center;
+    padding: 0 0.75rem;
+    background: var(--surface-2);
+    border-left: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .input-suffix-group.focused { border-color: var(--accent-solid); box-shadow: 0 0 0 2px var(--accent-solid) inset; }
+  .field-feedback { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
+
+  .dialog-input {
+    width: 100%;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 0.5625rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--text-strong);
+    background: var(--surface-card);
+    outline: none;
+  }
+
+  /* ---- Button (src/components/ui/button.tsx) ---- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border-radius: calc(var(--radius-md) - 3px); /* rounded-sm */
+    padding: 0.5rem 0.875rem;
+    cursor: pointer;
+    transition: background-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out), opacity var(--dur) var(--ease-out);
+    white-space: nowrap;
+    border: none;
+  }
+  .btn svg { width: 0.875rem; height: 0.875rem; }
+  .btn-sm { font-size: 0.75rem; padding: 0.375rem 0.625rem; }
+  .btn-default { background: var(--accent-solid); color: var(--accent-on-solid); }
+  .btn-default[disabled] { opacity: 0.45; cursor: not-allowed; }
+  .btn-outline {
+    background: var(--surface-card);
+    border: 1px solid var(--line-strong);
+    color: var(--text-strong);
+    box-shadow: var(--shadow-xs);
+  }
+  .btn-ghost { background: transparent; color: var(--text-strong); }
+  .btn-link {
+    background: transparent;
+    color: var(--accent-solid);
+    padding: 0.375rem 0;
+  }
+  .btn-link:hover { text-decoration: underline; }
+
+  /* ---- Alert (src/components/ui/alert.tsx) ---- */
+  .alert {
+    position: relative;
+    border-radius: calc(var(--radius-md) + 3px); /* rounded-lg */
+    border: 1px solid;
+    padding: 0.75rem 0.875rem 0.75rem 2.375rem;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  .alert svg {
+    position: absolute;
+    left: 0.875rem;
+    top: 0.8125rem;
+    width: 1rem;
+    height: 1rem;
+  }
+  .alert-title { font-weight: 500; margin: 0 0 0.1875rem; }
+  .alert p { margin: 0; }
+  .alert-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .alert-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .alert-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .alert-destructive { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+
+  .body-text { font-size: 0.875rem; color: var(--text-strong); margin: 0; line-height: 1.55; }
+  .muted-text { font-size: 0.8125rem; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* ---- Snippet block — machine string, mono, per design system ---- */
+  .snippet {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 0.875rem;
+  }
+  .snippet code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    color: var(--text-strong);
+    word-break: break-all;
+    flex: 1;
+  }
+  .snippet-col { display: flex; flex-direction: column; gap: 0.625rem; }
+  .snippet-col-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+
+  /* ---- Checklist rows (pending-propagation) ---- */
+  .checklist { display: flex; flex-direction: column; gap: 0.625rem; }
+  .checklist-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 0.875rem;
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+  }
+  .checklist-row .label { display: flex; flex-direction: column; gap: 0.125rem; }
+  .checklist-row .label .name { font-size: 0.8125rem; font-weight: 500; color: var(--text-strong); }
+  .checklist-row .label .desc { font-size: 0.75rem; color: var(--text-muted); }
+
+  .footnote {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---- Dialog (src/components/ui/dialog.tsx, Radix-wrapped) ---- */
+  .dialog-frame {
+    position: relative;
+    background: hsl(200 30% 12% / 0.55);
+    border-radius: var(--radius-lg);
+    padding: 2.5rem 1.75rem;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .dialog {
+    width: 100%;
+    max-width: 27rem;
+    background: var(--surface-card);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dialog-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0; }
+  .dialog-title .mono { font-family: var(--font-mono); font-weight: 600; }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 0.625rem; margin-top: 0.25rem; }
+</style>
+</head>
+<body>
+
+  <div class="reference-banner">
+    Reference mockup — not production code. Communicates layout and state only.
+    Execute builds this with the real <code>src/components/ui/*</code> components.
+  </div>
+
+  <div class="page">
+    <p class="text-eyebrow">Agency plan</p>
+    <h1 class="text-display">Branded subdomain</h1>
+    <p class="page-intro">
+      Story s20-agency-branded-subdomain. Serve your clients' embeds from your own
+      name instead of <span style="font-family:var(--font-mono)">www.recopyfa.st</span>.
+      One card, three headline states (unclaimed → verifying → active) plus the
+      sub-states each passes through — designed around one fact: once claimed,
+      this can never be released or changed, and every snippet issued after this
+      point points here for as long as it's installed on a client's site.
+    </p>
+
+    <!-- ============================================================ -->
+    <h2 class="section-heading">1 — Claim form (unclaimed)</h2>
+    <p class="section-note">Loading, empty, the live availability check
+      (success / taken / reserved), and a submission error — all sub-states of
+      the same card, before anything is claimed.</p>
+
+    <div class="grid grid-3">
+
+      <!-- Loading -->
+      <div>
+        <p class="state-label">Loading</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <div style="width:2.25rem; height:2.25rem; border-radius:var(--radius-md); background:var(--surface-2);"></div>
+                <div style="width:7rem; height:0.9rem; border-radius:4px; background:var(--surface-2);"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card-content">
+            <div style="width:100%; height:0.75rem; border-radius:4px; background:var(--surface-2);"></div>
+            <div style="width:70%; height:0.75rem; border-radius:4px; background:var(--surface-2);"></div>
+            <div style="width:100%; height:2.25rem; border-radius:var(--radius-md); background:var(--surface-2); margin-top:0.25rem;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Empty -->
+      <div>
+        <p class="state-label">Empty — nothing typed yet</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+                </span>
+                <h2 class="text-title">Claim a subdomain</h2>
+              </div>
+              <span class="status-badge tone-neutral">Not claimed</span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="field">
+              <label for="in-empty">Subdomain</label>
+              <div class="input-suffix-group">
+                <input id="in-empty" type="text" placeholder="acme" />
+                <span class="input-suffix">.recopyfa.st</span>
+              </div>
+            </div>
+            <button class="btn btn-default" type="button" disabled>Claim subdomain</button>
+            <p class="muted-text">Lowercase letters, numbers and hyphens. This becomes a permanent public hostname — see why below once it's available.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Checking (typing, debounced) -->
+      <div>
+        <p class="state-label">Checking (typing, debounced)</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+                </span>
+                <h2 class="text-title">Claim a subdomain</h2>
+              </div>
+              <span class="status-badge tone-neutral">Not claimed</span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="field">
+              <label for="in-checking">Subdomain</label>
+              <div class="input-suffix-group focused">
+                <input id="in-checking" type="text" value="acme" />
+                <span class="input-suffix">.recopyfa.st</span>
+              </div>
+              <div class="field-feedback">
+                <span class="status-badge tone-neutral dot">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+                  Checking&hellip;
+                </span>
+              </div>
+            </div>
+            <button class="btn btn-default" type="button" disabled>Claim subdomain</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="grid grid-3" style="margin-top:1.75rem;">
+
+      <!-- Success: available -->
+      <div>
+        <p class="state-label">Success — available</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+                </span>
+                <h2 class="text-title">Claim a subdomain</h2>
+              </div>
+              <span class="status-badge tone-neutral">Not claimed</span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="field">
+              <label for="in-avail">Subdomain</label>
+              <div class="input-suffix-group">
+                <input id="in-avail" type="text" value="acme" />
+                <span class="input-suffix">.recopyfa.st</span>
+              </div>
+              <div class="field-feedback">
+                <span class="status-badge tone-success">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                  Available
+                </span>
+              </div>
+            </div>
+            <div class="alert alert-warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+              <p class="alert-title">This can't be undone</p>
+              <p>Once claimed, <strong>acme.recopyfa.st</strong> is permanent — it can never be changed or released, even after this plan ends.</p>
+            </div>
+            <button class="btn btn-default" type="button">Claim subdomain</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Taken / reserved -->
+      <div>
+        <p class="state-label">Taken / reserved (same blocked state)</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+                </span>
+                <h2 class="text-title">Claim a subdomain</h2>
+              </div>
+              <span class="status-badge tone-neutral">Not claimed</span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="field">
+              <label for="in-taken">Subdomain</label>
+              <div class="input-suffix-group">
+                <input id="in-taken" type="text" value="app" />
+                <span class="input-suffix">.recopyfa.st</span>
+              </div>
+              <div class="field-feedback">
+                <span class="status-badge tone-danger">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+                  Unavailable
+                </span>
+              </div>
+              <p class="muted-text"><strong>app</strong> is reserved for internal use. Try a name specific to your agency instead.</p>
+            </div>
+            <button class="btn btn-default" type="button" disabled>Claim subdomain</button>
+            <p class="footnote">Another agency's subdomain shows the same "Unavailable" state, with copy naming that it's already claimed rather than reserved.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div>
+        <p class="state-label">Error — claim submission failed</p>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+                </span>
+                <h2 class="text-title">Claim a subdomain</h2>
+              </div>
+              <span class="status-badge tone-neutral">Not claimed</span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="alert alert-destructive">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v5M12 16h.01"/></svg>
+              <p class="alert-title">Couldn't claim this subdomain</p>
+              <p>Something went wrong on our end and nothing was claimed. <strong>acme.recopyfa.st</strong> is still available — try again.</p>
+            </div>
+            <div class="field">
+              <label for="in-error">Subdomain</label>
+              <div class="input-suffix-group">
+                <input id="in-error" type="text" value="acme" />
+                <span class="input-suffix">.recopyfa.st</span>
+              </div>
+            </div>
+            <button class="btn btn-default" type="button">Try again</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <h2 class="section-heading">2 — Claim confirmation dialog</h2>
+    <p class="section-note">Opens on "Claim subdomain" from the Success state
+      above. This is the actual commit point — the irreversibility warning gets
+      its full weight here, and the primary action stays disabled until the
+      agency types the exact hostname, the same deliberate-friction pattern
+      products use for claiming a permanent username or a custom domain.</p>
+
+    <div class="dialog-frame">
+      <div class="dialog">
+        <h3 class="dialog-title">Claim <span class="mono">acme.recopyfa.st</span>?</h3>
+
+        <div class="alert alert-warning">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+          <p class="alert-title">This can't be undone</p>
+          <p>
+            <strong>acme.recopyfa.st</strong> becomes yours permanently the moment
+            you confirm. It can't be released, changed, or reassigned later.
+            Every snippet issued from now on will point here, and those snippets
+            get pasted onto your clients' sites — pages we don't control. Even if
+            you cancel the Agency plan later, this subdomain keeps serving
+            whatever it's still installed on.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="dialog-confirm">Type <span style="font-family:var(--font-mono)">acme.recopyfa.st</span> to confirm</label>
+          <input id="dialog-confirm" class="dialog-input" type="text" placeholder="acme.recopyfa.st" />
+        </div>
+
+        <div class="dialog-actions">
+          <button class="btn btn-ghost" type="button">Cancel</button>
+          <button class="btn btn-default" type="button" disabled>Claim acme.recopyfa.st</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <h2 class="section-heading">3 — Pending-propagation</h2>
+    <p class="section-note">Right after confirmation. DNS and certificate
+      provisioning are not instant — this state exists specifically so an agency
+      staring at it for ten minutes understands why, and doesn't retry or open a
+      support ticket.</p>
+
+    <div class="grid" style="grid-template-columns: minmax(0,32rem);">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+              <span class="icon-tile tone-info pulsing" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              </span>
+              <h2 class="text-title mono">acme.recopyfa.st</h2>
+            </div>
+            <span class="status-badge tone-info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg>
+              Verifying
+            </span>
+          </div>
+        </div>
+        <div class="card-content">
+          <div class="checklist">
+            <div class="checklist-row">
+              <div class="label">
+                <span class="name">DNS record</span>
+                <span class="desc">Pointing acme.recopyfa.st at our servers</span>
+              </div>
+              <span class="status-badge tone-success">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+                Verified
+              </span>
+            </div>
+            <div class="checklist-row">
+              <div class="label">
+                <span class="name">TLS certificate</span>
+                <span class="desc">Issuing a certificate so browsers trust the connection</span>
+              </div>
+              <span class="status-badge tone-info dot">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+                Provisioning
+              </span>
+            </div>
+          </div>
+
+          <div class="alert alert-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <p class="alert-title">This usually takes 5&ndash;30 minutes</p>
+            <p>DNS and certificate issuance happen automatically. You don't need to do anything, and refreshing won't speed it up — we'll update this the moment it's ready.</p>
+          </div>
+
+          <div class="alert alert-success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+            <p class="alert-title">Nothing else changes yet</p>
+            <p>Every snippet already installed on a client site keeps loading from <strong>www.recopyfa.st</strong> the whole time this finishes.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <h2 class="section-heading">4 — Claimed (active)</h2>
+    <p class="section-note">The payoff state. Both snippets sit side by side so
+      the agency can see exactly what already-installed clients keep getting
+      versus what new sites will get — a diff, not a switch.</p>
+
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title-group">
+          <div style="display:flex; align-items:center; gap:0.75rem;">
+            <span class="icon-tile tone-success" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+            </span>
+            <h2 class="text-title mono">acme.recopyfa.st</h2>
+          </div>
+          <span class="status-badge tone-success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+            Active
+          </span>
+        </div>
+      </div>
+      <div class="card-content">
+        <p class="muted-text">Claimed permanently on <span class="tabular">Aug 16, 2026</span>. This subdomain can't be changed or released — <button class="btn btn-link" type="button" style="padding:0; font-size:inherit;">contact support</button> if that's ever a problem.</p>
+
+        <div class="grid" style="margin-top:0.25rem;">
+          <div class="snippet-col">
+            <div class="snippet-col-head">
+              <p class="text-eyebrow" style="margin:0;">Default origin &middot; already installed</p>
+              <span class="status-badge tone-neutral">Unaffected</span>
+            </div>
+            <div class="snippet">
+              <code>&lt;script src="https://www.recopyfa.st/embed/recopyfast.js" data-site="rcf_8f2a91c4"&gt;&lt;/script&gt;</code>
+              <button class="btn btn-outline btn-sm" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                Copy
+              </button>
+            </div>
+            <p class="muted-text">Every client site that already has this snippet keeps loading from here, untouched.</p>
+          </div>
+
+          <div class="snippet-col">
+            <div class="snippet-col-head">
+              <p class="text-eyebrow" style="margin:0;">Branded origin &middot; new installs</p>
+              <span class="status-badge tone-success">New default</span>
+            </div>
+            <div class="snippet">
+              <code>&lt;script src="https://acme.recopyfa.st/embed/recopyfast.js" data-site="rcf_c14de072"&gt;&lt;/script&gt;</code>
+              <button class="btn btn-outline btn-sm" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                Copy
+              </button>
+            </div>
+            <p class="muted-text">Any site you register or re-issue a snippet for from now on gets this one.</p>
+          </div>
+        </div>
+
+        <div class="alert alert-success">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+          <p class="alert-title">Existing snippets keep working</p>
+          <p>Nothing was rewritten. Sites installed before today keep serving from <strong>www.recopyfa.st</strong> exactly as before — this only changes what new snippets look like.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

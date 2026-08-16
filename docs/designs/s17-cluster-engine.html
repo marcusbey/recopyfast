@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s17-cluster-engine — /alternatives/tinacms</title>
+<style>
+  /* ============================================================
+     MARKETING surface, not app. Every literal below is the exact
+     hex Tailwind ships for these utility classes today — landing,
+     demo, privacy and terms hardcode these classes directly and
+     never touch [data-theme] or the light-dark() token system, so
+     this reference does the same rather than inventing a themed
+     variant that doesn't exist in the real pages. See
+     docs/designs/s17-cluster-engine.md ("Why marketing, not app")
+     for the full reasoning.
+     Low-fidelity static reference — not production code. Execute
+     builds the real page with Header/Footer + Tailwind classes.
+     ============================================================ */
+  :root {
+    --sky-50:  #f0f9ff;
+    --sky-70:  #e0f2fe; /* sky-100 */
+    --sky-200: #bae6fd;
+    --sky-500: #0ea5e9;
+    --sky-600: #0284c7;
+    --sky-700: #0369a1;
+
+    --slate-50:  #f8fafc;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-900: #0f172a;
+
+    --teal-50:  #f0fdfa;
+    --teal-600: #0d9488; /* --accent-solid on marketing = teal, per design-system.md */
+    --teal-700: #0f766e;
+
+    --white: #ffffff;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-display: "Bricolage Grotesque", var(--font-sans); /* marketing-only, per styleguide */
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur: 220ms;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--white);
+    color: var(--slate-900);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .reference-banner {
+    background: #fef3c7;
+    color: #78350f;
+    text-align: center;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-bottom: 1px solid #fde68a;
+  }
+
+  .container { max-width: 72rem; margin: 0 auto; padding: 0 1.5rem; } /* max-w-6xl px-6 */
+  .container-narrow { max-width: 56rem; margin: 0 auto; padding: 0 1.5rem; }
+
+  a { color: inherit; text-decoration: none; }
+
+  /* ---------- header ---------- */
+  header.site {
+    position: sticky; top: 0; z-index: 40;
+    background: rgba(255,255,255,0.8);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--sky-70);
+  }
+  header.site .bar { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; max-width: 80rem; margin: 0 auto; }
+  header.site .logo { display: flex; align-items: center; gap: 0.625rem; font-weight: 600; font-size: 1.1rem; color: var(--slate-900); }
+  header.site .logo .mark { width: 2.25rem; height: 2.25rem; border-radius: 0.75rem; background: var(--sky-600); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.9rem; }
+  header.site nav { display: flex; gap: 2rem; font-size: 0.875rem; font-weight: 500; color: var(--slate-600); }
+  header.site .cta { display: flex; align-items: center; gap: 1rem; }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    background: var(--sky-600); color: #fff; font-weight: 600;
+    border-radius: 9999px; padding: 0.75rem 1.5rem; font-size: 0.9rem;
+    transition: background var(--dur) var(--ease-out);
+  }
+  .btn-primary:hover { background: var(--sky-700); }
+  .btn-secondary {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    color: var(--slate-700); font-weight: 500; font-size: 0.9rem;
+    padding: 0.75rem 1rem;
+  }
+
+  /* ---------- breadcrumb ---------- */
+  .breadcrumb { padding: 1.25rem 0; font-size: 0.8125rem; color: var(--slate-500); }
+  .breadcrumb a { color: var(--slate-600); }
+  .breadcrumb a:hover { color: var(--slate-900); }
+  .breadcrumb .sep { margin: 0 0.4rem; color: var(--slate-400); }
+  .breadcrumb .current { color: var(--slate-900); font-weight: 500; }
+
+  /* ---------- section header block ---------- */
+  .eyebrow { display: inline-block; margin-bottom: 1.5rem; font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--sky-700); }
+  .section-head { text-align: center; max-width: 42rem; margin: 0 auto 4rem; }
+  h1.page-title, h2.section-title {
+    font-family: var(--font-display);
+    font-size: 2.25rem; font-weight: 700; letter-spacing: -0.02em; color: var(--slate-900);
+    margin: 0 0 1.5rem;
+    line-height: 1.1;
+  }
+  @media (min-width: 640px) { h1.page-title, h2.section-title { font-size: 3rem; } }
+  .section-intro { font-size: 1.125rem; line-height: 1.7; color: var(--slate-600); margin: 0; }
+  @media (min-width: 640px) { .section-intro { font-size: 1.25rem; } }
+
+  /* ---------- hero ---------- */
+  section.hero { padding: 2rem 0 5rem; text-align: center; background: linear-gradient(to bottom, var(--sky-50), #ffffff); }
+  section.hero .actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem; }
+
+  /* ---------- bands ---------- */
+  section.band { padding: 6rem 1.5rem; }
+  @media (min-width: 640px) { section.band { padding: 8rem 1.5rem; } }
+  section.band.glass { background: rgba(255,255,255,0.6); border-top: 1px solid rgba(255,255,255,0.4); border-bottom: 1px solid rgba(255,255,255,0.4); }
+  section.band.solid { background: #fff; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; }
+
+  /* ---------- comparison table ---------- */
+  .table-wrap { overflow-x: auto; border-radius: 1rem; border: 1px solid var(--sky-70); background: #fff; }
+  table.compare { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  table.compare thead th {
+    background: var(--sky-50);
+    text-align: center;
+    font-size: 0.8125rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em;
+    color: var(--sky-700); padding: 1rem 1.25rem;
+  }
+  table.compare thead th:first-child { text-align: left; text-transform: none; letter-spacing: normal; font-weight: 600; color: var(--slate-500); }
+  table.compare th.us-col, table.compare td.us-col { background: rgba(240,249,255,0.5); } /* sky-50/50 wash on RecopyFast column */
+  table.compare tbody td { padding: 1rem 1.25rem; border-bottom: 1px solid var(--sky-70); color: var(--slate-700); text-align: center; }
+  table.compare tbody tr:last-child td { border-bottom: none; }
+  table.compare tbody td:first-child { text-align: left; font-weight: 500; color: var(--slate-900); }
+  table.compare tbody tr:hover td { background-color: rgba(240,249,255,0.4); }
+  table.compare tbody tr:hover td.us-col { background-color: rgba(240,249,255,0.7); }
+  .yes { color: var(--teal-600); font-weight: 700; }
+  .no { color: var(--slate-400); }
+
+  /* ---------- where-they-win / where-we-win ---------- */
+  .win-grid { display: grid; grid-template-columns: 1fr; gap: 1.5rem; }
+  @media (min-width: 768px) { .win-grid { grid-template-columns: 1fr 1fr; gap: 2rem; } }
+  .win-card { border-radius: 1.5rem; border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.7); padding: 2.25rem; }
+  .win-card.theirs { border-color: var(--sky-200); }
+  .win-card.ours { border-color: #99d8d0; }
+  .win-card .eyebrow { margin-bottom: 0.5rem; }
+  .win-card h3 { font-size: 1.5rem; font-weight: 600; color: var(--slate-900); margin: 0 0 1.5rem; }
+  .win-item { display: flex; gap: 0.75rem; margin-bottom: 1.25rem; }
+  .win-item:last-child { margin-bottom: 0; }
+  .win-item .icon-tile { flex-shrink: 0; width: 2.25rem; height: 2.25rem; border-radius: 0.625rem; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 0.9rem; }
+  .win-card.theirs .icon-tile { background: var(--sky-600); }
+  .win-card.ours .icon-tile { background: var(--teal-600); }
+  .win-item .claim { font-weight: 600; color: var(--slate-900); margin: 0 0 0.25rem; }
+  .win-item .detail { font-size: 0.875rem; color: var(--slate-600); line-height: 1.6; margin: 0; }
+
+  /* ---------- migration steps ---------- */
+  .steps { display: grid; grid-template-columns: 1fr; gap: 2.5rem; max-width: 48rem; margin: 0 auto; }
+  @media (min-width: 768px) { .steps { grid-template-columns: repeat(3, 1fr); } }
+  .step { text-align: center; }
+  .step .num-row { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-bottom: 1rem; }
+  .step .num { font-size: 2rem; font-weight: 700; color: var(--sky-700); }
+  .step .icon-tile { width: 2.75rem; height: 2.75rem; border-radius: 0.75rem; background: var(--sky-600); display: flex; align-items: center; justify-content: center; color: #fff; }
+  .step h3 { font-size: 1.125rem; font-weight: 600; color: var(--slate-900); margin: 0 0 0.5rem; }
+  .step p { font-size: 0.9rem; color: var(--slate-600); line-height: 1.6; margin: 0; }
+
+  /* ---------- FAQ ---------- */
+  .faq { max-width: 44rem; margin: 0 auto; }
+  details.faq-item { border-bottom: 1px solid var(--sky-70); padding: 1.5rem 0; }
+  details.faq-item summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 1rem; font-size: 1.0625rem; font-weight: 600; color: var(--slate-900); }
+  details.faq-item summary::-webkit-details-marker { display: none; }
+  details.faq-item summary .chevron { flex-shrink: 0; transition: transform var(--dur) var(--ease-out); color: var(--sky-600); }
+  details.faq-item[open] summary .chevron { transform: rotate(180deg); }
+  details.faq-item p { margin: 1rem 0 0; color: var(--slate-600); line-height: 1.7; }
+
+  /* ---------- final CTA ---------- */
+  section.final-cta { padding: 6rem 1.5rem; text-align: center; background: linear-gradient(to bottom, #ffffff, var(--sky-50)); }
+  @media (min-width: 640px) { section.final-cta { padding: 8rem 1.5rem; } }
+  section.final-cta .actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 2rem; }
+  .btn-dark { display: inline-flex; align-items: center; gap: 0.5rem; background: var(--slate-900); color: #fff; font-weight: 600; border-radius: 9999px; padding: 1.1rem 2.25rem; font-size: 1.05rem; }
+
+  /* ---------- footer ---------- */
+  footer.site { background: #fff; border-top: 1px solid var(--sky-70); padding: 3rem 1.5rem; text-align: center; color: var(--slate-500); font-size: 0.875rem; }
+
+  /* ---------- 404 (documented in the .md; shown here as an inline reference panel, not a route) ---------- */
+  .notfound-panel { margin: 4rem auto; max-width: 32rem; text-align: center; border: 1px dashed var(--sky-200); border-radius: 1rem; padding: 3rem 2rem; }
+  .notfound-panel .icon-tile { width: 4rem; height: 4rem; border-radius: 1rem; background: var(--sky-70); color: var(--sky-600); display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; font-size: 1.5rem; }
+  .notfound-panel h2 { font-family: var(--font-display); font-size: 1.75rem; font-weight: 700; color: var(--slate-900); margin: 0 0 0.75rem; }
+  .notfound-panel p { color: var(--slate-600); margin: 0 0 1.5rem; }
+  .notfound-panel .links { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; font-size: 0.875rem; margin-bottom: 1.75rem; }
+  .notfound-panel .links a { color: var(--sky-700); }
+  .notfound-panel .links a:hover { text-decoration: underline; }
+
+  section.meta-note { padding: 2rem 1.5rem; text-align: center; font-size: 0.8125rem; color: var(--slate-500); background: var(--slate-50); }
+</style>
+</head>
+<body>
+
+<div class="reference-banner">
+  REFERENCE MOCKUP — docs/designs/s17-cluster-engine.html — not production code. See the paired .md for full spec and states.
+</div>
+
+<!--
+  JSON-LD attach points (not rendered — see docs/designs/s17-cluster-engine.md):
+  - SoftwareApplication: describes RecopyFast once, page-level.
+  - BreadcrumbList: mirrors the breadcrumb nav rendered directly below the header.
+  - FAQPage: mirrors the <details> Q&A pairs in the FAQ section, generated from the
+    same typed data that renders them — not maintained twice.
+-->
+
+<header class="site">
+  <div class="bar">
+    <a href="#" class="logo"><span class="mark">&lt;&gt;</span> ReCopyFast</a>
+    <nav>
+      <a href="#">Features</a>
+      <a href="#">Pricing</a>
+      <a href="#">Demo</a>
+      <a href="#">Blog</a>
+    </nav>
+    <div class="cta">
+      <a href="#" class="btn-secondary" style="padding:0;">Sign in</a>
+      <a href="#" class="btn-primary">Get started</a>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href="#">Home</a><span class="sep">/</span><a href="#">Alternatives</a><span class="sep">/</span><span class="current">TinaCMS</span>
+  </nav>
+</div>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="container-narrow">
+    <span class="eyebrow">TinaCMS alternative</span>
+    <h1 class="page-title">The honest RecopyFast vs TinaCMS comparison</h1>
+    <p class="section-intro">
+      TinaCMS is a strong git-backed editor for teams who already ship through a repo.
+      RecopyFast is for the site that already exists and just needs its words to be
+      editable — no rebuild, no schema, no migration. Here's where each one actually wins.
+    </p>
+    <div class="actions">
+      <a href="#" class="btn-primary">Start free trial →</a>
+      <a href="#compare" class="btn-secondary">See the comparison ↓</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ COMPARISON TABLE ============ -->
+<section class="band glass" id="compare">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Compare</span>
+      <h2 class="section-title">RecopyFast vs TinaCMS,<br />feature by feature</h2>
+      <p class="section-intro">No spin. Where TinaCMS is genuinely stronger, this table says so.</p>
+    </div>
+
+    <div class="table-wrap">
+      <table class="compare">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th class="us-col">RecopyFast</th>
+            <th>TinaCMS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Setup</td>
+            <td class="us-col">One script tag on your existing site</td>
+            <td>Wrap your app in Tina's components, adopt a git-backed content model</td>
+          </tr>
+          <tr>
+            <td>Where content lives</td>
+            <td class="us-col">The page you already have</td>
+            <td>Markdown/MDX files in your git repo</td>
+          </tr>
+          <tr>
+            <td>Non-technical editing</td>
+            <td class="us-col"><span class="yes">✓</span> Click text on the live page</td>
+            <td><span class="yes">✓</span> Visual editing, once configured</td>
+          </tr>
+          <tr>
+            <td>Client edits without an account</td>
+            <td class="us-col"><span class="yes">✓</span> Email link, no login</td>
+            <td><span class="no">✗</span> Requires an account</td>
+          </tr>
+          <tr>
+            <td>Git-native version history &amp; branch review</td>
+            <td class="us-col"><span class="no">✗</span> App-level rollback, not git</td>
+            <td><span class="yes">✓</span> Full git history, PR review</td>
+          </tr>
+          <tr>
+            <td>Works on an existing WordPress / static site</td>
+            <td class="us-col"><span class="yes">✓</span> Any stack, no rebuild</td>
+            <td><span class="no">✗</span> Requires a supported framework</td>
+          </tr>
+          <tr>
+            <td>Starting price</td>
+            <td class="us-col">Live from /api/pricing</td>
+            <td>~$49/mo, per-seat above that</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHERE THEY WIN / WHERE WE WIN ============ -->
+<section class="band solid">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">The honest part</span>
+      <h2 class="section-title">Where each one actually wins</h2>
+      <p class="section-intro">Equal weight, on purpose — a comparison that only lists our advantages isn't a comparison.</p>
+    </div>
+
+    <div class="win-grid">
+      <div class="win-card theirs">
+        <span class="eyebrow">Where TinaCMS wins</span>
+        <h3>Be honest about this</h3>
+
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Git-native version control</p>
+            <p class="detail">Every content change is a real git commit — full history, branch review, diffs in your normal PR workflow.</p>
+          </div>
+        </div>
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Structured content schemas</p>
+            <p class="detail">Define a typed content model once; every field is validated at edit time, not just on save.</p>
+          </div>
+        </div>
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Open-source, self-hostable</p>
+            <p class="detail">Run it yourself at zero license cost if you have the engineering time to own the infrastructure.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="win-card ours">
+        <span class="eyebrow">Where RecopyFast wins</span>
+        <h3>Be honest about this too</h3>
+
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Zero migration</p>
+            <p class="detail">Works on the site you already have — WordPress, a static export, hand-rolled HTML. No rebuild, no repo access.</p>
+          </div>
+        </div>
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Clients edit without an account</p>
+            <p class="detail">An email link lands them in edit mode on their own page. No signup, no password, no training.</p>
+          </div>
+        </div>
+        <div class="win-item">
+          <span class="icon-tile">✓</span>
+          <div>
+            <p class="claim">Minutes to first edit, not an afternoon</p>
+            <p class="detail">No schema to design, no build step to configure — paste the tag and the page is already editable.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MIGRATION NOTE ============ -->
+<section class="band glass">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">Switching</span>
+      <h2 class="section-title">Moving from TinaCMS takes minutes</h2>
+      <p class="section-intro">Not a migration project — your site is already live, so there's nothing to rebuild.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="num-row"><span class="num">01</span><span class="icon-tile">→</span></div>
+        <h3>Keep your git workflow if you want it</h3>
+        <p>RecopyFast doesn't replace your repo — it edits the rendered page. Nothing about your git history changes.</p>
+      </div>
+      <div class="step">
+        <div class="num-row"><span class="num">02</span><span class="icon-tile">→</span></div>
+        <h3>Paste one script tag</h3>
+        <p>Register your site, get a tag with your site ID and token filled in, paste it before the closing body tag.</p>
+      </div>
+      <div class="step">
+        <div class="num-row"><span class="num">03</span><span class="icon-tile">→</span></div>
+        <h3>You're already live</h3>
+        <p>There's no build to trigger. The install verifies itself and content is editable on the next load.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="band solid">
+  <div class="container">
+    <div class="section-head">
+      <span class="eyebrow">FAQ</span>
+      <h2 class="section-title">Common questions</h2>
+    </div>
+
+    <div class="faq">
+      <details class="faq-item" open>
+        <summary>Is RecopyFast a real alternative to TinaCMS?<span class="chevron">⌄</span></summary>
+        <p>For teams whose priority is a git-backed content model and structured schemas, TinaCMS is the better fit — that's stated plainly above. RecopyFast is the better fit when the site already exists and the only thing that needs to change is who can edit the words.</p>
+      </details>
+      <details class="faq-item">
+        <summary>Can I keep my git-based content workflow?<span class="chevron">⌄</span></summary>
+        <p>Yes — RecopyFast doesn't touch your repository. It edits the rendered page directly, so your git history, branches and PR review process are unaffected.</p>
+      </details>
+      <details class="faq-item">
+        <summary>What does TinaCMS do better?<span class="chevron">⌄</span></summary>
+        <p>Git-native version control, structured content schemas, and self-hosting at zero license cost — see "Where TinaCMS wins" above.</p>
+      </details>
+      <details class="faq-item">
+        <summary>Do my clients need a GitHub account?<span class="chevron">⌄</span></summary>
+        <p>No. RecopyFast's editing grants are email-based and don't require any account at all — not GitHub, not RecopyFast's own.</p>
+      </details>
+      <details class="faq-item">
+        <summary>How long does switching take?<span class="chevron">⌄</span></summary>
+        <p>Typically under five minutes for the install itself — see the migration note above. There's no data export/import step because your site's content never left the site.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="final-cta">
+  <div class="container-narrow">
+    <h2 class="section-title">Ready to see it on your own site?</h2>
+    <p class="section-intro" style="margin: 0 auto;">No migration, no schema to design — paste one tag and start editing.</p>
+    <div class="actions">
+      <a href="#" class="btn-dark">Get started →</a>
+      <a href="#" class="btn-secondary">See it in action →</a>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  ReCopyFast — comparison pages reference mockup
+</footer>
+
+<!-- ============================================================
+     404 STATE REFERENCE — src/app/alternatives/not-found.tsx
+     Shown here inline as a labelled panel, not a route, since this
+     mockup covers one page. Same shell (Header/Footer, sky-50→white
+     canvas) as the page above — NOT the app's token-driven
+     not-found.tsx. See docs/designs/s17-cluster-engine.md → States.
+     ============================================================ -->
+<section class="meta-note">↓ 404 state reference: /alternatives/&lt;unknown-slug&gt; ↓</section>
+<div class="notfound-panel">
+  <div class="icon-tile">◎</div>
+  <h2>Comparison not found</h2>
+  <p>We don't have a comparison for that yet — here's what we do have:</p>
+  <div class="links">
+    <a href="#">TinaCMS</a>
+    <a href="#">CloudCannon</a>
+    <a href="#">Contentful</a>
+    <a href="#">Storyblok</a>
+    <a href="#">Decap CMS</a>
+  </div>
+  <div class="actions" style="justify-content:center;">
+    <a href="#" class="btn-primary">Get started</a>
+    <a href="#" class="btn-secondary">Back to home</a>
+  </div>
+</div>
+
+</body>
+</html>

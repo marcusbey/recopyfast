@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Design reference — s04-retire-graveyard-surfaces</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* =========================================================================
+     REFERENCE MOCKUP — NOT PRODUCTION CODE.
+     Dashboard sections below use var() against tokens copied verbatim (light
+     values only, for legibility) from docs/design-system.md / src/app/globals.css.
+     The embed widget section (marked .rcf-*) intentionally does NOT use var() —
+     the real widget has zero CSS custom properties and cannot rely on app
+     tokens (see docs/design-system.md, "Embed widget — off-system"). Its
+     colours are literal hex values, each commented with the token it was
+     derived from. See docs/designs/s04-retire-graveyard-surfaces.md,
+     "Design system gaps" #2, for the full derivation list.
+     ========================================================================= */
+
+  :root {
+    /* --- copied from docs/design-system.md "Tokens" table, light values --- */
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur: 220ms;
+
+    /* tone-info triplet, light values, from src/app/globals.css */
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    /* tone-neutral triplet, light values */
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    padding: 2.5rem 1.5rem 6rem;
+  }
+  .doc-header {
+    max-width: 72rem;
+    margin: 0 auto 3rem;
+  }
+  .doc-header h1 {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0 0 0.5rem;
+  }
+  .doc-header p {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    max-width: 46rem;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .section {
+    max-width: 72rem;
+    margin: 0 auto 4rem;
+  }
+  .section-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 0 0 0.5rem;
+  }
+  .section-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0 0 1.5rem;
+  }
+  .row {
+    display: flex;
+    gap: 1.5rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .col {
+    flex: 1 1 320px;
+    min-width: 280px;
+  }
+  .col-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    margin-bottom: 0.75rem;
+  }
+  .col-label.before { color: var(--text-muted); }
+  .col-label.after { color: var(--accent-solid); }
+
+  /* ---- Card primitive (default variant) ---- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  /* ---- Dashboard nav mock ---- */
+  .nav-shell {
+    padding: 1rem 0.75rem;
+    width: 240px;
+  }
+  .nav-group {
+    margin-bottom: 1.25rem;
+  }
+  .nav-group-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    padding: 0 0.75rem;
+    margin-bottom: 0.375rem;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    color: var(--text-strong);
+    margin-bottom: 2px;
+  }
+  .nav-item.active {
+    background: var(--tone-accent-surface, hsl(176 40% 93%));
+    color: var(--accent-solid);
+    font-weight: 500;
+  }
+  .nav-item .dot {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 4px;
+    background: var(--surface-3);
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .nav-item-left { display: flex; align-items: center; gap: 0.625rem; }
+  .nav-item.removed {
+    opacity: 0.4;
+    text-decoration: line-through;
+    text-decoration-color: var(--danger-solid);
+    text-decoration-thickness: 1.5px;
+  }
+  .badge-pro {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--tone-accent-surface, hsl(176 40% 93%));
+    color: var(--accent-solid);
+  }
+  .strike-note {
+    font-size: 0.75rem;
+    color: var(--danger-solid);
+    margin-top: 0.5rem;
+    padding: 0 0.75rem;
+  }
+
+  /* ---- Alert (info variant) ---- */
+  .alert {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--tone-info-line);
+    background: var(--tone-info-surface);
+    color: var(--tone-info-text);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+  }
+  .alert .alert-icon {
+    flex-shrink: 0;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 999px;
+    background: var(--tone-info-text);
+    color: var(--tone-info-surface);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .alert .alert-body { flex: 1; }
+  .alert .alert-body a { color: inherit; font-weight: 600; text-decoration: underline; }
+  .alert .alert-dismiss {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    opacity: 0.6;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.125rem;
+  }
+
+  /* ---- Sites list mock ---- */
+  .page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  .page-title {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0;
+  }
+  .btn-primary {
+    background: var(--accent-solid);
+    color: var(--accent-on-solid);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.5rem 0.875rem;
+  }
+  .site-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.875rem;
+  }
+  .site-row:last-child { border-bottom: none; }
+  .site-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+    flex-shrink: 0;
+  }
+  .site-meta { flex: 1; }
+  .site-name { font-weight: 500; }
+  .site-domain { color: var(--text-muted); font-size: 0.8125rem; }
+  .status-pill {
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--tone-neutral-surface);
+    color: var(--tone-neutral-text);
+    border: 1px solid var(--tone-neutral-line);
+  }
+
+  .skeleton-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .skeleton-row:last-child { border-bottom: none; }
+  .skel {
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+  }
+  .skel.icon { width: 2rem; height: 2rem; flex-shrink: 0; }
+  .skel.line { height: 0.75rem; border-radius: 4px; }
+
+  .empty-state {
+    padding: 3rem 1.5rem;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .empty-state .empty-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 0.75rem;
+    border-radius: var(--radius-md);
+    background: var(--surface-2);
+  }
+  .empty-state .empty-title { font-size: 0.875rem; color: var(--text-strong); font-weight: 500; margin-bottom: 0.25rem; }
+  .empty-state .empty-sub { font-size: 0.8125rem; }
+
+  .caption {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin-top: 0.75rem;
+  }
+
+  /* =========================================================================
+     WIDGET SECTION — literal hex, no var(). See .md for token derivation.
+     ========================================================================= */
+  .widget-frame {
+    background: #eef2f3; /* stand-in host page canvas, arbitrary */
+    border-radius: var(--radius-xl);
+    padding: 3rem 2rem;
+    position: relative;
+    min-height: 420px;
+  }
+  .rcf-eb-panel {
+    width: 360px;
+    background: #0f1315; /* derived from --canvas (dark) hsl(200 18% 7%) */
+    border: 1px solid #2c3336; /* derived from --line (dark) hsl(200 12% 21%) */
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #eef2f3; /* derived from --text-strong (dark) hsl(200 22% 96%) */
+    overflow: hidden;
+  }
+  .rcf-eb-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: #1c2226; /* derived from --surface-2 (dark) hsl(200 14% 14%) */
+    border-bottom: 1px solid #2c3336;
+    font-size: 0.8125rem;
+    font-weight: 600;
+  }
+  .rcf-eb-close {
+    background: transparent;
+    border: none;
+    color: #a4b1b7; /* derived from --text-muted (dark) hsl(200 12% 68%) */
+    font-size: 1.125rem;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .rcf-eb-tabs {
+    display: flex;
+    border-bottom: 1px solid #2c3336; /* derived from --line (dark) */
+    background: #1c2226; /* derived from --surface-2 (dark) */
+  }
+  .rcf-eb-tab {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 0.625rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #a4b1b7; /* derived from --text-muted (dark) */
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .rcf-eb-tab.active {
+    color: #4fb8ac; /* derived from --accent-solid (dark) hsl(174 48% 58%) — replaces old #3b82f6 */
+    border-bottom: 2px solid #4fb8ac;
+  }
+  .rcf-eb-body {
+    padding: 1rem;
+    min-height: 200px;
+    font-size: 0.8125rem;
+  }
+  .rcf-element-row {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px solid #2c3336;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    background: #151b1d;
+  }
+  .rcf-element-row .rcf-swatch {
+    width: 0.5rem; height: 0.5rem; border-radius: 999px; background: #4fb8ac; flex-shrink: 0;
+  }
+  .rcf-element-row .rcf-el-text { flex: 1; color: #eef2f3; }
+  .rcf-element-row .rcf-el-tag { color: #a4b1b7; font-size: 0.6875rem; font-family: ui-monospace, monospace; }
+  .rcf-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: #a4b1b7;
+  }
+  .rcf-skel-row {
+    height: 2rem;
+    border-radius: 8px;
+    background: #1c2226;
+    margin-bottom: 0.5rem;
+  }
+  .rcf-error {
+    padding: 0.625rem;
+    border-radius: 8px;
+    border: 1px solid #5a2b2b;
+    background: #2a1616;
+    color: #e2726f; /* derived from --danger-solid (dark) hsl(358 62% 62%) */
+    font-size: 0.75rem;
+  }
+  .rcf-removed-note {
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.625rem;
+    border: 1px dashed #4a3030;
+    border-radius: 8px;
+    color: #d9938f;
+    font-size: 0.6875rem;
+    line-height: 1.5;
+  }
+  .toolbar-callout {
+    position: absolute;
+    right: 2rem;
+    top: 2.5rem;
+    width: 220px;
+  }
+  .toolbar-mock {
+    display: flex;
+    gap: 0.375rem;
+    background: #0f1315;
+    border: 1px solid #2c3336;
+    border-radius: 10px;
+    padding: 0.5rem;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  }
+  .toolbar-chip {
+    flex: 1;
+    height: 1.75rem;
+    border-radius: 6px;
+    background: #1c2226;
+  }
+  .toolbar-label {
+    margin-top: 0.5rem;
+    font-size: 0.6875rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.625rem;
+  }
+  .toolbar-label strong { color: var(--text-strong); }
+</style>
+</head>
+<body>
+
+  <div class="doc-header">
+    <h1>Design reference — s04-retire-graveyard-surfaces</h1>
+    <p>
+      Low-fidelity reference only. Do not copy into production — Execute builds the
+      dashboard part with real <code>src/components/ui/*</code> components, and edits
+      <code>recopyfast.src.js</code> directly for the widget part. This page shows
+      three things: the dashboard nav before/after, the <code>/dashboard/teams</code>
+      redirect landing, and the embed widget's 3-tab Edit Board with the floating
+      toolbar scope guard.
+    </p>
+  </div>
+
+  <!-- ============================= SECTION 1 ============================= -->
+  <div class="section">
+    <div class="section-eyebrow">Dashboard navigation</div>
+    <div class="section-title">Before → after</div>
+    <div class="row">
+      <div class="col">
+        <div class="col-label before">Before</div>
+        <div class="card">
+          <div class="nav-shell">
+            <div class="nav-group">
+              <div class="nav-group-label">Workspace</div>
+              <div class="nav-item active"><span class="nav-item-left"><span class="dot"></span>Overview</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Sites</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Content</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Analytics</span></div>
+            </div>
+            <div class="nav-group">
+              <div class="nav-group-label">Account</div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Teams</span><span class="badge-pro">Pro</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Settings</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Billing</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <div class="col-label after">After</div>
+        <div class="card">
+          <div class="nav-shell">
+            <div class="nav-group">
+              <div class="nav-group-label">Workspace</div>
+              <div class="nav-item active"><span class="nav-item-left"><span class="dot"></span>Overview</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Sites</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Content</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Analytics</span></div>
+            </div>
+            <div class="nav-group">
+              <div class="nav-group-label">Account</div>
+              <div class="nav-item removed"><span class="nav-item-left"><span class="dot"></span>Teams</span><span class="badge-pro">Pro</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Settings</span></div>
+              <div class="nav-item"><span class="nav-item-left"><span class="dot"></span>Billing</span></div>
+            </div>
+          </div>
+          <div class="strike-note">Teams entry removed — nothing repositioned to fill the gap.</div>
+          <div style="height: 1rem"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================= SECTION 2 ============================= -->
+  <div class="section">
+    <div class="section-eyebrow">/dashboard/teams redirect landing</div>
+    <div class="section-title">Where a stale Teams bookmark actually lands</div>
+    <div class="row">
+      <div class="col" style="flex: 1 1 480px;">
+        <div class="col-label after">Success — sites load normally</div>
+        <div class="card" style="padding: 1.25rem 1.25rem 0.5rem;">
+          <div class="alert">
+            <span class="alert-icon">i</span>
+            <span class="alert-body">
+              Team management has moved. Invite people to edit a site from that
+              site's <a href="#">Share panel</a>.
+            </span>
+            <button class="alert-dismiss" aria-label="Dismiss">×</button>
+          </div>
+          <div class="page-header">
+            <h2 class="page-title">Sites</h2>
+            <button class="btn-primary">Add site</button>
+          </div>
+          <div class="card" style="margin-bottom: 1.25rem;">
+            <div class="site-row">
+              <span class="site-icon"></span>
+              <span class="site-meta">
+                <div class="site-name">marketing-site.com</div>
+                <div class="site-domain">Live · 42 elements</div>
+              </span>
+              <span class="status-pill">Live</span>
+            </div>
+            <div class="site-row">
+              <span class="site-icon"></span>
+              <span class="site-meta">
+                <div class="site-name">docs.acme.io</div>
+                <div class="site-domain">Awaiting install</div>
+              </span>
+              <span class="status-pill">Pending</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col" style="flex: 1 1 320px;">
+        <div class="col-label before">Empty — zero sites, notice still shows</div>
+        <div class="card" style="padding: 1.25rem 1.25rem 0.5rem;">
+          <div class="alert">
+            <span class="alert-icon">i</span>
+            <span class="alert-body">
+              Team management has moved. Invite people to edit a site from that
+              site's <a href="#">Share panel</a>.
+            </span>
+            <button class="alert-dismiss" aria-label="Dismiss">×</button>
+          </div>
+          <div class="page-header">
+            <h2 class="page-title">Sites</h2>
+            <button class="btn-primary">Add site</button>
+          </div>
+          <div class="card" style="margin-bottom: 1.25rem;">
+            <div class="empty-state">
+              <div class="empty-icon"></div>
+              <div class="empty-title">No sites yet</div>
+              <div class="empty-sub">Add your first site to get started.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      Loading sub-state (not pictured): the Sites list's own <code>Skeleton</code> rows
+      render while the fetch is in flight — the notice above needs no fetch, so it
+      appears immediately. Error sub-state (not pictured): the list's existing
+      <code>Alert variant="destructive"</code> replaces the site rows; the notice still
+      renders, since it concerns navigation, not data.
+    </div>
+  </div>
+
+  <!-- ============================= SECTION 3 ============================= -->
+  <div class="section">
+    <div class="section-eyebrow">Embed widget — Edit Board</div>
+    <div class="section-title">Five tabs → three (Elements, Languages, History)</div>
+    <div class="row">
+      <div class="col" style="flex: 1 1 400px;">
+        <div class="col-label after">Elements tab — active, with items</div>
+        <div class="widget-frame">
+          <div class="rcf-eb-panel">
+            <div class="rcf-eb-header">
+              <span>📋 Edit Board</span>
+              <button class="rcf-eb-close">×</button>
+            </div>
+            <div class="rcf-eb-tabs">
+              <button class="rcf-eb-tab active">Elements</button>
+              <button class="rcf-eb-tab">Languages</button>
+              <button class="rcf-eb-tab">History</button>
+            </div>
+            <div class="rcf-eb-body">
+              <div class="rcf-element-row">
+                <span class="rcf-swatch"></span>
+                <span class="rcf-el-text">Hero headline</span>
+                <span class="rcf-el-tag">h1</span>
+              </div>
+              <div class="rcf-element-row">
+                <span class="rcf-swatch"></span>
+                <span class="rcf-el-text">CTA button label</span>
+                <span class="rcf-el-tag">button</span>
+              </div>
+              <div class="rcf-element-row">
+                <span class="rcf-swatch"></span>
+                <span class="rcf-el-text">Footer copyright</span>
+                <span class="rcf-el-tag">span</span>
+              </div>
+              <div class="rcf-removed-note">
+                "🎨 Apply Style" quick-action removed — its only destination
+                (Styles tab) no longer exists. Selecting elements no longer offers
+                a way to reach it.
+              </div>
+            </div>
+          </div>
+          <div class="toolbar-callout">
+            <div class="toolbar-mock">
+              <span class="toolbar-chip"></span>
+              <span class="toolbar-chip"></span>
+              <span class="toolbar-chip"></span>
+              <span class="toolbar-chip"></span>
+            </div>
+            <div class="toolbar-label">
+              <strong>Floating editor toolbar — UNCHANGED.</strong>
+              Per-element typography/colour (TypographyPanel, ColorPicker,
+              FontSizeSelector, TextAlignmentControls). Appears inline on the page
+              when an element is selected — separate from the Edit Board panel.
+              Not a tab, not touched by this story.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col" style="flex: 1 1 380px;">
+        <div class="col-label before">Languages tab — loading, then error</div>
+        <div class="widget-frame" style="padding: 3rem 2rem;">
+          <div class="rcf-eb-panel">
+            <div class="rcf-eb-header">
+              <span>📋 Edit Board</span>
+              <button class="rcf-eb-close">×</button>
+            </div>
+            <div class="rcf-eb-tabs">
+              <button class="rcf-eb-tab">Elements</button>
+              <button class="rcf-eb-tab active">Languages</button>
+              <button class="rcf-eb-tab">History</button>
+            </div>
+            <div class="rcf-eb-body">
+              <div class="rcf-skel-row"></div>
+              <div class="rcf-skel-row" style="width: 80%;"></div>
+              <div class="rcf-skel-row" style="width: 60%;"></div>
+              <div style="height: 0.75rem"></div>
+              <div class="rcf-error">Couldn't load languages. Try again.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="height: 1.5rem"></div>
+
+        <div class="col-label before">History tab — empty</div>
+        <div class="widget-frame" style="padding: 3rem 2rem;">
+          <div class="rcf-eb-panel">
+            <div class="rcf-eb-header">
+              <span>📋 Edit Board</span>
+              <button class="rcf-eb-close">×</button>
+            </div>
+            <div class="rcf-eb-tabs">
+              <button class="rcf-eb-tab">Elements</button>
+              <button class="rcf-eb-tab">Languages</button>
+              <button class="rcf-eb-tab active">History</button>
+            </div>
+            <div class="rcf-eb-body">
+              <div class="rcf-empty">No edits yet. Changes you make will show up here.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="caption">
+      Tab bar active/focus colour: literal <code>#4fb8ac</code>, derived from
+      <code>--accent-solid</code> (dark) <code>hsl(174 48% 58%)</code> — replaces the
+      current off-brand <code>#3b82f6</code>. Every other widget colour outside the
+      tab bar is left as-is; full token conversion is <code>s06</code>'s scope, per
+      <code>docs/design-system.md</code>.
+    </div>
+  </div>
+
+</body>
+</html>

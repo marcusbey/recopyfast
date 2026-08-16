@@ -1,0 +1,344 @@
+---
+validated: no
+---
+# Plan — Story s20-agency-branded-subdomain
+
+Branch: `feature/s20-agency-branded-subdomain`
+Research: `docs/research/s13-agency-plan.md` — read it first; this plan does not repeat it.
+(`s20` was split out of `s13` at research per M4 and inherits its parent's report; see
+`## Split proposal` and `## M4` there.)
+
+## Target story
+
+**`s20-agency-branded-subdomain` — serve a client's site from the agency's own name.**
+Takes **AC 8 of `s13` alone**: *"An agency can serve its sites from a branded subdomain, and
+content delivered through it is identical to content delivered through the default origin."*
+
+Complexity **4**. **Depends on `s13-agency-plan`** — there is no plan to attach a subdomain to
+until `s13` lands. Graph edge `s13 ──> s20`, parallel to `s13 ──> s14`.
+
+**Closes on its own as:** an agency on the Agency plan claims a subdomain; new snippets issued
+for that agency's sites point at it; a client page loading the widget from the branded origin
+renders and saves content byte-identical to the same page loaded from the default origin; and
+the default origin keeps working for every snippet already issued.
+
+> ## ⛔ BLOCKING #1 — wildcard host + wildcard TLS is an operator/Vercel decision, not code
+>
+> Research flags it unsettled, and `/ks-plan` validation cannot be granted until it is settled.
+> **Nothing in this plan provisions DNS or certificates.** What is needed before validation:
+> - Is `*.recopyfa.st` served by the same Vercel project, on a wildcard domain with a wildcard
+>   certificate? Or is each claimed subdomain added as an individual domain with its own
+>   certificate issuance?
+> - Whichever it is, **the branded host must be canonical from the first byte and must never be
+>   a redirect target.** `canonicalizePublicAppUrl` (`embed-script.ts:26-38`) exists precisely
+>   because *"The apex host 308s to www. Browser CORS preflights cannot follow that redirect, so
+>   a snippet that points at recopyfa.st makes the widget look dead on every customer site
+>   (B-11)."* A branded host behind a redirect reproduces B-11 on every client site of every
+>   agency.
+> - What the provisioning latency is, and whether it is observable programmatically — T2's
+>   pending-propagation state and its two-step checklist (DNS, then certificate) depend on it.
+>   The design's copy ("usually 5–30 minutes") holds either way; the plan's T2 does not.
+>
+> The **screen** does not depend on which way this is settled (`docs/designs/s20-…md` § Screens,
+> infrastructure note). The **plan** does: under wildcard, claiming is a database write and the
+> host already resolves; under per-subdomain issuance, claiming must call a provisioning API and
+> poll it, which is a task this plan does not currently contain.
+
+> ## ⛔ BLOCKING #2 — inherited from `s13`: PRD open decision 7
+>
+> `prd.md:444-446`. `s20` attaches a serving origin to *whatever the Agency plan turns out to
+> be*. Under answer B (client-paid upgrades), the question *"whose branded origin serves this
+> site"* stops having a single answer, because the payer and the site owner diverge. See
+> `docs/plans/s13-agency-plan.md` § Target story for what changes. Both blockers must clear.
+
+> ## ⚠ Design-system question to settle at validation (design gaps #1 and #2)
+> - **No inline progress/spinner primitive.** `Skeleton` covers content placeholders, not an
+>   in-flight *action* ("checking availability", the two in-progress checklist rows). The design
+>   composes a CSS pulse from existing `--dur`/`--ease-out` tokens rather than invent one. This
+>   is the **second story in a row** to want a spinner (`s02` was the first). Confirm the
+>   composition is acceptable, or add the primitive as its own change — not inside this story.
+> - **No documented "type-to-confirm" pattern.** This design introduces one for the claim
+>   `Dialog`, composed entirely from `Input`/`Label`/`Button`. Check whether site deletion
+>   (hardened in `728b646`) already uses a comparable gate, so this does not become the first of
+>   two inconsistent patterns for "are you sure, really."
+
+## Tasks (ordered)
+
+- [ ] **T1 — Migration: `agency_branded_origins`, with its RLS policy in the same file.**
+  Columns: `id`, `user_id` (the claiming agency, FK to `auth.users`), `subdomain` (lowercased,
+  **globally `UNIQUE`**), `status` (`'pending' | 'active'`, CHECK-constrained), `claimed_at`,
+  `verified_at`. RLS in the same migration — non-negotiable 6, ADR 002; twelve migrations exist
+  only to repair a missing policy after the fact. Policies: the owner may `SELECT` their own row;
+  writes are `service_role` only.
+  **The header comment must record the two facts that make this table unlike any other
+  tenant-scoped table in the schema:** (a) there is **no delete path and no `ON DELETE CASCADE`
+  from the user** — the claim outlives the account, because the snippet is on a third party's
+  page; (b) `status` never returns to `pending` and never becomes `revoked`, because there is no
+  un-claim. A reviewer who reads the absence of a delete policy as an omission will "fix" it.
+  *Fails a test when:* two accounts can claim the same subdomain; a second account can `SELECT`
+  another's row; the CHECK accepts a status outside the two; a subdomain is stored with mixed case.
+
+- [ ] **T2 — Claim + availability API, and the reserved list.**
+  `src/app/api/agency/branded-origin/route.ts` — `GET` (current claim status), `POST` (claim).
+  `GET /api/agency/branded-origin/availability?subdomain=…` for the live check.
+  - Validation through `src/lib/api/validation.ts` only — **never zod** (ADR 003). Extend it if a
+    hostname-label validator is needed; that is where it belongs.
+  - **Rate limit before authorization** (AGENTS.md § API routes): auth itself costs a lookup, so
+    a limiter behind it never sees the flood. `onStoreFailure` chosen explicitly and justified in
+    a comment — this is an authenticated write, so **fail closed**.
+  - Agency-plan entitlement required; any other plan is refused.
+  - Reserved labels refused: `www`, `api`, `app`, `admin`, `dashboard`, `mail`, `embed`, `static`,
+    `cdn`, `status`, plus the apex/www hosts themselves. Constant in code, `UPPER_SNAKE_CASE`.
+  - An account that already holds a claim is refused a second one — **there is no change action**,
+    by the permanence rule.
+  - Errors are `NextResponse.json({ error }, { status })`; `OPTIONS` returns
+    `new NextResponse(null, { status: 204 })` — `NextResponse.json({}, {status:204})` **throws**
+    and has broken preflight on this codebase twice.
+  *Fails a test when:* a non-Agency plan is allowed to claim; a reserved label is accepted; a
+  duplicate claim succeeds; a second claim by the same account succeeds; malformed input is not
+  rejected by `validation.ts` with control characters redacted; the limiter sits behind auth.
+
+- [ ] **T3 — One resolver for the serving origin. Every other task calls it and nothing else.**
+  New `src/lib/sites/serving-origin.ts`, exporting a single function that maps a site (or its
+  owner) to the origin its snippet and its CORS grant must use: the branded origin when a claim
+  is `active`, `getPublicAppUrl()` otherwise. It must go through the same canonicalisation
+  contract as `canonicalizePublicAppUrl` — a branded host is returned only in the form that
+  serves directly, never a form that 308s.
+  This is the whole architectural move: **the serving origin stops being a process-wide constant
+  (`getPublicAppUrl()`, `embed-script.ts:42-45`) and becomes a tenant-scoped lookup.** One
+  function, so the five threading tasks below cannot each invent their own.
+  *Fails a test when:* an `active` claim does not yield the branded origin; a `pending` claim
+  yields anything but the default; no claim yields anything but the default; a failed lookup
+  yields a branded origin rather than falling back to the default (fail **safe**, toward the
+  origin that is already known to work).
+
+- [ ] **T4 — Thread the resolver through the three snippet call sites.**
+  `src/app/api/sites/route.ts:108`, `src/app/api/sites/register/route.ts:190`,
+  `src/components/dashboard/SiteDetailView.tsx:100`. All three currently default to the global
+  origin. `buildEmbedScript`'s `appUrl` parameter already exists — this is supplying it, not
+  changing its signature.
+  *Fails a test when:* any of the three still emits the default origin for a claimed agency; any
+  emits a branded origin for an account without an `active` claim; `buildEmbedScript` is called
+  from a fourth place the tests do not cover.
+
+- [ ] **T5 — Content route: grant CORS to the branded origin.**
+  `src/app/api/content/[siteId]/route.ts:172-188` falls back to `NEXT_PUBLIC_APP_URL`; a second
+  origin is invisible to it. Grant the resolved serving origin **in addition to** the default —
+  the default must keep working for every snippet already issued, which is half the acceptance
+  criterion. Absence of the header is how "no grant" is expressed; `*` is never a fallback and
+  never pairs with credentials (AGENTS.md § API routes).
+  *Fails a test when:* a request from the branded origin gets no grant; a request from the
+  default origin **stops** getting one (this is the regression that breaks existing installs); an
+  arbitrary origin gets one; the response ever carries `*` alongside credentials.
+
+- [ ] **T6 — CSP: admit the branded host without loosening anything else.**
+  `src/middleware.ts:196-256` derives `connect-src` from env and `default-src 'self'` is
+  per-serving-origin. Extend to cover claimed branded hosts (or the wildcard, per Blocking #1).
+  *Fails a test when:* the branded host is absent from `connect-src`; **any** directive gains
+  `*`, `unsafe-inline` or `unsafe-eval` that it did not have; the default origin's policy changes
+  in any way.
+
+- [ ] **T7 — Auth redirect resolver: honour a claimed branded host, and only a claimed one.**
+  `src/app/auth/public-origin.ts:69-110` — `NEXT_PUBLIC_APP_URL` outranks the request host today,
+  so a session set on a branded host would redirect to the canonical one and land the user
+  **signed out**. Make a *claimed, active* host authoritative for its own redirects.
+  **This is the security-sensitive half of the story.** The `Host` header is attacker-controlled;
+  the resolver must trust it only after matching it against an `active` row, and fall back to the
+  canonical origin for anything else. An unvalidated host here is an open redirect.
+  *Fails a test when:* a claimed host does not redirect back to itself; an unclaimed, spoofed or
+  malformed host is honoured; the canonical origin's behaviour changes for accounts with no claim.
+
+- [ ] **T8 — Stripe return URLs follow the origin checkout started from.**
+  `src/lib/stripe/checkout.ts:68-83` uses the same single-canonical-origin resolver. An agency
+  starting checkout on its branded host must return to it, not be dropped on the canonical host
+  mid-payment.
+  *Fails a test when:* the return URL does not match the origin the session started from, for
+  either branded or default; the branded URL is built from an unvalidated host (same rule as T7).
+
+- [ ] **T9 — The claim screen.**
+  `/dashboard/settings/branding`, Agency-plan gated, per `docs/designs/s20-agency-branded-subdomain.md`.
+  One `PageHeader` + one `Card` whose anatomy is fixed and whose body changes by state — the same
+  pattern `s02-install-verified` established, so claim → verifying → active reads as *the same
+  thing changing*. Composed from `PageHeader`, `Card`, `IconTile`, `StatusBadge`, `Alert`
+  (`warning` / `info` / `success` / `destructive`), `Dialog`, `Input`, `Label`, `Button`,
+  `Skeleton`. **No new primitive.** `--font-mono` for the hostname everywhere it appears as a
+  value — it is a machine string, not prose.
+  States: loading (`Skeleton`, not a spinner) · empty · available · taken/reserved (both
+  `tone-danger`, different copy — colour signals state, not category) · error · pending-propagation
+  (two-step checklist, `Alert variant="info"` saying explicitly that refreshing won't speed it up)
+  · claimed (both snippets side by side, not tabbed — the point is to see the diff — with
+  `Alert variant="success"` at full weight stating that existing snippets keep serving from the
+  default origin untouched).
+  The confirmation `Dialog` carries the irreversibility `Alert variant="warning"` and a
+  type-to-confirm `Input`; the confirm `Button` is `variant="default"`, **not** `destructive` —
+  claiming is not a deletion and colouring it as one misstates what is happening.
+  *Fails a test when:* any state renders the wrong tone or the wrong component; the confirm button
+  enables before the typed value matches exactly; the claimed state implies migration of existing
+  snippets; a "change subdomain" affordance exists anywhere.
+
+- [ ] **T10 — The two tests the story exists for, plus the ADR.**
+  (a) **Byte-identity.** `GET /api/content/:siteId` through the branded origin and through the
+  default origin returns a byte-identical body — the handler is the same, the only permitted
+  difference is the `Access-Control-Allow-Origin` header. Assert on the raw body, not a parsed
+  object, or the test does not say what the criterion says.
+  (b) **Churn.** Cancelling, expiring or downgrading the Agency subscription **does not**
+  deactivate the branded origin. The snippet is on the client's page; the origin must keep
+  serving. Assert that an account whose subscription is `canceled` still resolves its `active`
+  claim and still receives the CORS grant.
+  (c) **New ADR** — `docs/decisions/018-tenant-scoped-serving-origin.md`, travelling on this
+  branch: what a tenant-scoped serving origin is, why it is permanent, why there is no un-claim,
+  and the options rejected (per-agency full custom domain; reversible/leaseable subdomains;
+  rewriting issued snippets). Immutable once written; a change means a superseding ADR.
+  *Fails a test when:* the two bodies differ by a byte; a canceled subscription revokes the
+  origin; the ADR is absent (this one is a review gate, not a jest assertion).
+
+## Run interdicts
+
+1. **`/embed/recopyfast.js` can never move or break.** AGENTS.md non-negotiable 2. Every branded
+   subdomain issued inherits that promise. **Never rewrite, migrate or invalidate a snippet
+   already issued.** The default origin keeps serving every existing install, forever, unchanged.
+2. **Never expose a way to change, release or re-point a claimed subdomain.** Not in the UI, not
+   in the API, not in an admin script. There is no un-claim. Support handles the exception, by
+   hand, knowing what it costs.
+3. **Never make a branded host a redirect target.** B-11: *"Browser CORS preflights cannot follow
+   that redirect, so a snippet that points at recopyfa.st makes the widget look dead on every
+   customer site."* Reproducing that on a branded host breaks every client site of every agency
+   at once, silently.
+4. **Never trust the `Host` header without matching it against an `active` claim** (T7, T8). An
+   unvalidated host in a redirect or a return URL is an open redirect. Fall back to the canonical
+   origin for anything unmatched.
+5. **Do not "fix" the `Origin` pin in `src/lib/security/site-auth.ts:151-158`, `:263-266`.** It
+   checks the **customer's** origin against `sites.domain` — the client's own domain — not our
+   serving origin. A branded subdomain does not break it. The widget's `Origin` is still the
+   client site. An implementer who "corrects" this is disabling a working control.
+6. **Never widen CORS to `*` on a credentialed route, and never treat `*` as a fallback.**
+   `src/lib/http/public-cors.ts` (`*`, token-authenticated, never cookies) vs per-route
+   `withCors(res, allowedOrigin)` (one echoed origin, with credentials). Absence of the header is
+   how "no grant" is expressed.
+7. **Never loosen the CSP beyond adding the host.** No new `unsafe-*`, no new `*`.
+8. **Do not provision DNS or certificates from application code.** That is the operator decision
+   in Blocking #1. If it lands as per-subdomain issuance, that provisioning call is a **new task
+   added to this plan**, not something improvised inside T2.
+9. **The widget degrades, never breaks** (non-negotiable 4). There is no error surface on the
+   customer's domain (`architecture.md:298-300`), so a branded origin that fails must fall back
+   to authored copy on the page — never throw into the host page's `window`.
+10. **No zod** (ADR 003) — `src/lib/api/validation.ts`. **Do not invent a UI primitive** — compose
+    from the seventeen in `src/components/ui/`. **Never edit an applied migration.** **Do not
+    lower the jest coverage thresholds.**
+11. **Do not touch `s13`'s billing surfaces.** This branch changes the serving origin and nothing
+    about plans, prices, quotas or Stripe amounts. If a change looks like it belongs in
+    `plans.ts` or `subscription.ts`, it belongs in `s13`.
+
+## The point everything turns on
+
+**A branded subdomain is a permanent public URL issued on someone else's behalf, and it outlives
+the relationship that created it.**
+
+AGENTS.md non-negotiable 2 makes `/embed/recopyfast.js` a URL that *"is already baked into every
+snippet ever issued. It can never move or break for existing installs."* A branded origin
+inherits that promise and then compounds it in three ways the billing half of `s13` never does:
+
+- **The snippet is not on the agency's page.** It is on their client's page — a domain this
+  product does not control, cannot audit and cannot fix. When the agency churns, the snippet
+  stays. `acme.recopyfa.st` must keep serving after Acme has stopped paying, or Acme's clients'
+  sites break and neither Acme nor we will hear about it first.
+- **There is no error surface.** The widget degrades silently by design
+  (`architecture.md:298-300`). A withdrawn certificate or a moved host does not produce an alert;
+  it produces *"editing stopped working on one site"*, reported weeks later, by someone else.
+- **A wrong plan row is one `UPDATE`. A wrong origin is not reversible at all.** That asymmetry
+  is the entire reason M4 cut this story out of `s13`, and it is why the design spends a whole
+  `Dialog`, a full-weight `Alert` and a type-to-confirm gate on a single text field.
+
+Everything else here — five surfaces to thread one resolver through — is plumbing that a compiler
+and a test suite will keep honest. This is the part that no test catches, because the failure
+arrives months later on infrastructure we do not own.
+
+## Files touched
+
+**New**
+- `supabase/migrations/<YYYYMMDDHHMMSS>_agency_branded_origins.sql` — table + RLS (T1)
+- `src/lib/sites/serving-origin.ts` — the single resolver (T3)
+- `src/lib/sites/__tests__/serving-origin.test.ts` (T3)
+- `src/app/api/agency/branded-origin/route.ts` (T2)
+- `src/app/api/agency/branded-origin/availability/route.ts` (T2)
+- `src/app/api/agency/branded-origin/__tests__/route.test.ts` (T2)
+- `src/app/dashboard/settings/branding/page.tsx` (T9)
+- `src/components/settings/BrandedSubdomainCard.tsx` + `__tests__/` (T9)
+- `docs/decisions/018-tenant-scoped-serving-origin.md` (T10)
+
+**Modified**
+- `src/app/api/sites/route.ts:108` — snippet origin (T4)
+- `src/app/api/sites/register/route.ts:190` — snippet origin (T4)
+- `src/components/dashboard/SiteDetailView.tsx:100` — snippet origin (T4)
+- `src/app/api/content/[siteId]/route.ts:172-188` — CORS grant (T5)
+- `src/middleware.ts:196-256` — CSP (T6)
+- `src/app/auth/public-origin.ts:69-110` — redirect resolver (T7)
+- `src/lib/stripe/checkout.ts:68-83` — return URLs (T8)
+- `src/lib/api/validation.ts` — hostname-label validator, if needed (T2)
+- `docs/operations/deployment-env.md`, `deployment-checklist.md` — the wildcard host/TLS step
+
+**Deliberately untouched**
+- `src/lib/security/site-auth.ts` — the `Origin` pin is against the *customer's* domain and is not
+  what changes here (interdict 5).
+- `src/lib/sites/embed-script.ts:26-45` — `canonicalizePublicAppUrl` and `getPublicAppUrl` keep
+  their current behaviour as the **default** origin. T3 wraps them; it does not replace them.
+- `public/embed/recopyfast.src.js` — the widget reads its origin from the snippet's data
+  attributes. Nothing about this story changes the widget, and therefore nothing about it touches
+  the ≤ 30,000-byte budget.
+- Everything in `src/lib/stripe/` except `checkout.ts:68-83` (interdict 11).
+
+## Test strategy
+
+**Unit (jest)**
+- The resolver, exhaustively: active / pending / absent / lookup-failure, with failure falling
+  back to the default origin.
+- Reserved-label and hostname-label validation, including control characters and mixed case.
+
+**Route**
+- Claim API: entitlement, reserved, duplicate, second-claim, malformed input, limiter-before-auth.
+- Content route CORS: branded granted, **default still granted** (the regression that matters),
+  unknown refused, never `*` with credentials.
+- Auth redirect and Stripe return URL: claimed host honoured, spoofed host refused.
+
+**Component**
+- Every state in the design's table, plus the `Dialog`'s type-to-confirm gate.
+
+**Cross-origin equivalence**
+- The byte-identity assertion (T10a) runs at the route level against the same handler with two
+  different `Origin`/`Host` inputs. That is what is honestly testable in CI.
+
+**What cannot be made green in CI, and must be an operator sign-off**
+Research is explicit that AC 8's *"content delivered through it is identical"* is a cross-origin
+assertion needing **a real second host with a real certificate**, and that nothing in jest or
+against `localhost:3000` can assert it. The route-level test above proves the *handler* is
+identical; it does not prove DNS, TLS and edge routing deliver it. The remaining half is a
+**manual verification step on the deployment checklist**: claim a subdomain in staging, load a
+real client page through it, diff the delivered payload against the default origin, and record
+the result. Do not claim AC 8 closed on the jest test alone.
+
+**Not modified:** existing tests. If one must change, change the behaviour instead, or change the
+test **and say so in the PR** (AGENTS.md § Tests).
+
+## Definition of Done
+
+- [ ] **Wildcard host + wildcard TLS decision recorded** (Blocking #1), and the plan amended with
+      a provisioning task if the answer is per-subdomain issuance. Frontmatter stays
+      `validated: no` until then.
+- [ ] **PRD open decision 7 answered as A** (Blocking #2, inherited from `s13`).
+- [ ] `s13-agency-plan` merged and deployed — there is no plan to attach a subdomain to otherwise.
+- [ ] AC 8 mapped to: the route-level byte-identity test **and** the recorded manual cross-origin
+      verification. Both, or the criterion is not closed.
+- [ ] The churn test passes: a canceled Agency subscription still serves its branded origin.
+- [ ] Every snippet already issued still resolves and still receives its CORS grant — asserted by
+      test, not by inspection.
+- [ ] `npm run lint`, `type-check`, `format:check`, `build`, `test` all green; CI green on
+      `audit:prod` and `type-check:build`.
+- [ ] Migration carries its RLS policy in the same file, and its header records why there is no
+      delete path.
+- [ ] `docs/decisions/018-tenant-scoped-serving-origin.md` written, with the rejected options.
+- [ ] No `*` CORS on a credentialed route; no new `unsafe-*` or `*` in the CSP; no unvalidated
+      `Host` reaching a redirect or a return URL — reviewer checks each explicitly.
+- [ ] Single PR, `git diff main...feature/s20-agency-branded-subdomain` readable, description
+      stating plainly that every subdomain issued by this feature is permanent.
+- [ ] `/ks-review` passed with no open critical (`docs/reviews/s20-agency-branded-subdomain.md`
+      ending `Ship allowed: yes`).

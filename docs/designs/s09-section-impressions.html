@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s09-section-impressions</title>
+<style>
+  /* ============================================================
+     Tokens copied from src/app/globals.css (light values only —
+     this is a low-fidelity static reference, not the app).
+     Every value here traces back to docs/design-system.md.
+     ============================================================ */
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: #ffffff;
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .reference-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    padding: 0.625rem 1.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .page {
+    max-width: 64rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 5rem;
+  }
+
+  .text-display {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0 0 0.375rem;
+  }
+
+  .page-intro {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: 0 0 2.5rem;
+    max-width: 44rem;
+  }
+
+  .section-divider {
+    margin: 3.5rem 0 1.5rem;
+    padding-top: 2.5rem;
+    border-top: 1px solid var(--line);
+  }
+  .section-divider:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+  .section-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--accent-solid);
+    margin: 0 0 0.375rem;
+  }
+  .section-title { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.012em; margin: 0 0 0.375rem; }
+  .section-note { font-size: 0.8125rem; color: var(--text-muted); margin: 0 0 1.75rem; max-width: 40rem; }
+
+  .state-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 0 0 0.5rem;
+  }
+
+  .stack { display: flex; flex-direction: column; gap: 1rem; }
+
+  /* ---- Metric (src/components/ui/metric.tsx) ---- */
+  .metric-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.25rem; margin-bottom: 0.875rem; }
+  @media (max-width: 640px) { .metric-row { grid-template-columns: 1fr; } }
+  .metric-tile {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;
+    border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-card);
+  }
+  .metric-tile.lead { padding: 1.5rem; }
+  .metric-tile:not(.lead) { padding: 1rem 1.25rem; }
+  .metric-label { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--text-muted); margin: 0; }
+  .metric-value { font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; color: var(--text-strong); margin: 0.625rem 0 0; }
+  .metric-tile.lead .metric-value { font-size: 2.5rem; }
+  .metric-tile:not(.lead) .metric-value { font-size: 1.5rem; }
+  .metric-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.375rem 0 0; }
+
+  /* ---- IconTile ---- */
+  .icon-tile {
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--radius-md); border: 1px solid; flex-shrink: 0;
+  }
+  .icon-tile.sz-default { width: 2.25rem; height: 2.25rem; }
+  .icon-tile.sz-lg { width: 2.75rem; height: 2.75rem; border-radius: var(--radius-lg); }
+  .icon-tile svg { width: 1rem; height: 1rem; }
+  .icon-tile.sz-lg svg { width: 1.25rem; height: 1.25rem; }
+  .icon-tile.tone-neutral { background: var(--surface-2); border-color: var(--line); color: var(--text-muted); }
+  .icon-tile.tone-accent { background: var(--tone-accent-surface); border-color: var(--tone-accent-line); color: var(--tone-accent-text); }
+
+  /* ---- privacy reassurance line ---- */
+  .privacy-line { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--text-muted); margin: 0 0 1.75rem; }
+  .privacy-line svg { width: 0.9375rem; height: 0.9375rem; color: var(--accent-solid); flex-shrink: 0; }
+
+  /* ---- upgrade banner (composed: Card + IconTile + Button) ---- */
+  .upgrade-banner {
+    display: flex; gap: 1.25rem; align-items: flex-start;
+    background: var(--surface-card); border: 1px solid var(--tone-accent-line); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm); padding: 1.5rem; margin-bottom: 1.75rem;
+  }
+  .upgrade-body { flex: 1; min-width: 0; }
+  .upgrade-eyebrow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--tone-accent-text); margin: 0 0 0.375rem; }
+  .upgrade-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0 0 0.5rem; }
+  .upgrade-text { font-size: 0.875rem; color: var(--text-strong); margin: 0 0 0.875rem; max-width: 38rem; line-height: 1.5; }
+  .upgrade-privacy { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--tone-accent-text); margin: 0 0 1.125rem; }
+  .upgrade-privacy svg { width: 0.9375rem; height: 0.9375rem; flex-shrink: 0; }
+  .upgrade-actions { display: flex; align-items: center; gap: 1rem; }
+
+  /* ---- Button ---- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.375rem; font-family: var(--font-sans);
+    font-size: 0.8125rem; font-weight: 500; border-radius: calc(var(--radius-md) - 2px);
+    padding: 0.5rem 0.875rem; cursor: pointer; white-space: nowrap;
+    transition: background-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+  }
+  .btn svg { width: 0.875rem; height: 0.875rem; }
+  .btn-default { background: var(--accent-solid); color: var(--accent-on-solid); border: 1px solid transparent; }
+  .btn-ghost { background: transparent; border: 1px solid transparent; color: var(--text-muted); font-size: 0.75rem; padding: 0.375rem 0.625rem; }
+  .btn-link { background: transparent; border: none; color: var(--accent-solid); padding: 0.5rem 0; font-size: 0.8125rem; }
+  .btn-link:hover, .link-inline:hover { text-decoration: underline; }
+  .link-inline { color: var(--accent-solid); font-size: 0.75rem; cursor: pointer; }
+
+  /* ---- Badge (outline) ---- */
+  .badge-outline {
+    display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid var(--line-strong);
+    color: var(--text-muted); font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.03em;
+    padding: 0.0625rem 0.4375rem; text-transform: uppercase;
+  }
+
+  /* ---- Card (element card, matches ContentElementCard.tsx) ---- */
+  .card {
+    background: var(--surface-card); border: 1px solid var(--line); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm); overflow: hidden;
+  }
+  .card-head {
+    display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+    gap: 0.5rem; padding: 1rem; border-bottom: 1px solid var(--line);
+  }
+  .element-id { font-family: var(--font-mono); font-size: 0.8125rem; font-weight: 500; color: var(--text-strong); margin: 0; }
+  .element-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.75rem; margin: 0.25rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
+  .element-meta span { display: inline-flex; align-items: center; gap: 0.25rem; }
+  .element-meta svg { width: 0.75rem; height: 0.75rem; }
+  .element-meta code { font-family: var(--font-mono); }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 0.3125rem; border-radius: 999px; border: 1px solid;
+    padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 500; white-space: nowrap; flex-shrink: 0;
+  }
+  .status-badge svg { width: 0.75rem; height: 0.75rem; }
+  .status-badge.tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .status-badge.tone-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+
+  .card-body { padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+
+  .content-row { border-left: 2px solid var(--line); padding-left: 0.75rem; }
+  .content-row.row-live { border-left-color: var(--tone-info-line); }
+
+  .row-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.25rem; }
+  .text-eyebrow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--text-muted); margin: 0; }
+  .row-value { font-size: 0.8125rem; color: var(--text-strong); line-height: 1.5; margin: 0; }
+
+  /* ---- inline impression stat ---- */
+  .stat-inline { display: inline-flex; align-items: center; gap: 0.375rem; flex-shrink: 0; }
+  .stat-inline svg { width: 0.8125rem; height: 0.8125rem; flex-shrink: 0; }
+  .stat-inline.tracked svg { color: var(--text-muted); }
+  .stat-inline.not-tracked svg { color: var(--line-strong); }
+  .stat-inline.locked svg { color: var(--text-muted); }
+  .text-metric { font-weight: 600; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; color: var(--text-strong); font-size: 0.9375rem; }
+  .stat-word { font-size: 0.75rem; color: var(--text-muted); }
+  .stat-skeleton { display: inline-block; width: 1.75rem; height: 0.8125rem; border-radius: 0.25rem; background: var(--surface-3); }
+  .stat-dash { font-size: 0.9375rem; color: var(--line-strong); font-weight: 600; }
+
+  .card-foot {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem;
+    border-top: 1px solid var(--line); background: var(--surface-1); padding: 0.625rem 1rem;
+  }
+  .last-edited { font-size: 0.75rem; color: var(--text-muted); margin: 0; }
+  .card-actions { display: flex; align-items: center; gap: 0.25rem; }
+
+  .footnote { font-size: 0.75rem; color: var(--text-muted); margin: 0.5rem 0 0; }
+</style>
+</head>
+<body>
+
+  <div class="reference-banner">
+    Reference mockup — not production code. Communicates layout and state only.
+    Execute builds this with the real <code>src/components/ui/*</code> components and the real
+    <code>ContentElementCard</code>.
+  </div>
+
+  <div class="page">
+    <h1 class="text-display">Content</h1>
+    <p class="page-intro">
+      Story s09-section-impressions. Same screen as today — no new route. Each element card keeps
+      showing the section's current text; an impression count now sits directly beside it, so
+      "which paragraph is actually seen" is answered without leaving the row.
+    </p>
+
+    <!-- ============================================================
+         ACCOUNT STATE 1 — entitled (Pro or trialling)
+         ============================================================ -->
+    <div class="section-divider">
+      <p class="section-eyebrow">Account state</p>
+      <h2 class="section-title">Entitled — Pro or trialling</h2>
+      <p class="section-note">
+        Counts are visible. The summary strip and privacy line are new; every card below keeps its
+        existing header, content rows and footer actions unchanged.
+      </p>
+
+      <div class="metric-row">
+        <div class="metric-tile lead">
+          <div>
+            <p class="metric-label">Impressions today</p>
+            <p class="metric-value">1,204</p>
+            <p class="metric-hint">Across 3 sites</p>
+          </div>
+          <span class="icon-tile sz-lg tone-neutral" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+          </span>
+        </div>
+        <div class="metric-tile">
+          <div>
+            <p class="metric-label">Sections tracked</p>
+            <p class="metric-value">18</p>
+            <p class="metric-hint">of 22 total</p>
+          </div>
+          <span class="icon-tile sz-default tone-neutral" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>
+          </span>
+        </div>
+      </div>
+
+      <p class="privacy-line">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9 8 11 4.6-2 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        Privacy-first by design — no cookies, no visitor id, aggregate counts only.
+      </p>
+
+      <div class="stack">
+
+        <!-- Card 1: edited element, Live row, success (nonzero) -->
+        <div>
+          <p class="state-label">Live row — success, 482 impressions</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-hero-headline</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>h1.hero-title</code>
+                </div>
+              </div>
+              <span class="status-badge tone-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                Edited
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row">
+                <div class="row-head"><p class="text-eyebrow">Original</p></div>
+                <p class="row-value">Software that ships itself. Eventually.</p>
+              </div>
+              <div class="content-row row-live">
+                <div class="row-head">
+                  <p class="text-eyebrow">Live</p>
+                  <span class="stat-inline tracked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="text-metric">482</span>
+                    <span class="stat-word">impressions</span>
+                  </span>
+                </div>
+                <p class="row-value">Edit the copy people actually read. Not the copy you guess they read.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: Aug 12, 2026</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>View
+                </button>
+                <button class="btn btn-ghost" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>Edit
+                </button>
+                <button class="btn btn-ghost" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l4 2"/></svg>History
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: edited element, Live row, zero (tracked) -->
+        <div>
+          <p class="state-label">Live row — zero, tracked (distinct from not-tracked below)</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-pricing-footnote</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>p.pricing-note</code>
+                </div>
+              </div>
+              <span class="status-badge tone-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                Edited
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row row-live">
+                <div class="row-head">
+                  <p class="text-eyebrow">Live</p>
+                  <span class="stat-inline tracked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="text-metric">0</span>
+                    <span class="stat-word">impressions</span>
+                  </span>
+                </div>
+                <p class="row-value">Prices exclude VAT. Published yesterday — tracking is on, nobody has scrolled this far yet.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: Aug 15, 2026</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: unedited element, Original row (= current), not-tracked -->
+        <div>
+          <p class="state-label">Original row (= current text) — not tracked, no digit rendered</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-footer-legal</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>small.legal</code>
+                </div>
+              </div>
+              <span class="status-badge tone-neutral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                Original
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row">
+                <div class="row-head">
+                  <p class="text-eyebrow">Original</p>
+                  <span class="stat-inline not-tracked" title="This element was mapped before impression tracking started.">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+                    <span class="stat-dash">—</span>
+                    <span class="stat-word">Not tracked yet</span>
+                  </span>
+                </div>
+                <p class="row-value">&copy; 2026 Example Inc. All rights reserved.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: —</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: loading -->
+        <div>
+          <p class="state-label">Live row — loading</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-cta-primary</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>a.cta-primary</code>
+                </div>
+              </div>
+              <span class="status-badge tone-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                Edited
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row row-live">
+                <div class="row-head">
+                  <p class="text-eyebrow">Live</p>
+                  <span class="stat-inline tracked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="stat-skeleton" aria-hidden="true"></span>
+                    <span class="stat-word">impressions</span>
+                  </span>
+                </div>
+                <p class="row-value">Start your free trial — no card required.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: Aug 9, 2026</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: error -->
+        <div>
+          <p class="state-label">Live row — error (count unavailable, rest of card unaffected)</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-testimonial-1</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>blockquote.quote-1</code>
+                </div>
+              </div>
+              <span class="status-badge tone-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                Edited
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row row-live">
+                <div class="row-head">
+                  <p class="text-eyebrow">Live</p>
+                  <span class="stat-inline tracked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="stat-word">Unavailable</span>
+                  </span>
+                </div>
+                <p class="row-value">&ldquo;Switched our whole team over in an afternoon.&rdquo;</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: Aug 3, 2026</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ============================================================
+         ACCOUNT STATE 2 — unentitled (free / trial expired)
+         ============================================================ -->
+    <div class="section-divider">
+      <p class="section-eyebrow">Account state</p>
+      <h2 class="section-title">Unentitled — free or trial expired</h2>
+      <p class="section-note">
+        The summary strip is replaced by one upgrade banner. Every card's stat area shows a locked
+        indicator, never a number — the widget sends no impression events for this account (AC 7),
+        so nothing here implies data that was never collected.
+      </p>
+
+      <div class="upgrade-banner">
+        <span class="icon-tile sz-lg tone-accent" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>
+        </span>
+        <div class="upgrade-body">
+          <p class="upgrade-eyebrow">Pro feature</p>
+          <h3 class="upgrade-title">See which sections people actually read</h3>
+          <p class="upgrade-text">
+            Impression counts show how many visitors actually saw each section, so you know which
+            paragraph to fix instead of guessing. Entitled Pro and trialling accounts get this
+            automatically.
+          </p>
+          <p class="upgrade-privacy">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 5v6c0 5 3.4 9 8 11 4.6-2 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+            No cookies, no fingerprinting, no visitor id — aggregate counts only, which keeps this
+            outside GDPR consent scope.
+          </p>
+          <div class="upgrade-actions">
+            <button class="btn btn-default" type="button">Upgrade to Pro</button>
+            <span class="link-inline">See what&rsquo;s included</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack">
+
+        <!-- Card 6: edited element, locked -->
+        <div>
+          <p class="state-label">Live row — locked</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-hero-headline</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>h1.hero-title</code>
+                </div>
+              </div>
+              <span class="status-badge tone-info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                Edited
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row row-live">
+                <div class="row-head">
+                  <p class="text-eyebrow">Live</p>
+                  <span class="stat-inline locked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                    <span class="badge-outline">Pro</span>
+                    <span class="link-inline">Upgrade to see impressions</span>
+                  </span>
+                </div>
+                <p class="row-value">Edit the copy people actually read. Not the copy you guess they read.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: Aug 12, 2026</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 7: unedited element, locked -->
+        <div>
+          <p class="state-label">Original row (= current text) — locked</p>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <p class="element-id">rcf-footer-legal</p>
+                <div class="element-meta">
+                  <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20Z"/></svg>example.com</span>
+                  <code>small.legal</code>
+                </div>
+              </div>
+              <span class="status-badge tone-neutral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>
+                Original
+              </span>
+            </div>
+            <div class="card-body">
+              <div class="content-row">
+                <div class="row-head">
+                  <p class="text-eyebrow">Original</p>
+                  <span class="stat-inline locked">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+                    <span class="badge-outline">Pro</span>
+                    <span class="link-inline">Upgrade to see impressions</span>
+                  </span>
+                </div>
+                <p class="row-value">&copy; 2026 Example Inc. All rights reserved.</p>
+              </div>
+            </div>
+            <div class="card-foot">
+              <p class="last-edited">Last edited: —</p>
+              <div class="card-actions">
+                <button class="btn btn-ghost" type="button">View</button>
+                <button class="btn btn-ghost" type="button">Edit</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <p class="footnote">
+        Page-level empty / initial-loading / fetch-error states are unchanged from the existing
+        Content screen and are not re-drawn here — see design-system.md's data-view state pattern.
+      </p>
+    </div>
+
+  </div>
+
+</body>
+</html>

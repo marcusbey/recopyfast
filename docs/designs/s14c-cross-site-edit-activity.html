@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Design reference — s14c-cross-site-edit-activity</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* =========================================================================
+     REFERENCE MOCKUP — NOT PRODUCTION CODE.
+     Tokens copied verbatim (light values only, for legibility) from
+     docs/design-system.md / src/app/globals.css. The real screen is fully
+     token-driven (light-dark()) and inherits dark mode automatically; this
+     static file pins light because it has no color-scheme to follow.
+     See docs/designs/s14c-cross-site-edit-activity.md for the full spec.
+     ========================================================================= */
+
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --radius: 0.75rem;
+    --radius-xs: calc(var(--radius) - 8px);
+    --radius-sm: calc(var(--radius) - 6px);
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-md: 0 2px 4px -1px var(--shadow-a), 0 4px 10px -2px var(--shadow-b);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    /* tone triplets, light values, from src/app/globals.css */
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    padding: 2.5rem 1.5rem 6rem;
+  }
+  .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+
+  .doc-header { max-width: 76rem; margin: 0 auto 3rem; }
+  .doc-header h1 {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600; letter-spacing: -0.023em; margin: 0 0 0.5rem;
+  }
+  .doc-header p { color: var(--text-muted); font-size: 0.875rem; max-width: 48rem; line-height: 1.6; margin: 0; }
+
+  .section { max-width: 76rem; margin: 0 auto 4rem; }
+  .section-eyebrow {
+    font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.075em; color: var(--text-muted); margin: 0 0 1rem;
+  }
+
+  /* ---- page shell (what /dashboard/activity itself contains) ---- */
+  .app-shell {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-sm);
+    padding: 2rem;
+  }
+
+  /* PageHeader */
+  .page-header { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1.75rem; }
+  .page-title { font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem); font-weight: 600; letter-spacing: -0.023em; margin: 0; }
+  .page-desc { font-size: 0.875rem; color: var(--text-muted); margin: 0.375rem 0 0; max-width: 42rem; line-height: 1.6; }
+
+  /* Filters row (Select x3) */
+  .filters-row { display: flex; flex-wrap: wrap; gap: 0.625rem; margin-bottom: 1.75rem; }
+  .select {
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    height: 2.25rem; padding: 0 0.75rem 0 0.875rem;
+    background: var(--surface-card); border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md); font-size: 0.8125rem; color: var(--text-strong);
+    min-width: 9.5rem; justify-content: space-between;
+  }
+  .select .caret { color: var(--text-muted); font-size: 0.625rem; }
+
+  /* Day group */
+  .day-group { margin-bottom: 1.75rem; }
+  .day-group:last-child { margin-bottom: 0; }
+  .day-label { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--text-muted); margin: 0 0 0.625rem; }
+
+  .card-outline {
+    border: 1px solid var(--line); border-radius: var(--radius-lg);
+    background: var(--surface-card); overflow: hidden;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 2rem minmax(11rem, 15rem) minmax(9rem, 11rem) minmax(14rem, 1fr) 4.5rem;
+    gap: 1rem;
+    align-items: start;
+    padding: 0.875rem 1rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: none; }
+
+  .avatar {
+    width: 1.75rem; height: 1.75rem; border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.6875rem; font-weight: 600; flex-shrink: 0;
+    background: var(--surface-2); color: var(--text-muted);
+  }
+  .avatar.has-account { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); }
+
+  .identity { min-width: 0; }
+  .identity .name { font-size: 0.8125rem; font-weight: 500; color: var(--text-strong); }
+  .identity .email { font-size: 0.75rem; color: var(--text-muted); }
+  .identity .email.primary { font-size: 0.8125rem; font-weight: 500; color: var(--text-strong); }
+  .badge {
+    display: inline-flex; align-items: center; height: 1.25rem; padding: 0 0.4375rem;
+    border-radius: 999px; font-size: 0.6875rem; font-weight: 500;
+    border: 1px solid var(--line-strong); color: var(--text-muted); background: transparent;
+    white-space: nowrap;
+  }
+  .badge.no-account { margin-top: 0.25rem; }
+
+  .site-badge {
+    display: inline-flex; align-items: center; height: 1.375rem; padding: 0 0.5rem;
+    border-radius: var(--radius-sm); font-size: 0.75rem; font-weight: 500;
+    border: 1px solid var(--line-strong); color: var(--text-strong); background: var(--surface-1);
+  }
+
+  .element .label { font-size: 0.8125rem; color: var(--text-strong); margin-bottom: 0.125rem; }
+  .element .selector { font-size: 0.6875rem; color: var(--text-muted); }
+
+  .value-preview {
+    font-size: 0.8125rem; color: var(--text-strong); line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .value-preview.empty { font-style: italic; color: var(--text-muted); }
+  .value-image {
+    display: flex; align-items: center; gap: 0.375rem; font-size: 0.75rem; color: var(--text-muted);
+  }
+  .value-image .swatch {
+    width: 2rem; height: 1.5rem; border-radius: var(--radius-xs); border: 1px solid var(--line);
+    background: linear-gradient(135deg, var(--surface-2), var(--surface-3)); flex-shrink: 0;
+  }
+
+  .timestamp { font-size: 0.75rem; color: var(--text-muted); text-align: right; white-space: nowrap; }
+
+  /* Load more */
+  .load-more-wrap { display: flex; justify-content: center; margin-top: 1.5rem; }
+  .btn-outline {
+    height: 2rem; padding: 0 0.875rem; border-radius: var(--radius-md);
+    border: 1px solid var(--line-strong); background: var(--surface-card);
+    color: var(--text-strong); font-size: 0.8125rem; font-weight: 500; cursor: pointer;
+  }
+
+  /* States gallery */
+  .states-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  @media (max-width: 900px) { .states-grid { grid-template-columns: 1fr; } .row { grid-template-columns: 1.75rem 1fr; } .row > *:not(:first-child):not(.identity) { grid-column: 2; } }
+  .state-card {
+    border: 1px solid var(--line); border-radius: var(--radius-xl);
+    background: var(--surface-card); padding: 1.5rem; box-shadow: var(--shadow-sm);
+  }
+  .state-card h3 { font-size: 0.8125rem; font-weight: 600; margin: 0 0 1rem; color: var(--text-strong); }
+
+  /* Skeleton */
+  .skeleton-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0; border-bottom: 1px solid var(--line); }
+  .skeleton-row:last-child { border-bottom: none; }
+  .skel { border-radius: var(--radius-md); background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: shimmer 1.6s linear infinite; }
+  @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+  .skel-circle { width: 1.75rem; height: 1.75rem; border-radius: 999px; flex-shrink: 0; }
+  .skel-lines { flex: 1; display: flex; flex-direction: column; gap: 0.375rem; }
+  .skel-bar { height: 0.625rem; border-radius: 999px; }
+
+  /* EmptyState */
+  .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 2.5rem 1.5rem; max-width: 26rem; margin: 0 auto; }
+  .empty-icon-tile {
+    width: 2.75rem; height: 2.75rem; border-radius: var(--radius-xl);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--line);
+    font-size: 1.125rem;
+  }
+  .empty-state h3 { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 1rem 0 0.375rem; }
+  .empty-state p.desc { font-size: 0.8125rem; color: var(--text-muted); line-height: 1.6; margin: 0; }
+  .empty-state .steps { list-style: none; margin: 1.5rem 0 0; padding: 1.25rem 0 0; border-top: 1px solid var(--line); width: 100%; text-align: left; }
+  .empty-state .steps li { display: flex; gap: 0.625rem; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.625rem; line-height: 1.5; }
+  .empty-state .steps li:last-child { margin-bottom: 0; }
+  .step-num { width: 1.125rem; height: 1.125rem; border-radius: 999px; background: var(--surface-2); color: var(--text-strong); font-size: 0.625rem; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 0.0625rem; }
+  .empty-state .btn-outline { margin-top: 1.25rem; }
+
+  /* Alert */
+  .alert-destructive {
+    display: flex; gap: 0.75rem; align-items: flex-start;
+    background: var(--tone-danger-surface); border: 1px solid var(--tone-danger-line);
+    color: var(--tone-danger-text); border-radius: var(--radius-lg); padding: 0.875rem 1rem;
+  }
+  .alert-destructive .icon { font-size: 1rem; line-height: 1.2; }
+  .alert-destructive strong { display: block; font-size: 0.8125rem; margin-bottom: 0.125rem; }
+  .alert-destructive p { margin: 0; font-size: 0.8125rem; line-height: 1.5; }
+  .alert-destructive .btn-outline { margin-top: 0.625rem; border-color: var(--tone-danger-line); color: var(--tone-danger-text); }
+</style>
+</head>
+<body>
+
+  <div class="doc-header">
+    <h1>Activity — cross-site edit list (s14c)</h1>
+    <p>
+      Reference mockup, not production code. Shows the success state (filters + grouped list,
+      mixed account and grant-holder editors across three sites) plus a states gallery: loading,
+      true-empty, filtered-empty, and error. Full spec in
+      <span class="mono">docs/designs/s14c-cross-site-edit-activity.md</span>.
+    </p>
+  </div>
+
+  <!-- =========================== SUCCESS STATE =========================== -->
+  <div class="section">
+    <p class="section-eyebrow">Success — /dashboard/activity</p>
+    <div class="app-shell">
+
+      <div class="page-header">
+        <h1 class="page-title">Activity</h1>
+        <p class="page-desc">Recent edits across every site you manage.</p>
+      </div>
+
+      <div class="filters-row">
+        <div class="select"><span>All sites</span><span class="caret">▾</span></div>
+        <div class="select"><span>All editors</span><span class="caret">▾</span></div>
+        <div class="select"><span>Last 30 days</span><span class="caret">▾</span></div>
+      </div>
+
+      <!-- Today -->
+      <div class="day-group">
+        <p class="day-label">Today</p>
+        <div class="card-outline">
+
+          <div class="row">
+            <div class="avatar">✉</div>
+            <div class="identity">
+              <div class="email primary">sarah@acmedental.com</div>
+              <span class="badge no-account">No account</span>
+            </div>
+            <div><span class="site-badge">acme-dental.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Homepage hero headline</div>
+                <div class="selector mono">.hero h1</div>
+              </div>
+              <div class="value-preview" style="margin-top: 0.5rem;">
+                "Same-day appointments — call before 3pm and we'll see you today."
+              </div>
+            </div>
+            <div class="timestamp tabular" title="Aug 16, 2026, 2:14 PM">14m ago</div>
+          </div>
+
+          <div class="row">
+            <div class="avatar has-account">JD</div>
+            <div class="identity">
+              <div class="name">Jordan Diaz</div>
+              <div class="email">jordan@recopyfast-agency.com</div>
+            </div>
+            <div><span class="site-badge">riverside-law.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Practice areas — intro</div>
+                <div class="selector mono">#practice-intro p</div>
+              </div>
+              <div class="value-preview" style="margin-top: 0.5rem;">
+                "We handle family law, estate planning and small-business disputes across three counties."
+              </div>
+            </div>
+            <div class="timestamp tabular" title="Aug 16, 2026, 11:02 AM">3h ago</div>
+          </div>
+
+          <div class="row">
+            <div class="avatar">✉</div>
+            <div class="identity">
+              <div class="email primary">frontdesk@oakwoodgym.com</div>
+              <span class="badge no-account">No account</span>
+            </div>
+            <div><span class="site-badge">oakwood-gym.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Class schedule banner image</div>
+                <div class="selector mono">.schedule-banner img</div>
+              </div>
+              <div class="value-image" style="margin-top: 0.5rem;">
+                <span class="swatch"></span>
+                <span>schedule-fall-2026.jpg</span>
+              </div>
+            </div>
+            <div class="timestamp tabular" title="Aug 16, 2026, 8:47 AM">5h ago</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Yesterday -->
+      <div class="day-group">
+        <p class="day-label">Yesterday</p>
+        <div class="card-outline">
+
+          <div class="row">
+            <div class="avatar">✉</div>
+            <div class="identity">
+              <div class="email primary">sarah@acmedental.com</div>
+              <span class="badge no-account">No account</span>
+            </div>
+            <div><span class="site-badge">acme-dental.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Phone number, footer</div>
+                <div class="selector mono">footer .phone</div>
+              </div>
+              <div class="value-preview" style="margin-top: 0.5rem;">(555) 019-2245</div>
+            </div>
+            <div class="timestamp tabular" title="Aug 15, 2026, 4:31 PM">1d ago</div>
+          </div>
+
+          <div class="row">
+            <div class="avatar">✉</div>
+            <div class="identity">
+              <div class="email primary">m.oakwood@oakwoodgym.com</div>
+              <span class="badge no-account">No account</span>
+            </div>
+            <div><span class="site-badge">oakwood-gym.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Membership pricing note</div>
+                <div class="selector mono">.pricing-note</div>
+              </div>
+              <div class="value-preview empty" style="margin-top: 0.5rem;">Empty</div>
+            </div>
+            <div class="timestamp tabular" title="Aug 15, 2026, 9:12 AM">1d ago</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Older -->
+      <div class="day-group">
+        <p class="day-label">Aug 10, 2026</p>
+        <div class="card-outline">
+
+          <div class="row">
+            <div class="avatar has-account">JD</div>
+            <div class="identity">
+              <div class="name">Jordan Diaz</div>
+              <div class="email">jordan@recopyfast-agency.com</div>
+            </div>
+            <div><span class="site-badge">riverside-law.com</span></div>
+            <div>
+              <div class="element">
+                <div class="label">Contact CTA button label</div>
+                <div class="selector mono">.cta-primary</div>
+              </div>
+              <div class="value-preview" style="margin-top: 0.5rem;">"Book a free consultation"</div>
+            </div>
+            <div class="timestamp tabular" title="Aug 10, 2026, 1:05 PM">6d ago</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="load-more-wrap">
+        <button class="btn-outline" type="button">Load more</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- =========================== STATES GALLERY =========================== -->
+  <div class="section">
+    <p class="section-eyebrow">States</p>
+    <div class="states-grid">
+
+      <!-- Loading -->
+      <div class="state-card">
+        <h3>Loading</h3>
+        <div>
+          <div class="skeleton-row"><div class="skel skel-circle"></div><div class="skel-lines"><div class="skel skel-bar" style="width:55%"></div><div class="skel skel-bar" style="width:30%"></div></div></div>
+          <div class="skeleton-row"><div class="skel skel-circle"></div><div class="skel-lines"><div class="skel skel-bar" style="width:65%"></div><div class="skel skel-bar" style="width:40%"></div></div></div>
+          <div class="skeleton-row"><div class="skel skel-circle"></div><div class="skel-lines"><div class="skel skel-bar" style="width:45%"></div><div class="skel skel-bar" style="width:35%"></div></div></div>
+          <div class="skeleton-row"><div class="skel skel-circle"></div><div class="skel-lines"><div class="skel skel-bar" style="width:60%"></div><div class="skel skel-bar" style="width:25%"></div></div></div>
+        </div>
+      </div>
+
+      <!-- Empty: true -->
+      <div class="state-card">
+        <h3>Empty — no activity yet</h3>
+        <div class="empty-state">
+          <div class="empty-icon-tile">◔</div>
+          <h3>No activity yet</h3>
+          <p class="desc">Recent edits across your sites will show up here once you or your clients start making changes.</p>
+          <ol class="steps">
+            <li><span class="step-num">1</span><span>Invite an editor from any site's detail view</span></li>
+            <li><span class="step-num">2</span><span>They edit content from the page they're on</span></li>
+            <li><span class="step-num">3</span><span>Their changes appear here, attributed to their email</span></li>
+          </ol>
+        </div>
+      </div>
+
+      <!-- Empty: filtered -->
+      <div class="state-card">
+        <h3>Empty — filters match nothing</h3>
+        <div>
+          <div class="filters-row" style="margin-bottom:1.5rem;">
+            <div class="select"><span>riverside-law.com</span><span class="caret">▾</span></div>
+            <div class="select"><span>sarah@acmedental.com</span><span class="caret">▾</span></div>
+            <div class="select"><span>Today</span><span class="caret">▾</span></div>
+          </div>
+          <div class="empty-state" style="padding-top:0.5rem;">
+            <div class="empty-icon-tile">⌕</div>
+            <h3>No edits match these filters</h3>
+            <p class="desc">Try a different site, editor or date range.</p>
+            <button class="btn-outline" type="button">Clear filters</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div class="state-card">
+        <h3>Error</h3>
+        <div class="alert-destructive">
+          <span class="icon">⚠</span>
+          <div>
+            <strong>Couldn't load activity</strong>
+            <p>Something went wrong fetching recent edits. Your other dashboard pages are unaffected.</p>
+            <button class="btn-outline" type="button">Retry</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

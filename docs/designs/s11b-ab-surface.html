@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Design reference — s11b-ab-surface</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* =========================================================================
+     REFERENCE MOCKUP — NOT PRODUCTION CODE.
+     Tokens copied verbatim (light values only, for legibility) from
+     docs/design-system.md / src/app/globals.css. See
+     docs/designs/s11b-ab-surface.md for the component inventory and the
+     rationale behind every state shown here.
+     ========================================================================= */
+
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+    --tone-success-surface: hsl(150 45% 94%);
+    --tone-success-text: hsl(152 50% 26%);
+    --tone-success-line: hsl(150 40% 82%);
+    --tone-warning-surface: hsl(40 75% 94%);
+    --tone-warning-text: hsl(32 65% 32%);
+    --tone-warning-line: hsl(40 65% 80%);
+    --tone-danger-surface: hsl(358 65% 96%);
+    --tone-danger-text: hsl(358 60% 38%);
+    --tone-danger-line: hsl(358 55% 85%);
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(176 54% 24%);
+    --tone-accent-line: hsl(176 35% 78%);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    padding: 2.5rem 1.5rem 6rem;
+  }
+  .doc-header { max-width: 78rem; margin: 0 auto 3rem; }
+  .doc-header h1 {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0 0 0.5rem;
+  }
+  .doc-header p { color: var(--text-muted); font-size: 0.875rem; max-width: 50rem; line-height: 1.6; margin: 0; }
+
+  .section { max-width: 78rem; margin: 0 auto 4rem; }
+  .section-eyebrow {
+    font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.075em; color: var(--text-muted); margin: 0 0 0.5rem;
+  }
+  .section-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0 0 1.5rem; }
+  .row { display: flex; gap: 1.5rem; align-items: flex-start; flex-wrap: wrap; }
+  .col { flex: 1 1 320px; min-width: 300px; }
+  .col-label {
+    font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.075em; margin-bottom: 0.75rem; color: var(--text-muted);
+  }
+  .col-label.entitled { color: var(--accent-solid); }
+  .col-label.locked { color: var(--text-muted); }
+
+  /* ---- Card primitive ---- */
+  .card { background: var(--surface-card); border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+  .card-pad { padding: 1rem; }
+
+  /* ---- Button primitive (subset) ---- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.375rem;
+    border-radius: var(--radius-md); font-size: 0.8125rem; font-weight: 500;
+    padding: 0.5rem 0.875rem; border: 1px solid transparent; cursor: default;
+    transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .btn-default { background: var(--accent-solid); color: var(--accent-on-solid); }
+  .btn-outline { background: transparent; color: var(--text-strong); border-color: var(--line-strong); }
+  .btn-ghost { background: transparent; color: var(--text-strong); }
+  .btn-sm { padding: 0.3125rem 0.625rem; font-size: 0.75rem; }
+  .btn[disabled], .btn.is-disabled { opacity: 0.5; }
+
+  /* ---- Badge / StatusBadge ---- */
+  .badge {
+    display: inline-flex; align-items: center; gap: 0.3125rem;
+    font-size: 0.6875rem; font-weight: 500; padding: 2px 8px;
+    border-radius: 999px; border: 1px solid transparent; white-space: nowrap;
+  }
+  .badge.tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .badge.tone-info    { background: var(--tone-info-surface);    color: var(--tone-info-text);    border-color: var(--tone-info-line); }
+  .badge.tone-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .badge.tone-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .badge.tone-danger  { background: var(--tone-danger-surface);  color: var(--tone-danger-text);  border-color: var(--tone-danger-line); }
+  .badge.tone-accent  { background: var(--tone-accent-surface);  color: var(--tone-accent-text);  border-color: var(--tone-accent-line); }
+  .badge-dot { width: 5px; height: 5px; border-radius: 999px; background: currentColor; }
+
+  /* ---- Alert ---- */
+  .alert { border-radius: var(--radius-lg); border: 1px solid var(--line); background: var(--surface-card); padding: 0.875rem 1rem; font-size: 0.8125rem; line-height: 1.55; }
+  .alert-title { font-weight: 600; margin: 0 0 0.25rem; font-size: 0.8125rem; }
+  .alert.destructive { border-color: var(--tone-danger-line); background: var(--tone-danger-surface); color: var(--tone-danger-text); }
+  .alert.warning { border-color: var(--tone-warning-line); background: var(--tone-warning-surface); color: var(--tone-warning-text); }
+  .alert-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+  /* ---- Nav mock ---- */
+  .nav-shell { padding: 1rem 0.75rem; width: 232px; }
+  .nav-group { margin-bottom: 1.25rem; }
+  .nav-group-label { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--text-muted); padding: 0 0.75rem; margin-bottom: 0.375rem; }
+  .nav-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    padding: 0.5rem 0.75rem; border-radius: var(--radius-md); font-size: 0.875rem;
+    color: var(--text-strong); margin-bottom: 2px; position: relative;
+  }
+  .nav-item-left { display: flex; align-items: center; gap: 0.625rem; }
+  .nav-item .icon-dot { width: 1.125rem; height: 1.125rem; border-radius: 4px; background: var(--surface-3); flex-shrink: 0; }
+  .nav-item.active { background: hsl(176 54% 28% / 0.12); color: var(--accent-solid); font-weight: 500; }
+  .nav-item.active .icon-dot { background: var(--accent-solid); }
+  .nav-item.active::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 1.25rem; border-radius: 0 4px 4px 0; background: var(--accent-solid);
+  }
+  .nav-item.locked { opacity: 0.45; cursor: not-allowed; }
+
+  /* ---- Skeleton ---- */
+  .skel { background: var(--surface-2); border-radius: var(--radius-md); }
+  .skel-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.875rem 1rem; border-bottom: 1px solid var(--line); }
+  .skel-row:last-child { border-bottom: none; }
+  .skel.icon { width: 2rem; height: 2rem; flex-shrink: 0; border-radius: var(--radius-md); }
+  .skel.line { height: 0.75rem; border-radius: 4px; }
+
+  /* ---- EmptyState ---- */
+  .empty-state { padding: 3rem 1.5rem; text-align: center; }
+  .empty-state .icon-tile {
+    width: 2.75rem; height: 2.75rem; margin: 0 auto 1rem; border-radius: var(--radius-md);
+    background: var(--tone-neutral-surface); color: var(--tone-neutral-text);
+    display: flex; align-items: center; justify-content: center; font-size: 1.125rem;
+  }
+  .empty-state .empty-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0 0 0.375rem; }
+  .empty-state .empty-desc { font-size: 0.8125rem; color: var(--text-muted); max-width: 26rem; margin: 0 auto 1.25rem; line-height: 1.55; }
+
+  /* ---- Test list rows ---- */
+  .test-row { display: flex; align-items: center; justify-content: space-between; padding: 1rem; border-bottom: 1px solid var(--line); }
+  .test-row:last-child { border-bottom: none; }
+  .test-name { font-size: 0.875rem; font-weight: 500; margin: 0 0 0.25rem; display: flex; align-items: center; gap: 0.5rem; }
+  .test-meta { font-size: 0.75rem; color: var(--text-muted); display: flex; gap: 0.75rem; }
+  .test-actions { display: flex; gap: 0.5rem; }
+
+  /* ---- Wizard ---- */
+  .wizard-steps { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  .wizard-steps .step { color: var(--text-muted); }
+  .wizard-steps .step.current { color: var(--tone-info-text); font-weight: 500; }
+  .wizard-steps .sep { color: var(--line-strong); }
+
+  .element-row { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 0.75rem; margin-bottom: 0.5rem; }
+  .element-row.disabled { opacity: 0.6; }
+  .element-row.selected { border-color: var(--accent-solid); background: var(--tone-info-surface); }
+  .element-top { display: flex; align-items: center; gap: 0.4375rem; margin-bottom: 0.375rem; }
+  .element-text { font-size: 0.8125rem; }
+  .tag { font-size: 0.6875rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--text-muted); }
+
+  .variant-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 0.875rem 1rem; margin-bottom: 0.625rem; }
+  .variant-card.control { background: var(--surface-1); }
+  .variant-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+  .variant-body-text { font-size: 0.8125rem; line-height: 1.5; }
+  .variant-textarea {
+    width: 100%; font-size: 0.8125rem; font-family: inherit; border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md); padding: 0.5rem 0.625rem; resize: vertical; background: var(--surface-card); color: var(--text-strong);
+  }
+  .split-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.625rem; }
+  .split-label { font-size: 0.75rem; color: var(--text-muted); }
+  .split-input {
+    width: 4.25rem; font-size: 0.8125rem; border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md); padding: 0.375rem 0.5rem; text-align: right;
+    font-variant-numeric: tabular-nums; background: var(--surface-card); color: var(--text-strong);
+  }
+  .split-suffix { font-size: 0.8125rem; color: var(--text-muted); }
+  .saved-tag { display: inline-flex; align-items: center; gap: 0.3125rem; font-size: 0.75rem; color: var(--tone-success-text); margin-left: 0.625rem; }
+
+  .total-row { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 0.25rem; border-top: 1px dashed var(--line); margin-top: 0.25rem; }
+  .total-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.9375rem; }
+  .total-value.ok { color: var(--text-strong); }
+  .total-value.bad { color: var(--tone-danger-text); }
+
+  .field-label { font-size: 0.75rem; font-weight: 500; color: var(--text-strong); display: block; margin-bottom: 0.3125rem; }
+  .caption { font-size: 0.8125rem; color: var(--text-muted); line-height: 1.6; margin-top: 0.75rem; }
+  .swatch-legend { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem; }
+</style>
+</head>
+<body>
+
+  <div class="doc-header">
+    <h1>Design reference — s11b · the A/B surface</h1>
+    <p>
+      Static, low-fidelity. Communicates layout and state only — the real screen is built from
+      <code>src/components/ui/</code> primitives and the existing <code>ABTest*</code>
+      components inventoried in <code>docs/designs/s11b-ab-surface.md</code>. Not production
+      markup; nothing here is meant to be copied into the app.
+    </p>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- NAV ENTRY — entitled vs. unentitled -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <p class="section-eyebrow">Nav entry</p>
+    <h2 class="section-title">Gated on entitlement — same mechanism Teams already uses</h2>
+    <div class="row">
+      <div class="col">
+        <p class="col-label entitled">Entitled (Pro)</p>
+        <div class="card">
+          <div class="nav-shell">
+            <div class="nav-group">
+              <p class="nav-group-label">Workspace</p>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Overview</div></div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Sites</div></div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Content</div></div>
+              <div class="nav-item active"><div class="nav-item-left"><span class="icon-dot"></span>A/B Tests</div></div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Analytics</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col">
+        <p class="col-label locked">Unentitled — visible, not hidden</p>
+        <div class="card">
+          <div class="nav-shell">
+            <div class="nav-group">
+              <p class="nav-group-label">Workspace</p>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Overview</div></div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Sites</div></div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Content</div></div>
+              <div class="nav-item locked">
+                <div class="nav-item-left"><span class="icon-dot"></span>A/B Tests</div>
+                <span class="badge tone-neutral">Pro</span>
+              </div>
+              <div class="nav-item"><div class="nav-item-left"><span class="icon-dot"></span>Analytics</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Click on the locked row is intercepted, same as `Teams` today (`DashboardNavigation.tsx:167-170`) — the row stays visible so an unentitled account can see the feature exists and where to upgrade.</p>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- TEST LIST -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <p class="section-eyebrow">Screen 1</p>
+    <h2 class="section-title">Test list — /dashboard/ab-tests</h2>
+    <div class="row">
+
+      <div class="col">
+        <p class="col-label">Loading</p>
+        <div class="card">
+          <div class="skel-row"><div class="skel icon"></div><div style="flex:1"><div class="skel line" style="width:55%;margin-bottom:6px"></div><div class="skel line" style="width:30%"></div></div></div>
+          <div class="skel-row"><div class="skel icon"></div><div style="flex:1"><div class="skel line" style="width:40%;margin-bottom:6px"></div><div class="skel line" style="width:25%"></div></div></div>
+          <div class="skel-row"><div class="skel icon"></div><div style="flex:1"><div class="skel line" style="width:60%;margin-bottom:6px"></div><div class="skel line" style="width:35%"></div></div></div>
+        </div>
+        <p class="caption">Shaped skeleton rows — replaces today's `Loader2` spinner.</p>
+      </div>
+
+      <div class="col">
+        <p class="col-label">Empty</p>
+        <div class="card">
+          <div class="empty-state">
+            <div class="icon-tile">⚗</div>
+            <p class="empty-title">No A/B tests yet</p>
+            <p class="empty-desc">Create a test on any content element to compare two versions of its copy.</p>
+            <button class="btn btn-default">Create test</button>
+          </div>
+        </div>
+        <p class="caption">`EmptyState` primitive — replaces the current hand-rolled empty block.</p>
+      </div>
+
+      <div class="col">
+        <p class="col-label">Error</p>
+        <div class="card card-pad">
+          <div class="alert destructive">
+            <p class="alert-title">Couldn't load your A/B tests</p>
+            <p style="margin:0">Request failed (502). The list you're seeing may be out of date.</p>
+            <div class="alert-actions">
+              <button class="btn btn-outline btn-sm">Try again</button>
+            </div>
+          </div>
+        </div>
+        <p class="caption">`Alert variant="destructive"` — replaces the hand-rolled `role="alert"` text block. Never falls through to Empty.</p>
+      </div>
+
+    </div>
+
+    <p class="col-label" style="margin-top:2rem">Success — lifecycle states</p>
+    <div class="card">
+      <div class="test-row">
+        <div>
+          <p class="test-name">Hero headline — pricing page <span class="badge tone-neutral"><span class="badge-dot"></span>Draft</span></p>
+          <div class="test-meta"><span>2 variants</span><span>Target: hero-h1</span></div>
+        </div>
+        <div class="test-actions"><button class="btn btn-outline btn-sm">Start</button><button class="btn btn-ghost btn-sm">Results</button></div>
+      </div>
+      <div class="test-row">
+        <div>
+          <p class="test-name">CTA button copy <span class="badge tone-success"><span class="badge-dot"></span>Active</span></p>
+          <div class="test-meta"><span>3 variants</span><span>Target: cta-primary</span></div>
+        </div>
+        <div class="test-actions"><button class="btn btn-outline btn-sm">Pause</button><button class="btn btn-ghost btn-sm">Results</button></div>
+      </div>
+      <div class="test-row">
+        <div>
+          <p class="test-name">Onboarding subhead <span class="badge tone-warning"><span class="badge-dot"></span>Paused</span></p>
+          <div class="test-meta"><span>2 variants</span><span>Target: onboard-sub</span></div>
+        </div>
+        <div class="test-actions"><button class="btn btn-outline btn-sm">Resume</button><button class="btn btn-ghost btn-sm">Results</button></div>
+      </div>
+      <div class="test-row">
+        <div>
+          <p class="test-name">Footer tagline <span class="badge tone-accent"><span class="badge-dot"></span>Completed</span></p>
+          <div class="test-meta"><span>2 variants</span><span>Target: footer-tag</span></div>
+        </div>
+        <div class="test-actions"><button class="btn btn-ghost btn-sm">Results</button></div>
+      </div>
+    </div>
+    <div class="swatch-legend">
+      <span><span class="badge tone-neutral" style="margin-right:4px"></span>draft</span>
+      <span><span class="badge tone-success" style="margin-right:4px"></span>running (status: active)</span>
+      <span><span class="badge tone-warning" style="margin-right:4px"></span>paused</span>
+      <span><span class="badge tone-accent" style="margin-right:4px"></span>ended (status: completed)</span>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- CREATE FLOW — STEP 1: ELEMENT PICKER -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <p class="section-eyebrow">Screen 2 — create flow</p>
+    <h2 class="section-title">Step 1 — select element</h2>
+    <div class="wizard-steps">
+      <span class="step current">Select element</span><span class="sep">→</span>
+      <span class="step">Generate / write</span><span class="sep">→</span>
+      <span class="step">Review &amp; split</span><span class="sep">→</span>
+      <span class="step">Start</span>
+    </div>
+    <div class="card card-pad">
+      <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 0.75rem">Select the copy element you want to test:</p>
+
+      <div class="element-row selected">
+        <div class="element-top"><span class="tag">headline</span></div>
+        <p class="element-text">Ship copy changes without a deploy.</p>
+      </div>
+
+      <div class="element-row disabled">
+        <div class="element-top">
+          <span class="tag">button</span>
+          <span class="badge tone-warning">Active test running</span>
+        </div>
+        <p class="element-text">Start free trial</p>
+      </div>
+
+      <div class="element-row">
+        <div class="element-top"><span class="tag">paragraph</span></div>
+        <p class="element-text">Real-time collaborative editing for marketing sites.</p>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:1rem">
+        <button class="btn btn-outline">Cancel</button>
+        <div style="display:flex;gap:0.5rem">
+          <button class="btn btn-outline">Write variants manually</button>
+          <button class="btn btn-default">Generate with AI</button>
+        </div>
+      </div>
+    </div>
+    <p class="caption">
+      The disabled row is the <strong>preventive</strong> half of the one-test-per-element rule —
+      already shipped (`ABTestElementPicker.tsx:90,127-131`). Two CTAs now, not one: AI
+      generation is unchanged, "Write variants manually" is new and skips straight to step 3
+      with one blank variant.
+    </p>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- CREATE FLOW — DUPLICATE REFUSAL (reactive) -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <p class="section-eyebrow">Create flow — reactive refusal</p>
+    <h2 class="section-title">"Can't start this test" — the required second touchpoint</h2>
+    <div class="row">
+      <div class="col" style="flex:1 1 480px">
+        <div class="card card-pad">
+          <div class="alert destructive">
+            <p class="alert-title">Can't start this test</p>
+            <p style="margin:0">This element already has an active test running. Pause or end it first, or choose a different element.</p>
+            <div class="alert-actions">
+              <button class="btn btn-outline btn-sm">Choose a different element</button>
+              <button class="btn btn-ghost btn-sm">View active test</button>
+            </div>
+          </div>
+        </div>
+        <p class="caption">
+          Not a greyed row alone. This can surface at step 1 (stale picker data) or at step 4
+          on activation (the race a partial unique index + 409 exist to catch). Same `Alert`
+          slot the wizard already uses for generation/activation errors
+          (`ABTestCreateFlow.tsx:43-47`) — a stated reason and two ways forward, not a bare string.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- CREATE FLOW — STEP 3: REVIEW & SPLIT -->
+  <!-- ============================================================ -->
+  <div class="section">
+    <p class="section-eyebrow">Create flow</p>
+    <h2 class="section-title">Step 3 — review &amp; split (manual authoring shown)</h2>
+    <div class="wizard-steps">
+      <span class="step">Select element</span><span class="sep">→</span>
+      <span class="step">Generate / write</span><span class="sep">→</span>
+      <span class="step current">Review &amp; split</span><span class="sep">→</span>
+      <span class="step">Start</span>
+    </div>
+
+    <div class="card card-pad">
+
+      <div class="variant-card control">
+        <div class="variant-head"><span class="badge tone-neutral">Control (Original)</span></div>
+        <p class="variant-body-text">Ship copy changes without a deploy.</p>
+      </div>
+
+      <div class="variant-card">
+        <div class="variant-head">
+          <span class="badge tone-info">Variant B</span>
+          <span style="display:flex;align-items:center">
+            <button class="btn btn-ghost btn-sm">Save</button>
+            <span class="saved-tag">✓ Saved</span>
+          </span>
+        </div>
+        <textarea class="variant-textarea" rows="2">Ship copy changes in seconds, not sprints.</textarea>
+        <div class="split-row">
+          <label class="split-label">Traffic split</label>
+          <input class="split-input" type="number" value="50" />
+          <span class="split-suffix">%</span>
+        </div>
+      </div>
+
+      <div class="variant-card">
+        <div class="variant-head">
+          <span class="badge tone-info">Variant C</span>
+          <button class="btn btn-ghost btn-sm">Save</button>
+        </div>
+        <textarea class="variant-textarea" rows="2">No deploy. No dev ticket. Just edit and publish.</textarea>
+        <div class="split-row">
+          <label class="split-label">Traffic split</label>
+          <input class="split-input" type="number" value="20" />
+          <span class="split-suffix">%</span>
+        </div>
+      </div>
+
+      <button class="btn btn-outline btn-sm" style="margin-bottom:0.5rem">+ Add variant</button>
+
+      <div class="total-row">
+        <span style="font-size:0.8125rem;color:var(--text-muted)">Total across all variants</span>
+        <span class="total-value bad">70%</span>
+      </div>
+      <div class="alert warning">
+        Splits must add up to 100% — currently 70%. Control gets the remainder automatically once variant splits are valid.
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:1rem">
+        <button class="btn btn-outline">Back</button>
+        <button class="btn btn-default is-disabled">Next</button>
+      </div>
+    </div>
+    <p class="caption">
+      "Saved" confirmation (green check, `--dur-fast` fade) is the visible signal that
+      `saveEdit` now persists — the fix for the review-step-edits-are-lost defect. Split input is
+      `Input` + a right-side "%" label, not an icon-in-input and not a slider (no slider exists
+      in `src/components/ui/`, and typed values are more precise than a drag for a value that
+      must sum exactly to 100). "Next" stays disabled until the total is exactly 100%.
+    </p>
+  </div>
+
+</body>
+</html>

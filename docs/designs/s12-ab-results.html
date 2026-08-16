@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design mockup — s12-ab-results (REFERENCE ONLY)</title>
+<style>
+  /* ============================================================
+     Tokens — copied verbatim from src/app/globals.css (light only;
+     this is a static reference, not the token-driven app screen).
+     ============================================================ */
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --radius: 0.75rem;
+    --radius-xs: calc(var(--radius) - 8px);
+    --radius-sm: calc(var(--radius) - 6px);
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-md: 0 2px 4px -1px var(--shadow-a), 0 4px 10px -2px var(--shadow-b);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    /* App loads Instrument Sans via next/font in layout.tsx; this static
+       reference approximates it with a system stack rather than a network
+       font, to keep the file self-contained. */
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 84rem; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+  /* ---------------- Type scale (from design-system.md §Typography) ------- */
+  .text-display { font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem); font-weight: 600; letter-spacing: -0.023em; margin: 0; }
+  .text-title   { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0; }
+  .text-eyebrow { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--text-muted); margin: 0; }
+  .text-sm      { font-size: 0.875rem; line-height: 1.5; }
+  .text-muted   { color: var(--text-muted); }
+  .text-metric  { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .text-metric.lead { font-size: 2.5rem; }
+  .tabular      { font-variant-numeric: tabular-nums; }
+
+  /* ---------------- Reference-only chrome (not part of the product) ------ */
+  .ref-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    text-align: center;
+    padding: 0.625rem 1rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+  .mockup-caption {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: center;
+    max-width: 42rem;
+    margin: 0 auto 1.75rem;
+    line-height: 1.6;
+  }
+  .col-label {
+    text-align: center;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+  }
+
+  /* ---------------- PageHeader ------------------------------------------- */
+  header.page-header {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 1.75rem;
+  }
+  @media (min-width: 640px) {
+    header.page-header { flex-direction: row; align-items: flex-end; justify-content: space-between; }
+  }
+  header.page-header .desc { margin: 0.375rem 0 0; max-width: 60ch; color: var(--text-muted); font-size: 0.875rem; line-height: 1.5; }
+
+  /* ---------------- Button ------------------------------------------------ */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.875rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+    text-decoration: none;
+  }
+  .btn-outline { background: var(--surface-card); border-color: var(--line); color: var(--text-strong); }
+  .btn-link { background: transparent; color: var(--accent-solid); padding: 0; font-weight: 500; }
+  .btn-link:hover { text-decoration: underline; }
+
+  /* ---------------- Badge -------------------------------------------------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .badge-outline { background: transparent; border-color: var(--line); color: var(--text-strong); }
+  .badge-tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .badge-tone-info    { background: var(--tone-info-surface);    color: var(--tone-info-text);    border-color: var(--tone-info-line); }
+  .badge-tone-success  { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .badge svg { width: 11px; height: 11px; flex-shrink: 0; }
+
+  /* ---------------- Card --------------------------------------------------- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    height: 100%;
+  }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+  .card-head .text-title { margin-top: 0.25rem; }
+
+  /* ---------------- Variant row --------------------------------------------- */
+  .variant-row {
+    border-top: 1px solid var(--line);
+    padding-top: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+  .variant-row-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .variant-name { font-size: 0.875rem; font-weight: 600; }
+  .content-value {
+    margin: 0;
+    font-size: 0.875rem;
+    color: var(--text-strong);
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* ---------------- Mini metric trio (Metric, default emphasis) ------------- */
+  .metric-trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+  .mini-metric {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    padding: 0.625rem 0.75rem;
+  }
+  .mini-metric .value { margin-top: 0.375rem; font-size: 1.125rem; }
+
+  /* ---------------- Lead metric (winner confidence) -------------------------- */
+  .metric-lead {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: var(--surface-card);
+    padding: 1rem 1.25rem;
+  }
+  .metric-lead .value { margin-top: 0.5rem; }
+  .metric-lead .hint { margin: 0.375rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
+
+  /* ---------------- Progress (composed from tokens — gap 2 in the .md) ------- */
+  .progress-wrap { display: flex; flex-direction: column; gap: 0.375rem; }
+  .progress-track { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 999px; background: var(--accent-solid); transition: width var(--dur) var(--ease-out); }
+  .progress-label { margin: 0; font-size: 0.75rem; color: var(--text-muted); }
+
+  /* ---------------- Alert -------------------------------------------------- */
+  .alert { border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface-card); padding: 0.875rem 1rem; display: flex; gap: 0.625rem; }
+  .alert svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 0.125rem; }
+  .alert-title { margin: 0 0 0.25rem; font-size: 0.875rem; font-weight: 600; }
+  .alert-body { margin: 0; font-size: 0.8125rem; line-height: 1.55; }
+  .alert-info { background: var(--tone-info-surface); border-color: var(--tone-info-line); color: var(--tone-info-text); }
+  .alert-success { background: var(--tone-success-surface); border-color: var(--tone-success-line); color: var(--tone-success-text); }
+  .alert-neutral { background: var(--surface-card); border-color: var(--line); color: var(--text-strong); }
+  .alert-neutral .alert-body { color: var(--text-muted); }
+
+  /* ---------------- IconTile ------------------------------------------------- */
+  .icon-tile { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: var(--radius-md); border: 1px solid var(--tone-info-line); background: var(--tone-info-surface); color: var(--tone-info-text); flex-shrink: 0; }
+  .icon-tile svg { width: 16px; height: 16px; }
+
+  /* ---------------- Layout -------------------------------------------------- */
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; align-items: start; }
+  @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } }
+  section.definition { margin-bottom: 2rem; }
+
+  /* ---------------- Secondary reference sections (loading / empty / error) --- */
+  .secondary-states { margin-top: 3.5rem; padding-top: 2.5rem; border-top: 1px dashed var(--line); }
+  .secondary-states h2 { font-size: 0.9375rem; font-weight: 600; margin: 0 0 0.375rem; }
+  .secondary-states > p { font-size: 0.8125rem; color: var(--text-muted); margin: 0 0 1.5rem; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+  @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-1) 37%, var(--surface-2) 63%); background-size: 400% 100%; border-radius: var(--radius-sm); animation: skeleton-shimmer 1.6s ease-in-out infinite; }
+  @keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+  .empty-state { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 2.5rem 1.5rem; }
+  .empty-state .icon-tile { width: 2.75rem; height: 2.75rem; border-radius: var(--radius-lg); background: var(--surface-2); border-color: var(--line); color: var(--text-muted); }
+  .empty-state h3 { margin: 1rem 0 0.375rem; }
+  .empty-state p { margin: 0; max-width: 32ch; }
+</style>
+</head>
+<body>
+
+  <div class="ref-banner">
+    REFERENCE MOCKUP — communicates layout and states only. Not production code; the real
+    screen is built from src/components/ui/* in Execute.
+  </div>
+
+  <div class="container">
+
+    <!-- ============ PageHeader ============ -->
+    <header class="page-header">
+      <div>
+        <p class="text-eyebrow">A/B test</p>
+        <h1 class="text-display">Homepage hero headline</h1>
+        <p class="desc">Started Jul 28 &middot; ends Aug 14 &middot; two variants &middot; homepage hero</p>
+      </div>
+      <div>
+        <a class="btn btn-outline" href="#">&larr; Back to tests</a>
+      </div>
+    </header>
+
+    <!-- ============ Persistent conversion definition (always visible) ============ -->
+    <section class="definition">
+      <div class="alert alert-info">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M12 11v5"/></svg>
+        <div>
+          <p class="alert-title">How we count a conversion</p>
+          <p class="alert-body">A conversion is a click on the tested element by a visitor, counted once per visitor, after that visitor has been assigned a variant. We compare it against <strong>assignments</strong> &mdash; how many visitors were bucketed into each variant &mdash; not raw page views, so a returning visitor's repeat clicks don't inflate the rate.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Mockup-only comparison caption ============ -->
+    <p class="mockup-caption">
+      These three cards are the <strong>same screen</strong> at three different points in one
+      test's lifecycle &mdash; shown side by side only for this review. In production, one
+      card renders at a time, in the state the test is actually in.
+    </p>
+
+    <div class="grid-3">
+
+      <!-- ================================================================
+           COLUMN 1 — Running, below minimum sample
+           No significance figure anywhere. Progress toward sample instead.
+           ================================================================ -->
+      <div>
+        <p class="col-label">Running &middot; below sample</p>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <p class="text-eyebrow">A/B test</p>
+              <p class="text-title">Homepage hero headline</p>
+            </div>
+            <span class="badge badge-tone-info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+              Running
+            </span>
+          </div>
+
+          <!-- Control -->
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Control</span>
+              <span class="badge badge-outline">Original</span>
+            </div>
+            <p class="content-value">&ldquo;Build your website in minutes&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">482</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">31</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">6.4%</p></div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-track"><div class="progress-fill" style="width:48%"></div></div>
+              <p class="progress-label tabular">482 of 1,000 assignments needed</p>
+            </div>
+          </div>
+
+          <!-- Variant B -->
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Variant B</span>
+            </div>
+            <p class="content-value">&ldquo;Your website, live in minutes&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">467</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">37</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">7.9%</p></div>
+            </div>
+            <div class="progress-wrap">
+              <div class="progress-track"><div class="progress-fill" style="width:47%"></div></div>
+              <p class="progress-label tabular">467 of 1,000 assignments needed</p>
+            </div>
+          </div>
+
+          <div class="alert alert-info">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.01M12 11v5"/></svg>
+            <div>
+              <p class="alert-title">Still gathering data</p>
+              <p class="alert-body">We don't show a confidence score until both variants reach 1,000 assignments &mdash; calling a result too early inflates the chance it's wrong. At the current pace, expect this around Aug 22.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================================================================
+           COLUMN 2 — Ended, inconclusive
+           No confidence number even though the test is over — see the .md
+           for why (an ended-by-date test may never have cleared the floor).
+           ================================================================ -->
+      <div>
+        <p class="col-label">Ended &middot; inconclusive</p>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <p class="text-eyebrow">A/B test</p>
+              <p class="text-title">Pricing page CTA</p>
+            </div>
+            <span class="badge badge-tone-neutral">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+              Inconclusive
+            </span>
+          </div>
+
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Control</span>
+              <span class="badge badge-outline">Original</span>
+            </div>
+            <p class="content-value">&ldquo;Start free trial&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">1,204</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">86</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">7.1%</p></div>
+            </div>
+          </div>
+
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Variant B</span>
+            </div>
+            <p class="content-value">&ldquo;Try it free&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">1,187</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">91</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">7.7%</p></div>
+            </div>
+          </div>
+
+          <div class="alert alert-neutral">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            <div>
+              <p class="alert-title">Ended without a clear winner</p>
+              <p class="alert-body">This test reached its end date (Aug 10) without either variant clearing the 95% confidence bar. Your original content stayed live &mdash; this test made no changes.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================================================================
+           COLUMN 3 — Ended, winner declared
+           Confidence figure is legitimate here: the test is over, both
+           gates are met, this is the final number, not a mid-flight peek.
+           ================================================================ -->
+      <div>
+        <p class="col-label">Ended &middot; winner declared</p>
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <p class="text-eyebrow">A/B test</p>
+              <p class="text-title">Signup form label</p>
+            </div>
+            <span class="badge badge-tone-success">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a2 2 0 0 0 2 4M17 6h3a2 2 0 0 1-2 4"/></svg>
+              Winner declared
+            </span>
+          </div>
+
+          <div class="metric-lead">
+            <p class="text-eyebrow">Confidence</p>
+            <p class="text-metric tabular value lead">98.6%</p>
+            <p class="hint">&ge;95% required &middot; both variants &ge;1,000 assignments</p>
+          </div>
+
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Control</span>
+              <span class="badge badge-outline">Original</span>
+            </div>
+            <p class="content-value">&ldquo;Email address&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">1,398</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">112</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">8.0%</p></div>
+            </div>
+          </div>
+
+          <div class="variant-row">
+            <div class="variant-row-top">
+              <span class="variant-name">Variant B</span>
+              <span class="badge badge-tone-success">Winner</span>
+            </div>
+            <p class="content-value">&ldquo;Work email&rdquo;</p>
+            <div class="metric-trio">
+              <div class="mini-metric"><p class="text-eyebrow">Assignments</p><p class="text-metric tabular value">1,412</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Conversions</p><p class="text-metric tabular value">168</p></div>
+              <div class="mini-metric"><p class="text-eyebrow">Rate</p><p class="text-metric tabular value">11.9%</p></div>
+            </div>
+          </div>
+
+          <div class="alert alert-success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m20 6-11 11-5-5"/></svg>
+            <div>
+              <p class="alert-title">Variant B is now live</p>
+              <p class="alert-body">This test reached 98.6% confidence with over 1,000 assignments per variant. Variant B replaced the original content on Aug 14.</p>
+              <p style="margin:0.5rem 0 0;"><a class="btn btn-link" href="#">View in version history &rarr;</a></p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============ Secondary states — not the headline comparison, kept
+         lightweight since they follow the same shell as the states above ==== -->
+    <div class="secondary-states">
+      <h2>Loading, empty and error — for completeness</h2>
+      <p>Same shell as above. Shown smaller since they're not the states under review.</p>
+      <div class="grid-2">
+
+        <div>
+          <p class="col-label">Loading</p>
+          <div class="card">
+            <div class="card-head">
+              <div style="width:100%">
+                <div class="skeleton" style="height:0.6875rem;width:4rem;border-radius:4px;margin-bottom:0.5rem;"></div>
+                <div class="skeleton" style="height:1.0625rem;width:12rem;border-radius:4px;"></div>
+              </div>
+              <div class="skeleton" style="height:1.5rem;width:5rem;border-radius:999px;"></div>
+            </div>
+            <div class="variant-row">
+              <div class="skeleton" style="height:0.875rem;width:4rem;border-radius:4px;margin-bottom:0.5rem;"></div>
+              <div class="skeleton" style="height:2.25rem;width:100%;border-radius:var(--radius-md);margin-bottom:0.75rem;"></div>
+              <div class="metric-trio">
+                <div class="skeleton" style="height:3.5rem;border-radius:var(--radius-md);"></div>
+                <div class="skeleton" style="height:3.5rem;border-radius:var(--radius-md);"></div>
+                <div class="skeleton" style="height:3.5rem;border-radius:var(--radius-md);"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="col-label">Empty (zero assignments)</p>
+          <div class="card">
+            <div class="empty-state">
+              <span class="icon-tile">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v4l4 8a2 2 0 0 1-2 3H7a2 2 0 0 1-2-3l4-8V3Z"/></svg>
+              </span>
+              <h3 class="text-title">No visitors assigned yet</h3>
+              <p class="text-sm text-muted">This test is live but hasn't served any traffic. Results appear once visitors are bucketed into a variant.</p>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="col-label">Error</p>
+          <div class="card">
+            <div class="alert" style="background:var(--tone-danger-surface);border-color:var(--tone-danger-line);color:var(--tone-danger-text);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16v.01"/></svg>
+              <div>
+                <p class="alert-title">Couldn't load this test's results</p>
+                <p class="alert-body">The request to fetch results failed. Nothing has been changed on your site.</p>
+                <p style="margin:0.625rem 0 0;"><button class="btn btn-outline">Retry</button></p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

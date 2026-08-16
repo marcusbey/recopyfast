@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s14a-grant-authorized-editing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ==========================================================================
+     TWO COLOUR SYSTEMS ON PURPOSE. See docs/designs/s14a-grant-authorized-editing.md.
+
+     Zone A — "the hub" (section 1): runs inside the Next.js app. Uses var(--token)
+     against a :root block copied from src/app/globals.css, same convention as
+     every other design in docs/designs/.
+
+     Zone B — "the widget" (sections 2-4): runs injected into a CUSTOMER'S page —
+     no shadow DOM, no CSS custom properties (design-system.md's own constraint
+     on this surface). Every colour in Zone B is a LITERAL hsl()/rgba() value,
+     commented with the token it derives from. This is not a shortcut — it is
+     what the widget's real code already looks like (recopyfast.src.js), and
+     what design-system.md instructs for this surface.
+
+     This file is a static reference only. Nothing here is copied into production.
+     ========================================================================== */
+  :root {
+    color-scheme: light dark;
+    --canvas: light-dark(hsl(200 24% 98%), hsl(200 18% 7%));
+    --surface-card: light-dark(hsl(0 0% 100%), hsl(200 15% 10%));
+    --surface-1: light-dark(hsl(200 24% 97%), hsl(200 18% 8%));
+    --text-strong: light-dark(hsl(200 22% 11%), hsl(200 22% 96%));
+    --text-muted: light-dark(hsl(200 11% 38%), hsl(200 12% 68%));
+    --accent-solid: light-dark(hsl(176 54% 28%), hsl(174 48% 58%));
+    --accent-on-solid: light-dark(hsl(0 0% 100%), hsl(200 30% 8%));
+    --line: light-dark(hsl(200 15% 87%), hsl(200 12% 21%));
+    --tone-accent-surface: light-dark(hsl(176 40% 93%), hsl(178 38% 16%));
+    --tone-accent-text: light-dark(hsl(178 68% 24%), hsl(176 52% 70%));
+    --tone-success-surface: light-dark(hsl(162 46% 93%), hsl(166 40% 15%));
+    --tone-success-text: light-dark(hsl(166 72% 24%), hsl(162 60% 70%));
+    --tone-warning-surface: light-dark(hsl(42 84% 92%), hsl(30 44% 17%));
+    --tone-warning-text: light-dark(hsl(28 74% 29%), hsl(42 84% 68%));
+    --tone-warning-line: light-dark(hsl(40 70% 80%), hsl(32 40% 29%));
+    --shadow-sm: 0 1px 2px hsl(200 32% 20% / 0.06), 0 1px 3px -1px hsl(200 32% 20% / 0.06);
+    --radius: 0.75rem;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .reference-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: center;
+    padding: 0.5rem 1rem;
+    position: sticky;
+    top: 0;
+    z-index: 999999;
+  }
+  .container { max-width: 68rem; margin: 0 auto; padding: 0 1.5rem; }
+  .page { padding-top: 2.5rem; padding-bottom: 6rem; }
+  .text-display { font-size: clamp(1.5rem, 1.3rem + 1vw, 1.875rem); font-weight: 600; letter-spacing: -0.023em; margin: 0 0 0.5rem; }
+  .text-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.012em; margin: 0; }
+  .text-eyebrow { font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.75rem; }
+  .text-sm { font-size: 0.875rem; }
+  .text-muted { color: var(--text-muted); }
+  .lede { color: var(--text-muted); font-size: 0.9375rem; max-width: 46rem; line-height: 1.6; margin: 0 0 2.5rem; }
+
+  /* --- Section scaffolding (Zone A convention, app tokens) ------------------ */
+  .section { margin-bottom: 4rem; }
+  .section-head { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--line); }
+  .section-head .n { font-size: 0.75rem; font-weight: 600; color: var(--accent-solid); }
+  .section-note { color: var(--text-muted); font-size: 0.8125rem; line-height: 1.6; max-width: 44rem; margin: 0.5rem 0 1.5rem; }
+  .row { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: flex-start; }
+  .label-chip { display: inline-flex; align-items: center; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 0.2rem 0.55rem; border-radius: 999px; background: var(--tone-accent-surface); color: var(--tone-accent-text); margin-bottom: 0.6rem; }
+
+  /* --- Zone A: hub card (var() tokens) --------------------------------------*/
+  .hub-card { background: var(--surface-card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 1.75rem; width: 21rem; }
+  .hub-icon { width: 2.5rem; height: 2.5rem; border-radius: 999px; background: var(--tone-accent-surface); display: flex; align-items: center; justify-content: center; margin: 0 auto 0.75rem; color: var(--tone-accent-text); }
+  .hub-h1 { text-align: center; font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
+  .hub-p { text-align: center; color: var(--text-muted); font-size: 0.8125rem; margin: 0 0 1.25rem; line-height: 1.5; }
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-size: 0.8125rem; font-weight: 500; margin-bottom: 0.375rem; }
+  .field input { width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--line); border-radius: calc(var(--radius) - 3px); background: var(--surface-card); color: var(--text-strong); font: inherit; font-size: 0.875rem; }
+  .field input:focus { outline: 2px solid var(--accent-solid); outline-offset: 1px; }
+  .btn-primary { width: 100%; padding: 0.55rem; border-radius: calc(var(--radius) - 3px); background: var(--accent-solid); color: var(--accent-on-solid); border: none; font: inherit; font-weight: 500; font-size: 0.875rem; cursor: default; }
+  .hub-notice { background: var(--surface-1); border-radius: calc(var(--radius) - 3px); padding: 0.85rem; text-align: center; font-size: 0.8125rem; margin-bottom: 1rem; }
+  .hub-notice .muted { color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem; }
+
+  /* ==========================================================================
+     ZONE B — literal values only from here down, mirroring recopyfast.src.js.
+     ========================================================================== */
+  .site-frame {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #ffffff; /* the customer's own page — arbitrary, not a token */
+    min-height: 22rem;
+  }
+  .site-frame-label { position: absolute; top: 0.5rem; left: 0.5rem; z-index: 2; font-size: 0.625rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; background: rgba(15,23,42,0.55); color: #e2e8f0; padding: 0.15rem 0.5rem; border-radius: 999px; }
+  .site-content { padding: 4.5rem 2.25rem 2rem; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .site-content h2 { font-size: 1.5rem; margin: 0 0 0.5rem; }
+  .site-content p { font-size: 0.9375rem; line-height: 1.6; color: #4b5563; max-width: 32rem; }
+  .site-content .btn-mock { display: inline-block; margin-top: 1rem; padding: 0.55rem 1.1rem; background: #0f766e; color: #fff; border-radius: 6px; font-size: 0.875rem; font-weight: 500; }
+
+  /* --- #rcf-editor-banner (redesigned) -------------------------------------
+     background: hsl(200 18% 7% / 0.88)  — dark-mode --canvas literal
+     text:       hsl(200 22% 96%)        — dark-mode --text-strong literal
+     accent:     hsl(174 48% 58%)        — dark-mode --accent-solid literal
+     border:     hsl(200 12% 21%)        — dark-mode --line literal          */
+  #mock-editor-banner {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 3;
+    display: flex; align-items: center; gap: 12px;
+    min-height: 46px; padding: 0 14px;
+    background: hsl(200 18% 7% / 0.88);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid hsl(200 12% 21%);
+    color: hsl(200 22% 96%);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px;
+  }
+  .banner-mark { width: 22px; height: 22px; border-radius: 6px; background: hsl(174 48% 58%); color: hsl(200 30% 8%); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex-shrink: 0; }
+  .banner-headline { font-weight: 600; white-space: nowrap; }
+  .banner-divider { width: 1px; height: 16px; background: hsl(200 12% 24%); flex-shrink: 0; }
+  .banner-email { color: hsl(200 12% 68%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .banner-spacer { flex: 1; }
+  .banner-status { display: inline-flex; align-items: center; gap: 6px; color: hsl(162 60% 70%); font-size: 12.5px; white-space: nowrap; }
+  .banner-status .dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(162 60% 55%); flex-shrink: 0; }
+  .banner-status.saving { color: hsl(200 12% 68%); }
+  .banner-status.saving .dot { background: hsl(200 12% 55%); }
+  .banner-done { flex-shrink: 0; background: hsl(200 14% 13%); border: 1px solid hsl(200 12% 24%); color: hsl(200 18% 88%); font: inherit; font-size: 12.5px; font-weight: 500; padding: 6px 12px; border-radius: 7px; }
+
+  /* --- content affordance (.rcf-hovering / .rcf-hover-hint / .rcf-editing)
+     CORRECTED from Tailwind blue-500 to the accent literal, hsl(174 48% 58%). */
+  .demo-editable { display: block; padding: 2px 4px; margin: -2px -4px; border-radius: 3px; }
+  .demo-editable.rest { outline: 2px dashed transparent; }
+  .demo-editable.hovering { outline: 2px dashed hsl(174 48% 58% / 0.7); outline-offset: 4px; cursor: pointer; }
+  .demo-editable.editing { outline: 2px solid hsl(174 48% 58%); outline-offset: 2px; cursor: text; background: hsl(174 48% 58% / 0.06); }
+  .hover-hint { display: inline-flex; align-items: center; gap: 6px; background: hsl(200 18% 10% / 0.95); color: #e2e8f0; padding: 5px 10px; border-radius: 8px; font-size: 11.5px; font-weight: 500; margin-left: 10px; white-space: nowrap; }
+  .affordance-caption { font-size: 0.75rem; color: var(--text-muted); text-align: center; margin-top: 0.5rem; }
+
+  /* --- verification modal (.rcf-modal family) -------------------------------
+     icon fill CORRECTED from a teal gradient to a flat tone-accent literal.   */
+  .modal-scrim { position: relative; background: hsl(200 18% 5% / 0.55); padding: 2.5rem 1.5rem; display: flex; justify-content: center; }
+  .rcf-modal { width: 21rem; background: hsl(200 20% 9%); border: 1px solid hsl(200 12% 22%); border-radius: 14px; padding: 1.75rem; color: hsl(200 22% 94%); font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.6); }
+  .rcf-modal-icon { width: 44px; height: 44px; border-radius: 12px; margin: 0 auto 14px; display: flex; align-items: center; justify-content: center; font-size: 18px; background: hsl(174 48% 58% / 0.16); border: 1px solid hsl(174 48% 58% / 0.35); }
+  .rcf-modal-title { text-align: center; font-size: 16px; font-weight: 600; margin: 0 0 6px; }
+  .rcf-modal-subtitle { text-align: center; font-size: 13px; color: hsl(200 12% 68%); line-height: 1.5; margin: 0 0 18px; }
+  .rcf-modal-label { display: block; font-size: 12px; font-weight: 500; color: hsl(200 14% 78%); margin-bottom: 6px; }
+  .rcf-modal-input { width: 100%; padding: 9px 11px; background: hsl(200 16% 13%); border: 1px solid hsl(200 12% 26%); border-radius: 7px; color: hsl(200 22% 94%); font-size: 13px; margin-bottom: 14px; }
+  .rcf-code-input { width: 100%; padding: 10px; text-align: center; letter-spacing: 0.4em; font-size: 18px; background: hsl(200 16% 13%); border: 1px solid hsl(200 12% 26%); border-radius: 7px; color: hsl(200 22% 94%); margin-bottom: 14px; }
+  .rcf-modal-btn-primary { width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 8px; background: hsl(174 48% 58%); border: none; color: hsl(200 30% 8%); font: inherit; font-size: 13.5px; font-weight: 600; }
+  .rcf-modal-btn-ghost { width: 100%; padding: 10px; border-radius: 8px; background: transparent; border: 1px solid hsl(200 12% 26%); color: hsl(200 18% 82%); font: inherit; font-size: 13px; }
+  .modal-copy-tag { position: absolute; top: -0.65rem; left: 1.5rem; background: var(--tone-accent-surface); color: var(--tone-accent-text); font-size: 0.6875rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 999px; }
+  .modal-stack { position: relative; }
+
+  /* --- gap / correction footnote table -------------------------------------*/
+  table.gaps { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+  table.gaps th, table.gaps td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.gaps th { color: var(--text-muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.gaps code { background: var(--surface-1); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.75rem; }
+</style>
+</head>
+<body>
+  <div class="reference-banner">REFERENCE ONLY — static mockup for s14a-grant-authorized-editing. Not production code. See the accompanying .md.</div>
+
+  <div class="container page">
+    <p class="text-eyebrow">Design reference · s14a</p>
+    <h1 class="text-display">Grant-authorized editing</h1>
+    <p class="lede">
+      Turns an already-injected, currently inert widget surface into a working one. Zone A
+      (below) is the existing, unchanged hub — shown for continuity. Zones B–D are the
+      widget surfaces this story actually changes: they run on the customer's page and use
+      literal token values, never CSS custom properties.
+    </p>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 1 — the hub (Zone A, var() tokens, existing/unchanged) -->
+    <!-- ============================================================ -->
+    <section class="section">
+      <div class="section-head">
+        <span class="n">1</span>
+        <span class="text-title">The hub — sign in (existing, unchanged)</span>
+      </div>
+      <p class="section-note">
+        <code>src/app/edit/EditorSignIn.tsx</code>. Already on-system: <code>Button</code>,
+        <code>Input</code>, <code>Label</code>, <code>tone-accent-*</code> icon well, sentence
+        case throughout. Not redesigned — shown for continuity with the widget-side screens below.
+      </p>
+      <div class="row">
+        <div>
+          <span class="label-chip">Step: email</span>
+          <div class="hub-card">
+            <div class="hub-icon">🛡</div>
+            <div class="hub-h1">Edit your site</div>
+            <p class="hub-p">Sign in with the email address the site owner added you with.</p>
+            <div class="field"><label>Email address</label><input placeholder="you@example.com" readonly /></div>
+            <button class="btn-primary">Send me a code</button>
+          </div>
+        </div>
+        <div>
+          <span class="label-chip">Step: code</span>
+          <div class="hub-card">
+            <div class="hub-notice">
+              If that address can edit a site, a code is on its way.
+              <div class="muted">Sent to jane@bakery.example. It expires in 10 minutes.</div>
+            </div>
+            <div class="field"><label>6-digit code</label><input placeholder="000000" readonly style="text-align:center; letter-spacing:0.5em; font-size:1.25rem;" /></div>
+            <button class="btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 2 — verification modal, Zone B, literal values -->
+    <!-- ============================================================ -->
+    <section class="section">
+      <div class="section-head">
+        <span class="n">2</span>
+        <span class="text-title">On the customer's page — verification needed</span>
+      </div>
+      <p class="section-note">
+        One component (<code>showEditorCodeUI()</code>), three openings. All three keep the
+        same neutral, never-confirms-an-address copy rule the hub already follows.
+        <strong>Icon fill corrected</strong> from a teal gradient to a flat tone — see gaps.
+      </p>
+      <div class="row">
+        <div class="modal-stack" style="width:21rem;">
+          <span class="modal-copy-tag">First-time verification</span>
+          <div class="site-frame" style="min-height:auto;">
+            <div class="modal-scrim">
+              <div class="rcf-modal">
+                <div class="rcf-modal-icon">✉</div>
+                <div class="rcf-modal-title">Confirm it's you</div>
+                <div class="rcf-modal-subtitle">Enter the email you edit this site with and we'll send a 6-digit code.</div>
+                <label class="rcf-modal-label">Email address</label>
+                <input class="rcf-modal-input" placeholder="you@example.com" readonly />
+                <button class="rcf-modal-btn-primary">Send code</button>
+                <button class="rcf-modal-btn-ghost">Continue as a visitor</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-stack" style="width:21rem;">
+          <span class="modal-copy-tag">Device grant expired</span>
+          <div class="site-frame" style="min-height:auto;">
+            <div class="modal-scrim">
+              <div class="rcf-modal">
+                <div class="rcf-modal-icon">✉</div>
+                <div class="rcf-modal-title">Sign in again to keep editing</div>
+                <div class="rcf-modal-subtitle">Your last sign-in expired. Enter the email you edit this site with and we'll send a new code.</div>
+                <label class="rcf-modal-label">6-digit code</label>
+                <input class="rcf-code-input" placeholder="000000" readonly />
+                <button class="rcf-modal-btn-primary">Verify</button>
+                <button class="rcf-modal-btn-ghost">Use a different address</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-stack" style="width:21rem;">
+          <span class="modal-copy-tag">Handoff link lapsed — new</span>
+          <div class="site-frame" style="min-height:auto;">
+            <div class="modal-scrim">
+              <div class="rcf-modal">
+                <div class="rcf-modal-icon">✉</div>
+                <div class="rcf-modal-title">That link needs refreshing</div>
+                <div class="rcf-modal-subtitle">Links like this work once. Enter the email you edit this site with and we'll send a new code.</div>
+                <label class="rcf-modal-label">Email address</label>
+                <input class="rcf-modal-input" placeholder="you@example.com" readonly />
+                <button class="rcf-modal-btn-primary">Send code</button>
+                <button class="rcf-modal-btn-ghost">Continue as a visitor</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="section-note" style="margin-top:1rem;">
+        "Handoff link lapsed" is not handled by the code today — <code>boot()</code> falls
+        through to silence when a spent handoff code meets an empty grant store
+        (<code>recopyfast.src.js:456-465</code>). Designed here as a state to close; see the .md.
+      </p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 3 — editing banner + affordance, Zone B, literal values -->
+    <!-- ============================================================ -->
+    <section class="section">
+      <div class="section-head">
+        <span class="n">3</span>
+        <span class="text-title">On the customer's page — editing</span>
+      </div>
+      <p class="section-note">
+        The redesigned banner (no more "isn't enabled yet") plus the three content-affordance
+        states. <strong>Hover outline corrected</strong> from Tailwind blue-500 to the accent
+        literal already used two hundred lines away in this same file — see gaps.
+      </p>
+      <div class="site-frame">
+        <span class="site-frame-label">customer's live page</span>
+        <div id="mock-editor-banner">
+          <span class="banner-mark">&lt;&gt;</span>
+          <span class="banner-headline">You can edit this page</span>
+          <span class="banner-divider"></span>
+          <span class="banner-email" title="jane@bakery.example">jane@bakery.example</span>
+          <span class="banner-spacer"></span>
+          <span class="banner-status"><span class="dot"></span>Saved</span>
+          <button class="banner-done">Done</button>
+        </div>
+        <div class="site-content">
+          <h2 class="demo-editable rest">Fresh bread, baked every morning</h2>
+          <p class="demo-editable hovering">We open at 7am and sell out by noon most days — come early for the good stuff.<span class="hover-hint">✏️ Click to edit</span></p>
+          <p class="demo-editable editing">123 Main Street, open Tue–Sun</p>
+          <a class="btn-mock demo-editable rest" href="#" onclick="return false;">See this week's menu</a>
+        </div>
+      </div>
+      <p class="affordance-caption">Left to right in the mock: at rest · hover (dashed outline + hint) · actively editing (solid outline). Everything else on the page is inert.</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 4 — access ended, Zone B, deliberately empty -->
+    <!-- ============================================================ -->
+    <section class="section">
+      <div class="section-head">
+        <span class="n">4</span>
+        <span class="text-title">On the customer's page — access ended</span>
+      </div>
+      <p class="section-note">
+        Revoked, or the grant no longer matches this site. <code>nextActionFor()</code> already
+        returns <code>"hide"</code> for both — deliberately, so a stale link can never be used to
+        confirm an address once had access (T7). This design keeps that: no banner, no modal,
+        no message. The page below is not broken and not blank — it is the customer's ordinary
+        page, exactly as any visitor sees it.
+      </p>
+      <div class="site-frame">
+        <span class="site-frame-label">customer's live page — nothing added</span>
+        <div class="site-content" style="padding-top:2.5rem;">
+          <h2>Fresh bread, baked every morning</h2>
+          <p>We open at 7am and sell out by noon most days — come early for the good stuff.</p>
+          <p>123 Main Street, open Tue–Sun</p>
+          <a class="btn-mock" href="#" onclick="return false;">See this week's menu</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- SECTION 5 — corrections footnote -->
+    <!-- ============================================================ -->
+    <section class="section">
+      <div class="section-head">
+        <span class="n">5</span>
+        <span class="text-title">Corrections applied in this design (not new gaps)</span>
+      </div>
+      <table class="gaps">
+        <thead><tr><th>Element</th><th>Was</th><th>Corrected to</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>.rcf-hovering</code></td>
+            <td><code>rgba(59,130,246,.6)</code> (blue-500)</td>
+            <td><code>hsl(174 48% 58% / .7)</code></td>
+            <td>Design system: one accent, never a second brand colour. This exact literal already appears in the same file at <code>:1815</code>.</td>
+          </tr>
+          <tr>
+            <td><code>.rcf-modal-icon</code></td>
+            <td>teal gradient wash</td>
+            <td>flat <code>hsl(174 48% 58% / .16)</code> fill</td>
+            <td>"No gradient, ever — including... icon tiles."</td>
+          </tr>
+          <tr>
+            <td><code>.rcf-hover-hint</code></td>
+            <td>slate gradient</td>
+            <td>flat <code>hsl(200 18% 10% / .95)</code></td>
+            <td>Same rule.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>REFERENCE MOCKUP — /cms-for/wordpress — s18-stack-recipes</title>
+<style>
+  /* Low-fidelity reference only. Tokens/colors approximate the sky-*/slate-* legacy
+     marketing palette + Instrument Sans / Bricolage Grotesque / JetBrains Mono per
+     docs/design-system.md and docs/design/styleguide.md. Not production code — see
+     the mockup-status rule in the /ks-design skill contract. */
+  :root {
+    --sky-50:#f0f7ff; --sky-100:#e0f0fe; --sky-200:#bae2fd; --sky-600:#0284c7; --sky-700:#0369a1;
+    --slate-50:#f8fafc; --slate-100:#f1f5f9; --slate-200:#e2e8f0; --slate-400:#94a3b8;
+    --slate-500:#64748b; --slate-600:#475569; --slate-900:#0f172a;
+    --teal:#1f6f68; /* brand accent, ~hsl(176 54% 28%) */
+    --white-70:rgba(255,255,255,.7); --white-60:rgba(255,255,255,.6);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+    background: linear-gradient(to bottom, var(--sky-50), #ffffff);
+    color: var(--slate-900);
+  }
+  .font-display { font-family: "Bricolage Grotesque", "Instrument Sans", sans-serif; }
+  .font-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .max-w-6xl { max-width: 72rem; margin-inline:auto; }
+  .max-w-4xl { max-width: 56rem; margin-inline:auto; }
+  .max-w-2xl { max-width: 42rem; }
+  .px-6 { padding-inline: 1.5rem; }
+  .section { padding-block: 4rem; }
+  header.site {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--slate-200);
+  }
+  .brand { display:flex; align-items:center; gap:.5rem; font-weight:600; }
+  .brand .mark {
+    width:28px; height:28px; border-radius:8px; background:var(--teal); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-family:monospace; font-size:.8rem;
+  }
+  nav.site a { color: var(--slate-600); text-decoration:none; margin-inline-start: 1.5rem; font-size:.9rem; }
+
+  /* --- mockup-only annotation ribbon, not part of production design --- */
+  .mockup-note {
+    background:#fff7ed; border-bottom:2px dashed #f59e0b; color:#78350f;
+    font-size:.8rem; padding: .75rem 1.5rem; line-height:1.5;
+  }
+  .mockup-note code { background:#fef3c7; padding:0 .25rem; border-radius:3px; }
+  [data-recipe-field] { outline: 1px dashed #f59e0b; outline-offset: 4px; position:relative; }
+  [data-recipe-field]::before {
+    content: attr(data-recipe-field);
+    position:absolute; top:-1.1rem; left:0; font-family: "JetBrains Mono", monospace;
+    font-size:.65rem; color:#b45309; letter-spacing:.02em;
+  }
+
+  .breadcrumb { font-size:.85rem; color: var(--slate-500); margin-bottom: 1.5rem; }
+  .breadcrumb a { color: var(--slate-500); text-decoration:none; }
+  .breadcrumb .sep { margin:0 .4rem; }
+
+  .eyebrow {
+    display:inline-block; font-size:.875rem; font-weight:600; text-transform:uppercase;
+    letter-spacing:.075em; color: var(--sky-700); margin-bottom: 1rem;
+  }
+  h1.page-title {
+    font-size: 2.75rem; line-height:1.05; font-weight:700; letter-spacing:-0.02em;
+    color: var(--slate-900); margin: 0 0 1rem 0;
+  }
+  @media (min-width: 640px) { h1.page-title { font-size: 3.25rem; } }
+  p.intro { font-size:1.15rem; color: var(--slate-600); line-height:1.6; max-width:42rem; }
+
+  .meta-row { display:flex; flex-wrap:wrap; gap:.75rem; margin-top:1.5rem; }
+  .pill {
+    display:inline-flex; align-items:center; gap:.5rem; padding:.5rem 1rem;
+    background: var(--sky-50); border:1px solid var(--sky-100); border-radius:999px;
+    font-size:.85rem; font-weight:600; color: var(--sky-700);
+  }
+  .pill.verified { color: var(--teal); background: #ecfaf8; border-color:#c9ece7; }
+  .pill .dot { width:8px; height:8px; border-radius:50%; background: currentColor; }
+
+  h2.section-title { font-size:1.5rem; font-weight:600; color: var(--slate-900); margin: 0 0 .5rem 0; }
+  p.section-sub { color: var(--slate-600); margin: 0 0 1.5rem 0; max-width:40rem; }
+
+  /* Snippet block — pattern reused from HowItWorks.tsx */
+  .code-panel {
+    background: var(--slate-900); border-radius: 1rem; padding: 1.5rem;
+    box-shadow: 0 20px 40px -20px rgba(15,23,42,.35);
+    border: 1px solid rgba(186,226,253,.15);
+  }
+  .window-dots { display:flex; gap:.4rem; margin-bottom:1rem; }
+  .window-dots span { width:10px; height:10px; border-radius:50%; }
+  .window-dots .r{background:#ef4444;} .window-dots .y{background:#eab308;} .window-dots .g{background:#22c55e;}
+  pre.snippet {
+    margin:0; color:#5eead4; font-size:.85rem; line-height:1.7; white-space:pre-wrap; word-break:break-all;
+  }
+  .copy-row { display:flex; align-items:center; justify-content:space-between; margin-top:1rem; }
+  .copy-btn {
+    display:inline-flex; align-items:center; gap:.5rem; padding:.5rem 1rem;
+    background: var(--sky-50); border:1px solid var(--sky-200); border-radius:.5rem;
+    font-size:.85rem; font-weight:500; color: var(--sky-700); cursor:pointer;
+  }
+  .snippet-note { font-size:.85rem; color: var(--slate-500); margin-top:.75rem; font-style:italic; }
+
+  .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+  @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    border-radius: 1.5rem; border: 1px solid rgba(255,255,255,.6); background: var(--white-70);
+    padding: 2rem;
+  }
+  .icon-tile {
+    width: 3rem; height:3rem; border-radius: 1rem; background: var(--sky-600);
+    display:flex; align-items:center; justify-content:center; color:#fff; margin-bottom:1rem;
+    font-size:1.1rem;
+  }
+  .card h3 { font-size:1.25rem; font-weight:600; margin: 0 0 .5rem 0; color: var(--slate-900); }
+  .card p { color: var(--slate-600); line-height:1.6; margin:0; }
+
+  .location-path {
+    font-family: "JetBrains Mono", monospace; font-size:.85rem; background: var(--slate-100);
+    border: 1px solid var(--slate-200); border-radius:.5rem; padding: .75rem 1rem; margin: 1rem 0;
+    color: var(--slate-900); line-height:1.6;
+  }
+  .location-path .step { color: var(--slate-500); }
+  .location-path .file { color: var(--sky-700); font-weight:600; }
+  .inline-code {
+    font-family: "JetBrains Mono", monospace; background: #fff; border:1px solid var(--slate-200);
+    border-radius:.3rem; padding:.1rem .4rem; font-size:.85rem;
+  }
+
+  /* Evidence card */
+  .evidence-frame {
+    border-radius: 1rem; overflow:hidden; border: 1px solid var(--slate-200);
+    background: #fff; box-shadow: 0 12px 30px -18px rgba(15,23,42,.25);
+  }
+  .evidence-frame .chrome {
+    background: var(--slate-100); padding: .5rem .75rem; display:flex; gap:.4rem; align-items:center;
+    border-bottom: 1px solid var(--slate-200);
+  }
+  .evidence-frame .chrome span { width:8px; height:8px; border-radius:50%; background: var(--slate-400); }
+  .evidence-frame .shot {
+    height: 220px; background: repeating-linear-gradient(45deg, var(--slate-100), var(--slate-100) 10px, var(--slate-50) 10px, var(--slate-50) 20px);
+    display:flex; align-items:center; justify-content:center; color: var(--slate-400); font-size:.85rem;
+  }
+  .evidence-caption { padding: 1rem 1.25rem; border-top:1px solid var(--slate-100); }
+  .evidence-caption .verified-line {
+    display:flex; align-items:center; gap:.5rem; font-weight:600; color: var(--teal); font-size:.9rem; margin-bottom:.35rem;
+  }
+  .evidence-caption p { margin:0; color: var(--slate-600); font-size:.85rem; line-height:1.5; }
+
+  .cta-band {
+    margin-top: 3rem; text-align:center; padding: 3rem 1.5rem; border-radius: 1.5rem;
+    background: var(--sky-50); border: 1px solid var(--sky-100);
+  }
+  .cta-band h3 { font-size:1.5rem; font-weight:600; margin:0 0 .5rem 0; }
+  .cta-band p { color: var(--slate-600); margin: 0 0 1.5rem 0; }
+  .btn-primary {
+    display:inline-block; background: var(--teal); color:#fff; padding: .75rem 1.75rem;
+    border-radius:.6rem; font-weight:600; text-decoration:none; font-size:.95rem;
+  }
+  .btn-outline {
+    display:inline-block; border: 1px solid var(--slate-200); color: var(--slate-600);
+    padding: .75rem 1.75rem; border-radius:.6rem; font-weight:600; text-decoration:none;
+    font-size:.95rem; margin-inline-start:.75rem;
+  }
+
+  footer.site { border-top:1px solid var(--slate-200); padding: 2rem 1.5rem; text-align:center; color: var(--slate-500); font-size:.85rem; }
+
+  .divider-label {
+    text-align:center; margin: 5rem 0 2rem 0; font-family:"JetBrains Mono", monospace;
+    font-size:.75rem; letter-spacing:.05em; text-transform:uppercase; color:#b45309;
+    background:#fff7ed; padding:.5rem; border-top:2px dashed #f59e0b; border-bottom:2px dashed #f59e0b;
+  }
+  .unsupported-card {
+    border-radius: 1.5rem; border: 1px solid var(--slate-200); background:#fff; padding: 2.5rem;
+    max-width: 44rem; margin: 0 auto;
+  }
+  .unsupported-card .icon-tile { background: var(--sky-600); }
+  .unsupported-card h3 { font-size:1.35rem; font-weight:600; margin:0 0 .75rem 0; }
+  .unsupported-card p { color: var(--slate-600); line-height:1.65; margin: 0 0 1rem 0; }
+  .unsupported-card .whatnow { background: var(--slate-50); border-radius:.75rem; padding:1rem 1.25rem; font-size:.9rem; color: var(--slate-600); }
+
+  .index-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; max-width:72rem; margin:0 auto; }
+  @media (max-width: 900px) { .index-grid { grid-template-columns: repeat(2, 1fr); } }
+  .index-card {
+    border:1px solid var(--slate-200); border-radius:1rem; padding:1.25rem; background:#fff;
+    display:flex; flex-direction:column; gap:.5rem;
+  }
+  .index-card .icon-tile { width:2.25rem; height:2.25rem; border-radius:.6rem; margin-bottom:.25rem; font-size:.8rem; }
+  .index-card .name { font-weight:600; font-size:.95rem; }
+  .index-card .status { font-size:.75rem; color: var(--teal); font-weight:600; }
+  .index-card.unsupported .status { color: var(--slate-500); }
+  .index-card.unsupported { opacity:.85; }
+</style>
+</head>
+<body>
+
+  <div class="mockup-note">
+    <strong>Mockup annotation (not part of the design):</strong> every element outlined with a
+    dashed amber box and labelled <code>data-recipe-field="…"</code> is data read from
+    <code>getInstallRecipe(stack)</code> — the same typed module <code>s02</code> owns and the
+    dashboard's <code>awaiting-install</code> state also reads from. There is one template for
+    every stack; a new stack is a new entry in that module, never new JSX. Nothing in this file
+    is production code — see <code>docs/designs/s18-stack-recipes.md</code>.
+  </div>
+
+  <!-- ============ /cms-for/wordpress — SUPPORTED VARIANT ============ -->
+
+  <header class="site">
+    <div class="brand"><span class="mark">&lt;&gt;</span> ReCopyFast</div>
+    <nav class="site">
+      <a href="#">Features</a>
+      <a href="#">Pricing</a>
+      <a href="#">Install guides</a>
+      <a href="#">Log in</a>
+    </nav>
+  </header>
+
+  <main class="max-w-4xl px-6 section">
+
+    <div class="breadcrumb">
+      <a href="#">Home</a><span class="sep">/</span>
+      <a href="#">Install guides</a><span class="sep">/</span>
+      WordPress
+    </div>
+
+    <span class="eyebrow">Install guide</span>
+    <h1 class="font-display page-title" data-recipe-field="recipe.stackName">
+      Add ReCopyFast to WordPress
+    </h1>
+    <p class="intro">
+      One script tag, pasted once. No plugin conflicts, no build step, no theme rewrite.
+    </p>
+
+    <div class="meta-row">
+      <span class="pill"><span class="dot"></span> ~5 min install</span>
+      <span class="pill verified" data-recipe-field="recipe.evidence.verifiedAt">
+        <span class="dot"></span> Verified live — Aug 2026
+      </span>
+    </div>
+
+    <!-- Section 1: the snippet -->
+    <div style="margin-top:4rem;">
+      <h2 class="section-title">The snippet</h2>
+      <p class="section-sub">
+        The exact tag your dashboard issues when you register this site — not a paraphrase.
+      </p>
+
+      <div class="code-panel" data-recipe-field="recipe.snippet">
+        <div class="window-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+        <pre class="snippet font-mono">&lt;script src="https://recopyfa.st/embed/recopyfast.js"
+    data-site-id="YOUR_SITE_ID"
+    data-site-token="YOUR_SITE_TOKEN"
+    data-api-url="https://recopyfa.st/api"&gt;&lt;/script&gt;</pre>
+        <div class="copy-row">
+          <span style="color:#94a3b8; font-size:.75rem;">from your dashboard once the site is registered</span>
+          <button class="copy-btn">⧉ Copy the snippet</button>
+        </div>
+      </div>
+      <p class="snippet-note">
+        This is the same tag builder (<code class="inline-code">buildEmbedScript</code>) every
+        other install surface in the product calls — the recipe module composes around it, it
+        never re-derives the tag text.
+      </p>
+    </div>
+
+    <!-- Section 2 + 3: where it goes / evidence -->
+    <div class="grid-2" style="margin-top:4rem;">
+      <div class="card" data-recipe-field="recipe.locationSteps">
+        <div class="icon-tile">📁</div>
+        <h3>Where it goes</h3>
+        <p>Paste it once, before the closing body tag of your theme's footer.</p>
+        <div class="location-path">
+          <span class="step">WordPress Admin → Appearance → Theme File Editor →</span>
+          <span class="file">footer.php</span>
+        </div>
+        <p style="font-size:.85rem; color:#64748b;">
+          Paste immediately before <span class="inline-code">&lt;/body&gt;</span>. Prefer not to
+          edit theme files directly? Any "insert header/footer scripts" plugin's footer field
+          works identically.
+        </p>
+      </div>
+
+      <div class="card" data-recipe-field="recipe.evidence">
+        <div class="icon-tile">✓</div>
+        <h3>Verified live</h3>
+        <p style="margin-bottom:1rem;">Installed and checked on a real instance, not assumed.</p>
+        <div class="evidence-frame">
+          <div class="chrome"><span></span><span></span><span></span></div>
+          <div class="shot">[ screenshot of the widget mounted, live ]</div>
+          <div class="evidence-caption">
+            <div class="verified-line">✓ Verified on a fresh WordPress 6.x install</div>
+            <p>Widget mounted, zero console errors, editable elements detected. Screenshot and
+              verification date committed alongside the recipe entry.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cta-band">
+      <h3>Not your stack?</h3>
+      <p>Seven more install guides, or start the 5-minute setup from your dashboard.</p>
+      <a href="#" class="btn-primary">Browse all install guides</a>
+      <a href="#" class="btn-outline">Start free trial</a>
+    </div>
+  </main>
+
+  <footer class="site">© ReCopyFast — Install guides render from one typed recipe module.</footer>
+
+
+  <!-- ============ SKETCH: documented-unsupported variant ============ -->
+  <div class="divider-label">Sketch — same route, unsupported variant (e.g. /cms-for/some-hostile-platform)</div>
+
+  <main class="max-w-4xl px-6" style="padding-bottom:5rem;">
+    <div class="breadcrumb">
+      <a href="#">Home</a><span class="sep">/</span>
+      <a href="#">Install guides</a><span class="sep">/</span>
+      Some Hostile Platform
+    </div>
+    <span class="eyebrow">Install guide</span>
+    <h1 class="font-display page-title" style="font-size:2.25rem;" data-recipe-field="recipe.stackName">
+      ReCopyFast on Some Hostile Platform
+    </h1>
+    <p class="intro" style="margin-bottom:2.5rem;">Not supported today — here's exactly why, and what to do instead.</p>
+
+    <div class="unsupported-card" data-recipe-field="recipe.unsupportedReason">
+      <div class="icon-tile">ℹ</div>
+      <h3>This platform strips injected scripts on save</h3>
+      <p>
+        Some Hostile Platform's page editor removes any <span class="inline-code">&lt;script&gt;</span>
+        tag pasted into its content field when the page is republished, so the snippet cannot
+        survive being installed here. This is a limitation of the platform's editor, not a bug
+        in the tag — we tried, and recorded it rather than quietly leaving this stack off the list.
+      </p>
+      <div class="whatnow">
+        <strong>What to do instead:</strong> if this platform exposes a raw HTML/embed block or a
+        custom-code injection setting outside the normal content editor, that path is not
+        stripped — contact support and we'll verify it together. Otherwise, browse a stack that
+        installs cleanly today.
+      </div>
+    </div>
+
+    <div class="cta-band" style="margin-top:3rem;">
+      <a href="#" class="btn-primary">Browse all install guides</a>
+      <a href="#" class="btn-outline">Contact support</a>
+    </div>
+  </main>
+
+
+  <!-- ============ SKETCH: /cms-for index / chooser ============ -->
+  <div class="divider-label">Sketch — /cms-for index (chooser, reachable from the comparison cluster)</div>
+
+  <main class="max-w-6xl px-6" style="padding-bottom:6rem;">
+    <div style="text-align:center; margin-bottom:3rem;">
+      <span class="eyebrow">Install guides</span>
+      <h2 class="font-display" style="font-size:2.25rem; font-weight:700;">Pick your stack</h2>
+      <p class="intro" style="margin:0 auto;">Every stack we've verified — and the one honest exception.</p>
+    </div>
+    <div class="index-grid" data-recipe-field="getAllInstallRecipes()">
+      <div class="index-card"><div class="icon-tile">W</div><span class="name">WordPress</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">S</div><span class="name">Shopify</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">W</div><span class="name">Webflow</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">S</div><span class="name">Squarespace</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">F</div><span class="name">Framer</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">N</div><span class="name">Next.js</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">A</div><span class="name">Astro</span><span class="status">✓ Verified</span></div>
+      <div class="index-card"><div class="icon-tile">H</div><span class="name">Plain HTML</span><span class="status">✓ Verified</span></div>
+      <div class="index-card unsupported"><div class="icon-tile">?</div><span class="name">Some Hostile Platform</span><span class="status">Documented unsupported</span></div>
+    </div>
+  </main>
+
+</body>
+</html>

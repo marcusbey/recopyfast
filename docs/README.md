@@ -13,9 +13,18 @@ If a document here contradicts the PRD, the PRD wins and the document is stale.
 Product definition: target, perimeter, graveyard, angle, success criteria, SEO and GTM.
 
 ### [`stories.md`](./stories.md)
-The delta backlog — 19 shippable stories covering the gap between what is in production
-today and what the PRD requires. Ordered by dependency. Ids (`s01`…`s19`) name every
-pipeline file and story branch.
+The delta backlog — **27 shippable stories** covering the gap between what is in production
+today and what the PRD requires. Ordered by dependency. Ids name every pipeline file and story
+branch. Read its **"Revised after research"** section first: five stories were re-scored to
+complexity 5 and split (suffixed ids, never renumbered), and four open review majors were
+settled against the code.
+
+### `research/`, `designs/`, `plans/` — the per-story pipeline
+| Folder | Contents |
+|---|---|
+| [`research/`](./research/) | 19 verified-context reports, one per original story. Split stories inherit their parent's report, whose `## Split proposal` defines them |
+| [`designs/`](./designs/README.md) | 19 story designs (`<id>.md` + `<id>.html` mockup). Eight no-UI stories are recorded as deliberate skips in its README |
+| [`plans/`](./plans/) | 27 plans, all `validated: no` — `/ks-execute` is fail-closed until a human checkpoint sets `yes` |
 
 ### [`reviews/stories.md`](./reviews/stories.md)
 Fresh-context review of the backlog against the PRD. Its verdict was *critical / not ready*;
@@ -40,13 +49,29 @@ inventory, imposed UI patterns, Do/Don't — captured from the code, plus the su
 One ADR per structural decision, with the options considered and why they were rejected.
 Immutable: a change means a new ADR superseding the old one.
 
-| ADR | Decision |
-|---|---|
-| [001](./decisions/001-inherited-production-baseline.md) | The inherited production codebase is the architectural baseline |
-| [002](./decisions/002-rls-tenant-boundary.md) | RLS is the tenant boundary; service-role is a named exception |
-| [003](./decisions/003-no-schema-validation-library.md) | Boundary validation stays hand-rolled; no schema library |
-| [004](./decisions/004-embed-transport-split.md) | Native WebSocket for the embed, Socket.io for first-party |
-| [005](./decisions/005-client-state-context-and-fetch-hooks.md) | Client state is React Context plus custom fetch hooks |
+**Framing decisions** (001–005) commit on `main`. **Story decisions** (006+) are scoped to a
+story and travel with its branch.
+
+| ADR | Decision | Scope |
+|---|---|---|
+| [001](./decisions/001-inherited-production-baseline.md) | The inherited production codebase is the architectural baseline | framing |
+| [002](./decisions/002-rls-tenant-boundary.md) | RLS is the tenant boundary; service-role is a named exception | framing |
+| [003](./decisions/003-no-schema-validation-library.md) | Boundary validation stays hand-rolled; no schema library | framing |
+| [004](./decisions/004-embed-transport-split.md) | Native WebSocket for the embed, Socket.io for first-party | framing |
+| [005](./decisions/005-client-state-context-and-fetch-hooks.md) | Client state is React Context plus custom fetch hooks | framing |
+| [006](./decisions/006-site-status-persisted-state-machine.md) | Site status is a persisted state machine, not a derived count | `s02` |
+| [007](./decisions/007-account-milestones-write-once.md) | Activation milestones are write-once rows, not a log scan | `s03` |
+| [008](./decisions/008-bulk-import-write-path.md) | Bulk import writes through the human-edit path | `s05` |
+| [009](./decisions/009-impression-history-change-timeline-source.md) | Which existing table is the true content-change timeline | `s10` |
+| [010](./decisions/010-webhook-dispatch-out-of-band.md) | Webhook dispatch is out-of-band | `s16` |
+| [011](./decisions/011-agency-digest-idempotent-send-ledger.md) | Digest sends are recorded before sending | `s15` |
+| [012](./decisions/012-cluster-content-engine.md) | The SEO cluster engine is typed data plus one template | `s17` |
+| [013](./decisions/013-lighthouse-ci-thresholds.md) | Lighthouse CI thresholds | `s17` |
+| [014](./decisions/014-trial-as-expiring-plan-entitlement.md) | The trial is a time-boxed grant of `pro`, not a catalogue row | `s01` |
+| [015](./decisions/015-impression-grain-and-anonymity.md) | Impressions are pre-aggregated and carry no visitor identifier | `s09` |
+| [016](./decisions/016-ab-visitor-identity-and-dnt.md) | A/B visitor identity and Do-Not-Track behaviour | `s11c` |
+| [017](./decisions/017-ab-conversion-is-per-visitor.md) | A/B conversion is defined over the per-visitor event stream (closes M2) | `s12` |
+| [018](./decisions/018-tenant-scoped-serving-origin.md) | A tenant-scoped serving origin, and its irreversibility | `s20` |
 
 ### `product/` — what it does and for whom
 | File | Contents |

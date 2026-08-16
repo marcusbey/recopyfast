@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s05 bulk content portability</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ==========================================================================
+     TOKENS — copied verbatim (light theme only) from src/app/globals.css.
+     This file is a REFERENCE mockup, not production code. It exists to
+     communicate layout and state, not to be pasted into the app.
+     ========================================================================== */
+  :root {
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+
+    --danger-solid: hsl(358 60% 42%);
+    --danger-on-solid: hsl(0 0% 100%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+
+    --radius: 0.75rem;
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    padding: 2.5rem 1.5rem 6rem;
+  }
+
+  .page {
+    max-width: 46rem;
+    margin: 0 auto;
+  }
+
+  .spec-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 3rem 0 0.75rem;
+  }
+  .spec-eyebrow:first-of-type { margin-top: 0; }
+
+  .spec-note {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+    line-height: 1.5;
+  }
+
+  .breadcrumb {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+  .breadcrumb b { color: var(--text-strong); font-weight: 500; }
+
+  /* ---- Card ---- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: 0.75rem; /* rounded-xl */
+    box-shadow: 0 1px 2px var(--shadow-a);
+  }
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.5rem 1rem;
+  }
+  .card-header-text { flex: 1; }
+  .card-title {
+    font-size: 1.0625rem; /* .text-title */
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0;
+  }
+  .card-description {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0.25rem 0 0;
+  }
+  .card-body { padding: 0 1.5rem 1.5rem; }
+
+  .icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.5rem; /* rounded-lg */
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+  .icon-tile svg { width: 1rem; height: 1rem; }
+  .icon-tile.tone-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .icon-tile.tone-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .icon-tile.tone-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .icon-tile.tone-danger { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+  .icon-tile.tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+
+  /* ---- Tabs ---- */
+  .tabs-list {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background: var(--surface-2);
+    border-radius: 0.625rem;
+    margin-bottom: 1.25rem;
+  }
+  .tabs-trigger {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.375rem 0.75rem;
+    border-radius: 0.5rem;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    cursor: default;
+  }
+  .tabs-trigger.active {
+    background: var(--surface-card);
+    color: var(--text-strong);
+    box-shadow: 0 1px 2px var(--shadow-a);
+  }
+
+  /* ---- Form controls ---- */
+  label.field-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-bottom: 0.375rem;
+    color: var(--text-strong);
+  }
+  .field-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.375rem;
+  }
+  .control {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    font-family: var(--font-sans);
+    color: var(--text-strong);
+    background: var(--surface-card);
+    border: 1px solid var(--line-strong);
+    border-radius: 0.5rem; /* rounded-lg */
+  }
+  .field { margin-bottom: 1rem; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+  .checkbox-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; margin-bottom: 0.5rem; }
+  .checkbox-row input { accent-color: var(--accent-solid); }
+
+  /* ---- Buttons ---- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.5rem 0.875rem;
+    border-radius: 0.5rem;
+    border: 1px solid transparent;
+    cursor: default;
+    transition: background-color var(--dur) var(--ease-out);
+  }
+  .btn-default { background: var(--accent-solid); color: var(--accent-on-solid); }
+  .btn-outline { background: var(--surface-card); color: var(--text-strong); border-color: var(--line-strong); }
+  .btn-secondary { background: var(--surface-2); color: var(--text-strong); }
+  .btn-ghost { background: transparent; color: var(--text-strong); }
+  .btn-disabled { opacity: 0.45; }
+  .btn-full { width: 100%; justify-content: center; }
+
+  /* ---- Alert ---- */
+  .alert {
+    border-radius: 0.5rem;
+    border: 1px solid var(--line);
+    background: var(--surface-card);
+    padding: 0.875rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    margin-bottom: 1rem;
+  }
+  .alert-title { font-weight: 600; margin: 0 0 0.125rem; font-size: 0.8125rem; }
+  .alert-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .alert-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .alert-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .alert-destructive { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+
+  /* ---- Badge / StatusBadge ---- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .badge-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .badge-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .badge-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .badge-danger { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+
+  /* ---- Metric row ---- */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .metric-tile {
+    border: 1px solid var(--line);
+    border-radius: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    background: var(--surface-1);
+  }
+  .metric-tile.is-danger { border-color: var(--tone-danger-line); background: var(--tone-danger-surface); }
+  .metric-label {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-bottom: 0.25rem;
+  }
+  .metric-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex-shrink: 0; }
+  .dot-success { background: var(--tone-success-text); }
+  .dot-info { background: var(--tone-info-text); }
+  .dot-neutral { background: var(--tone-neutral-text); }
+  .dot-danger { background: var(--tone-danger-text); }
+  .metric-value {
+    font-variant-numeric: tabular-nums;
+    font-size: 1.375rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+  }
+
+  /* ---- Outcome table ---- */
+  .outcome-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+  }
+  .outcome-table th {
+    text-align: left;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .outcome-table td {
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  .outcome-table tr:last-child td { border-bottom: none; }
+  .row-index { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+  .row-element { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-strong); }
+  .row-detail { color: var(--text-muted); }
+  .row-detail code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    background: var(--surface-2);
+    padding: 0.0625rem 0.3rem;
+    border-radius: 0.25rem;
+  }
+
+  .disclosure {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    background: var(--surface-1);
+    border: 1px dashed var(--line-strong);
+    border-radius: 0.5rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+  }
+
+  .reassurance {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-top: 0.875rem;
+    padding-top: 0.875rem;
+    border-top: 1px solid var(--line);
+  }
+
+  /* ---- field tags for "what's in the file" ---- */
+  .field-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .field-tag {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 0.375rem;
+    color: var(--text-strong);
+  }
+
+  /* ---- skeleton ---- */
+  .skeleton-row { height: 2.25rem; border-radius: 0.375rem; background: var(--surface-2); margin-bottom: 0.5rem; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .skeleton-row { animation: pulse 1.4s var(--ease-out) infinite; }
+
+  /* ---- empty state ---- */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 2.5rem 1.5rem;
+  }
+  .empty-state .icon-tile { width: 2.75rem; height: 2.75rem; margin-bottom: 1rem; }
+  .empty-state h3 { font-size: 1.0625rem; font-weight: 600; margin: 0 0 0.375rem; }
+  .empty-state p { font-size: 0.8125rem; color: var(--text-muted); margin: 0; max-width: 22rem; }
+
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <p class="breadcrumb">Dashboard → Sites → <b>marina-cafe.com</b></p>
+
+  <!-- ======================================================================
+       STATE: Export tab — default
+       ====================================================================== -->
+  <p class="spec-eyebrow">Screen — content portability card, Export tab (default)</p>
+  <p class="spec-note">
+    Mounted in Site Detail, directly above the Version History panel. Card chrome and
+    tab structure are shared by every state below — only the tab body changes.
+  </p>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="icon-tile" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+      </span>
+      <div class="card-header-text">
+        <h3 class="card-title">Content portability</h3>
+        <p class="card-description">Export your content as a backup, or import changes in bulk. Your copy is always yours to take.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="tabs-list">
+        <span class="tabs-trigger active">Export</span>
+        <span class="tabs-trigger">Import</span>
+        <span class="tabs-trigger">History</span>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Format</label>
+        <select class="control"><option>JSON</option><option>CSV</option></select>
+      </div>
+
+      <div class="field">
+        <label class="field-label">This file will include, per element</label>
+        <div class="field-tags">
+          <span class="field-tag">element_id</span>
+          <span class="field-tag">selector</span>
+          <span class="field-tag">current_content</span>
+          <span class="field-tag">language</span>
+          <span class="field-tag">variant</span>
+        </div>
+      </div>
+
+      <div class="field field-row">
+        <div>
+          <label class="field-label">Language <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input class="control" placeholder="e.g. en" />
+        </div>
+        <div>
+          <label class="field-label">Variant <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+          <input class="control" placeholder="e.g. default" />
+        </div>
+      </div>
+
+      <button class="btn btn-default btn-full">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+        Export content
+      </button>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Export tab — success
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Export, success</p>
+  <p class="spec-note">Inline confirmation after the browser download starts. No toast primitive exists — this is the permanent pattern.</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <div class="alert alert-success">
+        <p class="alert-title">Export ready</p>
+        content-export-marina-cafe-2026-08-16.json downloaded — 400 content elements.
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — default / empty
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, default (no file chosen)</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <div class="field">
+        <label class="field-label">Format</label>
+        <select class="control"><option>JSON</option><option>CSV</option></select>
+      </div>
+      <div class="field">
+        <label class="field-label">File</label>
+        <input class="control" type="file" disabled />
+        <p class="field-hint">JSON or CSV, up to 5 MB.</p>
+      </div>
+      <div class="field">
+        <label class="field-label">Options</label>
+        <label class="checkbox-row"><input type="checkbox" /> Overwrite existing content</label>
+        <label class="checkbox-row"><input type="checkbox" checked /> Create missing elements</label>
+      </div>
+      <button class="btn btn-default btn-full btn-disabled">Import content</button>
+      <p class="reassurance">Every applied row is saved to version history like a normal edit — review or revert any of them from the History tab below.</p>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — refused, size limit
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, refused before parsing (file too large)</p>
+  <p class="spec-note">Fires the instant the file is chosen — before any upload or parse attempt. The action stays disabled.</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <div class="field">
+        <label class="field-label">File</label>
+        <input class="control" type="file" />
+      </div>
+      <div class="alert alert-destructive">
+        <p class="alert-title">File too large</p>
+        This file is 12.4 MB. The import limit is 5 MB — split it into smaller files and try again.
+      </div>
+      <button class="btn btn-default btn-full btn-disabled">Import content</button>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — refused, permission
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, refused (no edit permission on this site)</p>
+  <p class="spec-note">Whole-tab refusal, not per-file — the form does not render underneath. Export stays available (view permission is enough to read).</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <div class="alert alert-destructive">
+        <p class="alert-title">You can't import content here</p>
+        You need edit access on this site to import content. Ask a site admin to grant it.
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — loading
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, in progress</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <button class="btn btn-default btn-full">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/></svg>
+        Importing…
+      </button>
+      <div style="margin-top:1rem">
+        <div class="skeleton-row" style="width:100%"></div>
+        <div class="skeleton-row" style="width:92%"></div>
+        <div class="skeleton-row" style="width:96%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — partial success (THE HEART OF THIS DESIGN)
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, partial success (the interesting one)</p>
+  <p class="spec-note">
+    394 created, 3 updated, 0 skipped, 3 failed — out of 400 rows. A malformed row fails
+    alone; it never blocks the other 397. The layout's whole job is making that
+    readable at a glance, not alarming.
+  </p>
+
+  <div class="card">
+    <div class="card-header">
+      <span class="icon-tile tone-warning" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86l-8.18 14.18A2 2 0 0 0 3.94 21h16.12a2 2 0 0 0 1.83-2.96L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      </span>
+      <div class="card-header-text">
+        <h3 class="card-title">Content portability</h3>
+        <p class="card-description">Import result — marina-cafe.com</p>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <div class="alert alert-warning">
+        <p class="alert-title">Import complete with 3 rows that need attention</p>
+        397 rows applied successfully (394 created, 3 updated). See below for what to fix.
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-tile">
+          <div class="metric-label"><span class="metric-dot dot-success"></span>Created</div>
+          <div class="metric-value">394</div>
+        </div>
+        <div class="metric-tile">
+          <div class="metric-label"><span class="metric-dot dot-info"></span>Updated</div>
+          <div class="metric-value">3</div>
+        </div>
+        <div class="metric-tile">
+          <div class="metric-label"><span class="metric-dot dot-neutral"></span>Skipped</div>
+          <div class="metric-value">0</div>
+        </div>
+        <div class="metric-tile is-danger">
+          <div class="metric-label"><span class="metric-dot dot-danger"></span>Failed</div>
+          <div class="metric-value">3</div>
+        </div>
+      </div>
+
+      <div class="disclosure">
+        <span>394 created rows hidden — showing rows that need review</span>
+        <button class="btn btn-ghost" style="padding:0.25rem 0.5rem">Show all 400 rows</button>
+      </div>
+
+      <table class="outcome-table">
+        <thead>
+          <tr>
+            <th style="width:3rem">Row</th>
+            <th>Element</th>
+            <th style="width:5.5rem">Outcome</th>
+            <th>Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-index">104</td>
+            <td class="row-element">hero-heading-01</td>
+            <td><span class="badge badge-info">Updated</span></td>
+            <td class="row-detail">Replaced "Fresh coffee daily" → "Fresh coffee, roasted weekly"</td>
+          </tr>
+          <tr>
+            <td class="row-index">217</td>
+            <td class="row-element">.menu-section:nth-child(2) h3</td>
+            <td><span class="badge badge-info">Updated</span></td>
+            <td class="row-detail">Replaced "Lunch menu" → "Weekday lunch menu"</td>
+          </tr>
+          <tr>
+            <td class="row-index">318</td>
+            <td class="row-element">footer-hours-text</td>
+            <td><span class="badge badge-info">Updated</span></td>
+            <td class="row-detail">Replaced "Open until 6pm" → "Open until 8pm, Fri–Sat"</td>
+          </tr>
+          <tr>
+            <td class="row-index">142</td>
+            <td class="row-element"><code>(blank)</code></td>
+            <td><span class="badge badge-danger">Failed</span></td>
+            <td class="row-detail">Missing selector — this row can't be matched to an element</td>
+          </tr>
+          <tr>
+            <td class="row-index">356</td>
+            <td class="row-element">promo-banner-copy</td>
+            <td><span class="badge badge-danger">Failed</span></td>
+            <td class="row-detail">Content exceeds the 10,000-character limit</td>
+          </tr>
+          <tr>
+            <td class="row-index">399</td>
+            <td class="row-element">seasonal-callout-03</td>
+            <td><span class="badge badge-danger">Failed</span></td>
+            <td class="row-detail">Element id not found and "create missing elements" is off</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p class="reassurance">Every applied row is saved to version history like a normal edit — review or revert any of them from the History tab below.</p>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: Import tab — full success (contrast against partial success)
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — Import, full success (for contrast)</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:1.25rem">
+      <div class="alert alert-success">
+        <p class="alert-title">Import complete</p>
+        400 rows created. Nothing needs attention.
+      </div>
+      <div class="disclosure">
+        <span>All rows created</span>
+        <button class="btn btn-ghost" style="padding:0.25rem 0.5rem">Show all 400 rows</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       STATE: History tab — empty
+       ====================================================================== -->
+  <p class="spec-eyebrow">State — History tab, no past operations</p>
+  <p class="spec-note">Uses the real EmptyState component. Today's BulkOperations.tsx hand-rolls this exact case — swap it in while wiring this up.</p>
+  <div class="card">
+    <div class="card-body" style="padding-top:0.5rem">
+      <div class="empty-state">
+        <span class="icon-tile" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+        </span>
+        <h3>No imports or exports yet</h3>
+        <p>Once you export or import content for this site, the operation and its result will show up here.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

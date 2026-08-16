@@ -104,6 +104,113 @@ stories are not each asserting the same ceiling and silently competing for it:
 
 ---
 
+## Revised after research — 2026-08-16
+
+All 19 stories were researched against the code (`docs/research/<id>.md`). Research is where a
+false premise gets repaired, and it repaired several. **Ids are suffixed, never renumbered** —
+the last renumbering broke four references in the PRD, two of which silently resolved to a
+different real story. Every existing `s01`…`s19` reference below and elsewhere still resolves.
+
+### Two research claims corrected by direct measurement
+
+Research is evidence, not verdict. Two claims were checked and are wrong:
+
+1. **`ab_test_results` and `visitor_buckets` DO exist.** `research/s11` claimed both tables are
+   missing and priced "a database repair" into its re-score. They are created at
+   `supabase/migrations/20260127_ab_testing_v2.sql:8` and `:40`, with no `DROP` anywhere.
+   `research/s09` and `research/s12` cite the same migration correctly. **What survives** is a
+   narrower concern worth keeping: that file is named `20260127_ab_testing_v2.sql` — 8 digits
+   where every other migration uses 14 (`YYYYMMDDHHMMSS`) — so its ordering in the ledger is not
+   guaranteed. That is a real defect, and it is `s11a`'s to confirm.
+2. **The widget is 34,063 gz, not 33,699.** `research/s06` proposed correcting the byte table
+   downward and seeding a build constant at 33,699. Re-measured here: artifact **46,781**,
+   socket.io prefix **13,085**, widget alone **34,063** — the table above was already right.
+   `s06a` seeds `MAX_WIDGET_GZ` at **34,063**.
+
+### Five stories re-scored to complexity 5 — split, per the scale's own rule
+
+| Story | Was | Now | Split into | Cut line |
+|---|---|---|---|---|
+| `s06-embed-budget-gate` | 4 | **5** | `s06a-embed-byte-gate` (2), `s06b-embed-fixture-harness` (3), `s06c-embed-shrink` (4) | Gate vs. safety net vs. the shrink itself |
+| `s07-realtime-service` | 4 | **5** | `s07a-realtime-service-hardening` (4), `s07b-realtime-deploy` (4) | Local vs. deployed |
+| `s11-ab-run-test` | 4 | **5** | `s11a-ab-data-plane` (4), `s11b-ab-surface` (4), `s11c-ab-variant-delivery` (4) | Data plane vs. surface vs. delivery |
+| `s13-agency-plan` | 4 | **4** + new | `s13-agency-plan` (4, AC 1-7+9), `s20-agency-branded-subdomain` (4, AC 8 alone) | Exactly at AC 8 |
+| `s14-agency-client-handoff` | 4 | **5** | `s14a-grant-authorized-editing` (4), `s14b-multi-site-grants` (3), `s14c-cross-site-edit-activity` (3) | Single-site security floor vs. plural vs. the cross-site view |
+
+Other re-scores, no split required: `s03` 3→**4**, `s05` 2→**3**, `s16` 3→**4**.
+`s02` 3, `s08` 4, `s09` 4, `s10` 3, `s12` 4, `s15` 3, `s17` 3, `s18` 3, `s19` 2 all confirmed.
+
+**`s06a` alone unblocks `s08`, `s09` and `s11c`** — they need a ceiling to test their byte
+allowance against, which a gate answers and a shrink does not. The `s06 → …` edges become
+`s06a → …`; `s07 → s08` becomes `s07b → s08`.
+
+### Open majors from `reviews/stories.md`, settled by research
+
+**M2 — `s09` ↔ `s12` data models. Resolved: drop the `s09` edge from `s12`.**
+`s09` and `s12` were researched independently and reached the same verdict. `s12` needs to prove
+a click and an impression happened *in the same page view*; that needs a shared key. `s09` AC 9
+forbids every candidate ("no per-visitor identifier is stored", aggregate counts only) — by
+construction there is no join column, and adding one repeals the criterion that keeps the
+feature out of GDPR consent scope. The join is also unnecessary: the widget already emits
+per-visitor `view` / `click` / `conversion` events carrying `visitor_id`, `test_id`, `variant_id`
+(`public/embed/recopyfast.src.js:3096-3161`, `rcf_vid` cookie at `:2956-2976`) into
+`ab_test_results` (`visitor_id NOT NULL`), and `/api/ab-tests/[testId]/results` already computes
+per-variant views and conversions from it. **`s12`'s conversion is defined over that stream.**
+Its `s09` dependency is removed below. One caveat both reports raise: *"same page view"* is
+currently unrepresentable anywhere — `session_id` exists on `ab_test_results` but nothing ever
+sets it — so `s12` must mint a page-view key or reword. That is `s12`'s open question.
+
+**M3 — `s11`'s anti-flicker criterion. Resolved: not achievable as written; replaced.**
+Three independent facts defeat "variant applied before first paint": the snippet is pasted
+before `</body>` (`HowItWorks.tsx:32`), `init()` awaits `DOMContentLoaded` first
+(`recopyfast.src.js:868`, `:2321-2329`), and three sequential fetches separate that from
+`applyVariants()` (`:896`, `:901`, `:902`, `:903`). No change confined to this story can fix it.
+Replaced by a measured swap-window criterion in `s11c`, whose main lever is folding the active
+test set and the visitor's assignment into the existing `GET /api/content/:siteId` response —
+which also makes "a no-test site issues zero extra requests" true.
+
+**M4 — `s13`'s branded subdomain. Resolved: split to `s20`.** A tenant-scoped serving origin
+threads through three snippet call sites, the content route's CORS grant, the CSP, the
+auth-redirect resolver and the Stripe return-URL builder, and needs wildcard DNS and a wildcard
+certificate. It is a second axis, not a ninth criterion — and every issued subdomain inherits
+the permanent-URL promise, so it is irreversible in a way the billing half is not.
+
+**M5 — who owns revocation-over-WebSocket. Resolved: the socket half moves to `s07a`.**
+The defect is server-side and live today: `server/index.js:386-405` resolves permissions once at
+handshake and caches them on `socket.data`; `:527` reads that cache on every `content-update`;
+nothing re-reads `site_editors`. `s08` replaces only the *client* library, so putting the
+criterion there would leave the Socket.io dashboard path uncovered. The HTTP half stays with the
+grant story (`s14a`) where it is already true and only needs a test.
+
+**Also found, not previously known:** `server/index.js:541-586` writes `content_elements` and
+inserts `staging_history` directly over the socket. That is a straight violation of
+[ADR 004](./decisions/004-embed-transport-split.md) rule 1 — *HTTP stays authoritative; realtime
+broadcasts, it never becomes a second write path*. `s07a` enforces rule 1, which collapses the
+revocation problem from "a revoked editor can still save" to "a revoked editor can still receive
+broadcasts" — a disclosure issue, not a defacement.
+
+### Blocking open questions, unchanged by research
+
+- **Who is billed in agency mode** — agency only, or agency with client-paid upgrades? PRD open
+  decision 7. `s13` assumes agency-only, single invoice. It changes the data model. Must be
+  answered before `s13` reaches `/ks-plan`.
+- **`npm run check:stripe` is test-mode only** and can pass vacuously — `s13` AC 9 as written
+  cannot be satisfied by the command it names.
+- **`s19`'s CTA targets trial signup, which is `s01`.** `s19` declares only `s17` as a
+  dependency. That edge is missing.
+
+### Resulting backlog — 27 stories
+
+`s01` · `s02` · `s03` · `s04` · `s05` · **`s06a` `s06b` `s06c`** · **`s07a` `s07b`** · `s08` ·
+`s09` · `s10` · **`s11a` `s11b` `s11c`** · `s12` · `s13` · **`s14a` `s14b` `s14c`** · `s15` ·
+`s16` · `s17` · `s18` · `s19` · **`s20`**
+
+Each split story's scope, criteria and rationale live in its parent's research report under
+`## Split proposal`. The split stories inherit their parent's research; they were not
+re-researched, because the research covered the parent's whole scope.
+
+---
+
 ## Story s01-trial-signup — 14-day Pro trial without a card
 
 **As a** web agency evaluating RecopyFast **I want** to use the full product for 14 days
@@ -569,7 +676,7 @@ needs a UI.
 - [ ] A returning visitor is served the same variant on every visit for the test's duration — bucketing is deterministic from a stable input, never random per request.
 - [ ] Over 10,000 simulated assignments, each bucket's share is within ±2 percentage points of its configured split, asserted in a unit test.
 - [ ] A visitor to a site with no active test receives default content and the widget makes no additional network request.
-- [ ] Variant content is applied before first paint; a test asserts the original text is never painted when a variant is assigned.
+- [ ] ~~Variant content is applied before first paint; a test asserts the original text is never painted when a variant is assigned.~~ **Withdrawn at research (M3) — not achievable for an async third-party script on a server-rendered host page.** Replaced in `s11c-ab-variant-delivery` by a measured swap-window criterion: the active-test set and the visitor's assignment fold into the existing `GET /api/content/:siteId` response, removing two sequential fetches from the widget's critical path, and the swap window is asserted against a stated budget rather than against "before first paint".
 - [ ] Only one test can be active per content element; a second attempt is refused with a clear reason.
 - [ ] Bucketing code adds ≤ 2,000 bytes gzipped to the widget, and the total stays ≤ 30,000.
 
@@ -623,8 +730,12 @@ silent defect does the most commercial damage.
 - [ ] The cron is idempotent: a duplicate run promotes nothing twice.
 
 ### Dependencies
-`s11-ab-run-test`, `s09-section-impressions` (supplies the impression half of the conversion
-definition).
+`s11a-ab-data-plane`, `s11b-ab-surface`.
+
+> **The `s09` edge was removed at research (M2).** `s09` stores anonymous aggregate counts with
+> no per-visitor key, so it cannot supply the "same page view" join this story's conversion
+> needs — and the widget's existing per-visitor A/B event stream already can. See
+> "Revised after research" above and `docs/research/s12-ab-results.md`.
 
 ### Agentic notes
 - Existing: `src/app/api/ab-tests/[testId]/results/route.ts`,
@@ -708,7 +819,7 @@ surface in the backlog and the one the product's main angle depends on.
 - [ ] An agency can invite an editor to a specific site by email from that site's view, in one action.
 - [ ] The invited editor can edit only that site; reaching any other site on the account is refused.
 - [ ] Invitations can be sent to several sites at once, each producing an independently scoped grant.
-- [ ] Revoking a grant takes effect on the next request, and an open editing session cannot continue saving after revocation — including over an established WebSocket connection.
+- [ ] Revoking a grant takes effect on the next request, and an open editing session cannot continue saving after revocation over HTTP. **(The "over an established WebSocket connection" half moved to `s07a-realtime-service-hardening` at research — M5. The defect is server-side and live: `server/index.js:386-405` caches permissions at handshake, `:527` reads that cache on every `content-update`, nothing re-reads `site_editors`. `s08` replaces only the client library, so the criterion cannot live there without leaving the Socket.io dashboard path uncovered.)**
 - [ ] Grants expire on schedule, enforced server-side.
 - [ ] The agency sees, per site, who holds a grant and when each expires.
 - [ ] One view lists recent edits across all the agency's sites, showing site, editor and element, read from `s03`'s milestone and activity data.

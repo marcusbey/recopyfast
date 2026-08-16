@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Design reference — s16-webhook-config (DO NOT SHIP)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  /* ============================================================
+     Tokens — copied verbatim (light theme) from src/app/globals.css.
+     This file is a REFERENCE MOCKUP ONLY. Execute builds this screen
+     with the real src/components/ui/* components, not this markup.
+     ============================================================ */
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: hsl(0 0% 100%);
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-md: 0 2px 4px -1px var(--shadow-a), 0 4px 10px -2px var(--shadow-b);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+    padding: 2.5rem 1.5rem 6rem;
+  }
+
+  .page {
+    max-width: 42rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+  }
+
+  .ref-banner {
+    max-width: 42rem;
+    margin: 0 auto 2rem;
+    padding: 0.75rem 1rem;
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-md);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: center;
+  }
+
+  .section-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+
+  /* ---- Card ---- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xs);
+    overflow: hidden;
+  }
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.25rem 1.25rem 0;
+  }
+  .card-body {
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .text-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0;
+  }
+  .card-desc {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin: 0.125rem 0 0;
+  }
+
+  /* ---- IconTile ---- */
+  .icon-tile {
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .icon-tile.accent { background: var(--accent-solid); color: var(--accent-on-solid); }
+  .icon-tile.warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); }
+  .icon-tile svg { width: 1.125rem; height: 1.125rem; }
+
+  /* ---- Form ---- */
+  .field { display: flex; flex-direction: column; gap: 0.375rem; }
+  .label { font-size: 0.8125rem; font-weight: 500; color: var(--text-strong); }
+  .input, .select {
+    width: 100%;
+    font: inherit;
+    font-size: 0.875rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--text-strong);
+  }
+  .input.mono, .value-mono { font-family: var(--font-mono); }
+  .help-text { font-size: 0.75rem; color: var(--text-muted); margin: 0; }
+  .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .form-row > .field { flex: 1; min-width: 12rem; }
+
+  /* ---- Buttons ---- */
+  .btn {
+    font: inherit;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.5rem 0.875rem;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    cursor: default;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    transition: background-color var(--dur) var(--ease-out), border-color var(--dur) var(--ease-out);
+  }
+  .btn.default { background: var(--accent-solid); color: var(--accent-on-solid); }
+  .btn.outline { background: transparent; border-color: var(--line-strong); color: var(--text-strong); }
+  .btn.ghost { background: transparent; color: var(--text-strong); padding-left: 0.5rem; padding-right: 0.5rem; }
+  .btn.sm { font-size: 0.75rem; padding: 0.375rem 0.625rem; }
+  .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+  /* ---- Alert ---- */
+  .alert {
+    display: flex;
+    gap: 0.625rem;
+    padding: 0.75rem 0.875rem;
+    border-radius: var(--radius-md);
+    border: 1px solid;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  .alert svg { width: 1rem; height: 1rem; flex-shrink: 0; margin-top: 0.0625rem; }
+  .alert-title { font-weight: 600; margin: 0 0 0.125rem; }
+  .alert-body { margin: 0; color: inherit; }
+  .alert.destructive { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+  .alert.warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .alert.success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+
+  /* ---- StatusBadge ---- */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 0.1875rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .status-badge::before { content: ""; width: 0.375rem; height: 0.375rem; border-radius: 999px; background: currentColor; }
+  .status-badge.success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .status-badge.warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .status-badge.danger  { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+  .status-badge.neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+
+  /* ---- Delivery list ---- */
+  .delivery-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .delivery-row {
+    background: var(--surface-1);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 0.875rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+  .delivery-row-top { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+  .delivery-meta { display: flex; align-items: center; gap: 0.625rem; font-size: 0.75rem; color: var(--text-muted); }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .delivery-reason { font-size: 0.75rem; color: var(--tone-danger-text); margin: 0; }
+  .delivery-reason.muted { color: var(--text-muted); }
+
+  /* ---- EmptyState ---- */
+  .empty-state {
+    text-align: center;
+    padding: 2.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .empty-state .icon-tile { background: var(--surface-2); color: var(--text-muted); width: 2.75rem; height: 2.75rem; }
+  .empty-state p { margin: 0; font-size: 0.8125rem; color: var(--text-muted); max-width: 22rem; }
+
+  /* ---- Skeleton ---- */
+  .skeleton { background: var(--surface-2); border-radius: var(--radius-md); position: relative; overflow: hidden; }
+  .skeleton::after {
+    content: "";
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.55), transparent);
+    animation: shimmer 1.6s var(--ease-out) infinite;
+  }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  /* ---- Dialog ---- */
+  .dialog-frame {
+    position: relative;
+    background: var(--surface-3);
+    border-radius: var(--radius-xl);
+    padding: 3rem 1.5rem;
+    display: flex;
+    justify-content: center;
+  }
+  .dialog {
+    width: 100%;
+    max-width: 26rem;
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-md);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dialog-header { display: flex; align-items: flex-start; gap: 0.75rem; }
+  .dialog-title { font-size: 1.0625rem; font-weight: 600; margin: 0; }
+  .dialog-desc { font-size: 0.8125rem; color: var(--text-muted); margin: 0.25rem 0 0; }
+  .secret-block {
+    background: var(--surface-1);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.875rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .secret-value { font-family: var(--font-mono); font-size: 0.75rem; word-break: break-all; color: var(--text-strong); }
+  .confirm-row { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.8125rem; padding-top: 0.25rem; border-top: 1px solid var(--line); }
+  .confirm-row input { margin-top: 0.1875rem; }
+  .no-x-note {
+    position: absolute;
+    top: 0.5rem;
+    right: -8.5rem;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    width: 8rem;
+    display: none;
+  }
+
+  .annotation {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: -0.75rem 0 0;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+  <div class="ref-banner">
+    Reference mockup only — layout &amp; states, not production markup. Execute builds this
+    screen with real <code>src/components/ui/*</code> components.
+  </div>
+
+  <div class="page">
+
+    <!-- ============================================================ -->
+    <!-- 1. EMPTY STATE -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">1 · Empty — no webhook configured</p>
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-tile accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H16m-3-4h5.99c1.66 0 3.01 1.34 3.01 3s-1.34 3-3.01 3H16m-7 4h.01M4 12l4-7"/></svg>
+          </div>
+          <div>
+            <h3 class="text-title">Webhooks</h3>
+            <p class="card-desc">Call an endpoint on your build system whenever this site's content changes.</p>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="empty-state">
+            <div class="icon-tile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H16m-3-4h5.99c1.66 0 3.01 1.34 3.01 3s-1.34 3-3.01 3H16m-7 4h.01M4 12l4-7"/></svg>
+            </div>
+            <p>No webhook configured for this site. Add one to trigger a rebuild whenever content changes.</p>
+            <button class="btn default">Add webhook</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 2. LOADING -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">2 · Loading</p>
+      <div class="card">
+        <div class="card-header">
+          <div class="skeleton" style="width:2.25rem;height:2.25rem;border-radius:var(--radius-md);"></div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:0.5rem;padding-top:0.125rem;">
+            <div class="skeleton" style="width:6rem;height:0.875rem;"></div>
+            <div class="skeleton" style="width:14rem;height:0.75rem;"></div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="skeleton" style="height:2.25rem;"></div>
+          <div class="skeleton" style="height:2.25rem;width:60%;"></div>
+          <div class="skeleton" style="height:3rem;"></div>
+          <div class="skeleton" style="height:3rem;"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 3. CONFIGURED — SSRF REFUSAL AT CONFIG TIME -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">3 · SSRF refusal — configuration time</p>
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-tile accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H16m-3-4h5.99c1.66 0 3.01 1.34 3.01 3s-1.34 3-3.01 3H16m-7 4h.01M4 12l4-7"/></svg>
+          </div>
+          <div>
+            <h3 class="text-title">Webhooks</h3>
+            <p class="card-desc">Call an endpoint on your build system whenever this site's content changes.</p>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label class="label">Webhook URL</label>
+            <input class="input mono" value="http://169.254.169.254/rebuild" readonly />
+          </div>
+          <div class="alert destructive">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <p class="alert-title">This address can't be used</p>
+              <p class="alert-body">169.254.169.254 is a link-local address — part of your own
+                infrastructure's private network, not something reachable from the public
+                internet. Webhook endpoints must be a public HTTPS URL your build system can
+                reach from outside your network.</p>
+            </div>
+          </div>
+          <div class="field">
+            <label class="label">Batch window</label>
+            <select class="select">
+              <option>10 seconds</option>
+              <option selected>30 seconds (default)</option>
+              <option>60 seconds</option>
+              <option>5 minutes</option>
+            </select>
+            <p class="help-text">Edits made within this window are grouped into one delivery, so a burst of changes doesn't trigger a burst of rebuilds. Default: 30 seconds.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn default">Save</button>
+            <button class="btn outline">Send test delivery</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 4. CONFIGURED — MIXED DELIVERY HISTORY + MANUAL TEST RESULT -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">4 · Configured — delivery history (mixed outcomes) + manual test result</p>
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-tile accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H16m-3-4h5.99c1.66 0 3.01 1.34 3.01 3s-1.34 3-3.01 3H16m-7 4h.01M4 12l4-7"/></svg>
+          </div>
+          <div>
+            <h3 class="text-title">Webhooks</h3>
+            <p class="card-desc">Call an endpoint on your build system whenever this site's content changes.</p>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="field">
+            <label class="label">Webhook URL</label>
+            <input class="input mono" value="https://ci.example.com/hooks/recopyfast" readonly />
+          </div>
+          <div class="field">
+            <label class="label">Batch window</label>
+            <select class="select">
+              <option>10 seconds</option>
+              <option selected>30 seconds (default)</option>
+              <option>60 seconds</option>
+              <option>5 minutes</option>
+            </select>
+            <p class="help-text">Edits made within this window are grouped into one delivery, so a burst of changes doesn't trigger a burst of rebuilds. Default: 30 seconds.</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn default">Update</button>
+            <button class="btn outline">Send test delivery</button>
+          </div>
+          <div class="alert success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <div>
+              <p class="alert-title">Test delivery sent</p>
+              <p class="alert-body">Received a <span class="value-mono">200</span> response in 340&nbsp;ms.</p>
+            </div>
+          </div>
+
+          <div>
+            <p class="section-label" style="margin-top:0.25rem;">Recent deliveries</p>
+            <ul class="delivery-list">
+
+              <li class="delivery-row">
+                <div class="delivery-row-top">
+                  <span class="status-badge success">Delivered</span>
+                  <span class="delivery-meta">
+                    <span class="value-mono">200</span>
+                    <span>·</span>
+                    <span class="tabular">Aug 16, 2026 14:02</span>
+                  </span>
+                </div>
+                <p class="delivery-reason muted">Attempt <span class="tabular">1 of 1</span></p>
+              </li>
+
+              <li class="delivery-row">
+                <div class="delivery-row-top">
+                  <span class="status-badge warning">Retrying</span>
+                  <span class="delivery-meta">
+                    <span class="value-mono">503</span>
+                    <span>·</span>
+                    <span class="tabular">Aug 16, 2026 13:47</span>
+                  </span>
+                </div>
+                <p class="delivery-reason muted">Attempt <span class="tabular">2 of 5</span> — next attempt in 4&nbsp;min</p>
+              </li>
+
+              <li class="delivery-row">
+                <div class="delivery-row-top">
+                  <span class="status-badge danger">Failed</span>
+                  <span class="delivery-meta">
+                    <span class="value-mono">—</span>
+                    <span>·</span>
+                    <span class="tabular">Aug 16, 2026 09:15</span>
+                  </span>
+                </div>
+                <p class="delivery-reason">Blocked before sending — this endpoint resolved to a
+                  private address at delivery time. If the URL passed validation when you saved
+                  it, its DNS record may have changed since (DNS rebinding); update the URL if
+                  this persists.</p>
+              </li>
+
+              <li class="delivery-row">
+                <div class="delivery-row-top">
+                  <span class="status-badge danger">Failed</span>
+                  <span class="delivery-meta">
+                    <span class="value-mono">timeout</span>
+                    <span>·</span>
+                    <span class="tabular">Aug 15, 2026 22:03</span>
+                  </span>
+                </div>
+                <p class="delivery-reason muted">Attempt <span class="tabular">5 of 5</span> — gave up after 5 attempts</p>
+              </li>
+
+              <li class="delivery-row">
+                <div class="delivery-row-top">
+                  <span class="status-badge neutral">Pending</span>
+                  <span class="delivery-meta">
+                    <span class="value-mono">—</span>
+                    <span>·</span>
+                    <span class="tabular">Aug 16, 2026 14:09</span>
+                  </span>
+                </div>
+                <p class="delivery-reason muted">Batching — waiting for the 30-second window to close</p>
+              </li>
+
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 5. ERROR -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">5 · Error — config failed to load</p>
+      <div class="card">
+        <div class="card-header">
+          <div class="icon-tile accent">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 16.98h-5.99c-1.66 0-3.01-1.34-3.01-3s1.34-3 3.01-3H16m-3-4h5.99c1.66 0 3.01 1.34 3.01 3s-1.34 3-3.01 3H16m-7 4h.01M4 12l4-7"/></svg>
+          </div>
+          <div>
+            <h3 class="text-title">Webhooks</h3>
+            <p class="card-desc">Call an endpoint on your build system whenever this site's content changes.</p>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="alert destructive">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <div>
+              <p class="alert-title">Couldn't load webhook settings</p>
+              <p class="alert-body">Something went wrong fetching this site's webhook configuration. Reload the page to try again.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- 6. SHOW-ONCE SECRET DIALOG -->
+    <!-- ============================================================ -->
+    <section>
+      <p class="section-label">6 · Show-once secret — non-dismissible dialog</p>
+      <p class="annotation">No corner close (X), no overlay-click dismiss, no Escape. The only
+        way out is the checkbox + confirm button below.</p>
+      <div class="dialog-frame">
+        <div class="dialog">
+          <div class="dialog-header">
+            <div class="icon-tile warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            </div>
+            <div>
+              <h4 class="dialog-title">Your webhook signing secret</h4>
+              <p class="dialog-desc">Use this to verify that a delivery really came from RecopyFast.</p>
+            </div>
+          </div>
+
+          <div class="alert warning">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+            <div>
+              <p class="alert-title">This is shown once</p>
+              <p class="alert-body">Copy it now and store it somewhere safe. We keep only a hash — if you lose it, you'll need to create a new webhook.</p>
+            </div>
+          </div>
+
+          <div class="secret-block">
+            <span class="secret-value">whsec_8f2c1e9a4b7d0f36c5e2a19b8d4f7c03e1a6b9d2f4c8e0a7b5d3f1c9e6a2b8d4</span>
+            <button class="btn ghost sm">Copy</button>
+          </div>
+
+          <label class="confirm-row">
+            <input type="checkbox" />
+            <span>I've copied and safely stored this secret.</span>
+          </label>
+
+          <button class="btn default" style="align-self:flex-end;opacity:0.5;">Done — I've saved it</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s03-activation-funnel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ==========================================================================
+     TOKENS — copied from src/app/globals.css. This file is a static reference
+     only; nothing here is copied into production. See docs/designs/s03-activation-funnel.md.
+     ========================================================================== */
+  :root {
+    color-scheme: light dark;
+
+    --canvas: light-dark(hsl(200 24% 98%), hsl(200 18% 7%));
+    --surface-card: light-dark(hsl(0 0% 100%), hsl(200 15% 10%));
+    --surface-1: light-dark(hsl(200 24% 97%), hsl(200 18% 8%));
+    --surface-2: light-dark(hsl(200 18% 94%), hsl(200 14% 14%));
+    --surface-3: light-dark(hsl(200 16% 90%), hsl(200 13% 18%));
+
+    --text-strong: light-dark(hsl(200 22% 11%), hsl(200 22% 96%));
+    --text-muted: light-dark(hsl(200 11% 38%), hsl(200 12% 68%));
+
+    --accent-solid: light-dark(hsl(176 54% 28%), hsl(174 48% 58%));
+    --accent-on-solid: light-dark(hsl(0 0% 100%), hsl(200 30% 8%));
+
+    --line: light-dark(hsl(200 15% 87%), hsl(200 12% 21%));
+    --line-strong: light-dark(hsl(200 13% 55%), hsl(200 10% 40%));
+
+    --danger-solid: light-dark(hsl(358 60% 42%), hsl(358 62% 62%));
+
+    --tone-neutral-surface: light-dark(hsl(200 18% 95%), hsl(200 12% 17%));
+    --tone-neutral-text: light-dark(hsl(200 12% 32%), hsl(200 12% 76%));
+    --tone-neutral-line: light-dark(hsl(200 15% 86%), hsl(200 12% 26%));
+
+    --tone-info-surface: light-dark(hsl(204 62% 95%), hsl(206 44% 18%));
+    --tone-info-text: light-dark(hsl(206 72% 30%), hsl(204 78% 76%));
+    --tone-info-line: light-dark(hsl(204 55% 85%), hsl(206 40% 30%));
+
+    --tone-success-surface: light-dark(hsl(162 46% 93%), hsl(166 40% 15%));
+    --tone-success-text: light-dark(hsl(166 72% 24%), hsl(162 60% 70%));
+    --tone-success-line: light-dark(hsl(162 40% 82%), hsl(166 36% 27%));
+
+    --tone-warning-surface: light-dark(hsl(42 84% 92%), hsl(30 44% 17%));
+    --tone-warning-text: light-dark(hsl(28 74% 29%), hsl(42 84% 68%));
+    --tone-warning-line: light-dark(hsl(40 70% 80%), hsl(32 40% 29%));
+
+    --tone-danger-surface: light-dark(hsl(4 76% 96%), hsl(358 40% 19%));
+    --tone-danger-text: light-dark(hsl(358 62% 39%), hsl(4 84% 76%));
+    --tone-danger-line: light-dark(hsl(4 70% 88%), hsl(358 36% 31%));
+
+    --tone-accent-surface: light-dark(hsl(176 40% 93%), hsl(178 38% 16%));
+    --tone-accent-text: light-dark(hsl(178 68% 24%), hsl(176 52% 70%));
+    --tone-accent-line: light-dark(hsl(176 34% 82%), hsl(178 34% 28%));
+
+    --shadow-a: light-dark(hsl(200 32% 20% / 0.05), hsl(200 55% 2% / 0.34));
+    --shadow-b: light-dark(hsl(200 32% 20% / 0.07), hsl(200 55% 2% / 0.46));
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-md: 0 2px 4px -1px var(--shadow-a), 0 4px 10px -2px var(--shadow-b);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .reference-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: center;
+    padding: 0.5rem 1rem;
+  }
+
+  .container { max-width: 72rem; margin: 0 auto; padding: 0 1.5rem; }
+
+  .page { padding-top: 2.5rem; padding-bottom: 5rem; }
+
+  /* --- Type scale --------------------------------------------------------- */
+  .text-display {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    line-height: 1.12;
+    letter-spacing: -0.023em;
+    color: var(--text-strong);
+    margin: 0;
+  }
+  .text-title { font-size: 1.0625rem; font-weight: 600; line-height: 1.35; letter-spacing: -0.012em; color: var(--text-strong); margin: 0; }
+  .text-eyebrow { font-size: 0.6875rem; font-weight: 600; line-height: 1.2; letter-spacing: 0.075em; text-transform: uppercase; color: var(--text-muted); margin: 0; }
+  .text-sm { font-size: 0.875rem; }
+  .text-xs { font-size: 0.75rem; }
+  .text-muted { color: var(--text-muted); }
+  .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+  .text-metric { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; font-weight: 600; letter-spacing: -0.02em; line-height: 1; color: var(--text-strong); }
+
+  /* --- Layout --------------------------------------------------------------*/
+  .stack-6 { display: flex; flex-direction: column; gap: 1.5rem; }
+  .stack-4 { display: flex; flex-direction: column; gap: 1rem; }
+  .stack-2 { display: flex; flex-direction: column; gap: 0.5rem; }
+  .row { display: flex; align-items: center; }
+  .row-between { display: flex; align-items: center; justify-content: space-between; }
+  .row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .gap-2 { gap: 0.5rem; }
+  .gap-3 { gap: 0.75rem; }
+  .gap-4 { gap: 1rem; }
+
+  section + section { margin-top: 3.5rem; padding-top: 2.5rem; border-top: 1px dashed var(--line); }
+  .ref-label { display: inline-block; font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--accent-solid); background: var(--tone-accent-surface); border: 1px solid var(--tone-accent-line); border-radius: 999px; padding: 0.2rem 0.65rem; margin-bottom: 1rem; }
+
+  /* --- Page header ---------------------------------------------------------*/
+  .page-header { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2rem; }
+  @media (min-width: 640px) { .page-header { flex-direction: row; align-items: flex-end; justify-content: space-between; } }
+  .page-header p.desc { margin: 0.375rem 0 0; max-width: 60ch; font-size: 0.875rem; line-height: 1.6; color: var(--text-muted); }
+
+  .tabs-list { display: inline-flex; gap: 0.25rem; padding: 0.25rem; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+  .tab-trigger { padding: 0.375rem 0.75rem; border-radius: var(--radius-md); font-size: 0.875rem; font-weight: 500; color: var(--text-muted); background: transparent; border: none; cursor: default; }
+  .tab-trigger.active { background: var(--surface-card); color: var(--text-strong); box-shadow: var(--shadow-xs); }
+
+  /* --- Section header --------------------------------------------------------*/
+  .section-header { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
+  @media (min-width: 640px) { .section-header { flex-direction: row; align-items: flex-start; justify-content: space-between; } }
+  .section-header p.desc { margin: 0.25rem 0 0; font-size: 0.875rem; color: var(--text-muted); }
+
+  /* --- Controls ------------------------------------------------------------*/
+  .input {
+    font: inherit;
+    font-size: 0.875rem;
+    color: var(--text-strong);
+    background: var(--surface-card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 0.4375rem 0.625rem;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: var(--radius-md);
+    padding: 0.4375rem 0.875rem;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-card);
+    color: var(--text-strong);
+    cursor: default;
+  }
+  .btn-outline-sm { padding: 0.3125rem 0.75rem; font-size: 0.8125rem; }
+
+  /* --- Card ------------------------------------------------------------------*/
+  .card { border-radius: var(--radius-xl); border: 1px solid var(--line); background: var(--surface-card); box-shadow: var(--shadow-sm); }
+  .card-outline { box-shadow: none; }
+  .card-sm { padding: 1rem 1.125rem; }
+
+  /* --- Funnel ----------------------------------------------------------------*/
+  .funnel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; align-items: stretch; }
+  @media (max-width: 900px) { .funnel { grid-template-columns: 1fr; } .funnel-chevron { display: none; } }
+  .funnel-step { display: flex; }
+  .funnel-connector { display: flex; align-items: center; justify-content: center; width: 2rem; color: var(--text-muted); }
+  .funnel-step-inner { flex: 1; }
+  .funnel-step-inner .text-metric { font-size: 1.75rem; margin-top: 0.5rem; display: block; }
+  .funnel-dropoff { display: inline-flex; align-items: center; gap: 0.25rem; margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-muted); }
+
+  /* --- Metrics grid ------------------------------------------------------------*/
+  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-top: 1.5rem; }
+  @media (max-width: 900px) { .metrics-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .metrics-grid { grid-template-columns: 1fr; } }
+  .metric-tile { border-radius: var(--radius-xl); border: 1px solid var(--line); background: var(--surface-card); padding: 1rem 1.25rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .metric-tile .text-metric { font-size: 1.5rem; margin-top: 0.625rem; display: block; }
+  .metric-hint { margin-top: 0.375rem; font-size: 0.75rem; color: var(--text-muted); }
+
+  .icon-tile { display: inline-flex; align-items: center; justify-content: center; width: 2.25rem; height: 2.25rem; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface-2); color: var(--text-muted); flex-shrink: 0; }
+  .icon-tile svg { width: 1rem; height: 1rem; }
+  .tone-success.icon-tile { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .tone-warning.icon-tile { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .tone-accent.icon-tile { background: var(--tone-accent-surface); color: var(--tone-accent-text); border-color: var(--tone-accent-line); }
+  .tone-neutral.icon-tile { background: var(--surface-2); color: var(--text-muted); border-color: var(--line); }
+
+  /* --- Attribution bar -----------------------------------------------------*/
+  .attribution-bar { display: flex; height: 0.75rem; width: 100%; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
+  .attribution-bar .seg-account { background: var(--accent-solid); }
+  .attribution-bar .seg-nonaccount { background: var(--surface-3); border-right: none; }
+  .attribution-legend { display: flex; flex-wrap: wrap; gap: 1.5rem; margin-top: 1rem; }
+  .legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; }
+  .legend-dot { width: 0.5rem; height: 0.5rem; border-radius: 999px; flex-shrink: 0; }
+  .legend-dot.account { background: var(--accent-solid); }
+  .legend-dot.nonaccount { background: var(--text-muted); }
+  .legend-value { font-weight: 600; }
+
+  /* --- Badge ------------------------------------------------------------------*/
+  .badge { display: inline-flex; align-items: center; gap: 0.3125rem; border-radius: 999px; border: 1px solid; padding: 0.125rem 0.5rem; font-size: 0.75rem; font-weight: 500; }
+  .badge-tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .badge-tone-accent { background: var(--tone-accent-surface); color: var(--tone-accent-text); border-color: var(--tone-accent-line); }
+  .badge-dot { width: 0.375rem; height: 0.375rem; border-radius: 999px; background: currentColor; }
+
+  /* --- Skeleton ------------------------------------------------------------*/
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+    border-radius: var(--radius-md);
+  }
+
+  /* --- Alert -----------------------------------------------------------------*/
+  .alert { border-radius: var(--radius-lg); border: 1px solid; padding: 1rem; display: flex; gap: 0.75rem; align-items: flex-start; }
+  .alert-destructive { border-color: var(--tone-danger-line); background: var(--tone-danger-surface); color: var(--tone-danger-text); }
+  .alert h5 { margin: 0 0 0.25rem; font-weight: 600; font-size: 0.875rem; }
+  .alert p { margin: 0; font-size: 0.875rem; line-height: 1.5; }
+  .alert .btn { margin-top: 0.75rem; }
+
+  /* --- Empty state -------------------------------------------------------------*/
+  .empty-state { max-width: 26rem; margin: 0 auto; padding: 3rem 1.5rem; text-align: center; display: flex; flex-direction: column; align-items: center; }
+  .empty-state h3 { margin: 1rem 0 0; }
+  .empty-state p { margin: 0.375rem 0 0; font-size: 0.875rem; line-height: 1.6; color: var(--text-muted); }
+
+  svg { display: block; }
+</style>
+</head>
+<body>
+
+<div class="reference-banner">
+  Design reference for s03-activation-funnel — not production markup. Composed entirely from
+  docs/design-system.md tokens and components. See docs/designs/s03-activation-funnel.md.
+</div>
+
+<div class="container page">
+
+  <!-- ============================== PAGE HEADER ============================== -->
+  <header class="page-header">
+    <div>
+      <p class="text-eyebrow" style="margin-bottom:0.5rem;">Analytics</p>
+      <h1 class="text-display">Activation funnel</h1>
+      <p class="desc">Time from account confirmation to first persisted content update,
+        instrumented against the product's under-5-minute target.</p>
+    </div>
+    <nav class="tabs-list" aria-label="Analytics sections (reference only)">
+      <span class="tab-trigger">Trends</span>
+      <span class="tab-trigger">Top sites</span>
+      <span class="tab-trigger">Performance</span>
+      <span class="tab-trigger active">Activation</span>
+    </nav>
+  </header>
+
+  <!-- ============================== SUCCESS STATE ============================== -->
+  <section>
+    <span class="ref-label">Success state</span>
+
+    <div class="section-header">
+      <div>
+        <h2 class="text-title">Signup → first edit</h2>
+        <p class="desc">Percentiles and the attribution split below are computed over this range.</p>
+      </div>
+      <div class="row-wrap">
+        <label class="stack-2" style="gap:0.25rem;">
+          <span class="text-xs text-muted">From</span>
+          <input class="input" type="date" value="2026-07-17" readonly />
+        </label>
+        <label class="stack-2" style="gap:0.25rem;">
+          <span class="text-xs text-muted">To</span>
+          <input class="input" type="date" value="2026-08-16" readonly />
+        </label>
+        <button class="btn btn-outline-sm" style="align-self:flex-end;">Apply</button>
+      </div>
+    </div>
+
+    <!-- Four-step funnel -->
+    <div class="funnel">
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <p class="text-eyebrow">Account confirmed</p>
+          <span class="text-metric tabular">1,842</span>
+          <p class="text-xs text-muted" style="margin:0.25rem 0 0;">100% of funnel</p>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <p class="text-eyebrow">Site registered</p>
+          <span class="text-metric tabular">1,510</span>
+          <p class="text-xs text-muted" style="margin:0.25rem 0 0;">82% of funnel</p>
+          <span class="funnel-dropoff">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            18% drop-off
+          </span>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <p class="text-eyebrow">Install verified</p>
+          <span class="text-metric tabular">1,120</span>
+          <p class="text-xs text-muted" style="margin:0.25rem 0 0;">61% of funnel</p>
+          <span class="funnel-dropoff">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            26% drop-off
+          </span>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <p class="text-eyebrow">First edit</p>
+          <span class="text-metric tabular">812</span>
+          <p class="text-xs text-muted" style="margin:0.25rem 0 0;">44% of funnel</p>
+          <span class="funnel-dropoff">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            27% drop-off
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-tile">
+        <div>
+          <p class="text-eyebrow">p50 time-to-first-edit</p>
+          <span class="text-metric tabular">3m 42s</span>
+          <p class="metric-hint">Under the 5-minute target</p>
+        </div>
+        <span class="icon-tile tone-success" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </span>
+      </div>
+      <div class="metric-tile">
+        <div>
+          <p class="text-eyebrow">p90 time-to-first-edit</p>
+          <span class="text-metric tabular">14m 08s</span>
+          <p class="metric-hint">Slowest 10% exceed the target</p>
+        </div>
+        <span class="icon-tile tone-warning" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </span>
+      </div>
+      <div class="metric-tile">
+        <div>
+          <p class="text-eyebrow">Non-account edits</p>
+          <span class="text-metric tabular">58%</span>
+          <p class="metric-hint">Of edits in range, by grant holders</p>
+        </div>
+        <span class="icon-tile tone-accent" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </span>
+      </div>
+      <div class="metric-tile">
+        <div>
+          <p class="text-eyebrow">Unmeasurable accounts</p>
+          <span class="text-metric tabular">128</span>
+          <p class="metric-hint">Predate this instrumentation — excluded from p50/p90</p>
+        </div>
+        <span class="icon-tile tone-neutral" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" stroke-dasharray="4 3"/></svg>
+        </span>
+      </div>
+    </div>
+
+    <!-- Attribution -->
+    <div class="card card-sm" style="margin-top:1rem;">
+      <p class="text-title">Edit attribution</p>
+      <p class="text-xs text-muted" style="margin:0.25rem 0 1rem;">1,055 persisted edits in range</p>
+      <div class="attribution-bar" role="img" aria-label="58% non-account edits, 42% account holder edits">
+        <div class="seg-account" style="width:42%;"></div>
+        <div class="seg-nonaccount" style="width:58%;"></div>
+      </div>
+      <div class="attribution-legend">
+        <div class="legend-item">
+          <span class="legend-dot account"></span>
+          Account holders — <span class="legend-value tabular">443</span> <span class="text-muted">(42%)</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot nonaccount"></span>
+          Non-account grant holders — <span class="legend-value tabular">612</span> <span class="text-muted">(58%)</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== LOADING STATE ============================== -->
+  <section>
+    <span class="ref-label">Loading state</span>
+    <div class="section-header">
+      <div>
+        <h2 class="text-title">Signup → first edit</h2>
+        <p class="desc">Skeleton in the shape of the content — not a spinner.</p>
+      </div>
+    </div>
+
+    <div class="funnel">
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <div class="skeleton" style="height:0.6875rem; width:60%;"></div>
+          <div class="skeleton" style="height:1.75rem; width:45%; margin-top:0.625rem;"></div>
+          <div class="skeleton" style="height:0.75rem; width:35%; margin-top:0.5rem;"></div>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <div class="skeleton" style="height:0.6875rem; width:55%;"></div>
+          <div class="skeleton" style="height:1.75rem; width:40%; margin-top:0.625rem;"></div>
+          <div class="skeleton" style="height:0.75rem; width:45%; margin-top:0.5rem;"></div>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <div class="skeleton" style="height:0.6875rem; width:50%;"></div>
+          <div class="skeleton" style="height:1.75rem; width:40%; margin-top:0.625rem;"></div>
+          <div class="skeleton" style="height:0.75rem; width:45%; margin-top:0.5rem;"></div>
+        </div>
+      </div>
+      <div class="funnel-connector funnel-chevron" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div class="funnel-step">
+        <div class="card card-outline card-sm funnel-step-inner">
+          <div class="skeleton" style="height:0.6875rem; width:40%;"></div>
+          <div class="skeleton" style="height:1.75rem; width:35%; margin-top:0.625rem;"></div>
+          <div class="skeleton" style="height:0.75rem; width:45%; margin-top:0.5rem;"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-tile">
+        <div class="stack-2" style="gap:0.625rem;">
+          <div class="skeleton" style="height:0.625rem; width:5rem;"></div>
+          <div class="skeleton" style="height:1.75rem; width:3.5rem;"></div>
+        </div>
+        <div class="skeleton" style="width:2.25rem; height:2.25rem; border-radius:var(--radius-md);"></div>
+      </div>
+      <div class="metric-tile">
+        <div class="stack-2" style="gap:0.625rem;">
+          <div class="skeleton" style="height:0.625rem; width:5rem;"></div>
+          <div class="skeleton" style="height:1.75rem; width:3.5rem;"></div>
+        </div>
+        <div class="skeleton" style="width:2.25rem; height:2.25rem; border-radius:var(--radius-md);"></div>
+      </div>
+      <div class="metric-tile">
+        <div class="stack-2" style="gap:0.625rem;">
+          <div class="skeleton" style="height:0.625rem; width:5rem;"></div>
+          <div class="skeleton" style="height:1.75rem; width:3.5rem;"></div>
+        </div>
+        <div class="skeleton" style="width:2.25rem; height:2.25rem; border-radius:var(--radius-md);"></div>
+      </div>
+      <div class="metric-tile">
+        <div class="stack-2" style="gap:0.625rem;">
+          <div class="skeleton" style="height:0.625rem; width:5rem;"></div>
+          <div class="skeleton" style="height:1.75rem; width:3.5rem;"></div>
+        </div>
+        <div class="skeleton" style="width:2.25rem; height:2.25rem; border-radius:var(--radius-md);"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== EMPTY STATE ============================== -->
+  <section>
+    <span class="ref-label">Empty state</span>
+    <div class="card card-outline">
+      <div class="empty-state">
+        <span class="icon-tile tone-neutral" style="width:2.75rem; height:2.75rem;" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:1.25rem;height:1.25rem;"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+        </span>
+        <h3 class="text-title">No activation data yet</h3>
+        <p>Accounts will appear here once they start confirming and setting up their site.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== ERROR STATE ============================== -->
+  <section>
+    <span class="ref-label">Error state</span>
+    <div class="alert alert-destructive" role="alert">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; margin-top:2px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div>
+        <h5>Couldn't load the activation funnel</h5>
+        <p>The request timed out. The previous range's data may still be visible above if it was already loaded.</p>
+        <button class="btn btn-outline-sm">Try again</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

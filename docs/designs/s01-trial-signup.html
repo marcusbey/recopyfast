@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Design reference — s01-trial-signup</title>
+<style>
+  /* ==========================================================================
+     REFERENCE MOCKUP — s01-trial-signup
+     Tokens copied verbatim from src/app/globals.css (light-dark() pairs), the
+     single source of truth. This file is NOT production code: Execute builds
+     the real screens with src/components/ui/* (Card, Button, StatusBadge,
+     IconTile, Skeleton). Low fidelity by design — communicates layout and
+     state, nothing more.
+
+     Font stack falls back to system fonts here (no next/font in a static
+     file). Production uses Instrument Sans / JetBrains Mono via
+     src/app/layout.tsx.
+     ========================================================================= */
+
+  :root {
+    color-scheme: light dark;
+
+    --canvas: light-dark(hsl(200 24% 98%), hsl(200 18% 7%));
+    --surface-card: light-dark(hsl(0 0% 100%), hsl(200 15% 10%));
+    --surface-1: light-dark(hsl(200 24% 97%), hsl(200 18% 8%));
+    --surface-2: light-dark(hsl(200 18% 94%), hsl(200 14% 14%));
+    --surface-3: light-dark(hsl(200 16% 90%), hsl(200 13% 18%));
+
+    --text-strong: light-dark(hsl(200 22% 11%), hsl(200 22% 96%));
+    --text-muted: light-dark(hsl(200 11% 38%), hsl(200 12% 68%));
+
+    --accent-solid: light-dark(hsl(176 54% 28%), hsl(174 48% 58%));
+    --accent-on-solid: light-dark(hsl(0 0% 100%), hsl(200 30% 8%));
+
+    --line: light-dark(hsl(200 15% 87%), hsl(200 12% 21%));
+    --line-strong: light-dark(hsl(200 13% 55%), hsl(200 10% 40%));
+
+    --tone-neutral-surface: light-dark(hsl(200 18% 95%), hsl(200 12% 17%));
+    --tone-neutral-text: light-dark(hsl(200 12% 32%), hsl(200 12% 76%));
+    --tone-neutral-line: light-dark(hsl(200 15% 86%), hsl(200 12% 26%));
+
+    --tone-info-surface: light-dark(hsl(204 62% 95%), hsl(206 44% 18%));
+    --tone-info-text: light-dark(hsl(206 72% 30%), hsl(204 78% 76%));
+    --tone-info-line: light-dark(hsl(204 55% 85%), hsl(206 40% 30%));
+
+    --tone-success-surface: light-dark(hsl(162 46% 93%), hsl(166 40% 15%));
+    --tone-success-text: light-dark(hsl(166 72% 24%), hsl(162 60% 70%));
+    --tone-success-line: light-dark(hsl(162 40% 82%), hsl(166 36% 27%));
+
+    --tone-warning-surface: light-dark(hsl(42 84% 92%), hsl(30 44% 17%));
+    --tone-warning-text: light-dark(hsl(28 74% 29%), hsl(42 84% 68%));
+    --tone-warning-line: light-dark(hsl(40 70% 80%), hsl(32 40% 29%));
+
+    --tone-danger-surface: light-dark(hsl(4 76% 96%), hsl(358 40% 19%));
+    --tone-danger-text: light-dark(hsl(358 62% 39%), hsl(4 84% 76%));
+    --tone-danger-line: light-dark(hsl(4 70% 88%), hsl(358 36% 31%));
+
+    --shadow-a: light-dark(hsl(200 32% 20% / 0.05), hsl(200 55% 2% / 0.34));
+    --shadow-b: light-dark(hsl(200 32% 20% / 0.07), hsl(200 55% 2% / 0.46));
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur: 220ms;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    padding: 32px 20px 80px;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  /* ---- reference banner ---------------------------------------------- */
+  .ref-note {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border: 1px solid var(--tone-warning-line);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 40px;
+  }
+  .ref-note strong { font-weight: 600; }
+
+  section.screen { margin-bottom: 56px; }
+  .screen-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 6px;
+  }
+  .screen-title {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0 0 4px;
+  }
+  .screen-desc {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 20px;
+    max-width: 60ch;
+    line-height: 1.5;
+  }
+
+  /* ---- type scale ------------------------------------------------------ */
+  .text-title { font-size: 1.0625rem; font-weight: 600; line-height: 1.35; letter-spacing: -0.012em; color: var(--text-strong); }
+  .text-eyebrow { font-size: 0.6875rem; font-weight: 600; line-height: 1.2; letter-spacing: 0.075em; text-transform: uppercase; color: var(--text-muted); }
+  .text-metric { font-variant-numeric: tabular-nums; font-weight: 600; letter-spacing: -0.02em; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* ---- Card -------------------------------------------------------- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+  }
+  .card--outline { box-shadow: none; }
+
+  /* ---- Button (subset used here) -------------------------------------- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: default;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .btn--sm { height: 32px; padding: 0 12px; font-size: 12px; }
+  .btn--lg { height: 48px; padding: 0 24px; font-size: 15px; border-radius: var(--radius); }
+  .btn--outline { background: var(--surface-card); color: var(--text-strong); border-color: var(--line-strong); }
+  .btn--default { background: var(--accent-solid); color: var(--accent-on-solid); box-shadow: var(--shadow-xs); }
+
+  /* ---- IconTile -------------------------------------------------------- */
+  .icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .icon-tile svg { width: 16px; height: 16px; }
+  .icon-tile--neutral { background: var(--surface-2); color: var(--text-muted); }
+  .icon-tile--info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .icon-tile--warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .icon-tile--danger { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+
+  /* ---- StatusBadge (pill) ----------------------------------------------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 2px 8px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .badge svg { width: 12px; height: 12px; }
+  .badge--info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .badge--warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+  .badge--danger { background: var(--tone-danger-surface); color: var(--tone-danger-text); border-color: var(--tone-danger-line); }
+
+  /* ---- progress bar ------------------------------------------------------ */
+  .progress-track {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-3);
+    overflow: hidden;
+  }
+  .progress-fill { height: 100%; border-radius: 999px; transition: width var(--dur) var(--ease-out); }
+  .progress-fill--info { background: var(--accent-solid); }
+  .progress-fill--warning { background: var(--tone-warning-text); }
+  .progress-fill--danger { background: var(--tone-danger-text); }
+
+  /* ---- Skeleton ---------------------------------------------------------- */
+  .skeleton { background: var(--surface-2); border-radius: var(--radius-md); }
+
+  /* ---- misc layout helpers ------------------------------------------- */
+  .row { display: flex; align-items: flex-start; gap: 12px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  .muted { color: var(--text-muted); }
+  .mt-tiny { margin-top: 2px; }
+  .mt-sm { margin-top: 6px; }
+  .mt-md { margin-top: 10px; }
+  .state-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+
+  /* mock page-header (dashboard overview) */
+  .mock-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 24px;
+    background: var(--canvas);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-lg);
+  }
+  .mock-header h1 {
+    font-size: clamp(1.4rem, 1.2rem + 1vw, 1.75rem);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin: 0 0 6px;
+  }
+  .mock-header .eyebrow { margin: 0 0 4px; }
+  .mock-header .desc { font-size: 13px; color: var(--text-muted); margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="ref-note">
+    <strong>Reference mockup, not production code.</strong> Low-fidelity static HTML for
+    docs/designs/s01-trial-signup.md. Tokens are copied from src/app/globals.css. Execute
+    builds these screens with the real src/components/ui/* primitives (Card, Button,
+    StatusBadge, IconTile, Skeleton) — nothing here gets pasted into the app.
+  </div>
+
+  <!-- ===================================================================
+       SCREEN 1 — Dashboard overview compact trial indicator
+       =================================================================== -->
+  <section class="screen">
+    <p class="screen-label">Screen 1 — /dashboard</p>
+    <h2 class="screen-title">Compact trial indicator in the page header</h2>
+    <p class="screen-desc">
+      One StatusBadge added to the existing PageHeader, between the title and "Add site."
+      Tone flips info → warning at 3 days left. Links to /dashboard/billing.
+    </p>
+
+    <div class="mock-header">
+      <div>
+        <p class="text-eyebrow eyebrow">Overview</p>
+        <h1>Welcome back, Alex</h1>
+        <p class="desc">Every site you have connected, and what has changed on them.</p>
+      </div>
+      <div class="row" style="align-items:center; gap:10px;">
+        <span class="badge badge--info">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+          Trial — 9 days left
+        </span>
+        <span class="btn btn--default btn--sm" style="padding:0 16px;">+ Add site</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================
+       SCREEN 2 — Billing page trial status card, all tone states
+       =================================================================== -->
+  <section class="screen">
+    <p class="screen-label">Screen 2 — /dashboard/billing</p>
+    <h2 class="screen-title">Trial status card — two independent rows, three tone states</h2>
+    <p class="screen-desc">
+      Sits above CheckoutStatusBanner. Row 1 (trial time) and row 2 (AI credits) carry their
+      own tone independently — a healthy trial with low credits looks different from an
+      ending trial with plenty of credits left. Four instances below show the range.
+    </p>
+
+    <div class="grid-4">
+
+      <!-- Healthy -->
+      <div>
+        <p class="state-tag">Healthy — plenty of time and credits</p>
+        <div class="card card--outline" style="padding: 18px 20px;">
+          <div class="row">
+            <span class="icon-tile icon-tile--info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;">9 days left in your trial</p>
+              <p class="muted mt-tiny" style="font-size:12px;">Ends Aug 30, 2026</p>
+            </div>
+          </div>
+          <div class="row mt-md">
+            <span class="icon-tile icon-tile--info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;font-size:0.9375rem;"><span class="text-metric tabular">120</span> <span class="muted" style="font-weight:400;">of 500 trial AI credits used</span></p>
+              <div class="progress-track mt-sm"><div class="progress-fill progress-fill--info" style="width:24%;"></div></div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+            <span class="btn btn--outline btn--sm">See plans</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ending soon -->
+      <div>
+        <p class="state-tag">Warning — trial ending soon</p>
+        <div class="card card--outline" style="padding: 18px 20px;">
+          <div class="row">
+            <span class="icon-tile icon-tile--warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;">2 days left in your trial</p>
+              <p class="muted mt-tiny" style="font-size:12px;">Ends Aug 18, 2026</p>
+            </div>
+          </div>
+          <div class="row mt-md">
+            <span class="icon-tile icon-tile--info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;font-size:0.9375rem;"><span class="text-metric tabular">210</span> <span class="muted" style="font-weight:400;">of 500 trial AI credits used</span></p>
+              <div class="progress-track mt-sm"><div class="progress-fill progress-fill--info" style="width:42%;"></div></div>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+            <span class="btn btn--outline btn--sm">See plans</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Credits running low -->
+      <div>
+        <p class="state-tag">Warning — AI credits running low (≥80%)</p>
+        <div class="card card--outline" style="padding: 18px 20px;">
+          <div class="row">
+            <span class="icon-tile icon-tile--info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;">7 days left in your trial</p>
+              <p class="muted mt-tiny" style="font-size:12px;">Ends Aug 28, 2026</p>
+            </div>
+          </div>
+          <div class="row mt-md">
+            <span class="icon-tile icon-tile--warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;font-size:0.9375rem;"><span class="text-metric tabular">460</span> <span class="muted" style="font-weight:400;">of 500 trial AI credits used</span></p>
+              <div class="progress-track mt-sm"><div class="progress-fill progress-fill--warning" style="width:92%;"></div></div>
+              <p class="muted mt-sm" style="font-size:12px;">Running low — upgrade to keep using AI features without interruption.</p>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+            <span class="btn btn--outline btn--sm">See plans</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Credits exhausted -->
+      <div>
+        <p class="state-tag">Danger — AI credits exhausted, trial still active</p>
+        <div class="card card--outline" style="padding: 18px 20px;">
+          <div class="row">
+            <span class="icon-tile icon-tile--info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;">5 days left in your trial</p>
+              <p class="muted mt-tiny" style="font-size:12px;">Ends Aug 26, 2026</p>
+            </div>
+          </div>
+          <div class="row mt-md">
+            <span class="icon-tile icon-tile--danger">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg>
+            </span>
+            <div style="flex:1;">
+              <p class="text-title" style="margin:0;font-size:0.9375rem;"><span class="text-metric tabular">500</span> <span class="muted" style="font-weight:400;">of 500 trial AI credits used</span></p>
+              <div class="progress-track mt-sm"><div class="progress-fill progress-fill--danger" style="width:100%;"></div></div>
+              <p class="mt-sm" style="font-size:12px; color:var(--tone-danger-text);">AI suggestions and translations are paused until you upgrade. Editing text by hand still works.</p>
+            </div>
+          </div>
+          <div style="display:flex; justify-content:flex-end; margin-top:14px;">
+            <span class="btn btn--outline btn--sm">See plans</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================
+       SCREEN 2b — Loading state
+       =================================================================== -->
+  <section class="screen">
+    <p class="screen-label">Screen 2 — loading state</p>
+    <h2 class="screen-title">Trial status card — loading</h2>
+    <p class="screen-desc">Skeleton in the shape of both rows, shown while the trial/entitlement data is in flight.</p>
+
+    <div class="card card--outline" style="padding: 18px 20px; max-width: 420px;">
+      <div class="row">
+        <span class="skeleton" style="width:36px;height:36px;border-radius:var(--radius-md);"></span>
+        <div style="flex:1;">
+          <span class="skeleton" style="display:block;width:60%;height:16px;"></span>
+          <span class="skeleton mt-sm" style="display:block;width:40%;height:12px;"></span>
+        </div>
+      </div>
+      <div class="row mt-md">
+        <span class="skeleton" style="width:36px;height:36px;border-radius:var(--radius-md);"></span>
+        <div style="flex:1;">
+          <span class="skeleton" style="display:block;width:70%;height:16px;"></span>
+          <span class="skeleton mt-sm" style="display:block;width:100%;height:6px;border-radius:999px;"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================
+       SCREEN 3 — Trial expired, full-page state
+       =================================================================== -->
+  <section class="screen">
+    <p class="screen-label">Screen 3 — /dashboard/billing, unentitled branch</p>
+    <h2 class="screen-title">Trial expired — single upgrade action</h2>
+    <p class="screen-desc">
+      Reuses the existing "Choose a plan to continue" shell (BillingDashboard.tsx:137-175).
+      Same shell, trial-aware copy, one button — no icon, matching the plain heading
+      treatment the existing shell already uses.
+    </p>
+
+    <div class="card" style="max-width: 460px; margin: 0 auto; padding: 40px 32px; text-align: center;">
+      <h1 style="font-size:1.375rem; font-weight:600; margin:0 0 10px;">Your trial has ended</h1>
+      <p class="muted" style="font-size:14px; line-height:1.6; margin:0 0 24px;">
+        Your 14-day Pro trial ended on Aug 16, 2026. Your site keeps serving its current
+        content — editing, new sites and collaborators need Pro.
+      </p>
+      <span class="btn btn--default btn--lg">Upgrade to Pro</span>
+    </div>
+  </section>
+
+  <p class="muted" style="font-size:12px; text-align:center;">
+    Empty and error states for the trial status card are intentionally not pictured — see
+    docs/designs/s01-trial-signup.md → States. Empty does not apply (the card either renders
+    or does not); error fails closed to hidden rather than rendering an Alert, per that file's
+    reasoning.
+  </p>
+
+</div>
+</body>
+</html>

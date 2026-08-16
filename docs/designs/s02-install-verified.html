@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Design reference — s02-install-verified</title>
+<style>
+  /* ============================================================
+     Tokens copied from src/app/globals.css (light values only —
+     this is a low-fidelity static reference, not the app).
+     Every value here traces back to docs/design-system.md.
+     ============================================================ */
+  :root {
+    --accent-solid: hsl(176 54% 28%);
+    --accent-on-solid: hsl(0 0% 100%);
+    --canvas: hsl(200 24% 98%);
+    --surface-card: #ffffff;
+    --surface-1: hsl(200 24% 97%);
+    --surface-2: hsl(200 18% 94%);
+    --surface-3: hsl(200 16% 90%);
+    --text-strong: hsl(200 22% 11%);
+    --text-muted: hsl(200 11% 38%);
+    --line: hsl(200 15% 87%);
+    --line-strong: hsl(200 13% 55%);
+    --danger-solid: hsl(358 60% 42%);
+
+    --tone-neutral-surface: hsl(200 18% 95%);
+    --tone-neutral-text: hsl(200 12% 32%);
+    --tone-neutral-line: hsl(200 15% 86%);
+
+    --tone-info-surface: hsl(204 62% 95%);
+    --tone-info-text: hsl(206 72% 30%);
+    --tone-info-line: hsl(204 55% 85%);
+
+    --tone-success-surface: hsl(162 46% 93%);
+    --tone-success-text: hsl(166 72% 24%);
+    --tone-success-line: hsl(162 40% 82%);
+
+    --tone-warning-surface: hsl(42 84% 92%);
+    --tone-warning-text: hsl(28 74% 29%);
+    --tone-warning-line: hsl(40 70% 80%);
+
+    --tone-danger-surface: hsl(4 76% 96%);
+    --tone-danger-text: hsl(358 62% 39%);
+    --tone-danger-line: hsl(4 70% 88%);
+
+    --tone-accent-surface: hsl(176 40% 93%);
+    --tone-accent-text: hsl(178 68% 24%);
+    --tone-accent-line: hsl(176 34% 82%);
+
+    --shadow-a: hsl(200 32% 20% / 0.05);
+    --shadow-b: hsl(200 32% 20% / 0.07);
+    --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
+    --shadow-xs: 0 1px 2px var(--shadow-a);
+
+    --radius: 0.75rem;
+    --radius-md: calc(var(--radius) - 3px);
+    --radius-lg: var(--radius);
+
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --dur-fast: 160ms;
+    --dur: 220ms;
+
+    --font-sans: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--text-strong);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .reference-banner {
+    background: var(--tone-warning-surface);
+    color: var(--tone-warning-text);
+    border-bottom: 1px solid var(--tone-warning-line);
+    padding: 0.625rem 1.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    text-align: center;
+  }
+
+  .page {
+    max-width: 76rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 4rem;
+  }
+
+  .text-display {
+    font-size: clamp(1.625rem, 1.35rem + 1.1vw, 2rem);
+    font-weight: 600;
+    letter-spacing: -0.023em;
+    margin: 0 0 0.375rem;
+  }
+
+  .page-intro {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: 0 0 2.5rem;
+    max-width: 42rem;
+  }
+
+  .state-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 0 0 0.75rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem 1.75rem;
+  }
+  @media (max-width: 860px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  /* ---- Card (matches src/components/ui/card.tsx "default" variant) ---- */
+  .card {
+    background: var(--surface-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg); /* rounded-xl */
+    box-shadow: var(--shadow-sm);
+  }
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 1.5rem 1.5rem 0;
+  }
+  .card-content {
+    padding: 1.25rem 1.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .card-title-group {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 1.125rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .text-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    letter-spacing: -0.012em;
+    margin: 0;
+  }
+
+  /* ---- IconTile (src/components/ui/icon-tile.tsx) ---- */
+  .icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: var(--radius-md); /* rounded-lg */
+    border: 1px solid;
+    flex-shrink: 0;
+  }
+  .icon-tile svg { width: 1rem; height: 1rem; }
+  .icon-tile.tone-neutral { background: var(--surface-2); border-color: var(--line); color: var(--text-muted); }
+  .icon-tile.tone-success { background: var(--tone-success-surface); border-color: var(--tone-success-line); color: var(--tone-success-text); }
+  .icon-tile.tone-warning { background: var(--tone-warning-surface); border-color: var(--tone-warning-line); color: var(--tone-warning-text); }
+
+  /* ---- StatusBadge (src/components/ui/status-badge.tsx + badge.tsx) ---- */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3125rem;
+    border-radius: 999px;
+    border: 1px solid;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .status-badge svg { width: 0.75rem; height: 0.75rem; }
+  .status-badge.tone-neutral { background: var(--tone-neutral-surface); color: var(--tone-neutral-text); border-color: var(--tone-neutral-line); }
+  .status-badge.tone-success { background: var(--tone-success-surface); color: var(--tone-success-text); border-color: var(--tone-success-line); }
+  .status-badge.tone-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+
+  /* ---- Eyebrow ---- */
+  .text-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.075em;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  /* ---- Tabs (src/components/ui/tabs.tsx, Radix-wrapped) ---- */
+  .tabs-list {
+    display: inline-flex;
+    gap: 0.25rem;
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
+    padding: 0.1875rem;
+    width: fit-content;
+  }
+  .tabs-list input { display: none; }
+  .tabs-list label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.375rem 0.75rem;
+    border-radius: calc(var(--radius-md) - 2px);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+  }
+  .tabs-list input:checked + label {
+    background: var(--surface-card);
+    color: var(--text-strong);
+    box-shadow: var(--shadow-xs);
+  }
+  .tab-panel { display: none; flex-direction: column; gap: 0.75rem; }
+  #wp:checked ~ .tab-panels #panel-wp,
+  #next:checked ~ .tab-panels #panel-next,
+  #html:checked ~ .tab-panels #panel-html { display: flex; }
+
+  .install-location {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  /* ---- Snippet block — machine string, mono, per design system ---- */
+  .snippet {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 0.875rem;
+  }
+  .snippet code {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-strong);
+    word-break: break-all;
+    flex: 1;
+  }
+
+  /* ---- Button (src/components/ui/button.tsx) ---- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: calc(var(--radius-md) - 3px); /* rounded-sm */
+    padding: 0.375rem 0.625rem;
+    cursor: pointer;
+    transition: background-color var(--dur) var(--ease-out), box-shadow var(--dur) var(--ease-out);
+    white-space: nowrap;
+  }
+  .btn svg { width: 0.875rem; height: 0.875rem; }
+  .btn-outline {
+    background: var(--surface-card);
+    border: 1px solid var(--line-strong);
+    color: var(--text-strong);
+    box-shadow: var(--shadow-xs);
+  }
+  .btn-link {
+    background: transparent;
+    border: none;
+    color: var(--accent-solid);
+    padding: 0.375rem 0;
+  }
+  .btn-link:hover { text-decoration: underline; }
+
+  /* ---- Alert (src/components/ui/alert.tsx) ---- */
+  .alert {
+    position: relative;
+    border-radius: calc(var(--radius-md) + 3px); /* rounded-lg */
+    border: 1px solid;
+    padding: 0.75rem 0.875rem 0.75rem 2.375rem;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  .alert svg {
+    position: absolute;
+    left: 0.875rem;
+    top: 0.8125rem;
+    width: 1rem;
+    height: 1rem;
+  }
+  .alert-title { font-weight: 500; margin: 0 0 0.125rem; }
+  .alert-info { background: var(--tone-info-surface); color: var(--tone-info-text); border-color: var(--tone-info-line); }
+  .alert-warning { background: var(--tone-warning-surface); color: var(--tone-warning-text); border-color: var(--tone-warning-line); }
+
+  .body-text { font-size: 0.875rem; color: var(--text-strong); margin: 0; }
+  .muted-text { font-size: 0.8125rem; color: var(--text-muted); margin: 0; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  .footnote {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+  }
+</style>
+</head>
+<body>
+
+  <div class="reference-banner">
+    Reference mockup — not production code. Communicates layout and state only.
+    Execute builds this with the real <code>src/components/ui/*</code> components.
+  </div>
+
+  <div class="page">
+    <h1 class="text-display">Site detail — Installation panel</h1>
+    <p class="page-intro">
+      Story s02-install-verified. One card, one fixed layout, four states driven
+      entirely by <code>StatusBadge</code> tone + body content. The site turns
+      &ldquo;green&rdquo; (live) by itself — no state here requires the owner to click
+      anything except copying the snippet once.
+    </p>
+
+    <div class="grid">
+
+      <!-- ============ STATE 1: awaiting-install ============ -->
+      <div>
+        <p class="state-label">State — awaiting-install (default)</p>
+        <div class="card">
+          <div class="card-header" style="flex-direction:column; gap:0;">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+                </span>
+                <h2 class="text-title">Installation</h2>
+              </div>
+              <span class="status-badge tone-neutral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+                Awaiting install
+              </span>
+            </div>
+          </div>
+          <div class="card-content">
+            <p class="text-eyebrow">Add this snippet to your site</p>
+
+            <div class="tabs-list">
+              <input type="radio" name="framework-1" id="wp" checked>
+              <label for="wp">WordPress</label>
+              <input type="radio" name="framework-1" id="next">
+              <label for="next">Next.js</label>
+              <input type="radio" name="framework-1" id="html">
+              <label for="html">Plain HTML</label>
+            </div>
+
+            <div class="tab-panels">
+              <div class="tab-panel" id="panel-wp">
+                <p class="install-location">Paste into your theme&rsquo;s <code>footer.php</code>, right before <code>&lt;/body&gt;</code> — or use a header/footer snippet plugin.</p>
+                <div class="snippet">
+                  <code>&lt;script src="https://cdn.recopyfast.com/embed.js" data-site="rcf_8f2a91c4"&gt;&lt;/script&gt;</code>
+                  <button class="btn btn-outline" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <div class="tab-panel" id="panel-next">
+                <p class="install-location">Add to <code>app/layout.tsx</code>, just before the closing <code>&lt;/body&gt;</code> tag.</p>
+                <div class="snippet">
+                  <code>&lt;script src="https://cdn.recopyfast.com/embed.js" data-site="rcf_8f2a91c4"&gt;&lt;/script&gt;</code>
+                  <button class="btn btn-outline" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <div class="tab-panel" id="panel-html">
+                <p class="install-location">Paste before <code>&lt;/body&gt;</code> on every page you want editable.</p>
+                <div class="snippet">
+                  <code>&lt;script src="https://cdn.recopyfast.com/embed.js" data-site="rcf_8f2a91c4"&gt;&lt;/script&gt;</code>
+                  <button class="btn btn-outline" type="button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="alert alert-info">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              <p class="alert-title">Checking automatically</p>
+              <p style="margin:0;">This card updates itself within 10 seconds of your first pageview. No refresh needed.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ STATE 2: awaiting-install + domain mismatch ============ -->
+      <div>
+        <p class="state-label">State — awaiting-install, domain mismatch reported (AC 4)</p>
+        <div class="card">
+          <div class="card-header" style="flex-direction:column; gap:0;">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-neutral" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+                </span>
+                <h2 class="text-title">Installation</h2>
+              </div>
+              <span class="status-badge tone-neutral">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>
+                Awaiting install
+              </span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="alert alert-warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+              <p class="alert-title">Report from an unregistered domain</p>
+              <p style="margin:0;">We received a report from <strong>wrong-domain.example</strong>, not <strong>yourexample.com</strong>. This site stays <strong>awaiting install</strong> until we see it from the registered domain. Double-check you pasted the snippet on the right site.</p>
+            </div>
+
+            <p class="text-eyebrow">Add this snippet to your site</p>
+            <p class="install-location">Paste into your theme&rsquo;s <code>footer.php</code>, right before <code>&lt;/body&gt;</code>.</p>
+            <div class="snippet">
+              <code>&lt;script src="https://cdn.recopyfast.com/embed.js" data-site="rcf_8f2a91c4"&gt;&lt;/script&gt;</code>
+              <button class="btn btn-outline" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>
+                Copy
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ STATE 3: live ============ -->
+      <div>
+        <p class="state-label">State — live (flips with no user action)</p>
+        <div class="card">
+          <div class="card-header" style="flex-direction:column; gap:0;">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-success" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+                </span>
+                <h2 class="text-title">Installation</h2>
+              </div>
+              <span class="status-badge tone-success">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>
+                Live
+              </span>
+            </div>
+          </div>
+          <div class="card-content">
+            <p class="body-text">ReCopyFast detected <strong>yourexample.com</strong> on <span class="tabular">Aug 16, 2026 at 10:42am</span>.</p>
+            <p class="muted-text">Editing is on. Your team can open the edit board on any page of the site.</p>
+            <button class="btn btn-link" type="button" style="align-self:flex-start;">View install snippet</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ STATE 4: stale ============ -->
+      <div>
+        <p class="state-label">State — stale (advisory only, AC 7)</p>
+        <div class="card">
+          <div class="card-header" style="flex-direction:column; gap:0;">
+            <div class="card-title-group">
+              <div style="display:flex; align-items:center; gap:0.75rem;">
+                <span class="icon-tile tone-warning" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                </span>
+                <h2 class="text-title">Installation</h2>
+              </div>
+              <span class="status-badge tone-warning">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                Stale
+              </span>
+            </div>
+          </div>
+          <div class="card-content">
+            <div class="alert alert-warning">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+              <p class="alert-title">No recent activity</p>
+              <p style="margin:0;">No report from <strong>yourexample.com</strong> in 14 days. Your site keeps working and stays editable — this is just a heads-up your install might need a check.</p>
+            </div>
+            <button class="btn btn-link" type="button" style="align-self:flex-start;">View install snippet</button>
+            <p class="footnote">Last seen <span class="tabular">Aug 2, 2026</span> · 14 days ago</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>
