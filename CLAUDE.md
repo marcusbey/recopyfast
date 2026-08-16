@@ -88,17 +88,21 @@ npm test
 ## Tech Stack & Dependencies
 
 ### Core Framework
-- **Next.js 15.4.6** with App Router
+- **Next.js 16.1.1** with App Router
 - **React 19.1.0** with TypeScript
 - **Tailwind CSS 4** for styling
 
 ### Key Dependencies
-- **Supabase** for database and authentication
-- **Socket.io** for real-time communication
-- **Zustand** for state management
-- **TipTap** for rich text editing
-- **Framer Motion** for animations
+- **Supabase** for database, authentication and storage
+- **Stripe** for billing (DB-driven catalogue — `plans` is the source of truth)
+- **Socket.io** for real-time communication — in `server/`, **not currently deployed**
+- **React Context + custom fetch hooks** for state ([ADR 005](./docs/decisions/005-client-state-context-and-fetch-hooks.md))
+- **Framer Motion** for animations — marketing surface only
 - **Radix UI** for accessible components
+
+> Zustand, TanStack Query and TipTap were listed here and in the old architecture plan. None
+> were ever imported by any file; they have been removed from `package.json`. There is no
+> `src/store/`. See [`docs/architecture.md`](./docs/architecture.md) — "Drift corrected".
 
 ### Development Tools
 - **ESLint** with Next.js config
@@ -116,17 +120,25 @@ src/
 │   └── embed/      # Embeddable widget
 ├── components/     # Reusable UI components
 │   ├── dashboard/  # Dashboard-specific components
-│   ├── demo/       # Demo components
-│   ├── editor/     # Rich text editor components
+│   ├── editor/     # In-page editing components
+│   ├── landing/    # Marketing surface
 │   ├── shared/     # Shared/common components
-│   └── ui/         # Base UI components (buttons, etc.)
-├── hooks/          # Custom React hooks
-├── lib/            # Utilities and configurations
-│   ├── supabase/   # Supabase client configuration
+│   └── ui/         # Base UI primitives (Radix-wrapped)
+├── hooks/          # Custom React hooks (server state lives here)
+├── contexts/       # React Context — AuthContext only
+├── lib/            # One folder per domain (auth, billing, stripe, security, …)
+│   ├── supabase/   # client / server / service — picking wrong one is a security bug
 │   └── utils/      # Utility functions
-├── store/          # Zustand state management
+├── middleware.ts   # Auth gate, entitlement gate, security headers, CSP
 └── types/          # TypeScript type definitions
+
+public/embed/
+├── recopyfast.src.js   # SOURCE OF TRUTH — hand-edited
+└── recopyfast.js       # BUILD ARTIFACT — never hand-edit, permanent public URL
 ```
+
+Full structure, conventions and data model: [`docs/architecture.md`](./docs/architecture.md).
+Pipeline rules and technical conventions: [`AGENTS.md`](./AGENTS.md).
 
 ### Server Structure
 ```

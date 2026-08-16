@@ -7,6 +7,7 @@ For what is true now, start at [`../prd.md`](../prd.md).
 
 | File | What it was | Why it's here |
 |---|---|---|
+| `2026-08-16-architecture-plan.md` | `architecture/overview.md` — the original architecture plan and stack doc | Superseded by [`../architecture.md`](../architecture.md), which is verified against the code. This one asserted Zustand, React Query, TipTap and Cloudflare Workers, none of which exist. `reviews/stories*.md` cite it at its old path for the 30KB budget (line 326) |
 | `2026-08-04-qa-user-journey.md` | QA pass over the live owner journey | Dated snapshot — findings were actioned |
 | `2026-08-07-qa-production-audit.md` | Production readiness audit | Dated snapshot |
 | `goal-audit-closeout.md` | Closeout report for a goal audit cycle | Completed, not maintained |

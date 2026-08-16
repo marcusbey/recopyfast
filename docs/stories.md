@@ -81,7 +81,8 @@ Reading the graph:
 ### Byte budget
 
 The PRD constraint is **≤ 30KB gzipped** for `public/embed/recopyfast.js`
-(`docs/architecture/overview.md:326`). Measured on this revision:
+([`architecture.md` → The embed widget](./architecture.md#the-embed-widget); formerly
+`docs/architecture/overview.md:326`, now archived). Measured on this revision:
 
 | Component | gzipped |
 |---|---|
@@ -344,7 +345,7 @@ None. **Gates `s08`, `s09` and `s11`.**
 ### Agentic notes
 - Measured on this revision, and these are measurements not estimates:
   `recopyfast.js` **46,781** gz, of which `socket.io-client` **13,085** and widget code
-  **34,063**. Budget is 30,000 (`docs/architecture/overview.md:326`).
+  **34,063**. Budget is 30,000 ([`architecture.md` → The embed widget](./architecture.md#the-embed-widget)).
   **Removing socket.io alone does not reach budget** — hence this story exists separately
   from `s08`.
 - Reproduce with `gzip -9c public/embed/recopyfast.js | wc -c`; isolate the widget by

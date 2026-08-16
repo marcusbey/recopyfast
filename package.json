@@ -55,10 +55,6 @@
     "@stripe/stripe-js": "^9.12.1",
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.55.0",
-    "@tanstack/react-query": "^5.85.0",
-    "@tiptap/extension-placeholder": "^3.1.0",
-    "@tiptap/react": "^3.1.0",
-    "@tiptap/starter-kit": "^3.1.0",
     "@types/stripe": "^8.0.416",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -89,8 +85,7 @@
     "three": "^0.182.0",
     "uuid": "^11.1.0",
     "winston": "^3.17.0",
-    "winston-daily-rotate-file": "^5.0.0",
-    "zustand": "^5.0.7"
+    "winston-daily-rotate-file": "^5.0.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
