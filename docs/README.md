@@ -31,6 +31,11 @@ structure, conventions, data model, integration points. Supersedes the old
 `architecture/overview.md`, which was an aspirational plan and wrong in seven places — see
 its "Drift corrected" table.
 
+### [`design-system.md`](./design-system.md)
+The single visual reference, read by `/ks-design` at every story. Tokens, the 17-component
+inventory, imposed UI patterns, Do/Don't — captured from the code, plus the surface-reach gaps
+(email and the embed widget are off-system today, with evidence).
+
 ### [`decisions/`](./decisions/)
 One ADR per structural decision, with the options considered and why they were rejected.
 Immutable: a change means a new ADR superseding the old one.
@@ -77,9 +82,11 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`qa-register.md`](./quality/qa-register.md) | Live QA findings register |
 
 ### `design/`
+Subordinate to [`design-system.md`](./design-system.md) above.
+
 | File | Contents |
 |---|---|
-| [`styleguide.md`](./design/styleguide.md) | Visual and UI conventions |
+| [`styleguide.md`](./design/styleguide.md) | The authored visual conventions — intent and rationale. `design-system.md` consumes it and adds the measured token values, component inventory and surface-reach gaps |
 
 ### [`archive/`](./archive/README.md)
 Point-in-time reports and superseded documents. Historical reference only — **do not
