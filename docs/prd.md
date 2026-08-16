@@ -118,7 +118,7 @@ serves that loop or serves the business around it.
 | 11 | Real-time multi-user sync (Socket.io, room per site) | 5 | Separate deployed service, reconnection, Redis pub/sub for horizontal scale, conflict handling. A 5 that stays because "the page updates while you watch" *is* the demo. |
 | 12 | Content versioning + rollback | 3 | Append-only history + restore. Cheap, and it is what makes handing edit rights to a stranger survivable. |
 | 13 | Staging → publish workflow | 4 | Draft/live split across the whole content model, approval state, publish transaction. Earns its place because agencies will not hand clients direct-to-live access. |
-| 14 | A/B testing: variants, traffic bucketing, lifecycle cron, results | 5 | Real-time bucketing at the edge of the embed script, statistical results, scheduled lifecycle. Kept because it is the Pro upsell and it shares infrastructure with (15). |
+| 14 | A/B testing: variants, traffic bucketing, lifecycle cron, results | 5 | Real-time bucketing at the edge of the embed script, statistical results, scheduled lifecycle. Kept because it is the Pro upsell and it shares infrastructure with (15). **Built, then parked out of the launch on 2026-08-03 (`dashboard/_ab-tests`). Decision: re-enabled — see stories s08/s09.** |
 | 15 | Per-section impression tracking (Pro) | 4 | IntersectionObserver in the embed script + high-volume ingest + aggregation. Volume risk is real. This is the differentiator no competitor has. |
 | 16 | Analytics dashboard + export | 3 | Read models over (15) plus edit activity. |
 | 17 | Public API v1 + API keys | 3 | Key issuance, scoping, rate limiting. Present because TinaCMS's audience is developers and parity matters in the comparison table. |
@@ -143,8 +143,12 @@ the UI unless a paying customer blocks on it:
 - **Security events dashboard** (`/api/security/events`, `/stats`). Keep the logging,
   drop the customer-facing surface.
 - **Notification centre** (`/api/notifications`). Email is enough at this scale.
-- **Theme / style editor** (`edit-board/styles`, `edit-board/themes`). We edit *content*.
-  The moment we edit design we inherit "you broke my site" support forever.
+- **Site-wide theme editor** (`edit-board/themes`, `edit-board/styles/apply`). We do not
+  restyle a site. The moment we edit design at that scope we inherit "you broke my site"
+  support forever.
+  **Not covered by this entry:** per-element typography and colour controls in the editor
+  toolbar (`TypographyPanel`, `ColorPicker`, `FontSizeSelector`, `TextAlignmentControls`).
+  Changing one heading's size is content-adjacent, it is shipped, and it stays.
 
 Never built, and never will be:
 
@@ -157,9 +161,11 @@ Never built, and never will be:
 - Native mobile apps.
 - WYSIWYG page builder of any kind.
 
-**Open**: whether a free tier exists. The code today is explicit that it does not
-(`getEffectivePlan` denies an account with no plan, no free tier to fall through to).
-That is a defensible stance and a GTM risk — see Open decisions.
+**Resolved**: no free tier. Access is gated by a **14-day Pro trial without a card**
+(story `s01-trial-signup`). The code today denies any account with no plan
+(`getEffectivePlan` has no free tier to fall through to); the trial is modelled as a
+time-boxed grant of the `pro` plan, reusing the mechanism `lifetime_pro` already uses —
+not as a new catalogue row.
 
 ### The angle (done differently / better)
 
@@ -409,18 +415,29 @@ the chosen angle, this is the single largest GTM gap in the product today.
 
 ---
 
-## Open decisions — need confirmation before /ks-stories
+## Decisions log
 
-1. **Free tier or trial?** Code today has neither — no plan means no access. Options:
-   free-forever (1 site, 1 editor, capped elements, badge required), 14-day Pro trial
-   without card, or stay paid-only. Recommendation: capped free-forever, because the
-   land-and-expand motion runs on an agency installing us on one client site to try it.
-2. **Agency plan shape.** Who is billed — agency only, or agency with client-paid
-   upgrades? What is a "client sub-account" concretely?
-3. **Impression definition.** What counts: ≥50% of the section in viewport for ≥1s?
-   What is the retention window for raw events, and what is the aggregation grain?
-4. **WordPress plugin priority** — first post-launch investment, or later?
-5. **Badge.** Ship the "Edited with RecopyFast" badge on Starter, or drop it?
+Resolved at `/ks-stories`:
+
+1. **Free tier or trial?** → **14-day Pro trial, no card.** Story `s01-trial-signup`.
+2. **A/B testing: parked or in?** → **Re-enabled.** It was pulled from the launch on
+   2026-08-03 and is back in the perimeter. Stories `s08` and `s09`.
+3. **Style editing scope?** → **Per-element typography and colour stay; site-wide themes
+   stay in the graveyard.** No removal story.
+4. **Impression definition** → ≥ 50% of the section in viewport for ≥ 1 continuous second,
+   one impression per section per page view, no visitor identifier. Story `s06`.
+
+Still open:
+
+5. **Agency plan shape.** Who is billed — agency only, or agency with client-paid
+   upgrades? `s10` assumes agency-only, single invoice. Confirm before `s10` reaches
+   `/ks-plan`.
+6. **Conversion definition for A/B.** `s09` proposes section impression → click on a
+   tracked CTA. Needs agreement before the significance work starts.
+7. **WordPress plugin priority** — first post-launch investment, or later? Not in the
+   current backlog either way.
+8. **Badge.** Ship the "Edited with RecopyFast" badge, or drop it? Affects the SEO
+   link-acquisition plan above; affects no story in the current backlog.
 
 ---
 

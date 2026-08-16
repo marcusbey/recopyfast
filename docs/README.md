@@ -12,6 +12,11 @@ If a document here contradicts the PRD, the PRD wins and the document is stale.
 ### [`prd.md`](./prd.md)
 Product definition: target, perimeter, graveyard, angle, success criteria, SEO and GTM.
 
+### [`stories.md`](./stories.md)
+The delta backlog — 16 shippable stories covering the gap between what is in production
+today and what the PRD requires. Ordered by dependency. Ids (`s01`…`s16`) name every
+pipeline file and story branch.
+
 ### `product/` — what it does and for whom
 | File | Contents |
 |---|---|
