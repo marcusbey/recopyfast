@@ -57,6 +57,28 @@ a status reads identically whether drawn as a dot, a bar or a badge.
 sky and use the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky`
 — never emerald, purple, or a second saturated hue.
 
+> ### ⚠ Unresolved: which surface do the SEO cluster pages belong to?
+>
+> `s17` / `s18` / `s19` (`/alternatives`, `/cms-for`, `/for`, `/agencies`) have **no agreed
+> surface**, and the two designs produced for them disagreed with each other:
+>
+> - **`s17` and `s18` were designed on the Marketing surface** — `architecture.md` groups these
+>   routes under Marketing, and reusing `Pricing` / `Benefits` / `HowItWorks` / `FinalCTA` is
+>   only possible there, because those components hardcode `sky-*` / `slate-*`.
+> - **`s19` was designed on the App surface** — because the nearest real precedent, `/blog`, is
+>   token-driven, and this document's own evidence table puts `/blog` on-system.
+>
+> **They cannot both be right: `s19` renders on `s17`'s engine.** And mixing the two is the
+> auth-page bug at scale — a token-driven panel on a hardcoded-light page is a dark card
+> floating on a light background in dark mode.
+>
+> **Recommendation: Marketing**, for one reason that outweighs the `/blog` precedent — `s17`'s
+> value comes largely from reusing the existing marketing sections, and that reuse is
+> mutually exclusive with app tokens. Choosing App means rebuilding those sections.
+>
+> This needs a decision before `/ks-design` output for `s17`–`s19` can be trusted, and it will
+> want an ADR. Until then, treat those three design docs as provisional on this point.
+
 ### Typography
 
 | Face | Variable | Use | Never |
@@ -105,6 +127,13 @@ Display sizes get negative tracking; small labels get positive tracking.
 
 `src/components/ui/` — 17 primitives. This is the floor. Compose from it.
 
+> **Correction (2026-08-16).** An earlier revision of this table listed `Select` among the
+> Radix-wrapped primitives. **`src/components/ui/select.tsx` does not exist** —
+> `@radix-ui/react-select` is a declared dependency imported by zero files. Three story designs
+> and one plan were written against the phantom component before the error was caught; each has
+> been repointed. It is recorded as gap 6 below. Verify a primitive exists before composing
+> with it; this table is evidence, not memory.
+
 | Component | Variants | Usage |
 |---|---|---|
 | `Button` | `default` `destructive` `outline` `secondary` `ghost` `link` × `default` `sm` `lg` `xl` `icon` | Every action. **Never override its background with a className gradient** |
@@ -114,7 +143,7 @@ Display sizes get negative tracking; small labels get positive tracking.
 | `Alert` | `default` `info` `success` `warning` `destructive` | Inline feedback. The product has no toast — see gaps |
 | `Input` | — | Text entry. Icon-in-input: `absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground` + `pl-10` |
 | `Label` | — | Always paired with an input |
-| `Select` `Tabs` `Dialog` `DropdownMenu` `Avatar` | Radix-wrapped | Overlays and navigation |
+| `Tabs` `Dialog` `DropdownMenu` `Avatar` | Radix-wrapped | Overlays and navigation |
 | `Skeleton` | — | Loading. 7 files |
 | `EmptyState` | icon slot | Zero-data state. 4 files |
 | `PageHeader` | — | Dashboard page top — title + actions |
@@ -294,3 +323,20 @@ Report-only. None of these gets filled freestyle inside a story.
 4. **Widget has no token layer** — see above. Fold into `s06`.
 5. **No documented dark-mode treatment for the widget or email.** App handles it; these two
    have no answer, and the widget sits on customer pages that may be either.
+6. **No `Select` primitive**, despite `@radix-ui/react-select` being a declared dependency.
+   Screens needing a bounded choice currently use `Input type="date"` or a native `<select>`
+   (`AnalyticsDashboard.tsx` is the precedent). Four stories want one: `s05` (format), `s10`
+   (range), `s14c` (three filters), `s16` (coalescing window). Build it once, in whichever
+   ships first.
+7. **No chart or timeline primitive.** `s03` (funnel), `s10` (impression timeline) and `s12`
+   (progress toward sample) each compose one from tokens directly. `s10`'s inline SVG documents
+   which tokens it uses so a primitive can be extracted from it rather than invented.
+8. **No `Table` primitive.** `s05`'s per-row outcome report and `s16`'s delivery history both
+   compose semantic `<table>`/`<ul>` from tokens. Promote if a third screen needs it.
+9. **No "gated feature" pattern.** `s09` composes Lock icon + outline Badge + upgrade banner;
+   `s11b` and `s13` need the same answer. Codify once one ships.
+10. **`DialogContent` hardcodes the close-X** with no prop to omit it (`dialog.tsx:32-54`).
+    `s16`'s show-once secret dialog must not be dismissable. Wants a `showClose` prop — a
+    change to the existing primitive, not a new component.
+11. **No irreversible-action confirmation pattern.** `s20`'s subdomain claim uses type-to-confirm;
+    site deletion presumably has its own. Reconcile them.

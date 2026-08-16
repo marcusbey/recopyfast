@@ -645,9 +645,13 @@ changed **so that** I can tell whether my edit did anything.
 `s09-section-impressions`.
 
 ### Agentic notes
-- Version history exists: `src/app/api/edit-board/history/route.ts`,
-  `src/components/dashboard/VersionHistoryPanel.tsx` (live, rendered at
-  `SiteDetailView.tsx:374`). Join against it; do not record a second edit timeline.
+- **Corrected at research — this note named the wrong table.** `VersionHistoryPanel` is live
+  (`SiteDetailView.tsx:374`), but `/api/edit-board/history` reads `content_versions`, which is
+  written **only** by the manual "Save Current Version" button. Joining it, as this note
+  originally instructed, would produce a timeline with almost no markers. The always-populated
+  log is `content_history` (DB trigger on every `content_elements` change). Settled in
+  [ADR 009](./decisions/009-impression-history-change-timeline-source.md). Still join rather
+  than record a second edit timeline — just join the right one.
 - Aggregate on write into daily buckets. Read-time aggregation over raw impressions will not
   survive the first customer with real traffic.
 - **Trap — timezone.** "Per day" must be defined in one timezone and stated in the schema. A
@@ -951,8 +955,13 @@ None. **Gates `s18` and `s19`.**
 - **Trap — thin content at scale.** Pages differing only by a swapped noun get demoted under
   the Helpful Content system, and the demotion is site-wide. Every page needs distinct
   substance.
-- `cron/generate-blog-post` exists and can draft this content, but the PRD is explicit: **it
-  drafts, a human publishes.** Do not wire auto-publish.
+- **`cron/generate-blog-post` already auto-publishes, today, daily.**
+  `src/app/api/blog/generate/route.ts:275-282` inserts with `status: "published"` and
+  `published_at: now()`, with no human review anywhere in the path, scheduled by `vercel.json`.
+  The PRD's rule — *it drafts, a human publishes* — describes an intention the code does not
+  implement. This story must not copy that route's pattern, and the existing behaviour is a
+  live finding in its own right: auto-publishing AI content is what the PRD calls "the fastest
+  route to a site-wide quality demotion", and at cluster scale it would apply site-wide.
 
 ---
 
