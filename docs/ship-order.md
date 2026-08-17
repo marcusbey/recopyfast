@@ -1,5 +1,31 @@
 # Ship order — the nine reviewed branches
 
+> ## ✅ ALL NINE SHIPPED, 2026-08-17. This document is now a record, not a plan.
+>
+> Merged in the order below, deployed, and verified. **2520 tests passing**, type-check clean,
+> production build green, migration ledger **50 of 50**, 57 tables all RLS-guarded. Production
+> smoke-tested after: `/`, `/api/pricing`, `/login`, `/demo`, `/blog`, `/signup` all 200; the embed
+> artifact on production matches the repo byte-for-byte; realtime healthy.
+>
+> **The order mattered, and both predicted problems occurred exactly as written here:**
+> - `s06a`'s gate fired on merge (+19/+18 over, the ADR 023 transport pin). Re-seeded, not raised.
+> - The embed artifact conflicted on all three of `s04`/`s11a`/`s14a`, resolved by **rebuilding**
+>   from the merged `.src.js` every time — never hand-merged.
+> - The ceiling then **ratcheted down** to what the merged tree earned: 46,894 → **46,681**.
+>   Predicted net was −196; actual −194.
+> - Migrations were applied **before** the deploy, per `s01`'s ordering requirement.
+> - `s16`'s migration applied cleanly *because* the schema repair had already created `webhooks`.
+>   Without it the file would have aborted and been marked applied.
+>
+> **Two auto-merges needed manual repair, and one was silent** — worth remembering, because a clean
+> `git merge` is not a correct merge:
+> - `status-badge.tsx` merged **without conflict** and lost the `CircleSlash` import, which only
+>   surfaced as a runtime `ReferenceError` in a test. Nothing flagged it.
+> - `server/index.js` conflicted against `s07a`'s factory refactor; its structure was kept and the
+>   ADR 023 transport pin re-applied inside it.
+> - `s07a`'s own manifest test caught 1.5 MB of untracked `server/server/node_modules` that its
+>   Docker build context would have copied wholesale.
+
 > Written 2026-08-17, from measurement rather than inspection. Every number here was produced by
 > running the compressor, `git diff --name-only`, and the gate's own constants — not read off a
 > report. Reproduce any of it with the commands in each section.
