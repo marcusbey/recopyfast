@@ -81,6 +81,7 @@ story and travel with its branch.
 | [021](./decisions/021-wildcard-serving-origin-provisioning.md) | One wildcard domain and certificate; claiming is a database write | `s20` |
 | [022](./decisions/022-realtime-parity-is-editors-only.md) | Real-time parity is defined over editors, not visitors | `s07b` |
 | [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) | WebSocket-only transport; the multi-instance answer is the adapter, never sticky routing | `s07b` |
+| [024](./decisions/024-bulk-import-snapshot-change-type.md) | The bulk-import snapshot writes `bulk_edit` — supersedes [008](./decisions/008-bulk-import-write-path.md) on that value | `s05` |
 
 ### `product/` — what it does and for whom
 | File | Contents |

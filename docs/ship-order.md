@@ -60,6 +60,27 @@ and it is invisible from inside any single branch.
 `−981 + 58 + 727 = −196` is an *estimate*, not a guarantee. **Re-measure after every merge**; do not
 plan the sequence on arithmetic.
 
+### Byte allocation for `s11a` — resolved by ordering, at zero cost
+
+`s11a`'s fix run reduced its overage from 74 to **58** gz bytes and, correctly, raised no constant.
+It escalated three ways out: sequence `s06c-embed-shrink` first, raise both ceilings by an itemised
+58, or merge `s11a` first and re-seed. **None is necessary.** `s04` frees **981** bytes, which is
+sixteen times what `s11a` needs. Merging `s04` first absorbs `s11a` (+58) and `s14a` (+727) together
+with room left over.
+
+The escalation was right to happen — from inside `s11a`'s branch, `s04`'s headroom is invisible.
+This is the merge-order view supplying an answer the branch could not reach. `s06c` stays available
+if the re-measure disagrees, and remains the correct instrument if the artifact ever genuinely needs
+to shrink.
+
+Its accounting is worth keeping: the overage is **entirely** Task 3's fallback sort (37) and M3's
+geo guard (23), both mandated. The bug fix and Task 8 were free — reusing the string
+`'ReCopyFast: A/B bucketing unavailable'` is **−11** on its own, because neighbouring text already
+contains those words. Five cheaper spellings were built and measured; four were rejected on
+correctness (dropping `!!` diverges from the server's `Number(Boolean())`; a `?-1:1` tiebreak is an
+invalid comparator), one taken. 58 bytes is 2.9% of the ≤2,000 gz this document's own budget
+(`docs/stories.md:101`) allocates to A/B bucketing.
+
 ---
 
 ## Recommended order

@@ -1,97 +1,98 @@
-# Review — Story s05-bulk-content-portability
+# Review — `s05-bulk-content-portability` (re-review of the fix run)
 
-> Fresh-context review by the `reviewer` subagent.
-> Diff reviewed: `git diff main...feature/s05-bulk-content-portability` (`d900d25`).
+Branch `feature/s05-bulk-content-portability`, commit `27d9bd1`. Fresh context, read-only.
+Supersedes the first-pass review (critical / ship no); that verdict's findings are assessed below.
 
-## Tests
-- [x] Run by the reviewer. 145 suites passed / 1 skipped, 2012 of 2048 tests, exit 0.
-      type-check clean, lint 0 errors, `npx eslint BulkOperations.tsx` 0 warnings (was 3),
-      format:check clean, build exit 0. All run interdicts show an empty diff. No zod.
-- [x] **Bite proven by neutralization**, all restored, `git diff --exit-code` clean, verified
-      twice: CSV quote-awareness → 10 red · per-row JSON isolation → 2 · 413 size guard → 1 ·
-      `create_content_version` → 1 · `change_type` → 1 · export GET permission check → 2 ·
-      history fetch URL → 3. Every load-bearing behaviour is pinned by a test that bites.
-- ⚠️ The green run depended on `.env.test.local`, which is gitignored and not in the diff.
-      Without it, 4 suites / 5 tests fail — all untouched by this diff, none of the 8 bulk
-      suites among them. Environment artifact, not an s05 regression.
+## Tests, run by the reviewer
+
+`npx jest --ci`: **146 suites passed / 1 skipped, 2019 of 2055**, exit 0. Coverage run exit 0, the
+ratchet holds. `type-check`, `lint` (0 errors), `format:check`, `build` — all green. All four run
+interdicts show empty diffs. No `zod`.
+
+**13 neutralizations, all bit, all restored** (`git diff --exit-code` clean afterwards). Highlights:
+re-applying the A-1 `<`→`&lt;` rewrite turned 3 red; `bulk_edit`→`bulk_import` 1; the registry key
+back to `bulk` 1; removing CSV quote-awareness 7; `encodeCSVRow` no longer quoting 8.
+
+## The prior critical is genuinely closed
+
+`sanitizeHTML` is gone from the import path — only the tombstone comment remains.
+`validateDiscoveredText` was read line by line: it never escapes, strips or truncates. The
+round-trip fixture now carries `<`, `>`, `&` and quotes in real marketing copy, and goes red under
+neutralization. **A-1 is not back in any form.**
+
+The `bulk_edit` correction is substantively right: `20251230100000_edit_board.sql:69` constrains
+`change_type` to six values, `bulk_import` is not among them, and no later migration relaxes it.
 
 ## Findings
 
-### CRITICAL 1 — AC 3 is unmet; the round trip silently rewrites and deletes customer copy
-The implementer suspected the sanitizer was lossy on `&lt;`. It is not — it is idempotent on
-all 17 probed values, so already-sanitized content round-trips fine. **The real failure is
-worse, and it is on content that never saw the sanitizer — which is nearly every row in the
-product.**
+### MAJOR 1 — a value that round-trips today can now be refused on import
+Probed, not inferred: a 20,001-character `current_content` returns `failed / "content exceeds 20000
+characters"` with zero writes. The deviation's premise — *"both bounds already govern every row"* —
+is **true of discovery and false of the column**. No other writer caps length:
+`bulk/update` set/append, `staging/content` PUT (`sanitizeHTML` has no cap) and `v1/content` POST
+all write unbounded. So a row written by any of those three exports fine and will not import.
 
-Content discovery writes the widget's raw `textContent` into `original_content`,
-`current_content` and `published_content` **unsanitized**
-(`src/app/api/content/[siteId]/route.ts:131-133`), deliberately:
-`src/lib/security/discovered-text.ts:1-31` records that an HTML sanitizer here was removed as
-production bug **A-1**, and `AGENTS.md` makes it a standing rule — *"Text scraped off a
-customer's DOM … is not markup and is not sanitized as markup."*
-**Import sanitizes it as markup anyway** (`import/route.ts:436-443`).
+Not the old bug — it is loud, per-row, and corrupts nothing — hence major, not critical. But **AC 3
+fails for that class of row**, and the run interdict against adding a content-length rule was
+explicit.
 
-Demonstrated with ordinary marketing copy in the round-trip fixture:
+### MAJOR 2 — a minimal import file blanks `original_content` permanently
+Probed: a 3-column CSV — *the exact minimum the UI advertises* — writes `original_content: ""`.
+That column is the served fallback when `published_content` is null, and the last `COALESCE` arm in
+`create_content_version`. **Pre-existing on `main`** (identical shape in
+`git show main:…/import/route.ts`), but this story makes it reachable, and the card's own "What's in
+the file" panel lists 5 fields while omitting this one — so a user following the UI builds the
+destructive file. Scoping is a judgement call; the data loss is not.
 
-```
-- Expected: "Setup in <2 minutes — Paste the <script> tag"
-+ Received: "Setup in &lt;2 minutes — Paste the "
-```
+### MAJOR 3 — ADR 008 was edited in place, and the correction misstated its own history
+`AGENTS.md`: ADRs are immutable; a change means a superseding ADR. ADR 008 is on `main`
+(`45844fd`), where line 51 still reads `bulk_import`. The branch rewrote the Decision paragraph and
+appended a note claiming the value was fixed *"before this ADR ever reached `main`"* — verifiably
+untrue. Substance right, mechanism wrong, and the artifact now carries a false claim about itself.
 
-Both CSV and JSON fail. The copy is rewritten **and ` tag` is destroyed**. The widget writes
-back via `target.textContent`, so `&lt;` renders literally on the customer's page.
+**Already remedied on `main`:** [ADR 024](../decisions/024-bulk-import-snapshot-change-type.md)
+supersedes ADR 008 on this one value. **The branch must restore ADR 008 byte-for-byte** to `main`'s
+content and cite ADR 024 instead.
 
-Compounding it: `roundtrip.test.ts:20-24` states in its own header that the fixture carries no
-HTML-special characters "because the write path sanitizes content deliberately … that
-transformation is not what this test is about". **The AC 3 test was scoped around the AC 3
-failure.**
-
-This is the feature the PRD calls the one that *"kills the lock-in objection in the sales
-call"*. An export that silently rewrites a customer's copy is worse than no export.
-
-### MAJOR 1 — every bulk import is labelled "Manual edit — Saved by hand from the edit board"
-`versionChangeTypes` (`src/components/ui/status-badge.tsx:134-163`) has the key `bulk`, not
-`bulk_edit`; `VersionTimelineItem.tsx:69-73` falls back to `manual`. Two comments in the diff
-(`import/route.ts:499-502`, `import-outcomes.test.ts:256-257`) assert the panel renders it as
-"Bulk edit" — verifiably false. One registry key fixes it.
+### MAJOR 4 — a new test certifies a live mislabelling
+`VersionTimelineItem.test.tsx:47` asserts `style_apply` → "Manual edit" *as correct*, describing it
+as "a change type this build does not know". But `edit-board/styles/apply/route.ts:176` writes
+exactly that value on every AI style application. It is the **identical** silent-fallback defect
+just fixed for `bulk_edit`, now blessed by a test — and the author enumerated the full CHECK list in
+their own comment, so the contradiction was on screen. Minimum fix: use a genuinely impossible value
+in the fixture.
 
 ### Minors
-1. Task 7 and task 5 deviations shipped unrecorded in the plan (task 10's `Select` deviation
-   *was* recorded, correctly).
-2. Missing CSV header → 500 `"Failed to process bulk import"`; the plan specified 400, and the
-   actionable reason is discarded.
-3. A payload with no `options` key → 500 (probed); the route does not use
-   `src/lib/api/validation.ts`.
-4. No rate limiter on a newly-reachable 5 MB endpoint.
+No test covers the 20,000-character bound — the deviation's central claim is the one thing unpinned.
+"What's in the file" lists 5 of 11 exported columns. `POST /api/bulk/export` remains unmetered
+(the scope argument does not hold, but it is kept minor for consistency with the prior review).
 
-## Two of the implementer's three flagged items were not defects
-- **`bulk_edit` change_type — the implementer is right, the plan and ADR 008 are wrong.**
-  `20251230100000_edit_board.sql:69` constrains `change_type` to a list containing `bulk_edit`
-  and **not** `bulk_import`; no later migration relaxes it. `bulk_import` would violate the
-  CHECK and history would silently stay empty.
-- **Task 5's "impossible fixture" — the plan is wrong, the split is correct.**
-  `create_missing_elements` / `overwrite_existing` are per-request, so "created" and
-  "missing-not-created skipped" cannot co-occur. The two-test split covers all four outcomes
-  and still bites under neutralization.
+## The three declared deviations, judged
+
+1. **`validateDiscoveredText` reuse — does not fully hold.** See MAJOR 1.
+2. **400 widening — holds.** All four reachable `FileParseError` conditions are caller errors.
+3. **`export` unmetered — does not hold as argued**, but stays minor.
 
 ## Verified sound
-The CSV codec is genuinely correct — a pathological fixture (embedded commas, quotes and
-`\r\n` inside quotes, a bare `"` field, `,,,` as data, preserved leading/trailing spaces,
-unicode) round-trips exactly. Every import and call signature checks against the real file.
-**No hallucinated primitive — `Select` correctly not invented.** `create_content_version`
-params and grants verified against the migration; ADR 008 accurately implemented. The export
-GET permission hole is closed, the history fetch repointed, the false empty state fixed.
 
-## Not verified
-No screen was ever rendered. No real file was ever exported or imported — `FileReader`, blob
-and `createObjectURL` are all mocked. Supabase is mocked throughout, so no CHECK constraint was
-exercised against Postgres. The MAJOR 1 label defect was proven by reading the registry, not by
-rendering. 413 was never hit with a genuinely oversized body (a platform body cap may fire
-first). No E2E. Permission-refused was only ever a stubbed 403.
+Every import, signature and primitive checks against the real file: `enforceRateLimit`/`API_UPLOAD`,
+`create_content_version`'s four parameters, and every `src/components/ui/` component with matching
+props. **No primitive was invented** — `select.tsx` is genuinely absent, and design-system gaps 6
+and 8 are cited exactly. Design conformity is complete: every named state is rendered and tested.
+Plan tasks 1–10 are all done, with nothing unasked-for in the diff.
 
-**Fastest confirmation of CRITICAL 1: export a real site to CSV, re-import it, diff the
-content.**
+## Not verified — needs a human's hands
+
+No screen rendered in a browser. No real file exported or re-imported — `FileReader`, `Blob` and
+`NextResponse` are all mocked. Supabase is mocked throughout, so the CHECK constraint is **read,
+never exercised**. 413 never hit with a genuinely oversized body. Permission-refused is only ever a
+stubbed 403. No E2E.
+
+**One query decides how much MAJOR 1 matters:**
+`select count(*) from content_elements where length(current_content) > 20000`.
+Then: export a real site in both formats, re-import, diff `current_content` / `original_content` /
+`metadata` in Postgres, and confirm a `content_versions` row lands with `change_type = 'bulk_edit'`.
 
 ## Verdict
-Max severity: critical
+Max severity: major
 Ship allowed: no

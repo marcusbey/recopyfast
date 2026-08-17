@@ -1,5 +1,38 @@
 # RecopyFast QA Register
 
+> ## 🔴 NEW 2026-08-17 — the A/B data plane is dead in production, and always has been
+>
+> **`ab_test_results` and `visitor_buckets` do not exist.** Probed live over PostgREST during
+> `s11a`'s fix run: both return `PGRST205`, while the error hints name other `public` tables — so
+> the schema cache is populated and the absence is real, not a caching artifact.
+>
+> This is **not new information to the repository** — it is new information to the *pipeline*.
+> `supabase/migrations/20260801200000_missing_base_tables.sql` documents it at `:41-42` and
+> `:64-68`: `20260127_ab_testing_v2.sql` aborted with `42P01` (it creates `ab_test_results` with
+> `REFERENCES ab_tests`, and `ab_tests` did not exist), and Supabase wraps each migration in a
+> transaction, so it rolled back **in full** and is nonetheless marked applied. It will never run
+> again.
+>
+> **Live code reads and writes tables that are not there:**
+> `src/app/api/ab-tests/track/route.ts`, `src/app/api/ab-tests/bucket/[siteId]/route.ts`,
+> `src/lib/ab-testing/lifecycle.ts:43`.
+>
+> **`docs/stories.md` asserted the opposite and has been retracted.** It claimed both tables "DO
+> exist" on the strength of reading `CREATE TABLE` in the migration file and finding no `DROP`.
+> **A migration file containing a `CREATE TABLE` is not evidence that the table exists.** That
+> mistake dismissed `research/s11`'s "database repair" pricing, which was correct.
+> `research/s09` and `research/s12` cite the same migration and inherit the same error — **re-check
+> both against the live schema before `s09` or `s12` executes.**
+>
+> **Not repairable by replay, and `s11a` correctly refused to try.** Its Task 9 was withdrawn under
+> the plan's own stop rule rather than ship a migration that would abort, be marked applied, and
+> reproduce the exact scar that created this situation. Creating these tables is a **scope
+> decision reserved to the operator**, not a task an implementer takes on.
+>
+> **Still unrun:** the `pg_catalog` half of the probe — RLS enablement, policies, and
+> `UNIQUE(visitor_id, test_id)` — needs a host with IPv6 or the pooler region. Do that **before**
+> anything creates these tables, not after.
+
 > ## 🔴 NEW 2026-08-17 — `NEXT_PUBLIC_APP_URL` is the apex, and only ONE reader canonicalises it
 >
 > Measured against production, not inferred:

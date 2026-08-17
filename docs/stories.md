@@ -115,13 +115,39 @@ different real story. Every existing `s01`…`s19` reference below and elsewhere
 
 Research is evidence, not verdict. Two claims were checked and are wrong:
 
-1. **`ab_test_results` and `visitor_buckets` DO exist.** `research/s11` claimed both tables are
-   missing and priced "a database repair" into its re-score. They are created at
-   `supabase/migrations/20260127_ab_testing_v2.sql:8` and `:40`, with no `DROP` anywhere.
-   `research/s09` and `research/s12` cite the same migration correctly. **What survives** is a
-   narrower concern worth keeping: that file is named `20260127_ab_testing_v2.sql` — 8 digits
-   where every other migration uses 14 (`YYYYMMDDHHMMSS`) — so its ordering in the ledger is not
-   guaranteed. That is a real defect, and it is `s11a`'s to confirm.
+1. ~~**`ab_test_results` and `visitor_buckets` DO exist.**~~ — **THIS CORRECTION WAS ITSELF WRONG.
+   Retracted 2026-08-17; `research/s11` was right.** The tables **do not exist**, and priced
+   "a database repair" correctly.
+
+   The error: I read `supabase/migrations/20260127_ab_testing_v2.sql:8` and `:40`, saw
+   `CREATE TABLE`, found no `DROP`, and concluded the tables were created. **A migration file
+   containing a `CREATE TABLE` is not evidence the table exists.** That migration **aborted in
+   full** and is marked applied, so it will never run again — exactly the trap
+   `20260801200000_missing_base_tables.sql` was written to document. Its tombstone says so
+   directly (`:41-42`, `:64-68`):
+
+   > `20260127_ab_testing_v2.sql`  CREATE TABLE ab_test_results / REFERENCES ab_tests → 42P01
+   >
+   > `ab_test_results` and `visitor_buckets` (20260127) were never created. The A/B pipeline
+   > reads and writes both … so creating `ab_tests` here is necessary but not sufficient.
+
+   Confirmed live during `s11a`'s fix run: both tables return `PGRST205` over PostgREST, while
+   the error hints name other `public` tables — so the schema cache is populated and the absence
+   is real, not a caching artifact.
+
+   **Consequences.** The A/B data plane is dead in production and always has been:
+   `src/app/api/ab-tests/track/route.ts`, `.../bucket/[siteId]/route.ts` and
+   `src/lib/ab-testing/lifecycle.ts:43` all read or write tables that are not there. **Creating
+   them is a scope decision, not a task** — `s11a`'s plan reserves it to the operator, and its
+   Task 9 was withdrawn under that stop rule rather than shipping a migration that would abort
+   and then be marked applied, reproducing the original scar.
+
+   `research/s09` and `research/s12` cite the same migration and inherit the same error; both
+   need re-checking against the live schema before `s09` or `s12` executes.
+
+   **What still survives** from the original note: the file is named `20260127_ab_testing_v2.sql`
+   — 8 digits where every other migration uses 14 (`YYYYMMDDHHMMSS`) — so its ledger ordering is
+   not guaranteed. Real, and secondary to the fact that it never applied at all.
 2. **The widget is 34,063 gz, not 33,699.** `research/s06` proposed correcting the byte table
    downward and seeding a build constant at 33,699. Re-measured here: artifact **46,781**,
    socket.io prefix **13,085**, widget alone **34,063** — the table above was already right.
