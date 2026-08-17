@@ -1,5 +1,48 @@
 # RecopyFast QA Register
 
+> ## ✅ SCHEMA REPAIRED 2026-08-17 — 57 tables, all with RLS. Ledger 43 of 44.
+>
+> `20260818000000_repair_aborted_migrations` is **applied to production** and merged to `main`.
+> Re-probe any time with `node scripts/check-schema.mjs`.
+>
+> ```
+> before:  39 tables, 18 absent, ledger 32/43
+> after:   57 tables,  0 absent, ledger 43/44 — every table RLS on, ≥1 policy
+> ```
+>
+> 57 is exactly the count `architecture.md` always claimed and never had. Production smoke-tested
+> after: `/api/health` database and storage `ok`; `/`, `/api/pricing`, `/blog`, `/demo` all 200.
+>
+> **A SIXTH aborted migration was found during the repair** — `20260731000000_collaboration_schema_alignment`.
+> `site_permissions` held only `(id, user_id, site_id, permission, created_at)`: no `role`, no
+> `team_id`, no `granted_by`. It had to be folded in, because `collaboration_notifications`' INSERT
+> policy joins `site_permissions` on `team_id` — without it the repair would have died exactly as
+> `20260731001000` did.
+>
+> **The root cause of the editor outage is now known.** `20260801100000_editor_access_2fa` aborted
+> because its first `site_editors` policy calls `user_has_site_permission()`, which does not exist:
+> only `20260731008000` creates it and that also aborted, while `20260804130000` restored the
+> policies with plain predicates and never redefined the helper. Both helpers are now created.
+>
+> **Method, again, because it is the fix for the scar:** dry run in `BEGIN … ROLLBACK` against real
+> production first, then apply with the ledger `INSERT` **inside the same transaction as the body**.
+> A failing migration rolls back its own "applied" marker. The migration also carries a postcondition
+> that re-asserts "RLS on + ≥1 policy" for all 17 new tables and raises if not, so it cannot
+> half-land a lockout or an open door.
+>
+> `20260813140000_site_permissions_delete_per_row` (the A-4 per-row DELETE fix) applied immediately
+> afterwards, confirming the `granted_by` fold-in.
+>
+> ### One migration still blocked, deliberately
+>
+> `20260809120000_lock_down_definer_functions` fails on `function update_site_analytics() does not
+> exist`. That belongs to the **analytics-alignment trio** (`20260731005000/006000/007000`), which
+> also aborted. It is not a matter of creating the function: a plpgsql body is not name-resolved at
+> creation, so creating it alone yields a function that creates cleanly and **raises at call time**,
+> because the trio also never added the `site_analytics` / `user_activity_logs` columns its body
+> writes. That repair is in progress as a separate migration. A blocked REVOKE is an acceptable
+> state; a function that raises at call time is not.
+
 > ## ✅ APPLIED 2026-08-17 — nine of the eleven unapplied migrations are now in production
 >
 > The ledger went from **32 to 41 of 43**. Verified by re-running `node scripts/check-schema.mjs`,

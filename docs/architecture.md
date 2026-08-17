@@ -213,7 +213,20 @@ noise; a comment that says *what broke last time* is the asset.
 
 ## Data model
 
-> ### ✅ MEASURED 2026-08-17 — 39 tables exist, not 57. Run `node scripts/check-schema.mjs`
+> ### ✅ REPAIRED 2026-08-17 — all 57 tables now exist. Run `node scripts/check-schema.mjs`
+>
+> The list below is **accurate again**, for the first time. Measured, not assumed: **57 tables,
+> every one with RLS enabled and at least one policy**, ledger at 43 of 44.
+>
+> It was not accurate this morning — 18 of these tables did not exist, because **six** migrations
+> aborted in full and were marked applied. `20260818000000_repair_aborted_migrations` recreated them
+> with the shape those six intended, including everything later migrations tried to add to them.
+> Details and method: [`quality/qa-register.md`](./quality/qa-register.md).
+>
+> **The lesson stands even though the numbers now agree: a `CREATE TABLE` in a migration file is not
+> evidence that the table exists.** Re-run the probe rather than trusting this paragraph.
+>
+> <details><summary>Superseded note from earlier the same day (39 tables)</summary>
 >
 > The database has been probed. **39 of the 57 tables below exist. 18 do not.** Every table has RLS
 > enabled with at least one policy, so [ADR 002](./decisions/002-rls-tenant-boundary.md)'s boundary
@@ -260,10 +273,11 @@ noise; a comment that says *what broke last time* is the asset.
 >
 > **The instrument exists and has not been run:** a `pg_catalog` probe for tables, `rowsecurity`,
 > and policy counts, from a host with IPv6 or the pooler region. Until it runs, treat everything
-> below as *intended* schema. Do not plan a story against it — `s12-ab-results` was withdrawn to
-> `validated: no` for exactly this reason.
+> below as *intended* schema.
+>
+> </details>
 
-57 tables across 43 migrations **as declared by the migrations**. Grouped by what they serve:
+**57 tables, all present and RLS-guarded** (measured 2026-08-17). Grouped by what they serve:
 
 **Tenancy and content (the core loop)**
 `sites` · `site_permissions` (ownership + roles; the real ownership record) · `content_elements`
