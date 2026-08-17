@@ -105,12 +105,34 @@ const files = readdirSync(path.join(ROOT, "supabase/migrations"))
 const appliedSet = new Set(applied.map((r) => r.version));
 const neverApplied = files.filter((f) => !appliedSet.has(f.split("_")[0]));
 
+// The ledger keys on the VERSION PREFIX alone, not the filename. Two migration files
+// sharing a prefix therefore both count as applied the moment either one is recorded
+// — so the second can never run, and this script would report a false clean because
+// `neverApplied` is derived from that same prefix. That is precisely the
+// marked-applied-but-never-ran defect this tooling exists to catch, so it must not be
+// able to hide here. It nearly happened on 2026-08-17: two independently authored
+// repairs both took the prefix 20260818001000.
+const byVersion = new Map();
+for (const f of files) {
+  const v = f.split("_")[0];
+  byVersion.set(v, [...(byVersion.get(v) ?? []), f]);
+}
+const duplicateVersions = [...byVersion.entries()].filter(
+  ([, fs]) => fs.length > 1,
+);
+
 const unguarded = tables.filter((t) => !t.rls || t.policies === 0);
 
 if (asJson) {
   console.log(
     JSON.stringify(
-      { tables, applied: [...appliedSet], neverApplied, unguarded },
+      {
+        tables,
+        applied: [...appliedSet],
+        neverApplied,
+        duplicateVersions,
+        unguarded,
+      },
       null,
       2,
     ),
@@ -139,10 +161,18 @@ if (asJson) {
     );
     for (const f of neverApplied) console.log(`  ${f}`);
   }
+  if (duplicateVersions.length) {
+    console.log(
+      `\nDUPLICATE VERSION PREFIXES (${duplicateVersions.length}) — one of each pair can NEVER run:`,
+    );
+    for (const [v, fs] of duplicateVersions)
+      console.log(`  ${v}: ${fs.join("  ")}`);
+  }
   console.log(
-    "\nNote: a migration IN the ledger may still have aborted and applied nothing.\n" +
+    "\nNote: a migration IN the ledger may still have aborted and applied nothing,\n" +
+      "or have applied only partially (20251230100000 did exactly that).\n" +
       "Compare the table list above against what each migration claims to create.",
   );
 }
 
-process.exit(unguarded.length > 0 ? 1 : 0);
+process.exit(unguarded.length > 0 || duplicateVersions.length > 0 ? 1 : 0);
