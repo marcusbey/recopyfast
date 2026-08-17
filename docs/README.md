@@ -24,7 +24,7 @@ settled against the code.
 |---|---|
 | [`research/`](./research/) | 19 verified-context reports, one per original story. Split stories inherit their parent's report, whose `## Split proposal` defines them |
 | [`designs/`](./designs/README.md) | 19 story designs (`<id>.md` + `<id>.html` mockup). Eight no-UI stories are recorded as deliberate skips in its README |
-| [`plans/`](./plans/) | 27 plans, **26 `validated: yes`**. `s12-ab-results` was withdrawn on 2026-08-17 — it reads `ab_test_results`, which does not exist in the database. `/ks-execute` is fail-closed on `validated: no` |
+| [`plans/`](./plans/) | 27 plans, **27 `validated: yes`**. `s12-ab-results` was withdrawn on 2026-08-17 because it reads `ab_test_results`, which did not exist; the schema repair created that table and `visitor_buckets`, and the plan was re-validated the same day against the live database — evidence in its frontmatter note. `/ks-execute` is fail-closed on `validated: no` |
 
 ### [`ship-order.md`](./ship-order.md)
 The measured merge sequence for the reviewed branches, with the conflict surface and the byte-budget

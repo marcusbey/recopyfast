@@ -374,8 +374,30 @@ that is the row above that matters.
 Wait at least 12 s after any state change before reading `/api/health`, or the memo will answer
 with the previous result and the drill will look like it failed.
 
-Still owed by a human: the two-snippet comparison (needs a signed-in dashboard), and a second run
-of the deploy procedure by someone who did not write it.
+### The two-snippet comparison is a test now, 2026-08-17
+
+It was owed to a human because it was written as a look at a signed-in dashboard, and a check that
+needs a session is a check that runs once. It is now
+`src/__tests__/api/sites/ws-url-parity.test.ts`: the snippet from `GET /api/sites`, the snippet
+from `POST /api/sites/register` and the `buildEmbedScript` call behind the dashboard's client-side
+fallback are asserted to carry the *identical* `data-ws-url` value, and to omit the attribute
+entirely — not emit it empty — when nothing is configured. `SiteDetailView.test.tsx` pins the other
+half: with a snippet from the API in hand, the dashboard renders it verbatim and never reaches the
+fallback, which is what keeps it a consumer rather than a fourth producer. The deployed value was
+also measured to inline into exactly one client chunk, both sides resolving to
+`wss://recopyfast-ws.fly.dev`; a local `npm run build` reproduces that —
+`grep -rl "recopyfast-ws.fly.dev" .next/static/chunks/` returns one file, containing one
+occurrence.
+
+**Read the limit before treating this as closed.** Jest reads `process.env` at call time on all
+three paths, so the build/runtime split above does not exist inside the suite. The test catches a
+*code* change that makes two producers disagree. It cannot catch a *deploy* that sets the variable
+without rebuilding — which is the failure this section is about. The order stays
+set-then-redeploy-then-compare, and **nobody has yet looked at the snippet rendered on the deployed
+dashboard**.
+
+Still owed by a human: that look at the deployed dashboard, and a second run of the deploy
+procedure by someone who did not write it.
 
 ### Incident, 2026-08-17: the running image was five hours and one merge out of date
 

@@ -1,6 +1,19 @@
 # Research — Story s12-ab-results
 
-> ## 🔴 SCHEMA CORRECTION, 2026-08-17 — this report's data source does not exist
+> ## ✅ SUPERSEDED 2026-08-17 (later the same day) — the tables exist; the report below stands
+>
+> The correction that follows was true when written and is **no longer true**. The schema repair
+> created `ab_test_results` and `visitor_buckets`, both re-verified against the live database —
+> columns, `CHECK (event_type IN ('view','click','conversion'))`, `UNIQUE (visitor_id, test_id)`,
+> RLS on with four policies each. The full evidence table is in the frontmatter note of
+> `docs/plans/s12-ab-results.md`, which is `validated: yes` again.
+>
+> So **every `20260127_ab_testing_v2.sql` citation in this report is now accurate about the
+> database as well as about the file**, which is what the correction denied. It is kept below
+> because the reason it was written has not gone away: a `CREATE TABLE` in a migration is not
+> evidence the table exists, and this document once cited one as if it were.
+
+> ## 🔴 SCHEMA CORRECTION, 2026-08-17 — this report's data source does not exist *(superseded, see above)*
 >
 > **`ab_test_results` and `visitor_buckets` DO NOT EXIST in the database.** Every citation of
 > `supabase/migrations/20260127_ab_testing_v2.sql` below is **accurate about that file** and wrong

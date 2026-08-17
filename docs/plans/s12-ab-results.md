@@ -1,30 +1,65 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation WITHDRAWN 2026-08-17 — the data source does not exist.**
-> This plan was validated on 2026-08-16 against a schema that was read from a migration file rather
-> than observed in the database. **`ab_test_results` does not exist**, and every number this story
-> computes — per-variant views and conversions, the significance math, the whole results surface —
-> reads from it.
+> **Re-validated 2026-08-17 — the withdrawal's premise is gone, the tables are there.**
+> This plan was withdrawn earlier the same day because `ab_test_results` and `visitor_buckets`
+> did not exist: `20260127_ab_testing_v2.sql` aborted in full with `42P01` and was nonetheless
+> marked applied, so it could never re-run. **The schema repair created both.** Re-verified
+> against the live database, not against a migration file — which is the mistake the withdrawal
+> was punishing in the first place.
 >
-> The migration that would have created it (`20260127_ab_testing_v2.sql`) aborted in full with
-> `42P01` and is nonetheless marked applied, so it will never re-run
-> (`20260801200000_missing_base_tables.sql:41-42`, `:64-68`; confirmed live via `PGRST205` during
-> `s11a`'s fix run). **Two of the four A/B tables exist** — `ab_tests` and `ab_test_variants`,
-> created by `20260801200000` — and the two this story needs do not.
+> **What was checked, and how.** `node scripts/check-schema.mjs`: 57 tables, every one with RLS
+> on and at least one policy, 50 migration files and 50 ledger rows, no duplicate version
+> prefixes. `ab_test_results` `rls=on policies=4`; `visitor_buckets` `rls=on policies=4`. Then a
+> direct read-only `information_schema` / `pg_catalog` probe over the IPv4 pooler for the column
+> shape this plan actually depends on:
 >
-> [ADR 017](../decisions/017-ab-conversion-is-per-visitor.md) stands as a *definition*. What does
-> not stand is the assumption that there is a table to evaluate it against.
+> | Object | Verified present, with the shape the plan assumes |
+> |---|---|
+> | `ab_test_results` | `test_id`, `variant_id`, **`visitor_id text NOT NULL`**, `session_id text` (exists, still never written — ADR 017's premise), `event_type text NOT NULL` with `CHECK (event_type IN ('view','click','conversion'))`, `value`, `metadata`, `geo_country`, `geo_region`, `recorded_at`; index `idx_atr_visitor_event (visitor_id, test_id, event_type)` |
+> | `visitor_buckets` | `site_id`, `visitor_id text NOT NULL`, `test_id`, `variant_id`, `geo_*`, `bucketed_at`, and **`UNIQUE (visitor_id, test_id)`** — the constraint the bucket upsert's `onConflict` needs and T3's assignment count rests on |
+> | `ab_tests` | `site_id`, `status` with `CHECK (status IN ('draft','active','paused','completed'))`, `end_date`, `winner_variant`, `statistical_significance numeric`, `target_element_id text`, `auto_complete`, `min_sample_size`, `confidence_threshold` |
+> | `ab_test_variants` | `test_id`, **`variant_name`**, **`variant_content`**, **`is_control boolean`**, `traffic_percentage`, `content_element_id` |
+> | `content_elements` | `site_id`, `element_id`, `staging_content`, `staging_updated_at`, `published_content`, `current_content`, `original_content` — everything T6 steps 1 and 3 touch |
+> | `staging_history` | `content_element_id`, `staging_access_id`, `previous_content`, `new_content`, `user_email NOT NULL`, `action` — T6 step 2 writes exactly these |
+> | `create_content_version` | `(p_site_id uuid, p_created_by text, p_description text, p_change_type text) → uuid`, `SECURITY DEFINER` — argument order **matches** T6's `create_content_version(site_id, 'ab-test', <description>, 'ab_test_winner')` |
+> | `ab_test_variant_stats`, `promote_ab_test_winner` | absent, as they should be — T3 and T6 create them |
 >
-> **To lift this gate:** creating those tables is a scope decision reserved to the operator —
-> `s11a` withdrew its own Task 9 rather than ship a migration that would abort, be marked applied,
-> and reproduce the original scar. Run the probe first, with a pooler-region `SUPABASE_DB_URL`,
-> covering RLS, policies and `UNIQUE(visitor_id, test_id)`, **before** anything creates them.
+> **RLS matches what the plan reads through.** Both tables: one `SELECT` policy for site members
+> via `site_permissions` (`ab_test_results` joins through `ab_tests.site_id`; `visitor_buckets`
+> uses its own `site_id`), and `INSERT`/`UPDATE`/`DELETE` restricted to `service_role`. That is
+> the shape `docs/research/s12-ab-results.md` § *Schema* describes.
 >
-> The probe is `scripts/check-ab-schema.mjs` — **tracked only on `feature/s11a-ab-data-plane`, not
-> on `main`**. Either merge `s11a` first (it is ship-allowed) or read it with
-> `git show feature/s11a-ab-data-plane:scripts/check-ab-schema.mjs`.
+> **[ADR 017](../decisions/017-ab-conversion-is-per-visitor.md) holds against the real schema.**
+> Its definition needs three facts and all three are true in the database: `visitor_id` is `NOT
+> NULL` on `ab_test_results` so "distinct visitors who clicked" is computable; `'click'` is an
+> admitted `event_type`; and `visitor_buckets` is one row per `(visitor_id, test_id)` by
+> constraint, so it is an assignment ledger and not an event log — the denominator the ADR
+> specifies. `session_id` exists and is still written `null` by `track/route.ts`, so the ADR's
+> reason for rewording "same page view" rather than computing it is unchanged. The four defects
+> the plan is built to kill are all still in the code: two `calculateSignificance` copies
+> (`results/route.ts:203`, `lifecycle.ts:222`), the `< 30` floor (`lifecycle.ts:99`), the
+> promoting `reduce` (`lifecycle.ts:133`), the `content_history` insert (`lifecycle.ts:211`) and
+> the inline `checkTestCompletion` import (`track/route.ts:181`).
+>
+> **Three drifts an implementer should know about, none of them blocking:**
+> 1. **T8's parenthetical is stale.** `vercel.json` now holds **two** crons —
+>    `/api/cron/generate-blog-post` and `/api/cron/webhook-dispatch` — not one. Adding the
+>    lifecycle entry makes three; the task is unchanged, but on a Vercel Hobby project three
+>    exceeds the cron *count* limit, which is a different limit from the once-a-day cadence T8
+>    reasons about.
+> 2. **`ab_test_variants` carries legacy duplicate columns.** `name` and `content` sit beside
+>    `variant_name` and `variant_content`. The application writes the `variant_*` pair
+>    (`api/ab-tests/route.ts:185`, `api/ab-tests/generate/route.ts:174-185`), which is the pair
+>    T3's RPC returns. The other two are empty and reading them would give a working query that
+>    returns nulls.
+> 3. **`ab_tests.winner_variant` is `text`, not `uuid`.** T5 stores a variant id in it and tests
+>    `IS NULL` for inconclusive; both work, but it is not a typed foreign key.
+>
+> `scripts/check-ab-schema.mjs` — the withdrawal note said it was tracked only on
+> `feature/s11a-ab-data-plane` — is **on `main`** since `1a1e23c`. Run it with a pooler-region
+> `SUPABASE_DB_URL` for the focused version of the check above.
 
 # Plan — Story s12-ab-results
 

@@ -1,11 +1,30 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { SiteDetailView } from "../SiteDetailView";
+import { buildEmbedScript } from "@/lib/sites/embed-script";
 import type { Site } from "@/types";
 
 // Mock date-fns
 jest.mock("date-fns", () => ({
   formatDistanceToNow: jest.fn(() => "5 hours ago"),
 }));
+
+/**
+ * The real builder, watched. s07b task 5 turns on *which* of the two snippet
+ * sources this screen uses: `site.embedScript` comes from `GET /api/sites`,
+ * which reads `NEXT_PUBLIC_WS_URL` at request time, while the
+ * `buildEmbedScript` fallback below runs in the browser, where Next.js has
+ * already inlined that value at build time. The two can disagree after a
+ * variable is set without a redeploy, so the call count is the assertion —
+ * a stub returning a fixed string would prove nothing about which path ran.
+ */
+jest.mock("@/lib/sites/embed-script", () => {
+  const actual = jest.requireActual("@/lib/sites/embed-script");
+  return { ...actual, buildEmbedScript: jest.fn(actual.buildEmbedScript) };
+});
+
+const mockBuildEmbedScript = buildEmbedScript as jest.MockedFunction<
+  typeof buildEmbedScript
+>;
 
 describe("SiteDetailView", () => {
   const mockSite: Site & {
@@ -100,6 +119,40 @@ describe("SiteDetailView", () => {
     expect(
       screen.getByText(/Add this script to your website/i),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * s07b task 5. The dashboard is a *consumer* of the snippet: whatever
+   * `GET /api/sites` returned is what an owner copies. The fallback at
+   * `SiteDetailView.tsx:93-98` exists for the case where it returned none, and
+   * it is the one path on this screen that reads a build-time
+   * `NEXT_PUBLIC_WS_URL` rather than the serving runtime's. It must therefore
+   * stay unreachable whenever the API did supply a snippet — otherwise the
+   * screen would show a `data-ws-url` from the build while the API hands out
+   * one from the runtime, and the two look right on their own.
+   */
+  it("renders the snippet the API supplied without rebuilding it", () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    expect(screen.getAllByText(mockSite.embedScript!).length).toBeGreaterThan(
+      0,
+    );
+    expect(mockBuildEmbedScript).not.toHaveBeenCalled();
+  });
+
+  it("builds one itself only when the API supplied none", () => {
+    const siteWithoutScript = { ...mockSite };
+    delete siteWithoutScript.embedScript;
+
+    render(<SiteDetailView site={siteWithoutScript} />);
+
+    expect(mockBuildEmbedScript).toHaveBeenCalledWith({
+      siteId: mockSite.id,
+      siteToken: mockSite.siteToken,
+    });
+
+    const built = mockBuildEmbedScript.mock.results[0].value as string;
+    expect(screen.getAllByText(built).length).toBeGreaterThan(0);
   });
 
   it("copies embed script to clipboard", async () => {
