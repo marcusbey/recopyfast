@@ -23,7 +23,7 @@ only.
 
 ## Tasks (ordered)
 
-1. [ ] **Migration — widen `plan_entitlements` for a time-boxed, tagged grant.**
+1. [x] **Migration — widen `plan_entitlements` for a time-boxed, tagged grant.**
    New file `supabase/migrations/<ts>_trial_entitlements.sql`: `ALTER TABLE plan_entitlements
    ADD COLUMN expires_at TIMESTAMPTZ` (nullable — `NULL` keeps meaning "never expires", so every
    existing lifetime row needs no backfill), plus `CREATE UNIQUE INDEX
@@ -39,7 +39,7 @@ only.
    adds `expires_at` to `plan_entitlements` and the partial unique index on `(user_id) WHERE
    source = 'trial'`, and that `20260802000000_plans_catalog.sql` itself is untouched.
 
-2. [ ] **Chokepoint — make `plan_entitlements` resolution expiry-aware, and stop a trial from
+2. [x] **Chokepoint — make `plan_entitlements` resolution expiry-aware, and stop a trial from
    blocking Lifetime.** In `src/lib/billing/effective-plan.ts`: add `export const TRIAL_SOURCE =
    "trial"`; add `export async function readTrialGrant(supabase, userId): Promise<{ grantedAt:
    string; expiresAt: string; isActive: boolean } | null>` reading the one possible
@@ -66,7 +66,7 @@ only.
    `src/__tests__/api/billing/checkout-concurrency.test.ts:269` — "refuses a lifetime purchase the
    customer already holds a grant for" — still passes unmodified).
 
-3. [ ] **Grant and idempotency — `src/lib/billing/trial.ts` (new file).** `export const
+3. [x] **Grant and idempotency — `src/lib/billing/trial.ts` (new file).** `export const
    TRIAL_DURATION_DAYS = 14`; `export async function grantTrialEntitlement(userId):
    Promise<{granted: boolean; duplicate: boolean}>` — service-role insert into
    `plan_entitlements` with `plan_id: "pro"`, `source: TRIAL_SOURCE`, `stripe_payment_intent_id:
@@ -89,7 +89,7 @@ only.
    — this is AC 6's "even after deleting and recreating sites" case, since nothing here reads
    `sites` at all.
 
-4. [ ] **Wire the grant to the only two server-side sign-in touchpoints.** In
+4. [x] **Wire the grant to the only two server-side sign-in touchpoints.** In
    `src/app/auth/callback/route.ts` and `src/app/auth/confirm/route.ts`, after
    `exchangeCodeForSession`/`verifyOtp` succeeds, read the now-established user
    (`supabase.auth.getUser()`) and call `ensureTrialStarted(supabase, user.id)` before redirecting
@@ -101,7 +101,7 @@ only.
    brand-new user results in `ensureTrialStarted` being called and does not alter the redirect
    destination; a thrown error from the grant path is swallowed and the redirect still happens.
 
-5. [ ] **Credit period — stop the calendar-month allowance from doubling mid-trial (T6).** In
+5. [x] **Credit period — stop the calendar-month allowance from doubling mid-trial (T6).** In
    `src/lib/credits/system.ts`'s `getUserCreditBalance`, after resolving `entitlement`, call
    `readTrialGrant(supabase, userId)` (task 2); when it returns an active trial, use its
    `grantedAt` as `startOfPeriod` instead of `startOfCurrentMonth()` — the same variable that
@@ -118,7 +118,7 @@ only.
    window never exceeds the plan's `monthlyCredits`; a non-trial Pro subscriber's calendar-month
    reset behaviour is unchanged (regression guard).
 
-6. [ ] **Surface trial state on the two routes the dashboard already calls.** Extend
+6. [x] **Surface trial state on the two routes the dashboard already calls.** Extend
    `EntitlementSummary` (`src/types/billing.ts`) with an optional `trial: { daysRemaining: number;
    endsAt: string } | null`, populated in `GET /api/billing/entitlement` from `readTrialGrant` when
    active — this is the cheap per-page call the dashboard overview badge (design screen 1) reads,
@@ -141,7 +141,7 @@ only.
    where an active trial coexists with a live subscription and `trial` is omitted from the
    response.
 
-7. [ ] **Dashboard UI — badge, trial card, expired panel.** All composed from
+7. [x] **Dashboard UI — badge, trial card, expired panel.** All composed from
    `src/components/ui/*` per `docs/design-system.md` and `docs/designs/s01-trial-signup.md`; no
    new primitive. `src/app/dashboard/page.tsx`: add a `StatusBadge` in `PageHeader`'s action area,
    fetched from `/api/billing/entitlement`, text `Trial — {daysLeft} days left`, tone `info` (>3
@@ -161,7 +161,7 @@ only.
    copy variants; a loading-skeleton test; a fetch-failure test asserting the card does not
    render (not an `Alert`).
 
-8. [ ] **Restore the marketing claims the product can now honour.** Un-comment/replace the
+8. [x] **Restore the marketing claims the product can now honour.** Un-comment/replace the
    tombstoned copy in `src/components/sections/Pricing.tsx:55-58` (`TRUST_POINTS`),
    `src/components/sections/FinalCTA.tsx:96-100`, and `src/components/sections/Hero.tsx:115-124`
    with "14-day free trial" / "No credit card required" copy, removing the now-inaccurate
@@ -170,7 +170,7 @@ only.
    **Tests**: new render tests (`Pricing.test.tsx`, `FinalCTA.test.tsx`, `Hero.test.tsx` — none
    exist today) asserting the restored strings are present in the rendered output.
 
-9. [ ] **Integration — close the loop through real route handlers.** New
+9. [x] **Integration — close the loop through real route handlers.** New
    `src/__tests__/integration/trial-lifecycle.test.ts`: grant a trial via `ensureTrialStarted` →
    `POST /api/sites/register` succeeds with no Stripe customer row anywhere (AC 1); mutate the
    grant's `expires_at` into the past (simulating day 15, no cron involved — task 2's read-time

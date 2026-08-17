@@ -22,6 +22,16 @@ import {
  * `Entitlement`, and the union does not expose `.limits` until the caller has
  * checked `entitled`, so every gate below has to say what it does about a user
  * who has not paid.
+ *
+ * The 14-day trial does not change that, and is not a free tier: it is a plan
+ * entitlement with an end date — a row in `plan_entitlements` conferring `pro`
+ * until `expires_at` (ADR 014). A trialling account therefore arrives at every
+ * gate below as `kind: "plan"` with Pro's limits read verbatim from the
+ * catalogue, and needs no branch of its own here. When the window closes the
+ * row stops being selected and the same account resolves to `none`, meeting
+ * exactly the denials already written below. Nothing in this file distinguishes
+ * a trial from a purchase, deliberately: a second opinion about who is entitled
+ * is how the two come to disagree.
  */
 
 export interface FeaturePermission {

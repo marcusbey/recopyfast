@@ -52,10 +52,18 @@ const PLAN_ICONS: Record<string, LucideIcon> = {
 
 const FALLBACK_ICON = Sparkles;
 
-// No trial is offered and subscription Checkout always collects a card, so the
-// "14-day free trial" and "No credit card required" claims that used to sit here
-// were commercial promises the product did not honour.
-const TRUST_POINTS = ["Cancel anytime", "30-day money-back guarantee"];
+// The first two were removed once, because there was no trial and subscription
+// Checkout always collected a card — they were promises the product did not
+// honour. Both are true again: every new account is granted 14 days of Pro at
+// sign-in with no Stripe customer and no payment method (see
+// src/lib/billing/trial.ts). Do not restore either claim without that grant
+// still being in place.
+const TRUST_POINTS = [
+  "14-day free trial",
+  "No credit card required",
+  "Cancel anytime",
+  "30-day money-back guarantee",
+];
 
 export default function Pricing() {
   const ref = useRef(null);

@@ -94,6 +94,58 @@ describe("plans seed", () => {
 });
 
 /**
+ * Migration 20260817000000 — the trial is a time-boxed row in the SAME grant
+ * table lifetime purchases use, not a new plan (ADR 014).
+ *
+ * Read from the migration text for the same reason as the seed above: the
+ * partial unique index is the ONLY thing enforcing "one trial per account,
+ * ever" (AC 6). It is not an application check that a future refactor can move
+ * — if it is not in the DDL, the guarantee does not exist.
+ */
+describe("trial entitlement migration", () => {
+  const trialSql = readFileSync(
+    join(
+      process.cwd(),
+      "supabase/migrations/20260817000000_trial_entitlements.sql",
+    ),
+    "utf8",
+  );
+
+  it("widens plan_entitlements with a nullable expiry", () => {
+    expect(trialSql).toMatch(
+      /ALTER TABLE\s+(public\.)?plan_entitlements\s+ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ/,
+    );
+    // NULL has to keep meaning "never expires", or every existing lifetime
+    // grant would need a backfill and a missed one would revoke a $199 sale.
+    expect(trialSql).not.toMatch(/expires_at TIMESTAMPTZ\s+NOT NULL/);
+  });
+
+  it("enforces one trial per account in Postgres, not in application code", () => {
+    expect(trialSql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS\s+plan_entitlements_one_trial_per_user/,
+    );
+    expect(trialSql).toMatch(
+      /ON\s+(public\.)?plan_entitlements\s*\(user_id\)\s*WHERE source = 'trial'/,
+    );
+  });
+
+  it("does not add a trial row to the plan catalogue", () => {
+    // A `trial` id is outside the SubscriptionPlanId/OneTimeProductId unions,
+    // and loadPlanCatalogue maps every active row before returning any of them
+    // — so one such row takes down pricing, checkout and every feature gate at
+    // once, not just the pricing feed. See ADR 014.
+    expect(trialSql).not.toMatch(/INSERT INTO plans/i);
+  });
+
+  it("leaves the applied catalogue migration untouched", () => {
+    // Forward-only: 20260802000000 is applied in production, so the expiry
+    // column must arrive in a new file rather than by editing that one.
+    expect(sql).not.toContain("expires_at");
+    expect(sql).not.toContain("one_trial_per_user");
+  });
+});
+
+/**
  * Migration 20260802020000 — the two defects that ended with a customer paying
  * and receiving nothing.
  */

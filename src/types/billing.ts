@@ -26,10 +26,31 @@ export type { PlanLimits, SubscriptionPlan as PlanData };
  * entitlement server-side; a client can lie about what it draws, never about
  * what the server allows.
  */
+/**
+ * A running trial, as far as the UI is concerned.
+ *
+ * `endsAt` is the stored expiry, computed server-side when the trial was
+ * granted; `daysRemaining` is derived from it there too, so a client that lies
+ * about its clock changes what it draws and nothing else. Whether the trial
+ * still entitles anyone is decided by `resolveEntitlement`, which never reads
+ * this.
+ */
+export interface TrialSummary {
+  daysRemaining: number;
+  endsAt: string;
+}
+
 export interface EntitlementSummary {
   kind: "plan" | "credits" | "none";
   planId: PaidPlanId | null;
   planName: string | null;
+  /**
+   * Present only while a trial is running AND nothing is being billed yet.
+   * Absent — the key is omitted, not null — for every other account, so a
+   * client that has never heard of trials sees exactly the payload it did
+   * before.
+   */
+  trial?: TrialSummary;
 }
 
 export interface Customer {
@@ -171,6 +192,24 @@ export interface BillingDashboardData {
    * Null when the account has none — there is no free plan to report instead.
    */
   effectivePlanId: string | null;
+  /**
+   * The running trial and what it has spent of its AI allowance, or null.
+   *
+   * Null once a subscription is live, even while the grant itself has days left
+   * on it: the trial is left to lapse on its own clock rather than being
+   * revoked at payment, so "unexpired" and "still trialling" stop meaning the
+   * same thing the moment someone converts.
+   */
+  trial: (TrialSummary & { creditsUsed: number; creditsLimit: number }) | null;
+  /**
+   * Whether this account has ever had a trial, running or spent.
+   *
+   * The unentitled branch of the billing page has two readers with the same
+   * `effectivePlanId: null` and very different situations — someone who has
+   * never subscribed, and someone whose trial just ran out — and only this
+   * tells them apart.
+   */
+  everTrialed: boolean;
 }
 
 // Subscription management

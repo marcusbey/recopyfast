@@ -4,6 +4,8 @@ import { getUserSubscription } from "@/lib/stripe/subscription";
 import { getCreditWallet, getCreditTransactions } from "@/lib/credits/system";
 import { getPlanCatalogue } from "@/lib/stripe/plans";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { readTrialGrant } from "@/lib/billing/effective-plan";
+import { trialDaysRemaining } from "@/lib/billing/trial";
 import { listPaymentMethods } from "@/lib/stripe/payment-methods";
 import type { BillingDashboardData, PaymentMethod } from "@/types/billing";
 
@@ -125,6 +127,21 @@ export async function GET() {
       getEffectivePlan(user.id),
     ]);
 
+    // The trial, and whether there has ever been one.
+    //
+    // `everTrialed` survives expiry on purpose: it is the only thing that tells
+    // "never subscribed" apart from "trial just ran out" on the unentitled
+    // branch of this page, where both are `effectivePlanId: null` and the right
+    // thing to say is completely different.
+    //
+    // `trial` is withheld the moment a subscription is live, even though the
+    // grant itself may still have days on it. Conversion does not revoke the
+    // trial — it is left to lapse on its own clock, which is exactly what makes
+    // conversion seamless — so "unexpired" stops meaning "still trialling" at
+    // the moment someone starts paying, and the card has to disappear then.
+    const trialGrant = await readTrialGrant(supabase, user.id);
+    const isTrialling = Boolean(trialGrant?.isActive) && !subscription;
+
     const dashboardData: BillingDashboardData = {
       customer: customer || undefined,
       subscription: subscription || undefined,
@@ -135,6 +152,16 @@ export async function GET() {
       currentUsage,
       catalogue,
       effectivePlanId: entitlement.planId,
+      trial:
+        isTrialling && trialGrant
+          ? {
+              daysRemaining: trialDaysRemaining(trialGrant.expiresAt),
+              endsAt: trialGrant.expiresAt,
+              creditsUsed: creditWallet.usedThisMonth,
+              creditsLimit: creditWallet.included,
+            }
+          : null,
+      everTrialed: trialGrant !== null,
     };
 
     return NextResponse.json(dashboardData);
