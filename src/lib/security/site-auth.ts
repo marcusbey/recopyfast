@@ -110,10 +110,29 @@ export function verifySiteTokenSignature(
     .update(`${tokenSiteId}.${issuedAt}`)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature),
-  );
+  const presented = Buffer.from(signature);
+  const expected = Buffer.from(expectedSignature);
+
+  // Length first, and a `try` around the compare regardless.
+  //
+  // `timingSafeEqual` THROWS `RangeError: Input buffers must have the same byte
+  // length` on mismatched sizes — it does not return false. That exception used
+  // to escape this function, escape `authorizeSiteRequest`, and land in the
+  // route's `catch (authError)`, which hands `authError.message` straight back
+  // to an unauthenticated caller (api/content/[siteId]/route.ts:296-308). A
+  // one-character signature was enough to produce it.
+  //
+  // The length check leaks nothing a caller does not already know: they chose
+  // the length. Comparing the two full-length digests is what has to stay
+  // constant-time, and it still is. `server/auth.js:73-77` does the same, and
+  // the two copies are watched for drift by the auth-parity suite.
+  if (presented.length !== expected.length) return false;
+
+  try {
+    return crypto.timingSafeEqual(presented, expected);
+  } catch {
+    return false;
+  }
 }
 
 export async function authorizeSiteRequest(options: {

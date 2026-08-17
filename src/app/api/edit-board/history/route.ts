@@ -13,6 +13,7 @@ import {
   requireEditorPermission,
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -26,6 +27,32 @@ const CORS_METHODS = "GET,POST,OPTIONS";
 
 function withCors(response: NextResponse, origin?: string | null) {
   return withPublicCors(response, origin, CORS_METHODS);
+}
+
+/**
+ * Per site, fail closed — ADR 002 rule 4, the same shape as the per-site limiter
+ * on api/content/[siteId]/route.ts:455-473.
+ *
+ * Both methods reach `createServiceRoleClient`, which bypasses RLS. GET paginates
+ * over a customer's whole edit history; POST calls `create_content_version`,
+ * which snapshots every content element on the site into a row. Unmetered, the
+ * snapshot is the cheaper request to make and the more expensive one to serve.
+ *
+ * Behind the access check, not in front of it: the bucket is the customer's own
+ * site, so metering an anonymous caller into it would let anyone exhaust the
+ * owner's budget by naming their site id.
+ *
+ * 50/min: a person scrolling history and taking the occasional snapshot.
+ */
+function meterSite(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_CONTENT_EDIT",
+    endpoint: "edit-board/history",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Version history rate limit exceeded for this site.",
+  });
 }
 
 // GET: List all versions for a site
@@ -78,6 +105,9 @@ export async function GET(request: NextRequest) {
         );
       }
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
     const limit = parseInt(request.nextUrl.searchParams.get("limit") || "50");
@@ -205,6 +235,9 @@ export async function POST(request: NextRequest) {
 
       authorEmail = validation.email ?? null;
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 

@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 export async function GET(
   request: NextRequest,
@@ -195,6 +196,30 @@ export async function PUT(
         request,
       );
     }
+
+    // Per site, fail closed, behind the permission grade — the pattern of the
+    // per-site limiter on api/content/[siteId]/route.ts:455-473. (ADR 002 rule 4)
+    //
+    // This is the service-role UPDATE of staged copy, and the credential that
+    // opens it is an invite link handed to a collaborator: a link that leaks is
+    // a copied credential, and this limiter is what bounds what it can rewrite.
+    //
+    // Behind the grade, not in front: the bucket is the customer's site, so
+    // metering an anonymous caller into it would let anyone exhaust the owner's
+    // own editing budget by naming their site id.
+    //
+    // 50/min because a human is typing. The editor saves per element on blur,
+    // not per keystroke (recopyfast.src.js persists on commit), so a real
+    // session is nowhere near it and a refusal is retried by the next save.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_CONTENT_EDIT",
+      endpoint: "staging/content-update",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Staging edit rate limit exceeded for this site.",
+    });
+    if (limited) return withPublicCors(limited, request);
 
     const sanitizedContent = sanitizeIncomingContent(String(content));
     const supabase = createServiceRoleClient();

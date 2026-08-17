@@ -14,6 +14,7 @@ import {
   requireEditorPermission,
 } from "@/lib/auth/editor-access";
 import { withPublicCors } from "@/lib/http/public-cors";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -60,6 +61,30 @@ function withCors(response: NextResponse, origin?: string | null) {
   return withPublicCors(response, origin, "GET,POST,OPTIONS");
 }
 
+/**
+ * Per site, fail closed — ADR 002 rule 4, the same shape as the per-site limiter
+ * on api/content/[siteId]/route.ts:455-473.
+ *
+ * AFTER the version row is read, and it cannot be anywhere else: the site a
+ * version belongs to is only knowable by reading the row, so there is no site to
+ * bucket by until then. The lookup it leaves unmetered is one indexed SELECT by
+ * primary key, behind the credential short-circuit in `hasAnyCredential`; the
+ * RPC below — which rewrites every staged element on the site from a snapshot —
+ * is on this side of it.
+ *
+ * 50/min: a person browsing versions and occasionally rolling one back.
+ */
+function meterSite(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_CONTENT_EDIT",
+    endpoint: "edit-board/history-version",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Version history rate limit exceeded for this site.",
+  });
+}
+
 // GET: Get specific version snapshot
 export async function GET(
   request: NextRequest,
@@ -88,6 +113,9 @@ export async function GET(
         origin,
       );
     }
+
+    const limited = await meterSite(request, version.site_id);
+    if (limited) return withCors(limited, origin);
 
     // The signed-in owner holds `site_permissions` and never a staging token.
     // Same first-party path as the history list and the staging routes.
@@ -176,6 +204,9 @@ export async function POST(
         origin,
       );
     }
+
+    const limited = await meterSite(request, version.site_id);
+    if (limited) return withCors(limited, origin);
 
     const firstPartyAccess = await authorizeFirstPartyEditorAccess(
       version.site_id,

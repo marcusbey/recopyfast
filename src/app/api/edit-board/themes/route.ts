@@ -11,6 +11,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { withPublicCors } from "@/lib/http/public-cors";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -22,6 +23,34 @@ function extractStagingToken(request: NextRequest): string | null {
 
 function withCors(response: NextResponse, origin?: string | null) {
   return withPublicCors(response, origin, "GET,POST,PUT,DELETE,OPTIONS");
+}
+
+/**
+ * Per site, fail closed — ADR 002 rule 4, the same shape as the per-site limiter
+ * on api/content/[siteId]/route.ts:455-473.
+ *
+ * Every method below reaches `createServiceRoleClient`, which bypasses RLS, and
+ * the credential that opens them is a staging token delivered in an invite link.
+ * A link that leaks is a copied credential; this is what bounds what it can do,
+ * and losing Redis must not remove it.
+ *
+ * Behind the access check, not in front of it: the bucket is the customer's own
+ * site, so metering an anonymous caller into it would let anyone exhaust the
+ * owner's budget by naming their site id — a worse denial of service than the
+ * one being closed.
+ *
+ * 50/min: a person clicking through the theme panel, not a program. A refusal
+ * costs one click, retried a second later.
+ */
+function meterSite(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_CONTENT_EDIT",
+    endpoint: "edit-board/themes",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Theme rate limit exceeded for this site.",
+  });
 }
 
 // GET: List all themes for a site
@@ -56,6 +85,9 @@ export async function GET(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 
@@ -161,6 +193,9 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 
@@ -280,6 +315,9 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
+
     const supabase = createServiceRoleClient();
 
     // If activating a theme, deactivate all others first
@@ -381,6 +419,9 @@ export async function DELETE(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 

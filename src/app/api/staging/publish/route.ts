@@ -13,6 +13,7 @@ import {
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 type PublishRpcRow = {
   element_id: string;
@@ -106,6 +107,26 @@ export async function POST(request: NextRequest) {
         validation.access.kind;
       publisherId = validation.access.userId || null;
     }
+
+    // Per site, fail closed, behind the permission grade — the pattern of the
+    // per-site limiter on api/content/[siteId]/route.ts:455-473. (ADR 002 rule 4)
+    //
+    // The RPC below pushes staged copy LIVE on the customer's site with the
+    // service-role key. Of everything a leaked invite link opens, this is the
+    // one with an audience: it changes what the site's visitors read.
+    //
+    // 10/min, the tightest ceiling here, because publishing is a human clicking
+    // a button — nobody publishes eleven times in a minute, and a legitimate
+    // publisher who hits it waits seconds, not minutes.
+    const limited = await enforceRateLimit(request, {
+      limit: "API_UPLOAD",
+      endpoint: "staging/publish",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "Publish rate limit exceeded for this site.",
+    });
+    if (limited) return withPublicCors(limited, request);
 
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();

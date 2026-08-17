@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -50,6 +51,37 @@ export async function GET(
         ),
       );
     }
+
+    // Per site, fail closed, behind authorization — same shape and same reasons
+    // as the per-site limiter on api/content/[siteId]/route.ts:455-473, which is
+    // the other route a published site token opens onto the service-role client.
+    // (ADR 002 rule 4)
+    //
+    // BEHIND the auth call rather than in front of it, despite the general rule
+    // in AGENTS.md: the bucket is the customer's own, so metering an
+    // unauthenticated caller into it would let anyone exhaust it by naming their
+    // site id and take that customer's A/B tests offline. Bucketing per IP
+    // instead would not bound what one copied token can do, which is the point.
+    //
+    // 1000/min because this is called on ORDINARY PAGE VIEWS. The response is
+    // already cached for 60 s (see withCors above), so a busy site spends far
+    // fewer than one request per view; 1000 leaves room for a traffic spike and
+    // still caps a scraped token well below what it could otherwise cost us.
+    //
+    // Fail closed even though this is a read: a Redis outage costs the visitor
+    // the A/B variant, and the widget then renders the page's own authored copy.
+    // That is the degrade path it takes for any failed fetch. The GET on
+    // /api/content fails OPEN instead because losing THAT un-publishes every
+    // customer's copy at once — a different blast radius, hence a different call.
+    const limited = await enforceRateLimit(request, {
+      limit: "API_KEY_DEFAULT",
+      endpoint: "ab-tests/active",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "A/B test lookup rate limit exceeded for this site.",
+    });
+    if (limited) return withCors(limited);
 
     const supabase = createServiceRoleClient();
 
