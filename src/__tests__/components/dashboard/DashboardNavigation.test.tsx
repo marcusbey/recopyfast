@@ -60,7 +60,6 @@ describe("DashboardNavigation", () => {
       expect(screen.getByText("Sites")).toBeInTheDocument();
       expect(screen.getByText("Content")).toBeInTheDocument();
       expect(screen.getByText("Analytics")).toBeInTheDocument();
-      expect(screen.getByText("Teams")).toBeInTheDocument();
       expect(screen.getByText("Settings")).toBeInTheDocument();
       expect(screen.getByText("Billing")).toBeInTheDocument();
     });
@@ -74,9 +73,11 @@ describe("DashboardNavigation", () => {
     it("should name the plan a subscriber is actually on", () => {
       render(<DashboardNavigation entitlement={onPlan("pro")} />);
 
-      // Scoped to the plan card: "Pro" also appears as the Teams badge, and a
-      // bare getByText would pass on the badge alone even if the card were
-      // still showing the old hardcoded label.
+      // Scoped to the plan card. "Pro" used to also render as the Teams nav
+      // badge, so a bare getByText would pass on the badge alone even if the
+      // card were still showing the old hardcoded label. The badge is gone with
+      // the Teams entry; the scoping stays, because the claim is about what the
+      // card says, not about the word appearing somewhere in the sidebar.
       expect(planCard()).toHaveTextContent("Pro");
     });
 
@@ -135,7 +136,9 @@ describe("DashboardNavigation", () => {
       // A/B Tests is no longer in the nav at all — the feature is not being
       // pursued and its route is disabled, so there is nothing here to gate.
       ["Analytics"],
-      ["Teams"],
+      // Teams is likewise gone from the nav entirely (s04), so there is no
+      // link left here to disable. Its absence is pinned below, in "The
+      // retired Teams surface".
       ["Settings"],
     ])("should not offer %s to an unentitled account", (label) => {
       render(<DashboardNavigation entitlement={lockedOut} />);
@@ -218,44 +221,56 @@ describe("DashboardNavigation", () => {
     });
   });
 
-  describe("Plan-Based Access Control", () => {
-    it("should show Pro badge on Teams", () => {
-      render(<DashboardNavigation entitlement={onPlan("starter")} />);
+  /**
+   * These five tests used to pin the Pro badge, the plan gate and the
+   * disabled-link behaviour of a "Teams" nav entry. Teams with org roles is in
+   * the graveyard (`docs/prd.md`, "Explicitly NOT replicated"): the permission
+   * model is an owner plus editors invited by email from a site's own Share
+   * panel. The entry is gone, so what they described is gone with it.
+   *
+   * They are rewritten to pin its ABSENCE rather than deleted. "No Teams entry"
+   * is a product decision, and a decision that nothing asserts is one the next
+   * person to add a nav item can undo without noticing. Deleting these would
+   * have left the sidebar's most recently removed item as its least guarded.
+   *
+   * `/api/teams/*` is untouched and still answers exactly as before — frozen
+   * means unexposed, not deleted. What must not come back is the way in.
+   */
+  describe("The retired Teams surface", () => {
+    it.each([
+      ["a Pro subscriber", onPlan("pro")],
+      ["a Starter subscriber", onPlan("starter")],
+      ["a credit holder", onCredits],
+      ["an unentitled account", lockedOut],
+    ])("is not offered to %s", (_who, entitlement) => {
+      render(<DashboardNavigation entitlement={entitlement} />);
 
-      const teamsLink = screen.getByText("Teams").closest("a");
-      expect(teamsLink?.parentElement).toContainHTML("Pro");
+      expect(screen.queryByText("Teams")).not.toBeInTheDocument();
     });
 
-    it("should enable Teams link for pro users", () => {
+    it("is not offered while the entitlement is still loading", () => {
+      // The state the nav renders in on every first paint. It treats an unknown
+      // entitlement as entitled on purpose, which is exactly the branch a
+      // reintroduced Teams entry would slip through.
+      render(<DashboardNavigation />);
+
+      expect(screen.queryByText("Teams")).not.toBeInTheDocument();
+    });
+
+    it("leaves no link pointing at /dashboard/teams", () => {
+      // The label is the obvious thing to assert and the easy thing to rename.
+      // The href is what actually reaches the retired route, which now only
+      // redirects — a nav entry to it would be a link to a bounce.
       render(<DashboardNavigation entitlement={onPlan("pro")} />);
 
-      const teamsLink = screen.getByText("Teams").closest("a");
-      expect(teamsLink).not.toHaveClass("cursor-not-allowed");
-    });
+      const hrefs = screen
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"));
 
-    it("should disable Teams link for starter users", () => {
-      render(<DashboardNavigation entitlement={onPlan("starter")} />);
-
-      const teamsLink = screen.getByText("Teams").closest("a");
-      expect(teamsLink).toHaveClass("cursor-not-allowed");
-    });
-
-    it("should disable Teams link for a credit holder", () => {
-      // Credits buy metered usage, never a plan capability.
-      render(<DashboardNavigation entitlement={onCredits} />);
-
-      const teamsLink = screen.getByText("Teams").closest("a");
-      expect(teamsLink).toHaveClass("cursor-not-allowed");
-    });
-
-    it("should prevent navigation when clicking disabled link", () => {
-      render(<DashboardNavigation entitlement={onPlan("starter")} />);
-
-      const teamsLink = screen.getByText("Teams").closest("a");
-      fireEvent.click(teamsLink!);
-
-      // Link should have href="#" for disabled state
-      expect(teamsLink).toHaveAttribute("href", "#");
+      expect(hrefs).not.toContain("/dashboard/teams");
+      // GUARD: the sidebar really did render its links, so the absence above
+      // is an absence of Teams rather than an absence of navigation.
+      expect(hrefs).toContain("/dashboard/sites");
     });
   });
 
@@ -316,11 +331,24 @@ describe("DashboardNavigation", () => {
 
   describe("Icons", () => {
     it("should render icons for each navigation item", () => {
-      const { container } = render(<DashboardNavigation />);
+      render(<DashboardNavigation />);
 
-      // Check that SVG icons are rendered
-      const svgs = container.querySelectorAll("svg");
-      expect(svgs.length).toBeGreaterThan(7); // At least one icon per nav item plus plan section
+      // Asserted per item rather than as a total. This was
+      // `svgs.length > 7`, a count that silently tracked how many nav items
+      // existed: it broke the moment one was retired, and it would have passed
+      // just as happily on eight icons attached to the wrong things.
+      for (const label of [
+        "Overview",
+        "Sites",
+        "Content",
+        "Analytics",
+        "Settings",
+        "Billing",
+      ]) {
+        expect(
+          screen.getByText(label).closest("a")?.querySelector("svg"),
+        ).not.toBeNull();
+      }
     });
   });
 });

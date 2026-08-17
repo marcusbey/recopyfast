@@ -5158,10 +5158,8 @@
       this.isOpen = false;
       this.activeTab = 'elements';
       this.panel = null;
-      this.styles = [];
       this.languages = [];
       this.versions = [];
-      this.themes = [];
       this.selectedElements = new Set();
     }
 
@@ -5451,12 +5449,15 @@
       const tabs = document.createElement('div');
       tabs.className = 'rcf-eb-tabs';
 
+      // Styles and Themes were here. Site-wide restyling is retired: we edit
+      // copy, not design, and the moment we restyle a customer's site we own
+      // "you broke my site" forever. Per-element typography and colour are a
+      // different thing and are untouched — they live in the floating editor
+      // toolbar, not in this panel.
       const tabData = [
         { id: 'elements', label: 'Elements' },
-        { id: 'styles', label: 'Styles' },
         { id: 'languages', label: 'Languages' },
-        { id: 'history', label: 'History' },
-        { id: 'themes', label: 'Themes' }
+        { id: 'history', label: 'History' }
       ];
 
       tabData.forEach(tab => {
@@ -5510,10 +5511,6 @@
           case 'elements':
             this.renderElementsTab();
             break;
-          case 'styles':
-            await this.loadStyles();
-            this.renderStylesTab();
-            break;
           case 'languages':
             await this.loadLanguages();
             this.renderLanguagesTab();
@@ -5521,10 +5518,6 @@
           case 'history':
             await this.loadHistory();
             this.renderHistoryTab();
-            break;
-          case 'themes':
-            await this.loadThemes();
-            this.renderThemesTab();
             break;
         }
       } catch (error) {
@@ -5622,6 +5615,19 @@
       content.appendChild(section);
 
       // Actions
+      //
+      // A "Apply Style" button lived here and called switchTab('styles')
+      // directly. It was a SECOND entry point into the retired Styles panel,
+      // reachable without the tab bar: select an element, click it, and the
+      // widget posted the site-wide restyle request from a tab that no longer
+      // appeared anywhere. Deleting the tab entries alone would have looked
+      // done and left site-wide restyling one click away.
+      //
+      // Do not restore it, and do not name the retired endpoints in a comment
+      // either: src/__tests__/embed/edit-board-tabs.test.ts asserts their paths
+      // appear nowhere in this file, which is what makes "the widget cannot
+      // issue that request" a property of the source rather than of a
+      // hand-maintained list of callers.
       if (this.selectedElements.size > 0) {
         const actions = document.createElement('div');
         actions.style.cssText = 'position: sticky; bottom: 0; padding: 16px 0; background: linear-gradient(transparent, rgba(15, 23, 42, 0.98) 20%);';
@@ -5630,127 +5636,8 @@
         selectInfo.style.cssText = 'margin-bottom: 10px; font-size: 12px; color: #94a3b8;';
         selectInfo.textContent = this.selectedElements.size + ' element(s) selected';
 
-        const actionBtns = document.createElement('div');
-        actionBtns.style.cssText = 'display: flex; gap: 8px;';
-
-        const applyStyleBtn = document.createElement('button');
-        applyStyleBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
-        applyStyleBtn.textContent = '🎨 Apply Style';
-        applyStyleBtn.onclick = () => self.switchTab('styles');
-
-        actionBtns.appendChild(applyStyleBtn);
-
         actions.appendChild(selectInfo);
-        actions.appendChild(actionBtns);
         content.appendChild(actions);
-      }
-    }
-
-    // Styles Tab
-    async loadStyles() {
-      try {
-        const response = await fetch(RECOPYFAST_API + '/edit-board/styles?siteId=' + SITE_ID, {
-          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
-        });
-        const data = await response.json();
-        this.styles = [...(data.presets || []), ...(data.custom || [])];
-      } catch (error) {
-        console.error('Error loading styles:', error);
-        this.styles = [];
-      }
-    }
-
-    renderStylesTab() {
-      const self = this;
-      const content = document.getElementById('rcf-eb-content');
-      content.innerHTML = '';
-
-      // Section title
-      const title = document.createElement('div');
-      title.className = 'rcf-eb-section-title';
-      title.textContent = 'Apply a writing style';
-      title.style.marginBottom = '16px';
-      content.appendChild(title);
-
-      if (this.styles.length === 0) {
-        content.innerHTML += '<div class="rcf-eb-empty">No styles available</div>';
-        return;
-      }
-
-      // Style grid
-      const grid = document.createElement('div');
-      grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 8px;';
-
-      this.styles.forEach(style => {
-        const card = document.createElement('button');
-        card.className = 'rcf-eb-card';
-        card.style.cssText = 'text-align: left; width: 100%; cursor: pointer;';
-
-        const cardTitle = document.createElement('div');
-        cardTitle.style.cssText = 'font-size: 13px; font-weight: 600; color: #f1f5f9; margin-bottom: 4px;';
-        cardTitle.textContent = style.name;
-
-        const cardDesc = document.createElement('div');
-        cardDesc.style.cssText = 'font-size: 11px; color: #64748b; line-height: 1.3;';
-        cardDesc.textContent = style.description || '';
-
-        card.appendChild(cardTitle);
-        card.appendChild(cardDesc);
-
-        card.onclick = async () => {
-          await self.applyStyle(style.id);
-        };
-
-        grid.appendChild(card);
-      });
-
-      content.appendChild(grid);
-
-      // Info text
-      const info = document.createElement('div');
-      info.style.cssText = 'margin-top: 16px; padding: 12px; background: rgba(59, 130, 246, 0.1); border-radius: 6px; font-size: 12px; color: #94a3b8;';
-      info.textContent = 'Click a style to transform all text on the page with AI.';
-      content.appendChild(info);
-    }
-
-    async applyStyle(styleId) {
-      const self = this;
-      const elementIds = this.selectedElements.size > 0
-        ? Array.from(this.selectedElements)
-        : null;
-
-      const content = document.getElementById('rcf-eb-content');
-      content.innerHTML = '<div class="rcf-eb-loading">Applying style...</div>';
-
-      try {
-        const response = await fetch(RECOPYFAST_API + '/edit-board/styles/apply', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + this.rcf.stagingToken
-          },
-          body: JSON.stringify({
-            siteId: SITE_ID,
-            styleId: styleId,
-            elementIds: elementIds
-          })
-        });
-
-        const result = await response.json();
-
-        if (result.success) {
-          content.innerHTML = '<div class="rcf-eb-empty">Applied ' + result.styleName + ' to ' + result.transformedCount + ' elements</div>';
-
-          // Refresh the page content
-          setTimeout(() => {
-            window.location.reload();
-          }, 1500);
-        } else {
-          content.innerHTML = '<div class="rcf-eb-empty">' + (result.error || 'Failed to apply style') + '</div>';
-        }
-      } catch (error) {
-        console.error('Error applying style:', error);
-        content.innerHTML = '<div class="rcf-eb-empty">Error applying style</div>';
       }
     }
 
@@ -6022,159 +5909,6 @@
       }
     }
 
-    // Themes Tab
-    async loadThemes() {
-      try {
-        const response = await fetch(RECOPYFAST_API + '/edit-board/themes?siteId=' + SITE_ID, {
-          headers: { 'Authorization': 'Bearer ' + this.rcf.stagingToken }
-        });
-        const data = await response.json();
-        this.themes = data.themes || [];
-      } catch (error) {
-        console.error('Error loading themes:', error);
-        this.themes = [];
-      }
-    }
-
-    renderThemesTab() {
-      const self = this;
-      const content = document.getElementById('rcf-eb-content');
-      content.innerHTML = '';
-
-      const section = document.createElement('div');
-      section.className = 'rcf-eb-section';
-
-      const title = document.createElement('div');
-      title.className = 'rcf-eb-section-title';
-      title.textContent = 'Event Themes';
-      section.appendChild(title);
-
-      if (this.themes.length === 0) {
-        section.innerHTML += '<div class="rcf-eb-empty">No themes created yet</div>';
-      } else {
-        this.themes.forEach(theme => {
-          const card = document.createElement('div');
-          card.className = 'rcf-eb-card';
-
-          const cardTitle = document.createElement('div');
-          cardTitle.className = 'rcf-eb-card-title';
-          cardTitle.textContent = theme.name;
-
-          const cardDesc = document.createElement('div');
-          cardDesc.className = 'rcf-eb-card-desc';
-          cardDesc.textContent = theme.description || theme.overrideCount + ' content overrides';
-
-          const cardMeta = document.createElement('div');
-          cardMeta.className = 'rcf-eb-card-meta';
-
-          if (theme.is_active) {
-            const badge = document.createElement('span');
-            badge.className = 'rcf-eb-badge';
-            badge.style.background = 'rgba(16, 185, 129, 0.2)';
-            badge.style.color = '#6ee7b7';
-            badge.textContent = 'Active';
-            cardMeta.appendChild(badge);
-          }
-
-          if (theme.schedule_start) {
-            const schedule = document.createElement('span');
-            schedule.textContent = 'Scheduled';
-            cardMeta.appendChild(schedule);
-          }
-
-          const toggleBtn = document.createElement('button');
-          toggleBtn.className = theme.is_active ? 'rcf-eb-btn rcf-eb-btn-ghost' : 'rcf-eb-btn rcf-eb-btn-success';
-          toggleBtn.style.marginTop = '10px';
-          toggleBtn.textContent = theme.is_active ? 'Deactivate' : 'Activate';
-          toggleBtn.onclick = async (e) => {
-            e.stopPropagation();
-            await self.toggleTheme(theme.id, !theme.is_active);
-          };
-
-          card.appendChild(cardTitle);
-          card.appendChild(cardDesc);
-          card.appendChild(cardMeta);
-          card.appendChild(toggleBtn);
-
-          section.appendChild(card);
-        });
-      }
-
-      content.appendChild(section);
-
-      // Create theme button
-      const createSection = document.createElement('div');
-      createSection.className = 'rcf-eb-section';
-
-      const createTitle = document.createElement('div');
-      createTitle.className = 'rcf-eb-section-title';
-      createTitle.textContent = 'Create Theme';
-      createSection.appendChild(createTitle);
-
-      const nameInput = document.createElement('input');
-      nameInput.className = 'rcf-eb-input';
-      nameInput.placeholder = 'Theme name (e.g., Holiday Sale)';
-
-      const createBtn = document.createElement('button');
-      createBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
-      createBtn.style.cssText = 'margin-top: 10px; width: 100%;';
-      createBtn.textContent = 'Create Theme';
-      createBtn.onclick = async () => {
-        if (!nameInput.value.trim()) return;
-
-        createBtn.disabled = true;
-        createBtn.textContent = 'Creating...';
-
-        try {
-          await fetch(RECOPYFAST_API + '/edit-board/themes', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + self.rcf.stagingToken
-            },
-            body: JSON.stringify({
-              siteId: SITE_ID,
-              name: nameInput.value.trim()
-            })
-          });
-
-          self.loadTabData();
-        } catch (error) {
-          console.error('Error creating theme:', error);
-          createBtn.disabled = false;
-          createBtn.textContent = 'Create Theme';
-        }
-      };
-
-      createSection.appendChild(nameInput);
-      createSection.appendChild(createBtn);
-      content.appendChild(createSection);
-    }
-
-    async toggleTheme(themeId, activate) {
-      const content = document.getElementById('rcf-eb-content');
-      content.innerHTML = '<div class="rcf-eb-loading">' + (activate ? 'Activating...' : 'Deactivating...') + '</div>';
-
-      try {
-        await fetch(RECOPYFAST_API + '/edit-board/themes', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + this.rcf.stagingToken
-          },
-          body: JSON.stringify({
-            siteId: SITE_ID,
-            themeId: themeId,
-            isActive: activate
-          })
-        });
-
-        this.loadTabData();
-      } catch (error) {
-        console.error('Error toggling theme:', error);
-        this.loadTabData();
-      }
-    }
   }
 
   window.ReCopyFast = new ReCopyFast();

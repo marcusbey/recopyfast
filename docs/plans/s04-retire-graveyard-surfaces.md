@@ -38,14 +38,33 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
 
 ## Tasks (ordered)
 
-1. **Dashboard nav: remove the Teams entry (AC1).**
+1. [x] **Dashboard nav: remove the Teams entry (AC1).**
+   Initially reported blocked: `src/__tests__/components/dashboard/DashboardNavigation.test.tsx`
+   asserted the Teams entry was *present* in 8 of its 32 tests, which the run interdict
+   ("do not modify an existing test") appeared to freeze. The operator scoped the interdict
+   to its actual intent — the **frozen API routes'** tests must pass unchanged — and
+   authorised updating this file, whose subject legitimately changed. Done accordingly.
+   Research had missed those 8: it grepped `src/__tests__/` for the `/dashboard/teams`
+   *path* and found only `Breadcrumbs.test.tsx`; these assert the *label*.
+   The 8 are updated to pin **absence**, not merely to stop asserting presence:
+   - "should render all navigation items" — Teams assertion dropped; absence covered below.
+   - the locked-out `it.each` — `["Teams"]` removed, with a comment pointing at the new block.
+   - the five "Plan-Based Access Control" tests — replaced by "The retired Teams surface":
+     6 tests asserting no Teams entry for a Pro subscriber, a Starter subscriber, a credit
+     holder, an unentitled account, and a still-loading entitlement, plus one asserting no
+     rendered link has `href="/dashboard/teams"` (with a guard that links rendered at all).
+     Re-adding the entry fails all 6 — verified by watching them fail before the change.
+   - "should render icons for each navigation item" — `svgs.length > 7` was a count that
+     silently tracked the number of nav items; now asserted per item.
+   The other 24 tests in the file are untouched. `Users` and the already-unused
+   `FlaskConical` imports are dropped (lint warnings 44 → 43).
    Delete the `Teams` `NavItem` object at `src/components/dashboard/DashboardNavigation.tsx:59-64`
    from the `Account` group. Drop the now-unused `Users` icon import (line 13) — verify with
    `npm run lint` that nothing else in the file references `Users`.
    Test: a component test rendering `DashboardNavigation` asserts no element with text
    "Teams" exists, and that `Account` group still renders `Settings` and `Billing`.
 
-2. **Dashboard: pin AC3 as a regression test.**
+2. [x] **Dashboard: pin AC3 as a regression test.**
    AC3 is already true (research: zero imports of `TeamSelector`, `InvitationManager`,
    `NotificationCenter`, `SecurityDashboard` outside their own files and
    `collaboration.test.tsx`) — this task adds the missing test, no source change.
@@ -54,7 +73,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    appear as an import specifier anywhere under `src/app/`. Fails loudly if a future PR
    reintroduces one.
 
-3. **`/dashboard/teams` becomes a redirect (AC2, part 1).**
+3. [x] **`/dashboard/teams` becomes a redirect (AC2, part 1).**
    Replace the 538-line client component at `src/app/dashboard/teams/page.tsx` with a server
    component that calls `redirect("/dashboard/sites?notice=teams-moved")` from
    `next/navigation`. Delete the team-listing/invite/member-removal body entirely — per design,
@@ -63,7 +82,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    existing pattern for redirecting pages in this repo) asserts visiting `/dashboard/teams`
    issues a redirect to `/dashboard/sites?notice=teams-moved` and never renders team UI or a 404.
 
-4. **`/dashboard/sites`: render the "moved" notice (AC2, part 2).**
+4. [x] **`/dashboard/sites`: render the "moved" notice (AC2, part 2).**
    In `src/app/dashboard/sites/page.tsx` (already `"use client"`, already imports `Alert`,
    `AlertDescription`, `AlertTitle`, and the `X` icon — no new imports needed), read the
    `notice` search param; when it equals `teams-moved`, render a dismissible
@@ -76,7 +95,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    error/success states; renders nothing extra when the param is absent; dismiss removes the
    alert from the DOM.
 
-5. **Widget: drop the Styles/Themes tabs (AC4).**
+5. [x] **Widget: drop the Styles/Themes tabs (AC4).**
    In `public/embed/recopyfast.src.js`, remove the two `styles` and `themes` entries from the
    `tabData` array (`:5454-5460`). Remaining order: `elements`, `languages`, `history`.
    Test: extend the existing "slice the real widget and eval it" pattern (see
@@ -85,7 +104,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    block, inject a `document`, and assert exactly 3 tab buttons render with ids
    `elements`/`languages`/`history` and no button with id `styles` or `themes` exists.
 
-6. **Widget: close the hidden Styles entry point and delete dead code (AC5).**
+6. [x] **Widget: close the hidden Styles entry point and delete dead code (AC5).**
    Remove the "🎨 Apply Style" quick-action button at `:5639` (`applyStyleBtn` — the Elements-tab
    button whose `onclick` calls `self.switchTab('styles')`, reachable independently of the tab
    bar removed in task 5 — this is the trap research fact 5 identifies as the real risk to AC5).
@@ -101,7 +120,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    no longer appear anywhere in `recopyfast.src.js` — the strongest form of AC5, since it rules
    out both the two known and any not-yet-imagined call sites at once.
 
-7. **Rebuild the artifact and verify the staleness gate.**
+7. [x] **Rebuild the artifact and verify the staleness gate.**
    Run `npm run build:embed` to regenerate `public/embed/recopyfast.js` from the edited
    `.src.js` (never hand-edit the artifact — `scripts/build-embed.mjs`'s
    `STALE_MARKER = "// @generated-from-sha256 "` mechanism detects a mismatch). Then run
@@ -111,7 +130,7 @@ otherwise spend effort minifying"). The API routes themselves are never touched.
    is confirmed locally to make `--check` fail, proving the gate is live — this check is
    deleted from the working tree before committing, it is a one-time proof, not a shipped test.
 
-8. **Verify every frozen surface, AC6/7/8, with an explicit diff guard.**
+8. [x] **Verify every frozen surface, AC6/7/8, with an explicit diff guard.**
    Run the full existing suites that cover the frozen routes and confirm they pass **and** that
    `git diff main...feature/s04-retire-graveyard-surfaces -- <path>` is empty for each path
    listed under "Run interdicts" below. Specifically: `src/__tests__/api/teams/*.test.ts`,
@@ -212,3 +231,72 @@ of the request-issuing code*, not on the absence of a particular button.
 - No test modified to accommodate this story's behaviour change — every frozen test named in
   the interdicts passes with its original assertions intact.
 - Review passed (`/ks-review`), no open critical issue.
+
+## Execution notes
+
+Recorded at `/ks-execute`. All eight tasks done. Every deviation from the plan as written:
+
+1. **`DashboardNavigation.test.tsx` was modified** — 8 of its 32 assertions, rewritten to pin
+   the *absence* of the Teams entry. The plan assumed a new test would be enough and did not
+   anticipate the existing file asserting presence. Task 1 was first reported blocked on the
+   "do not modify an existing test" interdict; the operator scoped that interdict to its
+   actual intent — the frozen **API routes'** tests pass unchanged — and authorised this file.
+   Detail on task 1 above. The frozen route tests remain untouched.
+2. **Task 5's test asserts tab *labels* and the tab id each button dispatches, not DOM ids.**
+   The plan asked for "3 tab buttons with ids `elements`/`languages`/`history`". The widget
+   sets no `id` attribute on a tab button — the tab id exists only inside the button's own
+   `onclick` closure. The test therefore clicks each button and asserts which id it asks
+   `switchTab` for, which covers the same ground without inventing markup.
+3. **The notice's "Share panel" is text, not a link.** The design mockup draws it as
+   `<a href="#">`. There is no route to point at: site detail is rendered in-page from
+   `/dashboard/sites` and there is no `/dashboard/sites/[id]` (research's own open question
+   says the same). A live `href="#"` would be a link to nowhere, so the notice names the
+   destination in prose instead.
+4. **`useSearchParams` is a new import in `sites/page.tsx`.** The plan said "no new imports
+   needed", which held for `Alert`/`AlertTitle`/`AlertDescription`/`X` but not for reading
+   the param. No `Suspense` wrapper was needed: `npm run build` still prerenders
+   `/dashboard/sites` as static with no bailout warning.
+5. **Two deletions beyond the named list, both strictly implied by it:** `applyStyle` and
+   `toggleTheme` (the methods the deleted render functions called, and the only callers of
+   the four forbidden fetches), and the now-unread `this.styles` / `this.themes` fields on
+   `EditBoardPanel`. Leaving `applyStyle` would have left `/edit-board/styles/apply` in the
+   shipped bytes, which is what task 6's source-level test forbids.
+6. **The tombstone comment on the removed Apply Style button cannot name the endpoints.**
+   Task 6's own string-absence test asserts those paths appear nowhere in `recopyfast.src.js`,
+   comments included. The comment says so, so the next agent does not reintroduce the string
+   while trying to follow the house comment style.
+7. **The design's teal recolour of the widget tab bar was not applied.** It appears in
+   `docs/designs/s04-retire-graveyard-surfaces.md` ("Reused components") but in none of this
+   plan's eight tasks, and the plan is what executes.
+
+Evidence: `node scripts/build-embed.mjs --check` fails on the stale artifact and passes after
+`npm run build:embed` (gate proven live, then satisfied). `lint` 0 errors (43 pre-existing
+warnings, none in touched files — was 44 before the unused `FlaskConical` import went),
+`type-check`, `format:check` and `build` all green.
+
+**Embed size, measured three ways.** State the method with the number: the three differ, and
+two of them differ only by gzip header bytes.
+
+The first report of this saving (−958) was **wrong**, and the way it was wrong is worth
+recording. The `before` was measured through a pipe (`git show … | gzip -9`) and the `after`
+from a file argument (`gzip -9c public/embed/recopyfast.js`). gzip stores the original
+filename in the header when it is given a file and omits it for stdin, so the `after` figure
+carried an extra `recopyfast.js\0` — 14 bytes — that the `before` did not. Both numbers were
+valid measurements; comparing them to each other was not. Never subtract two compressed
+sizes without checking they were produced the same way.
+
+| method | before | after | saving |
+|---|---|---|---|
+| Node `zlib.gzipSync(buf, {level:9})` — **what `s06a` seeds its gate with** | 46,875 | 45,894 | −981 |
+| GNU `gzip -9` from stdin (no `FNAME` header) | 46,767 | 45,795 | −972 |
+| GNU `gzip -9c <file>` (stores `recopyfast.js\0`, +14 bytes) | 46,781 | 45,809 | −972 |
+| raw, uncompressed | 174,420 | 168,541 | −5,879 |
+
+The gate-relevant figure is **46,875 → 45,894, −981 bytes**. The budget is 30,000, so it stays
+breached by 15,894 and this story moves it the right way.
+
+Jest: full suite green. Four suites (`api/ai/suggest`, `api/ai/translate`, `api/sites/register`,
+`api/content/[siteId]`) need `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_APP_URL` and
+`NEXT_PUBLIC_WS_URL` to be set at all; without them they fail identically on a clean `main`
+checkout in this worktree, which has no `.env.local` — verified by stashing and re-running.
+Zero regressions attributable to this story.

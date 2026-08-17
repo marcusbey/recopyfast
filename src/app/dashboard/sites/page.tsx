@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { SiteCard, SiteStatus } from "@/components/dashboard/SiteCard";
 import { SiteDetailView } from "@/components/dashboard/SiteDetailView";
@@ -71,8 +72,16 @@ const SORT_LABELS: Record<SortOption, string> = {
   activity: "Last activity",
 };
 
+/**
+ * Set by the redirect that retired `/dashboard/teams`. It is the only thing
+ * telling an owner who asked for team management why they are looking at a list
+ * of sites instead — see `src/app/dashboard/teams/page.tsx`.
+ */
+const TEAMS_MOVED_NOTICE = "teams-moved";
+
 export default function SitesPage() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
   const [sites, setSites] = useState<SiteWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +93,11 @@ export default function SitesPage() {
 
   // Modal state
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
+
+  // Session-local only, and deliberately so: the notice is triggered by a query
+  // param the user can only arrive with once per navigation, so there is
+  // nothing worth persisting and nothing to clean up if they never dismiss it.
+  const [isTeamsNoticeDismissed, setIsTeamsNoticeDismissed] = useState(false);
 
   // Delete confirmation dialog state
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -228,6 +242,10 @@ export default function SitesPage() {
     ? sites.find((site) => site.id === selectedSiteId)
     : null;
 
+  const isTeamsMovedNoticeVisible =
+    !isTeamsNoticeDismissed &&
+    searchParams.get("notice") === TEAMS_MOVED_NOTICE;
+
   const statusCounts = useMemo(() => {
     return {
       all: sites.length,
@@ -267,6 +285,30 @@ export default function SitesPage() {
           </Button>
         }
       />
+
+      {/* Driven by the query param alone, so it needs no fetch and renders in
+          every state of the list below — including the empty one. An owner
+          redirected off /dashboard/teams may have no sites at all and still
+          needs to know why they are on this page. */}
+      {isTeamsMovedNoticeVisible && (
+        <Alert variant="info" className="flex items-start gap-3">
+          <div className="flex-1">
+            <AlertTitle>Team management has moved</AlertTitle>
+            <AlertDescription>
+              Invite people to edit a site from that site&apos;s Share panel —
+              open a site below and use Share.
+            </AlertDescription>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Dismiss"
+            onClick={() => setIsTeamsNoticeDismissed(true)}
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </Alert>
+      )}
 
       {/* These were four metric cards. They never were metrics — clicking one
           filtered the list. Presented as a segmented filter they say what they

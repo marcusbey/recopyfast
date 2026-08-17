@@ -8,9 +8,7 @@ import {
   LayoutDashboard,
   Globe,
   FileText,
-  FlaskConical,
   BarChart3,
-  Users,
   Settings,
   CreditCard,
   Menu,
@@ -55,13 +53,11 @@ const navGroups: NavGroup[] = [
   {
     label: "Account",
     items: [
-      {
-        label: "Teams",
-        href: "/dashboard/teams",
-        icon: Users,
-        badge: "Pro",
-        requiresPlan: "pro",
-      },
+      // Teams is deliberately absent. Teams with org roles is in the graveyard
+      // (docs/prd.md, "Explicitly NOT replicated") — the permission model is an
+      // owner plus editors invited by email from a site's own Share panel.
+      // /api/teams/* and its components are kept so the decision is reversible;
+      // /dashboard/teams redirects to /dashboard/sites?notice=teams-moved.
       { label: "Settings", href: "/dashboard/settings", icon: Settings },
       { label: "Billing", href: "/dashboard/billing", icon: CreditCard },
     ],
