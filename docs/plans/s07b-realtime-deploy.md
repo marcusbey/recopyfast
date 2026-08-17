@@ -8,10 +8,15 @@ validated: yes
 > stands exactly as written; **no new broadcast path is built**, and `s08` AC 3's
 > zero-connection guarantee is left intact.
 >
-> **Operator inputs, 2026-08-17: platform is Fly.io, instance count is one, no Redis adapter.**
-> See the "Operator inputs" table and the single-instance ceiling note below — that ceiling is the
-> part a future operator must not trip over.
-> ⚠ **Still required before T1 can run:** the Fly app name, the region, and the TLS hostname.
+> **Operator inputs, 2026-08-17 — all resolved.** Fly.io, app `recopyfast-ws`, region `iad`,
+> hostname `recopyfast-ws.fly.dev`, **two machines**. `@socket.io/redis-adapter` therefore ships
+> with this story, backed by a new Upstash database.
+>
+> ⚠ **This story is now larger than complexity 4.** The split proposal scoped it as "deploy and
+> wire up"; it has since acquired the adapter, a second Redis, a transport/stickiness decision and
+> a four-way `fly.toml` reconciliation. **Re-score before executing** — if it lands at 5,
+> `AGENTS.md` requires a split, and the natural cut is deploy-and-verify vs multi-instance
+> correctness.
 # Plan — Story s07b-realtime-deploy
 
 Branch: `feature/s07b-realtime-deploy`
@@ -32,37 +37,56 @@ Criteria this plan must satisfy:
 - [ ] Realtime appears as a check in `GET /api/health`, **degrading** the app's status rather than failing it. (AC 3, ADR 004 "Watch")
 - [ ] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — editors-only, settled: ADR 022.
 - [ ] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
-- [x] **Instance count decided explicitly: ONE.** No Socket.io Redis adapter in this story.
-      Recorded 2026-08-17. See "Operator inputs" below. (Research open question 4, ADR 004)
+- [x] **Instance count decided explicitly: TWO.** `@socket.io/redis-adapter` therefore **ships
+      with this story** — it is not optional. Recorded 2026-08-17. (Research open question 4, ADR 004)
 
 ### Operator inputs — recorded 2026-08-17
 
 | Input | Answer |
 |---|---|
-| Platform | **Fly.io.** `server/fly.toml` already exists, so T1 fills it in rather than authoring it. Vercel cannot host a long-lived process (ADR 004, `architecture.md:50`). |
-| Instances | **One.** No `@socket.io/redis-adapter`, no additional Upstash load. |
-| Redis adapter, if instances ever > 1 | **A new Upstash database on the existing account** — not `informed-ghost-153511`. |
-| App name / region / TLS hostname | ⚠ **Still required before T1 can run.** |
+| Platform | **Fly.io**, app **`recopyfast-ws`**, region **`iad`** (Ashburn). `server/fly.toml:22-23` already carries both — the placeholders happen to be correct; delete the `# change to …` comments. Vercel cannot host a long-lived process (ADR 004, `architecture.md:50`). |
+| TLS hostname | **`recopyfast-ws.fly.dev`** → `NEXT_PUBLIC_WS_URL = wss://recopyfast-ws.fly.dev` (T6). |
+| Instances | **Two**, `shared-1x-cpu@512MB`, process group `app`, both in `iad`. |
+| Redis adapter | **Ships with this story.** Backed by a **new Upstash database on the existing account** — *not* `informed-ghost-153511`. |
 
-> #### ⛔ The single-instance decision is a ceiling, not a default — record it where a future operator will hit it
+> #### ⛔ Two machines make the adapter mandatory, and there are two distinct failure modes
 >
-> Socket.io rooms live in the **memory of one process**. With one instance that is invisible and
-> everything works. **The moment a second instance exists, two editors on the same page can land
-> on different processes, join the same room name in two separate memories, and stop seeing each
-> other** — while every health check stays green and no error is raised anywhere. It presents as
-> "realtime randomly stopped working for some people," which is the hardest possible shape of
-> report to act on.
+> **1 — Room isolation (silent).** Socket.io rooms live in the **memory of one process**. Two
+> editors on the same page can land on different machines, join the same room name in two separate
+> memories, and never see each other — health checks green, nothing thrown. It presents as
+> "realtime randomly stopped working for some people," the hardest possible shape of report to act
+> on. **This makes AC 4 flaky, not merely unproven**: "edit in A appears in B under 1 s" passes or
+> fails depending on machine placement.
 >
-> So scaling this service horizontally is **not** a scaling operation; it is a code change that
-> must ship `@socket.io/redis-adapter` in the same deploy. `server/package.json` today carries
-> `express`, `socket.io`, `cors`, `@supabase/supabase-js` and `dotenv` — **no redis client and no
-> adapter**. T7 records this in `server/README.md`, next to the instance count, in those terms.
+> **2 — Handshake failure (loud).** `src/lib/collaboration/realtime.ts:93` sets
+> `transports: ["websocket", "polling"]`. A client that falls back to polling round-robins its
+> requests across both machines with no sticky routing, and the session breaks with
+> `Session ID unknown`. The adapter alone does **not** fix this — it needs either sticky routing or
+> websocket-only transport. Decide which, and record it.
 >
-> The Redis itself is already provisioned and paid for: `REDIS_URL` points at Upstash
-> (`informed-ghost-153511`) and `src/lib/security/rate-limiter.ts` uses it over TCP. When the
-> adapter ships it gets **its own database on that account** — the rate limiter is fail-closed in
-> production, so a socket-traffic spike must not be able to exhaust the command quota that ten API
-> endpoints depend on.
+> `server/package.json` today carries `express`, `socket.io`, `cors`, `@supabase/supabase-js` and
+> `dotenv` — **no redis client and no adapter**. Both are added here.
+>
+> The rate limiter is fail-closed in production (`src/lib/security/rate-limiter.ts:169-174`): if it
+> cannot reach Redis, ten API endpoints stop serving. That is why the adapter gets its **own**
+> database rather than sharing `informed-ghost-153511` — socket pub/sub must not be able to exhaust
+> the command quota those endpoints depend on. Upstash bills per command, and `.env.example:119`
+> notes each rate-limit check already costs two.
+
+> #### ⛔ T1 — the live Fly app and `server/fly.toml` are four-way inconsistent
+>
+> The app was created with Fly's generated defaults; the repo's hand-written `fly.toml` has never
+> been applied. Reconcile them deliberately — do not assume `fly deploy` sorts it out.
+>
+> | | Fly (live) | `server/fly.toml` | Consequence if unresolved |
+> |---|---|---|---|
+> | Port | `internal_port = 8080` | `internal_port = 4001`, `WS_PORT = "4001"` | **Total failure.** `server/index.js:1177` binds `process.env.WS_PORT \|\| 4001` and ignores `PORT`. Nothing listens on 8080. |
+> | Idle | `auto_stop_machines = true`, `min_machines_running = 0` | not set | Fly's idle detection is request-based, so a quiet WebSocket looks idle. **Open editing sessions drop.** Needs `min_machines_running >= 1` and autostop off. |
+> | Health | none | `/health` HTTP check + TCP fallback | `/health` exists (`server/index.js:228`) but Fly is not checking it. AC 3 depends on this path. |
+> | Memory | `memory = "1gb"` **and** `memory_mb = 512` both set | — | Contradictory; the dashboard reports 512MB. Pick one. |
+>
+> Fly's generated file uses `[http_service]`; the repo's uses `[[services]]`. They are not
+> mergeable key-by-key — choose one form and make it complete.
 
 ### Cleared — AC 4 is editors-only (M6 answered 2026-08-17, ADR 022)
 
