@@ -81,6 +81,11 @@ describe("GET /api/health — the realtime check", () => {
   let fetchMock: jest.Mock;
 
   beforeEach(() => {
+    // The route memoizes its realtime probe in module scope, so a stale memo
+    // from the previous test would answer the next one's GET and every case
+    // below would pass without a probe ever running. Resetting the registry is
+    // what keeps the degrade / timeout / kill-switch cases biting.
+    jest.resetModules();
     doubleOptions = {};
     process.env.NEXT_PUBLIC_WS_URL = REALTIME_ORIGIN;
     fetchMock = jest.fn(realtimeUp);
@@ -118,6 +123,22 @@ describe("GET /api/health — the realtime check", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toBe(
       "https://recopyfast-ws.fly.dev/health",
+    );
+  });
+
+  it("probes the service over http when the configured origin is a ws one", async () => {
+    // The local-dev half of the same swap. `npm run dev` runs the socket server
+    // on `ws://localhost:4001`, and `https://localhost:4001/health` is not the
+    // same URL — it fails the TLS handshake against a plain HTTP server, so a
+    // developer running the whole stack correctly would still read
+    // "realtime: error" and go looking for a service that is up.
+    process.env.NEXT_PUBLIC_WS_URL = "ws://localhost:4001";
+
+    await callGet();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      "http://localhost:4001/health",
     );
   });
 
@@ -199,6 +220,24 @@ describe("GET /api/health — the realtime check", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("survives a malformed NEXT_PUBLIC_WS_URL instead of 503-ing the endpoint", async () => {
+    // The guard that costs the most when it is missing. `getRealtimeHealthUrl()`
+    // is called INSIDE `GET`'s outer try, whose catch answers 503 `unhealthy` —
+    // so an unguarded `new URL(configured)` on a typo'd variable takes the whole
+    // app's health endpoint down, pages whoever is on call, and drops the
+    // instance out of load balancer rotation. Same forbidden outcome as ADR
+    // 004's "Watch", arriving from configuration rather than from an outage, and
+    // a typo is far more likely than the outage.
+    process.env.NEXT_PUBLIC_WS_URL = "not a url";
+
+    const { response, body } = await callGet();
+
+    expect(response.status).toBe(200);
+    expect(body.status).toBe("healthy");
+    expect(body.checks.realtime).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps HEAD reading the database alone, with realtime down", async () => {
     // HEAD is what the uptime monitor and the load balancer poll. It answers
     // "can this instance serve traffic", and realtime has no bearing on that.
@@ -220,5 +259,75 @@ describe("GET /api/health — the realtime check", () => {
     expect(response.status).toBe(200);
     expect(body.status).toBe("healthy");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The memo. `/api/health` is public, unauthenticated and deliberately NOT
+   * rate limited — uptime monitors poll it, and denying them is worse than what
+   * this bounds. Since s07b every GET also issues an outbound request to the
+   * realtime service, which makes an endpoint anyone can call a small
+   * amplifier: one request in, two out, at whatever rate the caller likes.
+   *
+   * A limiter is the wrong answer here. Memoizing the probe is the right one:
+   * the reading is a few seconds old at worst, and the traffic the endpoint can
+   * generate downstream stops depending on the traffic it receives.
+   */
+  describe("the probe memo", () => {
+    it("issues one outbound probe for two GETs inside the window", async () => {
+      const first = await callGet();
+      const second = await callGet();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(first.body.checks.realtime).toMatchObject({ status: "ok" });
+      expect(second.body.checks.realtime).toMatchObject({ status: "ok" });
+    });
+
+    it("collapses concurrent GETs onto a single outbound probe", async () => {
+      // The case the memo actually exists for. Storing only the settled result
+      // would leave N simultaneous callers each starting their own fetch before
+      // the first one lands — exactly the burst an unlimited public endpoint
+      // invites — so what is held is the in-flight probe itself.
+      const [first, second] = await Promise.all([callGet(), callGet()]);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(first.body.checks.realtime).toMatchObject({ status: "ok" });
+      expect(second.body.checks.realtime).toMatchObject({ status: "ok" });
+    });
+
+    it("probes again once the window has passed", async () => {
+      // The other half: a memo that never expires is not a memo, it is a health
+      // check frozen at boot, and it would report a dead service as healthy
+      // forever.
+      const base = Date.now();
+      const nowSpy = jest.spyOn(Date, "now").mockReturnValue(base);
+
+      try {
+        await callGet();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        nowSpy.mockReturnValue(base + 10_001);
+        await callGet();
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      } finally {
+        nowSpy.mockRestore();
+      }
+    });
+
+    it("re-probes when the configured origin changes", async () => {
+      // The memo is keyed on the URL it probed. Without that, a test — or a
+      // process that reads a changed variable — gets an answer about a service
+      // it is no longer pointing at.
+      await callGet();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      process.env.NEXT_PUBLIC_WS_URL = "wss://recopyfast-ws-staging.fly.dev";
+      await callGet();
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchMock.mock.calls[1][0])).toBe(
+        "https://recopyfast-ws-staging.fly.dev/health",
+      );
+    });
   });
 });

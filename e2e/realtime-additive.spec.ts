@@ -189,7 +189,11 @@ test.describe("realtime is additive with the service stopped", () => {
       requests.filter((url) => url.includes("socket.io-client.min.js")),
     ).toEqual([]);
 
-    // The additive path is the one that must have run.
+    // The additive path is the one that must have run — and what is asserted is
+    // that the REQUEST was issued. `siteId` is a random uuid and `siteToken`
+    // ends in `deadbeef`, so the API rejects it; proving a response came back
+    // would need a seeded site, which is `share-edit-publish.spec.ts`'s job. The
+    // regression this catches is the widget skipping HTTP altogether.
     expect(
       requests.filter((url) => url.includes(`/api/content/${siteId}`)),
     ).not.toEqual([]);

@@ -26,11 +26,15 @@
 # NEXT_PUBLIC_APP_URL is read too (index.js) but defaults to http://localhost:3000
 # and nothing here depends on it; set it if you want it in the logs.
 #
-# ALLOWED_ORIGINS is deliberately NOT in that list. server/index.js:174 and :196
-# record that it is no longer consulted: authorisation is the per-site HMAC token
-# check in the connection handler, which is strictly stronger than an origin
-# allowlist and does not need a redeploy per customer. Setting it would create
-# false confidence about where the security boundary is.
+# ALLOWED_ORIGINS is deliberately NOT in that list, and must not be added. The
+# variable is not consulted anywhere in this service — `grep -rn ALLOWED_ORIGINS
+# server/*.js` returns nothing since s07a rewrote the connection handler, so
+# there is no line to read and nothing to reinstate. Authorisation is the
+# per-site HMAC token check at index.js:256 (`verifySiteToken`, auth.js:50)
+# followed by the registered-domain pin at :263 (`isOriginAllowed`, auth.js:101),
+# both inside the connection handler. That pair is strictly stronger than an
+# origin allowlist and needs no redeploy per customer. Setting ALLOWED_ORIGINS
+# would create false confidence about where the security boundary is.
 #
 # Note: site tokens are HMAC-signed with each site's API key (read from the DB
 # via the service-role key) — there is no separate token-secret env var.
@@ -68,8 +72,14 @@
 # So scaling this service is NOT a scaling operation. It is a code change that must
 # ship @socket.io/redis-adapter in the same deploy (and the adapter fixes only the
 # FIRST failure — it shares rooms, not sessions; the transport pinning below covers
-# the second). server/package.json carries no redis client and no adapter today.
-# See ADR 023 and docs/plans/s07b-realtime-deploy.md.
+# the second).
+#
+# Do not read `redis` in server/package.json as "the adapter is already here". That
+# is node-redis, the store behind s07a's fail-closed connection limiter
+# (rate-limit.js:82). @socket.io/redis-adapter is a DIFFERENT package and is absent
+# — `grep -n redis-adapter server/package.json` returns nothing — and it is the
+# adapter, not the client, that shares rooms across machines.
+# See ADR 023, ADR 026 and docs/plans/s07b-realtime-deploy.md.
 #
 # `fly scale count 2` without that work is a silent outage for co-editing.
 # ---------------------------------------------------------------------------

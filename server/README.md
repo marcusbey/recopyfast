@@ -97,12 +97,15 @@ credential that opens it is `data-site-token` — published in the customer's ow
 readable with View Source. Refusing to start is louder than a limiter denying every connection
 all day while `/health` keeps answering 200.
 
-> **`ALLOWED_ORIGINS` is not in that list and must not be added.** `index.js` records that it is
-> no longer consulted: authorisation is the per-site HMAC token check plus the registered-domain
-> pin in the connection handler, which is strictly stronger than an origin allowlist and needs no
-> redeploy per customer. Setting it creates false confidence about where the security boundary
-> is. The variable still exists in the *Next app's* environment for unrelated reasons; it means
-> nothing here.
+> **`ALLOWED_ORIGINS` is not in that list and must not be added.** It is not consulted anywhere in
+> this service — `grep -rn ALLOWED_ORIGINS server/*.js` returns nothing since `s07a` rewrote the
+> connection handler, so there is no code left to point at and nothing to reinstate.
+> Authorisation is the per-site HMAC token check at `index.js:256` (`verifySiteToken`,
+> `auth.js:50`) followed by the registered-domain pin at `:263` (`isOriginAllowed`, `auth.js:101`),
+> both inside the connection handler — strictly stronger than an origin allowlist, and no redeploy
+> per customer. Setting it creates false confidence about where the security boundary is. The
+> variable still exists in the *Next app's* environment for unrelated reasons; it means nothing
+> here.
 
 ### Deploy
 

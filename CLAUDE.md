@@ -95,7 +95,9 @@ npm test
 ### Key Dependencies
 - **Supabase** for database, authentication and storage
 - **Stripe** for billing (DB-driven catalogue — `plans` is the source of truth)
-- **Socket.io** for real-time communication — in `server/`, **not currently deployed**
+- **Socket.io** for real-time communication — in `server/`, deployed on Fly as `recopyfast-ws` in
+  `iad`, **one machine** ([ADR 026](./docs/decisions/026-one-machine-no-adapter-supersedes-023.md));
+  scaling it is a code change, not a scaling operation — see [`server/README.md`](./server/README.md)
 - **React Context + custom fetch hooks** for state ([ADR 005](./docs/decisions/005-client-state-context-and-fetch-hooks.md))
 - **Framer Motion** for animations — marketing surface only
 - **Radix UI** for accessible components

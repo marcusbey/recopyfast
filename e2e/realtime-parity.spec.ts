@@ -1,4 +1,10 @@
-import { chromium, expect, test, type Page, type Request } from "@playwright/test";
+import {
+  chromium,
+  expect,
+  test,
+  type Page,
+  type Request,
+} from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
@@ -34,13 +40,19 @@ import { createHmac, randomUUID } from "node:crypto";
  * the interval covers the authoritative HTTP write *and* the fan-out, which is
  * what "an edit in A appears in B" means to the person watching.
  *
- * ## What a human still has to do
+ * ## What a human still has to do — two of the three tests here
  *
- * The parity case is gated. It needs a Supabase project that the **deployed**
- * realtime service also reads (the service holds its own service-role key), plus
- * the deployed origins. Those are credentials, not code, so this cannot run
- * unattended in CI — see server/README.md for the one command and the exact
- * variables.
+ * **Only the legacy-snippet test is ungated and reaches CI.** Both of the others
+ * — the HTTP-save regression and the parity measurement itself — are behind
+ * `RUN_RECOPYFAST_PARITY=1`, because both need a Supabase project that the
+ * **deployed** realtime service also reads (the service holds its own
+ * service-role key), plus the deployed origins. Those are credentials, not code,
+ * so they cannot run unattended in CI — see server/README.md for the one command
+ * and the exact variables.
+ *
+ * Worth stating plainly, because the HTTP-save case below is written as a
+ * regression guard and reads like one: it only guards for whoever sets the
+ * variable. A gated test catches nothing on a branch nobody runs it on.
  */
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
@@ -187,7 +199,13 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
       ),
     ).toEqual([]);
 
-    // Content still arrives the way it always did: over HTTP, authoritative.
+    // The widget still goes to HTTP for its content, on a page that has no
+    // socket. What is asserted is exactly that: the REQUEST was issued. The site
+    // id is a random uuid and the token is fabricated, so the API rejects it and
+    // nothing here claims a response came back — that would need a seeded site,
+    // which is what the gated tests below have and this one deliberately does
+    // not. The regression this catches is the widget skipping the HTTP path
+    // altogether once realtime is on.
     expect(
       observed.requests.filter((url) => url.includes(`/api/content/${siteId}`)),
     ).not.toEqual([]);
@@ -206,9 +224,15 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    *
    * Deliberately served the **legacy** document, with no `data-ws-url` at all, so
    * this asserts the same thing whether or not realtime happens to be configured
-   * when it runs. That makes it a standing regression guard rather than a
-   * one-off drill: the day someone makes the socket a second write path, this
-   * goes red without anyone having to remember to pull the switch first.
+   * when it runs — no kill-switch drill required to make it meaningful.
+   *
+   * Be precise about which rule it guards. There is **no socket on this page at
+   * all** (`socketAttempts` is asserted empty at the end), so it cannot catch the
+   * socket becoming a *second writer* — that is rule 1, and it would need a page
+   * that has a connection. What it catches is the mirror image, rule 2: the day
+   * the save comes to *depend* on the socket — an ack, an ordering, a broadcast
+   * the write path waits on — the poll below finds no `staging_content` and this
+   * goes red on a page where no socket can exist.
    *
    * `s07a`'s `realtime-additive.spec.ts` proves the non-mutating half of this
    * without a database. This is the mutating half, which needs one.
@@ -444,10 +468,15 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
     const ids = (data ?? []).map((row: { id: string }) => row.id);
     if (ids.length === 0) return;
 
-    console.log(`[s07b AC 4] purging ${ids.length} parity site(s): ${ids.join(", ")}`);
+    console.log(
+      `[s07b AC 4] purging ${ids.length} parity site(s): ${ids.join(", ")}`,
+    );
     await client.from("edit_sessions").delete().in("site_id", ids);
     await client.from("content_elements").delete().in("site_id", ids);
-    const { error: siteError } = await client.from("sites").delete().in("id", ids);
+    const { error: siteError } = await client
+      .from("sites")
+      .delete()
+      .in("id", ids);
     if (siteError) throw siteError;
   }
 

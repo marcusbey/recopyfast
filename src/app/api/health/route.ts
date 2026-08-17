@@ -266,6 +266,59 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
   }
 }
 
+/**
+ * How long one realtime probe answers for.
+ *
+ * `/api/health` is public, unauthenticated and deliberately **not** rate
+ * limited: uptime monitors poll it, and denying them is a worse outcome than
+ * what this bounds. Since the realtime check landed, every GET also issues an
+ * outbound request to `recopyfast-ws.fly.dev` — which turns an endpoint anyone
+ * can call into a small amplifier, one request in and two out, at whatever rate
+ * the caller likes. The destination is fixed and the timeout is 2 s, so it is
+ * mild; it is still a network side effect the endpoint did not have before, and
+ * AGENTS.md's "rate limit before authorization" rule has no coverage here.
+ *
+ * Memoizing is the answer rather than a limiter, because it costs the monitors
+ * nothing: what they lose is freshness, not an answer. Ten seconds is short
+ * enough that an outage — or a recovery, which is the direction that reads
+ * wrong for longer — surfaces within a poll or two, and Fly's own check on the
+ * service runs every 15 s (`server/fly.toml`), so this memo is not the slowest
+ * link in the chain. It is long enough that the traffic this endpoint can
+ * generate downstream stops depending on the traffic it receives.
+ */
+const REALTIME_PROBE_MEMO_TTL_MS = 10_000;
+
+/**
+ * The last probe, held as the **in-flight promise** rather than as its settled
+ * result. Storing the result only would leave N simultaneous callers each
+ * starting their own fetch before the first one lands — precisely the burst an
+ * unlimited public endpoint invites. Keyed on the URL so that a changed
+ * `NEXT_PUBLIC_WS_URL` is never answered from a memo about the old origin.
+ */
+let realtimeProbeMemo: {
+  at: number;
+  url: string;
+  result: Promise<ServiceCheck>;
+} | null = null;
+
+function probeRealtime(url: string): Promise<ServiceCheck> {
+  const now = Date.now();
+  if (
+    realtimeProbeMemo &&
+    realtimeProbeMemo.url === url &&
+    now - realtimeProbeMemo.at < REALTIME_PROBE_MEMO_TTL_MS
+  ) {
+    return realtimeProbeMemo.result;
+  }
+
+  // Recorded before the await, so concurrent callers find it. `checkRealtime`
+  // is written never to reject — it reports `error`/`timeout` instead — which
+  // is what makes a stored promise safe to hand to every one of them.
+  const result = checkRealtime(url);
+  realtimeProbeMemo = { at: now, url, result };
+  return result;
+}
+
 function getMemoryMetrics(): MemoryMetrics {
   const memoryUsage = process.memoryUsage();
   const totalMemory = memoryUsage.heapTotal;
@@ -301,7 +354,7 @@ export async function GET(request: NextRequest) {
       checkDatabase(),
       checkStorage(),
       detailed ? checkExternalServices() : Promise.resolve(undefined),
-      realtimeUrl ? checkRealtime(realtimeUrl) : Promise.resolve(undefined),
+      realtimeUrl ? probeRealtime(realtimeUrl) : Promise.resolve(undefined),
     ]);
 
     // Process results

@@ -96,8 +96,11 @@ Criteria this plan must satisfy:
 > lose realtime with no fallback — accepted under ADR 004, since HTTP stays authoritative and
 > realtime is additive. One console warning on failure, sharing `s08`'s `connect-src` warning path.
 >
-> `server/package.json` carries no redis client and no adapter, and **at one machine it should
-> not** — nothing above is a task for this story.
+> `server/package.json` carries **no `@socket.io/redis-adapter`**, and at one machine it should
+> not — nothing above is a task for this story. It *does* carry `redis`: that is node-redis, the
+> store behind `s07a`'s fail-closed connection limiter (`server/rate-limit.js:82`). Different
+> package, different job — the client's presence is not evidence the adapter is there, and it is
+> the adapter that shares rooms across machines.
 >
 > When the count does rise, the adapter must get its **own** Upstash database rather than sharing
 > `informed-ghost-153511`. The rate limiter is fail-closed in production
