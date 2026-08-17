@@ -3005,11 +3005,30 @@
           var data = await response.json();
           this.variantAssignments = data.assignments || {};
           this.geoData = data.geo || null;
-          return;
+        } else {
+          // A refusal stops the A/B path. It does not fall through.
+          //
+          // This method used to `return` only inside the `if` above, so a 401
+          // or a 500 skipped the catch as well and landed on the client-side
+          // bucketing below — which meant a revoked token still split traffic
+          // while every /ab-tests/track call 401'd. Visitors saw variants,
+          // nothing was counted, and the numbers that did accumulate were
+          // skewed by exactly the population that had failed. Emptying
+          // activeTests is what makes applyVariants, setupClickTracking and
+          // trackImpressions all no-ops — every one of them iterates it — so
+          // the visitor gets the page's own copy, which is the correct
+          // degradation, and no event is sent for a test we are not authorised
+          // to run.
+          this.activeTests = [];
         }
+        return;
       } catch (error) {
-        // Fallback: client-side deterministic bucketing
-        console.log('ReCopyFast: Using client-side bucketing fallback');
+        // A dropped connection is not a refusal. The assignment is still ours
+        // to make and the visitor is still being shown something, so the
+        // client-side fallback below stays — but it is a degraded path, and one
+        // warning makes it visible to anyone who looks at the console instead
+        // of leaving it indistinguishable from a normal load.
+        console.warn('ReCopyFast: A/B bucketing unavailable');
       }
 
       // Client-side fallback using FNV-1a hash
@@ -3021,7 +3040,33 @@
         var bucket = hash % 100;
         var cumulative = 0;
 
-        var eligible = test.variants.filter(function(v) { return true; }); // No geo filter in fallback
+        // Control first, then id — the same total order the server applies
+        // (src/lib/ab-testing/bucketing.ts, orderVariantsForBucketing).
+        //
+        // The walk below maps the bucket number onto whichever variant the
+        // running total reaches first, so its answer is a function of this
+        // array's order. That order arrives from /ab-tests/active, i.e. from
+        // Postgres, which promises none. Unsorted, the same visitor gets a
+        // different variant whenever the planner returns the rows differently
+        // — and nothing anywhere reports it: the visitor just sees a different
+        // headline and both page views are recorded under one visitor_id.
+        var eligible = test.variants.slice().sort(function(a, b) {
+          return !!b.is_control - !!a.is_control || (a.id > b.id) - (a.id < b.id);
+        });
+
+        // Geo belongs to the server, so a geo-scoped test is not ours to
+        // answer. bucketVisitorToVariant filters on country and region before
+        // it walks, reading x-vercel-ip-country off the request; here there is
+        // no country and no region — geo reaches the widget only in the bucket
+        // response, and on this path that response never arrived. Walking the
+        // unfiltered list is not the safe half of the choice: it is a *longer*
+        // list, so the same bucket number lands on a different variant, the
+        // server serves A, this serves B on the next page, and both are
+        // recorded under one visitor_id. Declining costs the visitor the
+        // page's own copy; guessing costs the marketer the experiment.
+        if (eligible.some(function(v) {
+          return (v.geo_countries || '').length || (v.geo_regions || '').length;
+        })) return;
 
         for (var i = 0; i < eligible.length; i++) {
           cumulative += eligible[i].traffic_percentage;
@@ -3033,11 +3078,25 @@
       });
     }
 
+    // FNV-1a, 32-bit. The server keeps the same function in
+    // src/lib/ab-testing/bucketing.ts and the two are held equal by
+    // src/__tests__/embed/ab-bucketing-parity.test.ts, which slices THIS block
+    // out of the shipped file and runs both against shared vectors. Edit one
+    // without the other and that test fails.
+    //
+    // Math.imul, not `*`. This read `hash = (hash * 16777619) >>> 0`, a float64
+    // multiply whose product reaches ~7.2e16 — past 2^53, so it is rounded, and
+    // rounding there destroys the low bits that `% 100` goes on to read.
+    // Measured over 10,000 seeded visitor ids: 57% of hashes had their low
+    // three bits at zero, per-bucket counts ran 4 to 328 instead of ~100, and
+    // splits of 10/90, 5/95 and 33/33/34 all missed their configured share by
+    // more than the 2 percentage points the product promises. Nothing errored;
+    // the traffic was simply split wrong.
     fnv1aHash(str) {
       var hash = 2166136261;
       for (var i = 0; i < str.length; i++) {
         hash ^= str.charCodeAt(i);
-        hash = (hash * 16777619) >>> 0;
+        hash = Math.imul(hash, 16777619) >>> 0;
       }
       return hash;
     }

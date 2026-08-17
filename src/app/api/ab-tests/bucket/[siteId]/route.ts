@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
+import { bucketVisitorToVariant } from "@/lib/ab-testing/bucketing";
 
 function extractToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -18,60 +19,6 @@ function withCors(response: NextResponse) {
   );
   response.headers.set("Access-Control-Allow-Methods", "GET, OPTIONS");
   return response;
-}
-
-/**
- * FNV-1a hash for deterministic bucketing
- */
-function fnv1aHash(str: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = (hash * 16777619) >>> 0;
-  }
-  return hash;
-}
-
-function bucketVisitorToVariant(
-  visitorId: string,
-  testId: string,
-  variants: Array<{
-    id: string;
-    traffic_percentage: number;
-    is_control: boolean;
-    geo_countries: string[] | null;
-    geo_regions: string[] | null;
-  }>,
-  geoCountry?: string | null,
-  geoRegion?: string | null,
-): string | null {
-  // Filter variants by geo eligibility
-  const eligible = variants.filter((v) => {
-    if (v.geo_countries && v.geo_countries.length > 0 && geoCountry) {
-      if (!v.geo_countries.includes(geoCountry)) return false;
-    }
-    if (v.geo_regions && v.geo_regions.length > 0 && geoRegion) {
-      if (!v.geo_regions.includes(geoRegion)) return false;
-    }
-    return true;
-  });
-
-  if (eligible.length === 0) return null;
-
-  // Deterministic bucket 0-99
-  const bucket = fnv1aHash(`${visitorId}:${testId}`) % 100;
-
-  // Map to variant by cumulative traffic percentage
-  let cumulative = 0;
-  for (const variant of eligible) {
-    cumulative += variant.traffic_percentage;
-    if (bucket < cumulative) {
-      return variant.id;
-    }
-  }
-
-  // Fallback to last eligible variant
-  return eligible[eligible.length - 1].id;
 }
 
 export async function GET(
@@ -116,12 +63,32 @@ export async function GET(
 
     const supabase = createServiceRoleClient();
 
-    // Check for existing bucket assignments
-    const { data: existingBuckets } = await supabase
-      .from("visitor_buckets")
-      .select("test_id, variant_id")
-      .eq("site_id", siteId)
-      .eq("visitor_id", visitorId);
+    // Check for existing bucket assignments.
+    //
+    // The error is read, not dropped. This used to destructure `data` alone, so
+    // a failed read — a missing table, a dead connection, a timeout — was
+    // indistinguishable from "this visitor has never been bucketed". Every
+    // returning visitor was then re-hashed and the persisted assignment
+    // ignored, silently, with a 200 and a full set of assignments in the body.
+    // Losing the stability guarantee is not something to paper over: the widget
+    // can degrade to the page's own copy, but it must not be handed an
+    // assignment we know might contradict the one already recorded.
+    const { data: existingBuckets, error: existingBucketsError } =
+      await supabase
+        .from("visitor_buckets")
+        .select("test_id, variant_id")
+        .eq("site_id", siteId)
+        .eq("visitor_id", visitorId);
+
+    if (existingBucketsError) {
+      console.error("Error reading visitor buckets:", existingBucketsError);
+      return withCors(
+        NextResponse.json(
+          { error: "Failed to read assignments" },
+          { status: 500 },
+        ),
+      );
+    }
 
     const existingAssignments: Record<string, string> = {};
     for (const bucket of existingBuckets || []) {
@@ -144,7 +111,18 @@ export async function GET(
       `,
       )
       .eq("site_id", siteId)
-      .eq("status", "active");
+      .eq("status", "active")
+      // Control first, then id — see orderVariantsForBucketing. The walk below
+      // sorts for itself too; this keeps the wire order stable so the widget's
+      // fallback and this route are looking at the same list. `nullsFirst:
+      // false` for the reason spelled out in active/[siteId]/route.ts: DESC
+      // puts NULLs first in Postgres and last in both walks.
+      .order("is_control", {
+        ascending: false,
+        nullsFirst: false,
+        referencedTable: "ab_test_variants",
+      })
+      .order("id", { ascending: true, referencedTable: "ab_test_variants" });
 
     if (testsError) {
       console.error("Error fetching tests for bucketing:", testsError);
@@ -201,8 +179,19 @@ export async function GET(
         .from("visitor_buckets")
         .upsert(newBuckets, { onConflict: "visitor_id,test_id" });
 
+      // Same reasoning as the read above, one step later: an assignment that
+      // was not persisted is an assignment that will be recomputed on the next
+      // page load, and the visitor may well get a different variant then. This
+      // used to log and return 200 with the assignment anyway, which is a
+      // promise the database did not make.
       if (insertError) {
         console.error("Error persisting visitor buckets:", insertError);
+        return withCors(
+          NextResponse.json(
+            { error: "Failed to persist assignments" },
+            { status: 500 },
+          ),
+        );
       }
     }
 

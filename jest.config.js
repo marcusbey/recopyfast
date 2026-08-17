@@ -34,12 +34,17 @@ const customJestConfig = {
   // These numbers are the floor measured today. They stop coverage regressing
   // and should be raised as tests are added; 80% remains the goal, it just
   // cannot be declared before it is earned.
+  //
+  // Raised 2026-08-17 (s11a) from 16/19/22/22 to the floor measured that day:
+  // branches 34.32, functions 39.51, lines 41.82, statements 41.57. Each is
+  // rounded down to the integer below the measurement, so the gate has a
+  // fraction of a point of slack and still ratchets. Never lower these.
   coverageThreshold: {
     global: {
-      branches: 16,
-      functions: 19,
-      lines: 22,
-      statements: 22,
+      branches: 34,
+      functions: 39,
+      lines: 41,
+      statements: 41,
     },
   },
   // Only *.test.* / *.spec.* are suites. The previous
