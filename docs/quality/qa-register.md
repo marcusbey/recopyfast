@@ -1,5 +1,52 @@
 # RecopyFast QA Register
 
+> ## ✅ APPLIED 2026-08-17 — nine of the eleven unapplied migrations are now in production
+>
+> The ledger went from **32 to 41 of 43**. Verified by re-running `node scripts/check-schema.mjs`,
+> and production smoke-checked afterwards: `/api/health` reports database and storage `ok`, the
+> homepage and `/api/pricing` both 200.
+>
+> ```
+> 20260804120000_billing_customers_write_policy      20260805190000_lock_down_content_version_rpcs
+> 20260804130000_restore_missing_rls_policies        20260809130000_content_history_definer_and_delete_split
+> 20260804140000_yearly_price_matches_stripe         20260813120000_hide_sites_api_key
+> 20260804150000_reconcile_restore_content_version   20260813130000_checkout_reservations
+> 20260805120000_reconcile_create_content_version
+> ```
+>
+> `checkout_reservations` now exists (it was absent). RLS remains healthy: **every** table has RLS
+> on with at least one policy. Several of these were security hardening that had simply never been
+> run — `hide_sites_api_key`, `lock_down_content_version_rpcs`, `content_history_definer_and_delete_split`.
+>
+> **Method, because it is the fix for the scar that caused all of this.** Each migration was first
+> run inside `BEGIN … ROLLBACK` as a dry run, so a failure cost nothing. Then each was applied with
+> **the ledger INSERT inside the same transaction as the migration body** — so if the SQL fails, the
+> "applied" marker rolls back with it. The original damage happened precisely because a file could
+> abort while the ledger recorded success. That cannot happen with this method, and
+> `scripts/check-schema.mjs` re-checks it in seconds.
+>
+> ### The two that could not be applied, and why
+>
+> Both fail the dry run because they depend on the **aborted** `20260801100000_editor_access_2fa`:
+>
+> | Migration | Blocked on |
+> |---|---|
+> | `20260809120000_lock_down_definer_functions` | `function public.purge_expired_editor_artifacts() does not exist` |
+> | `20260813140000_site_permissions_delete_per_row` | `column "granted_by" does not exist` |
+>
+> Both are **security work** — the first revokes EXECUTE on definer functions, the second is the A-4
+> per-row DELETE fix. Neither can land until the editor tables are repaired, which is the same work
+> that unblocks the product's angle. That makes the editor repair the highest-value remaining item
+> by some distance: one forward migration closes the wedge *and* two security migrations.
+>
+> **17 tables remain absent** (was 18). A repair must be a NEW forward migration modelled on
+> `20260801200000_missing_base_tables.sql` — additive, `IF NOT EXISTS` on every table and index,
+> `DROP POLICY IF EXISTS` before every `CREATE POLICY`, RLS in the same migration per non-negotiable
+> 6, and every intent from the aborted files folded in, since none of them will ever re-run. It also
+> needs a scoping decision: several absent tables serve **graveyard** features (`compliance_reports`,
+> `conversion_events`, `collaboration_notifications`, `team_activity_log`) that `s04` retires, and
+> recreating those would contradict the PRD's perimeter.
+
 > ## ✅🔴 MEASURED 2026-08-17 — the database was finally probed. Run `node scripts/check-schema.mjs`
 >
 > Every claim below is from a live read-only query against production, not from a migration file.
