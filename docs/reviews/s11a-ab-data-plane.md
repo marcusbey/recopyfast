@@ -1,90 +1,111 @@
-# Review — Story s11a-ab-data-plane
+# Review — `s11a-ab-data-plane` (re-review of the fix run)
 
-> Fresh-context review by the `reviewer` subagent.
-> Diff reviewed: `git diff main...feature/s11a-ab-data-plane` (`98e08fe`). No UI in this story.
+Branch `feature/s11a-ab-data-plane`, commit `1a1e23c`. Fresh context, read-only.
+Supersedes the first-pass review (major / ship no, four majors). **All four are genuinely closed.**
 
-## Tests
-- [x] Run by the reviewer. A bare worktree showed 5 failed / 2016 passed; the same four suites
-      fail identically at `main` (`a213fcb`) — pre-existing, in untouched files. With
-      `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_WS_URL` and `NEXT_PUBLIC_APP_URL` exported:
-      **147 suites, 2021 passed, 0 failed.** lint 0 errors, type-check clean, format:check
-      clean, `build-embed.mjs --check` up to date. Coverage 34.48 / 39.59 / 41.89 / 41.63, all
-      above the raised ratchet.
-- [x] **Bite proven by neutralization — 10 mutations, 10 went red.** Server hash → `*` (10 red) ·
-      server sort dropped (2) · widget hash → `*` (2) · widget sort dropped (1) · widget non-OK
-      stop removed (5) · read-error check deleted (2) · `upsert` → `insert` (3) ·
-      `authorizeSiteRequest` removed from `track` (4) · same-day migration planted (1) ·
-      `.order("is_control")` removed from `active` (1). All restored, `git diff --exit-code`
-      clean.
+## Tests, run by the reviewer
 
-## The eight verification points — all pass
-1. **No table creation.** Only `CREATE UNIQUE INDEX`. The sole `CREATE TABLE` string in the diff
-   is the test asserting its absence. No `DROP`. The research's claim that
-   `ab_test_results` / `visitor_buckets` were missing was correctly ignored.
-2. **Migration ordering verified, not assumed.** The test computes both orderings from disk; the
-   plan records a measured verdict and **corrects itself** (two migrations reference those
-   tables, not four). Planting `20260127120000_same_day_hazard.sql` turned the suite red.
-3. **±2 pp** over 6 splits × 3 id families, seeded xorshift128, plus a bucket-spread assertion
-   and a `Math.random` / `Date.now` spy.
-4. **Hash parity independently recomputed** — all 75 vectors against an exact BigInt FNV-1a, 0
-   mismatches. The fixture encodes the algorithm, not a snapshot of either implementation.
-5. **`3099c07` intact.** The gate is not mocked — real HMACs, real refusals, 15 cases × 3 routes.
-6. `bucket` reads both its errors → 500; the widget stops the A/B path on non-OK.
-7. `ORDER BY` pinned twice, wire and walk.
-8. RLS untouched (index only), no rename, no zod.
+146 suites passed / 1 skipped, **2020 passed, 0 failed**. `lint` 0 errors, `tsc` clean, `prettier`
+clean, `build-embed.mjs --check` up to date, and **`npm run build` green — exit 0** (the first-pass
+reviewer did not run the build; this one did).
 
-**The implementer's bonus find is real and was a live defect.** Both FNV-1a copies used a
-float64 multiply past 2^53. Reproduced exactly: the old hash bucketed 4..328 where ~100 was
-expected, with 5698/10000 ids having their low three bits zero. `Math.imul` → 70..130, 1222.
-That was silent split-skew in production, correctly fixed.
+Coverage against the raised ratchet (34/39/41/41): **branches 34.32 · functions 39.51 · lines 41.82
+· statements 41.57.** All clear; thinnest margin is 0.32 pp on branches. The SIGSEGV worker flake
+appeared once in `src/__tests__/api/ab-tests/route.test.ts`; the isolated re-run was green and the
+DoD numbers reproduce exactly.
 
-## Findings
+## Bite — 15 mutations, 14 red, 1 green
 
-### MAJOR 1 — Task 2's database probe never ran, and the plan's own stop rule was crossed
-The plan is explicit: *"Absent or partial → stop … do not proceed to Task 9."* The verdict is
-UNKNOWN and Task 9 shipped anyway. Honestly disclosed and the DoD box left unticked — but the
-gate is open. Only credentials are missing; the script runs and exits 2 correctly.
+Red: server hash `Math.imul`→`*` (10 tests) · widget hash (2) · `orderVariantsForBucketing` sort (2)
+· widget fallback sort (1) · geo guard (1) · non-OK `activeTests` clear (4) · `console.warn`→`log`
+(1) · `existingBucketsError` check (2) · upsert 500 (1) · `nullsFirst: false` (1) ·
+`authorizeSiteRequest` in `active` (4) · Origin pin back to the A-2 form (3) · a planted
+`20260127120000_same_day_hazard.sql` (1) · one fixture `expectedHash` bit-flipped (1).
 
-### MAJOR 2 — the `ON CONFLICT` claim is unverified, and if wrong it loses data silently
-A code comment and the migration header both assert that omitting `onConflict` makes PostgREST
-emit a bare `ON CONFLICT DO NOTHING`. The client half checks out (postgrest-js 1.19.4 sends
-`Prefer: resolution=ignore-duplicates` with no `on_conflict`), but **PostgREST's documented
-default target is the primary key** — here `id UUID DEFAULT gen_random_uuid()`, which never
-collides. If that reading holds, every duplicate view raises 23505, the route 500s, and
-`sendBeacon` discards the response — silent loss, which is the exact failure class this story
-exists to prevent. The only in-repo precedent
-(`content/[siteId]/route.ts:427-430`) passes `onConflict` explicitly.
+Green: dropping `!!` from the widget comparator — 15/15 still pass. The plan predicts this itself;
+recorded as minor 2.
 
-### MAJOR 3 — hash parity is proven only for geo-null variants
-The server geo-filters before the walk; the widget fallback explicitly does not
-(`recopyfast.src.js:3053`). Every parity vector uses null geo. On a geo-restricted test with the
-endpoint unreachable, the server hands A and the fallback hands B **under one `visitor_id`**.
-Latent today, live with `s11b`. Recorded nowhere.
+Restored cleanly: `git status --porcelain` empty, `git diff --exit-code` 0, `--check` up to date,
+full suite re-run green.
 
-### MAJOR 4 — the artifact breaches `s06a`'s ceiling by 74 bytes
-Node zlib -9: `main` 46,875 → branch **46,949**, against `MAX_BUNDLE_GZ = 46875`. Sequencing is
-`s06 → s11a`, so if `s06a` merges first, `npm run build` fails. esbuild strips comments, so the
-cost is genuine code — this needs a byte allocation, not a comment trim. **This is the concrete
-instance of the headroom problem recorded against `s06a` as finding F3.**
+## The Task 9 withdrawal — verified, not taken on trust
 
-### Minors
-`recorded` over-reports · `CONCURRENTLY` deviation documented in the migration but not the plan ·
-ADR 002 §4 rate limiter absent on all three routes (pre-existing) · the ratchet is not enforced
-in CI (`npm test` ≠ `test:coverage`) · NULL `is_control` sorts differently on the wire vs in the
-walk.
+`git diff main...HEAD -- supabase/` is empty. `git diff --exit-code -- src/app/api/ab-tests/track/
+route.ts` returns 0 — **byte-identical to `main`**. No `track-view-dedup.test.ts`. Grepping
+`ux_atr_unique_view|ab_results_view_dedup` across `src/`, `public/`, `scripts/`, `supabase/` and
+`docs/` hits **only** the plan's own Task 9 text: no dead references left behind. Task 9's box is
+`[ ]`, as are the DoD lines for the index and the byte ceiling. The view-dedup race is **reported
+open, not fixed on paper.**
 
-## Not verified
-No database — the index was never created, RLS never observed, "one row" never observed. No
-PostgREST, which is exactly what MAJOR 2 turns on, and the embedded-resource `order` was only
-asserted against a mock. No browser — the widget was only ever a sliced class in JSDOM,
-`sendBeacon` always mocked, the swap never run. No real traffic; synthetic ids only.
-`npm run build` was not run by the reviewer.
+The refusal to plant a `to_regclass`-guarded migration is correct and correctly reasoned: shipping
+it would abort, be marked applied, and reproduce the exact scar that created this situation.
 
-**Human gestures before merge:** run `check-ab-schema.mjs` with `SUPABASE_DB_URL` and paste the
-verdict; on staging, apply the migration and POST the same view event twice — a 500 with 23505
-confirms MAJOR 2; revoke a token on a real page and confirm no beacon fires; decide the 74-byte
-allocation.
+## Comparator, bucketing and ordering — checked as arithmetic, not read
+
+Both comparators are valid total orders and mutually equivalent. `!` binds tighter than `-`, `-1` is
+truthy so `||` never swallows it, and the id term is the standard sign expression. **The `!!` is
+genuinely load-bearing**: `undefined - true` is `NaN`, which falls through to the id tiebreak, while
+the server returns −1.
+
+`referencedTable` / `nullsFirst` verified against postgrest-js 1.19.4 source
+(`PostgrestTransformBuilder.js:57-60`): `nullsFirst: false` emits `.nullslast`, and the two
+`.order()` calls append into a single `ab_test_variants.order` param. Postgres sorts NULLs first
+under `DESC`; both walks now sort them last, so client and server agree.
+
+**Hash parity independently recomputed** — all 75 fixture vectors against the reviewer's own BigInt
+FNV-1a: 0 hash mismatches, 0 bucket mismatches, 56 distinct buckets across 0–99.
+
+**Byte delta reproduced: +58 exactly, and no constant was raised.** This is accepted and is not a
+finding — `s04-retire-graveyard-surfaces` frees 981 bytes and merges first
+([`../ship-order.md`](../ship-order.md)).
+
+## Findings — all minor
+
+1. **Task 8 clears `activeTests` but not `variantAssignments`**, though the plan says both. Inert on
+   a fresh load, but a click listener bound in an earlier cycle reads `variantAssignments` directly,
+   so a click can still fire a beacon after a 401 — which the adjacent comment says will not happen.
+   The server refuses it anyway. Undeclared deviation.
+2. **The `!!` guard has no test.** Neutralization confirms it. One ordering vector with
+   `is_control: null` closes it.
+3. **The geo guard creates an unrecorded tension with accepted [ADR 016](../decisions/016-ab-visitor-identity-and-dnt.md) §2**, which names that exact fallback path as the DNT bucketing mechanism and states DNT *"changes nothing about what they see"*. Post-`s11c`, a DNT visitor on a geo-scoped test would see default content while others see a variant. Latent — nothing writes the geo columns today — but unrecorded. **`s11c` must reconcile it.**
+4. **ADR 002 §4's fail-closed per-site rate limiter is still absent on all three A/B routes.**
+   Pre-existing on `main`, not a regression, carried forward.
+5. One stale Task 9 reference survives: the plan's "Test strategy → 2. Route tests" still says
+   "dedup upsert (9)".
+
+## Ship note — deliberate, argued, and the operator should know
+
+Once merged, **`GET /api/ab-tests/bucket/:siteId` 500s on every request in production**
+(`visitor_buckets` is absent and the error is now surfaced rather than swallowed), and Task 8 then
+clears `activeTests` — so **no variant is applied on any site with an active test** until the tables
+exist. That trades a silent mis-split for a visible refusal, which is the right trade. The widget
+still degrades rather than breaks: `bucketVisitor` is awaited at `recopyfast.src.js:901`, a 500
+resolves normally, and init proceeds.
+
+With 0 users the blast radius is nil — **but the feature goes dark on deploy**, and that is a
+consequence of merging, not a defect in this branch.
+
+## Not verified — needs a human's hands
+
+- **No database.** The absence was verified from
+  `supabase/migrations/20260801200000_missing_base_tables.sql:41-42,59-66` plus independent
+  confirmation, not by re-running the live probe. RLS, policies and `UNIQUE(visitor_id, test_id)`
+  remain unobserved. **Run `check-ab-schema.mjs` with a pooler-region `SUPABASE_DB_URL` _before_
+  anything creates these tables.**
+- **The PostgREST-server half of the `ON CONFLICT` claim** (`Plan.hs:936`,
+  `QueryBuilder.hs:117-123`) is unchecked — no offline source available. The postgrest-js half was
+  verified locally (1.19.4, `PostgrestQueryBuilder.js:158-162`), as were Postgres's partial-index
+  inference semantics. The record is version-pinned and attributed rather than asserted as general
+  truth, so it is recorded proportionately — **treat it as a lead, not a settled fact.**
+- **No browser.** JSDOM class-body slice only; `sendBeacon` and `fetch` always mocked, the DOM swap
+  never run, the cookie never exercised. Needed: revoke a token on a real page and confirm no beacon
+  fires and the authored copy stays; kill the network mid-load and confirm one warning plus a
+  fallback assignment.
+- **The `ORDER BY` was only asserted against a mock** — nothing proves Postgres honours it. The walk
+  sorting for itself is what makes that acceptable.
+- **No real traffic** — synthetic ids only. **The geo guard was never exercised against a
+  geo-scoped test that exists**, because no creation path can write those columns.
 
 ## Verdict
-Max severity: major
-Ship allowed: no
+Max severity: minor
+Ship allowed: yes

@@ -7,6 +7,37 @@ Branch: `feature/s11c-ab-variant-delivery`
 Research: `docs/research/s11-ab-run-test.md` — read it first; this plan does not repeat it.
 In particular read `## M3 — the anti-flicker criterion` in full before the first task.
 
+> ## ⛔ Inherited conflict — `s11a`'s geo guard contradicts ADR 016 §2, and this story must reconcile it
+>
+> Found in `s11a`'s re-review (minor 3), 2026-08-17. **Latent today, live the moment this story
+> ships.** Do not discover it mid-task.
+>
+> [ADR 016](../decisions/016-ab-visitor-identity-and-dnt.md) §2 routes Do-Not-Track visitors — and,
+> under §3, cookie-refused visitors, which includes Safari private browsing and any CMP that
+> intercepts `document.cookie` before consent — down the **client-side cumulative-walk fallback**,
+> and states the outcome plainly:
+>
+> > The visitor experiences the test exactly as any other visitor does … **DNT changes nothing
+> > about what they see**; it changes only whether anything durable is written about them.
+>
+> `s11a` changed that fallback. It now **declines** a geo-scoped test rather than walking an
+> unfiltered list — correctly, and its suite proves the point mechanically: the server's answer
+> differs between `"FR"` and `"US"` for the same visitor, so any client-side answer is a guess.
+>
+> **Both are right, and for a geo-scoped test they cannot both hold.** A DNT visitor would see
+> default content while everyone else sees a variant — which is exactly what ADR 016 §2 promises
+> will not happen, and it is *visible*, not merely a recording difference.
+>
+> **This story owns the reconciliation**, because it is the story that makes variant delivery real.
+> The honest resolution is to narrow ADR 016's claim rather than weaken the geo guard — a superseding
+> ADR stating that for geo-scoped tests specifically, a DNT or cookie-refused visitor sees the
+> default, because an honest guess is not available. Do not silently drop the guard to satisfy the
+> older ADR: that reintroduces a mis-split that `s11a` built its geo tests to prevent.
+>
+> It is latent right now only because **nothing can write the geo columns** — there is no creation
+> path — so no geo-scoped test can exist yet. That is a reason to reconcile it deliberately here,
+> not a reason to defer it.
+
 ## Target story
 
 `s11c — variant delivery and the swap window` (complexity 4), the third of the three stories

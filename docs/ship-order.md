@@ -13,8 +13,8 @@
 |---|---|---|
 | `s04-retire-graveyard-surfaces` · `s06a-embed-byte-gate` · `s14a-grant-authorized-editing` | minor | ✅ |
 | `s01-trial-signup` · `s02-install-verified` · `s07a-realtime-service-hardening` · `s16-webhook-config` | major | ✅ |
-| `s05-bulk-content-portability` | critical → **re-review in flight** | ❌ |
-| `s11a-ab-data-plane` | major → **fix in flight** | ❌ |
+| `s05-bulk-content-portability` | **major** (re-reviewed `27d9bd1`) | ❌ **fix round 3 in flight** |
+| `s11a-ab-data-plane` | **minor** (re-reviewed `1a1e23c`) | ✅ |
 
 All nine branches are **a single commit** each (`s06a` has two). No rebasing needed; every merge is
 a clean squash.
@@ -48,7 +48,9 @@ for ref in main feature/s04-… feature/s11a-… feature/s14a-…; do
 done
 ```
 
-**`s11a` was caught** — its review flagged the breach and its fix run is addressing it.
+**`s11a` was caught** — its review flagged the breach, its fix run cut the overage from 74 to 58 and
+correctly raised no constant, and its re-review reproduced **+58 exactly** and passed it as
+ship-allowed on the understanding that ordering absorbs it (see below).
 **`s14a` was not.** It carries `Ship allowed: yes` at 727 bytes over. That is not a reviewer error:
 `s14a` was judged against `main`, and on `main` no ceiling exists. It is a **merge-order** defect,
 and it is invisible from inside any single branch.
