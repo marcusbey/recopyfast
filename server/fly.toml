@@ -44,14 +44,17 @@
 # created with Fly's generated defaults. Four things disagreed; all four are
 # fixed here, and `fly deploy` is what makes them real.
 #
-#   1. PORT — Fly routed to internal_port 8080. server/index.js:1177 binds
-#      `process.env.WS_PORT || 4001` and ignores PORT entirely, so NOTHING
-#      listened on 8080. This was a total outage, not a degradation.
+#   1. PORT — Fly routed to internal_port 8080. server/index.js:740, inside
+#      `startFromCli()` (`grep -n 'process.env.WS_PORT' index.js` is the
+#      rewrite-proof way to find it), binds `Number(process.env.WS_PORT) || 4001`
+#      and ignores PORT entirely, so NOTHING listened on 8080. This was a total
+#      outage, not a degradation.
 #   2. AUTOSTOP — Fly had auto_stop_machines = true with min_machines_running
 #      = 0. Its idle detection is request-based and a quiet WebSocket looks
 #      idle, so open editing sessions would be dropped. Both corrected below.
 #   3. HEALTH — the generated config had no health check at all, though
-#      /health exists (server/index.js:228) and s07b AC 3 depends on it.
+#      /health exists (server/index.js:129, `app.get('/health', …)`) and
+#      s07b AC 3 depends on it.
 #   4. MEMORY — `memory = "1gb"` and `memory_mb = 512` were both set and
 #      disagreed. One value only, below.
 #
@@ -96,7 +99,7 @@ primary_region = "iad"
   NODE_ENV = "production"
 
 [http_service]
-  internal_port       = 4001       # MUST match WS_PORT above and index.js:1177
+  internal_port       = 4001       # MUST match WS_PORT above and index.js:740
   force_https         = true
   processes           = ["app"]
 

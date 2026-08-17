@@ -8,16 +8,11 @@ import { Team } from "@/types";
 // Mock fetch
 global.fetch = jest.fn();
 
-// Mock collaboration realtime
-jest.mock("@/lib/collaboration/realtime", () => ({
-  collaborationRealtime: {
-    connect: jest.fn().mockResolvedValue(true),
-    disconnect: jest.fn(),
-    on: jest.fn(),
-    off: jest.fn(),
-    isConnected: true,
-  },
-}));
+// There was a `jest.mock("@/lib/collaboration/realtime", …)` here. It was
+// mocking a module neither component under test ever imported — the dashboard
+// has never opened a socket — and the module itself was deleted as dead code on
+// 2026-08-17. A mock of a non-existent path throws at collection, so it goes
+// with it. Nothing in the assertions below changes.
 
 const mockTeam: Team = {
   id: "team-1",

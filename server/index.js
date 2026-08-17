@@ -562,8 +562,8 @@ function createRealtimeServer(options = {}) {
    *
    * There is deliberately no port walking. The previous startServer() retried
    * 4001→4010 on EADDRINUSE, which is convenient under `npm run dev` and wrong
-   * everywhere else: fly.toml:33 and :58 pin 4001, so a silent shift to 4002
-   * presents as a failing deploy with perfectly healthy application logs (T9).
+   * everywhere else: fly.toml:95 (WS_PORT) and :99 (internal_port) pin 4001, so
+   * a silent shift to 4002 presents as a failing deploy with healthy logs (T9).
    * Port 0 stays legal and means "give me an ephemeral port" — that is how the
    * integration harness binds.
    */
