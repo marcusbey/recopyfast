@@ -57,7 +57,7 @@ defined in `docs/research/s07-realtime-service.md` § *Split proposal*. Inherits
 Criteria this plan must satisfy:
 
 - [x] Deployed at a stable origin on a platform that hosts a long-lived process; a real app name and a documented, repeatable procedure; the stale `ALLOWED_ORIGINS` instruction removed. (AC 1, T10) — the image was five hours stale when this story started; redeployed 16:39 UTC and verified by marker probe. Incident recorded in `server/README.md`
-- [ ] `NEXT_PUBLIC_WS_URL` set **and the Next app redeployed**, verified in both snippet producers and in the CSP `connect-src` header. (AC 2, T6) — CSP verified; the two-snippet comparison needs a signed-in dashboard and is still owed
+- [x] `NEXT_PUBLIC_WS_URL` set **and the Next app redeployed**, verified in both snippet producers and in the CSP `connect-src` header. (AC 2, T6) — CSP verified. The two-snippet comparison closed 2026-08-17 by a **standing test** (`src/__tests__/api/sites/ws-url-parity.test.ts`): the snippet from `GET /api/sites`, the one from `POST /api/sites/register` and the `buildEmbedScript` call behind the dashboard's client-side fallback emit the identical `data-ws-url`, and all three omit the attribute rather than emitting it empty when the variable is unset — plus a measurement that the value inlines into exactly one client chunk and both sides resolve to `wss://recopyfast-ws.fly.dev`. **Not closed by eyeball: nobody has looked at the rendered snippet on the deployed dashboard.**
 - [x] Realtime appears as a check in `GET /api/health`, **degrading** the app's status rather than failing it. (AC 3, ADR 004 "Watch")
 - [x] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — editors-only, settled: ADR 022. **Measured 613 ms** on `e2e-parity-1786984973.invalid:4176` against `wss://recopyfast-ws.fly.dev`, two distinct connections
 - [x] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
@@ -188,7 +188,7 @@ they do not block planning, and they block exactly one task.
    `HEAD` returns 200 with realtime down. This is ADR 004's "Watch" clause, and it is the one test in
    this story whose absence would be invisible until an outage.
 
-5. [ ] **Set `NEXT_PUBLIC_WS_URL` and redeploy the Next app (T6).** This is a deploy, not an env
+5. [x] **Set `NEXT_PUBLIC_WS_URL` and redeploy the Next app (T6).** This is a deploy, not an env
    edit. `src/components/dashboard/SiteDetailView.tsx:98-103` is a `"use client"` component calling
    `buildEmbedScript`, so the value is inlined at **build** time; `src/app/api/sites/route.ts:108` and
    `src/app/api/sites/register/route.ts:190` read it at **runtime**. Set the var, then redeploy.
@@ -196,6 +196,27 @@ they do not block planning, and they block exactly one task.
    **same** `data-ws-url` (`src/lib/sites/embed-script.ts:94-96`). If they differ, the var was set
    without a rebuild — a difference nobody would think to look for, because both snippets look right
    on their own.
+
+   **Closed 2026-08-17, by a test rather than by a look.** The variable was set and the app
+   redeployed during the story; what stayed open was the comparison, because it was written as an
+   eyeball on a signed-in dashboard and so could never run twice. It is now
+   `src/__tests__/api/sites/ws-url-parity.test.ts`: the three producers — `GET /api/sites`,
+   `POST /api/sites/register`, and the `buildEmbedScript` call behind
+   `SiteDetailView.tsx:93-98`'s client-side fallback — are asserted to emit the identical
+   `data-ws-url` attribute *value* from one env, and to omit the attribute entirely (not emit it
+   empty) with none configured; `SiteDetailView.test.tsx` pins that the fallback is unreachable
+   whenever the API supplied a snippet, which is what makes the dashboard a consumer rather than a
+   fourth producer. Alongside it, the deployed value was measured to inline into exactly one client
+   chunk, with both sides resolving to `wss://recopyfast-ws.fly.dev` — reproduced here by
+   `npm run build`, where `grep -rl "recopyfast-ws.fly.dev" .next/static/chunks/` returns exactly
+   one file and one occurrence.
+
+   **What the test cannot cover, and what is therefore still un-eyeballed.** Jest reads
+   `process.env` at call time for all three paths, so the build/runtime split — the actual axis of
+   divergence — does not exist inside the suite. It guards a code change that makes two producers
+   disagree; it cannot guard a variable set without a redeploy. **Nobody has yet looked at the
+   snippet rendered on the deployed dashboard**, and the set-then-redeploy order in
+   `server/README.md` remains the only control on that half.
 
 6. [x] **Confirm the CSP followed the same deploy.** `src/middleware.ts:233` feeds
    `NEXT_PUBLIC_WS_URL` into `connect-src`, adding both `https://host` and `wss://host` (`:207-231`).
