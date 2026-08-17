@@ -140,9 +140,29 @@ Research is evidence, not verdict. Two claims were checked and are wrong:
 Other re-scores, no split required: `s03` 3→**4**, `s05` 2→**3**, `s16` 3→**4**.
 `s02` 3, `s08` 4, `s09` 4, `s10` 3, `s12` 4, `s15` 3, `s17` 3, `s18` 3, `s19` 2 all confirmed.
 
-**`s06a` alone unblocks `s08`, `s09` and `s11c`** — they need a ceiling to test their byte
-allowance against, which a gate answers and a shrink does not. The `s06 → …` edges become
-`s06a → …`; `s07 → s08` becomes `s07b → s08`.
+~~**`s06a` alone unblocks `s08`, `s09` and `s11c`** — they need a ceiling to test their byte
+allowance against, which a gate answers and a shrink does not.~~ **Wrong, and exactly backwards.
+Corrected after `s06a` shipped and was reviewed.**
+
+`s06a` seeds its ceilings at *today's measured size* — the artifact sits at **exactly**
+`MAX_BUNDLE_GZ` and `MAX_WIDGET_GZ`, with zero headroom, because seeding at the 30,000 budget
+would make the build red the moment the gate landed. Combined with the rule the same story
+establishes — *raising a ceiling is a defect, not a fix* — **any story that adds a widget byte
+is red on arrival.** `s09` (≤2,000 gz) and `s11c` (≤2,000 gz) therefore do not become buildable
+when `s06a` lands; they become *un*buildable, which is the opposite of what this paragraph
+claimed.
+
+The gate answers *"did this change fit?"*. It does not create room for a change to fit in.
+**`s06c` (the shrink) is what unblocks the additive stories**, and `s04` already contributes by
+deleting the retired Edit Board tabs. The real edges:
+
+- `s06a → s06b → s06c`, and **`s06c → s09`, `s06c → s11c`** — not `s06a → …`.
+- `s08` is different: it *removes* the 13,141-byte transport, so it is additive-negative and
+  only needs the gate plus a deployed service. `s06a → s08` and `s07b → s08` both stand.
+- `s07 → s08` becomes `s07b → s08`.
+
+Found by the `s06a` review (finding F3), not by planning — the arithmetic only becomes visible
+once the constants are real. Settle it before `s09` reaches `/ks-plan`.
 
 ### Open majors from `reviews/stories.md`, settled by research
 
