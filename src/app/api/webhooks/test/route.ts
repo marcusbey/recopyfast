@@ -1,31 +1,43 @@
+/**
+ * POST /api/webhooks/test — send one test delivery to a configured endpoint.
+ *
+ * The rate limit is the load-bearing part of this file. This endpoint makes our
+ * infrastructure issue an HTTP request to an address the caller chose, on
+ * demand. Unmetered, it is a free SSRF probe once the URL check exists to probe
+ * against — and a free way to aim our egress at somebody else's server as fast
+ * as a loop can press the button. `deny` on store failure: losing Redis must
+ * not quietly remove the only control in front of that.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@/lib/supabase/server";
 import { webhookManager } from "@/lib/webhooks/manager";
+import { requireWebhookSitePermission } from "@/lib/webhooks/access";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { readJsonObject, requireUuid } from "@/lib/api/validation";
 
 export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { webhook_id } = body;
+  // Before authorization, deliberately: auth costs a permissions lookup, so a
+  // limiter behind it never sees the flood.
+  const limited = await enforceRateLimit(req, {
+    limit: "API_UPLOAD",
+    endpoint: "webhooks/test",
+    onStoreFailure: "deny",
+  });
+  if (limited) return limited;
 
-    if (!webhook_id) {
-      return NextResponse.json(
-        { error: "Missing webhook_id" },
-        { status: 400 },
-      );
+  try {
+    const parsed = await readJsonObject(req);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get: (name: string) => req.cookies.get(name)?.value,
-          set: () => {},
-          remove: () => {},
-        },
-      },
-    );
+    const webhookId = requireUuid(parsed.value, "webhook_id");
+    if (!webhookId.ok) {
+      return NextResponse.json({ error: webhookId.error }, { status: 400 });
+    }
 
+    const supabase = await createClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -33,34 +45,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get webhook and verify permissions
     const { data: webhook, error: webhookError } = await supabase
       .from("webhooks")
       .select("site_id, created_by")
-      .eq("id", webhook_id)
+      .eq("id", webhookId.value)
       .single();
 
     if (webhookError || !webhook) {
       return NextResponse.json({ error: "Webhook not found" }, { status: 404 });
     }
 
-    // Check site permissions
-    const { data: permission } = await supabase
-      .from("site_permissions")
-      .select("permission")
-      .eq("site_id", webhook.site_id)
-      .eq("user_id", user.id)
-      .single();
-
-    if (!permission || !["edit", "admin"].includes(permission.permission)) {
+    if (
+      !(await requireWebhookSitePermission(supabase, webhook.site_id, user.id))
+    ) {
       return NextResponse.json(
         { error: "Insufficient permissions" },
         { status: 403 },
       );
     }
 
-    // Test the webhook
-    const testResult = await webhookManager.testWebhook(webhook_id);
+    // testWebhook re-checks the URL against SSRF immediately before it sends,
+    // exactly as the scheduled deliveries do.
+    const testResult = await webhookManager.testWebhook(webhookId.value);
 
     return NextResponse.json(testResult);
   } catch (error) {

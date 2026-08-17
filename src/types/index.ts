@@ -515,15 +515,35 @@ export interface Webhook {
   site_id: string;
   url: string;
   events: string[];
+  /**
+   * Plaintext at rest, unlike `ApiKey.key_hash`: `deliverWebhook` has to
+   * recover it to compute the HMAC signature at send time, and a hash cannot be
+   * reversed for that. Never selected by the list path — see `secret_prefix`.
+   */
   secret?: string;
+  /** First 8 characters of the secret, for display after the show-once moment. */
+  secret_prefix?: string;
   is_active: boolean;
   last_triggered_at?: string;
   failure_count: number;
   max_failures: number;
+  /** Width of the edit-coalescing window, in seconds (ADR 010). */
+  coalesce_window_seconds: number;
+  /** The open coalescing window, if any. Null when nothing is pending. */
+  pending_event_type?: string | null;
+  pending_payload?: Record<string, unknown> | null;
+  pending_dispatch_at?: string | null;
   created_by?: string;
   created_at: string;
   updated_at: string;
 }
+
+/** Where one delivery sits in its retry lifecycle (ADR 010). */
+export type WebhookDeliveryStatus =
+  | "pending"
+  | "delivered"
+  | "retrying"
+  | "failed";
 
 export interface WebhookDelivery {
   id: string;
@@ -535,6 +555,9 @@ export interface WebhookDelivery {
   response_time?: number;
   attempt_number: number;
   success: boolean;
+  status: WebhookDeliveryStatus;
+  /** When the sweep should re-attempt. Null unless `status` is "retrying". */
+  next_retry_at?: string | null;
   error_message?: string;
   delivered_at: string;
 }

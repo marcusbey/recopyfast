@@ -61,7 +61,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
 
 ## Tasks (ordered)
 
-1. [ ] **Schema: extend `webhooks` and `webhook_deliveries`; update the hand-written types.**
+1. [x] **Schema: extend `webhooks` and `webhook_deliveries`; update the hand-written types.**
    New migration `supabase/migrations/20260816150000_webhook_dispatch_and_secrets.sql`, forward
    only, no edits to any applied migration:
    - `webhooks` gains: `secret_prefix TEXT` (set at creation, never updated — the
@@ -78,7 +78,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    committed) that inserting a row omitting every new column still succeeds, confirming the
    defaults are non-breaking for the existing manager code before Task 3 changes it.
 
-2. [ ] **New module: `src/lib/security/webhook-url-safety.ts` — the SSRF check.**
+2. [x] **New module: `src/lib/security/webhook-url-safety.ts` — the SSRF check.**
    Exports `assertSafeWebhookUrl(rawUrl: string): Promise<ValidationResult<string>>` (the
    `ValidationResult<T>` shape from `src/lib/api/validation.ts`, per ADR 003 — no zod). Steps:
    parse with `new URL`; reject any scheme other than `http:`/`https:`; if the hostname is a
@@ -96,7 +96,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    address passes, to a private one is refused; `file://`, `ftp://` refused by scheme; malformed
    URL refused; a mocked DNS resolution failure is refused (fails closed, not open).
 
-3. [ ] **`WebhookManager`: secret handling stops leaking, coalescing entry point added.**
+3. [x] **`WebhookManager`: secret handling stops leaking, coalescing entry point added.**
    In `src/lib/webhooks/manager.ts`:
    - `createWebhook` drops the caller-supplied `secret` parameter entirely — always
      `generateSecret()` — and additionally computes `secret_prefix` (first 8 hex chars) at
@@ -119,7 +119,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    window; `sweepDueDispatches` fires exactly the webhooks whose window has elapsed and clears
    their pending state, leaving not-yet-due webhooks untouched.
 
-4. [ ] **`WebhookManager`: replace the `setTimeout` retry engine with persisted state.**
+4. [x] **`WebhookManager`: replace the `setTimeout` retry engine with persisted state.**
    Remove `setTimeout` from `handleWebhookFailure`; `deliverWebhook` and (the now-unified) retry
    path write `status`/`next_retry_at` onto the delivery row instead of scheduling in-process.
    A retry **updates the original delivery row** (same `id`, incremented `attempt_number`) —
@@ -142,7 +142,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    success sets `status='delivered'`; on exhausting `MAX_DELIVERY_ATTEMPTS`, `status='failed'`
    and `next_retry_at` is null; a not-yet-due retrying row is left alone by the sweep.
 
-5. [ ] **Delivery-time SSRF recheck, wired into every outbound call site.**
+5. [x] **Delivery-time SSRF recheck, wired into every outbound call site.**
    `deliverWebhook`, the retry path (Task 4), and `testWebhook` each call
    `assertSafeWebhookUrl` (Task 2) immediately before their `fetch()` — no caching of Task 2's
    config-time result across the gap. On failure, record the delivery/test outcome as failed
@@ -153,7 +153,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    returns a private address at delivery time is refused; the delivery row records the
    DNS-rebinding-specific reason; `fetch` is asserted never called for that case.
 
-6. [ ] **CRUD routes: config-time SSRF, PUT allowlist, DRY auth, rate limiting.**
+6. [x] **CRUD routes: config-time SSRF, PUT allowlist, DRY auth, rate limiting.**
    `src/app/api/webhooks/route.ts`, `src/app/api/webhooks/test/route.ts`:
    - New shared helper `src/lib/webhooks/access.ts` exporting
      `requireWebhookSitePermission(supabase, siteId, userId): Promise<boolean>` — the
@@ -183,7 +183,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    /api/webhooks/test` returns 429; a normal create returns the plaintext secret once and a
    subsequent GET for the same site never includes it.
 
-7. [ ] **New cron: `/api/cron/webhook-dispatch`, registered in `vercel.json`.**
+7. [x] **New cron: `/api/cron/webhook-dispatch`, registered in `vercel.json`.**
    `src/app/api/cron/webhook-dispatch/route.ts` — `CRON_SECRET`-gated exactly like
    `src/app/api/cron/ab-test-lifecycle/route.ts` (`Bearer` header check, 401 on mismatch), calls
    `webhookManager.sweepDueDispatches()` then `sweepDueRetries()`, returns counts from both.
@@ -196,7 +196,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    header → 401, neither sweep called; correct header → both sweep functions invoked exactly
    once and their counts appear in the response body.
 
-8. [ ] **Hook the publish path: `POST /api/staging/publish` records a qualifying event.**
+8. [x] **Hook the publish path: `POST /api/staging/publish` records a qualifying event.**
    After `publish_staging_content_atomic` succeeds (`route.ts:111-119`), call
    `webhookManager.recordQualifyingEvent({ siteId, eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
    payload: { elements: publishedRows } })` inside `after()` from `"next/server"` — not
@@ -208,7 +208,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    without awaiting that call — assert by resolving the route's promise before the mocked
    `recordQualifyingEvent`'s own promise resolves, proving the two are not serialized.
 
-9. [ ] **Design-system floor: add the missing `Select` primitive; add `Dialog`'s `showClose`.**
+9. [x] **Design-system floor: add the missing `Select` primitive; add `Dialog`'s `showClose`.**
    `src/components/ui/select.tsx` — a Radix wrapper over the already-installed
    `@radix-ui/react-select`, matching the composition and `cva`/`cn()` conventions of
    `dialog.tsx`/`dropdown-menu.tsx` in the same directory: `Select`, `SelectTrigger`,
@@ -227,7 +227,7 @@ Acceptance criteria carried forward verbatim from `docs/stories.md`:
    existing `Dialog` call site (grep confirms none pass `showClose` today) keeps rendering the
    `X`.
 
-10. [ ] **`WebhooksPanel`: the dashboard surface (AC 1, 4, 7).**
+10. [x] **`WebhooksPanel`: the dashboard surface (AC 1, 4, 7).**
     New `src/components/dashboard/WebhooksPanel.tsx`, wired into `SiteDetailView.tsx` alongside
     `DomainVerification`/`VersionHistoryPanel` (`:369-374`), following
     `docs/designs/s16-webhook-config.md` exactly: `Card` shell; header (`IconTile accent` +

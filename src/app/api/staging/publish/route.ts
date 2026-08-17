@@ -4,7 +4,7 @@
  * GET: Preview pending staging changes
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartyEditorAccess,
@@ -12,6 +12,7 @@ import {
   validateEditorTokenFromRequest,
 } from "@/lib/auth/editor-access";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 
 type PublishRpcRow = {
   element_id: string;
@@ -130,6 +131,35 @@ export async function POST(request: NextRequest) {
     }
 
     const publishedRows = (data || []) as PublishRpcRow[];
+
+    if (publishedRows.length > 0) {
+      // Deferred, not awaited: the publisher's response must not be gated on a
+      // webhook write, let alone on a customer endpoint being reachable (AC 6).
+      // `after()` runs this once the response below has already been committed
+      // — the same reasoning, and the same primitive, as
+      // src/app/api/editor/request-code/route.ts:115.
+      //
+      // This is a MARKER, not a delivery. It opens or joins a coalescing window
+      // (ADR 010); the cron at /api/cron/webhook-dispatch is what actually
+      // sends. Doing the send here would put a stranger's HTTP endpoint on the
+      // critical path of an edit.
+      after(async () => {
+        try {
+          await webhookManager.recordQualifyingEvent({
+            siteId,
+            eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
+            payload: { elements: publishedRows },
+          });
+        } catch (webhookError) {
+          // Nothing left to shape — the response has already gone. Loud in the
+          // logs is all that is available, and all that is wanted.
+          console.error(
+            `Failed to record webhook event after publish (site: ${siteId}):`,
+            webhookError,
+          );
+        }
+      });
+    }
 
     return withPublicCors(
       NextResponse.json({

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
+import type { WebhookDeliveryStatus } from "@/types";
 
 /**
  * Single source of truth for every status pill in the dashboard.
@@ -194,6 +195,42 @@ export const abTestStatuses: Record<ABTestStatus, StatusDefinition> = {
     tone: "accent",
     icon: Trophy,
     description: "Finished, winner picked",
+  },
+};
+
+/**
+ * Webhook delivery outcomes. Added here rather than mapped inside
+ * WebhooksPanel for the reason this file exists at the top: six drifted copies
+ * of the same treatment is what it replaced, and a seventh living in a panel
+ * would be the first step back.
+ */
+export const webhookDeliveryStatuses: Record<
+  WebhookDeliveryStatus,
+  StatusDefinition
+> = {
+  pending: {
+    label: "Pending",
+    tone: "neutral",
+    icon: Clock,
+    description: "Waiting for the batching window to close",
+  },
+  delivered: {
+    label: "Delivered",
+    tone: "success",
+    icon: CheckCircle2,
+    description: "Your endpoint accepted this delivery",
+  },
+  retrying: {
+    label: "Retrying",
+    tone: "warning",
+    icon: RotateCcw,
+    description: "The attempt failed and another is scheduled",
+  },
+  failed: {
+    label: "Failed",
+    tone: "danger",
+    icon: CircleSlash,
+    description: "Every attempt failed — no further attempts will be made",
   },
 };
 
