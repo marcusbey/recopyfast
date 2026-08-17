@@ -186,6 +186,12 @@ The single most constrained surface in the product. It runs on domains we do not
   is currently breached; `s06` makes it a build gate. The per-story allocation is in
   [`stories.md`](./stories.md#byte-budget) and is the only place it is allocated — do not
   restate a ceiling in a story.
+- **Compressor, stated once.** Those figures are GNU `gzip -9c`. The build gate in
+  `scripts/build-embed.mjs` measures in process with Node's `zlib.gzipSync({ level: 9 })`,
+  which returns **46,875** (artifact), **34,063** (widget alone) and **13,141** (socket.io) for
+  the same bytes — the ceilings `MAX_BUNDLE_GZ` / `MAX_WIDGET_GZ` are seeded from those. The
+  gate is in-process so the number cannot drift with whichever `gzip` a machine ships. Never
+  compare a figure from one compressor against the other; re-measure.
 - Degrade, never break. The host page keeps its authored copy on any failure. No uncaught
   exception may reach the host `window`, and there is no error surface there by design — which
   means a broken branch presents as "editing stopped working on one site", not as an alert.

@@ -72,7 +72,7 @@ jobs:
         run: npm ci
 
       # Every step in this job is a blocking gate:
-      # audit → lint → type-check → build → tests.
+      # audit → lint → type-check → embed check → build → tests.
 
       # ── Step 0: Dependency vulnerabilities (BLOCKING) ─────────────────────
       # Production dependency tree only — dev-only advisories do not ship to
@@ -93,11 +93,22 @@ jobs:
       - name: Type-check production code (tsc, blocking)
         run: npm run type-check:build
 
-      # ── Step 3: Production build (BLOCKING) ───────────────────────────────
+      # ── Step 3: Embed artifact freshness + byte ceiling (BLOCKING) ────────
+      # Must run BEFORE the build. `npm run build` triggers `prebuild` →
+      # `build:embed`, which rebuilds the artifact and then gates it — so by the
+      # time the build has run, a stale committed `public/embed/recopyfast.js`
+      # has been overwritten and CI can no longer see that it was stale. The
+      # artifact is the file customers actually download, and it is served
+      # straight from the repo, so a stale commit ships stale code to every
+      # install. `--check` runs first, rebuilds nothing, and needs only Node.
+      - name: Check embed artifact (freshness + gz ceiling, blocking)
+        run: node scripts/build-embed.mjs --check
+
+      # ── Step 4: Production build (BLOCKING) ───────────────────────────────
       - name: Build (Next.js)
         run: npm run build
 
-      # ── Step 4: Unit / integration tests (Jest, BLOCKING) ─────────────────
+      # ── Step 5: Unit / integration tests (Jest, BLOCKING) ─────────────────
       # The broken mocks that forced `continue-on-error` have been fixed: the
       # suite is green (61 passed / 1 skipped suite, 972 tests passed, 0 failed).
       # It is now a real gate — if it goes red, the deploy stops.
