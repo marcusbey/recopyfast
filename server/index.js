@@ -2,77 +2,22 @@ const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-const crypto = require('crypto');
 const path = require('path');
 const createDOMPurify = require('dompurify');
 const { JSDOM } = require('jsdom');
 
-// Crash safety: log and exit so the platform (Fly.io, Docker, PM2, etc.)
-// can restart the process.  Without these handlers an unhandled rejection
-// silently kills the event loop with no diagnostic output.
-process.on('uncaughtException', (err) => {
-  console.error('[FATAL] uncaughtException – restarting process:', err);
-  process.exit(1);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('[FATAL] unhandledRejection – restarting process:', reason);
-  process.exit(1);
-});
+const {
+  isOriginAllowed,
+  normalizePermissions,
+  resolveGrant,
+  verifySiteToken,
+} = require('./auth');
+const {
+  createMemoryRateLimitStore,
+  createRateLimiter,
+  createRedisRateLimitStore,
+} = require('./rate-limit');
 
-// ENV LOADING: resolve paths absolutely so the server works whether it is
-// started from the repo root, the server/ directory, or inside a container
-// where only process.env is populated.  We try several candidate paths in
-// order of preference and fall back gracefully if none exist.
-const envCandidates = [
-  path.resolve(__dirname, '.env.local'),         // server/.env.local
-  path.resolve(__dirname, '..', '.env.local'),   // repo-root/.env.local (dev)
-  path.resolve(__dirname, '.env'),               // server/.env
-  path.resolve(__dirname, '..', '.env'),         // repo-root/.env
-];
-for (const envPath of envCandidates) {
-  const result = require('dotenv').config({ path: envPath });
-  if (!result.error) {
-    console.log(`✓ Loaded env from ${envPath}`);
-    break;
-  }
-}
-// If none of the files exist, process.env values already set by the container
-// runtime (Fly secrets, Docker --env, etc.) are used as-is – no error thrown.
-
-const app = express();
-const httpServer = createServer(app);
-
-// Validate environment variables
-const requiredEnvVars = {
-  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
-  NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-};
-
-// Check for missing or invalid environment variables
-const missingVars = [];
-const invalidUrls = [];
-
-for (const [key, value] of Object.entries(requiredEnvVars)) {
-  if (!value || value.includes('your_') || value === 'undefined') {
-    missingVars.push(key);
-  } else if (key.includes('URL') && !isValidUrl(value)) {
-    invalidUrls.push(key);
-  }
-}
-
-function isValidUrl(string) {
-  try {
-    new URL(string);
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-// Initialize Supabase client (with error handling)
-let supabase = null;
-let supabaseEnabled = false;
 const window = new JSDOM('').window;
 const DOMPurify = createDOMPurify(window);
 
@@ -84,1154 +29,745 @@ function sanitizeContent(content) {
   });
 }
 
-function normalizeDomain(domain) {
-  if (!domain) return null;
+function isValidUrl(string) {
   try {
-    const url = new URL(domain.startsWith('http') ? domain : `https://${domain}`);
-    return url.hostname.toLowerCase();
-  } catch (error) {
-    return null;
-  }
-}
-
-function parseHost(header) {
-  if (!header) return null;
-  try {
-    return new URL(header).hostname.toLowerCase();
-  } catch (error) {
-    return null;
-  }
-}
-
-/** Maximum token lifetime: 90 days in seconds (mirrors site-auth.ts). */
-const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
-
-/**
- * Verify a site token produced by buildSiteToken() on the HTTP side.
- * Token format: "<siteId>.<issuedAtUnixSeconds>.<hmac-sha256-hex>"
- *
- * Checks performed (matching verifySiteTokenSignature in site-auth.ts):
- *  1. Three-part structure
- *  2. siteId claim matches expected
- *  3. issuedAt is a digit-only unix timestamp
- *  4. Token is not older than 90 days
- *  5. Token is not future-dated (allows 60 s clock skew)
- *  6. HMAC signature is valid (timing-safe compare)
- */
-function verifySiteToken(siteId, apiKey, token) {
-  if (!token) return false;
-  const parts = token.split('.');
-  if (parts.length !== 3) return false;
-
-  const [tokenSiteId, issuedAtStr, signature] = parts;
-  if (tokenSiteId !== siteId) return false;
-  if (!/^[0-9]+$/.test(issuedAtStr)) return false;
-
-  const issuedAtSeconds = parseInt(issuedAtStr, 10);
-  const nowSeconds = Math.floor(Date.now() / 1000);
-
-  // Reject tokens older than 90 days
-  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
-
-  // Reject future-dated tokens (allow 60 s of clock skew)
-  if (issuedAtSeconds > nowSeconds + 60) return false;
-
-  const expectedSignature = crypto
-    .createHmac('sha256', apiKey)
-    .update(`${tokenSiteId}.${issuedAtStr}`)
-    .digest('hex');
-
-  try {
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
-  } catch (error) {
+    new URL(string);
+    return true;
+  } catch (_) {
     return false;
   }
 }
 
-if (missingVars.length === 0 && invalidUrls.length === 0) {
-  try {
-    const { createClient } = require('@supabase/supabase-js');
-    supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
-    supabaseEnabled = true;
-    console.log('✓ Supabase client initialized successfully');
-  } catch (error) {
-    console.error('✗ Failed to initialize Supabase client:', error.message);
-  }
-} else {
-  console.warn('⚠ Running in development mode without Supabase');
-  if (missingVars.length > 0) {
-    console.warn('  Missing environment variables:', missingVars.join(', '));
-  }
-  if (invalidUrls.length > 0) {
-    console.warn('  Invalid URLs:', invalidUrls.join(', '));
-  }
-  console.warn('  Set up Supabase credentials in .env.local to enable persistence');
-}
 
-// NOTE: ALLOWED_ORIGINS is intentionally no longer consulted for socket CORS.
-// See the comment on the Server() construction below — the origin allowlist was
-// gating a multi-tenant widget on a static env list, which silently broke every
-// customer whose domain was not in it. Authorisation is the HMAC site token plus
-// the per-site registered-domain check in the connection handler.
+/**
+ * How often a connected editor's grant is re-checked when it is not talking.
+ * One minute: long enough that the sweep costs one indexed SELECT per open
+ * editing session per minute, short enough that "I removed them" and "they
+ * stopped receiving" are the same event to a human.
+ */
+const DEFAULT_REVALIDATION_INTERVAL_MS = 60 * 1000;
 
-// A static origin allowlist cannot work here. The widget runs on EVERY
-// customer's own domain, so a fixed list would mean adding each new customer to
-// an env var and redeploying — and until then their editors simply cannot
-// connect. That is what happened: the handshake was refused at the CORS layer,
-// so sendContentMap() never ran, no content element was ever registered, and
-// every save failed with "Content element not found".
-//
-// Authorisation does not depend on this layer. The connection handler below
-// looks the site up by its HMAC token and rejects the socket unless the request
-// host matches that site's REGISTERED domain (see the normalizeDomain check in
-// the connection handler). That is a per-site check, and strictly stronger than
-// a global list.
-//
-// So: accept any origin by default and let the token + per-site domain check do
-// the real work. Credentials are off because nothing here authenticates by
-// cookie — the site token travels in the handshake query. Setting
-// ALLOWED_ORIGINS still pins the server to a hard list for operators who want
-// to lock a deployment down.
-// The CORS layer is deliberately NOT the gate.
-//
-// Every customer embeds the widget on their own domain, so the set of legitimate
-// origins is the set of registered sites — it lives in the database and changes
-// whenever someone signs up. Expressing that as an env allowlist would mean a
-// redeploy per customer, and any origin missing from the list fails in the most
-// confusing way possible: the socket is refused, sendContentMap() never runs, no
-// content element is ever registered, and every save dies with
-// "Content element not found" while the widget looks connected and healthy.
-//
-// Authorisation happens in the connection handler below, which is where it
-// belongs: the socket presents an HMAC site token, the server looks that site up
-// and rejects the connection unless the request host matches that site's
-// REGISTERED domain. That check is per-site and cannot be satisfied by simply
-// arriving from an approved origin, so it is strictly stronger than a list.
-//
-// Credentials stay off: nothing here authenticates by cookie.
-const io = new Server(httpServer, {
-  cors: {
-    origin: true,
-    methods: ['GET', 'POST'],
-    credentials: false
-  },
-  // WebSocket only — no polling fallback. ADR 023.
-  //
-  // Refusing polling HERE, at the server, is the part that must not be dropped.
-  // Setting it on the clients alone leaves a server that still accepts polling, so
-  // any client that misses the option — a cached older embed artifact among them —
-  // establishes a session that appears to work and then fails on its next request.
-  // Refusing at the door turns a confusing intermittent bug into an immediate one.
-  //
-  // Why not polling at all: socket.io's handshake is stateful. The session id issued
-  // by one process means nothing to another, so a polling exchange spread across two
-  // machines dies with `Session ID unknown`. This service runs one machine today
-  // (see fly.toml) and that is what keeps rooms coherent — but the transport pin is
-  // what keeps the handshake coherent, and the two are independent problems.
-  //
-  // The cost, accepted under ADR 004: a client on a WebSocket-hostile network loses
-  // realtime with no fallback. HTTP stays authoritative and realtime is additive, so
-  // that degrades an enhancement rather than breaking the product.
-  transports: ['websocket']
-});
+/**
+ * Build the realtime service.
+ *
+ * A factory rather than module-load side effects. `startServer(PORT)` used to
+ * run the moment this file was required, which is the single reason the service
+ * had no integration test: importing it bound a port. Everything the process
+ * needs is now an argument — the Supabase client, the rate-limit store, the
+ * port — so a test can boot the real server on port 0 with doubles it controls
+ * and assert against the running thing rather than against a copy of its logic.
+ *
+ * The CLI path (`require.main === module`, bottom of this file) is the only
+ * place that reads process.env and starts anything.
+ */
+function createRealtimeServer(options = {}) {
+  const {
+    port = 4001,
+    supabase = null,
+    rateLimitStore = createMemoryRateLimitStore(),
+    rateLimit = {},
+    revalidationIntervalMs = DEFAULT_REVALIDATION_INTERVAL_MS,
+  } = options;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    connections: io.engine.clientsCount,
-    supabase: supabaseEnabled ? 'connected' : 'disabled',
-    message: supabaseEnabled ? 'All systems operational' : 'Running in development mode - set up Supabase for full functionality'
+  const supabaseEnabled = Boolean(supabase);
+  const rateLimiter = createRateLimiter({
+    store: rateLimitStore,
+    limits: rateLimit,
   });
-});
 
-// Store active connections by site
-const siteConnections = new Map();
-const userConnections = new Map();
+  const app = express();
+  const httpServer = createServer(app);
 
-// Validate staging access token
-async function validateStagingAccess(stagingToken, siteId) {
-  if (!supabaseEnabled || !stagingToken) {
-    return { valid: false };
-  }
+  // A static origin allowlist cannot work here. The widget runs on EVERY
+  // customer's own domain, so a fixed list would mean adding each new customer to
+  // an env var and redeploying — and until then their editors simply cannot
+  // connect. That is what happened: the handshake was refused at the CORS layer,
+  // so sendContentMap() never ran, no content element was ever registered, and
+  // every save failed with "Content element not found".
+  //
+  // Authorisation does not depend on this layer. The connection handler below
+  // looks the site up by its HMAC token and rejects the socket unless the request
+  // host matches that site's REGISTERED domain (see the origin pin in the
+  // connection handler). That is a per-site check, and strictly stronger than a
+  // global list.
+  //
+  // Credentials stay off: nothing here authenticates by cookie — the site token
+  // travels in the handshake query.
+  const io = new Server(httpServer, {
+    cors: {
+      origin: true,
+      methods: ['GET', 'POST'],
+      credentials: false
+    },
+    // WebSocket only — no polling fallback. ADR 023.
+    //
+    // Refusing polling HERE, at the server, is the part that must not be dropped.
+    // Setting it on the clients alone leaves a server that still accepts polling,
+    // so any client that misses the option — a cached older embed artifact among
+    // them — establishes a session that appears to work and then fails on its next
+    // request. Refusing at the door turns a confusing intermittent bug into an
+    // immediate, legible one.
+    //
+    // Why not polling at all: socket.io's handshake is stateful. The session id
+    // issued by one process means nothing to another, so a polling exchange spread
+    // across two machines dies with `Session ID unknown`. This service runs one
+    // machine today (see fly.toml) and that is what keeps ROOMS coherent — the
+    // transport pin is what keeps the HANDSHAKE coherent. Two independent problems;
+    // do not treat the single machine as covering both.
+    //
+    // The cost, accepted under ADR 004: a client on a WebSocket-hostile network
+    // loses realtime with no fallback. HTTP stays authoritative and realtime is
+    // additive, so that degrades an enhancement rather than breaking the product.
+    transports: ['websocket']
+  });
 
-  try {
-    const { data: access, error } = await supabase
-      .from('staging_access')
-      .select('*')
-      .eq('token', stagingToken)
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .gte('expires_at', new Date().toISOString())
-      .single();
+  // Middleware
+  app.use(cors());
+  app.use(express.json());
 
-    if (error || !access) {
-      return { valid: false, error: 'Invalid or expired staging token' };
+  // Health check endpoint
+  app.get('/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      connections: io.engine.clientsCount,
+      supabase: supabaseEnabled ? 'connected' : 'disabled',
+      message: supabaseEnabled ? 'All systems operational' : 'Running in development mode - set up Supabase for full functionality'
+    });
+  });
+
+  // Store active connections by site
+  const siteConnections = new Map();
+  const userConnections = new Map();
+
+  /**
+   * Re-resolve the grant a socket is holding, and drop the socket if it no
+   * longer stands.
+   *
+   * TOMBSTONE — `validateStagingAccess` and `validateEditSessionAccess` used to
+   * live here as two near-identical local functions called exactly once each,
+   * at the handshake, with their answer cached on `socket.data`. Everything
+   * afterwards read the cache. They are now one call into `resolveGrant`
+   * (server/auth.js), made on every message that reaches a permission check and
+   * again on the revalidation sweep. See the comment there for why this is a
+   * SELECT rather than a TTL cache.
+   *
+   * Refusal is `auth-error` then `disconnect`, in that order: the widget
+   * listens for `auth-error` (recopyfast.src.js:2745) and that is how a revoked
+   * editor finds out rather than simply going quiet.
+   */
+  async function revalidateSocket(socket) {
+    if (!socket.data.isStaging) return true;
+
+    const grant = await resolveGrant({
+      supabase,
+      siteId: socket.data.siteId,
+      stagingToken: socket.data.stagingToken,
+      editToken: socket.data.editToken,
+    });
+
+    if (!grant.valid) {
+      socket.emit('auth-error', { error: grant.error || 'Editor access revoked' });
+      socket.disconnect();
+      return false;
     }
 
-    if (!access.email_verified) {
-      return { valid: false, error: 'Email verification required' };
+    // A downgrade is a revocation of part of a grant, so the refreshed
+    // permissions replace the cached ones rather than merely being compared.
+    socket.data.stagingPermissions = normalizePermissions(grant.permissions);
+    socket.data.stagingEmail = grant.email || grant.userId || 'unknown';
+    socket.data.stagingAccessId = grant.accessId || null;
+    return true;
+  }
+
+  /**
+   * The sweep exists for the socket that says NOTHING.
+   *
+   * Per-message re-resolution only fires for a socket that talks. Once the
+   * socket stopped writing (ADR 004 rule 1) the residual exposure of a revoked
+   * but silent connection is disclosure — it is still in `site:{id}:staging`
+   * and still receiving every other editor's unpublished copy — and this is
+   * what closes it.
+   *
+   * `unref()` so a running sweep never keeps the process (or a test worker)
+   * alive on its own.
+   */
+  const revalidationTimer = supabaseEnabled
+    ? setInterval(() => {
+        for (const socket of io.sockets.sockets.values()) {
+          if (!socket.data.isStaging) continue;
+          revalidateSocket(socket).catch((error) => {
+            console.error('[revalidation] sweep failed for socket:', error.message);
+          });
+        }
+      }, revalidationIntervalMs)
+    : null;
+  if (revalidationTimer && typeof revalidationTimer.unref === 'function') {
+    revalidationTimer.unref();
+  }
+
+  // Socket.io connection handling
+  io.on('connection', async (socket) => {
+    const { siteId, editMode, token, stagingMode, stagingToken, editToken } = socket.handshake.query;
+    const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
+    const isStaging = stagingMode === 'true' || stagingMode === true;
+
+    if (!siteId) {
+      socket.disconnect();
+      return;
     }
 
-    return {
-      valid: true,
-      verified: true,
-      email: access.email,
-      permissions: access.permissions,
-      accessId: access.id
-    };
-  } catch (error) {
-    console.error('Staging token validation error:', error);
-    return { valid: false, error: 'Validation failed' };
-  }
-}
-
-function normalizePermissions(rawPermissions) {
-  const permissions = new Set(Array.isArray(rawPermissions) ? rawPermissions : []);
-  if (permissions.has('admin')) {
-    permissions.add('publish');
-    permissions.add('edit');
-    permissions.add('view');
-  }
-  if (permissions.has('publish')) {
-    permissions.add('edit');
-    permissions.add('view');
-  }
-  if (permissions.has('edit')) {
-    permissions.add('view');
-  }
-  return ['view', 'edit', 'publish', 'admin'].filter(permission => permissions.has(permission));
-}
-
-async function validateEditSessionAccess(editToken, siteId) {
-  if (!supabaseEnabled || !editToken) {
-    return { valid: false };
-  }
-
-  try {
-    const { data: session, error } = await supabase
-      .from('edit_sessions')
-      .select('*')
-      .eq('token', editToken)
-      .eq('site_id', siteId)
-      .eq('is_active', true)
-      .gte('expires_at', new Date().toISOString())
-      .single();
-
-    if (error || !session) {
-      return { valid: false, error: 'Invalid or expired edit session' };
+    // RATE LIMIT BEFORE AUTHORIZATION (AGENTS.md).
+    //
+    // Authorization here is a `sites` lookup — a database round trip — so a
+    // limiter placed behind it never sees the flood it exists to stop; it just
+    // makes the flood expensive. The only thing needed to compute the bucket is
+    // the handshake's own site id, which is why this sits immediately after the
+    // presence check and before everything else.
+    const connectionVerdict = await rateLimiter.checkConnection({
+      siteId,
+      address: socket.handshake.address,
+    });
+    if (!connectionVerdict.allowed) {
+      socket.emit('auth-error', { error: 'Rate limit exceeded' });
+      socket.disconnect();
+      return;
     }
 
-    await supabase
-      .from('edit_sessions')
-      .update({ last_used_at: new Date().toISOString() })
-      .eq('id', session.id);
+    if (!token) {
+      socket.emit('auth-error', { error: 'Missing site token' });
+      socket.disconnect();
+      return;
+    }
 
-    return {
-      valid: true,
-      verified: true,
-      userId: session.user_id,
-      permissions: normalizePermissions(session.permissions),
-      sessionId: session.id
-    };
-  } catch (error) {
-    console.error('Edit session validation error:', error);
-    return { valid: false, error: 'Validation failed' };
-  }
-}
+    if (supabaseEnabled) {
+      try {
+        const { data: site, error } = await supabase
+          .from('sites')
+          .select('id, domain, api_key')
+          .eq('id', siteId)
+          .single();
 
-// Socket.io connection handling
-io.on('connection', async (socket) => {
-  console.log('New connection:', socket.id);
-
-  const { siteId, editMode, token, stagingMode, stagingToken, editToken } = socket.handshake.query;
-  const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
-  const isStaging = stagingMode === 'true' || stagingMode === true;
-
-  if (!siteId) {
-    socket.disconnect();
-    return;
-  }
-
-  if (!token) {
-    socket.emit('auth-error', { error: 'Missing site token' });
-    socket.disconnect();
-    return;
-  }
-
-  let siteRecord = null;
-
-  if (supabaseEnabled) {
-    try {
-      const { data: site, error } = await supabase
-        .from('sites')
-        .select('id, domain, api_key')
-        .eq('id', siteId)
-        .single();
-
-      if (error || !site) {
-        socket.emit('auth-error', { error: 'Site not found' });
-        socket.disconnect();
-        return;
-      }
-
-      if (!verifySiteToken(siteId, site.api_key, token)) {
-        socket.emit('auth-error', { error: 'Invalid site token' });
-        socket.disconnect();
-        return;
-      }
-
-      const allowedDomain = normalizeDomain(site.domain);
-      const requestHost = parseHost(originHeader);
-
-      if (allowedDomain && requestHost && requestHost !== allowedDomain) {
-        socket.emit('auth-error', { error: 'Origin not allowed' });
-        socket.disconnect();
-        return;
-      }
-
-      siteRecord = site;
-      socket.data.siteToken = token;
-
-      // Validate editor access if in staging/edit mode
-      if (isStaging && (stagingToken || editToken)) {
-        const stagingAccess = stagingToken
-          ? await validateStagingAccess(stagingToken, siteId)
-          : await validateEditSessionAccess(editToken, siteId);
-
-        if (!stagingAccess.valid) {
-          socket.emit('auth-error', { error: stagingAccess.error || 'Invalid editor access' });
+        if (error || !site) {
+          socket.emit('auth-error', { error: 'Site not found' });
           socket.disconnect();
           return;
         }
 
-        socket.data.isStaging = true;
-        socket.data.stagingToken = stagingToken;
-        socket.data.editToken = editToken;
-        socket.data.stagingEmail = stagingAccess.email || stagingAccess.userId || 'unknown';
-        socket.data.stagingPermissions = normalizePermissions(stagingAccess.permissions);
-        socket.data.stagingAccessId = stagingAccess.accessId || null;
-
-        console.log(`Editor connection for site ${siteId} by ${socket.data.stagingEmail}`);
-      }
-    } catch (error) {
-      console.error('Site verification failed:', error);
-      socket.emit('auth-error', { error: 'Site verification failed' });
-      socket.disconnect();
-      return;
-    }
-  } else {
-    console.warn('Supabase not configured - skipping site token verification');
-    // In dev mode, allow staging connections
-    if (isStaging) {
-      socket.data.isStaging = true;
-      socket.data.stagingToken = stagingToken;
-    }
-  }
-
-  // Join appropriate room based on staging mode
-  if (socket.data.isStaging) {
-    socket.join(`site:${siteId}:staging`);
-    console.log(`Client joined staging room: site:${siteId}:staging`);
-  } else {
-    socket.join(`site:${siteId}`);
-  }
-  
-  // Track connections
-  if (!siteConnections.has(siteId)) {
-    siteConnections.set(siteId, new Set());
-  }
-  siteConnections.get(siteId).add(socket.id);
-  
-  // Handle content map from embed script
-  socket.on('content-map', async (data) => {
-    console.log(`Received content map for site ${siteId}`);
-    
-    try {
-      const { url, contentMap, token: messageToken } = data;
-
-      if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-        socket.emit('auth-error', { error: 'Invalid site token' });
-        return;
-      }
-      
-      // Store content elements in database
-      const contentElements = [];
-      
-      for (const [elementId, elementData] of Object.entries(contentMap)) {
-        const safeContent = sanitizeContent(elementData.content);
-        contentElements.push({
-          site_id: siteId,
-          element_id: elementId,
-          selector: elementData.selector,
-          original_content: safeContent,
-          current_content: safeContent,
-          published_content: safeContent,
-          language: 'en',
-          variant: 'default',
-          metadata: { 
-            type: elementData.type,
-            url: url
-          }
-        });
-      }
-      
-      // Batch upsert to database (if Supabase is enabled)
-      if (contentElements.length > 0) {
-        if (supabaseEnabled) {
-          const { error } = await supabase
-            .from('content_elements')
-            .upsert(contentElements, {
-              onConflict: 'site_id,element_id,language,variant',
-              ignoreDuplicates: true
-            });
-          
-          if (error) {
-            console.error('Error saving content elements:', error);
-          } else {
-            console.log(`Saved ${contentElements.length} content elements for site ${siteId}`);
-          }
-        } else {
-          console.log(`Content map received for site ${siteId} (${contentElements.length} elements) - not persisted (Supabase disabled)`);
-        }
-      }
-      
-      // Notify dashboard clients about new content
-      io.to(`dashboard:${siteId}`).emit('content-map-updated', {
-        siteId,
-        url,
-        elementCount: Object.keys(contentMap).length
-      });
-      
-    } catch (error) {
-      console.error('Error processing content map:', error);
-    }
-  });
-  
-  // Handle content updates from dashboard or staging
-  socket.on('content-update', async (data, ack) => {
-    const reply = (payload) => {
-      if (typeof ack === 'function') {
-        ack(payload);
-      }
-    };
-    const isStaging = socket.data.isStaging;
-    console.log(`Content update for site ${siteId} (${isStaging ? 'staging' : 'live'}):`, data.elementId);
-
-    try {
-      const { elementId, content, language = 'en', variant = 'default', token: messageToken } = data;
-
-      if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-        socket.emit('auth-error', { error: 'Invalid site token' });
-        reply({ ok: false, error: 'Invalid site token' });
-        return;
-      }
-
-      if (!isStaging) {
-        socket.emit('update-error', {
-          error: 'Live updates must be saved through staging and published explicitly'
-        });
-        reply({ ok: false, error: 'Live updates must be saved through staging and published explicitly' });
-        return;
-      }
-
-      const permissions = socket.data.stagingPermissions || [];
-      const hasEditPermission = permissions.includes('edit') ||
-                                 permissions.includes('publish') ||
-                                 permissions.includes('admin');
-      if (!hasEditPermission) {
-        socket.emit('update-error', { error: 'Edit permission required' });
-        reply({ ok: false, error: 'Edit permission required' });
-        return;
-      }
-
-      const sanitizedContent = sanitizeContent(content);
-      const now = new Date().toISOString();
-
-      // Update database (if Supabase is enabled)
-      if (supabaseEnabled && !data.persisted) {
-        const updateData = {
-            staging_content: sanitizedContent,
-            staging_updated_at: now,
-            updated_at: now
-        };
-
-        const { error } = await supabase
-          .from('content_elements')
-          .update(updateData)
-          .eq('site_id', siteId)
-          .eq('element_id', elementId)
-          .eq('language', language)
-          .eq('variant', variant);
-
-        if (error) {
-          console.error('Error updating content:', error);
-          socket.emit('update-error', { error: 'Failed to save content' });
-          reply({ ok: false, error: 'Failed to save content' });
+        if (!verifySiteToken(siteId, site.api_key, token)) {
+          socket.emit('auth-error', { error: 'Invalid site token' });
+          socket.disconnect();
           return;
         }
 
-        // Record staging history
-        if (isStaging && socket.data.stagingAccessId) {
-          const { data: element } = await supabase
-            .from('content_elements')
-            .select('id')
-            .eq('site_id', siteId)
-            .eq('element_id', elementId)
-            .eq('language', language)
-            .eq('variant', variant)
-            .single();
-
-          if (element) {
-            await supabase.from('staging_history').insert({
-              content_element_id: element.id,
-              staging_access_id: socket.data.stagingAccessId,
-              new_content: sanitizedContent,
-              user_email: socket.data.stagingEmail || 'unknown',
-              action: 'update'
-            });
-          }
+        // The pin is unconditional — see the A-2 comment on isOriginAllowed().
+        if (!isOriginAllowed(site.domain, originHeader)) {
+          socket.emit('auth-error', { error: 'Origin not allowed' });
+          socket.disconnect();
+          return;
         }
-      } else {
-        console.log(`Content update for site ${siteId}, element ${elementId} - persistence skipped (${data.persisted ? 'already persisted' : 'Supabase disabled'})`);
-      }
 
-      // Broadcast to appropriate room
-      if (isStaging) {
-        // Staging: broadcast only to staging room
-        socket.to(`site:${siteId}:staging`).emit('content-update', {
-          elementId,
-          content: sanitizedContent,
-          language,
-          variant,
-          isStaging: true,
-          updatedBy: socket.data.stagingEmail
-        });
-      } else {
-        // Live: broadcast to live room
-        socket.to(`site:${siteId}`).emit('content-update', {
-          elementId,
-          content: sanitizedContent,
-          language,
-          variant
-        });
-      }
+        socket.data.siteToken = token;
+        socket.data.siteId = siteId;
 
-      // Notify dashboard users
-      socket.to(`dashboard:${siteId}`).emit('content-updated', {
-        elementId,
-        content: sanitizedContent,
-        updatedBy: socket.id,
-        timestamp: now,
-        isStaging
-      });
-
-      reply({ ok: true });
-
-    } catch (error) {
-      console.error('Error processing content update:', error);
-      socket.emit('update-error', { error: 'Internal server error' });
-      reply({ ok: false, error: 'Internal server error' });
-    }
-  });
-  
-  // Handle dashboard connections
-  socket.on('join-dashboard', (data) => {
-    const { siteId: dashboardSiteId, userId } = data;
-
-    // Authorization: the dashboard room must match the site id that was
-    // authenticated during the handshake.  Allowing arbitrary room joins
-    // would let any authenticated socket subscribe to another site's events.
-    if (!dashboardSiteId || dashboardSiteId !== siteId) {
-      socket.emit('auth-error', {
-        error: 'Unauthorized: dashboard site id does not match authenticated site'
-      });
-      console.warn(
-        `join-dashboard rejected: socket ${socket.id} authenticated for site "${siteId}" ` +
-        `requested dashboard for site "${dashboardSiteId}"`
-      );
-      return;
-    }
-
-    socket.join(`dashboard:${dashboardSiteId}`);
-
-    if (userId) {
-      userConnections.set(socket.id, userId);
-    }
-
-    console.log(`Dashboard user joined for site ${dashboardSiteId}`);
-  });
-  
-  // Handle bulk content updates (for Edit Board: style apply, language switch, etc.)
-  socket.on('bulk-update', async (data) => {
-    const { updates, token: messageToken, description, changeType = 'bulk_edit', createVersion = true } = data;
-    const isStaging = socket.data.isStaging;
-
-    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-      socket.emit('auth-error', { error: 'Invalid site token' });
-      return;
-    }
-
-    // Check staging edit permission
-    if (isStaging) {
-      const permissions = socket.data.stagingPermissions || [];
-      const hasEditPermission = permissions.includes('edit') ||
-                                 permissions.includes('publish') ||
-                                 permissions.includes('admin');
-      if (!hasEditPermission) {
-        socket.emit('bulk-update-error', { error: 'Edit permission required' });
-        return;
-      }
-    }
-
-    try {
-      const now = new Date().toISOString();
-
-      // Create version snapshot before bulk changes (if staging and Supabase enabled)
-      let versionId = null;
-      if (isStaging && supabaseEnabled && createVersion) {
-        try {
-          const { data: versionResult } = await supabase.rpc('create_content_version', {
-            p_site_id: siteId,
-            p_created_by: socket.data.stagingEmail || 'unknown',
-            p_description: description || `Bulk update (${updates.length} elements)`,
-            p_change_type: changeType
+        // Validate editor access if in staging/edit mode
+        if (isStaging && (stagingToken || editToken)) {
+          const grant = await resolveGrant({
+            supabase,
+            siteId,
+            stagingToken,
+            editToken,
           });
-          versionId = versionResult;
-          console.log(`Created version snapshot ${versionId} for site ${siteId}`);
-        } catch (versionError) {
-          console.error('Error creating version snapshot:', versionError);
-          // Continue with updates even if version creation fails
-        }
-      }
 
-      for (const update of updates) {
-        const { elementId, content } = update;
-        const sanitizedContent = sanitizeContent(content);
-
-        // Update database (if Supabase is enabled)
-        if (supabaseEnabled) {
-          let updateData;
-
-          if (isStaging) {
-            updateData = {
-              staging_content: sanitizedContent,
-              staging_updated_at: now,
-              updated_at: now
-            };
-          } else {
-            updateData = {
-              published_content: sanitizedContent,
-              current_content: sanitizedContent,
-              updated_at: now
-            };
+          if (!grant.valid) {
+            socket.emit('auth-error', { error: grant.error || 'Invalid editor access' });
+            socket.disconnect();
+            return;
           }
 
-          await supabase
-            .from('content_elements')
-            .update(updateData)
-            .eq('site_id', siteId)
-            .eq('element_id', elementId);
+          // The CREDENTIALS are what is kept on the socket, not the verdict.
+          // Caching the verdict is the M5 defect: it made "is this editor still
+          // allowed" a question answered once, at connect time, forever.
+          socket.data.isStaging = true;
+          socket.data.stagingToken = stagingToken;
+          socket.data.editToken = editToken;
+          socket.data.stagingEmail = grant.email || grant.userId || 'unknown';
+          socket.data.stagingPermissions = normalizePermissions(grant.permissions);
+          socket.data.stagingAccessId = grant.accessId || null;
         }
-
-        // Broadcast each update to appropriate room
-        const targetRoom = isStaging ? `site:${siteId}:staging` : `site:${siteId}`;
-        io.to(targetRoom).emit('content-update', {
-          elementId,
-          content: sanitizedContent,
-          isStaging: isStaging || undefined,
-          updatedBy: isStaging ? socket.data.stagingEmail : undefined
-        });
-      }
-
-      const modeText = isStaging ? ' (staging)' : '';
-      const message = supabaseEnabled ?
-        `Processed ${updates.length} updates${modeText}` :
-        `Processed ${updates.length} updates${modeText} (not persisted - Supabase disabled)`;
-
-      socket.emit('bulk-update-success', {
-        count: updates.length,
-        message,
-        versionId
-      });
-    } catch (error) {
-      console.error('Error processing bulk update:', error);
-      socket.emit('bulk-update-error', { error: 'Failed to process updates' });
-    }
-  });
-
-  // Handle language switching (Edit Board feature)
-  socket.on('switch-language', async (data) => {
-    const { languageCode, token: messageToken } = data;
-    const isStaging = socket.data.isStaging;
-
-    if (!isStaging) {
-      socket.emit('switch-language-error', { error: 'Language switching only available in staging mode' });
-      return;
-    }
-
-    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-      socket.emit('auth-error', { error: 'Invalid site token' });
-      return;
-    }
-
-    // Check staging edit permission
-    const permissions = socket.data.stagingPermissions || [];
-    const hasEditPermission = permissions.includes('edit') ||
-                               permissions.includes('publish') ||
-                               permissions.includes('admin');
-    if (!hasEditPermission) {
-      socket.emit('switch-language-error', { error: 'Edit permission required' });
-      return;
-    }
-
-    try {
-      if (!supabaseEnabled) {
-        socket.emit('switch-language-error', { error: 'Database not available' });
+      } catch (error) {
+        console.error('Site verification failed:', error);
+        socket.emit('auth-error', { error: 'Site verification failed' });
+        socket.disconnect();
         return;
       }
-
-      // Get the language translations
-      const { data: language, error: langError } = await supabase
-        .from('site_languages')
-        .select('translations, language_name')
-        .eq('site_id', siteId)
-        .eq('language_code', languageCode)
-        .single();
-
-      if (langError || !language) {
-        socket.emit('switch-language-error', { error: 'Language not found' });
-        return;
-      }
-
-      const translations = language.translations || {};
-      const translationEntries = Object.entries(translations);
-
-      if (translationEntries.length === 0) {
-        socket.emit('switch-language-error', { error: 'No translations available for this language' });
-        return;
-      }
-
-      // Create version snapshot before language switch
-      try {
-        await supabase.rpc('create_content_version', {
-          p_site_id: siteId,
-          p_created_by: socket.data.stagingEmail || 'unknown',
-          p_description: `Switched to ${language.language_name} (${languageCode})`,
-          p_change_type: 'language_switch'
-        });
-      } catch (versionError) {
-        console.error('Error creating version snapshot:', versionError);
-      }
-
-      const now = new Date().toISOString();
-
-      // Apply translations to staging content
-      for (const [elementId, translatedContent] of translationEntries) {
-        const sanitizedContent = sanitizeContent(translatedContent);
-
-        await supabase
-          .from('content_elements')
-          .update({
-            staging_content: sanitizedContent,
-            staging_updated_at: now,
-            updated_at: now
-          })
-          .eq('site_id', siteId)
-          .eq('element_id', elementId);
-
-        // Broadcast to staging room
-        io.to(`site:${siteId}:staging`).emit('content-update', {
-          elementId,
-          content: sanitizedContent,
-          isStaging: true,
-          updatedBy: socket.data.stagingEmail
-        });
-      }
-
-      console.log(`Switched site ${siteId} to ${languageCode} (${translationEntries.length} elements)`);
-
-      socket.emit('switch-language-success', {
-        languageCode,
-        languageName: language.language_name,
-        elementsUpdated: translationEntries.length
-      });
-
-    } catch (error) {
-      console.error('Error switching language:', error);
-      socket.emit('switch-language-error', { error: 'Failed to switch language' });
-    }
-  });
-
-  // Handle version restoration (Edit Board feature)
-  socket.on('restore-version', async (data) => {
-    const { versionId, token: messageToken } = data;
-    const isStaging = socket.data.isStaging;
-
-    if (!isStaging) {
-      socket.emit('restore-version-error', { error: 'Version restore only available in staging mode' });
-      return;
-    }
-
-    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-      socket.emit('auth-error', { error: 'Invalid site token' });
-      return;
-    }
-
-    // Check staging edit permission
-    const permissions = socket.data.stagingPermissions || [];
-    const hasEditPermission = permissions.includes('edit') ||
-                               permissions.includes('publish') ||
-                               permissions.includes('admin');
-    if (!hasEditPermission) {
-      socket.emit('restore-version-error', { error: 'Edit permission required' });
-      return;
-    }
-
-    try {
-      if (!supabaseEnabled) {
-        socket.emit('restore-version-error', { error: 'Database not available' });
-        return;
-      }
-
-      // Restore the version using database function
-      const { data: restoreResult, error: restoreError } = await supabase.rpc('restore_content_version', {
-        p_version_id: versionId,
-        p_restored_by: socket.data.stagingEmail || 'unknown'
-      });
-
-      if (restoreError) {
-        console.error('Error restoring version:', restoreError);
-        socket.emit('restore-version-error', { error: 'Failed to restore version' });
-        return;
-      }
-
-      // Get the restored content to broadcast
-      const { data: elements } = await supabase
-        .from('content_elements')
-        .select('element_id, staging_content')
-        .eq('site_id', siteId)
-        .not('staging_content', 'is', null);
-
-      // Broadcast all updates to staging room
-      for (const element of (elements || [])) {
-        io.to(`site:${siteId}:staging`).emit('content-update', {
-          elementId: element.element_id,
-          content: element.staging_content,
-          isStaging: true,
-          updatedBy: socket.data.stagingEmail
-        });
-      }
-
-      console.log(`Restored version ${versionId} for site ${siteId}`);
-
-      socket.emit('restore-version-success', {
-        versionId,
-        elementsRestored: (elements || []).length
-      });
-
-    } catch (error) {
-      console.error('Error restoring version:', error);
-      socket.emit('restore-version-error', { error: 'Failed to restore version' });
-    }
-  });
-
-  // Handle theme activation (Edit Board feature)
-  socket.on('activate-theme', async (data) => {
-    const { themeId, token: messageToken } = data;
-    const isStaging = socket.data.isStaging;
-
-    if (!isStaging) {
-      socket.emit('activate-theme-error', { error: 'Theme activation only available in staging mode' });
-      return;
-    }
-
-    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-      socket.emit('auth-error', { error: 'Invalid site token' });
-      return;
-    }
-
-    // Check admin permission for theme activation
-    const permissions = socket.data.stagingPermissions || [];
-    if (!permissions.includes('admin')) {
-      socket.emit('activate-theme-error', { error: 'Admin permission required' });
-      return;
-    }
-
-    try {
-      if (!supabaseEnabled) {
-        socket.emit('activate-theme-error', { error: 'Database not available' });
-        return;
-      }
-
-      // Get theme content overrides
-      const { data: theme, error: themeError } = await supabase
-        .from('site_themes')
-        .select('name, content_overrides')
-        .eq('id', themeId)
-        .eq('site_id', siteId)
-        .single();
-
-      if (themeError || !theme) {
-        socket.emit('activate-theme-error', { error: 'Theme not found' });
-        return;
-      }
-
-      const overrides = theme.content_overrides || {};
-      const overrideEntries = Object.entries(overrides);
-
-      if (overrideEntries.length === 0) {
-        socket.emit('activate-theme-error', { error: 'No content overrides in this theme' });
-        return;
-      }
-
-      // Create version snapshot before theme application
-      try {
-        await supabase.rpc('create_content_version', {
-          p_site_id: siteId,
-          p_created_by: socket.data.stagingEmail || 'unknown',
-          p_description: `Applied theme: ${theme.name}`,
-          p_change_type: 'theme_apply'
-        });
-      } catch (versionError) {
-        console.error('Error creating version snapshot:', versionError);
-      }
-
-      const now = new Date().toISOString();
-
-      // Deactivate other themes
-      await supabase
-        .from('site_themes')
-        .update({ is_active: false })
-        .eq('site_id', siteId)
-        .neq('id', themeId);
-
-      // Activate this theme
-      await supabase
-        .from('site_themes')
-        .update({ is_active: true })
-        .eq('id', themeId);
-
-      // Apply content overrides to staging
-      for (const [elementId, overrideContent] of overrideEntries) {
-        const sanitizedContent = sanitizeContent(overrideContent);
-
-        await supabase
-          .from('content_elements')
-          .update({
-            staging_content: sanitizedContent,
-            staging_updated_at: now,
-            updated_at: now
-          })
-          .eq('site_id', siteId)
-          .eq('element_id', elementId);
-
-        // Broadcast to staging room
-        io.to(`site:${siteId}:staging`).emit('content-update', {
-          elementId,
-          content: sanitizedContent,
-          isStaging: true,
-          updatedBy: socket.data.stagingEmail
-        });
-      }
-
-      console.log(`Activated theme "${theme.name}" for site ${siteId}`);
-
-      socket.emit('activate-theme-success', {
-        themeId,
-        themeName: theme.name,
-        elementsUpdated: overrideEntries.length
-      });
-
-    } catch (error) {
-      console.error('Error activating theme:', error);
-      socket.emit('activate-theme-error', { error: 'Failed to activate theme' });
-    }
-  });
-  
-  // Handle staging publish request
-  socket.on('staging-publish', async (data) => {
-    const { elementIds, token: messageToken } = data;
-
-    if (!socket.data.isStaging) {
-      socket.emit('publish-error', { error: 'Not in staging mode' });
-      return;
-    }
-
-    if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
-      socket.emit('auth-error', { error: 'Invalid site token' });
-      return;
-    }
-
-    // Check publish permission
-    const permissions = socket.data.stagingPermissions || [];
-    const hasPublishPermission = permissions.includes('publish') ||
-                                  permissions.includes('admin');
-    if (!hasPublishPermission) {
-      socket.emit('publish-error', { error: 'Publish permission required' });
-      return;
-    }
-
-    try {
-      if (!supabaseEnabled) {
-        socket.emit('publish-error', { error: 'Database not available' });
-        return;
-      }
-
-      const filteredElementIds = Array.isArray(elementIds)
-        ? elementIds.filter(elementId => typeof elementId === 'string')
-        : null;
-
-      const { data: publishedRows, error: publishError } = await supabase.rpc(
-        'publish_staging_content_atomic',
-        {
-          p_site_id: siteId,
-          p_element_ids: filteredElementIds && filteredElementIds.length > 0 ? filteredElementIds : null,
-          p_published_by: null,
-          p_user_email: socket.data.stagingEmail || 'unknown'
-        }
+    } else {
+      // Degraded, development-only mode: no Supabase means no site row, so
+      // there is no api_key to verify the token against and no domain to pin
+      // the origin to. The connection is admitted to the site's LIVE room and
+      // nothing else.
+      //
+      // TOMBSTONE — this branch used to read `if (isStaging) {
+      // socket.data.isStaging = true; ... }`, i.e. it granted staging-room
+      // membership because the client asked for it. Staging rooms carry
+      // unpublished copy. The branch is gated on env presence, not on
+      // NODE_ENV, so a single typo'd SUPABASE_SERVICE_ROLE_KEY in production
+      // turned the service into "anyone can watch any site's unpublished
+      // edits", with no error anywhere. Production now refuses to boot at all
+      // in that state (see startFromCli), and this branch grants nothing.
+      console.warn(
+        'Supabase not configured - running degraded: no token verification, no staging rooms'
       );
+    }
 
-      if (publishError) {
-        console.error('Error publishing staging content:', publishError);
-        socket.emit('publish-error', { error: 'Failed to publish staging content' });
-        return;
+    // Join appropriate room based on staging mode
+    if (socket.data.isStaging) {
+      socket.join(`site:${siteId}:staging`);
+    } else {
+      socket.join(`site:${siteId}`);
+    }
+
+    // Track connections
+    if (!siteConnections.has(siteId)) {
+      siteConnections.set(siteId, new Set());
+    }
+    siteConnections.get(siteId).add(socket.id);
+
+    /**
+     * Register a message handler behind the per-socket message budget.
+     *
+     * Every inbound event goes through here, so adding a handler cannot forget
+     * the limiter — which is how the connection-level limit stops being the
+     * only one. An acknowledged event (`content-update` carries an ack) is
+     * answered rather than dropped silently: a client left waiting on an ack
+     * that will never come is a hang, not a refusal.
+     */
+    function onMessage(event, handler) {
+      socket.on(event, async (...args) => {
+        const ack =
+          typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+
+        const verdict = await rateLimiter.checkMessage({ socketId: socket.id });
+        if (!verdict.allowed) {
+          socket.emit('rate-limit-error', { error: 'Rate limit exceeded' });
+          if (ack) ack({ ok: false, error: 'Rate limit exceeded' });
+          return;
+        }
+
+        return handler(...args);
+      });
+    }
+
+    // Handle content map from embed script.
+    //
+    // TOMBSTONE — this handler used to upsert `content_elements` under the
+    // service-role key. The write belongs to POST /api/content/:siteId, which
+    // the widget calls UNCONDITIONALLY at recopyfast.src.js:2821, before the
+    // socket emit at :2833 that reaches here. The socket copy was therefore
+    // never the registering write; it was a second, unauthorised one, with no
+    // permission check at all, on attacker-choosable element ids. ADR 004 rule
+    // 1: HTTP stays authoritative, realtime broadcasts. Do not re-add it "for
+    // symmetry" — two writers of one row disagree silently, which is the exact
+    // failure that rule exists to prevent.
+    //
+    // What stays is the fan-out: dashboards watching this site learn that a page
+    // reported its inventory.
+    onMessage('content-map', async (data) => {
+      try {
+        const { url, contentMap, token: messageToken } = data || {};
+
+        if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
+          socket.emit('auth-error', { error: 'Invalid site token' });
+          return;
+        }
+
+        // Notify dashboard clients about new content
+        io.to(`dashboard:${siteId}`).emit('content-map-updated', {
+          siteId,
+          url,
+          elementCount: Object.keys(contentMap || {}).length
+        });
+
+      } catch (error) {
+        console.error('Error processing content map:', error);
       }
+    });
 
-      const rows = publishedRows || [];
+    // Handle content updates from dashboard or staging
+    onMessage('content-update', async (data, ack) => {
+      const reply = (payload) => {
+        if (typeof ack === 'function') {
+          ack(payload);
+        }
+      };
+      const isStagingSocket = socket.data.isStaging;
 
-      if (rows.length === 0) {
-        socket.emit('publish-success', {
-          published: 0,
-          message: 'No staging changes to publish'
+      try {
+        const { elementId, content, language = 'en', variant = 'default', token: messageToken } = data;
+
+        if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
+          socket.emit('auth-error', { error: 'Invalid site token' });
+          reply({ ok: false, error: 'Invalid site token' });
+          return;
+        }
+
+        if (!isStagingSocket) {
+          socket.emit('update-error', {
+            error: 'Live updates must be saved through staging and published explicitly'
+          });
+          reply({ ok: false, error: 'Live updates must be saved through staging and published explicitly' });
+          return;
+        }
+
+        // M5 — re-resolve the grant before every permission decision. This used
+        // to read `socket.data.stagingPermissions` alone, which was written
+        // once at the handshake and never refreshed, so a revoked editor kept
+        // editing for as long as the tab stayed open. revalidateSocket()
+        // refreshes the permissions it is about to be judged on, and
+        // disconnects when the grant is gone.
+        if (!(await revalidateSocket(socket))) {
+          reply({ ok: false, error: 'Editor access revoked' });
+          return;
+        }
+
+        const permissions = socket.data.stagingPermissions || [];
+        const hasEditPermission = permissions.includes('edit') ||
+                                   permissions.includes('publish') ||
+                                   permissions.includes('admin');
+        if (!hasEditPermission) {
+          socket.emit('update-error', { error: 'Edit permission required' });
+          reply({ ok: false, error: 'Edit permission required' });
+          return;
+        }
+
+        const sanitizedContent = sanitizeContent(content);
+        const now = new Date().toISOString();
+
+        // TOMBSTONE — a `content_elements` update and a `staging_history`
+        // insert used to happen right here, guarded by `!data.persisted`.
+        //
+        // PUT /api/staging/content/:siteId owns both. `persistContentUpdate`
+        // (recopyfast.src.js:2625) performs that authenticated PUT and only then
+        // emits with `persisted: true`, so the real client never reached this
+        // branch — only a hand-crafted one did, and for that caller the branch
+        // was a service-role write into another tenant's staged copy plus a
+        // forged audit row attributing it to whatever email the handshake
+        // carried. ADR 004 rule 1: realtime broadcasts, it never writes.
+        //
+        // `persisted` is consequently no longer read at all: there is nothing
+        // left for it to gate.
+
+        // Broadcast to appropriate room
+        if (isStagingSocket) {
+          // Staging: broadcast only to staging room
+          socket.to(`site:${siteId}:staging`).emit('content-update', {
+            elementId,
+            content: sanitizedContent,
+            language,
+            variant,
+            isStaging: true,
+            updatedBy: socket.data.stagingEmail
+          });
+        } else {
+          // Live: broadcast to live room
+          socket.to(`site:${siteId}`).emit('content-update', {
+            elementId,
+            content: sanitizedContent,
+            language,
+            variant
+          });
+        }
+
+        // Notify dashboard users
+        socket.to(`dashboard:${siteId}`).emit('content-updated', {
+          elementId,
+          content: sanitizedContent,
+          updatedBy: socket.id,
+          timestamp: now,
+          isStaging: isStagingSocket
+        });
+
+        reply({ ok: true });
+
+      } catch (error) {
+        console.error('Error processing content update:', error);
+        socket.emit('update-error', { error: 'Internal server error' });
+        reply({ ok: false, error: 'Internal server error' });
+      }
+    });
+
+    // Handle dashboard connections
+    onMessage('join-dashboard', (data) => {
+      const { siteId: dashboardSiteId, userId } = data || {};
+
+      // Authorization: the dashboard room must match the site id that was
+      // authenticated during the handshake.  Allowing arbitrary room joins
+      // would let any authenticated socket subscribe to another site's events.
+      if (!dashboardSiteId || dashboardSiteId !== siteId) {
+        socket.emit('auth-error', {
+          error: 'Unauthorized: dashboard site id does not match authenticated site'
         });
         return;
       }
 
-      for (const element of rows) {
-        io.to(`site:${siteId}`).emit('content-update', {
-          elementId: element.element_id,
-          content: element.content
-        });
+      socket.join(`dashboard:${dashboardSiteId}`);
+
+      if (userId) {
+        userConnections.set(socket.id, userId);
       }
-
-      const publishedAt = new Date().toISOString();
-      console.log(`Published ${rows.length} elements for site ${siteId}`);
-
-      socket.emit('publish-success', {
-        published: rows.length,
-        total: rows.length,
-        publishedAt,
-        publishedBy: socket.data.stagingEmail
-      });
-
-      // Notify dashboard
-      io.to(`dashboard:${siteId}`).emit('content-published', {
-        siteId,
-        count: rows.length,
-        publishedBy: socket.data.stagingEmail,
-        publishedAt
-      });
-
-    } catch (error) {
-      console.error('Error publishing content:', error);
-      socket.emit('publish-error', { error: 'Internal server error' });
-    }
-  });
-
-  // Handle A/B test status changes (emitted by API when test activated/completed)
-  socket.on('ab-test-status-change', async (data) => {
-    const { testId, status, siteId: testSiteId } = data;
-
-    // Authorization: the authenticated handshake siteId is the only authoritative
-    // source. A client must not broadcast to another tenant's rooms by supplying a
-    // different siteId in the payload.
-    if (testSiteId && testSiteId !== siteId) {
-      socket.emit('auth-error', { message: 'Cannot modify A/B tests for another site' });
-      return;
-    }
-    const targetSiteId = siteId;
-
-    console.log(`A/B test ${testId} status changed to ${status} for site ${targetSiteId}`);
-
-    // Broadcast to all live site connections
-    io.to(`site:${targetSiteId}`).emit('ab-test-update', {
-      test_id: testId,
-      status: status
     });
 
-    // Also notify dashboard
-    io.to(`dashboard:${targetSiteId}`).emit('ab-test-update', {
-      test_id: testId,
-      status: status
+    // TOMBSTONE — six handlers were removed here, and none of them may come
+    // back on this socket. Each wrote `content_elements` or called
+    // `create_content_version` / `restore_content_version` /
+    // `publish_staging_content_atomic` under the SERVICE-ROLE key, and a grep
+    // across `src/` and `public/embed/recopyfast.src.js` finds no client that
+    // has ever emitted any of them — the only emitters are `content-map`
+    // (recopyfast.src.js:2834) and `content-update` (:2670, :2676). The service
+    // has never been deployed, so an out-of-repo client cannot exist either.
+    //
+    //   bulk-update            → POST /api/bulk/update
+    //   switch-language        → /api/edit-board/languages
+    //   restore-version        → /api/edit-board/history
+    //   activate-theme         → /api/edit-board/themes
+    //   staging-publish        → POST /api/staging/publish
+    //   ab-test-status-change  → (no twin: 3099c07 closed the HTTP one)
+    //
+    // Those routes stay, with their tests. Frozen means unexposed, not deleted.
+    //
+    // `ab-test-status-change` is the one worth naming twice: it had no token
+    // re-check and no permission check whatsoever, only a site-id match against
+    // the handshake. Any holder of the public site token — which ships as a
+    // plain attribute in the customer's own page markup — could broadcast an
+    // arbitrary A/B status to every client in `site:{id}` and `dashboard:{id}`.
+    // 3099c07 closed exactly that hole on the HTTP side; standing this service
+    // up would have re-opened it on the socket.
+
+    // Handle disconnection
+    socket.on('disconnect', () => {
+      // Remove from site connections
+      if (siteConnections.has(siteId)) {
+        siteConnections.get(siteId).delete(socket.id);
+        if (siteConnections.get(siteId).size === 0) {
+          siteConnections.delete(siteId);
+        }
+      }
+
+      // Remove from user connections
+      userConnections.delete(socket.id);
     });
   });
 
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-    
-    // Remove from site connections
-    if (siteConnections.has(siteId)) {
-      siteConnections.get(siteId).delete(socket.id);
-      if (siteConnections.get(siteId).size === 0) {
-        siteConnections.delete(siteId);
-      }
-    }
-    
-    // Remove from user connections
-    userConnections.delete(socket.id);
-  });
-});
+  /**
+   * Bind the configured port, or reject.
+   *
+   * There is deliberately no port walking. The previous startServer() retried
+   * 4001→4010 on EADDRINUSE, which is convenient under `npm run dev` and wrong
+   * everywhere else: fly.toml:33 and :58 pin 4001, so a silent shift to 4002
+   * presents as a failing deploy with perfectly healthy application logs (T9).
+   * Port 0 stays legal and means "give me an ephemeral port" — that is how the
+   * integration harness binds.
+   */
+  function listen() {
+    return new Promise((resolve, reject) => {
+      const onError = (error) => {
+        httpServer.off('listening', onListening);
+        reject(error);
+      };
+      const onListening = () => {
+        httpServer.off('error', onError);
+        const address = httpServer.address();
+        resolve(address && typeof address === 'object' ? address.port : port);
+      };
 
-// Start server with port auto-detection
-const PORT = process.env.WS_PORT || 4001;
-const MAX_PORT_ATTEMPTS = 10;
-
-const startServer = (port, attempt = 0) => {
-  if (attempt >= MAX_PORT_ATTEMPTS) {
-    console.error(`Failed to find available port after ${MAX_PORT_ATTEMPTS} attempts`);
-    process.exit(1);
+      httpServer.once('error', onError);
+      httpServer.once('listening', onListening);
+      httpServer.listen(port);
+    });
   }
 
-  const server = httpServer.listen(port);
-
-  server.on('listening', () => {
-    console.log(`✓ WebSocket server running on port ${port}`);
-    if (supabaseEnabled) {
-      console.log('✓ Supabase client initialized successfully');
-    } else {
-      console.log('⚠ Running in development mode - set up Supabase for persistence');
+  function close() {
+    if (revalidationTimer) {
+      clearInterval(revalidationTimer);
     }
-  });
+    return new Promise((resolve) => {
+      io.close(() => {
+        httpServer.close(() => resolve());
+      });
+    });
+  }
 
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.log(`⚠ Port ${port} is in use, trying ${port + 1}...`);
-      // Close the failed attempt before trying next port
-      server.close();
-      startServer(port + 1, attempt + 1);
-    } else {
-      console.error('Server error:', err);
+  return { app, io, httpServer, listen, close };
+}
+
+// ---------------------------------------------------------------------------
+// CLI entry point. Nothing below runs when this module is merely required.
+// ---------------------------------------------------------------------------
+
+function installCrashHandlers() {
+  // Crash safety: log and exit so the platform (Fly.io, Docker, PM2, etc.)
+  // can restart the process.  Without these handlers an unhandled rejection
+  // silently kills the event loop with no diagnostic output.
+  process.on('uncaughtException', (err) => {
+    console.error('[FATAL] uncaughtException – restarting process:', err);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (reason) => {
+    console.error('[FATAL] unhandledRejection – restarting process:', reason);
+    process.exit(1);
+  });
+}
+
+function loadEnvironment() {
+  // ENV LOADING: resolve paths absolutely so the server works whether it is
+  // started from the repo root, the server/ directory, or inside a container
+  // where only process.env is populated.  We try several candidate paths in
+  // order of preference and fall back gracefully if none exist.
+  const envCandidates = [
+    path.resolve(__dirname, '.env.local'),         // server/.env.local
+    path.resolve(__dirname, '..', '.env.local'),   // repo-root/.env.local (dev)
+    path.resolve(__dirname, '.env'),               // server/.env
+    path.resolve(__dirname, '..', '.env'),         // repo-root/.env
+  ];
+  for (const envPath of envCandidates) {
+    const result = require('dotenv').config({ path: envPath });
+    if (!result.error) {
+      console.log(`✓ Loaded env from ${envPath}`);
+      break;
+    }
+  }
+  // If none of the files exist, process.env values already set by the container
+  // runtime (Fly secrets, Docker --env, etc.) are used as-is – no error thrown.
+}
+
+function resolveEnvironment() {
+  const requiredEnvVars = {
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  };
+
+  const missingVars = [];
+  const invalidUrls = [];
+
+  for (const [key, value] of Object.entries(requiredEnvVars)) {
+    if (!value || value.includes('your_') || value === 'undefined') {
+      missingVars.push(key);
+    } else if (key.includes('URL') && !isValidUrl(value)) {
+      invalidUrls.push(key);
+    }
+  }
+
+  return { missingVars, invalidUrls };
+}
+
+function createSupabaseFromEnv() {
+  const { missingVars, invalidUrls } = resolveEnvironment();
+
+  if (missingVars.length > 0 || invalidUrls.length > 0) {
+    console.warn('⚠ Running in development mode without Supabase');
+    if (missingVars.length > 0) {
+      console.warn('  Missing environment variables:', missingVars.join(', '));
+    }
+    if (invalidUrls.length > 0) {
+      console.warn('  Invalid URLs:', invalidUrls.join(', '));
+    }
+    console.warn('  Set up Supabase credentials in .env.local to enable persistence');
+    return null;
+  }
+
+  const { createClient } = require('@supabase/supabase-js');
+  const client = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+  console.log('✓ Supabase client initialized successfully');
+  return client;
+}
+
+/**
+ * In production, a missing or invalid required variable is a refusal to start,
+ * not a warning.
+ *
+ * AGENTS.md non-negotiable 8: validate presence at startup and fail loudly. The
+ * degraded no-Supabase mode below is a development convenience; reaching it in
+ * production means the service is running with no token verification and no
+ * origin pin, which is indistinguishable from a healthy deployment in every
+ * signal an operator looks at — `/health` answers 200 and the process stays up.
+ * Refusing to boot is the only failure mode that surfaces.
+ */
+function assertProductionEnvironment() {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const { missingVars, invalidUrls } = resolveEnvironment();
+  const problems = [
+    ...missingVars.map((name) => `${name} (missing)`),
+    ...invalidUrls.map((name) => `${name} (not a valid URL)`),
+  ];
+
+  // REDIS_URL is required in production for the same reason the limiter denies
+  // on store failure: without a store there is no limit, and this process
+  // authenticates with a credential published in the customer's page markup.
+  // Refusing to boot is louder than refusing every connection at runtime, which
+  // is what the fail-closed limiter would otherwise do all day.
+  if (!process.env.REDIS_URL) {
+    problems.push('REDIS_URL (missing)');
+  }
+
+  if (problems.length > 0) {
+    console.error(
+      '✗ Refusing to start in production. Required environment is missing or invalid:',
+      problems.join(', ')
+    );
+    process.exit(1);
+  }
+}
+
+function startFromCli() {
+  installCrashHandlers();
+  loadEnvironment();
+  assertProductionEnvironment();
+
+  const supabase = createSupabaseFromEnv();
+  const rateLimitStore = process.env.REDIS_URL
+    ? createRedisRateLimitStore({ url: process.env.REDIS_URL })
+    : createMemoryRateLimitStore();
+  if (!process.env.REDIS_URL) {
+    console.warn(
+      '⚠ REDIS_URL is not set - rate limiting is in-process and correct for one instance only'
+    );
+  }
+
+  const port = Number(process.env.WS_PORT) || 4001;
+  const server = createRealtimeServer({ port, supabase, rateLimitStore });
+
+  server.listen().then(
+    (boundPort) => {
+      console.log(`✓ WebSocket server running on port ${boundPort}`);
+      if (!supabase) {
+        console.log('⚠ Running in development mode - set up Supabase for persistence');
+      }
+    },
+    (error) => {
+      console.error(`✗ Failed to bind port ${port}: ${error.message}`);
       process.exit(1);
     }
+  );
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    console.log('SIGTERM received, closing server...');
+    server.close().then(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
   });
+}
+
+module.exports = {
+  createRealtimeServer,
+  sanitizeContent,
 };
 
-startServer(PORT);
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, closing server...');
-  httpServer.close(() => {
-    console.log('Server closed');
-    process.exit(0);
-  });
-});
+if (require.main === module) {
+  startFromCli();
+}

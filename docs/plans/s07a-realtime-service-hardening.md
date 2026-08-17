@@ -35,7 +35,7 @@ T2, T3 and T4 are in this story. Nothing about AC 8 is deferred.
 Nothing below task 3 is verifiable before task 3 exists. The current suite certifies nothing (T5),
 so the harness is not a closing chore — it is the prerequisite for every security task after it.
 
-1. [ ] **The manifest matches the source.** Add `dompurify`, `jsdom` and `redis` to
+1. [x] **The manifest matches the source.** Add `dompurify`, `jsdom` and `redis` to
    `server/package.json`; regenerate `server/package-lock.json` (`npm install` inside `server/`, not
    a hand edit — `server/Dockerfile:16` runs `npm ci`, which fails on a lockfile that disagrees).
    Delete the stray `server/server/` package: it is tracked (`server/server/package.json`,
@@ -47,7 +47,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    `curl localhost:4001/health` returns `status: ok`. Today this run dies with
    `Cannot find module 'dompurify'` before the crash handlers at `server/index.js:13-20` exist.
 
-2. [ ] **Make the process importable and make the port non-negotiable.** `server/index.js:1210`
+2. [x] **Make the process importable and make the port non-negotiable.** `server/index.js:1210`
    calls `startServer(PORT)` at module load, and `:1197-1207` walks 4001→4010 on `EADDRINUSE`.
    Export a `createRealtimeServer({ port, supabase, rateLimitStore, revalidationIntervalMs })`
    factory; auto-start only under `require.main === module`; bind the configured port or exit
@@ -57,7 +57,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    *Why this is not cosmetic:* `fly.toml:33` and `fly.toml:58` pin 4001, so a silent shift to 4002
    presents as a failing deploy with healthy application logs (T9).
 
-3. [ ] **Replace the test file with an integration harness.** Delete
+3. [x] **Replace the test file with an integration harness.** Delete
    `src/__tests__/websocket/server.test.ts` (416 lines, never imports `server/index.js`, asserts
    `expect("site:site-123").toBe("site:site-123")` at `:110-113`). Add
    `src/__tests__/websocket/server.integration.test.ts` with `/** @jest-environment node */` —
@@ -69,7 +69,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    90 days and a future-dated token each disconnect. **Verify:** delete the guard at
    `server/index.js:367-371` and the suite goes red.
 
-4. [ ] **ADR 004 rule 1 — the socket stops writing. This is the story's centre.** Remove every
+4. [x] **ADR 004 rule 1 — the socket stops writing. This is the story's centre.** Remove every
    database write reachable from a socket message:
    - `content-map` (`:436`) — drop the `content_elements` upsert at `:471`. The authoritative path
      is `postContentMap` → `POST /api/content/:siteId`, called unconditionally at
@@ -97,7 +97,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    `update` / `rpc` calls across every event the server still accepts, including a `content-update`
    sent *without* `persisted: true`; each removed event produces no broadcast and no write.
 
-5. [ ] **Port the origin pin (T2).** `server/index.js:376` reads
+5. [x] **Port the origin pin (T2).** `server/index.js:376` reads
    `if (allowedDomain && requestHost && requestHost !== allowedDomain)` — two truthiness guards that
    turn a missing `Origin` into "nothing to check", and a site with a null or unparseable `domain`
    into "no pin at all". `src/lib/security/site-auth.ts:162` compares unconditionally; copy the rule
@@ -106,7 +106,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    `Origin` ⇒ accepted; `Referer` alone ⇒ accepted when it matches. A `wscat`-shaped client (no
    `Origin`, valid scraped token) is the case that passes today and must fail after.
 
-6. [ ] **Fail closed when Supabase is absent (T4).** `server/index.js:412-419` skips token
+6. [x] **Fail closed when Supabase is absent (T4).** `server/index.js:412-419` skips token
    verification entirely when `supabaseEnabled` is false and sets `socket.data.isStaging = true` on
    the client's own say-so, joining `site:{id}:staging`. It is gated on env presence, not
    `NODE_ENV` — one typo'd `SUPABASE_SERVICE_ROLE_KEY` in production degrades to "anyone can watch
@@ -116,7 +116,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    staging room. **Verify:** production env + missing service-role key ⇒ non-zero exit with a named
    error; non-production + no Supabase ⇒ socket lands in `site:{id}`, never `site:{id}:staging`.
 
-7. [ ] **Fail-closed per-site rate limiter (T3, ADR 002 rule 4).** `server/index.js` holds
+7. [x] **Fail-closed per-site rate limiter (T3, ADR 002 rule 4).** `server/index.js` holds
    `SUPABASE_SERVICE_ROLE_KEY` (`:154`) and has no limiter of any kind. Add `server/rate-limit.js`
    backed by `redis` (node-redis 5, the same client `src/lib/security/rate-limiter.ts:1` uses), with
    two buckets: connections per site per window, and messages per socket per window. On store
@@ -128,7 +128,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    `auth-error`; over-limit message dropped with an error and no broadcast; a store whose calls
    throw ⇒ refused, not admitted.
 
-8. [ ] **M5 — re-resolve the grant per message, and sweep idle sockets.** `server/index.js:386-405`
+8. [x] **M5 — re-resolve the grant per message, and sweep idle sockets.** `server/index.js:386-405`
    resolves the grant once at handshake and caches it on `socket.data`; `:527` reads that cache on
    every `content-update`; nothing re-reads. Re-resolve on every message that reaches a permission
    check, using the same predicates plus the two the current queries omit:
@@ -148,7 +148,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    an authenticated HTTP `PUT` for the same event), not one-per-keystroke, so one indexed select per
    message is proportionate — and the limiter from task 7, not a TTL, is what bounds the rate.
 
-9. [ ] **The additive drill (AC 5) and the legacy snippet (AC 6).** With the service not running,
+9. [x] **The additive drill (AC 5) and the legacy snippet (AC 6).** With the service not running,
    an editing session must save, stage and publish with no error surface on the page. Add an e2e
    spec under `e2e/` alongside `share-edit-publish.spec.ts` that runs the flow twice: once with
    `data-ws-url` absent (AC 6 — asserts `window.RECOPYFAST_WS` unset, the early return at
@@ -157,7 +157,7 @@ so the harness is not a closing chore — it is the prerequisite for every secur
    rendered to the user). **Verify:** both runs green with the WS server stopped. This is ADR 004
    rule 2, and it is the reason `s07a` can ship before `s07b`.
 
-10. [ ] **Two editors, two elements (AC 7).** After task 4 the socket never persists, so this is an
+10. [x] **Two editors, two elements (AC 7).** After task 4 the socket never persists, so this is an
     HTTP concurrency test, not a socket test: two concurrent `PUT /api/staging/content/:siteId`
     calls for different `elementId`s both land, and each element's `staging_content` holds its own
     value. Add it beside the existing staging-content route tests. **Verify:** the test fails if
