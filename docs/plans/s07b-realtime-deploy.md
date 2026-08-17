@@ -1,9 +1,18 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Research open question 1 (the real-time parity criterion, ex-M6) is unresolved, so AC 4 cannot yet be written as a test.
-> Every other section of this plan stands; only the gate is held.
+> **Validated 2026-08-17.** The parity criterion is decided: **editors only** —
+> [ADR 022](../decisions/022-realtime-parity-is-editors-only.md). AC 4 is two editors in a
+> session on a non-RecopyFast fixture, edit propagating under one second, measured. Task 8
+> stands exactly as written; **no new broadcast path is built**, and `s08` AC 3's
+> zero-connection guarantee is left intact.
+>
+> ⚠ **Two operator inputs are still required before task 1 can run** (research open question 2):
+> the hosting platform and account (Fly / Railway / Render — Vercel cannot host a long-lived
+> process), and the app name, region and TLS hostname. Plus the instance count, which decides
+> whether the Socket.io Redis adapter ships with this story. These are inputs to one task, not
+> a gate on the plan — but do not start task 1 without them.
 # Plan — Story s07b-realtime-deploy
 
 Branch: `feature/s07b-realtime-deploy`
@@ -26,18 +35,21 @@ Criteria this plan must satisfy:
 - [ ] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
 - [ ] Instance count decided explicitly and recorded; if > 1, the Socket.io Redis adapter ships with it. (Research open question 4, ADR 004)
 
-### Blocker — AC 4 cannot be written as a test until M6 is answered
+### Cleared — AC 4 is editors-only (M6 answered 2026-08-17, ADR 022)
 
-Research open question 1 (`docs/research/s07-realtime-service.md:250-257`) is unresolved and this
-plan does not guess it. As written, AC 4 says a second browser **viewing** the page. The code
+Research open question 1 (`docs/research/s07-realtime-service.md:250-257`) is **answered:
+editors only**. The reasoning is kept below because it is what makes AC 4's literal wording
+misleading, and a reviewer reading AC 4 cold will otherwise reach the wrong conclusion.
+As written, AC 4 says a second browser **viewing** the page. The code
 broadcasts staging edits only to `site:{id}:staging` (`server/index.js:591`); a plain viewer sits in
 `site:{id}` (`:426`) and receives nothing until publish (`:1101`). So the literal reading requires a
 **new broadcast path** — while `s08` AC 3 requires "no editing session open ⇒ zero WebSocket
 connections", which that path would contradict, and `s08` would then rip it out.
 
-`docs/reviews/stories.md:172` recommends **editors-only**. Task 8 is written in that form. If the
-operator settles on visitors, task 8 changes shape and the story grows a new broadcast path — say so
-before executing, do not discover it mid-task. **Every other task in this plan is unblocked.**
+`docs/reviews/stories.md:172` recommended **editors-only**, and that is the settled answer. Task 8
+is written in that form and does not change. Visitors are served by HTTP and see new content on
+their next load after publish — current behaviour, authoritative, and not degraded by this story.
+**Do not add a viewer broadcast path to satisfy AC 4's literal wording.**
 
 Two operator inputs are also required before task 1 can be executed (research open question 2): the
 platform and account, and the app name / region / TLS hostname. They are decisions, not unknowns —
@@ -112,14 +124,13 @@ they do not block planning, and they block exactly one task.
    snippet carries no `data-ws-url` (or a non-production one); checked once against a real preview
    URL and recorded.
 
-8. [ ] **The parity demo (AC 4) — editors-only, pending M6.** Two browsers in an editing session on
+8. [ ] **The parity demo (AC 4) — editors-only (settled, ADR 022).** Two browsers in an editing session on
    the same fixture page hosted on a **non-RecopyFast domain**; an edit in A appears in B in under
    one second, measured, not eyeballed. This exercises the staging room
-   (`server/index.js:589-598`), which is the only room that carries edits today. **Blocked on the
-   M6 answer** — if the operator reads AC 4 as *visitors*, this task becomes "build a new broadcast
-   path from publish to `site:{id}` viewers", which is a different task and contradicts `s08` AC 3;
-   stop and re-plan rather than improvise. **Verify:** the measured interval and the fixture's
-   hostname recorded in the PR.
+   (`server/index.js:589-598`), which is the only room that carries edits today. **Assert that two
+   distinct connections received the event** — ADR 022's Watch: if staging rooms are ever scoped
+   per user instead of per site, a weaker assertion keeps passing on a single client while proving
+   nothing. **Verify:** the measured interval and the fixture's hostname recorded in the PR.
 
 9. [ ] **Legacy snippets keep working against the live origin.** A snippet issued before this story
    — no `data-ws-url` — must behave exactly as it does today on the deployed system: no

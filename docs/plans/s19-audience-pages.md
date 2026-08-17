@@ -2,8 +2,12 @@
 validated: no
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Same undecided SEO surface — this story's design was drawn on the App surface while s17's was drawn on Marketing, and s19 runs on s17's engine.
-> Every other section of this plan stands; only the gate is held.
+> **Decision made, gate still held.** The SEO cluster surface is settled as **Marketing**
+> ([ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md), 2026-08-17) — but this
+> story's design was drawn on the **App** surface and is therefore known-wrong, not merely
+> provisional. It is being redrawn through `/ks-design` on Marketing: `--sky-*` / `--slate-*`,
+> pinned light, no `bg-card` / `text-foreground` anywhere.
+> **This gate flips to `yes` when the redrawn design lands** — nothing else blocks it.
 # Plan — Story s19-audience-pages
 
 Branch: `feature/s19-audience-pages`

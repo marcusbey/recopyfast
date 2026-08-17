@@ -24,7 +24,7 @@ settled against the code.
 |---|---|
 | [`research/`](./research/) | 19 verified-context reports, one per original story. Split stories inherit their parent's report, whose `## Split proposal` defines them |
 | [`designs/`](./designs/README.md) | 19 story designs (`<id>.md` + `<id>.html` mockup). Eight no-UI stories are recorded as deliberate skips in its README |
-| [`plans/`](./plans/) | 27 plans, all `validated: no` — `/ks-execute` is fail-closed until a human checkpoint sets `yes` |
+| [`plans/`](./plans/) | 27 plans. `/ks-execute` is fail-closed on `validated: no`. **26 validated**; `s19` alone is still held, on a design redraw (ADR 020), not on a decision |
 
 ### [`reviews/stories.md`](./reviews/stories.md)
 Fresh-context review of the backlog against the PRD. Its verdict was *critical / not ready*;
@@ -72,6 +72,10 @@ story and travel with its branch.
 | [016](./decisions/016-ab-visitor-identity-and-dnt.md) | A/B visitor identity and Do-Not-Track behaviour | `s11c` |
 | [017](./decisions/017-ab-conversion-is-per-visitor.md) | A/B conversion is defined over the per-visitor event stream (closes M2) | `s12` |
 | [018](./decisions/018-tenant-scoped-serving-origin.md) | A tenant-scoped serving origin, and its irreversibility | `s20` |
+| [019](./decisions/019-agency-billing-single-payer.md) | The agency is the only payer; payer and site owner are one identity | `s13` |
+| [020](./decisions/020-seo-clusters-on-marketing-surface.md) | The SEO cluster pages render on the Marketing surface | `s17`–`s19` |
+| [021](./decisions/021-wildcard-serving-origin-provisioning.md) | One wildcard domain and certificate; claiming is a database write | `s20` |
+| [022](./decisions/022-realtime-parity-is-editors-only.md) | Real-time parity is defined over editors, not visitors | `s07b` |
 
 ### `product/` — what it does and for whom
 | File | Contents |

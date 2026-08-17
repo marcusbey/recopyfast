@@ -1,9 +1,14 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Same undecided SEO surface, and it needs s02 to land first to supply the install-recipe contract it renders from.
-> Every other section of this plan stands; only the gate is held.
+> **Validated 2026-08-17.** The SEO cluster surface is decided: **Marketing** —
+> [ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md). This is what the design
+> already assumed.
+>
+> ⚠ **Ordering, not a gate: `s02-install-verified` must land first.** This story renders the
+> install-recipe contract `s02` defines; starting before `s02` merges means inventing that
+> contract twice. `s02` is reviewed and ship-allowed but unmerged.
 # Plan — Story s18-stack-recipes
 
 Branch: `feature/s18-stack-recipes`

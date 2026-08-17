@@ -439,11 +439,32 @@ Resolved at `/ks-architect`:
    [ADR 004](./decisions/004-embed-transport-split.md). Settles the connection model shared by
    `s07` and `s08`.
 
+Resolved at plan validation, 2026-08-17 — the four decisions that were holding six plans
+at `validated: no`:
+
+7. **Agency plan shape.** → **Agency-only, single invoice.** The agency holds one
+   subscription; every site it owns is covered by it; a client never pays for an agency's
+   site. Payer identity and site ownership are the same identity, always.
+   [ADR 019](./decisions/019-agency-billing-single-payer.md). `s13`'s AC 7 is satisfied by
+   the system as it stands — `resolveEntitlement`, `canCreateWebsite`, `getUserSubscription`
+   and `resolveSiteOwnerId` are untouched, and `s13` stays a catalogue-and-quota story.
+   Unblocks `s13`, and `s20` which inherited it.
+10. **SEO cluster surface.** → **Marketing.** `/alternatives`, `/cms-for`, `/for` and
+    `/agencies` render on the `--sky-*` / `--slate-*` palette, pinned light, so they can
+    reuse `Pricing` / `Benefits` / `HowItWorks` / `FinalCTA`.
+    [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md). Unblocks `s17`, `s18`,
+    `s19` — `s19`'s design was drawn on App and is redrawn.
+11. **Branded subdomain provisioning.** → **One wildcard domain, one wildcard certificate.**
+    Claiming is a database write; the product provisions no DNS and no certificates.
+    [ADR 021](./decisions/021-wildcard-serving-origin-provisioning.md). Carries a host
+    admission rule — unclaimed hosts under the wildcard redirect to canonical. Unblocks `s20`.
+12. **Real-time parity criterion.** → **Editors only.** Two editors in a session, edit
+    propagates under one second; visitors are served by HTTP and see content on their next
+    load after publish. [ADR 022](./decisions/022-realtime-parity-is-editors-only.md).
+    Keeps `s08` AC 3's zero-connection guarantee intact. Unblocks `s07b`.
+
 Still open:
 
-7. **Agency plan shape.** Who is billed — agency only, or agency with client-paid
-   upgrades? `s13-agency-plan` assumes agency-only, single invoice. Confirm before `s13`
-   reaches `/ks-plan`.
 8. **WordPress plugin priority** — first post-launch investment, or later? Not in the
    current backlog either way.
 9. **Badge.** Ship the "Edited with RecopyFast" badge, or drop it? Affects the SEO

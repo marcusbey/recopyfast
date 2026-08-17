@@ -1,9 +1,19 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Wildcard host and wildcard TLS is an unmade operator decision, not code; and it depends on s13, which is itself held.
-> Every other section of this plan stands; only the gate is held.
+> **Validated 2026-08-17.** Both blockers cleared:
+> **#1 — one wildcard domain, one wildcard certificate**
+> ([ADR 021](../decisions/021-wildcard-serving-origin-provisioning.md)). Claiming is a database
+> write; the host already resolves; this plan provisions no DNS and no certificates and gains
+> no provisioning-API task.
+> **#2 — PRD open decision 7 is answer A**, agency-only
+> ([ADR 019](../decisions/019-agency-billing-single-payer.md)), so *"whose branded origin serves
+> this site"* has exactly one answer: the owner's, because the owner is the payer.
+>
+> ⚠ **ADR 021 adds four requirements this plan must carry.** See "Amendments from ADR 021" below.
+> ⚠ **Ordering: `s13-agency-plan` must merge first** — there is no plan to attach a subdomain to
+> otherwise.
 # Plan — Story s20-agency-branded-subdomain
 
 Branch: `feature/s20-agency-branded-subdomain`
@@ -25,34 +35,45 @@ for that agency's sites point at it; a client page loading the widget from the b
 renders and saves content byte-identical to the same page loaded from the default origin; and
 the default origin keeps working for every snippet already issued.
 
-> ## ⛔ BLOCKING #1 — wildcard host + wildcard TLS is an operator/Vercel decision, not code
+> ## ✅ Amendments from ADR 021 — wildcard domain, wildcard certificate
 >
-> Research flags it unsettled, and `/ks-plan` validation cannot be granted until it is settled.
-> **Nothing in this plan provisions DNS or certificates.** What is needed before validation:
-> - Is `*.recopyfa.st` served by the same Vercel project, on a wildcard domain with a wildcard
->   certificate? Or is each claimed subdomain added as an individual domain with its own
->   certificate issuance?
-> - Whichever it is, **the branded host must be canonical from the first byte and must never be
->   a redirect target.** `canonicalizePublicAppUrl` (`embed-script.ts:26-38`) exists precisely
->   because *"The apex host 308s to www. Browser CORS preflights cannot follow that redirect, so
->   a snippet that points at recopyfa.st makes the widget look dead on every customer site
->   (B-11)."* A branded host behind a redirect reproduces B-11 on every client site of every
->   agency.
-> - What the provisioning latency is, and whether it is observable programmatically — T2's
->   pending-propagation state and its two-step checklist (DNS, then certificate) depend on it.
->   The design's copy ("usually 5–30 minutes") holds either way; the plan's T2 does not.
+> `*.recopyfa.st` is served by the same Vercel project under **one wildcard domain and one
+> wildcard certificate** ([ADR 021](../decisions/021-wildcard-serving-origin-provisioning.md)).
+> Claiming is a database write, the host already resolves, and **nothing in this plan provisions
+> DNS or certificates.** Four requirements come with that and are part of this story:
 >
-> The **screen** does not depend on which way this is settled (`docs/designs/s20-…md` § Screens,
-> infrastructure note). The **plan** does: under wildcard, claiming is a database write and the
-> host already resolves; under per-subdomain issuance, claiming must call a provisioning API and
-> poll it, which is a task this plan does not currently contain.
+> 1. **Single-label subdomains only.** A `*.recopyfa.st` certificate does not cover
+>    `*.*.recopyfa.st`. `acme` is valid; `eu.acme` is not — the `subdomain` column's validation
+>    rejects any label containing a dot, before storage.
+> 2. **A reserved list, enforced at claim time** — `www`, `app`, `api`, `admin`, `embed`, `blog`,
+>    `docs`, `staging`, `preview`, `mail`. The wildcard matches hosts the product already owns,
+>    and ADR 018 provides **no un-claim path**: the first agency to claim `www` takes the
+>    canonical host permanently.
+> 3. **Canonical from the first byte, never a redirect target.** `canonicalizePublicAppUrl`
+>    (`embed-script.ts:26-38`) exists because *"The apex host 308s to www. Browser CORS preflights
+>    cannot follow that redirect, so a snippet that points at recopyfa.st makes the widget look
+>    dead on every customer site (B-11)."* It rewrites **only** the exact apex hostname, so branded
+>    hosts pass through untouched — **assert that, do not assume it.**
+> 4. **Unclaimed hosts must not serve the app.** New requirement, and the real cost of the
+>    wildcard: every subdomain in the zone now reaches this application. `src/middleware.ts`
+>    admits the canonical host and hosts holding an `active` claim; any other host under the
+>    wildcard **redirects to the canonical origin**. A redirect is correct here and forbidden in
+>    requirement 3, and the distinction is exact — B-11 is about hosts a *snippet points at*, and
+>    no snippet has ever pointed at an unclaimed host. Fail-closed in the safe direction: a failed
+>    claims lookup treats the host as unclaimed and redirects, never as claimed.
+>
+> **T2 changes shape.** `pending` is now a *verification* state, not a provisioning one — the host
+> already resolves, so the two-step checklist (DNS, then certificate) collapses to one check: does
+> this host serve our app over TLS. The design's "usually 5–30 minutes" copy is **wrong now** and
+> is reworded to near-immediate. If users routinely sit in `pending`, the verification check is
+> broken — that state is not a waiting room.
 
-> ## ⛔ BLOCKING #2 — inherited from `s13`: PRD open decision 7
+> ## ✅ CLEARED — PRD open decision 7 is answer A
 >
-> `prd.md:444-446`. `s20` attaches a serving origin to *whatever the Agency plan turns out to
-> be*. Under answer B (client-paid upgrades), the question *"whose branded origin serves this
-> site"* stops having a single answer, because the payer and the site owner diverge. See
-> `docs/plans/s13-agency-plan.md` § Target story for what changes. Both blockers must clear.
+> Agency-only, single invoice ([ADR 019](../decisions/019-agency-billing-single-payer.md)). The
+> payer and the site owner are the same identity, so *"whose branded origin serves this site"*
+> has exactly one answer and the resolver needs no tiebreak rule. Under answer B it would have had
+> two.
 
 > ## ⚠ Design-system question to settle at validation (design gaps #1 and #2)
 > - **No inline progress/spinner primitive.** `Skeleton` covers content placeholders, not an
@@ -324,10 +345,15 @@ test **and say so in the PR** (AGENTS.md § Tests).
 
 ## Definition of Done
 
-- [ ] **Wildcard host + wildcard TLS decision recorded** (Blocking #1), and the plan amended with
-      a provisioning task if the answer is per-subdomain issuance. Frontmatter stays
-      `validated: no` until then.
-- [ ] **PRD open decision 7 answered as A** (Blocking #2, inherited from `s13`).
+- [x] **Wildcard host + wildcard TLS decision recorded** — 2026-08-17,
+      [ADR 021](../decisions/021-wildcard-serving-origin-provisioning.md). Wildcard, so no
+      provisioning task is added.
+- [x] **PRD open decision 7 answered as A** — 2026-08-17,
+      [ADR 019](../decisions/019-agency-billing-single-payer.md).
+- [ ] **ADR 021's four requirements each map to a test**: single-label validation rejects a dotted
+      label; the reserved list refuses `www`; `canonicalizePublicAppUrl` leaves a branded host
+      untouched; an unclaimed host under the wildcard redirects to canonical, and does so when the
+      claims lookup fails.
 - [ ] `s13-agency-plan` merged and deployed — there is no plan to attach a subdomain to otherwise.
 - [ ] AC 8 mapped to: the route-level byte-identity test **and** the recorded manual cross-origin
       verification. Both, or the criterion is not closed.

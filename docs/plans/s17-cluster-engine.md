@@ -1,9 +1,11 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** The SEO cluster visual surface (Marketing vs App) is undecided; this story's design is provisional on it. See design-system.md.
-> Every other section of this plan stands; only the gate is held.
+> **Validated 2026-08-17.** The SEO cluster surface is decided: **Marketing** —
+> `--sky-*` / `--slate-*`, pinned light, no app tokens, reuse of `Pricing` / `Benefits` /
+> `HowItWorks` / `FinalCTA` permitted. [ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md).
+> This is what the design already assumed; it is no longer provisional.
 # Plan — Story s17-cluster-engine
 
 Branch: `feature/s17-cluster-engine`

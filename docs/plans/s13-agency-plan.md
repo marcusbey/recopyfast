@@ -1,9 +1,10 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** PRD open decision 7 — who is billed in agency mode, agency-only or agency with client-paid upgrades — is unanswered, and the answer changes the data model.
-> Every other section of this plan stands; only the gate is held.
+> **Validated 2026-08-17.** PRD open decision 7 is answered: **agency-only, single invoice** —
+> answer A, which every task below was already written under.
+> [ADR 019](../decisions/019-agency-billing-single-payer.md).
 # Plan — Story s13-agency-plan
 
 Branch: `feature/s13-agency-plan`
@@ -11,16 +12,18 @@ Research: `docs/research/s13-agency-plan.md` — read it first; this plan does n
 
 ## Target story
 
-> ## ⛔ BLOCKING — this plan cannot be validated until PRD open decision 7 is answered
+> ## ✅ CLEARED — PRD open decision 7 is answered: **A, agency-only, single invoice**
 >
-> `prd.md:444-446`, verbatim: *"**Agency plan shape.** Who is billed — agency only, or agency
-> with client-paid upgrades? `s13-agency-plan` assumes agency-only, single invoice. Confirm
-> before `s13` reaches `/ks-plan`."*
+> Answered 2026-08-17, recorded as
+> [ADR 019](../decisions/019-agency-billing-single-payer.md). Every task below was written
+> under answer A and stands unchanged. The rule the ADR fixes, for anyone reviewing this
+> story's diff: **payer identity and site ownership are the same identity, always** — no
+> payer column, no join table, no second answer to "who pays for this site".
 >
-> **This is not a detail. It changes the data model.** Every task below is written under
-> **answer A**. The frontmatter stays `validated: no` until an operator answers it.
+> The analysis that produced the decision is kept below, because it names the five functions a
+> reviewer must confirm are *untouched* by this story.
 >
-> **Under answer A — agency-only, single invoice (assumed here).**
+> **Under answer A — agency-only, single invoice (the decision).**
 > No structural change. One `plans` row, one widened CHECK, one Stripe customer, one
 > subscription keyed on the agency's `auth.users` id. Entitlement stays a per-**user**
 > question: `resolveEntitlement(supabase, userId)` (`effective-plan.ts:198`) is unchanged,
@@ -367,9 +370,12 @@ test **and say so in the PR** (AGENTS.md § Tests).
 
 ## Definition of Done
 
-- [ ] **PRD open decision 7 answered in writing, and the answer is A.** If B, this plan is closed
-      unexecuted and the story is re-scored and re-planned. Frontmatter stays `validated: no`
-      until this line is satisfiable.
+- [x] **PRD open decision 7 answered in writing, and the answer is A.** Done — 2026-08-17,
+      [ADR 019](../decisions/019-agency-billing-single-payer.md).
+- [ ] **`resolveEntitlement`, `countOwnedSites`, `canCreateWebsite`, `getUserSubscription` and
+      `resolveSiteOwnerId` are untouched by this story's diff.** Under answer A that is the
+      observable form of the decision — a diff that modifies any of them means this story has
+      quietly started building answer B.
 - [ ] The Agency numbers (research Q3) are recorded before any Stripe price is created — amounts
       are immutable.
 - [ ] AC 1, 2, 3, 4 (as (a)), 5, 6, 7 and the reworded 9 each map to a passing test named in the
