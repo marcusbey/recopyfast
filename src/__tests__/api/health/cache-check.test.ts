@@ -84,7 +84,23 @@ function cacheDown() {
 }
 
 describe("A-30 /api/health does not check the rate-limit store", () => {
+  // Realtime is switched off for this file, deliberately and explicitly.
+  //
+  // This suite is about the rate-limit store; realtime is a different optional
+  // dependency and its state must not decide these assertions. Leaving it to
+  // ambient environment made the control case pass locally and fail in CI,
+  // where `.github/workflows/ci.yml` sets NEXT_PUBLIC_WS_URL for the whole job:
+  // the route then really probed localhost:4001, got nothing, and reported
+  // `degraded` — a correct answer to a question this file is not asking.
+  //
+  // Unsetting the variable is what `getRealtimeHealthUrl` reads as "off", so the
+  // check is omitted entirely rather than mocked to succeed. That keeps the
+  // control case meaning "database and storage both answered", which is what it
+  // is for.
+  const originalWsUrl = process.env.NEXT_PUBLIC_WS_URL;
+
   beforeEach(() => {
+    delete process.env.NEXT_PUBLIC_WS_URL;
     jest.clearAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
     mockSingle.mockResolvedValue({ data: { id: "site-1" }, error: null });
@@ -96,6 +112,11 @@ describe("A-30 /api/health does not check the rate-limit store", () => {
   });
 
   afterEach(() => {
+    if (originalWsUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_WS_URL;
+    } else {
+      process.env.NEXT_PUBLIC_WS_URL = originalWsUrl;
+    }
     jest.restoreAllMocks();
   });
 
