@@ -158,6 +158,33 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       );
     });
 
+    it("answers byte-identically, headers included, for a known editor and an unknown address", async () => {
+      // AC 9 of s14-agency-client-handoff, restated as a criterion now that the
+      // grant it leads to actually authorises writes. Deep equality on the body
+      // is not quite the guarantee: a different key ORDER, a different
+      // `Vary`, or a CORS header present on one branch and not the other is
+      // still an oracle to anyone watching the wire.
+      mockFindActiveSiteEditor.mockResolvedValue({
+        id: "se_1",
+        siteId: "site_1",
+        email: RECOGNISED_EMAIL,
+        permissions: ["edit"],
+        createdAt: new Date(),
+      });
+      const known = await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+
+      mockFindActiveSiteEditor.mockResolvedValue(null);
+      const unknown = await POST(requestCodeRequest(UNKNOWN_EMAIL, "site_1"));
+
+      expect(JSON.stringify(await known.json())).toBe(
+        JSON.stringify(await unknown.json()),
+      );
+      expect(known.status).toBe(unknown.status);
+      expect([...known.headers.entries()].sort()).toEqual(
+        [...unknown.headers.entries()].sort(),
+      );
+    });
+
     it("never awaits the code mint or the mail send before responding — the response is not gated on `after`'s callback resolving", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",

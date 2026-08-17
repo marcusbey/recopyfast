@@ -1007,14 +1007,20 @@
      * no grant in storage there is nobody to identify, and the function returns
      * before making a request. Everyone else gets exactly one boot round trip.
      *
-     * Note what this does NOT do: it does not turn on `editMode`. A device grant
-     * proves identity to `/api/editor/*` and to nothing else — the content and
-     * publish endpoints authenticate through `validateEditorTokenFromRequest`,
-     * which knows staging tokens and edit-session tokens only. Enabling the
-     * editing affordances off the back of a grant would put a pencil on the page
-     * whose every save is refused by a server that never learnt this credential.
-     * So the identity is established, persisted and shown, and the editing
-     * surface stays off until the grant is accepted where content is written.
+     * TOMBSTONE. This comment used to state, as a rule, that establishing an
+     * identity here does NOT turn on `editMode` — because a device grant proved
+     * identity to `/api/editor/*` and to nothing else, and the content and
+     * publish endpoints knew staging and edit-session tokens only. That was
+     * accurate, and it is why the banner below apologised to every grant holder
+     * that in-page editing was not yet available on their site.
+     * `validateEditorTokenFromRequest` now accepts the grant
+     * (`X-RCF-Editor-Grant`, header only), so the rule is reversed: edit mode
+     * comes from the grant's own permissions, in `applyEditorIdentity`.
+     *
+     * What has NOT changed is why the rule existed: never show an editing
+     * affordance whose saves the server will refuse. If a future change narrows
+     * what a grant may do, narrow `applyEditorIdentity` with it rather than
+     * leaving a pencil on the page that answers 401.
      */
     async initEditorAuth() {
       if (!RECOPYFAST_API) return;
@@ -1041,25 +1047,135 @@
         return;
       }
 
+      // Arrived on a handoff link, and it did not work: spent, sixty seconds
+      // old, or minted for another site. With nothing in storage either, this
+      // browser has no idea who they are — and until now said so by saying
+      // nothing at all, which is the whole of the AC 8 gap. Someone was told to
+      // click a link, clicked it, and got an ordinary page.
+      //
+      // Safe to speak here, and ONLY here. Nothing has been verified, so
+      // nothing is being confirmed or denied about any address: the copy is
+      // about the link, not about the person. That is what separates this from
+      // the revoked case below, where saying anything at all would tell whoever
+      // holds an old link that the address once had access.
+      if (HANDOFF_CODE && outcome.status === 'anonymous') {
+        await this.showEditorCodeUI('link-expired');
+        return;
+      }
+
       // 'hidden'   — no longer an editor here; prompting would only confirm that
       //              the address once was one.
       // 'offline'  — we could not reach the API. The grant is deliberately still
       //              in storage; the next load asks again.
-      // 'anonymous'— nothing was ever stored.
+      // 'anonymous'— nothing was ever stored, and no link was followed.
       // In each case the page stays exactly as a visitor sees it.
     }
 
     applyEditorIdentity(identity) {
       this.editorAuth = identity;
+
+      // Graded with exactly the test the staging path uses at initStagingMode —
+      // one rule for "may this person edit", not two that can drift apart.
+      const permissions = (identity && identity.permissions) || [];
+      const canEdit = permissions.indexOf('edit') !== -1 ||
+                      permissions.indexOf('publish') !== -1 ||
+                      permissions.indexOf('admin') !== -1;
+
+      if (canEdit && !this.editMode) {
+        this.editMode = true;
+        // init() gates `setupEditMode()` on editMode, and the in-page code
+        // prompt resolves after that gate has already run — so an identity
+        // that arrives late has to attach the affordances itself.
+        if (this.isInitialized) this.setupEditMode();
+      }
+
       this.showEditorBanner();
+    }
+
+    /**
+     * The banner's save status: "Saving…" while a write is in flight, "Saved"
+     * when it lands, blank when it did not.
+     *
+     * Text only, and it never claims more than "written". Whether the write
+     * went to staging or straight live is a distinction this audience should
+     * not have to learn — the whole point of an invited editor is that there is
+     * no mode to understand.
+     */
+    setEditorSaveStatus(text) {
+      const status = document.querySelector('#rcf-editor-banner .rcf-editor-banner-status');
+      if (status) status.textContent = text;
+    }
+
+    /** The device grant this page load holds, or null. */
+    editorGrant() {
+      return (this.editorAuth && this.editorAuth.grant) || null;
+    }
+
+    /**
+     * Credential headers for a content or publish request.
+     *
+     * `X-RCF-Editor-Grant`, and nowhere else — not a query parameter, not a path
+     * segment, not a fragment, not a body field. A grant authorises writes to
+     * this page, and a credential in a URL is a credential in browser history,
+     * in the `Referer` sent to every third-party asset on this page, and in
+     * every access log between here and there. The server reads the header and
+     * only the header (`extractEditorToken`), so putting it anywhere else would
+     * not even work — which is the point.
+     */
+    editorAuthHeaders() {
+      const grant = this.editorGrant();
+      return grant ? { 'X-RCF-Editor-Grant': grant } : {};
+    }
+
+    /**
+     * The staging credentials' query suffix — and deliberately EMPTY when a
+     * device grant is what authenticates this request, so the two credentials
+     * can never be sent together and a grant-authenticated URL carries nothing.
+     */
+    editorTokenQuery() {
+      if (this.editorGrant()) return '';
+      if (this.editSessionToken) return '?rcf_edit_token=' + encodeURIComponent(this.editSessionToken);
+      return '?rcf_token=' + encodeURIComponent(this.stagingToken || '');
+    }
+
+    /** Body fields carrying a staging credential; none when a grant is in play. */
+    editorTokenBody() {
+      if (this.editorGrant()) return {};
+      return {
+        stagingToken: this.stagingToken || undefined,
+        editToken: this.editSessionToken || undefined
+      };
+    }
+
+    /**
+     * Can this page load read and write the site's staging content?
+     *
+     * True for a staging or edit-session link, and now also for a device grant:
+     * an invited editor reads and writes the same staging rows as everybody
+     * else, they just prove who they are differently.
+     */
+    canReachStagingContent() {
+      return this.stagingMode || !!this.editorGrant();
     }
 
     /**
      * Name the signed-in editor, and say plainly what they can do.
      *
-     * Deliberately not `showStagingBanner`: that toolbar offers Publish and Edit
-     * Board, both of which authenticate with a staging or edit-session token
-     * this holder does not have, so every button on it would answer 401.
+     * TOMBSTONE. This bar used to end with a grey note apologising that in-page
+     * editing was not yet available on this site, and a `title` on it saying the
+     * sign-in was recognised but the content API did not accept editor device
+     * grants. Both were true, and both shipped to every customer's live page: a
+     * grant proved identity to `/api/editor/*` and authorised no write
+     * anywhere. The content and publish routes now accept it, so the note is
+     * false and it is gone, `title` included. Do not add a note here explaining
+     * why editing is off — if it is off, that is the grant's permissions
+     * talking, and the honest banner simply does not claim editing.
+     *
+     * Deliberately still not `showStagingBanner`: that toolbar offers Publish
+     * and Edit Board, both of which authenticate with a staging or edit-session
+     * token this holder does not have, so every button on it would answer 401.
+     * No Publish button and no staging/live vocabulary here for the same
+     * reason — "Saved" only ever claims the edit was written.
      */
     showEditorBanner() {
       if (!this.editorAuth) return;
@@ -1088,13 +1204,41 @@
             font-size: 13px;
             line-height: 1.4;
           }
+          /* Brand mark: flat teal tile, no gradient (design-system.md). */
+          #rcf-editor-banner .rcf-editor-banner-mark {
+            flex: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px; height: 22px;
+            border-radius: 6px;
+            background: hsl(174 48% 58% / 0.16);
+            border: 1px solid hsl(174 48% 58% / 0.35);
+            color: hsl(174 48% 68%);
+            font-size: 11px;
+            font-weight: 700;
+          }
+          #rcf-editor-banner .rcf-editor-banner-divider {
+            flex: none;
+            width: 1px; height: 14px;
+            background: hsl(200 12% 26%);
+          }
           #rcf-editor-banner .rcf-editor-banner-email {
             font-weight: 600;
             color: hsl(174 48% 68%);
+            /* Truncating is a layout decision; losing the address is not —
+               the full value stays in the title attribute. */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 40vw;
           }
-          #rcf-editor-banner .rcf-editor-banner-note { color: hsl(200 12% 65%); }
-          #rcf-editor-banner .rcf-editor-banner-dismiss {
+          #rcf-editor-banner .rcf-editor-banner-status {
             margin-left: auto;
+            flex: none;
+            color: hsl(200 12% 65%);
+          }
+          #rcf-editor-banner .rcf-editor-banner-dismiss {
             flex: none;
             background: transparent;
             border: 1px solid hsl(200 12% 26%);
@@ -1117,27 +1261,46 @@
       banner.setAttribute('role', 'region');
       banner.setAttribute('aria-label', 'ReCopyFast editor session');
 
-      const identity = document.createElement('span');
-      identity.appendChild(document.createTextNode('Signed in as '));
+      const mark = document.createElement('span');
+      mark.className = 'rcf-editor-banner-mark';
+      mark.setAttribute('aria-hidden', 'true');
+      mark.textContent = '<>';
+      banner.appendChild(mark);
+
+      // Claimed only when it is true. A view-only holder is named and nothing
+      // more — telling them they can edit and then refusing every save is the
+      // failure the deleted note above was a symptom of.
+      if (this.editMode) {
+        const claim = document.createElement('span');
+        claim.textContent = 'You can edit this page';
+        banner.appendChild(claim);
+
+        const divider = document.createElement('span');
+        divider.className = 'rcf-editor-banner-divider';
+        divider.setAttribute('aria-hidden', 'true');
+        banner.appendChild(divider);
+      }
+
       const email = document.createElement('span');
       email.className = 'rcf-editor-banner-email';
       email.textContent = this.editorAuth.email || 'an editor';
-      identity.appendChild(email);
-      banner.appendChild(identity);
+      if (this.editorAuth.email) email.title = this.editorAuth.email;
+      banner.appendChild(email);
 
-      const note = document.createElement('span');
-      note.className = 'rcf-editor-banner-note';
-      note.textContent = '— in-page editing isn’t enabled for this site yet.';
-      note.title = 'Your sign-in is recognised. The content API does not yet accept editor device grants.';
-      banner.appendChild(note);
+      const status = document.createElement('span');
+      status.className = 'rcf-editor-banner-status';
+      status.setAttribute('role', 'status');
+      banner.appendChild(status);
 
       const dismiss = document.createElement('button');
       dismiss.type = 'button';
       dismiss.className = 'rcf-editor-banner-dismiss';
-      dismiss.textContent = 'Hide';
-      // Hides the bar for this page load only. It does not sign anyone out:
-      // discarding a credential is something the holder should have to mean.
-      dismiss.setAttribute('aria-label', 'Hide the ReCopyFast editor bar');
+      // "Done", not "Hide": it dismisses the bar for this page load only and
+      // does NOT sign anyone out — discarding a credential is something the
+      // holder should have to mean, and a session ending because someone closed
+      // a bar is a strange thing for a return visit to have to explain.
+      dismiss.textContent = 'Done';
+      dismiss.setAttribute('aria-label', 'Dismiss the ReCopyFast editor bar');
       dismiss.onclick = function() {
         if (banner.parentNode) banner.parentNode.removeChild(banner);
       };
@@ -1157,8 +1320,22 @@
      * visitor sees and nothing more. The only way through is a code delivered to
      * a mailbox that is already on the site's editor allowlist.
      */
-    showEditorCodeUI() {
+    showEditorCodeUI(variant) {
       const self = this;
+
+      // Two openings, one component. Everything below the heading is identical
+      // — same email-then-code stages, same neutral notice, same escape — so a
+      // second modal would be two things to keep in step for the sake of two
+      // sentences.
+      const copy = variant === 'link-expired'
+        ? {
+            title: 'That link needs refreshing',
+            subtitle: 'Links like this work once. Enter the email you edit this site with and we’ll send a new code.'
+          }
+        : {
+            title: 'Confirm it’s you',
+            subtitle: 'Enter the email you edit this site with and we’ll send a 6-digit code.'
+          };
 
       return new Promise(function(resolve) {
         const overlay = self.createOverlay();
@@ -1170,17 +1347,20 @@
 
         const icon = document.createElement('div');
         icon.className = 'rcf-modal-icon';
-        icon.style.background = 'linear-gradient(135deg, rgba(45, 212, 191, 0.2) 0%, rgba(13, 148, 136, 0.2) 100%)';
-        icon.style.border = '1px solid rgba(45, 212, 191, 0.3)';
+        // Flat fill on a flat border — the design system forbids a gradient
+        // anywhere, icon tiles included. Literals derived from the accent token
+        // (hsl(174 48% 58%)); the widget has no token layer and s06 owns that.
+        icon.style.background = 'hsl(174 48% 58% / 0.16)';
+        icon.style.border = '1px solid hsl(174 48% 58% / 0.35)';
         icon.textContent = '✉';
 
         const title = document.createElement('h2');
         title.className = 'rcf-modal-title';
-        title.textContent = 'Confirm it’s you';
+        title.textContent = copy.title;
 
         const subtitle = document.createElement('p');
         subtitle.className = 'rcf-modal-subtitle';
-        subtitle.textContent = 'Enter the email you edit this site with and we’ll send a 6-digit code.';
+        subtitle.textContent = copy.subtitle;
 
         iconContainer.appendChild(icon);
         iconContainer.appendChild(title);
@@ -2096,12 +2276,10 @@
         try {
           const response = await fetch(RECOPYFAST_API + '/staging/publish', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              siteId: SITE_ID,
-              stagingToken: self.stagingToken || undefined,
-              editToken: self.editSessionToken || undefined
-            })
+            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
+            body: JSON.stringify(Object.assign({
+              siteId: SITE_ID
+            }, self.editorTokenBody()))
           });
 
           const result = await response.json();
@@ -2623,28 +2801,39 @@
     }
 
     async persistContentUpdate(elementId, content, extra) {
-      if (!this.stagingMode) {
+      // A device grant is a third way to be allowed to write here, alongside a
+      // staging link and an edit session. It used to throw at this line for a
+      // grant holder — which is what the banner's deleted note was apologising
+      // for, and why an invited editor could sign in and change nothing.
+      if (!this.canReachStagingContent()) {
         throw new Error('Live editing requires a staging or edit-session token.');
       }
 
-      const tokenQuery = this.editSessionToken
-        ? '?rcf_edit_token=' + encodeURIComponent(this.editSessionToken)
-        : '?rcf_token=' + encodeURIComponent(this.stagingToken);
-      const response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + tokenQuery, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(Object.assign({
-          elementId: elementId,
-          content: content,
-          stagingToken: this.stagingToken || undefined,
-          editToken: this.editSessionToken || undefined
-        }, extra || {}))
-      });
+      this.setEditorSaveStatus('Saving…');
+
+      let response;
+      try {
+        response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
+          method: 'PUT',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
+          body: JSON.stringify(Object.assign({
+            elementId: elementId,
+            content: content
+          }, this.editorTokenBody(), extra || {}))
+        });
+      } catch (error) {
+        // Never leave "Saving…" standing over a write that will never land.
+        this.setEditorSaveStatus('');
+        throw error;
+      }
 
       const result = await response.json().catch(function() { return {}; });
       if (!response.ok || result.error) {
+        this.setEditorSaveStatus('');
         throw new Error(result.error || 'Failed to save content');
       }
+
+      this.setEditorSaveStatus('Saved');
 
       this.emitRealtimeContentUpdate(Object.assign({
         siteId: SITE_ID,
@@ -3336,17 +3525,19 @@
     async hydrateStoredContent() {
       if (!RECOPYFAST_API) return;
 
-      const endpoint = this.stagingMode
-        ? RECOPYFAST_API + '/staging/content/' + SITE_ID +
-          (this.editSessionToken
-            ? '?rcf_edit_token=' + encodeURIComponent(this.editSessionToken)
-            : '?rcf_token=' + encodeURIComponent(this.stagingToken || ''))
+      const staged = this.canReachStagingContent();
+      const endpoint = staged
+        ? RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery()
         : RECOPYFAST_API + '/content/' + SITE_ID;
 
       let rows;
       try {
+        // `Authorization: Bearer <SITE_TOKEN>` goes on this request either way,
+        // and the grant header sits beside it rather than replacing it — which
+        // is why the server checks the grant header FIRST: its Bearer branch
+        // reads that value as a staging token and would refuse the request.
         const response = await fetch(endpoint, {
-          headers: { 'Authorization': 'Bearer ' + SITE_TOKEN }
+          headers: Object.assign({ 'Authorization': 'Bearer ' + SITE_TOKEN }, this.editorAuthHeaders())
         });
 
         if (!response.ok) {
@@ -3355,7 +3546,7 @@
         }
 
         const body = await response.json();
-        rows = this.stagingMode ? (body && body.content) : body;
+        rows = staged ? (body && body.content) : body;
       } catch (error) {
         console.warn('ReCopyFast: could not load saved content; showing the page as authored.', error);
         return;
@@ -3521,7 +3712,11 @@
          */
         .rcf-hovering {
           cursor: pointer !important;
-          outline: 2px dashed rgba(59, 130, 246, 0.6) !important;
+          /* Brand accent, not Tailwind blue-500: the design system forbids a
+             second brand colour outright, and this file already had the right
+             literal two hundred lines away in .rcf-banner-btn:focus-visible.
+             Derived from the accent token hsl(174 48% 58%). */
+          outline: 2px dashed hsl(174 48% 58% / 0.7) !important;
           outline-offset: 4px !important;
         }
         /*
@@ -3535,7 +3730,9 @@
           display: flex;
           align-items: center;
           gap: 6px;
-          background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+          /* Flat, not a gradient — same rule as the icon tile. Derived from the
+             surface token hsl(200 18% 10%). */
+          background: hsl(200 18% 10% / 0.95);
           color: #e2e8f0;
           padding: 6px 12px;
           border-radius: 8px;
@@ -5168,21 +5365,19 @@
       const self = this;
       setInterval(async function() {
         try {
-          const endpoint = self.stagingMode
-            ? RECOPYFAST_API + '/staging/content/' + SITE_ID +
-              (self.editSessionToken
-                ? '?rcf_edit_token=' + encodeURIComponent(self.editSessionToken)
-                : '?rcf_token=' + encodeURIComponent(self.stagingToken))
+          const staged = self.canReachStagingContent();
+          const endpoint = staged
+            ? RECOPYFAST_API + '/staging/content/' + SITE_ID + self.editorTokenQuery()
             : RECOPYFAST_API + '/content/' + SITE_ID;
 
           const response = await fetch(endpoint, {
-            headers: {
+            headers: Object.assign({
               'Authorization': 'Bearer ' + SITE_TOKEN,
-            },
+            }, self.editorAuthHeaders()),
           });
           if (response.ok) {
             const data = await response.json();
-            const updates = self.stagingMode ? data.content : data;
+            const updates = staged ? data.content : data;
             updates.forEach(function(update) { self.handleContentUpdate(update); });
           }
         } catch (error) {

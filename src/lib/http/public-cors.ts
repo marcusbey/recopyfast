@@ -22,8 +22,16 @@ import { NextRequest, NextResponse } from "next/server";
  * If an endpoint ever genuinely needs cookies cross-origin, reflect only
  * origins matched against the site's registered domain — never whatever the
  * caller happened to send.
+ *
+ * `X-RCF-Editor-Grant` carries an invited editor's device grant on the content
+ * and publish routes. Every header the widget sends has to be named here: one
+ * the preflight does not allow is stripped by the browser before the request is
+ * ever sent, which fails silently on every customer domain while every
+ * server-side test goes on passing — the same shape as the 204 preflight bug
+ * recorded in `publicOptions` below.
  */
-const ALLOW_HEADERS = "Authorization, Content-Type, X-Site-Token";
+const ALLOW_HEADERS =
+  "Authorization, Content-Type, X-Site-Token, X-RCF-Editor-Grant";
 
 export function withPublicCors(
   response: NextResponse,

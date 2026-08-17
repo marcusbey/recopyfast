@@ -37,7 +37,7 @@ Acceptance criteria this story carries, from the parent:
 
 ## Tasks (ordered)
 
-- [ ] **T1 — `extractEditorToken` gains a `device-grant` kind, read from `X-RCF-Editor-Grant`,
+- [x] **T1 — `extractEditorToken` gains a `device-grant` kind, read from `X-RCF-Editor-Grant`,
       header only.** `src/lib/auth/editor-access.ts:166-197`. Widen `EditorAccessKind` to
       `"staging" | "edit-session" | "device-grant"` (consumed only inside this module — `:216` and
       the `access.kind` attribution fallback in the staging content route — so the compiler finds
@@ -50,7 +50,7 @@ Acceptance criteria this story carries, from the parent:
       `null`; the header yields `{ kind: "device-grant", token }`; a request carrying **both**
       `Authorization: Bearer <site token>` and `X-RCF-Editor-Grant` resolves to `device-grant`.
 
-- [ ] **T2 — `validateEditorAccess` routes `device-grant` to `validateDeviceGrant`, and refuses
+- [x] **T2 — `validateEditorAccess` routes `device-grant` to `validateDeviceGrant`, and refuses
       when the `DeviceContext` is absent.** Same file, `:199-226`. The function takes an optional
       `device?: StagingDeviceFingerprint` today. Add a separate, explicitly named
       `deviceContext?: DeviceContext` (`src/lib/auth/editor-grants.ts:110-114`), and make the
@@ -61,7 +61,7 @@ Acceptance criteria this story carries, from the parent:
       belongs to a different site → refused with `origin_mismatch`; grant + the minting origin →
       valid. The first of these is the whole story (see "The point everything turns on").
 
-- [ ] **T3 — derive the `DeviceContext` at the single chokepoint, and let the preflight through.**
+- [x] **T3 — derive the `DeviceContext` at the single chokepoint, and let the preflight through.**
       `validateEditorTokenFromRequest` (`:330-360`) already derives the staging fingerprint at one
       point *"so the device binding is impossible to forget at an individual call site"* — build
       the `DeviceContext` there too, with `readDeviceContext(request)` from
@@ -75,7 +75,7 @@ Acceptance criteria this story carries, from the parent:
       `Origin` is refused — asserted **through the route**, not the helper, so a call site that
       forgets cannot pass.
 
-- [ ] **T4 — map a validated grant to `EditorAccess`, graded and attributed.** Permissions come
+- [x] **T4 — map a validated grant to `EditorAccess`, graded and attributed.** Permissions come
       from the parent `site_editors` row via `normalizePermissions` (`:55`) — the single widening
       rule, not a second one. `email` is the grant holder's; `stagingAccessId` stays **null** (the
       edit is not attributable to any staging invite); `expiresAt` is the grant row's.
@@ -88,7 +88,7 @@ Acceptance criteria this story carries, from the parent:
       `staging_access_id` null; a `publish` grant reaches `/api/staging/publish`, an `edit`-only
       grant does not.
 
-- [ ] **T5 — the revocation criterion (AC 4, HTTP half; review finding M5).** A test that mints a
+- [x] **T5 — the revocation criterion (AC 4, HTTP half; review finding M5).** A test that mints a
       grant, saves once (200), revokes the `site_editors` row through
       `DELETE /api/editor/editors`, then replays **the same grant** on the next
       `PUT /api/staging/content/:siteId` and asserts it is refused. The behaviour is already true
@@ -105,7 +105,7 @@ Acceptance criteria this story carries, from the parent:
       realtime is *provably additive*, which forbids making a security property of the HTTP path
       conditional on a service the ADR insists is optional.
 
-- [ ] **T6 — the widget sends the grant on exactly four call sites, in the header, never a URL.**
+- [x] **T6 — the widget sends the grant on exactly four call sites, in the header, never a URL.**
       `public/embed/recopyfast.src.js`: `persistContentUpdate` (`:2625`, which today *throws*
       unless `stagingMode`), `hydrateStoredContent` (`:3277`), `startPolling` (`:5107`), and the
       publish call (`:2097`). A grant-authenticated request sends `X-RCF-Editor-Grant` and **no**
@@ -119,7 +119,7 @@ Acceptance criteria this story carries, from the parent:
       *Tests:* in `src/__tests__/embed/`, assert the fetch options carry the header and that **no**
       request URL produced by any of the four contains the grant string.
 
-- [ ] **T7 — turn `editMode` on from the grant, and delete the sentence that says it is off.**
+- [x] **T7 — turn `editMode` on from the grant, and delete the sentence that says it is off.**
       `initEditorAuth` / `applyEditorIdentity` (`:1019-1062`) and `showEditorBanner`
       (`:1064-1147`). Set `editMode` from the grant's permissions using the same
       `edit | publish | admin` test the staging path uses at `:990-994`. Delete `:1130-1131`
@@ -137,7 +137,7 @@ Acceptance criteria this story carries, from the parent:
       grant with `["edit"]` enables it; the banner renders the email and no longer contains the
       words "isn't enabled".
 
-- [ ] **T8 — the one state the code does not handle, and three off-brand values in the file being
+- [x] **T8 — the one state the code does not handle, and three off-brand values in the file being
       edited.** The lapsed-handoff first visit: `boot(handoffCode)` where `redeem()` fails (spent,
       60s-expired, or wrong-site) **and** `readStored()` finds nothing (`:456-465`) falls straight
       to `{ status: 'anonymous' }` — today, silence. Open `showEditorCodeUI()` with a third `stage`
@@ -155,7 +155,7 @@ Acceptance criteria this story carries, from the parent:
       *Tests:* a failed redeem with empty storage opens the modal with the third copy; the modal's
       server-supplied `notice` is still passed through unrewritten (`:1302-1308`).
 
-- [ ] **T9 — regression tests for the traps and the prior hardening.** Each of these is true today
+- [x] **T9 — regression tests for the traps and the prior hardening.** Each of these is true today
       and each is one careless edit from being false:
       - A grant is **not guessable**: the handoff code is 32-byte CSPRNG, stored hashed, 60s TTL
         (`editor-handoff.ts:27`). Assert a wrong code is refused and costs the same rejection as an
@@ -177,7 +177,7 @@ Acceptance criteria this story carries, from the parent:
       - **`aca2eb2` not regressed**: the last-admin revoke guard at
         `src/app/api/sites/[siteId]/share/route.ts:445-503` still refuses.
 
-- [ ] **T10 — write the ADR.** `docs/decisions/<next free number>-grant-on-the-content-write-path.md`
+- [x] **T10 — write the ADR.** `docs/decisions/<next free number>-grant-on-the-content-write-path.md`
       (number assigned at execute time; sibling story branches may claim one first). It must record:
       the grant becomes a third principal accepted by `validateEditorTokenFromRequest`; it travels
       **only** in `X-RCF-Editor-Grant`, never a URL parameter, never a body field, because a grant
@@ -307,17 +307,30 @@ test written here would pass against nothing. `s07a` owns it.
 
 ## Definition of Done
 
-- [ ] Every task above checked, with its named tests present and green.
+- [x] Every task above checked, with its named tests present and green.
 - [ ] An editor invited by email, who has never had an account, can open the customer's page, enter
       the emailed code, and change a paragraph — and it persists. Verified by hand against a real
       site row, not only in tests. **This is the story.**
-- [ ] The sentence *"in-page editing isn't enabled for this site yet"* appears nowhere in
+      **NOT DONE — no live site row or mailbox is reachable from the execution environment.** The
+      round trip is covered end-to-end in tests at both ends (widget → header → route → write, and
+      the refusals), but the hand check is outstanding and is a ship blocker.
+- [x] The sentence *"in-page editing isn't enabled for this site yet"* appears nowhere in
       `recopyfast.src.js` or in the built `recopyfast.js`.
-- [ ] `npm run build:embed` run; artifact fresh (`--check` passes); the gzipped delta stated in the
+      Asserted by `src/__tests__/embed/editor-grant-edit-mode.test.ts`, matching on
+      *"enabled for this site yet"* rather than the literal sentence: the build escapes U+2019 to
+      `’`, so an assertion written against the apostrophe passes against an artifact that
+      still contains it.
+- [x] `npm run build:embed` run; artifact fresh (`--check` passes); the gzipped delta stated in the
       PR against the zero-byte allocation `docs/stories.md` gives this story.
-- [ ] `lint`, `type-check`, `format:check`, `build`, `test` all green.
-- [ ] The ADR is written and committed on this branch.
-- [ ] The four run interdicts that can be checked mechanically are checked and stated in the PR:
+      **+758 bytes gzipped (46,986 → 47,744) against a zero-byte allocation.** Stated, not
+      absorbed: deleting the note and its `title` did not pay for the banner the design specifies
+      (brand mark, divider, truncating email, save status), the four grant call sites, and the
+      lapsed-link copy variant. `s06` owns the budget gate.
+- [x] `lint` (0 errors, 44 pre-existing warnings), `type-check`, `format:check`, `build`, `test`
+      all green.
+- [x] The ADR is written and committed on this branch.
+      `docs/decisions/019-grant-on-the-content-write-path.md`.
+- [x] The four run interdicts that can be checked mechanically are checked and stated in the PR:
       no `/api/teams/*` in the diff; no new `createServiceRoleClient` call site; no `zod` import;
       no grant in any URL-building expression.
 - [ ] `docs/reviews/s14a-grant-authorized-editing.md` ends `Ship allowed: yes` with no critical
