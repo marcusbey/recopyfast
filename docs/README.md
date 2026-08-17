@@ -85,6 +85,14 @@ story and travel with its branch.
 | [025](./decisions/025-grant-on-the-content-write-path.md) | The device grant is a principal on the content write path, fail-closed on its origin pin | `s14a` |
 | [026](./decisions/026-one-machine-no-adapter-supersedes-023.md) | One machine, no Redis adapter — supersedes [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) on the deployment shape only | `s07b` |
 
+> **Errata.** A wrong *pointer* in an accepted ADR — a line number, path, symbol or count — is
+> corrected in [`decisions/errata.md`](./decisions/errata.md), never by editing the ADR. That keeps
+> immutability whole instead of carving an exception into it, and keeps the real supersessions (024,
+> 026) from being buried under bookkeeping. **Anything that changes what was decided still needs a
+> superseding ADR** — errata are not a shortcut around that. Two entries so far, both line numbers
+> that moved; one of them went stale inside the very commit that was fixing stale line numbers,
+> which is why entries anchor on symbol names rather than line numbers.
+
 > **Numbering.** 025 was authored as 019 on `s14a`'s branch and renumbered when it merged, because
 > `019-agency-billing-single-payer` had taken that number on `main` in the meantime. Two branches
 > cannot see each other's ADR numbers, so **check this table for the next free number when you
