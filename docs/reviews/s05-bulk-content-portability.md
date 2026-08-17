@@ -108,10 +108,31 @@ both with `overwrite_existing`, and diff `current` / `original` / `published_con
 in Postgres, especially rows where `original_content IS NULL`; (3) confirm a `content_versions` row
 lands and renders "Bulk edit"; (4) open the Import tab as a view-only collaborator.
 
-> **Follow-up in flight.** MAJOR 5 and minor 1 are being fixed before merge — the wrong constant is
-> provable against the repo's own documented platform ceiling, and a load-bearing guard with zero
-> bite should not ship. This verdict is recorded as issued; the fix is verified separately below the
-> gate lines when it lands.
+## Follow-up — MAJOR 5 and minor 1 fixed and verified (`d172a0c`)
+
+Fixed before merge despite the ship-yes, because the constant was provable against the repo's own
+documented platform ceiling and a load-bearing guard with zero bite should not ship. **Verified
+independently against the branch, not accepted from the report:**
+
+- `MAX_IMPORT_BYTES = 4 * 1024 * 1024` (`constants.ts:24`), and `MAX_IMPORT_LABEL` is **derived**
+  from it (`:27`) — so the owner-facing string can no longer drift from the enforced number, which
+  is the failure this finding was about.
+- The card measures **the request envelope**, not the file: `new Blob([JSON.stringify(payload)]).size`
+  (`BulkOperations.tsx:126`), evaluated at file-choose time (`:157`) *and* again immediately before
+  the request (`:184`) — correct, because the format picker and the option checkboxes both change
+  the envelope and both can be touched after the file is picked. The cheap `file.size` pre-check
+  stays in front of the read (`:152`): escaping only grows a body, so a file already over the limit
+  cannot produce an envelope under it.
+- Its test uses a real ~2.1 MB CSV of quote characters — under the limit as a file, over it once
+  each `"` escapes. Nothing about it is faked.
+- Minor 1's null case is in, and bite was checked both directions: removing `carriesOriginal`'s null
+  check turns exactly the new test red; restored, green.
+- No stale "5 MB" survives in code or plan. The design doc did, and has been corrected on `main` —
+  `.md` and `.html`, both figures.
+
+Knock-on worth recording: choosing a file is now asynchronous, so four submit-path tests wait for
+the button to arm. That is real UI behaviour, not a test accommodation — an owner waits for the same
+thing.
 
 ## Verdict
 Max severity: major

@@ -13,7 +13,7 @@
 |---|---|---|
 | `s04-retire-graveyard-surfaces` · `s06a-embed-byte-gate` · `s14a-grant-authorized-editing` | minor | ✅ |
 | `s01-trial-signup` · `s02-install-verified` · `s07a-realtime-service-hardening` · `s16-webhook-config` | major | ✅ |
-| `s05-bulk-content-portability` | **major** (pass 3, `caaa5e0`) | ✅ — one follow-up fix in flight (MAX_IMPORT_BYTES → 4 MB) |
+| `s05-bulk-content-portability` | **major** (pass 3, fixed at `d172a0c`) | ✅ |
 | `s11a-ab-data-plane` | **minor** (re-reviewed `1a1e23c`) | ✅ |
 
 All nine branches are **a single commit** each (`s06a` has two). No rebasing needed; every merge is
