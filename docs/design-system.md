@@ -323,11 +323,16 @@ Report-only. None of these gets filled freestyle inside a story.
 4. **Widget has no token layer** — see above. Fold into `s06`.
 5. **No documented dark-mode treatment for the widget or email.** App handles it; these two
    have no answer, and the widget sits on customer pages that may be either.
-6. **No `Select` primitive**, despite `@radix-ui/react-select` being a declared dependency.
-   Screens needing a bounded choice currently use `Input type="date"` or a native `<select>`
-   (`AnalyticsDashboard.tsx` is the precedent). Four stories want one: `s05` (format), `s10`
-   (range), `s14c` (three filters), `s16` (coalescing window). Build it once, in whichever
-   ships first.
+6. ~~**No `Select` primitive**~~ — **closed by `s16`**, which shipped
+   `src/components/ui/select.tsx` as a genuine Radix wrapper. It was the first of the four
+   stories wanting one to reach execution, as this gap asked.
+   **Inherited caveat, found at review:** it drifts from `Input` — `select.tsx:32` uses
+   `bg-transparent` where `input.tsx:18` uses `bg-card`, and it omits `focus-visible:border-ring`
+   and `focus-visible:ring-offset-background`. Inside a `Card` the two render identically, so
+   `s16`'s own form is fine — but **`s05` (format), `s10` (range) and `s14c` (three filters) will
+   inherit it on other surfaces**, where the difference shows. Align it with `Input` before the
+   second consumer lands, not after. `SelectContent`/`SelectItem` match `dropdown-menu.tsx`
+   correctly and need no change.
 7. **No chart or timeline primitive.** `s03` (funnel), `s10` (impression timeline) and `s12`
    (progress toward sample) each compose one from tokens directly. `s10`'s inline SVG documents
    which tokens it uses so a primitive can be extracted from it rather than invented.
