@@ -187,11 +187,30 @@ The single most constrained surface in the product. It runs on domains we do not
   it is stale.
 - `/embed/recopyfast.js` is a **permanent public URL** — it is already baked into every
   snippet ever issued. It can never move or break for existing installs.
-- Budget: **≤ 30,000 bytes gzipped.** Today it is **46,781** (widget 34,063 + socket.io
-  13,085), measured 2026-08-16 with `gzip -9c public/embed/recopyfast.js | wc -c`. The budget
-  is currently breached; `s06` makes it a build gate. The per-story allocation is in
+- Budget: **≤ 30,000 bytes gzipped.** Today it is **46,875** (widget 34,063 + socket.io
+  13,141), measured 2026-08-16 by the build gate itself. **These three do not sum** — gzipping a
+  concatenation is not the sum of gzipping its parts, because the compressor shares a dictionary
+  across the whole stream. An earlier revision of this line printed a gzip figure for the bundle
+  beside a Node-zlib figure for the widget and invited exactly that arithmetic; the numbers were
+  from different compressors and never added up. The budget is currently breached; `s06a` makes
+  it a build gate. The per-story allocation is in
   [`stories.md`](./stories.md#byte-budget) and is the only place it is allocated — do not
   restate a ceiling in a story.
+- **Compressor, stated once — and this bit has already caused three wrong numbers.** The gate in
+  `scripts/build-embed.mjs` measures in process with Node's `zlib.gzipSync({ level: 9 })`:
+  **46,875** artifact, **34,063** widget alone, **13,141** socket.io. `MAX_BUNDLE_GZ` and
+  `MAX_WIDGET_GZ` are seeded from those, and they are the only figures that mean anything about
+  the gate, because the gate is what enforces them. In-process, so it cannot drift with whichever
+  `gzip` a machine ships.
+
+  GNU `gzip -9c` gives different, consistently lower numbers for the same bytes — **46,767**
+  artifact, **33,891** widget alone. And `gzip -9c FILE` is 14 bytes larger than `gzip -9c < FILE`
+  (46,781 vs 46,767) because the first form writes the filename into the gzip header. That
+  filename confound is where the phantom third figure came from.
+
+  So: **never compare a figure from one compressor against the other, and never quote a
+  widget-alone number as though it held under both — it does not.** Re-measure, and say which
+  tool produced it.
 - Degrade, never break. The host page keeps its authored copy on any failure. No uncaught
   exception may reach the host `window`, and there is no error surface there by design — which
   means a broken branch presents as "editing stopped working on one site", not as an alert.

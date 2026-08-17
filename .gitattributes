@@ -1,0 +1,5 @@
+# Node scripts are text. scripts/build-embed.mjs carried a literal NUL byte as a hash
+# delimiter, which tripped git binary detection and left the file with no reviewable
+# diff. The byte is now written as the escape `\0`; this keeps the diff readable for the
+# history that still contains it.
+*.mjs diff

@@ -23,44 +23,44 @@ do not move: `s06a` adds measurement and refusal, nothing else.
 
 ## Tasks (ordered)
 
-- [ ] **1. Pin the measurement, and prove the slice.** In `scripts/build-embed.mjs`, add
+- [x] **1. Pin the measurement, and prove the slice.** In `scripts/build-embed.mjs`, add
   `gzipSize(text)` (`node:zlib` `gzipSync`, `{ level: 9 }`) and
   `measureBundle(bundleText, transportText)` returning `{ bundleGz, transportGz, widgetGz }`,
   where **`widgetGz` is the artifact with the `socket.io-client.min.js` text excised** — the
   literal reading of AC 1's "widget code alone, excluding the concatenated transport library".
   If the transport text is not found inside the artifact, **throw**; do not fall back to a
   whole-file measurement. Test asserts the identity independently (see Test strategy).
-- [ ] **2. Seed the two constants, with the tombstone.** `MAX_BUNDLE_GZ` and `MAX_WIDGET_GZ` as
+- [x] **2. Seed the two constants, with the tombstone.** `MAX_BUNDLE_GZ` and `MAX_WIDGET_GZ` as
   module-level `UPPER_SNAKE_CASE` constants, seeded at **what task 1's function prints for
   today's artifact** — expected `46875` and `34063` (measured 2026-08-16 in this session; see
   *The point everything turns on* for why the bundle figure is not 46,781). House-style comment
   above them recording: they are seeded at today's size because seeding at the 30,000 budget
   makes the build red the moment the gate lands (the budget is breached by 16,875 today); they
   ratchet **downward only**; and **raising either one is a defect, not a fix**.
-- [ ] **3. Print the three numbers.** Extend the existing `console.log` block
+- [x] **3. Print the three numbers.** Extend the existing `console.log` block
   (`build-embed.mjs:235-245`) with a gz line carrying `bundleGz`, `widgetGz`, `transportGz` and
   both ceilings. Keep the raw-KB lines — they are how a reader sees the 10× gap between raw and
   gzipped that trap 4 of the research is about.
-- [ ] **4. Gate the build.** After the artifact is written, refuse: exit non-zero with a message
+- [x] **4. Gate the build.** After the artifact is written, refuse: exit non-zero with a message
   naming the constant, the measured value and the overage. **Write first, then gate** — a failed
   build that left no artifact on disk also leaves `--check` reporting "stale", which is a second,
   misleading error for the same cause.
-- [ ] **5. Gate `--check`, rebuild-free.** The `isCheck` branch (`:191-210`) reads
+- [x] **5. Gate `--check`, rebuild-free.** The `isCheck` branch (`:191-210`) reads
   `recopyfast.js` and `socket.io-client.min.js` from disk and runs the *same* `measureBundle`.
   No `loadEsbuild()`, no rebuild, no `node_modules` dependency beyond Node itself. Print the same
   line and apply the same refusal.
-- [ ] **6. Make the failure path testable without a 47KB fixture.** Env var
+- [x] **6. Make the failure path testable without a 47KB fixture.** Env var
   `RCF_EMBED_CEILING_OVERRIDE`, honoured **only when it is lower** than the constant; a higher
   value is ignored with a printed warning. An override that can only tighten cannot be used to
   escape the gate. Comment says exactly that.
-- [ ] **7. Test suite** — `src/__tests__/embed/build-size-gate.test.ts`, per Test strategy below.
+- [x] **7. Test suite** — `src/__tests__/embed/build-size-gate.test.ts`, per Test strategy below.
   Covers the measurement identity, the ratchet seed, both gate directions, the tighten-only
   override, `--check` green, `--check` stale, and the no-esbuild-in-`--check` invariant.
-- [ ] **8. Reach CI in check mode.** Add `node scripts/build-embed.mjs --check` as a step in
+- [x] **8. Reach CI in check mode.** Add `node scripts/build-embed.mjs --check` as a step in
   `.github/workflows/ci.yml`'s `ci` job **before** `npm run build`. Build mode is already gated
   in CI via `prebuild` → `build:embed`, but it *rebuilds*, so a stale committed artifact is
   invisible there. `--check` first is what catches it.
-- [ ] **9. Record the compressor, once.** House-style comment in `build-embed.mjs` and one
+- [x] **9. Record the compressor, once.** House-style comment in `build-embed.mjs` and one
   sentence in `docs/architecture.md` → The embed widget: 46,781 / 13,085 are **GNU `gzip -9c`**;
   the gate's canonical in-process figures for the same bytes are **46,875 / 34,063**, and the two
   must never be compared. Do **not** change any figure in `docs/stories.md` (its table is
