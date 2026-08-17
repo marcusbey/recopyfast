@@ -511,6 +511,86 @@ export async function resolveStripePriceId(
   return priceId;
 }
 
+/** The two periods every paid plan can be billed on. */
+const BILLING_PERIODS: readonly BillingPeriod[] = ["monthly", "yearly"];
+
+/**
+ * `resolveStripePriceId`, downgraded from a throw to a null.
+ *
+ * A plan/period pair with no configured price id is a real, survivable state:
+ * a plan that is not sold yearly, or an environment where only the variables
+ * in use have been set. `findPaidPlanIdByStripePriceId` consults ALL of them on
+ * every subscription webhook, so letting one missing variable throw would turn
+ * "yearly Starter is not on sale" into a 500 on every subscription event there
+ * is. Skipping the pair costs only the subscriptions actually billing it, which
+ * then resolve to null and are refused by the caller.
+ */
+async function configuredStripePriceId(
+  planId: PaidPlanId,
+  billingPeriod: BillingPeriod,
+): Promise<string | null> {
+  try {
+    return await resolveStripePriceId(planId, billingPeriod);
+  } catch (error) {
+    console.error(
+      `No Stripe price id resolves for ${planId}/${billingPeriod}, so a ` +
+        `subscription billing it cannot be matched back to a plan.`,
+      error,
+    );
+    return null;
+  }
+}
+
+/**
+ * The paid plan a Stripe price belongs to — the inverse of
+ * `resolveStripePriceId`, and `null` when the catalogue sells no such price.
+ *
+ * WHY IT EXISTS — the Stripe webhook used to record
+ * `plan: subscription.metadata?.plan_id || "pro"`, which made the most
+ * expensive plan the fail-open default on precisely the subscriptions that
+ * carry no metadata: the ones created from the Stripe dashboard or a Payment
+ * Link. `updateSubscription` (src/lib/stripe/subscription.ts) is the only code
+ * path that keeps `metadata.plan_id` in step with the price, so a plan change
+ * made anywhere else left the metadata stale and the row wrong. The price is
+ * what the customer is actually charged, so the price is what decides.
+ *
+ * Ambiguity answers null rather than picking. Two plans configured with the
+ * same price id is a misconfiguration, but a silent first-match would hand out
+ * whichever plan the iteration order happened to reach first, permanently and
+ * with nothing to notice it.
+ */
+export async function findPaidPlanIdByStripePriceId(
+  priceId: string,
+): Promise<PaidPlanId | null> {
+  const configured = await Promise.all(
+    PAID_PLAN_IDS.flatMap((planId) =>
+      BILLING_PERIODS.map(async (billingPeriod) => ({
+        planId,
+        resolved: await configuredStripePriceId(planId, billingPeriod),
+      })),
+    ),
+  );
+
+  const claimants = new Set(
+    configured
+      .filter((entry) => entry.resolved === priceId)
+      .map((entry) => entry.planId),
+  );
+
+  if (claimants.size !== 1) {
+    if (claimants.size > 1) {
+      console.error(
+        `Stripe price ${priceId} is configured for more than one plan ` +
+          `(${[...claimants].join(", ")}). Refusing to guess which one a ` +
+          `subscription billing it is on.`,
+      );
+    }
+    return null;
+  }
+
+  return [...claimants][0];
+}
+
 /**
  * Stripe price id for a one-time product. Same precedence as above.
  */

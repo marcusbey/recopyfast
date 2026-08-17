@@ -3,9 +3,11 @@ import { headers } from "next/headers";
 import type Stripe from "stripe";
 import { stripe, requireWebhookSecret } from "@/lib/stripe/config";
 import {
+  findPaidPlanIdByStripePriceId,
   getLifetimeGrantPlanId,
   isPaidPlanId,
   resolveStripePriceId,
+  type PaidPlanId,
 } from "@/lib/stripe/plans";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
@@ -354,12 +356,105 @@ function assertRowMatched(
 }
 
 /**
+ * The subscription as Stripe holds it NOW, not as the delivered event
+ * snapshotted it at emission time.
+ *
+ * WHY EVERY SUBSCRIPTION WRITE GOES THROUGH THIS — Stripe states its events are
+ * unordered and delivery is at-least-once. The handlers below wrote the payload
+ * verbatim, keyed on `.eq("stripe_subscription_id", …)` and nothing else: no
+ * timestamp comparison anywhere, and every column written unconditionally. So a
+ * `customer.subscription.updated` that was slow or retried could land AFTER the
+ * `customer.subscription.deleted` for the same subscription and write back
+ * `status:'active'`, `plan:'pro'`, `cancel_at:null` and `canceled_at:null`. It
+ * carries its own `event.id`, so the idempotency probe at the top of POST does
+ * not stop it — it is late, not duplicate. Nothing in this codebase reconciles
+ * `billing_subscriptions` from Stripe afterwards (`vercel.json`'s two crons are
+ * not billing), so the resurrected row is permanent: an account holding Pro
+ * that nobody is being charged for. A redelivered `created` reaches the same
+ * end through its upsert.
+ *
+ * Re-reading makes delivery order stop mattering rather than merely making it
+ * detectable, and it needs no schema change: the API always returns current
+ * state, so whichever event triggered the write, the row ends up saying what
+ * Stripe says today.
+ *
+ * RESIDUAL WINDOW, stated so nobody reads this as "ordered": two concurrent
+ * deliveries can each retrieve and then write in the opposite order. That race
+ * is bounded by the time between the retrieve and the write — milliseconds —
+ * where the one this replaces was bounded by Stripe's retry schedule, i.e.
+ * days. Closing it entirely needs a compare-and-set on the row.
+ *
+ * A failure here is left to propagate. Falling back to the payload snapshot
+ * would reintroduce the stale write at exactly the moment the network is
+ * unhealthy — which is when deliveries are late in the first place. The 500
+ * puts the event back on Stripe's retry schedule instead.
+ */
+async function retrieveCurrentSubscription(
+  subscriptionId: string,
+): Promise<StripeSubscriptionWithPeriod> {
+  return (await stripe.subscriptions.retrieve(
+    subscriptionId,
+  )) as StripeSubscriptionWithPeriod;
+}
+
+/**
+ * Which plan this subscription is on, decided by the price it actually bills.
+ *
+ * WHY NOT METADATA — this used to be `subscription.metadata?.plan_id || "pro"`,
+ * which made the most expensive plan the fail-open default on exactly the
+ * subscriptions that carry no metadata: the ones created from the Stripe
+ * dashboard or a Payment Link (see `requireBillingCustomer`'s caller, which
+ * already compensates for the same gap on attribution). And `updateSubscription`
+ * (src/lib/stripe/subscription.ts) is the only code path that keeps
+ * `metadata.plan_id` in step with the price, so a plan change made anywhere
+ * else — the dashboard, the API, a proration fix — left the metadata behind.
+ *
+ * Metadata is kept only as a tie-breaker between items that each match a
+ * DIFFERENT plan, which `createCheckoutSession` never produces but a manual
+ * dashboard edit can. It can no longer name a plan the prices do not.
+ *
+ * Throws when nothing matches. `billing_subscriptions_plan_valid` admits only
+ * 'starter' and 'pro', so a guess is either a plan the customer is not paying
+ * for or a 23514 that discards the event; a 500 is retried until the catalogue
+ * and the subscription agree.
+ */
+async function resolveSubscriptionPlan(
+  subscription: StripeSubscriptionWithPeriod,
+): Promise<PaidPlanId> {
+  const priceIds = (subscription.items?.data ?? [])
+    .map((item) => item.price?.id)
+    .filter((priceId): priceId is string => Boolean(priceId));
+
+  const resolved = await Promise.all(
+    priceIds.map((priceId) => findPaidPlanIdByStripePriceId(priceId)),
+  );
+  const candidates = [...new Set(resolved.filter(isPaidPlanId))];
+
+  if (candidates.length === 1) return candidates[0];
+
+  const declared = subscription.metadata?.plan_id;
+  if (candidates.length > 1 && isPaidPlanId(declared)) {
+    const tieBreak = candidates.find((candidate) => candidate === declared);
+    if (tieBreak) return tieBreak;
+  }
+
+  throw new Error(
+    `Stripe subscription ${subscription.id} bills price(s) ` +
+      `[${priceIds.join(", ")}] which resolve to ${candidates.length} plan(s) ` +
+      `in the catalogue. Refusing to record a plan this subscription is not ` +
+      `paying for — check the plans table and the STRIPE_*_PRICE_ID variables.`,
+  );
+}
+
+/**
  * Handle subscription creation
  */
 async function handleSubscriptionCreated(
-  subscription: StripeSubscriptionWithPeriod,
+  delivered: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
+  const subscription = await retrieveCurrentSubscription(delivered.id);
+
   // A subscription created from the Stripe dashboard or a Payment Link carries
   // no metadata, so fall back to the customer record before giving up.
   const customer = await requireBillingCustomer(
@@ -382,7 +477,7 @@ async function handleSubscriptionCreated(
         user_id: userId,
         customer_id: customer.id,
         stripe_subscription_id: subscription.id,
-        plan: subscription.metadata?.plan_id || "pro",
+        plan: await resolveSubscriptionPlan(subscription),
         status: subscription.status,
         current_period_start: await subscriptionPeriod(subscription, "start"),
         current_period_end: await subscriptionPeriod(subscription, "end"),
@@ -408,13 +503,15 @@ async function handleSubscriptionCreated(
  * Handle subscription updates
  */
 async function handleSubscriptionUpdated(
-  subscription: StripeSubscriptionWithPeriod,
+  delivered: StripeSubscriptionWithPeriod,
   supabase: ServiceClient,
 ) {
+  const subscription = await retrieveCurrentSubscription(delivered.id);
+
   const { data: updatedRows, error: updateError } = await supabase
     .from("billing_subscriptions")
     .update({
-      plan: subscription.metadata?.plan_id || "pro",
+      plan: await resolveSubscriptionPlan(subscription),
       status: subscription.status,
       current_period_start: await subscriptionPeriod(subscription, "start"),
       current_period_end: await subscriptionPeriod(subscription, "end"),
@@ -442,6 +539,19 @@ async function handleSubscriptionUpdated(
 
 /**
  * Handle subscription deletion
+ *
+ * DELIBERATELY DOES NOT RE-READ FROM STRIPE, unlike the two handlers above.
+ * A cancelled subscription id can never become live again — Stripe issues a new
+ * id for a resubscribe — so this event is terminal by definition and a retrieve
+ * could only agree with it or fail. Agreeing adds nothing; failing would throw,
+ * and the one handler whose job is to REMOVE access would then be the one that
+ * needs Stripe to be reachable in order to run. The `updated` and `created`
+ * handlers re-read precisely so that whichever of them arrives late converges
+ * on this terminal state.
+ *
+ * `canceled_at` is taken from the payload rather than the clock: for a terminal
+ * event that value is final, so the snapshot cannot be stale about it, and it
+ * records when Stripe cancelled rather than when we processed the event.
  */
 async function handleSubscriptionDeleted(
   subscription: Stripe.Subscription,
@@ -451,7 +561,9 @@ async function handleSubscriptionDeleted(
     .from("billing_subscriptions")
     .update({
       status: "canceled",
-      canceled_at: new Date().toISOString(),
+      canceled_at: subscription.canceled_at
+        ? new Date(subscription.canceled_at * 1000).toISOString()
+        : new Date().toISOString(),
     })
     .eq("stripe_subscription_id", subscription.id)
     .select("id");

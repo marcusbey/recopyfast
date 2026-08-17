@@ -39,9 +39,34 @@ jest.mock("next/headers", () => ({
   headers: jest.fn(async () => new Headers({ "stripe-signature": "t=1,v1=x" })),
 }));
 
+/**
+ * HARNESS ONLY — the behaviour asserted below is unchanged.
+ *
+ * The subscription handlers now re-read the subscription from Stripe before
+ * writing, so that a delivery arriving after the subscription was cancelled
+ * cannot resurrect the row (covered in stripe-webhook-stale-writes.test.ts).
+ * `subscriptions.retrieve` therefore has to exist on the mocked client, and it
+ * answers with the same SUBSCRIPTION object the event carries — this file is
+ * about what happens when the DATABASE write fails, not about Stripe.
+ */
 jest.mock("@/lib/stripe/config", () => ({
-  stripe: { webhooks: { constructEvent: jest.fn() } },
+  stripe: {
+    webhooks: { constructEvent: jest.fn() },
+    subscriptions: { retrieve: jest.fn() },
+  },
   requireWebhookSecret: jest.fn(() => "whsec_test"),
+}));
+
+/**
+ * HARNESS ONLY, same reason: the plan is now resolved from the price the
+ * subscription bills, against the `plans` catalogue. Loading a real catalogue
+ * through this file's minimal PostgREST stub would be a fixture for something
+ * it does not test; the resolution itself is covered end-to-end in
+ * stripe-webhook-stale-writes.test.ts and in lib/stripe/plans.test.ts.
+ */
+jest.mock("@/lib/stripe/plans", () => ({
+  ...jest.requireActual("@/lib/stripe/plans"),
+  findPaidPlanIdByStripePriceId: jest.fn(async () => "pro"),
 }));
 
 jest.mock("@/lib/supabase/service", () => ({
@@ -49,6 +74,7 @@ jest.mock("@/lib/supabase/service", () => ({
 }));
 
 const constructEvent = stripe.webhooks.constructEvent as jest.Mock;
+const retrieveSubscription = stripe.subscriptions.retrieve as jest.Mock;
 const mockServiceClient = createServiceRoleClient as unknown as jest.Mock;
 
 const WRITE_ERROR = {
@@ -114,6 +140,7 @@ function request(): Parameters<typeof POST>[0] {
 beforeEach(() => {
   jest.clearAllMocks();
   (requireWebhookSecret as jest.Mock).mockReturnValue("whsec_test");
+  retrieveSubscription.mockResolvedValue(SUBSCRIPTION);
   mockServiceClient.mockReturnValue(buildClient({ error: WRITE_ERROR }));
 });
 
@@ -124,7 +151,14 @@ const SUBSCRIPTION = {
   metadata: { user_id: "22222222-2222-2222-2222-222222222222", plan_id: "pro" },
   items: {
     data: [
-      { current_period_start: 1700000000, current_period_end: 1702592000 },
+      {
+        // A Stripe SubscriptionItem always carries its price; the fixture
+        // omitted it because nothing read it until the plan started being
+        // resolved from the price rather than from metadata.
+        price: { id: "price_test_pro_monthly" },
+        current_period_start: 1700000000,
+        current_period_end: 1702592000,
+      },
     ],
   },
   cancel_at: null,
