@@ -1,98 +1,118 @@
-# Review — `s05-bulk-content-portability` (re-review of the fix run)
+# Review — `s05-bulk-content-portability` (third pass)
 
-Branch `feature/s05-bulk-content-portability`, commit `27d9bd1`. Fresh context, read-only.
-Supersedes the first-pass review (critical / ship no); that verdict's findings are assessed below.
+Branch `feature/s05-bulk-content-portability`, commit `caaa5e0`. Fresh context, read-only.
+Pass 1: critical / ship no. Pass 2: major / ship no, four majors. **This pass: all four closed.**
 
-## Tests, run by the reviewer
+## Suite, run by the reviewer
 
-`npx jest --ci`: **146 suites passed / 1 skipped, 2019 of 2055**, exit 0. Coverage run exit 0, the
-ratchet holds. `type-check`, `lint` (0 errors), `format:check`, `build` — all green. All four run
-interdicts show empty diffs. No `zod`.
+`npx jest --ci`: 146 suites passed / 1 skipped, **2035 of 2071**, exit 0. Coverage exit 0 —
+statements 42.64 · branches 35.72 · functions 40.11 · lines 42.92, all far above the ratchet floors
+(22/16/19/22), and **`jest.config.js` is byte-identical to `main`**, so nothing was lowered.
+`npm run build` exit 0. `type-check`, `format:check` clean; `lint` 0 errors. All four run interdicts
+show empty diffs. No `zod`. No SIGSEGV.
 
-**13 neutralizations, all bit, all restored** (`git diff --exit-code` clean afterwards). Highlights:
-re-applying the A-1 `<`→`&lt;` rewrite turned 3 red; `bulk_edit`→`bulk_import` 1; the registry key
-back to `bulk` 1; removing CSV quote-awareness 7; `encodeCSVRow` no longer quoting 8.
+## The four prior majors — closed, each verified independently
 
-## The prior critical is genuinely closed
+**MAJOR 1 — removing the length bound did *not* trade one defect for another.** All three
+sub-checks were run separately rather than inferred from one another:
 
-`sanitizeHTML` is gone from the import path — only the tombstone comment remains.
-`validateDiscoveredText` was read line by line: it never escapes, strips or truncates. The
-round-trip fixture now carries `<`, `>`, `&` and quotes in real marketing copy, and goes red under
-neutralization. **A-1 is not back in any form.**
+- *Discovery unchanged.* `validateDiscoveredText` is now
+  `validateVerbatimText(content, MAX_DISCOVERED_TEXT_LENGTH)` (`discovered-text.ts:162-164`) — same
+  check order, and the parameterised error template renders the identical string at 20000.
+  Neutralizing the wrapper to pass `null` turned **5 tests red repo-wide**.
+- *Both guarantees survive on the import path specifically, not by inheritance.* Skipping the
+  control-character check when `maxLength === null` → **2 red**. Re-applying the A-1 `<`→`&lt;`
+  rewrite on the null-ceiling branch only → **4 red**.
+- *`MAX_IMPORT_BYTES` is real and enforced.* `src/lib/bulk/constants.ts:13`, applied at
+  `import/route.ts:49` after `req.text()` and before `JSON.parse`. `import.test.ts:178-198` hits it
+  with a genuinely oversized body, asserting 413 plus zero inserts and zero upserts. Raising the
+  threshold ×1000 → **1 red**. **Unbounded text does not reach the database by this route** — the
+  body ceiling caps any single field. Pass 2's "413 never hit" gap is closed.
 
-The `bulk_edit` correction is substantively right: `20251230100000_edit_board.sql:69` constrains
-`change_type` to six values, `bulk_import` is not among them, and no later migration relaxes it.
+**MAJOR 2 — presence semantics are uniform, and there is no third column.** Both columns treat
+`undefined` and JSON `null` as absent (`route.ts:419-422`) and are omitted from the payload entirely
+(`:704-713`), so `ON CONFLICT DO UPDATE` never names them. Both are nullable in the schema
+(`20250817000000:31,35`), so no `NOT NULL` trap was hiding behind the mock. Neutralizing the
+omission → **5 red**. The whole payload was checked for a third: the only other content column is
+`published_content: content.current`, deliberately in lockstep — every writer in the repo sets
+published and current together (`v1/content:236,258`; `bulk/update:313-314`; `content/[siteId]:133`;
+`server/index.js:457-458,712-713`; `publish_staging_content_atomic 20260803020000:81-82`).
 
-## Findings
+**MAJOR 3 — closed.** `git diff main --exit-code` on `docs/decisions/008-…` and on the whole
+`docs/decisions/` directory both exit 0. The false *"before this ADR ever reached `main`"* claim is
+gone; the plan and the route comment cite ADR 024.
 
-### MAJOR 1 — a value that round-trips today can now be refused on import
-Probed, not inferred: a 20,001-character `current_content` returns `failed / "content exceeds 20000
-characters"` with zero writes. The deviation's premise — *"both bounds already govern every row"* —
-is **true of discovery and false of the column**. No other writer caps length:
-`bulk/update` set/append, `staging/content` PUT (`sanitizeHTML` has no cap) and `v1/content` POST
-all write unbounded. So a row written by any of those three exports fine and will not import.
+**MAJOR 4 — closed and correct.** `edit-board/styles/apply/route.ts:176` writes exactly
+`p_change_type: "style_apply"`. The fixture `not-a-change-type` is genuinely outside the CHECK list
+at `20251230100000_edit_board.sql:69`. Neutralizing the label → 1 red; reverting the key to `bulk` →
+1 red.
 
-Not the old bug — it is loud, per-row, and corrupts nothing — hence major, not critical. But **AC 3
-fails for that class of row**, and the run interdict against adding a content-length rule was
-explicit.
+## New — MAJOR 5: the 5 MB import limit is not the limit that applies
 
-### MAJOR 2 — a minimal import file blanks `original_content` permanently
-Probed: a 3-column CSV — *the exact minimum the UI advertises* — writes `original_content: ""`.
-That column is the served fallback when `published_content` is null, and the last `COALESCE` arm in
-`create_content_version`. **Pre-existing on `main`** (identical shape in
-`git show main:…/import/route.ts`), but this story makes it reachable, and the card's own "What's in
-the file" panel lists 5 fields while omitting this one — so a user following the UI builds the
-destructive file. Scoping is a judgement call; the data loss is not.
+`constants.ts:4-8` claims the constant exists so the owner's number *"can never drift from the
+number the server actually applies."* It drifts twice:
 
-### MAJOR 3 — ADR 008 was edited in place, and the correction misstated its own history
-`AGENTS.md`: ADRs are immutable; a change means a superseding ADR. ADR 008 is on `main`
-(`45844fd`), where line 51 still reads `bulk_import`. The branch rewrote the Decision paragraph and
-appended a note claiming the value was fixed *"before this ADR ever reached `main`"* — verifiably
-untrue. Substance right, mechanism wrong, and the artifact now carries a false claim about itself.
+1. **It is above the platform ceiling this repo documents.** `upload/image/route.ts:38-45` states it
+   in the repo's own words: Vercel caps a serverless function body at **4.5 MB**, the rejection
+   happens in the platform *before the handler runs*, and it surfaces as an opaque 413 with no JSON
+   body — which is why that route deliberately picks 4 MB. `architecture.md:49` confirms Vercel
+   hosts the app. `s05` picked 5 MB, so for a 4.5–5 MB body the route's own 413 branch never runs,
+   and `BulkOperations.tsx:155-158` calls `response.json()` on the platform's non-JSON 413. **The
+   owner sees a JSON-parse error string.**
+2. **Client and server measure different quantities against the same constant.**
+   `BulkOperations.tsx:104` checks `file.size`; the server measures the `JSON.stringify(payload)`
+   envelope (`:145` → `route.ts:46-47`), where every quote and newline in a CSV becomes two bytes.
+   The body is strictly larger than the file.
 
-**Already remedied on `main`:** [ADR 024](../decisions/024-bulk-import-snapshot-change-type.md)
-supersedes ADR 008 on this one value. **The branch must restore ADR 008 byte-for-byte** to `main`'s
-content and cite ADR 024 instead.
+Nothing is corrupted and the refusal direction is safe, so this is major, not critical.
+**Fix: `MAX_IMPORT_BYTES` → 4 MB, and bound the envelope client-side rather than the raw file.**
 
-### MAJOR 4 — a new test certifies a live mislabelling
-`VersionTimelineItem.test.tsx:47` asserts `style_apply` → "Manual edit" *as correct*, describing it
-as "a change type this build does not know". But `edit-board/styles/apply/route.ts:176` writes
-exactly that value on every AI style application. It is the **identical** silent-fallback defect
-just fixed for `bulk_edit`, now blessed by a test — and the author enumerated the full CHECK list in
-their own comment, so the contradiction was on screen. Minimum fix: use a genuinely impossible value
-in the fixture.
+## Minors
 
-### Minors
-No test covers the 20,000-character bound — the deviation's central claim is the one thing unpinned.
-"What's in the file" lists 5 of 11 exported columns. `POST /api/bulk/export` remains unmetered
-(the scope argument does not hold, but it is kept minor for consistency with the prior review).
+1. **One guard has zero bite.** Neutralizing `carriesOriginal` (`route.ts:420`) to drop the null
+   check produced **0 red**, while the identical neutralization on `carriesMetadata` produced 1.
+   The guard is load-bearing for exactly the rows this story now creates: a 3-column import leaves
+   `original_content` NULL, the JSON export writes that NULL, and without the guard every such row
+   fails re-import.
+2. The status-badge comment says nothing writes `language_switch` / `theme_apply`. **Something
+   does** — `server/index.js:810` and `:983`. The conclusion still holds, because `AGENTS.md:77` and
+   `architecture.md:35,276` record `server/` as not deployed, so there is no live mislabelling. But
+   the wording is false as written, and **[ADR 023](../decisions/023-websocket-only-transport-no-sticky-routing.md)
+   means `s07b` standing that service up turns both into silent "Manual edit".**
+3. CSV export flattens NULL `original_content` to `""` (`export/route.ts:199`), so JSON preserves
+   NULL and CSV cannot. Pre-existing on `main`, newly consequential because the import now creates
+   NULL-original rows.
+4. The native `<select>` deviation is honest against the code, but `design-system.md:337-346`
+   records gap 6 as **closed by `s16`** and names `s05` as the consumer that inherits
+   `select.tsx`'s `bg-transparent` drift. The plan's citation is stale — **merge-order dependency**.
+5. `jest.setup.js` and `import-outcomes.test.ts` are missing from the plan's "Files touched".
+   `validate_content` is still parsed into options and read by nothing.
 
-## The three declared deviations, judged
+## Bite — 12 neutralizations, 11 bit
 
-1. **`validateDiscoveredText` reuse — does not fully hold.** See MAJOR 1.
-2. **400 widening — holds.** All four reachable `FileParseError` conditions are caller errors.
-3. **`export` unmetered — does not hold as argued**, but stays minor.
+discovery ceiling → 5 · control-char skip → 2 · A-1 rewrite → 4 · size threshold ×1000 → 1 ·
+`original_content` null → **0** · payload always names both → 5 · metadata null → 1 · `style_apply`
+label → 1 · key back to `bulk` → 1 · fetch URL back to import → 3 · export GET permission gate → 1 ·
+CSV quoting removed → 8. All restored; final `git diff --exit-code` 0, `git status --short` empty.
 
-## Verified sound
-
-Every import, signature and primitive checks against the real file: `enforceRateLimit`/`API_UPLOAD`,
-`create_content_version`'s four parameters, and every `src/components/ui/` component with matching
-props. **No primitive was invented** — `select.tsx` is genuinely absent, and design-system gaps 6
-and 8 are cited exactly. Design conformity is complete: every named state is rendered and tested.
-Plan tasks 1–10 are all done, with nothing unasked-for in the diff.
-
-## Not verified — needs a human's hands
+## Not verified
 
 No screen rendered in a browser. No real file exported or re-imported — `FileReader`, `Blob` and
-`NextResponse` are all mocked. Supabase is mocked throughout, so the CHECK constraint is **read,
-never exercised**. 413 never hit with a genuinely oversized body. Permission-refused is only ever a
-stubbed 403. No E2E.
+`NextResponse` all mocked. Supabase mocked throughout, so the CHECK constraint is read, never
+exercised. **The 413 is never hit through the platform — which is precisely why the Vercel ceiling
+went unnoticed.** Permission-refused is only a stubbed 403. No E2E.
 
-**One query decides how much MAJOR 1 matters:**
-`select count(*) from content_elements where length(current_content) > 20000`.
-Then: export a real site in both formats, re-import, diff `current_content` / `original_content` /
-`metadata` in Postgres, and confirm a `content_versions` row lands with `change_type = 'bulk_edit'`.
+Human gestures, in priority order: (1) upload a ~4.7 MB file against a deployed preview and read the
+error the owner actually sees — that is MAJOR 5; (2) export a real site as CSV and JSON, re-import
+both with `overwrite_existing`, and diff `current` / `original` / `published_content` and `metadata`
+in Postgres, especially rows where `original_content IS NULL`; (3) confirm a `content_versions` row
+lands and renders "Bulk edit"; (4) open the Import tab as a view-only collaborator.
+
+> **Follow-up in flight.** MAJOR 5 and minor 1 are being fixed before merge — the wrong constant is
+> provable against the repo's own documented platform ceiling, and a load-bearing guard with zero
+> bite should not ship. This verdict is recorded as issued; the fix is verified separately below the
+> gate lines when it lands.
 
 ## Verdict
 Max severity: major
-Ship allowed: no
+Ship allowed: yes

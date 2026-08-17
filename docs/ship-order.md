@@ -13,7 +13,7 @@
 |---|---|---|
 | `s04-retire-graveyard-surfaces` · `s06a-embed-byte-gate` · `s14a-grant-authorized-editing` | minor | ✅ |
 | `s01-trial-signup` · `s02-install-verified` · `s07a-realtime-service-hardening` · `s16-webhook-config` | major | ✅ |
-| `s05-bulk-content-portability` | **major** (re-reviewed `27d9bd1`) | ❌ **fix round 3 in flight** |
+| `s05-bulk-content-portability` | **major** (pass 3, `caaa5e0`) | ✅ — one follow-up fix in flight (MAX_IMPORT_BYTES → 4 MB) |
 | `s11a-ab-data-plane` | **minor** (re-reviewed `1a1e23c`) | ✅ |
 
 All nine branches are **a single commit** each (`s06a` has two). No rebasing needed; every merge is
@@ -111,9 +111,16 @@ collision to resolve:
 1. **`s01`** — `20260817000000_trial_entitlements.sql`
 2. **`s02`** — `20260817001000_sites_install_status.sql`
 3. **`s16`** — `20260817003000_webhook_dispatch_and_secrets.sql`
-4. **`s05`** — no migration; merge after its re-review passes.
+4. **`s05`** — no migration; ship-allowed at pass 3. **Merge it after `s16`**: the review found the
+   plan's `<select>` citation stale, because `design-system.md` records gap 6 as closed by `s16` and
+   names `s05` as the consumer that inherits `select.tsx`'s `bg-transparent` drift.
 
 `s07a` touches neither cluster meaningfully and can go any time.
+
+### All nine are now ship-allowed
+
+Nothing is gated on a review any more. What remains before a merge is **ordering** (this document)
+and the operator gestures below — not further pipeline work.
 
 ---
 
