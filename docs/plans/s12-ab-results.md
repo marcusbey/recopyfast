@@ -19,9 +19,12 @@ validated: no
 >
 > **To lift this gate:** creating those tables is a scope decision reserved to the operator —
 > `s11a` withdrew its own Task 9 rather than ship a migration that would abort, be marked applied,
-> and reproduce the original scar. Run `scripts/check-ab-schema.mjs` with a pooler-region
-> `SUPABASE_DB_URL` first, including RLS, policies and `UNIQUE(visitor_id, test_id)`, **before**
-> anything creates them.
+> and reproduce the original scar. Run the probe first, with a pooler-region `SUPABASE_DB_URL`,
+> covering RLS, policies and `UNIQUE(visitor_id, test_id)`, **before** anything creates them.
+>
+> The probe is `scripts/check-ab-schema.mjs` — **tracked only on `feature/s11a-ab-data-plane`, not
+> on `main`**. Either merge `s11a` first (it is ship-allowed) or read it with
+> `git show feature/s11a-ab-data-plane:scripts/check-ab-schema.mjs`.
 
 # Plan — Story s12-ab-results
 

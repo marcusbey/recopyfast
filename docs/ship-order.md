@@ -149,6 +149,11 @@ source files — resolve them normally, then run the suite.
 for paying accounts if the code lands before the migration applies. That is a deploy-sequencing
 requirement, not a merge one — but `s01` is first in cluster B, so it is the first place it bites.
 
+**Merging `s11a` puts the schema probe in the tree.** `scripts/check-ab-schema.mjs` is tracked only
+on `feature/s11a-ab-data-plane`. It is the instrument for the largest open unknown in this codebase
+— whether the RLS tenant boundary ADR 002 depends on is actually in place — and it has never been
+run. That is a reason to merge `s11a` early rather than late.
+
 **Fix `NEXT_PUBLIC_APP_URL` before `s17`.** It is set to the apex, which 308s, and only
 `getPublicAppUrl` canonicalises it — so every sitemap, robots and canonical URL currently redirects
 (QA register D-1, 2026-08-17). Setting the env var to `https://www.recopyfa.st` fixes sixteen call

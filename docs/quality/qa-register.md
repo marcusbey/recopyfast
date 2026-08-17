@@ -35,9 +35,18 @@
 >
 > **What to run, once, from a host with IPv6 or the pooler region:** a `pg_catalog` probe listing
 > tables, `pg_class.relrowsecurity`, and `pg_policies` counts per table. Compare against
-> `architecture.md`'s Data model. That single query replaces every inference in this entry and
-> should be committed as a script so it is repeatable — `scripts/check-ab-schema.mjs` is the
-> template, and its `pg_catalog` half is already written and already unrun.
+> `architecture.md`'s Data model. That single query replaces every inference in this entry.
+>
+> **The instrument already exists — but not on `main`.** `scripts/check-ab-schema.mjs` (306 lines)
+> is tracked **only on `feature/s11a-ab-data-plane`**, which is unmerged. Read it with
+> `git show feature/s11a-ab-data-plane:scripts/check-ab-schema.mjs`. Its `pg_catalog` half is
+> genuinely written and genuinely unrun: `relrowsecurity` from `pg_class`, policy counts from
+> `pg_policies`, the unique-constraint check, and it already handles Supabase's pooler presenting a
+> certificate for a different host. It is **scoped to the A/B tables** via its `REQUIRED` map —
+> broaden that map to cover `architecture.md`'s Data model and it answers the whole question.
+>
+> *(Recorded precisely because an earlier revision of this entry called it "the template" as though
+> it sat on `main`. It does not. That was the same infer-from-a-report habit this entry is about.)*
 >
 > Until then: **the security boundary this product depends on is unverified**, and the app largely
 > works around it — 28 of 77 routes use the service-role client, which bypasses RLS entirely.

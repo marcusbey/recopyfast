@@ -90,8 +90,9 @@ consequence of merging, not a defect in this branch.
 - **No database.** The absence was verified from
   `supabase/migrations/20260801200000_missing_base_tables.sql:41-42,59-66` plus independent
   confirmation, not by re-running the live probe. RLS, policies and `UNIQUE(visitor_id, test_id)`
-  remain unobserved. **Run `check-ab-schema.mjs` with a pooler-region `SUPABASE_DB_URL` _before_
-  anything creates these tables.**
+  remain unobserved. **Run `scripts/check-ab-schema.mjs` with a pooler-region `SUPABASE_DB_URL`
+  _before_ anything creates these tables.** Note the script ships **on this branch** — it is not on
+  `main`, so merging `s11a` is what puts the instrument in the tree.
 - **The PostgREST-server half of the `ON CONFLICT` claim** (`Plan.hs:936`,
   `QueryBuilder.hs:117-123`) is unchecked — no offline source available. The postgrest-js half was
   verified locally (1.19.4, `PostgrestQueryBuilder.js:158-162`), as were Postgres's partial-index
