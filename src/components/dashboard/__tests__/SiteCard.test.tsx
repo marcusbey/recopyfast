@@ -15,7 +15,7 @@ describe("SiteCard", () => {
       views?: number;
       last_activity?: string;
     };
-    status?: "active" | "inactive" | "verifying";
+    status?: "awaiting-install" | "live" | "stale";
   } = {
     id: "test-site-id",
     domain: "example.com",
@@ -23,7 +23,7 @@ describe("SiteCard", () => {
     api_key: "test-api-key",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-15T00:00:00Z",
-    status: "active",
+    status: "live",
     stats: {
       edits_count: 42,
       views: 1337,
@@ -51,7 +51,7 @@ describe("SiteCard", () => {
   it("displays status badge correctly", () => {
     render(<SiteCard site={mockSite} {...mockHandlers} />);
 
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
   });
 
   it("renders site statistics", () => {
@@ -128,35 +128,36 @@ describe("SiteCard", () => {
   it("renders with different status types", () => {
     const { rerender } = render(
       <SiteCard
-        site={{ ...mockSite, status: "verifying" }}
+        site={{ ...mockSite, status: "awaiting-install" }}
         {...mockHandlers}
       />,
     );
-    expect(screen.getByText("No content yet")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting install")).toBeInTheDocument();
 
     rerender(
-      <SiteCard site={{ ...mockSite, status: "inactive" }} {...mockHandlers} />,
+      <SiteCard site={{ ...mockSite, status: "stale" }} {...mockHandlers} />,
     );
-    expect(screen.getByText("Inactive")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
   });
 
   /**
-   * The API's `verifying` flag means "no content_elements rows", and nothing in
-   * this product gates a site on `domain_verifications`. Calling it "Verifying"
-   * put two working sites in a queue that does not exist and that no owner
-   * action could clear.
+   * The API's old `verifying` flag meant "no content_elements rows", and nothing
+   * in this product gates a site on `domain_verifications`. Calling it
+   * "Verifying" put two working sites in a queue that does not exist and that no
+   * owner action could clear. The state is now named for what is actually true —
+   * we are waiting on their script, not on ourselves.
    */
   it("never labels a site as verifying, because nothing verifies it", () => {
     render(
       <SiteCard
-        site={{ ...mockSite, status: "verifying" }}
+        site={{ ...mockSite, status: "awaiting-install" }}
         {...mockHandlers}
       />,
     );
 
     expect(screen.queryByText(/verifying/i)).not.toBeInTheDocument();
     expect(
-      screen.getByTitle(/has not recorded any content from this site yet/i),
+      screen.getByTitle(/Add the snippet to your site/i),
     ).toBeInTheDocument();
   });
 
@@ -166,8 +167,8 @@ describe("SiteCard", () => {
 
     render(<SiteCard site={siteWithoutStatus} {...mockHandlers} />);
 
-    expect(screen.getByText("Inactive")).toBeInTheDocument();
-    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.getByText("Awaiting install")).toBeInTheDocument();
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
   });
 
   it("handles sites with no stats gracefully", () => {

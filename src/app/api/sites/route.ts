@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
+import { resolveEffectiveSiteStatus } from "@/lib/sites/site-status";
 
 export async function GET(request: NextRequest) {
   try {
@@ -41,7 +42,9 @@ export async function GET(request: NextRequest) {
     // Fetch sites data
     const { data: sites, error: sitesError } = await serviceClient
       .from("sites")
-      .select("id, domain, name, created_at, updated_at, api_key")
+      .select(
+        "id, domain, name, created_at, updated_at, api_key, status, live_at, last_reported_at, last_mismatch_domain, last_mismatch_at",
+      )
       .in("id", siteIds);
 
     if (sitesError) {
@@ -114,7 +117,18 @@ export async function GET(request: NextRequest) {
           name: site.name,
           created_at: site.created_at,
           updated_at: site.updated_at,
-          status: elementsCount && elementsCount > 0 ? "active" : "verifying",
+          // The persisted state machine, resolved once per site.
+          //
+          // This used to read `elementsCount > 0 ? "active" : "verifying"` — a
+          // count standing in for a status. It could not say when anything
+          // happened, and it drew a site that reported for months and then went
+          // quiet exactly like one whose script was never installed. `stale` is
+          // derived here rather than stored; see @/lib/sites/site-status.
+          status: resolveEffectiveSiteStatus(site),
+          live_at: site.live_at ?? null,
+          last_reported_at: site.last_reported_at ?? null,
+          last_mismatch_domain: site.last_mismatch_domain ?? null,
+          last_mismatch_at: site.last_mismatch_at ?? null,
           stats: {
             content_elements_count: elementsCount || 0,
             edits_count: editsCount || 0,

@@ -1,4 +1,5 @@
 import {
+  act,
   render,
   screen,
   fireEvent,
@@ -52,7 +53,7 @@ describe("SitesPage", () => {
       name: "Example Site 1",
       created_at: "2024-01-01T00:00:00Z",
       updated_at: "2024-01-15T00:00:00Z",
-      status: "active",
+      status: "live",
       stats: {
         edits_count: 10,
         views: 100,
@@ -65,7 +66,7 @@ describe("SitesPage", () => {
       name: "Example Site 2",
       created_at: "2024-01-02T00:00:00Z",
       updated_at: "2024-01-16T00:00:00Z",
-      status: "verifying",
+      status: "awaiting-install",
       stats: {
         edits_count: 5,
         views: 50,
@@ -78,7 +79,7 @@ describe("SitesPage", () => {
       name: "Example Site 3",
       created_at: "2024-01-03T00:00:00Z",
       updated_at: "2024-01-17T00:00:00Z",
-      status: "inactive",
+      status: "stale",
       stats: {
         edits_count: 0,
         views: 0,
@@ -144,16 +145,138 @@ describe("SitesPage", () => {
 
     // The status filters are a real button group (aria-pressed) rather than
     // clickable cards, so query by role instead of a styling class.
+    // The filter vocabulary follows the site state machine: Awaiting install /
+    // Live / Stale, in place of the retired Active / No content yet / Inactive.
     fireEvent.click(
       within(
         screen.getByRole("group", { name: /filter sites by status/i }),
-      ).getByRole("button", { name: /^Active/ }),
+      ).getByRole("button", { name: /^Live/ }),
     );
 
     await waitFor(() => {
-      // Should only show active site
+      // Should only show the live site
       expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
       expect(screen.queryByTestId("site-card-site-2")).not.toBeInTheDocument();
+    });
+  });
+
+  it("filters down to the sites still waiting on their snippet", async () => {
+    render(<SitesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("site-card-site-2")).toBeInTheDocument();
+    });
+
+    fireEvent.click(
+      within(
+        screen.getByRole("group", { name: /filter sites by status/i }),
+      ).getByRole("button", { name: /^Awaiting install/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("site-card-site-2")).toBeInTheDocument();
+      expect(screen.queryByTestId("site-card-site-1")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("site-card-site-3")).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * AC 3 — "the dashboard reflects the flip within 10 seconds while the page
+   * stays open, with no manual refresh".
+   *
+   * The moment this exists for is the owner pasting the snippet into another
+   * tab and coming back. Watching a card that says "awaiting install" while
+   * their script is already reporting is the whole failure this story removes,
+   * and telling them to hit reload is not an answer — they do not know whether
+   * anything changed.
+   *
+   * Polling stops the instant it has nothing to watch for. A site that is live
+   * or stale is not going to flip while they look at it, and an unbounded timer
+   * on an open dashboard tab is a request every few seconds, forever.
+   */
+  describe("waiting for the install to be detected", () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const openSite = async (testId: string) => {
+      render(<SitesPage />);
+
+      const card = await screen.findByTestId(testId);
+      fireEvent.click(within(card).getByText("View Details"));
+      await screen.findByTestId("site-detail-view");
+    };
+
+    it("keeps checking while an awaiting-install site is open", async () => {
+      await openSite("site-card-site-2");
+      const callsAfterOpen = (global.fetch as jest.Mock).mock.calls.length;
+
+      await act(async () => {
+        jest.advanceTimersByTime(10_000);
+      });
+
+      expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(
+        callsAfterOpen,
+      );
+    });
+
+    it("stops checking once the site reports itself live", async () => {
+      await openSite("site-card-site-2");
+
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          sites: mockSites.map((site) =>
+            site.id === "site-2" ? { ...site, status: "live" } : site,
+          ),
+        }),
+      });
+
+      await act(async () => {
+        jest.advanceTimersByTime(10_000);
+      });
+      const callsAfterFlip = (global.fetch as jest.Mock).mock.calls.length;
+
+      await act(async () => {
+        jest.advanceTimersByTime(60_000);
+      });
+
+      expect((global.fetch as jest.Mock).mock.calls.length).toBe(
+        callsAfterFlip,
+      );
+    });
+
+    it("does not poll for a site that is already live", async () => {
+      await openSite("site-card-site-1");
+      const callsAfterOpen = (global.fetch as jest.Mock).mock.calls.length;
+
+      await act(async () => {
+        jest.advanceTimersByTime(60_000);
+      });
+
+      expect((global.fetch as jest.Mock).mock.calls.length).toBe(
+        callsAfterOpen,
+      );
+    });
+
+    it("stops checking when the owner goes back to the list", async () => {
+      await openSite("site-card-site-2");
+
+      fireEvent.click(screen.getByText("Back to Sites"));
+      await screen.findByTestId("site-card-site-2");
+      const callsAfterClose = (global.fetch as jest.Mock).mock.calls.length;
+
+      await act(async () => {
+        jest.advanceTimersByTime(60_000);
+      });
+
+      expect((global.fetch as jest.Mock).mock.calls.length).toBe(
+        callsAfterClose,
+      );
     });
   });
 

@@ -73,6 +73,7 @@ type MockServiceClient = {
   eq: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
+  update: jest.Mock;
 };
 
 const serviceClient: MockServiceClient = {
@@ -86,6 +87,11 @@ const serviceClient: MockServiceClient = {
     }),
   ),
   upsert,
+  // A refused report now writes `last_mismatch_domain` on the way out (AC 4).
+  // Without an `update` stub that write throws, the route's best-effort wrapper
+  // swallows it, and every assertion below would pass for a reason that has
+  // nothing to do with what it claims to test.
+  update: jest.fn(() => serviceClient),
 };
 
 /** The token any visitor can read off the customer's page. */
@@ -117,6 +123,8 @@ function primeServiceClient() {
   });
   upsert.mockReset();
   upsert.mockResolvedValue({ error: null });
+  serviceClient.update.mockReset();
+  serviceClient.update.mockReturnValue(serviceClient);
 
   (
     createServiceRoleClient as jest.MockedFunction<
@@ -390,6 +398,67 @@ describe("POST /api/content/[siteId] without an Origin header", () => {
 
     expect(response.status).toBe(403);
     expect(upsert).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The refusal is now also a record (AC 4), and it resolves the reporting host
+   * through the same `parseOrigin` the refusal itself used.
+   *
+   * This suite runs the real `authorizeSiteRequest`, so it is the one place the
+   * recorded domain is checked against the decision that rejected it rather
+   * than against a mock's idea of it. A raw `Referer` would have stored
+   * "https://attacker.example.net/landing" here; what the owner needs to read
+   * is the host, which is what was actually compared.
+   */
+  it("records the domain that reported, without letting the request through", async () => {
+    const request = new NextRequest(
+      `https://recopyfast.com/api/content/${SITE_ID}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${publishedSiteToken()}`,
+          Referer: "https://attacker.example.net/landing?utm=1",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          "rcf-not-yet-discovered": {
+            selector: "h1",
+            content: "seeded",
+            type: "text",
+          },
+        }),
+      },
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ siteId: SITE_ID }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(upsert).not.toHaveBeenCalled();
+    expect(serviceClient.update).toHaveBeenCalledWith({
+      last_mismatch_domain: "attacker.example.net",
+      last_mismatch_at: expect.any(String),
+    });
+  });
+
+  it("records nothing for a caller that names no domain at all", async () => {
+    // Headerless: refused for exactly the same reason, but there is no domain
+    // to show an owner, and a null in that column would be worse than an empty
+    // one — it reads as "someone reported from nowhere".
+    const response = await POST(
+      headerlessPost({
+        "rcf-not-yet-discovered": {
+          selector: "h1",
+          content: "seeded",
+          type: "text",
+        },
+      }),
+      { params: Promise.resolve({ siteId: SITE_ID }) },
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(serviceClient.update).not.toHaveBeenCalled();
   });
 });
 

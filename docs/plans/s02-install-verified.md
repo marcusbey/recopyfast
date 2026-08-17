@@ -17,19 +17,34 @@ Owns the install-recipe data `s18` consumes. No declared dependencies; `s03` dep
 story's timestamps.
 
 Acceptance criteria (verbatim from `docs/stories.md`):
-- [ ] A registered site starts in an explicit `awaiting-install` state, visibly distinct from `live`.
-- [ ] The first authenticated content report from the embed on the registered domain flips the site to `live` with no user action.
-- [ ] The dashboard reflects the flip within 10 seconds while the page stays open — no manual refresh.
-- [ ] A report from a domain other than the registered one does not verify the site and is recorded as a mismatch.
-- [ ] The `awaiting-install` state shows the snippet, a copy control, and the install location for WordPress, Next.js and plain HTML.
-- [ ] Install recipes are stored as typed data in one module, and both this state and `s18`'s public pages render from it — this story owns that module.
-- [ ] A site that was live and has reported nothing for a configurable window shows as `stale`, and `stale` never blocks content delivery or editing.
-- [ ] State and transition timestamps are readable via the sites API, so `s03` can consume them.
+- [x] A registered site starts in an explicit `awaiting-install` state, visibly distinct from `live`.
+- [x] The first authenticated content report from the embed on the registered domain flips the site to `live` with no user action.
+- [x] The dashboard reflects the flip within 10 seconds while the page stays open — no manual refresh.
+- [x] A report from a domain other than the registered one does not verify the site and is recorded as a mismatch.
+- [x] The `awaiting-install` state shows the snippet, a copy control, and the install location for WordPress, Next.js and plain HTML.
+- [x] Install recipes are stored as typed data in one module, and both this state and `s18`'s public pages render from it — this story owns that module.
+- [x] A site that was live and has reported nothing for a configurable window shows as `stale`, and `stale` never blocks content delivery or editing.
+- [x] State and transition timestamps are readable via the sites API, so `s03` can consume them.
 
 ## Tasks (ordered)
 
+Progress tracker (ticked as each task lands, in the story's single commit):
+
+- [x] T1 — Migration: persisted status + transition timestamps on `sites`
+- [x] T2 — `src/lib/sites/site-status.ts`
+- [x] T3 — `src/lib/sites/install-recipes.ts`
+- [x] T4 — `status-badge.tsx` vocabulary (executed before T2: `resolveEffectiveSiteStatus`
+      returns `SiteStatus`, so the union has to hold `live`/`stale` before T2 can compile)
+- [x] T5 — `GET /api/sites` reads the persisted status
+- [x] T6 — `content/[siteId]/route.ts` transitions
+- [x] T7 — `dashboard/sites/page.tsx` filters + 10-second flip
+- [x] T8 — `SiteInstallationCard.tsx`
+
 **T1 — Migration: persisted status + transition timestamps on `sites`.**
-New `supabase/migrations/20260816120000_sites_install_status.sql`. Adds `status TEXT NOT NULL
+New `supabase/migrations/20260816120000_sites_install_status.sql` — shipped as
+`20260817001000_sites_install_status.sql`, reassigned at execution time so it cannot collide
+with the concurrently-running stories' migrations (ADR 006 quotes the original timestamp; the
+file name is the only difference). Adds `status TEXT NOT NULL
 DEFAULT 'awaiting-install' CHECK (status IN ('awaiting-install','live'))`, `live_at
 TIMESTAMPTZ`, `last_reported_at TIMESTAMPTZ`, `last_mismatch_domain TEXT`, `last_mismatch_at
 TIMESTAMPTZ`. Backfills existing rows: any site with a `content_elements` row is set `live`,
