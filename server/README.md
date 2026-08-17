@@ -346,12 +346,33 @@ The middle row is the one that matters: with realtime switched off entirely, an 
 third-party domain still saved, and the write still landed authoritatively. That is the whole of
 ADR 004 rule 2, measured rather than asserted.
 
-**One honest limitation.** `GET /api/health` reporting `healthy` through the window is *not* a
-test of AC 3's asymmetry. Production runs `main`, and the `realtime` check added by this story is
-not merged, so production's `checks` object contains only `database` and `storage` in both
-columns above. AC 3's degrade-but-never-fail behaviour is covered by unit tests
-(`src/__tests__/api/health/realtime-check.test.ts`) and should be re-confirmed against production
-after this story merges and deploys.
+**One honest limitation, since closed.** `GET /api/health` reporting `healthy` through the window
+above is *not* a test of AC 3's asymmetry. Production ran `main` at the time, where the `realtime`
+check did not exist, so production's `checks` object contained only `database` and `storage` in
+**both** columns — "healthy with the check absent" proves nothing about a check that is not there.
+
+### AC 3 confirmed against production, 2026-08-17 17:53 UTC
+
+Run after this story merged (`26397ca`) and Vercel deployed it — the deploy was confirmed first by
+`checks.realtime` appearing at all, since the whole point is that it was previously absent. The
+realtime machine was then **stopped**, not merely made unreachable:
+
+```
+fly machine stop 8654414c646128 -a recopyfast-ws     # → stopped, 1 check warning
+GET  /api/health   → HTTP 200   status "degraded"    realtime "timeout"   database ok   storage ok
+HEAD /api/health   → HTTP 200
+fly machine start 8654414c646128 -a recopyfast-ws    # → started, 1/1 passing
+GET  /api/health   → HTTP 200   status "healthy"     realtime "ok"
+```
+
+Both halves of the asymmetry hold in production: a dead realtime service **degrades** the app and
+never fails it (200, not 503), and `HEAD` does not consult realtime at all. Recovery surfaced on
+the first poll ~12 s after restart, consistent with the 10 s probe memo in
+`src/app/api/health/route.ts`. Outage window ~24 s; HTTP saves were unaffected by construction —
+that is the row above that matters.
+
+Wait at least 12 s after any state change before reading `/api/health`, or the memo will answer
+with the previous result and the drill will look like it failed.
 
 Still owed by a human: the two-snippet comparison (needs a signed-in dashboard), and a second run
 of the deploy procedure by someone who did not write it.
