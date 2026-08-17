@@ -20,6 +20,7 @@ import {
   validateDiscoveredElement,
   validateDiscoveredText,
   validateElementId,
+  validateVerbatimText,
 } from "@/lib/security/discovered-text";
 
 const NUL = String.fromCharCode(0x00);
@@ -138,6 +139,68 @@ describe("validateDiscoveredText", () => {
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toBe(
       "content must be a string",
+    );
+  });
+});
+
+/**
+ * The same "is this storable text" decision, with the ceiling supplied by the
+ * caller instead of assumed.
+ *
+ * Discovery's 20,000-character cap is a rule about *discovery* — a text node on
+ * a customer's page — not about `content_elements.current_content`, which is an
+ * unbounded `TEXT` that `bulk/update`, `staging/content` PUT and `v1/content`
+ * POST all write with no cap at all. Bulk import needs the byte-for-byte
+ * guarantee and the control-character refusal without inheriting a bound its
+ * column never had; copying the function to get that is how two definitions of
+ * "control character" start drifting apart.
+ */
+describe("validateVerbatimText", () => {
+  it("accepts text past discovery's cap when no ceiling is given", () => {
+    const content = "A".repeat(MAX_DISCOVERED_TEXT_LENGTH + 1);
+
+    expect(validateVerbatimText(content, null)).toEqual({
+      ok: true,
+      value: content,
+    });
+  });
+
+  it("still refuses control characters with no ceiling", () => {
+    const result = validateVerbatimText(`before${NUL}after`, null);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe(
+      "content contains control characters",
+    );
+  });
+
+  it("still refuses a non-string with no ceiling", () => {
+    const result = validateVerbatimText(42, null);
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe(
+      "content must be a string",
+    );
+  });
+
+  it("enforces the ceiling it is handed", () => {
+    expect(validateVerbatimText("ABCDE", 5)).toEqual({
+      ok: true,
+      value: "ABCDE",
+    });
+
+    const result = validateVerbatimText("ABCDEF", 5);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe(
+      "content exceeds 5 characters (6)",
+    );
+  });
+
+  it("is what validateDiscoveredText is built on", () => {
+    const content = "Setup in <2 minutes — paste the <script> tag & go";
+
+    expect(validateDiscoveredText(content)).toEqual(
+      validateVerbatimText(content, MAX_DISCOVERED_TEXT_LENGTH),
     );
   });
 });

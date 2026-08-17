@@ -579,6 +579,34 @@ export interface BulkImportPayload {
   };
 }
 
+/**
+ * What happened to one row of an imported file.
+ *
+ * `row` is the 1-based position of the record in the source file — the first
+ * JSON array item and the first CSV line after the header are both row 1, so
+ * the number means the same thing whichever format was exported.
+ *
+ * `skipped` is not a failure: it is a row the import options deliberately
+ * declined to write (an existing element with "overwrite existing" off, or a
+ * missing one with "create missing elements" off). The second of those used to
+ * be counted as a failure via the unique-constraint violation it caused.
+ */
+export interface BulkImportRowResult {
+  row: number;
+  elementId: string;
+  outcome: "created" | "updated" | "skipped" | "failed";
+  detail?: string;
+}
+
+export interface BulkImportResults {
+  total: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  rows: BulkImportRowResult[];
+}
+
 export interface BulkExportPayload {
   site_id: string;
   format: "json" | "csv" | "xml";

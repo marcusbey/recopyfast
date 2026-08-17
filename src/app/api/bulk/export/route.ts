@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkExportPayload } from "@/types";
+import { encodeCSVRow } from "@/lib/bulk/csv";
 
 interface ExportedContentElement {
   id: string;
@@ -186,22 +187,25 @@ function generateCSV(contentElements: ExportedContentElement[]): string {
     "updated_at",
   ];
 
-  // CSV rows
+  // Every column goes through the shared codec, not just the three that used to
+  // be wrapped in quotes by hand. `selector` is the one that made this concrete:
+  // `.header, .hero` is an ordinary CSS selector list, and unquoted it shifted
+  // every later column of that row by one when the file was imported back.
   const rows = contentElements.map((element) => [
     element.id,
     element.site_id,
     element.element_id,
     element.selector,
-    `"${(element.original_content || "").replace(/"/g, '""')}"`,
-    `"${(element.current_content || "").replace(/"/g, '""')}"`,
+    element.original_content || "",
+    element.current_content || "",
     element.language,
     element.variant,
-    `"${JSON.stringify(element.metadata || {}).replace(/"/g, '""')}"`,
+    JSON.stringify(element.metadata || {}),
     element.created_at,
     element.updated_at,
   ]);
 
-  return [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+  return [encodeCSVRow(headers), ...rows.map(encodeCSVRow)].join("\n");
 }
 
 function generateXML(contentElements: ExportedContentElement[]): string {
@@ -273,11 +277,35 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Get export operations for the site
+    // Being signed in was the only thing this listing ever checked, so any
+    // authenticated user could read any site's operation history by guessing a
+    // site id. Nobody could reach it while `BulkOperations` was mounted
+    // nowhere; the dashboard card that story s05 mounts is what makes it
+    // reachable, so the same `site_permissions` check the POST handler does
+    // lands with the wiring.
+    const { data: permission } = await supabase
+      .from("site_permissions")
+      .select("permission")
+      .eq("site_id", siteId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (
+      !permission ||
+      !["view", "edit", "admin"].includes(permission.permission)
+    ) {
+      return NextResponse.json(
+        { error: "Insufficient permissions" },
+        { status: 403 },
+      );
+    }
+
+    // Every bulk operation on the site, not just exports: this is the listing
+    // the dashboard's History tab reads, and an owner who just ran an import
+    // expects to see it there.
     let query = supabase
       .from("bulk_operations")
       .select("*")
-      .eq("operation_type", "export")
       .eq("site_id", siteId)
       .order("created_at", { ascending: false });
 

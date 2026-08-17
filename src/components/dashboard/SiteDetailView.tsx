@@ -30,6 +30,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { BulkOperations } from "./BulkOperations";
 import { ShareButton } from "./ShareButton";
 import { SiteEditorsCard } from "./SiteEditorsCard";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
@@ -369,6 +370,16 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           <DomainVerification siteId={site.id} siteDomain={site.domain} />
         </CardContent>
       </Card>
+
+      {/* Content portability.
+          Same story as the domain ownership panel above: `BulkOperations` and
+          its three `/api/bulk/*` routes shipped together, and the component was
+          imported by nothing — so the answer to "what happens to my copy if I
+          leave" was an endpoint no owner could reach. It sits directly above
+          the version history it writes to, because that adjacency is the
+          reassurance an owner needs *before* running an import. It brings its
+          own Card, unlike DomainVerification. */}
+      <BulkOperations siteId={site.id} />
 
       {/* Version History Panel */}
       <VersionHistoryPanel

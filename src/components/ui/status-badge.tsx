@@ -15,6 +15,7 @@ import {
   Layers,
   Trophy,
   Upload,
+  Wand2,
 } from "lucide-react";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { cn } from "@/lib/utils/cn";
@@ -49,12 +50,39 @@ interface StatusDefinition {
 
 export type SiteStatus = "active" | "inactive" | "verifying";
 export type ContentStatus = "original" | "edited" | "pending";
+/**
+ * Keyed by the raw `content_versions.change_type` string, which is what
+ * `VersionHistoryPanel` passes through unmodified. The key was `bulk`, a value
+ * the column has never been able to hold: its CHECK constraint
+ * (`20251230100000_edit_board.sql:69`) allows only
+ * ('manual','style_apply','language_switch','theme_apply','restore','bulk_edit').
+ * `resolveStatus` falls back to `manual`, so every bulk snapshot rendered as
+ * "Saved by hand from the edit board" — silently, because a fallback looks the
+ * same as a match.
+ *
+ * `style_apply` was the same miss in the other direction: a value the registry
+ * did not carry, written on every AI style application
+ * (`edit-board/styles/apply/route.ts:176`), so those versions rendered as
+ * "Manual edit" too.
+ *
+ * `language_switch` and `theme_apply` are also CHECK-legal and also absent
+ * here. They are written — `server/index.js:810` and `:983` — but that Socket.io
+ * service is **not deployed** (`AGENTS.md`, `docs/architecture.md`), so no row
+ * in production carries either value and there is no live mislabelling to fix
+ * today. [ADR 023](../../../docs/decisions/023-websocket-only-transport-no-sticky-routing.md)
+ * has `s07b` standing that service up; **the moment it ships, both render as
+ * "Manual edit"** and this registry needs the two entries.
+ *
+ * `auto` and `publish` are the reverse — entries the column cannot hold, kept
+ * because removing them is not this story's to do.
+ */
 export type VersionChangeType =
   | "manual"
   | "auto"
   | "publish"
   | "restore"
-  | "bulk";
+  | "style_apply"
+  | "bulk_edit";
 export type ABTestStatus =
   | "draft"
   | "active"
@@ -156,7 +184,13 @@ export const versionChangeTypes: Record<VersionChangeType, StatusDefinition> = {
     icon: RotateCcw,
     description: "Rolled back to an earlier version",
   },
-  bulk: {
+  style_apply: {
+    label: "Style applied",
+    tone: "accent",
+    icon: Wand2,
+    description: "AI rewrote the copy in a saved style",
+  },
+  bulk_edit: {
     label: "Bulk edit",
     tone: "warning",
     icon: Layers,
