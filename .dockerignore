@@ -1,0 +1,77 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# runtime logs — winston writes here at runtime; never commit them
+/logs/
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/e2e-screenshots/
+
+# agent tooling scratch
+/.omc/
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Embedded standalone project — was tracked as a gitlink pointing at an
+# unreachable commit, with no .gitmodules to resolve it. Fresh clones got a
+# broken submodule entry. Keep it out of this repo until it is either a proper
+# submodule (with .gitmodules) or a separate checkout.
+/web/
+
+# Supabase CLI local state
+supabase/.temp/
+# Written by `supabase db reset` / `supabase start`; records which branch the
+# local stack is on, which is per-developer state and not project configuration.
+supabase/.branches/
+
+# Supabase CLI scratch state, not project configuration
+supabase/.temp/
+
+# The server subproject ships its own dependency tree; it was committed by
+# accident (2130 files) and is not project source.
+**/node_modules/
+
+# QA and Playwright artefacts (screenshots, traces, audit output).
+output/
+supabase/.temp/
