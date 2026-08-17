@@ -1,5 +1,5 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s14a-grant-authorized-editing
 

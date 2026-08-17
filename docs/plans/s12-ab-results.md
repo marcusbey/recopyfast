@@ -1,5 +1,5 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s12-ab-results
 

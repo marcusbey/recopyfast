@@ -2,7 +2,7 @@
 validated: no
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Wildcard host and wildcard TLS is an unmade operator decision, not code; and it depends on s13, which is itself held.
+> **Validation withheld.** Not approved for `/ks-execute`: wildcard host + wildcard TLS is an unmade operator decision, and it depends on s13, which is itself held.
 > Every other section of this plan stands; only the gate is held.
 # Plan — Story s20-agency-branded-subdomain
 

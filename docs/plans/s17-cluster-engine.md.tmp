@@ -2,7 +2,7 @@
 validated: no
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** The SEO cluster visual surface (Marketing vs App) is undecided; this story's design is provisional on it. See design-system.md.
+> **Validation withheld.** Not approved for `/ks-execute`: the SEO cluster visual surface (Marketing vs App) is undecided; this story's design is provisional on it.
 > Every other section of this plan stands; only the gate is held.
 # Plan — Story s17-cluster-engine
 

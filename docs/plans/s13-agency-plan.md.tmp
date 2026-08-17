@@ -2,7 +2,7 @@
 validated: no
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** PRD open decision 7 — who is billed in agency mode, agency-only or agency with client-paid upgrades — is unanswered, and the answer changes the data model.
+> **Validation withheld.** Not approved for `/ks-execute`: PRD open decision 7 — who is billed in agency mode — is unanswered, and it changes the data model.
 > Every other section of this plan stands; only the gate is held.
 # Plan — Story s13-agency-plan
 

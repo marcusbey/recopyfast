@@ -2,7 +2,7 @@
 validated: no
 ---
 
-> **Validation withheld — not approved for `/ks-execute`.** Research open question 1 (the real-time parity criterion, ex-M6) is unresolved, so AC 4 cannot yet be written as a test.
+> **Validation withheld.** Not approved for `/ks-execute`: research open question 1 (the real-time parity criterion, ex-M6) is unresolved, so AC 4 cannot be written as a test.
 > Every other section of this plan stands; only the gate is held.
 # Plan — Story s07b-realtime-deploy
 
