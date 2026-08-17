@@ -32,7 +32,7 @@ to it. See [ADR 001](./decisions/001-inherited-production-baseline.md).
 | AI | OpenAI | `^5.12` | `src/lib/ai/`, credit-metered |
 | Email | Resend | `^6.14` | `src/lib/email/resend.ts` |
 | Cache / limits | Redis | `^5.8` | rate limiting, sessions, intended pub/sub |
-| Realtime | Socket.io | `^4.8` | **separate service in `server/`, not deployed** — see [ADR 004](./decisions/004-embed-transport-split.md) |
+| Realtime | Socket.io | `^4.8` | separate service in `server/`, deployed on Fly as `recopyfast-ws` (one machine) — see [ADR 004](./decisions/004-embed-transport-split.md) |
 | Errors | Sentry | `@sentry/nextjs ^10.32` | Only wired when `NEXT_PUBLIC_SENTRY_DSN` is set |
 | Tests | Jest 30 + Testing Library, Playwright `^1.58` | — | 374 test files, 1954 passing |
 | Embed build | esbuild `^0.25` | — | `scripts/build-embed.mjs`, runs on `prebuild` |
@@ -48,14 +48,18 @@ plus custom fetch hooks. See [ADR 005](./decisions/005-client-state-context-and-
 
 - **Vercel** — the Next.js app. One cron in `vercel.json` (`/api/cron/generate-blog-post`, daily 14:00).
 - **Fly.io** — `server/index.js`, an Express + Socket.io process, deployed 2026-08-17 as
-  `recopyfast-ws` in `iad`, two `shared-1x-cpu@512MB` machines.
+  `recopyfast-ws` in `iad`, **one** `shared-cpu-1x@512MB` machine.
   `https://recopyfast-ws.fly.dev/health` returns `status: ok`, `supabase: connected`.
   Vercel cannot host a long-lived process, which is why it is here.
-  **Nothing points at it yet, deliberately:** `NEXT_PUBLIC_WS_URL` is unset, and it must stay
-  unset until `s07b` ships `@socket.io/redis-adapter` and the websocket-only transport
-  ([ADR 023](./decisions/023-websocket-only-transport-no-sticky-routing.md)). With two machines
-  and the current polling-first default, wiring it up would break the handshake on every
-  customer site.
+  **Live since `s07b`:** `NEXT_PUBLIC_WS_URL = wss://recopyfast-ws.fly.dev`, set in the Vercel
+  **production** environment only — a preview pointed at it would share `site:{id}` rooms with
+  live customers. Transport is websocket-only on the server and both clients
+  ([ADR 023](./decisions/023-websocket-only-transport-no-sticky-routing.md)).
+  **One machine is load-bearing, not a default.** Socket.io rooms live in one process's memory,
+  so a single process keeps them coherent by construction and no Redis adapter ships. A second
+  machine splits the room set silently — green health checks, nothing thrown, "realtime randomly
+  stopped working for some people". Scaling this service is a code change, not a scaling
+  operation: see [`server/README.md`](../server/README.md) and `server/fly.toml`'s header.
 
 ---
 
@@ -84,7 +88,7 @@ public/embed/
   recopyfast.src.js       SOURCE OF TRUTH, hand-edited, 5397 lines
   recopyfast.js           BUILD ARTIFACT — never hand-edit
   socket.io-client.min.js standalone fallback copy
-server/                   Express + Socket.io service (own package.json, not deployed)
+server/                   Express + Socket.io service (own package.json, own Fly app)
 supabase/migrations/      43 SQL migrations, timestamp-prefixed
 scripts/                  build-embed, sync-stripe-catalogue, qa-journey, check-redis, install-hooks
 e2e/                      7 Playwright specs
@@ -362,7 +366,7 @@ noise; a comment that says *what broke last time* is the asset.
 | **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only** — a wallet balance is never a quota |
 | **Email** | `src/lib/email/resend.ts` | Resend |
 | **Images** | `src/lib/images/`, `src/lib/storage/`, `/api/upload/image` | Supabase Storage, `20260801000000_storage_assets_bucket.sql`. Replace an existing `<img>` only |
-| **Realtime** | `server/index.js` (Socket.io) — **not deployed** | `NEXT_PUBLIC_WS_URL` unset in production ⇒ `getPublicWebSocketUrl()` returns `""` ⇒ snippet omits `data-ws-url` ⇒ widget returns early at `recopyfast.src.js:2703`. Content persists over HTTP. See [ADR 004](./decisions/004-embed-transport-split.md) |
+| **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
 | **Errors** | Sentry, 3 config files + `instrumentation.ts` | `next.config.ts` only wraps when the DSN is set, so CI builds without it |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
@@ -414,7 +418,7 @@ assert the following. None of it is true, and each was checked:
 | React Query for server state | `@tanstack/react-query` imported by 0 files |
 | TipTap for rich text | `@tiptap/react` imported by 0 files |
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
-| Socket.io with Redis pub/sub, running | Service exists in `server/`, deployed nowhere |
+| Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
 | Test coverage ≥ 80% | Jest floor is 22% lines, ratcheted from measured reality |
 

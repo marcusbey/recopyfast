@@ -80,9 +80,10 @@ story and travel with its branch.
 | [020](./decisions/020-seo-clusters-on-marketing-surface.md) | The SEO cluster pages render on the Marketing surface | `s17`–`s19` |
 | [021](./decisions/021-wildcard-serving-origin-provisioning.md) | One wildcard domain and certificate; claiming is a database write | `s20` |
 | [022](./decisions/022-realtime-parity-is-editors-only.md) | Real-time parity is defined over editors, not visitors | `s07b` |
-| [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) | WebSocket-only transport; the multi-instance answer is the adapter, never sticky routing | `s07b` |
+| [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) | WebSocket-only transport; the multi-instance answer is the adapter, never sticky routing — superseded by [026](./decisions/026-one-machine-no-adapter-supersedes-023.md) on the deployment shape (it assumed two machines and a shipped adapter; neither is true). The transport pin and the rejection of sticky routing stand | `s07b` |
 | [024](./decisions/024-bulk-import-snapshot-change-type.md) | The bulk-import snapshot writes `bulk_edit` — supersedes [008](./decisions/008-bulk-import-write-path.md) on that value | `s05` |
 | [025](./decisions/025-grant-on-the-content-write-path.md) | The device grant is a principal on the content write path, fail-closed on its origin pin | `s14a` |
+| [026](./decisions/026-one-machine-no-adapter-supersedes-023.md) | One machine, no Redis adapter — supersedes [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) on the deployment shape only | `s07b` |
 
 > **Numbering.** 025 was authored as 019 on `s14a`'s branch and renumbered when it merged, because
 > `019-agency-billing-single-payer` had taken that number on `main` in the meantime. Two branches

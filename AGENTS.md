@@ -74,8 +74,8 @@ practice disagree, these win** — see [ADR 001](./docs/decisions/001-inherited-
 
 Next.js 16 App Router · React 19 · TypeScript strict · Tailwind 4 · Radix UI wrapped in
 `src/components/ui/` · Supabase (Postgres + Auth + Storage, RLS) · Stripe · OpenAI · Resend ·
-Redis · Socket.io in `server/` (**not deployed**) · Sentry · Jest 30 + Playwright · esbuild
-for the embed.
+Redis · Socket.io in `server/` (**deployed on Fly as `recopyfast-ws`, one machine — scaling it is
+a code change, not a scaling operation**) · Sentry · Jest 30 + Playwright · esbuild for the embed.
 
 **Not in the stack, whatever older docs say:** Zustand, React Query, TipTap. Removed from
 `package.json` — see [ADR 005](./docs/decisions/005-client-state-context-and-fetch-hooks.md).
