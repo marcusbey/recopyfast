@@ -10,8 +10,21 @@
 #   cd server
 #   fly secrets set \
 #     NEXT_PUBLIC_SUPABASE_URL=... \
-#     SUPABASE_SERVICE_ROLE_KEY=...
+#     SUPABASE_SERVICE_ROLE_KEY=... \
+#     REDIS_URL=...
 #   fly deploy
+#
+# All three are required, and REDIS_URL is required FIRST — set it before the
+# deploy that brings the code reading it, not after. assertProductionEnvironment()
+# in index.js refuses to boot in production without it, so a deploy that arrives
+# ahead of the secret is a crash loop rather than a degradation. The reason it
+# refuses is ADR 002 rule 4: this process holds SUPABASE_SERVICE_ROLE_KEY and is
+# opened by a token published in the customer's own page markup, so its limiter
+# denies on store failure — and refusing to start is louder than refusing every
+# connection all day while /health keeps answering 200.
+#
+# NEXT_PUBLIC_APP_URL is read too (index.js) but defaults to http://localhost:3000
+# and nothing here depends on it; set it if you want it in the logs.
 #
 # ALLOWED_ORIGINS is deliberately NOT in that list. server/index.js:174 and :196
 # record that it is no longer consulted: authorisation is the per-site HMAC token

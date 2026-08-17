@@ -19,6 +19,12 @@ interface HealthStatus {
     storage: ServiceCheck;
     cache?: ServiceCheck;
     external?: ServiceCheck;
+    /**
+     * The Socket.io service in `server/`. Optional because it is optional in
+     * production: no `NEXT_PUBLIC_WS_URL` means realtime is off, which is a
+     * supported configuration (ADR 004 rule 2), not a failing check.
+     */
+    realtime?: ServiceCheck;
   };
   metrics?: {
     memory: MemoryMetrics;
@@ -160,6 +166,106 @@ async function checkExternalServices(): Promise<ServiceCheck> {
   }
 }
 
+/**
+ * How long we are willing to wait on the realtime service before calling it
+ * down. Short on purpose: `/api/health` is polled, and a check on an optional
+ * dependency must never be the reason the endpoint itself is slow.
+ */
+const REALTIME_PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * The realtime service's `/health`, as an https URL, or `null` when realtime is
+ * switched off.
+ *
+ * `NEXT_PUBLIC_WS_URL` is a *websocket* origin — that is what the widget's
+ * `data-ws-url` and the CSP `connect-src` need (`src/middleware.ts:233`). `fetch`
+ * does not speak `wss:`; handing it one throws before a packet leaves, so the
+ * check would report the service down permanently while the service was
+ * perfectly healthy. Swap the scheme rather than assuming the env value is
+ * already an http one.
+ */
+function getRealtimeHealthUrl(): string | null {
+  const configured = process.env.NEXT_PUBLIC_WS_URL;
+  if (!configured) return null;
+
+  try {
+    const url = new URL(configured);
+    if (url.protocol === "wss:") url.protocol = "https:";
+    else if (url.protocol === "ws:") url.protocol = "http:";
+    url.pathname = "/health";
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    // A malformed value tells us nothing about a running service, and it is not
+    // this endpoint's job to fail over a typo in an unrelated variable.
+    return null;
+  }
+}
+
+/**
+ * Probe the Socket.io service in `server/`.
+ *
+ * Deliberately reports `error`/`timeout` rather than throwing: the caller caps
+ * this check's contribution at `degraded`, and that cap is only meaningful if
+ * the check always returns.
+ */
+async function checkRealtime(url: string): Promise<ServiceCheck> {
+  const start = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      signal: AbortSignal.timeout(REALTIME_PROBE_TIMEOUT_MS),
+    });
+
+    const latency = Date.now() - start;
+
+    if (!response.ok) {
+      return {
+        status: "error",
+        latency,
+        error: `Realtime service responded ${response.status}`,
+      };
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as {
+      status?: string;
+      connections?: number;
+      supabase?: string;
+    };
+
+    return {
+      status: "ok",
+      latency,
+      details: {
+        connections: payload.connections ?? 0,
+        supabase: payload.supabase ?? "unknown",
+        reported: payload.status ?? "unknown",
+      },
+    };
+  } catch (error) {
+    const isTimeout =
+      error instanceof Error &&
+      (error.name === "AbortError" || error.name === "TimeoutError");
+
+    // Logged at warn, not error. A realtime outage is a degradation of an
+    // additive feature (ADR 004 rule 2) — logging it at the same level as a
+    // database failure is how a real outage gets lost in the noise later.
+    logger.warn("Realtime health check failed", undefined, {
+      component: "health-check",
+      service: "realtime",
+      reason: error instanceof Error ? error.message : "Unknown error",
+    });
+
+    return {
+      status: isTimeout ? "timeout" : "error",
+      latency: Date.now() - start,
+      error: error instanceof Error ? error.message : "Unknown error",
+    };
+  }
+}
+
 function getMemoryMetrics(): MemoryMetrics {
   const memoryUsage = process.memoryUsage();
   const totalMemory = memoryUsage.heapTotal;
@@ -190,10 +296,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Run all health checks in parallel
-    const [database, storage, external] = await Promise.allSettled([
+    const realtimeUrl = getRealtimeHealthUrl();
+    const [database, storage, external, realtime] = await Promise.allSettled([
       checkDatabase(),
       checkStorage(),
       detailed ? checkExternalServices() : Promise.resolve(undefined),
+      realtimeUrl ? checkRealtime(realtimeUrl) : Promise.resolve(undefined),
     ]);
 
     // Process results
@@ -218,7 +326,15 @@ export async function GET(request: NextRequest) {
       checks.external = external.value;
     }
 
-    // Determine overall health status
+    // Determine overall health status.
+    //
+    // Computed BEFORE realtime is attached to `checks`, and that ordering is the
+    // whole point: this counts errors across the object and turns two of them
+    // into `unhealthy`, which answers 503 below. Realtime is an additive
+    // enhancement (ADR 004 rule 2) — with the socket service stopped, editing,
+    // saving, staging and publishing all still work over HTTP. If its check
+    // joined this array, a realtime restart during a storage blip would take the
+    // whole app out of rotation over a feature nobody needs in order to serve.
     const statuses = Object.values(checks)
       .filter(Boolean)
       .map((check: ServiceCheck) => check.status);
@@ -229,6 +345,19 @@ export async function GET(request: NextRequest) {
         statuses.filter((s) => s === "error").length > 1
           ? "unhealthy"
           : "degraded";
+    }
+
+    // Realtime, capped at `degraded` and never worse (ADR 004, "Watch"). It can
+    // move `healthy` down one step — an outage should be visible, not silent —
+    // and it can do nothing else. Attached after the count, so it is reported
+    // without being counted.
+    const realtimeCheck =
+      realtime.status === "fulfilled" ? realtime.value : undefined;
+    if (realtimeCheck) {
+      checks.realtime = realtimeCheck;
+      if (realtimeCheck.status !== "ok" && overallStatus === "healthy") {
+        overallStatus = "degraded";
+      }
     }
 
     // Build response
@@ -296,6 +425,12 @@ export async function GET(request: NextRequest) {
 // A HEAD probe must reflect real readiness: if the database is unreachable the
 // instance cannot serve traffic, so return 503 and let the load balancer / uptime
 // monitor route around it. A bare 200 would mask a hard outage.
+//
+// The realtime check is deliberately absent here and must stay absent. This is
+// the probe a load balancer polls, and an instance with realtime down can serve
+// every request the product makes — HTTP is authoritative (ADR 004 rule 1).
+// Adding the probe would also put a cross-network fetch on the hottest path in
+// the app, for a dependency it does not need.
 export async function HEAD() {
   const db = await checkDatabase();
   return new NextResponse(null, {

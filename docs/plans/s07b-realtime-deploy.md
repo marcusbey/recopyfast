@@ -56,11 +56,11 @@ defined in `docs/research/s07-realtime-service.md` § *Split proposal*. Inherits
 
 Criteria this plan must satisfy:
 
-- [ ] Deployed at a stable origin on a platform that hosts a long-lived process; a real app name and a documented, repeatable procedure; the stale `ALLOWED_ORIGINS` instruction removed. (AC 1, T10)
-- [ ] `NEXT_PUBLIC_WS_URL` set **and the Next app redeployed**, verified in both snippet producers and in the CSP `connect-src` header. (AC 2, T6)
-- [ ] Realtime appears as a check in `GET /api/health`, **degrading** the app's status rather than failing it. (AC 3, ADR 004 "Watch")
-- [ ] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — editors-only, settled: ADR 022.
-- [ ] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
+- [x] Deployed at a stable origin on a platform that hosts a long-lived process; a real app name and a documented, repeatable procedure; the stale `ALLOWED_ORIGINS` instruction removed. (AC 1, T10) — the image was five hours stale when this story started; redeployed 16:39 UTC and verified by marker probe. Incident recorded in `server/README.md`
+- [ ] `NEXT_PUBLIC_WS_URL` set **and the Next app redeployed**, verified in both snippet producers and in the CSP `connect-src` header. (AC 2, T6) — CSP verified; the two-snippet comparison needs a signed-in dashboard and is still owed
+- [x] Realtime appears as a check in `GET /api/health`, **degrading** the app's status rather than failing it. (AC 3, ADR 004 "Watch")
+- [x] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — editors-only, settled: ADR 022. **Measured 613 ms** on `e2e-parity-1786984973.invalid:4176` against `wss://recopyfast-ws.fly.dev`, two distinct connections
+- [x] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
 - [x] **Instance count decided explicitly: ONE.** No `@socket.io/redis-adapter` — a single process
       keeps rooms coherent by construction. Recorded 2026-08-17. (Research open question 4, ADR 004)
 
@@ -142,7 +142,7 @@ they do not block planning, and they block exactly one task.
 
 ## Tasks (ordered)
 
-1. [ ] **Choose the target and make `fly.toml` (or its equivalent) true.** Fly, Railway or Render —
+1. [x] **Choose the target and make `fly.toml` (or its equivalent) true.** Fly, Railway or Render —
    Vercel cannot host a long-lived process (ADR 004; `docs/architecture.md:50`). `server/fly.toml:22`
    still reads `app = "recopyfast-ws"   # change to your chosen Fly app name`. Replace it with the
    real app name and region. Delete the `ALLOWED_ORIGINS` line from the `fly secrets` example at
@@ -153,7 +153,7 @@ they do not block planning, and they block exactly one task.
    **Verify:** `grep -n "change to your chosen\|ALLOWED_ORIGINS" server/` returns nothing; every env
    name in the config appears in `server/index.js` or `server/rate-limit.js`.
 
-2. [ ] **Decide the instance count explicitly and make the config say it.** ADR 004: one instance is
+2. [x] **Decide the instance count explicitly and make the config say it.** ADR 004: one instance is
    acceptable to start, and the decision to run more must be explicit rather than assumed. Record the
    number and the reason in `server/README.md` (0 bytes today). If **1**: pin it in the platform
    config (`min_machines_running = 1`, autoscale off) so a routine scale-up cannot silently split the
@@ -165,7 +165,7 @@ they do not block planning, and they block exactly one task.
    Without that test, "> 1" is a claim, and the symptom of it being wrong is half the editors on a
    page missing half the edits.
 
-3. [ ] **Deploy, and prove the procedure repeats.** `fly deploy` from `server/` — not from the repo
+3. [x] **Deploy, and prove the procedure repeats.** `fly deploy` from `server/` — not from the repo
    root; `server/fly.toml:1-8` records why (the Dockerfile is written for a `server/`-rooted build
    context). Write the procedure into `server/README.md`: prerequisites, secrets, the deploy command,
    how to read the logs, how to roll back. **Verify:** `curl https://<origin>/health` returns
@@ -173,7 +173,7 @@ they do not block planning, and they block exactly one task.
    runs a second time from a clean checkout by following only the written steps. Paste both runs in
    the PR. A procedure that has been executed once by its author is a memory, not a document.
 
-4. [ ] **Add the realtime check to `GET /api/health` — outside the severity computation.** Extend
+4. [x] **Add the realtime check to `GET /api/health` — outside the severity computation.** Extend
    `HealthStatus["checks"]` (`src/app/api/health/route.ts:17-22`) with `realtime`, fetched from the
    service's `/health` with a short timeout. **It must not be able to make the app unhealthy.**
    `route.ts:222-232` maps "one check in error" to `degraded` and "two or more" to `unhealthy`, and
@@ -194,14 +194,14 @@ they do not block planning, and they block exactly one task.
    without a rebuild — a difference nobody would think to look for, because both snippets look right
    on their own.
 
-6. [ ] **Confirm the CSP followed the same deploy.** `src/middleware.ts:233` feeds
+6. [x] **Confirm the CSP followed the same deploy.** `src/middleware.ts:233` feeds
    `NEXT_PUBLIC_WS_URL` into `connect-src`, adding both `https://host` and `wss://host` (`:207-231`).
    The middleware runs on the deployed build, so the header is only correct after the *same* redeploy
    as task 5. **Verify:** `curl -I https://<app>/dashboard` and read `content-security-policy` —
    `connect-src` contains the exact wss and https origins, and no blanket `wss:` or `https:`. Get the
    order wrong and the dashboard's own connections are blocked by our own CSP, silently.
 
-7. [ ] **Scope the variable to production (research open question 7).** Preview deploys share
+7. [x] **Scope the variable to production (research open question 7).** Preview deploys share
    whatever env they inherit; pointing them at the production socket means preview and production
    clients share `site:{id}` rooms on the same site ids — cross-environment room bleed on live
    customer content. Set the var in the production environment only, or give non-production its own
@@ -209,7 +209,7 @@ they do not block planning, and they block exactly one task.
    snippet carries no `data-ws-url` (or a non-production one); checked once against a real preview
    URL and recorded.
 
-8. [ ] **The parity demo (AC 4) — editors-only (settled, ADR 022).** Two browsers in an editing session on
+8. [x] **The parity demo (AC 4) — editors-only (settled, ADR 022).** Two browsers in an editing session on
    the same fixture page hosted on a **non-RecopyFast domain**; an edit in A appears in B in under
    one second, measured, not eyeballed. This exercises the staging room
    (`server/index.js:589-598`), which is the only room that carries edits today. **Assert that two
@@ -217,7 +217,7 @@ they do not block planning, and they block exactly one task.
    per user instead of per site, a weaker assertion keeps passing on a single client while proving
    nothing. **Verify:** the measured interval and the fixture's hostname recorded in the PR.
 
-9. [ ] **Legacy snippets keep working against the live origin.** A snippet issued before this story
+9. [x] **Legacy snippets keep working against the live origin.** A snippet issued before this story
    — no `data-ws-url` — must behave exactly as it does today on the deployed system: no
    `window.RECOPYFAST_WS`, the early return at `public/embed/recopyfast.src.js:2703`, no request for
    `/embed/socket.io-client.min.js`, content still delivered over HTTP. **Verify:** the fixture from
@@ -225,7 +225,7 @@ they do not block planning, and they block exactly one task.
    public URL baked into every snippet ever issued (AGENTS.md non-negotiable 2) — this is the check
    that turning realtime on did not quietly make the old ones second-class.
 
-10. [ ] **Prove the kill switch.** Unset `NEXT_PUBLIC_WS_URL`, redeploy, and confirm the product
+10. [x] **Prove the kill switch.** Unset `NEXT_PUBLIC_WS_URL`, redeploy, and confirm the product
     returns to its pre-`s07b` state with no user-visible error — `s07a`'s additive drill re-run
     against production. Then restore. **Verify:** editing, saving, staging and publishing all succeed
     during the window, and the recorded steps are the rollback procedure in `server/README.md`. ADR
