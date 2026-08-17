@@ -1,5 +1,75 @@
 # RecopyFast QA Register
 
+> ## ✅🔴 MEASURED 2026-08-17 — the database was finally probed. Run `node scripts/check-schema.mjs`
+>
+> Every claim below is from a live read-only query against production, not from a migration file.
+> The probe is committed, repeatable, and connects over the **IPv4 pooler**
+> (`aws-0-us-east-2.pooler.supabase.com:5432`) — `db.<ref>.supabase.co` is IPv6-only, which is why
+> every earlier attempt was abandoned.
+>
+> ### ✅ GOOD NEWS FIRST: the RLS tenant boundary is intact
+>
+> **All 39 tables have RLS enabled and at least one policy. Zero exceptions.** ADR 002's boundary is
+> real. This **retracts** the alarm an earlier revision of this register raised: `site_permissions`
+> has 2 policies, `content_history` 2, and `teams` / `team_members` / `domain_verifications` 2 each
+> — the "five tables locked out with zero policies" state described in
+> `20260801200000_missing_base_tables.sql:70-77` **is not live**. `security_events` and
+> `rate_limits` also have RLS **on**, contradicting the same tombstone. That tombstone is a snapshot
+> of a moment, not of today.
+>
+> ### 🔴 The real problem is worse, and it is not RLS
+>
+> **18 of the 57 tables `architecture.md` describes do not exist.** Two independent causes, both
+> live:
+>
+> **(a) Five migrations ABORTED and are marked applied** — in the ledger, tables absent, will never
+> re-run. Every table from each file is missing, which is the transaction-rollback signature:
+>
+> | Migration | Tables it should have created |
+> |---|---|
+> | `20260127_ab_testing_v2` | `ab_test_results`, `visitor_buckets` |
+> | `20260731001000_missing_tables_collaboration` | `collaboration_notifications`, `content_editing_sessions`, `team_activity_log` |
+> | `20260731002000_missing_tables_audit_analytics` | `api_usage`, `audit_logs`, `compliance_reports`, `conversion_events` |
+> | `20260731004000_missing_tables_integrations` | `blog_posts`, `bulk_operations`, `webhooks`, `webhook_deliveries` |
+> | **`20260801100000_editor_access_2fa`** | **`site_editors`, `editor_verification_codes`, `editor_device_grants`, `editor_handoffs`** |
+>
+> **That last row is the product's angle.** `architecture.md` files those four under "Non-account
+> editing (the angle)" and the PRD sells it as the wedge. **Nine source files on `main` already
+> query `site_editors`** — `api/editor/editors`, `api/editor/validate-grant`, `SiteEditorsCard`,
+> and five modules under `lib/auth/` (`editor-directory`, `editor-grants`, `editor-handoff`,
+> `editor-hub-session`, `staging-access`) plus `feature-gating/permissions`. The table has never
+> existed in production, so every one of those paths fails at runtime. It has gone unnoticed
+> because production holds 1 user and 1 site — nobody has exercised the wedge.
+>
+> **(b) Eleven migrations have NEVER BEEN APPLIED.** The ledger stops at `20260803020000`; `main`
+> has 43 files and the ledger has 32. These are clean, additive, re-runnable files — they did not
+> abort, **nobody ran them**. Several are security hardening:
+>
+> ```
+> 20260804120000_billing_customers_write_policy      20260809120000_lock_down_definer_functions
+> 20260804130000_restore_missing_rls_policies        20260809130000_content_history_definer_and_delete_split
+> 20260804140000_yearly_price_matches_stripe         20260813120000_hide_sites_api_key
+> 20260804150000_reconcile_restore_content_version   20260813130000_checkout_reservations
+> 20260805120000_reconcile_create_content_version    20260813140000_site_permissions_delete_per_row
+> 20260805190000_lock_down_content_version_rpcs
+> ```
+>
+> `hide_sites_api_key` and `lock_down_definer_functions` are not cosmetic. **Applying these is an
+> operator decision and has not been done** — they are listed here so the gap is a decision rather
+> than a discovery.
+>
+> ### What this invalidates
+>
+> - **`s14a-grant-authorized-editing` is built on `site_editors`, which does not exist.** Its diff
+>   adds 14 lines referencing that table and it ships **zero migrations**. It passed review as
+>   minor/ship-yes — correctly, because the reviewer judged the diff against `main`, and on `main`
+>   the code around it makes the same assumption. **Merging it changes nothing for the worse; it
+>   also cannot work.** Whoever creates these tables owns `s14a`'s real acceptance.
+> - **`s05`'s `bulk_operations`** is absent for the same reason.
+> - **`s16-webhook-config`** creates `webhooks` / `webhook_deliveries` in its own migration, so it
+>   is unaffected — it supplies what `20260731004000` failed to.
+> - `docs/architecture.md`'s Data model is annotated with these counts.
+
 > ## 🔴 NEW 2026-08-17 — nobody has observed the live schema or the live RLS state
 >
 > This is the root cause behind two separate wrong claims made this week, and it will produce more

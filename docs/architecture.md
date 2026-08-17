@@ -213,7 +213,27 @@ noise; a comment that says *what broke last time* is the asset.
 
 ## Data model
 
-> ### ⚠ This section is derived from migration files, not from the database — and they disagree
+> ### ✅ MEASURED 2026-08-17 — 39 tables exist, not 57. Run `node scripts/check-schema.mjs`
+>
+> The database has been probed. **39 of the 57 tables below exist. 18 do not.** Every table has RLS
+> enabled with at least one policy, so [ADR 002](./decisions/002-rls-tenant-boundary.md)'s boundary
+> is intact — that part is verified, not assumed.
+>
+> The 18 absent tables come from **five migrations that aborted and are marked applied** (whole-file
+> granularity — the transaction-rollback signature) plus `20260127`. Separately, **eleven
+> migrations on `main` have never been applied at all** — the ledger holds 32 versions against 43
+> files and stops at `20260803020000`.
+>
+> **The costliest absence is the product's angle**: `site_editors`, `editor_verification_codes`,
+> `editor_device_grants` and `editor_handoffs` — the whole "Non-account editing" group below — were
+> to be created by `20260801100000_editor_access_2fa`, which aborted. Nine source files query
+> `site_editors` today.
+>
+> Full breakdown, including which migrations are unapplied and what that invalidates:
+> [`quality/qa-register.md`](./quality/qa-register.md). **Re-run the probe rather than trusting this
+> paragraph** — it is a measurement with a date on it, not a guarantee.
+>
+> ### ⚠ The list below is still derived from migration files — treat it as INTENDED schema
 >
 > **Corrected 2026-08-17.** "57 tables" is a count of what the migrations *declare*. It is not a
 > count of what exists, and the gap is not small.
