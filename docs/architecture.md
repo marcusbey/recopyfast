@@ -47,9 +47,15 @@ plus custom fetch hooks. See [ADR 005](./decisions/005-client-state-context-and-
 ### Two deploy targets
 
 - **Vercel** — the Next.js app. One cron in `vercel.json` (`/api/cron/generate-blog-post`, daily 14:00).
-- **Nowhere (yet)** — `server/index.js`, an Express + Socket.io process. `server/Dockerfile`
-  and `server/fly.toml` exist but were never used; `fly.toml:22` still carries the
-  placeholder app name. Vercel cannot host a long-lived process. Standing this up is `s07`.
+- **Fly.io** — `server/index.js`, an Express + Socket.io process, deployed 2026-08-17 as
+  `recopyfast-ws` in `iad`, two `shared-1x-cpu@512MB` machines.
+  `https://recopyfast-ws.fly.dev/health` returns `status: ok`, `supabase: connected`.
+  Vercel cannot host a long-lived process, which is why it is here.
+  **Nothing points at it yet, deliberately:** `NEXT_PUBLIC_WS_URL` is unset, and it must stay
+  unset until `s07b` ships `@socket.io/redis-adapter` and the websocket-only transport
+  ([ADR 023](./decisions/023-websocket-only-transport-no-sticky-routing.md)). With two machines
+  and the current polling-first default, wiring it up would break the handshake on every
+  customer site.
 
 ---
 
