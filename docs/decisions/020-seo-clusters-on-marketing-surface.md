@@ -17,14 +17,23 @@ This codebase has **two visual surfaces, and they are not compatible on one page
 bug** — a token-driven panel on a hardcoded-light page is a dark card floating on a light
 background in dark mode.
 
-The SEO cluster stories (`/alternatives`, `/cms-for`, `/for`, `/agencies`) had no agreed surface,
-and `/ks-design` produced two answers that contradict each other:
+The SEO cluster stories (`/alternatives`, `/cms-for`, `/for`, `/agencies`) had no *agreed* surface
+— the two governing documents disagree, and `s19`'s design escalated that disagreement rather than
+resolving it:
 
-- `s17` and `s18` were drawn on **Marketing**.
-- `s19` was drawn on **App**, reasoning from `/blog` — which is genuinely token-driven; the real
-  `blog/page.tsx` and `blog/[slug]/page.tsx` contain zero `sky-*` classes.
+- **`architecture.md:299-309`** groups these routes under Marketing, naming `s17`–`s19` by number.
+- **`design-system.md`'s own evidence table** puts the one built precedent, `/blog`, under App —
+  and the code agrees: `blog/page.tsx` and `blog/[slug]/page.tsx` contain zero `sky-*` classes.
 
-They cannot both stand, because **`s19` renders on `s17`'s engine**. One template, one surface.
+All three designs were in fact drawn on **Marketing** (`s19`'s design doc, line 5: *"Surface:
+Marketing, per team-lead brief"*; its mockup is pinned `data-theme="light"`, uses only
+`sky-*`/`slate-*`, and contains no app tokens). But `s19` recorded the conflict as design-system
+gap 2 and explicitly deferred it: *"the doc conflict is real and unresolved — flag to
+`/ks-architect` to reconcile once s17/s18/s19 are all in."* It also recorded gap 1: the Marketing
+exception list in `design-system.md:56-58` names only "landing, demo, privacy and terms" and has
+never been extended to cover these routes.
+
+So the surface was applied without being decided. This ADR decides it.
 
 ## Decision
 
@@ -55,7 +64,7 @@ Three independent reasons converge, which is why this is not a coin flip:
   mode on pages whose visitors arrive cold from a search engine and convert or leave.
 - **(b) Mixed — cluster pages Marketing, `/agencies` App.** Rejected outright. This *is* the
   auth-page bug, applied at the scale of a whole route group, and `s19` renders on `s17`'s engine,
-  so the mix would occur inside one template rather than between two.
+  so the mix would occur inside one engine rather than between two.
 - **(c) Migrate the four marketing sections to tokens first, then build all three stories on
   App.** Rejected as sequencing, not as an idea. It is a real refactor of the highest-traffic page
   in the product, it has no story, and putting it in front of `s17` blocks the entire SEO cluster
@@ -64,20 +73,34 @@ Three independent reasons converge, which is why this is not a coin flip:
 
 ## Consequences
 
-**`s19`'s design is now known-wrong and must be redrawn.** It was produced against App tokens; it
-inherits the Marketing palette, the pinned-light background, and the constraint that it may not use
-`bg-card` / `text-foreground` anywhere. Its `.md` and `.html` are re-issued through `/ks-design`
-before `s19` executes. `s17` and `s18` need no design change — they already assumed this answer.
+**No design is redrawn.** All three were already on Marketing; this ADR ratifies what they did and
+removes the "provisional" qualifier from them. It closes `s19`'s design-system gaps 1 and 2 — the
+conflict it escalated is now decided, in favour of the surface it had already applied.
+
+**`design-system.md`'s Marketing exception list must be extended** — that is `s19`'s gap 1, and it
+is real. `design-system.md:56-58` and `styleguide.md:33-36` scope the legacy palette to "landing,
+demo, privacy and terms". `/for/*`, `/agencies/*`, `/alternatives/*` and `/cms-for/*` join it, so
+the next story does not have to re-derive this call.
 
 **These pages will not have dark mode, and that is now a stated property rather than an
-oversight.** A future reader comparing `/blog` (dark mode works) against `/for/saas` (it does not)
-is looking at a deliberate line, drawn here.
+oversight.** A future reader comparing `/blog` (dark mode works) against `/for/dental-practices`
+(it does not) is looking at a deliberate line, drawn here.
 
 **The `/blog` inconsistency is accepted and stays.** `/blog` is App-surfaced and is not moving.
 The rule going forward is narrow and checkable: **routes that reuse `src/components/sections/*`
 are Marketing; everything else is App.** That is a grep, not a judgement call.
 
-**Watch.** `s19`'s design explicitly *did not* reuse `src/components/sections/*` — that was the
-consequence of drawing it on App. On redraw, if it still does not reuse them, then reason 3 above
-does not apply to `s19` on its own merits and it is sitting on Marketing only because it shares
-`s17`'s engine. That is a sufficient reason, but a reviewer should know it is the operative one.
+**Watch — `s19` does not reuse `src/components/sections/*`, so reason 3 does not carry it.** Its
+design deliberately excludes them: research found all six are zero-argument and single-use,
+imported only by `src/app/page.tsx`, and forking one to take a vertical prop invites the
+thin-content failure `s17` itself warns against. `s19` builds purpose-made sections from primitives
+(`Button`, `Card`, `Badge`, `IconTile`) instead. It therefore sits on Marketing because it shares
+`s17`'s engine and its reader is a cold search visitor — reasons 1 and 2 — not reason 3. That is
+sufficient, but a reviewer should know which reason is load-bearing here, because the "reuses
+`sections/*`" grep above will return nothing for `s19` and that is expected, not a violation.
+
+**A third open item `s19` raised is not settled here and is not visual.** There is no marketing-
+surface `not-found.tsx` / `error.tsx` — the only ones in the app are App-surfaced, so an unknown
+`/for/<slug>` produces a surface switch mid-navigation. This ADR does not close that; it is a
+generic gap affecting every route on the Marketing surface, and it needs its own story rather than
+a per-route patch inside `s19`.

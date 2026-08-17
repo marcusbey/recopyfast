@@ -1,13 +1,17 @@
 ---
-validated: no
+validated: yes
 ---
 
-> **Decision made, gate still held.** The SEO cluster surface is settled as **Marketing**
-> ([ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md), 2026-08-17) — but this
-> story's design was drawn on the **App** surface and is therefore known-wrong, not merely
-> provisional. It is being redrawn through `/ks-design` on Marketing: `--sky-*` / `--slate-*`,
-> pinned light, no `bg-card` / `text-foreground` anywhere.
-> **This gate flips to `yes` when the redrawn design lands** — nothing else blocks it.
+> **Validated 2026-08-17.** The SEO cluster surface is settled as **Marketing**
+> ([ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md)) — which is the surface
+> this story's design was already drawn on. Its design-system gaps 1 and 2 are closed by that
+> ADR; no redraw.
+>
+> ⚠ **Ordering: `s17-cluster-engine` must land first** — this runs on `s17`'s engine, and if it
+> needs new route code, `s17` was built wrong (fix `s17`, don't special-case here).
+> ⚠ **Two open items the ADR did not close**, both recorded in the design: there is no
+> marketing-surface 404/error page, and no JSON-LD pattern exists anywhere in the codebase
+> while both templates need `FAQPage` + `BreadcrumbList`.
 # Plan — Story s19-audience-pages
 
 Branch: `feature/s19-audience-pages`

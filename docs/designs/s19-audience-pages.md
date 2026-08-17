@@ -153,15 +153,26 @@ skeleton/empty/error/success set doesn't map 1:1. What applies:
 
 ## Design system gaps
 
-1. **Marketing exception list doesn't name these routes yet.** `design-system.md:56-58`
+1. ~~**Marketing exception list doesn't name these routes yet.**~~ — **CLOSED 2026-08-17 by
+   [ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md).** `design-system.md`'s
+   Marketing exception now names `/for/*`, `/agencies/*`, `/alternatives/*` and `/cms-for/*`
+   explicitly. Original text kept below for the record.
+
+   `design-system.md:56-58`
    and `styleguide.md:33-36` scope the legacy `sky-*`/`slate-*` exception to "landing,
    demo, privacy and terms." This design extends it to `/for/*` and `/agencies/*` per the
    team-lead's explicit brief ("same surface as s17/s18"). Recording it here rather than
    silently assuming it — `/ks-design-system` should add `/for/*`, `/agencies/*`,
    `/alternatives/*`, `/cms-for/*` to that list once `s17`/`s18`/`s19` ship, so the next
    story doesn't have to re-derive the same call.
-2. **`architecture.md` vs. `design-system.md` disagree on which surface content-driven
-   SEO routes belong to** (research fact 5): `architecture.md:307` groups
+2. ~~**`architecture.md` vs. `design-system.md` disagree on which surface content-driven SEO
+   routes belong to**~~ — **CLOSED 2026-08-17 by
+   [ADR 020](../decisions/020-seo-clusters-on-marketing-surface.md): Marketing.** This design's
+   choice stands, and it is no longer provisional on a team-lead brief — it is a recorded
+   decision. `/blog` stays App-surfaced and the inconsistency is accepted deliberately. Original
+   text below.
+
+   (research fact 5): `architecture.md:307` groups
    `s17`–`s19` under the WebGL Marketing surface; `design-system.md:17` places the one
    built precedent, `blog`, on the token-driven App surface, and the actual code
    (`blog/[slug]/page.tsx`) uses `bg-background`/`text-display`, no WebGL, no

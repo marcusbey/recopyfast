@@ -452,8 +452,9 @@ at `validated: no`:
 10. **SEO cluster surface.** → **Marketing.** `/alternatives`, `/cms-for`, `/for` and
     `/agencies` render on the `--sky-*` / `--slate-*` palette, pinned light, so they can
     reuse `Pricing` / `Benefits` / `HowItWorks` / `FinalCTA`.
-    [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md). Unblocks `s17`, `s18`,
-    `s19` — `s19`'s design was drawn on App and is redrawn.
+    [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md). Unblocks `s17`, `s18`
+    and `s19`. All three designs were already on Marketing; the ADR ratifies it and closes the
+    `architecture.md` / `design-system.md` conflict that `s19` had escalated.
 11. **Branded subdomain provisioning.** → **One wildcard domain, one wildcard certificate.**
     Claiming is a database write; the product provisions no DNS and no certificates.
     [ADR 021](./decisions/021-wildcard-serving-origin-provisioning.md). Carries a host

@@ -24,7 +24,7 @@ settled against the code.
 |---|---|
 | [`research/`](./research/) | 19 verified-context reports, one per original story. Split stories inherit their parent's report, whose `## Split proposal` defines them |
 | [`designs/`](./designs/README.md) | 19 story designs (`<id>.md` + `<id>.html` mockup). Eight no-UI stories are recorded as deliberate skips in its README |
-| [`plans/`](./plans/) | 27 plans. `/ks-execute` is fail-closed on `validated: no`. **26 validated**; `s19` alone is still held, on a design redraw (ADR 020), not on a decision |
+| [`plans/`](./plans/) | 27 plans, **all `validated: yes`** as of 2026-08-17 — the last four blocking decisions are ADRs 019–022. `/ks-execute` is fail-closed on `validated: no` |
 
 ### [`reviews/stories.md`](./reviews/stories.md)
 Fresh-context review of the backlog against the PRD. Its verdict was *critical / not ready*;

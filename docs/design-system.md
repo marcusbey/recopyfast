@@ -53,9 +53,11 @@ Off-black in dark is `#0f1315`-ish, never pure black.
 border-tone-<name>-border`. Every status treatment in the product resolves to one of these, so
 a status reads identically whether drawn as a dot, a bar or a badge.
 
-**Marketing exception (documented, keep):** landing, demo, privacy and terms sit on the WebGL
-sky and use the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky`
-— never emerald, purple, or a second saturated hue.
+**Marketing exception (documented, keep):** landing, demo, privacy and terms — plus the SEO
+cluster routes `/alternatives/*`, `/cms-for/*`, `/for/*` and `/agencies/*` per
+[ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
+the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky` — never
+emerald, purple, or a second saturated hue.
 
 > ### ✅ Resolved: the SEO cluster pages are Marketing
 >
@@ -63,24 +65,30 @@ sky and use the legacy `--sky-*` / `--slate-*` palette. Accent moments there use
 > **Marketing** surface — `--sky-*` / `--slate-*`, pinned light, no app tokens.
 > [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md), decided 2026-08-17.
 >
-> The two `/ks-design` outputs had disagreed: `s17` and `s18` were drawn on Marketing,
-> `s19` on App. They could not both stand, because **`s19` renders on `s17`'s engine**, and
-> mixing the two is the auth-page bug at scale — a token-driven panel on a hardcoded-light
-> page is a dark card floating on a light background in dark mode.
+> **What was actually unresolved:** the two governing documents disagreed —
+> `architecture.md:299-309` names `s17`–`s19` under Marketing, while this document's own
+> evidence table puts the one built precedent, `/blog`, under App (and the code agrees:
+> zero `sky-*` classes in `blog/[slug]/page.tsx`). All three designs were drawn on
+> **Marketing**; `s19` recorded the conflict as its design-system gap 2 and deferred it
+> rather than designing against it. So the surface was applied without being decided.
+> An earlier revision of this block said `s19` "was designed on the App surface" — that was
+> wrong, and no design needs redrawing.
 >
 > Marketing wins because `s17`'s value comes largely from reusing `Pricing` / `Benefits` /
 > `HowItWorks` / `FinalCTA`, and those components hardcode `sky-*` / `slate-*` and read no
 > custom property. Reuse and app-token compliance are mutually exclusive here; the brief
-> already chose reuse. `architecture.md:299-309` also names `s17`–`s19` under Marketing by
-> number.
+> already chose reuse.
 >
 > **Consequences that land on this document:**
-> - **`s19`'s design is known-wrong and is redrawn** on Marketing before `s19` executes.
->   `s17` and `s18` need no change — they already assumed this.
+> - **The Marketing exception list below now covers these routes** — `s19`'s gap 1, closed.
 > - **These pages have no dark mode.** That is now a stated property, not an oversight.
 > - **`/blog` stays App-surfaced.** The inconsistency is accepted. The forward rule is a grep,
 >   not a judgement: **routes that reuse `src/components/sections/*` are Marketing; everything
->   else is App.**
+>   else is App.** `s19` is the noted exception — it is Marketing by engine and reader, and
+>   deliberately reuses none of them (ADR 020 § Watch).
+> - **Still open, and not `s19`'s to fix:** there is no marketing-surface `not-found.tsx` /
+>   `error.tsx`, so an unknown `/for/<slug>` switches surface mid-navigation. Needs its own
+>   story.
 
 ### Typography
 
