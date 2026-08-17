@@ -143,6 +143,25 @@ source files — resolve them normally, then run the suite.
 
 ---
 
+## ⛔ Schema comes before any of this
+
+The database was probed on 2026-08-17 (`node scripts/check-schema.mjs`). **17 tables that live code
+queries do not exist**, because five migrations aborted in full and are marked applied. Nine
+previously-unapplied migrations have since been applied; the ledger is at 41 of 43.
+
+**`20260818000000_repair_aborted_migrations` must be applied to production before two of these
+stories deploy:**
+
+- **`s16-webhook-config`** — its migration has **zero `CREATE TABLE` statements** and its first
+  statement is `ALTER TABLE webhooks`. `webhooks` does not exist, so the file would abort, be marked
+  applied, and kill the feature permanently.
+- **`s14a-grant-authorized-editing`** — built on `site_editors`, ships no migrations. Merging is
+  harmless; the feature simply cannot work until the table exists.
+
+Two security migrations are also blocked on that repair —
+`20260809120000_lock_down_definer_functions` (needs `purge_expired_editor_artifacts()`) and
+`20260813140000_site_permissions_delete_per_row` (needs `site_permissions.granted_by`).
+
 ## Before the first merge
 
 **`s01` needs migration-before-deploy ordering.** Its review found the entitlement chokepoint throws

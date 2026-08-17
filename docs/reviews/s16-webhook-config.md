@@ -145,6 +145,30 @@ signature; point one at a 500 and watch it through all five attempts — the pan
 "No webhook configured for this site" at attempt 5, which is MAJOR 1's user-visible half;
 `npx supabase db reset`; check the Vercel plan tier accepts the cron.
 
+## Addendum, 2026-08-17 — this migration would ABORT on production as it stands
+
+Found by probing the live database, not by re-reading the diff. **`webhooks` and
+`webhook_deliveries` do not exist in production.** They were to be created by
+`20260731004000_missing_tables_integrations`, which aborted in full and is marked applied, so it
+will never re-run.
+
+`20260817003000_webhook_dispatch_and_secrets.sql` contains **zero `CREATE TABLE` statements** and
+its first statement is `ALTER TABLE webhooks ADD COLUMN …`. Against production that is an immediate
+`42P01`. Supabase wraps each migration in a transaction, so the whole file would roll back — **and
+the ledger would record it as applied.** The feature would be silently dead, permanently, and this
+story would reproduce the exact scar that caused the seventeen absent tables in the first place.
+
+**This is not a review miss.** All three reviews judged the diff against `main`, where the migration
+is valid SQL; the absence is environmental and invisible from inside the branch. It is the same
+class as `s14a`'s `site_editors` dependency.
+
+**Blocking constraint on merge:** `20260818000000_repair_aborted_migrations` must be applied to
+production **before** this migration runs. That repair creates `webhooks` and `webhook_deliveries`
+with the shape `20260731004000` intended, at which point this migration's `ALTER`s land correctly.
+Do not merge and deploy `s16` ahead of it.
+
+The verdict below stands as issued — the code is sound and the review's findings are unaffected.
+
 ## Verdict
 Max severity: major
 Ship allowed: yes
