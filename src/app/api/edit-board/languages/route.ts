@@ -12,6 +12,7 @@ import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -23,6 +24,53 @@ function extractStagingToken(request: NextRequest): string | null {
 
 function withCors(response: NextResponse, origin?: string | null) {
   return withPublicCors(response, origin, "GET,POST,PUT,DELETE,OPTIONS");
+}
+
+/**
+ * Per site, fail closed — ADR 002 rule 4, the same shape as the per-site limiter
+ * on api/content/[siteId]/route.ts:455-473.
+ *
+ * Every method here reaches `createServiceRoleClient`, which bypasses RLS, and
+ * the credential that opens them is a staging token delivered in an invite link.
+ * A link that leaks is a copied credential; this is what bounds what it can do,
+ * and losing Redis must not remove it.
+ *
+ * Behind the access check, not in front of it: the bucket is the customer's own
+ * site, so metering an anonymous caller into it would let anyone exhaust the
+ * owner's budget by naming their site id.
+ *
+ * 50/min for reading and editing translations — a person working through a
+ * language panel.
+ */
+function meterSite(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "USER_CONTENT_EDIT",
+    endpoint: "edit-board/languages",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Language rate limit exceeded for this site.",
+  });
+}
+
+/**
+ * Adding a language is metered far tighter, and separately, because
+ * `autoTranslate` runs one OpenAI call PER content element: a single accepted
+ * request is an unbounded-ish bill, not one row. Its own bucket so a burst of
+ * ordinary language reads can never consume the budget that caps the spend, and
+ * vice versa.
+ *
+ * 10/min: adding a language is a once-in-a-while human action.
+ */
+function meterTranslation(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "API_UPLOAD",
+    endpoint: "edit-board/languages-add",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Language creation rate limit exceeded for this site.",
+  });
 }
 
 // Common language codes and names
@@ -82,6 +130,9 @@ export async function GET(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 
@@ -182,6 +233,9 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterTranslation(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 
@@ -361,6 +415,9 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
+
     const supabase = createServiceRoleClient();
 
     // If setting as default, unset other defaults first
@@ -474,6 +531,9 @@ export async function DELETE(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 

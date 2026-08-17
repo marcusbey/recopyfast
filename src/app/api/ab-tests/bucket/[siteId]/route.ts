@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
 import { bucketVisitorToVariant } from "@/lib/ab-testing/bucketing";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -55,6 +56,28 @@ export async function GET(
         ),
       );
     }
+
+    // Per site, fail closed, behind authorization — the pattern of the per-site
+    // limiter on api/content/[siteId]/route.ts:455-473. (ADR 002 rule 4)
+    //
+    // This one WRITES: it upserts `visitor_buckets` with the service-role client,
+    // so an unmetered token is an unbounded insert primitive against a table the
+    // customer never sees. Behind the auth call for the reason given on the other
+    // A/B routes — an unauthenticated caller must not be able to spend a
+    // customer's bucket by naming their site id.
+    //
+    // 1000/min: one call per visitor per page view, and the widget persists the
+    // assignment, so a real site sits far below it. A refusal costs the visitor
+    // their variant for that load, not the page.
+    const limited = await enforceRateLimit(request, {
+      limit: "API_KEY_DEFAULT",
+      endpoint: "ab-tests/bucket",
+      identifier: siteId,
+      identifierType: "api_key",
+      onStoreFailure: "deny",
+      message: "A/B bucketing rate limit exceeded for this site.",
+    });
+    if (limited) return withCors(limited);
 
     // Resolve geo from Vercel headers or client hint
     const geoCountry =

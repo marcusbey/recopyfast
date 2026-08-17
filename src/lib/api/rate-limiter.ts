@@ -163,8 +163,42 @@ export class APIRateLimiter {
         total: maxRequests,
       };
     } catch (error) {
-      console.error("Rate limit error:", error);
-      // In case of error, allow the request but log it
+      // FAIL CLOSED IN PRODUCTION. (H-4)
+      //
+      // This catch used to end with "In case of error, allow the request but log
+      // it" and `allowed: true`. Any error on the `rate_limits` table — a dead
+      // connection, a timeout, the table missing — therefore removed the limit
+      // silently, and the only endpoint behind this limiter is /api/v1/content,
+      // which reads and WRITES `content_elements` with the service-role key. A
+      // limiter that disappears without saying so is worse than none: nothing
+      // downstream can tell the difference between "metered" and "unmetered".
+      //
+      // Permissive outside production, deliberately, and it is the same call
+      // `@/lib/security/rate-limiter` already makes about a missing REDIS_URL:
+      // strict where the traffic is real, out of the way on a developer's
+      // machine that has no local store. Two different conventions for "the
+      // meter is down" would be one too many.
+      //
+      // The caller sees an ordinary refusal rather than a distinct "store
+      // unavailable" signal, because RateLimitResult has no channel for one.
+      // /api/v1/content answers 429; a 503 would be more precise and is not
+      // worth widening this interface for.
+      const isProduction = process.env.NODE_ENV === "production";
+
+      console.error(
+        `Rate limit store unavailable (policy: ${isProduction ? "deny" : "allow"}):`,
+        error,
+      );
+
+      if (isProduction) {
+        return {
+          allowed: false,
+          remaining: 0,
+          resetTime: windowStart + windowMs,
+          total: maxRequests,
+        };
+      }
+
       return {
         allowed: true,
         remaining: maxRequests - 1,

@@ -9,6 +9,7 @@ import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -20,6 +21,34 @@ function extractStagingToken(request: NextRequest): string | null {
 
 function withCors(response: NextResponse, origin?: string | null) {
   return withPublicCors(response, origin, "POST,OPTIONS");
+}
+
+/**
+ * Per site, fail closed — ADR 002 rule 4, the same shape as the per-site limiter
+ * on api/content/[siteId]/route.ts:455-473.
+ *
+ * The tightest ceiling of the edit-board routes, and not because of the database:
+ * one call here runs an OpenAI completion PER content element and then writes
+ * every result back with the service-role key. Unmetered, a leaked invite link
+ * is an unbounded bill as much as an unbounded write, so the limiter sits in
+ * front of the spend, not between it and the update.
+ *
+ * Behind the access check, not in front of it: the bucket is the customer's own
+ * site, so metering an anonymous caller into it would let anyone exhaust the
+ * owner's budget by naming their site id.
+ *
+ * 10/min: applying a style to a page is a deliberate, slow action a human waits
+ * for. Ten in a minute is already more than anyone does.
+ */
+function meterSite(request: NextRequest, siteId: string) {
+  return enforceRateLimit(request, {
+    limit: "API_UPLOAD",
+    endpoint: "edit-board/styles-apply",
+    identifier: siteId,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "Style application rate limit exceeded for this site.",
+  });
 }
 
 interface TransformedContent {
@@ -88,6 +117,9 @@ export async function POST(request: NextRequest) {
         origin,
       );
     }
+
+    const limited = await meterSite(request, siteId);
+    if (limited) return withCors(limited, origin);
 
     const supabase = createServiceRoleClient();
 

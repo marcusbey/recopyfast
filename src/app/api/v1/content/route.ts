@@ -8,6 +8,27 @@ import {
 import { analytics } from "@/lib/analytics/tracker";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
+/**
+ * THIS IS A SERVICE-ROLE ROUTE. All four handlers below build a Supabase client
+ * from `SUPABASE_SERVICE_ROLE_KEY`, which bypasses RLS entirely — ADR 002
+ * applies to every one of them.
+ *
+ * It does not call `createServiceRoleClient()`, so `grep -rn createServiceRoleClient`
+ * — the census ADR 002 leans on for "which routes bypass RLS" — does not list
+ * this file. That is how it came to be the one service-role path whose limiter
+ * failed open (H-4): nobody counted it. The construction is deliberately left
+ * alone rather than swapped, because `@supabase/ssr`'s `createServerClient` and
+ * `@supabase/supabase-js`'s `createClient` differ in auth options, client
+ * headers and cookie handling, and rewriting a live API route's data client is
+ * not a change to make inside a security fix. This comment is the marker
+ * instead: a census that greps for "SERVICE-ROLE ROUTE" or for
+ * `SUPABASE_SERVICE_ROLE_KEY` finds it.
+ *
+ * Authorization here is `validateAPIKey` plus a strict `apiKey.site_id === siteId`
+ * check in every handler — a per-key credential, not a site token, which is why
+ * this route uses neither `authorizeSiteRequest` nor a per-site limiter.
+ */
+
 export async function GET(req: NextRequest) {
   try {
     // Validate API key
@@ -64,6 +85,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    // Service-role client — RLS off. See the note at the top of this file.
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -202,6 +224,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Service-role client — RLS off. See the note at the top of this file.
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -354,6 +377,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
+    // Service-role client — RLS off. See the note at the top of this file.
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
