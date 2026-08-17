@@ -90,6 +90,32 @@ the plan's own open DoD item — an invited editor who never had an account, ema
 changes a paragraph, and it persists. The implementer marked that NOT DONE honestly and called
 it a ship blocker; the reviewer agrees it gates the **ship**, not the review.
 
+## Addendum, 2026-08-17 — a merge-time constraint this review could not have seen
+
+Measured after the fact, with the compressor `s06a`'s gate uses (Node `zlib.gzipSync`, level 9):
+
+```
+main                                    46,875 gz   ← MAX_BUNDLE_GZ, exactly
+feature/s14a-grant-authorized-editing   47,602 gz   ← +727 OVER
+```
+
+**This branch's embed artifact exceeds the committed byte ceiling by 727 gzipped bytes.**
+
+This is not a defect in the review. `s14a` was judged against `main`, and on `main` there is no
+ceiling — `s06a` committed the gate to its own branch, which is unmerged, so
+`scripts/build-embed.mjs` on this branch has no gate to fire. The verdict below stands as issued.
+
+It is a **merge-order** constraint, and it is invisible from inside any single branch: the moment
+`s06a` lands, this branch stops building. `s04-retire-graveyard-surfaces` frees 981 bytes and is the
+only source of headroom; merge it before this one. See [`../ship-order.md`](../ship-order.md) for
+the measured sequence.
+
+**Do not raise `MAX_BUNDLE_GZ` to make this merge pass.** `s06c-embed-shrink` is the story that
+exists to create room.
+
 ## Verdict
 Max severity: minor
 Ship allowed: yes
+
+> ⚠ **Ship-allowed, merge-ordered.** Valid against `main` as reviewed; blocked against a tree that
+> already contains `s06a` unless `s04` merges first. See the addendum above.

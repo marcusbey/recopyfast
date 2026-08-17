@@ -26,6 +26,10 @@ settled against the code.
 | [`designs/`](./designs/README.md) | 19 story designs (`<id>.md` + `<id>.html` mockup). Eight no-UI stories are recorded as deliberate skips in its README |
 | [`plans/`](./plans/) | 27 plans, **all `validated: yes`** as of 2026-08-17 — the last four blocking decisions are ADRs 019–022. `/ks-execute` is fail-closed on `validated: no` |
 
+### [`ship-order.md`](./ship-order.md)
+The measured merge sequence for the reviewed branches, with the conflict surface and the byte-budget
+constraint that is invisible from inside any single branch. Read before the first `/ks-ship`.
+
 ### [`reviews/stories.md`](./reviews/stories.md)
 Fresh-context review of the backlog against the PRD. Its verdict was *critical / not ready*;
 `stories.md` has since been revised to close every issue, and cites the old numbering — the
