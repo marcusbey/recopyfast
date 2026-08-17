@@ -5,6 +5,7 @@ import {
   StatusBadge,
   versionChangeTypes,
   resolveStatus,
+  type VersionChangeType,
 } from "@/components/ui/status-badge";
 import { Eye, RotateCcw, FileText, User, Clock } from "lucide-react";
 import { format } from "date-fns";
@@ -15,7 +16,7 @@ export interface Version {
   createdBy: string;
   description: string | null;
   elementsChanged: number;
-  changeType: "manual" | "auto" | "publish" | "restore" | "bulk";
+  changeType: VersionChangeType;
   createdAt: string;
   snapshot?: Record<string, unknown>[];
 }

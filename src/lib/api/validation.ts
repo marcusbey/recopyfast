@@ -120,6 +120,28 @@ export function optionalEnum<T extends string>(
   return requireEnum(body, field, allowed);
 }
 
+/**
+ * Read an optional boolean flag, falling back to `fallback` when absent.
+ *
+ * Deliberately strict about the type rather than truthy-coercing: these flags
+ * gate writes (`overwrite_existing`), and a caller sending the string `"false"`
+ * must not be read as "yes, overwrite". A wrong value is refused, not guessed.
+ */
+export function optionalBoolean(
+  body: Record<string, unknown>,
+  field: string,
+  fallback: boolean,
+): ValidationResult<boolean> {
+  const raw = body[field];
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: fallback };
+  }
+  if (typeof raw !== "boolean") {
+    return fail(`Field "${field}" must be a boolean`);
+  }
+  return { ok: true, value: raw };
+}
+
 export function requireFiniteNumber(
   body: Record<string, unknown>,
   field: string,

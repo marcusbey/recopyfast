@@ -278,6 +278,25 @@ describe("SiteDetailView", () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * Same defect class as the domain ownership panel above: `BulkOperations`
+   * and its three API routes shipped together and the component was imported
+   * by nothing, so an owner had no way to export their own content — the one
+   * feature that answers "what happens to my copy if I leave". It lives at the
+   * foot of the site page, next to the version history it writes to.
+   */
+  it("mounts the content portability card at the foot of the page", async () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    const portability = await screen.findByText("Content portability");
+    const domainOwnership = screen.getByText("Domain ownership");
+
+    expect(
+      domainOwnership.compareDocumentPosition(portability) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("handles missing stats gracefully", () => {
     const siteWithoutStats = { ...mockSite };
     delete siteWithoutStats.stats;

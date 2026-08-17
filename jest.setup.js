@@ -69,6 +69,14 @@ jest.mock('next/server', () => ({
     async json() {
       return JSON.parse(this.body || '{}')
     }
+
+    // The real NextRequest exposes the body as text too, and a route that has
+    // to measure what it received before parsing it — bulk import refuses an
+    // oversized file *before* `JSON.parse` — can only be written that way. The
+    // mock omitting `text()` made that route untestable rather than wrong.
+    async text() {
+      return this.body || ''
+    }
   },
   // Constructible, and faithful about which statuses may carry a body.
   //

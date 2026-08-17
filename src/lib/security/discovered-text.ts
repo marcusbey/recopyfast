@@ -115,20 +115,34 @@ export type DiscoveredTextResult =
   | { ok: false; error: string };
 
 /**
- * Accept a discovered text node verbatim, or say why it was refused.
+ * Accept a string verbatim, or say why it was refused, with the length ceiling
+ * supplied by the caller. Pass `null` for no ceiling.
  *
  * The returned string is identical to the input: this function never escapes,
- * strips or truncates.
+ * strips or truncates. That guarantee — refuse, never repair — is the reusable
+ * part, and it is the reason this is a parameter rather than a second copy of
+ * the function somewhere else: there is one definition of "control character"
+ * in this repo and it stays that way.
+ *
+ * The ceiling is *not* the reusable part. `MAX_DISCOVERED_TEXT_LENGTH` is a rule
+ * about discovery — one text node scraped off a customer's page — and not about
+ * `content_elements.current_content`, which is an unbounded `TEXT`. Nothing else
+ * that writes that column caps it: not `bulk/update`'s set/append, not
+ * `staging/content` PUT, not `v1/content` POST. A caller applying this bound to
+ * a column that never had it would refuse a value the product itself wrote.
  */
-export function validateDiscoveredText(content: unknown): DiscoveredTextResult {
+export function validateVerbatimText(
+  content: unknown,
+  maxLength: number | null,
+): DiscoveredTextResult {
   if (typeof content !== "string") {
     return { ok: false, error: "content must be a string" };
   }
 
-  if (content.length > MAX_DISCOVERED_TEXT_LENGTH) {
+  if (maxLength !== null && content.length > maxLength) {
     return {
       ok: false,
-      error: `content exceeds ${MAX_DISCOVERED_TEXT_LENGTH} characters (${content.length})`,
+      error: `content exceeds ${maxLength} characters (${content.length})`,
     };
   }
 
@@ -137,6 +151,16 @@ export function validateDiscoveredText(content: unknown): DiscoveredTextResult {
   }
 
   return { ok: true, value: content };
+}
+
+/**
+ * Accept a discovered text node verbatim, or say why it was refused.
+ *
+ * The returned string is identical to the input: this function never escapes,
+ * strips or truncates.
+ */
+export function validateDiscoveredText(content: unknown): DiscoveredTextResult {
+  return validateVerbatimText(content, MAX_DISCOVERED_TEXT_LENGTH);
 }
 
 /** Accept an element id fit to key the upsert's conflict target. */
