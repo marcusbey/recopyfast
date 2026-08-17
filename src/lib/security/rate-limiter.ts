@@ -1,5 +1,50 @@
 import { createClient } from "redis";
 
+/**
+ * Environment names that mean "a developer's machine", and nothing else.
+ *
+ * Everything not on this list — including an environment that identifies
+ * itself as nothing at all — is treated as serving real traffic. See
+ * `isProductionLikeEnvironment` for why the default leans that way.
+ */
+const DEVELOPER_ENVIRONMENTS = new Set(["development", "test"]);
+
+/**
+ * True where requests arrive from the internet rather than from whoever is
+ * running the app.
+ *
+ * WHY NOT `NODE_ENV === "production"` (M-1)
+ * ----------------------------------------
+ * That is what this module used to ask, and it is the wrong question twice
+ * over. NODE_ENV describes the compile, not the deployment: Vercel sets it to
+ * "production" for every `next build`, previews included, and it is ordinary
+ * configuration that can be dropped or mistyped by hand. When it came back
+ * false the app silently got `MemoryRateLimiter`, whose `checkLimit` never
+ * throws — so every `onStoreFailure: "deny"` in the codebase became dead code
+ * and the counters went per-isolate, which on a serverless platform is no
+ * limit at all. No log, no failure, nothing to notice. `src/lib/stripe/mode.ts`
+ * carries the same tombstone for the same variable.
+ *
+ * VERCEL_ENV is set by the platform on every deployment and is the honest
+ * discriminator, so it is read first — the resolution order this project
+ * already uses in `src/lib/config/production.ts` and both health routes.
+ * "preview" counts as production-like: a preview deployment is publicly
+ * reachable and serves the same service-role widget paths as production, whose
+ * credential is published in the customer's own page markup. ADR 002 rule 4
+ * makes the fail-closed limiter the thing that bounds a copied token; an
+ * unmetered preview is the same exposure as an unmetered production.
+ *
+ * The default when NOTHING identifies the environment is production-like, on
+ * purpose. Being wrongly strict costs a 503 that someone reads within the
+ * hour; being wrongly permissive costs an unmetered service-role path that no
+ * signal anywhere reports. Only the two names above buy the memory store.
+ */
+export function isProductionLikeEnvironment(): boolean {
+  const environment = process.env.VERCEL_ENV || process.env.NODE_ENV;
+  if (!environment) return true;
+  return !DEVELOPER_ENVIRONMENTS.has(environment);
+}
+
 export interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
@@ -169,7 +214,12 @@ export class RedisRateLimiter {
       // In production a missing REDIS_URL means rate limiting would silently
       // fall back to a local Redis that does not exist on Vercel. Fail fast
       // so the misconfiguration is caught at first use rather than ignored.
-      if (!this.resolvedUrl && process.env.NODE_ENV === "production") {
+      //
+      // Keyed on the same predicate as the store selection below, not on
+      // NODE_ENV: a deployment whose NODE_ENV was lost would otherwise dial
+      // localhost:6379 and surface ECONNREFUSED instead of naming the variable
+      // an operator has to set.
+      if (!this.resolvedUrl && isProductionLikeEnvironment()) {
         throw new Error(
           "REDIS_URL environment variable is required in production. " +
             "Rate limiting cannot be initialised without a Redis connection.",
@@ -481,8 +531,54 @@ export class AbuseDetector {
   }
 }
 
+/** How the environment described itself, for a log line an operator can act on. */
+function describeEnvironment(): string {
+  const vercelEnv = process.env.VERCEL_ENV ?? "<unset>";
+  const nodeEnv = process.env.NODE_ENV ?? "<unset>";
+  return `VERCEL_ENV=${vercelEnv}, NODE_ENV=${nodeEnv}`;
+}
+
+/**
+ * Pick the store this process will meter against, and refuse to do it quietly.
+ *
+ * This runs once, at module import — the closest thing a serverless app has to
+ * a startup gate. `server/index.js`'s `assertProductionEnvironment()` answers
+ * the same misconfiguration by refusing to boot and exiting 1; a Vercel
+ * function has no boot to refuse, so the equivalent is the pair below: a
+ * production-like deployment NEVER receives the in-memory store, and a missing
+ * REDIS_URL is stated at error level rather than absorbed.
+ *
+ * Error, not warn, and not silence. The failure this replaces was invisible by
+ * construction — the memory limiter answers every check successfully, so
+ * nothing downstream could tell "metered" from "unmetered". A warning would be
+ * one more line in a stream nobody reads at the moment it matters.
+ *
+ * Note what this deliberately does NOT do: fail the import. Throwing here would
+ * take every route in the app down over a rate-limit store, including the ones
+ * that declared `onStoreFailure: "allow"` precisely because they would rather
+ * serve unmetered than not serve. Handing them the Redis limiter instead lets
+ * each endpoint keep the policy it chose — the fail-closed ones 503, the
+ * fail-open ones proceed — which is the behaviour they were reviewed against.
+ */
+function selectRateLimiter(): MemoryRateLimiter | RedisRateLimiter {
+  if (!isProductionLikeEnvironment()) {
+    return RateLimiterFactory.getMemoryLimiter();
+  }
+
+  if (!process.env.REDIS_URL) {
+    console.error(
+      "REDIS_URL is not set and this deployment looks production-like " +
+        `(${describeEnvironment()}). Rate limiting has no shared store: every ` +
+        'endpoint with onStoreFailure: "deny" — including the service-role ' +
+        "paths ADR 002 rule 4 requires a limiter on — will answer 503 until it " +
+        "is set. Set REDIS_URL and REDEPLOY: Vercel bakes environment variables " +
+        "into a deployment, so editing the value alone changes nothing.",
+    );
+  }
+
+  return RateLimiterFactory.getRedisLimiter();
+}
+
 // Export default instances
-export const rateLimiter = RateLimiterFactory.getLimiter(
-  process.env.NODE_ENV === "production",
-);
+export const rateLimiter = selectRateLimiter();
 export const abuseDetector = new AbuseDetector();
