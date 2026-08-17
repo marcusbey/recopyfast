@@ -152,20 +152,34 @@ process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
 process.env.OPENAI_API_KEY = 'test-openai-key'
 
+// Browser-only globals, guarded.
+//
+// `testEnvironment` is jsdom for the whole project, but a suite may opt into the
+// node environment with a `@jest-environment node` docblock — the realtime
+// server harness has to, because it boots a real HTTP listener and drives it
+// with socket.io-client, and jsdom's fetch/WebSocket shims get in the way of
+// both. This file runs in `setupFilesAfterEach` for EVERY suite, so an
+// unguarded `window`/`navigator` reference here makes any node-environment
+// suite fail to run at all, with "ReferenceError: window is not defined"
+// pointing at the setup file rather than at the test.
+const hasBrowserGlobals = typeof window !== 'undefined'
+
 // Mock window.matchMedia
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: jest.fn().mockImplementation(query => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: jest.fn(), // deprecated
-    removeListener: jest.fn(), // deprecated
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
-  })),
-})
+if (hasBrowserGlobals) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: jest.fn().mockImplementation(query => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: jest.fn(), // deprecated
+      removeListener: jest.fn(), // deprecated
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+      dispatchEvent: jest.fn(),
+    })),
+  })
+}
 
 // Mock ResizeObserver
 global.ResizeObserver = jest.fn().mockImplementation(() => ({
@@ -182,12 +196,14 @@ global.IntersectionObserver = jest.fn().mockImplementation(() => ({
 }))
 
 // Mock clipboard API
-Object.assign(navigator, {
-  clipboard: {
-    writeText: jest.fn().mockImplementation(() => Promise.resolve()),
-    readText: jest.fn().mockImplementation(() => Promise.resolve('')),
-  },
-})
+if (hasBrowserGlobals) {
+  Object.assign(navigator, {
+    clipboard: {
+      writeText: jest.fn().mockImplementation(() => Promise.resolve()),
+      readText: jest.fn().mockImplementation(() => Promise.resolve('')),
+    },
+  })
+}
 
 // Global test utilities
 global.createMockElement = (id, content = 'Test content') => ({
