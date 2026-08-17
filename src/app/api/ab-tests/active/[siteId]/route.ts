@@ -72,7 +72,25 @@ export async function GET(
       `,
       )
       .eq("site_id", siteId)
-      .eq("status", "active");
+      .eq("status", "active")
+      // Control first, then id. The widget's client-side bucketing fallback
+      // walks this list and accumulates traffic_percentage, so its answer is a
+      // function of the order this response happens to arrive in — and Postgres
+      // promises no order without an ORDER BY. Unordered, a returning visitor
+      // gets silently reassigned whenever the planner changes its mind.
+      // Mirrored in src/lib/ab-testing/bucketing.ts and in the widget.
+      //
+      // `nullsFirst: false` because `ORDER BY is_control DESC` puts NULLs first
+      // in Postgres, while both walks read a NULL as "not the control" and sort
+      // it last. The walks decide, so this changes no assignment — but a wire
+      // order that contradicts the order the walk imposes on it is a trap for
+      // whoever next reads one and assumes the other.
+      .order("is_control", {
+        ascending: false,
+        nullsFirst: false,
+        referencedTable: "ab_test_variants",
+      })
+      .order("id", { ascending: true, referencedTable: "ab_test_variants" });
 
     if (error) {
       console.error("Error fetching active A/B tests:", error);
