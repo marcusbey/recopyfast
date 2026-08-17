@@ -166,6 +166,38 @@ describe("GET /api/health — the realtime check", () => {
     expect(response.status).toBe(200);
   });
 
+  it("never returns the raw probe error to an anonymous caller", async () => {
+    // `/api/health` is public and unauthenticated. Node's real failure messages
+    // carry infrastructure detail — `ECONNREFUSED 127.0.0.1:4001` names an
+    // internal port, TLS errors name ciphers and certificates — and they are
+    // most interesting to an attacker exactly when the probe is failing. The
+    // operator still gets the full message: it is logged at warn.
+    const leaky = new Error(
+      "connect ECONNREFUSED 10.0.0.7:4001 — internal-broker.fly.internal",
+    );
+    fetchMock.mockRejectedValue(leaky);
+
+    const { response, body } = await callGet();
+    const wire = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(body.checks.realtime.error).toBe("Realtime service unreachable");
+    expect(wire).not.toContain("ECONNREFUSED");
+    expect(wire).not.toContain("10.0.0.7");
+    expect(wire).not.toContain("fly.internal");
+  });
+
+  it("keeps the timeout message generic too", async () => {
+    const aborted = new Error("The operation was aborted due to timeout");
+    aborted.name = "TimeoutError";
+    fetchMock.mockRejectedValue(aborted);
+
+    const { body } = await callGet();
+
+    expect(body.checks.realtime.status).toBe("timeout");
+    expect(body.checks.realtime.error).toBe("Realtime service timed out");
+  });
+
   it("records a timeout rather than waiting on an unreachable service", async () => {
     const aborted = new Error("The operation was aborted");
     aborted.name = "AbortError";

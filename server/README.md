@@ -93,8 +93,10 @@ already pointed at.
 - The Supabase project URL and **service-role** key
 - **The `REDIS_URL` connection string.** It is not in this repo and not in Fly — Fly stores
   secrets write-only, so `fly secrets list` gives you the name and never the value. Get it from
-  the Upstash console (`console.upstash.com`), database **`informed-ghost-153511`**, on the
-  database page's connect panel.
+  the Upstash console (`console.upstash.com`), on the connect panel of **the database backing the
+  app's rate limiter** — there is one, and anyone with console access sees it listed. Its name is
+  deliberately not written here: this repo is public, and naming the single store whose exhaustion
+  fail-closes both services is a targeting hint that buys a legitimate deployer nothing.
 
   **It must be the `rediss://` string, not `redis://`.** `rate-limit.js:76-98` passes the value
   straight to node-redis' `createClient({ url })` and configures nothing else about the
@@ -131,8 +133,8 @@ value it already has is a no-op that releases nothing, so this only bites when a
 changes — that is, precisely while following this section. The incident at the bottom of this file
 was closed with `--stage` for exactly this reason; the procedure now agrees with it.
 
-`REDIS_URL` points at the **same Upstash database the Next app's own rate limiter uses**
-(`informed-ghost-153511`). That is deliberate and it is fine at current traffic, but it carries a
+`REDIS_URL` points at the **same Upstash database the Next app's own rate limiter uses** (named in
+the console, not here — this repo is public). That is deliberate and fine at current traffic, but it carries a
 caveat with a name on it: the app's limiter is **fail-closed in production**
 (`src/lib/security/rate-limiter.ts`), so if socket traffic ever exhausts the command quota, ten
 API endpoints stop serving. Upstash bills per command and each rate-limit check already costs two.

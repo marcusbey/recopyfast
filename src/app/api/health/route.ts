@@ -258,10 +258,19 @@ async function checkRealtime(url: string): Promise<ServiceCheck> {
       reason: error instanceof Error ? error.message : "Unknown error",
     });
 
+    // Generic on the wire, specific in the log. `/api/health` is public and
+    // unauthenticated, and the raw message carries infrastructure detail a
+    // caller has no business seeing — TLS handshake and certificate errors,
+    // `ECONNREFUSED 127.0.0.1:4001` with the internal port, Node-specific error
+    // shapes. Most valuable to an attacker precisely during an outage, when the
+    // probe is failing and the errors get interesting. The full message is
+    // already logged at warn above, which is where an operator reads it.
     return {
       status: isTimeout ? "timeout" : "error",
       latency: Date.now() - start,
-      error: error instanceof Error ? error.message : "Unknown error",
+      error: isTimeout
+        ? "Realtime service timed out"
+        : "Realtime service unreachable",
     };
   }
 }

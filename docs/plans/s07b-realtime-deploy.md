@@ -112,7 +112,7 @@ Criteria this plan must satisfy:
 > the adapter that shares rooms across machines.
 >
 > When the count does rise, the adapter must get its **own** Upstash database rather than sharing
-> `informed-ghost-153511`. The rate limiter is fail-closed in production
+> the one the rate limiter uses. The rate limiter is fail-closed in production
 > (`src/lib/security/rate-limiter.ts:169-174`): if it cannot reach Redis, ten API endpoints stop
 > serving, so socket pub/sub must not be able to exhaust the command quota they depend on. Upstash
 > bills per command and `.env.example:119` notes each rate-limit check already costs two.
