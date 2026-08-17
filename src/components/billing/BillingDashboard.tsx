@@ -12,6 +12,7 @@ import { CreditBalanceCard } from "./CreditBalanceCard";
 import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
+import { TrialStatusCard } from "./TrialStatusCard";
 import {
   LifetimeOfferCard,
   resolveLifetimeOffer,
@@ -76,6 +77,9 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
       <div className="container mx-auto px-4 py-8">
         <div className="animate-pulse space-y-6">
           <div className="h-8 bg-surface-2 rounded w-1/4"></div>
+          {/* In the shape of the two rows that may be about to arrive, so a
+              trialling account's page does not jump when they do. */}
+          <TrialStatusCard trial={null} isLoading />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[...Array(6)].map((_, i) => (
               <div key={i} className="h-48 bg-surface-2 rounded-lg"></div>
@@ -134,20 +138,34 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
   // route redirects a wholly unentitled session here (see src/middleware.ts),
   // so it has to stand on its own rather than assume the reader arrived by
   // choice.
+  // Being unentitled has more than one story behind it, and the reader knows
+  // which one is theirs. Someone whose 14-day trial just ran out is not
+  // "choosing a plan to continue" — they used the product, it worked, and the
+  // thing they most need to hear is that their site did not go down with the
+  // trial. Credits outrank it: a credit holder who also trialled once still has
+  // something spendable, and that is the more useful fact.
+  const hasExpiredTrial = dashboardData.everTrialed && !holdsCredits;
+
   if (currentPlan === null) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="mx-auto max-w-lg p-8 text-center">
           <h1 className="mb-2 text-2xl font-semibold">
-            {holdsCredits ? "You're on credits" : "Choose a plan to continue"}
+            {holdsCredits
+              ? "You're on credits"
+              : hasExpiredTrial
+                ? "Your trial has ended"
+                : "Choose a plan to continue"}
           </h1>
           <p className="mb-6 text-muted-foreground">
             {holdsCredits
               ? `You have ${creditBalance.toLocaleString("en-US")} credits to spend on AI suggestions and translations. Sites, collaborators and A/B testing need a plan.`
-              : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
+              : hasExpiredTrial
+                ? "Your 14-day Pro trial has ended. Your site keeps serving its current content — editing, new sites and collaborators need Pro."
+                : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
           </p>
           <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
-            See plans
+            {hasExpiredTrial ? "Upgrade to Pro" : "See plans"}
           </Button>
         </Card>
 
@@ -208,6 +226,12 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
           </Button>
         </div>
       </div>
+
+      {/* Above the banner, because for someone still inside their trial this
+          is the fact that governs everything below it. It renders nothing when
+          `trial` is null — which covers a paying customer, an account that
+          never trialled, and a payload that failed to load. */}
+      <TrialStatusCard trial={dashboardData.trial} />
 
       <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
 

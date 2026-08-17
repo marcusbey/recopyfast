@@ -94,10 +94,21 @@ export default function FinalCTA() {
           className="mt-16 flex flex-wrap justify-center items-center gap-6 text-sm text-slate-800"
         >
           {/*
-            "No credit card required" and "14-day free trial" were removed:
-            there is no trial_period_days anywhere and subscription Checkout
-            always collects a card, so both were claims the product broke.
+            These two were removed once, when there was no trial anywhere and
+            subscription Checkout always collected a card — both were claims the
+            product broke. They are true again because a new account is granted
+            14 days of Pro at sign-in, with no Stripe customer and no card (see
+            src/lib/billing/trial.ts). If that grant is ever removed, these go
+            with it.
           */}
+          <span className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            14-day free trial
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            No credit card required
+          </span>
           <span className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
             Cancel anytime

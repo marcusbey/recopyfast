@@ -22,12 +22,26 @@ jest.mock("@/lib/billing/entitlements", () => ({
   getEffectivePlan: jest.fn(),
 }));
 
+jest.mock("@/lib/billing/effective-plan", () => ({
+  readTrialGrant: jest.fn(),
+}));
+
+jest.mock("@/lib/stripe/subscription", () => ({
+  getUserSubscription: jest.fn(),
+}));
+
 import { GET } from "@/app/api/billing/entitlement/route";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { readTrialGrant } from "@/lib/billing/effective-plan";
+import { getUserSubscription } from "@/lib/stripe/subscription";
 import type { Entitlement } from "@/lib/billing/effective-plan";
+import type { Subscription } from "@/types/billing";
 
 const mockGetEffectivePlan = getEffectivePlan as jest.MockedFunction<
   typeof getEffectivePlan
+>;
+const mockReadTrialGrant = readTrialGrant as jest.MockedFunction<
+  typeof readTrialGrant
 >;
 
 const signedIn = () =>
@@ -129,6 +143,103 @@ describe("GET /api/billing/entitlement", () => {
       planName: "Enterprise",
     });
     expect(console.error).toHaveBeenCalled();
+  });
+
+  /**
+   * The trial countdown the dashboard badge draws.
+   *
+   * Presentation only, like everything else on this route: a countdown is not
+   * an authorisation decision, and the gates never read it. It rides here
+   * rather than on a new route because the shell already asks this question on
+   * every page.
+   */
+  describe("trial countdown", () => {
+    const PRO_PLAN = {
+      kind: "plan",
+      planId: "pro",
+      plan: { name: "Pro" },
+    } as unknown as Entitlement;
+
+    const IN_NINE_DAYS = new Date(
+      Date.now() + 8.4 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    it("reports the days left on a running trial", async () => {
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+        expiresAt: IN_NINE_DAYS,
+        isActive: true,
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue(null);
+
+      const body = await (await GET()).json();
+
+      // Rounded up: eight-and-a-bit days remaining is "9 days left", which is
+      // what a customer counting down would say.
+      expect(body.trial).toEqual({ daysRemaining: 9, endsAt: IN_NINE_DAYS });
+    });
+
+    it("says nothing about a trial for an account that has none", async () => {
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue(null);
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toBeUndefined();
+    });
+
+    it("says nothing about a trial that has already ended", async () => {
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 20 * 86400000).toISOString(),
+        expiresAt: new Date(Date.now() - 6 * 86400000).toISOString(),
+        isActive: false,
+      });
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toBeUndefined();
+    });
+
+    it("stops counting down once the customer is being billed", async () => {
+      // Conversion is reflected by the countdown disappearing. The trial grant
+      // is left to lapse on its own clock — nothing revokes it — so without
+      // this check a paying customer would keep being told their trial is
+      // running out.
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+        expiresAt: IN_NINE_DAYS,
+        isActive: true,
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue({
+        id: "sub_1",
+      } as unknown as Subscription);
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toBeUndefined();
+    });
+
+    it("does not look for a trial for an account with no plan at all", async () => {
+      // An active trial always resolves to `kind: "plan"`, so anything else
+      // cannot be trialling and must not cost an extra query on every page.
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue({
+        kind: "none",
+        planId: null,
+        plan: null,
+      });
+
+      await GET();
+
+      expect(mockReadTrialGrant).not.toHaveBeenCalled();
+    });
   });
 
   it("answers 500 rather than a misleading entitlement when the read fails", async () => {

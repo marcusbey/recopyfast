@@ -6,6 +6,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SiteRegistrationModal } from "@/components/dashboard/SiteRegistrationModal";
+import { TrialStatusBadge } from "@/components/dashboard/TrialStatusBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -168,10 +169,15 @@ export default function DashboardPage() {
         title={firstName ? `Welcome back, ${firstName}` : "Welcome back"}
         description="Every site you have connected, and what has changed on them."
         actions={
-          <Button onClick={() => setIsModalOpen(true)}>
-            <Plus aria-hidden="true" />
-            Add site
-          </Button>
+          <>
+            {/* Absent unless a trial is actually running, so nothing moves for
+                anyone else. Renders itself from /api/billing/entitlement. */}
+            <TrialStatusBadge />
+            <Button onClick={() => setIsModalOpen(true)}>
+              <Plus aria-hidden="true" />
+              Add site
+            </Button>
+          </>
         }
       />
 

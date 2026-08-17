@@ -113,20 +113,24 @@ export default function Hero() {
           className="flex flex-col items-center justify-center gap-4 sm:flex-row"
         >
           {/*
-            Was "Start editing for free". There is no free plan — `free` is
-            retired and resolves to no entitlement, so an account is worth
-            nothing until a paid plan is on it. Same class as the "14-day free
-            trial" and "No credit card required" claims already removed from
-            FinalCTA and Pricing. The label names no price either: the
-            catalogue is fetched live in Pricing.tsx, and a number hardcoded
-            here would be a second source of truth free to drift from it —
-            which is exactly how Stripe ended up describing Pro as 3 sites.
+            This said "Get started", because the label before it — "Start
+            editing for free" — was untrue: `free` is retired and resolves to no
+            entitlement, so an account was worth nothing until a paid plan was
+            on it. It is a trial, not a free plan, that makes a free-sounding
+            CTA honest, and there is now one: 14 days of Pro granted at sign-in
+            with no card (src/lib/billing/trial.ts). Hence "Start your free
+            trial", which names the thing that actually happens.
+
+            It still names no price. The catalogue is fetched live in
+            Pricing.tsx, and a number hardcoded here would be a second source of
+            truth free to drift from it — which is exactly how Stripe ended up
+            describing Pro as 3 sites.
           */}
           <Link
             href="/signup"
             className="pressable group inline-flex items-center gap-2 rounded-full bg-sky-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-sky-700"
           >
-            <span>Get started</span>
+            <span>Start your free trial</span>
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
           </Link>
 
@@ -140,6 +144,15 @@ export default function Hero() {
             <span>Watch it work</span>
           </Link>
         </motion.div>
+
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, delay: 0.4 }}
+          className="mt-4 text-sm text-slate-600"
+        >
+          14 days of Pro. No credit card required.
+        </motion.p>
       </motion.div>
 
       {/* The bouncing scroll cue that used to sit here is gone: the demo window

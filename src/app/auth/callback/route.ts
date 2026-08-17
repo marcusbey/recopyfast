@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
+import { ensureTrialStarted } from "@/lib/billing/trial";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -18,6 +19,28 @@ export async function GET(request: Request) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      // The 14-day trial starts here because there is nowhere earlier: sign-up
+      // is passwordless `signInWithOtp`, so there is no signup route and no
+      // "email confirmed" event — this and /auth/confirm are the only two
+      // moments the server sees a session come into existence.
+      //
+      // This route also runs on the tenth sign-in and the hundredth, so
+      // `ensureTrialStarted` is idempotent by design; it reads the account's
+      // entitlement first and writes nothing unless there is genuinely nothing
+      // there. It already swallows its own failures, and the belt-and-braces
+      // catch is here because the one thing this must never do is turn a
+      // working sign-in into /auth/error over a free trial.
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          await ensureTrialStarted(supabase, user.id);
+        }
+      } catch (trialError) {
+        console.error("[auth] trial start failed after sign-in", trialError);
+      }
+
       return NextResponse.redirect(`${origin}${next}`);
     }
     // The exchange fails when the link is expired, already consumed, or was

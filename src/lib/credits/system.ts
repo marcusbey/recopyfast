@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
+import { readTrialGrant } from "@/lib/billing/effective-plan";
 import { readPurchasedCreditBalance, spendableFilter } from "./spendable";
 import type { CreditTransaction, CreditWallet } from "@/types/billing";
 
@@ -141,8 +142,24 @@ export async function getUserCreditBalance(
   // would eventually disagree about which rows still count.
   const purchasedCredits = await readPurchasedCreditBalance(supabase, userId);
 
+  // A trial's allowance is granted once, for the whole trial.
+  //
+  // A trialling account resolves to `pro` and therefore inherits Pro's 500
+  // included credits — nobody grants them, they fall out of the plan. But with
+  // no subscription row the window below defaulted to the calendar month, so a
+  // trial started on the 25th drew 500 credits and then 500 more on the 1st:
+  // 1,000 credits of OpenAI spend on fourteen card-less days. The trial's own
+  // `granted_at` makes it one non-renewing window regardless of which dates it
+  // spans, which is the "a trial never grants uncapped spend" half of AC 8.
+  //
+  // Below the subscription deliberately: once someone converts, the thing being
+  // billed owns the period again, and the lapsing trial grant must not hold the
+  // window open behind it.
+  const trial = await readTrialGrant(supabase, userId);
+
   const startOfPeriod =
-    subscription?.current_period_start || startOfCurrentMonth();
+    subscription?.current_period_start ||
+    (trial?.isActive ? trial.grantedAt : startOfCurrentMonth());
 
   const usage = assertRead(
     await supabase
@@ -167,6 +184,11 @@ export async function getUserCreditBalance(
  * Without a subscription there is no billing period, so the included allowance
  * resets on the calendar month. Using "now" instead would count zero usage and
  * hand out the monthly allowance again on every call.
+ *
+ * The last resort, not the only rule: a live subscription's `current_period_start`
+ * and an active trial's `granted_at` both take precedence — see the caller. This
+ * is what a lifetime-grant holder, a lapsed trial and a credit-only wallet fall
+ * back to.
  */
 function startOfCurrentMonth(): string {
   const start = new Date();

@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { sanitizeNext } from "../sanitize-next";
 import { resolvePublicOrigin } from "../public-origin";
+import { ensureTrialStarted } from "@/lib/billing/trial";
 
 /**
  * Email-link confirmation via one-time token hash.
@@ -99,6 +100,23 @@ export async function GET(request: NextRequest) {
   if (error) {
     console.error("[auth] verifyOtp failed", { type, message: error.message });
     return NextResponse.redirect(`${origin}/auth/error`);
+  }
+
+  // Same trial start as /auth/callback, and it has to be in both. This route is
+  // the ONLY one a customer who opens the magic link on a different device ever
+  // reaches, so wiring the grant to the callback alone would quietly deny the
+  // trial to everyone who reads their email on their phone. `ensureTrialStarted`
+  // writes nothing for an account that is already entitled, which is what makes
+  // it safe to sit on a path that runs on every sign-in.
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      await ensureTrialStarted(supabase, user.id);
+    }
+  } catch (trialError) {
+    console.error("[auth] trial start failed after confirmation", trialError);
   }
 
   return NextResponse.redirect(`${origin}${next}`);
