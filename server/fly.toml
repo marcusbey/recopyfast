@@ -38,10 +38,27 @@
 #   4. MEMORY — `memory = "1gb"` and `memory_mb = 512` were both set and
 #      disagreed. One value only, below.
 #
-# Two machines run in iad. Per ADR 023 that makes @socket.io/redis-adapter
-# MANDATORY, not optional: Socket.io rooms live in one process's memory, so two
-# editors can land on different machines and never see each other. The adapter
-# is s07b's to ship, and it is not in server/package.json yet.
+# ⛔ ONE MACHINE, AND THAT IS LOAD-BEARING — DO NOT SCALE WITHOUT READING THIS
+# ---------------------------------------------------------------------------
+# Scaled to one machine on 2026-08-17, deliberately. Socket.io rooms live in the
+# MEMORY OF ONE PROCESS. With one machine that is invisible and everything works.
+#
+# The moment a second machine exists, two editors on the same page can land on
+# different processes, join the same room name in two separate memories, and stop
+# seeing each other — while every health check stays green and nothing is thrown.
+# It presents as "realtime randomly stopped working for some people", which is the
+# hardest possible shape of bug report to act on.
+#
+# There is a second, louder failure too: socket.io's handshake is stateful, so a
+# polling exchange split across machines dies with `Session ID unknown`.
+#
+# So scaling this service is NOT a scaling operation. It is a code change that must
+# ship @socket.io/redis-adapter in the same deploy (and the adapter fixes only the
+# FIRST failure — it shares rooms, not sessions; the transport pinning below covers
+# the second). server/package.json carries no redis client and no adapter today.
+# See ADR 023 and docs/plans/s07b-realtime-deploy.md.
+#
+# `fly scale count 2` without that work is a silent outage for co-editing.
 # ---------------------------------------------------------------------------
 
 app            = "recopyfast-ws"
@@ -64,7 +81,7 @@ primary_region = "iad"
   # must never scale to zero: a cold start drops every open editing session.
   auto_stop_machines  = false
   auto_start_machines = true
-  min_machines_running = 2         # matches the two machines actually running
+  min_machines_running = 1         # see the ONE MACHINE note in the header
 
   [http_service.concurrency]
     # Connections, not requests: a WebSocket is one long-lived connection, so

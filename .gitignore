@@ -75,3 +75,6 @@ supabase/.temp/
 # QA and Playwright artefacts (screenshots, traces, audit output).
 output/
 supabase/.temp/
+
+# Agent worktrees — transient, each is its own git repo
+.claude/worktrees/

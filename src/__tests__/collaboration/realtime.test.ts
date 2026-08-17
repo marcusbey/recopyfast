@@ -75,7 +75,9 @@ describe("CollaborationRealtime", () => {
         expect.any(String),
         expect.objectContaining({
           auth: { token: "auth-token" },
-          transports: ["websocket", "polling"],
+          // Polling removed per ADR 023 — the server refuses it, so a polling
+          // fallback would only ever produce a failing connection.
+          transports: ["websocket"],
           reconnection: true,
         }),
       );

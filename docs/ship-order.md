@@ -34,9 +34,18 @@ branch but its own.**
 Measured with the same compressor the gate uses (Node `zlib.gzipSync`, level 9), on
 `public/embed/recopyfast.js` at each branch tip:
 
+> **⚠ The `main` baseline moved on 2026-08-17 — re-seed `s06a`'s constants when it merges.**
+> Pinning the embed to `transports: ['websocket']` (ADR 023) cost **+19 gz bytes**, so `main` is now
+> **46,894**, nineteen above `s06a`'s committed `MAX_BUNDLE_GZ = 46875`. `s06a`'s gate would fail on
+> merge. That is the ratchet working, not a defect: the constant was seeded from `main` and `main`
+> changed. Re-seed both constants from the then-current `main` **and itemise the delta in the commit
+> message** — do not raise them to whatever makes the build pass. The +19 is one line of code and is
+> accounted for.
+
 | Ref | gz bytes | vs ceiling 46,875 |
 |---|---|---|
-| `main` | **46,875** | exactly at it |
+| `main` (before the transport pin) | **46,875** | exactly at it |
+| `main` (now) | **46,894** | **+19** — the ADR 023 transport pin |
 | `feature/s04-retire-graveyard-surfaces` | **45,894** | **−981 — the only branch that frees bytes** |
 | `feature/s11a-ab-data-plane` | **46,933** | **+58 over** ❌ |
 | `feature/s14a-grant-authorized-editing` | **47,602** | **+727 over** ❌ |

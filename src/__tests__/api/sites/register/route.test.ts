@@ -76,12 +76,21 @@ describe("/api/sites/register - POST", () => {
     mockServiceClient.single.mockReset();
     mockServiceClient.upsert.mockResolvedValue({ error: null });
 
-    // Mock environment variable
+    // Mock environment variables.
+    //
+    // NEXT_PUBLIC_WS_URL is pinned here deliberately. The snippet this route emits
+    // embeds it as `data-ws-url`, so leaving it to ambient config makes the assertion
+    // below depend on whatever happens to be in the developer's `.env`. It passed for
+    // a long time only because no `.env` defined the variable and the route fell back
+    // to its localhost default; the moment a real value was configured, the test broke
+    // without the route changing at all. Pin both, assert against the pinned values.
     process.env.NEXT_PUBLIC_APP_URL = "https://recopyfast.com";
+    process.env.NEXT_PUBLIC_WS_URL = "http://localhost:4001";
   });
 
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_APP_URL;
+    delete process.env.NEXT_PUBLIC_WS_URL;
   });
 
   it("should successfully register a new site", async () => {

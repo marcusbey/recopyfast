@@ -2716,6 +2716,7 @@
             stagingToken: this.stagingToken || '',
             editToken: this.editSessionToken || ''
           },
+          transports: ['websocket'],
           reconnection: true,
           reconnectionDelay: 1000,
           reconnectionAttempts: 5

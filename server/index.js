@@ -217,7 +217,25 @@ const io = new Server(httpServer, {
     origin: true,
     methods: ['GET', 'POST'],
     credentials: false
-  }
+  },
+  // WebSocket only — no polling fallback. ADR 023.
+  //
+  // Refusing polling HERE, at the server, is the part that must not be dropped.
+  // Setting it on the clients alone leaves a server that still accepts polling, so
+  // any client that misses the option — a cached older embed artifact among them —
+  // establishes a session that appears to work and then fails on its next request.
+  // Refusing at the door turns a confusing intermittent bug into an immediate one.
+  //
+  // Why not polling at all: socket.io's handshake is stateful. The session id issued
+  // by one process means nothing to another, so a polling exchange spread across two
+  // machines dies with `Session ID unknown`. This service runs one machine today
+  // (see fly.toml) and that is what keeps rooms coherent — but the transport pin is
+  // what keeps the handshake coherent, and the two are independent problems.
+  //
+  // The cost, accepted under ADR 004: a client on a WebSocket-hostile network loses
+  // realtime with no fallback. HTTP stays authoritative and realtime is additive, so
+  // that degrades an enhancement rather than breaking the product.
+  transports: ['websocket']
 });
 
 // Middleware

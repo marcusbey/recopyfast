@@ -90,7 +90,11 @@ export class CollaborationRealtime {
         auth: {
           token: authToken,
         },
-        transports: ["websocket", "polling"],
+        // WebSocket only — polling removed per ADR 023. A polling handshake is
+        // stateful and cannot survive being split across processes, and the server
+        // now refuses polling outright, so listing it here would only produce a
+        // fallback that always fails.
+        transports: ["websocket"],
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
