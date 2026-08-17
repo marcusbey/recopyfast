@@ -1,5 +1,42 @@
 # RecopyFast QA Register
 
+> ## ✅ DATABASE COMPLETE 2026-08-17 — verify any time with `node scripts/check-schema.mjs`
+>
+> ```
+> 57 tables   · every one RLS-on with ≥1 policy
+> 46 files    · 46 in the ledger — complete for the first time
+> 15 SECURITY DEFINER functions · 0 with an unpinned search_path
+> ```
+>
+> Production smoke-tested after every step: `/api/health` database and storage `ok`; `/`,
+> `/api/pricing`, `/blog`, `/demo`, `/login` all 200.
+>
+> **Seven migrations were in the ledger without having applied**, six wholesale and one — the newly
+> found `20251230100000_edit_board` — *partially*, which is the more dangerous shape because the
+> file looks half-right. Eleven more had never been run at all.
+>
+> **Two repair techniques, and the choice between them matters:**
+> - **Replay** when a file is idempotent and its prerequisite now exists. The
+>   `20260731005000/006000/007000` trio needed no new code — it had aborted on
+>   `ALTER TABLE performance_metrics`, which exists now. Replaying makes reality match the ledger
+>   rather than the reverse, and adds no ledger row because one is already there.
+> - **Forward migration** when replay is impossible. `edit_board` cannot be replayed —
+>   `cannot remove parameter defaults from existing function`, because a later migration redefined
+>   one of its functions with a default argument. It fails identically on every retry, which is
+>   very likely how it failed originally.
+>
+> **The method that makes this safe, and it is the fix for the original scar:** dry-run every
+> migration in `BEGIN … ROLLBACK` first, then apply with the ledger `INSERT` **inside the same
+> transaction as the body**. A failing migration rolls back its own "applied" marker. The damage
+> being repaired here happened precisely because that was not true.
+>
+> **Last hardening applied:** `20260818002000` pins `search_path` on all ten unpinned SECURITY
+> DEFINER functions — including `add_tickets`, `consume_tickets`, `create_content_version` and
+> `publish_staging_content_atomic`, the paths that move money and customer copy. `pg_temp` goes
+> last, since first would let a caller shadow a real table with a temporary one. Its postcondition
+> is scoped to the whole schema, so a future definer function added without a pinned path fails the
+> migration instead of shipping quietly.
+
 > ## ✅ SCHEMA REPAIRED 2026-08-17 — 57 tables, all with RLS. Ledger 43 of 44.
 >
 > `20260818000000_repair_aborted_migrations` is **applied to production** and merged to `main`.
