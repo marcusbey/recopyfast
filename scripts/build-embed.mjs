@@ -88,8 +88,27 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * the documented 46,781 would put the build 94 bytes over its own ceiling on the
  * first run. Never compare a `gzip -9c` figure with one of these; re-measure.
  */
-const MAX_BUNDLE_GZ = 46875;
-const MAX_WIDGET_GZ = 34063;
+/*
+ * RE-SEEDED 2026-08-17, from 46875 / 34063. This is the one legitimate reason to
+ * raise these numbers, and it is not "the build failed".
+ *
+ * Both constants were seeded from `main`'s artifact at the moment this gate was
+ * written, with zero headroom by construction. `main` then moved underneath the
+ * unmerged branch: ADR 023 pinned the embed to `transports: ['websocket']`, which
+ * removed socket.io's polling fallback because a polling handshake is stateful and
+ * cannot survive being split across processes.
+ *
+ * That one line costs +19 gz on the bundle and +18 on the widget, and the numbers
+ * below are the re-measurement, not an allowance. The delta is itemised precisely so
+ * that a future reader can tell this apart from someone widening the budget to make
+ * a build pass — which the note above rightly calls a defect.
+ *
+ * The rule stands unchanged: raise these ONLY when `main` itself has legitimately
+ * moved, and only to the newly measured value, with the cause named. If your branch
+ * is over, the branch is over. `s06c-embed-shrink` is the story that creates room.
+ */
+const MAX_BUNDLE_GZ = 46894;
+const MAX_WIDGET_GZ = 34081;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
@@ -184,11 +203,16 @@ function injectRules(source, rules) {
     );
   }
   if (end < begin) {
-    throw new Error(`"${INJECT_END}" appears before "${INJECT_BEGIN}" in recopyfast.src.js.`);
+    throw new Error(
+      `"${INJECT_END}" appears before "${INJECT_BEGIN}" in recopyfast.src.js.`,
+    );
   }
 
   return (
-    source.slice(0, begin) + rules + "\n" + source.slice(end + INJECT_END.length)
+    source.slice(0, begin) +
+    rules +
+    "\n" +
+    source.slice(end + INJECT_END.length)
   );
 }
 

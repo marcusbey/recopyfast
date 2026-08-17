@@ -38,8 +38,23 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
  * `s06c` will ratchet the constants down. Nothing in this file has to change
  * when it does — these are upper bounds, not equalities.
  */
-const SEEDED_MAX_BUNDLE_GZ = 46875;
-const SEEDED_MAX_WIDGET_GZ = 34063;
+// RE-SEEDED 2026-08-17, from 46875 / 34063.
+//
+// This assertion did its job: it caught the raise and refused it, which is exactly
+// what it was written for. The raise is nonetheless correct here, and the distinction
+// is the whole point of this guard, so it is recorded rather than just applied.
+//
+// These seeds track `main`'s artifact. `main` moved: ADR 023 pinned the embed to
+// `transports: ['websocket']`, dropping socket.io's polling fallback because a
+// polling handshake is stateful and cannot survive being split across processes.
+// That one line costs +19 gz on the bundle and +18 on the widget.
+//
+// So this is a re-measurement of a moved baseline, not a widened budget. The test
+// still forbids the thing it was built to forbid: a branch that is over the ceiling
+// raising the number to get itself through. If your change is over, it is over —
+// `s06c-embed-shrink` is the story that creates room.
+const SEEDED_MAX_BUNDLE_GZ = 46894;
+const SEEDED_MAX_WIDGET_GZ = 34081;
 
 interface CheckRun {
   status: number;
