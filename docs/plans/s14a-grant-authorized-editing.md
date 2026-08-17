@@ -329,7 +329,7 @@ test written here would pass against nothing. `s07a` owns it.
 - [x] `lint` (0 errors, 44 pre-existing warnings), `type-check`, `format:check`, `build`, `test`
       all green.
 - [x] The ADR is written and committed on this branch.
-      `docs/decisions/019-grant-on-the-content-write-path.md`.
+      `docs/decisions/025-grant-on-the-content-write-path.md`.
 - [x] The four run interdicts that can be checked mechanically are checked and stated in the PR:
       no `/api/teams/*` in the diff; no new `createServiceRoleClient` call site; no `zod` import;
       no grant in any URL-building expression.

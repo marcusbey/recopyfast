@@ -82,6 +82,12 @@ story and travel with its branch.
 | [022](./decisions/022-realtime-parity-is-editors-only.md) | Real-time parity is defined over editors, not visitors | `s07b` |
 | [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) | WebSocket-only transport; the multi-instance answer is the adapter, never sticky routing | `s07b` |
 | [024](./decisions/024-bulk-import-snapshot-change-type.md) | The bulk-import snapshot writes `bulk_edit` — supersedes [008](./decisions/008-bulk-import-write-path.md) on that value | `s05` |
+| [025](./decisions/025-grant-on-the-content-write-path.md) | The device grant is a principal on the content write path, fail-closed on its origin pin | `s14a` |
+
+> **Numbering.** 025 was authored as 019 on `s14a`'s branch and renumbered when it merged, because
+> `019-agency-billing-single-payer` had taken that number on `main` in the meantime. Two branches
+> cannot see each other's ADR numbers, so **check this table for the next free number when you
+> write one, and expect to renumber if your branch sits unmerged for long.**
 
 ### `product/` — what it does and for whom
 | File | Contents |

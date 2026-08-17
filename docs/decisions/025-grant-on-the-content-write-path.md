@@ -1,8 +1,12 @@
-# ADR 019 — The device grant is a principal on the content write path, in a header, fail-closed on its origin pin
+# ADR 025 — The device grant is a principal on the content write path, in a header, fail-closed on its origin pin
 
 - Status: accepted
 - Date: 2026-08-16
-- Scope: story s14a-grant-authorized-editing
+- Scope: story `s14a-grant-authorized-editing`
+- **Renumbered from 019 on 2026-08-17.** Two ADRs were independently authored as 019 while this
+  one sat on an unmerged branch: this, and `019-agency-billing-single-payer`, which had already
+  been referenced from `prd.md` and two plans by the time they met. Renumbering the less-cited
+  file was the cheaper correction. **The decision below is unchanged** — only its filing.
 
 ## Context
 
