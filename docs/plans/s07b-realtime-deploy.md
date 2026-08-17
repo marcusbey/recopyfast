@@ -8,11 +8,10 @@ validated: yes
 > stands exactly as written; **no new broadcast path is built**, and `s08` AC 3's
 > zero-connection guarantee is left intact.
 >
-> ⚠ **Two operator inputs are still required before task 1 can run** (research open question 2):
-> the hosting platform and account (Fly / Railway / Render — Vercel cannot host a long-lived
-> process), and the app name, region and TLS hostname. Plus the instance count, which decides
-> whether the Socket.io Redis adapter ships with this story. These are inputs to one task, not
-> a gate on the plan — but do not start task 1 without them.
+> **Operator inputs, 2026-08-17: platform is Fly.io, instance count is one, no Redis adapter.**
+> See the "Operator inputs" table and the single-instance ceiling note below — that ceiling is the
+> part a future operator must not trip over.
+> ⚠ **Still required before T1 can run:** the Fly app name, the region, and the TLS hostname.
 # Plan — Story s07b-realtime-deploy
 
 Branch: `feature/s07b-realtime-deploy`
@@ -31,9 +30,39 @@ Criteria this plan must satisfy:
 - [ ] Deployed at a stable origin on a platform that hosts a long-lived process; a real app name and a documented, repeatable procedure; the stale `ALLOWED_ORIGINS` instruction removed. (AC 1, T10)
 - [ ] `NEXT_PUBLIC_WS_URL` set **and the Next app redeployed**, verified in both snippet producers and in the CSP `connect-src` header. (AC 2, T6)
 - [ ] Realtime appears as a check in `GET /api/health`, **degrading** the app's status rather than failing it. (AC 3, ADR 004 "Watch")
-- [ ] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — **blocked, see below.**
+- [ ] Edit in browser A appears in browser B in under 1 s, on a fixture page on a non-RecopyFast domain. (AC 4) — editors-only, settled: ADR 022.
 - [ ] A snippet predating this story, with no `data-ws-url`, keeps working unchanged against the deployed origin. (`s07` AC 6, carried to production)
-- [ ] Instance count decided explicitly and recorded; if > 1, the Socket.io Redis adapter ships with it. (Research open question 4, ADR 004)
+- [x] **Instance count decided explicitly: ONE.** No Socket.io Redis adapter in this story.
+      Recorded 2026-08-17. See "Operator inputs" below. (Research open question 4, ADR 004)
+
+### Operator inputs — recorded 2026-08-17
+
+| Input | Answer |
+|---|---|
+| Platform | **Fly.io.** `server/fly.toml` already exists, so T1 fills it in rather than authoring it. Vercel cannot host a long-lived process (ADR 004, `architecture.md:50`). |
+| Instances | **One.** No `@socket.io/redis-adapter`, no additional Upstash load. |
+| Redis adapter, if instances ever > 1 | **A new Upstash database on the existing account** — not `informed-ghost-153511`. |
+| App name / region / TLS hostname | ⚠ **Still required before T1 can run.** |
+
+> #### ⛔ The single-instance decision is a ceiling, not a default — record it where a future operator will hit it
+>
+> Socket.io rooms live in the **memory of one process**. With one instance that is invisible and
+> everything works. **The moment a second instance exists, two editors on the same page can land
+> on different processes, join the same room name in two separate memories, and stop seeing each
+> other** — while every health check stays green and no error is raised anywhere. It presents as
+> "realtime randomly stopped working for some people," which is the hardest possible shape of
+> report to act on.
+>
+> So scaling this service horizontally is **not** a scaling operation; it is a code change that
+> must ship `@socket.io/redis-adapter` in the same deploy. `server/package.json` today carries
+> `express`, `socket.io`, `cors`, `@supabase/supabase-js` and `dotenv` — **no redis client and no
+> adapter**. T7 records this in `server/README.md`, next to the instance count, in those terms.
+>
+> The Redis itself is already provisioned and paid for: `REDIS_URL` points at Upstash
+> (`informed-ghost-153511`) and `src/lib/security/rate-limiter.ts` uses it over TCP. When the
+> adapter ships it gets **its own database on that account** — the rate limiter is fail-closed in
+> production, so a socket-traffic spike must not be able to exhaust the command quota that ten API
+> endpoints depend on.
 
 ### Cleared — AC 4 is editors-only (M6 answered 2026-08-17, ADR 022)
 
