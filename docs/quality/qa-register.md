@@ -171,6 +171,30 @@
 > other call sites read `process.env.NEXT_PUBLIC_APP_URL` raw. The embed snippet is therefore
 > correct and every other consumer emits an apex URL.
 >
+> ### ✅ D-1 FIXED 2026-08-17 (pending a deploy) — and confirmed live first
+>
+> Measured against production before changing anything:
+> ```
+> https://www.recopyfa.st/sitemap.xml → <loc>https://recopyfa.st/</loc>   (every entry, all 308)
+> homepage                            → <link rel="canonical" href="https://recopyfa.st"/>
+>                                       <meta property="og:url" content="https://recopyfa.st"/>
+> ```
+> The canonical tag was the worst of it: it declared the canonical URL to be one that immediately
+> redirects away.
+>
+> **`NEXT_PUBLIC_APP_URL` in Vercel Production is now `https://www.recopyfa.st`** (was the apex).
+> Two notes on the change: it is a **build-time inlined** variable, so **nothing changes until the
+> next deploy** — no redeploy was triggered. And it is now marked **non-sensitive**, where
+> production variables default to sensitive; a public URL is not a secret, and sensitive values
+> cannot be read back with `vercel env pull`, which makes exactly this kind of verification
+> impossible. The value was read back and confirmed.
+>
+> Local `.env` updated to match. `canonicalizePublicAppUrl` becomes a no-op safety net rather than
+> a load-bearing rewrite — which is the safer arrangement, since it removes the failure mode instead
+> of adding call sites that must remember.
+>
+> D-2 and D-3 below are **also fixed by this**, since they share the cause. Original entry follows.
+>
 > **D-1 · SEO — every sitemap, robots and canonical URL 308s. Live, and it undercuts `s17`–`s19`.**
 > `sitemap.ts:14` and `robots.ts:13` build from the raw value via `resolveSiteUrl()`, and
 > `layout.tsx:50` uses it as `metadataBase`, so every `<link rel="canonical">` and every OG URL
