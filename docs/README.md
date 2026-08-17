@@ -76,6 +76,7 @@ story and travel with its branch.
 | [020](./decisions/020-seo-clusters-on-marketing-surface.md) | The SEO cluster pages render on the Marketing surface | `s17`–`s19` |
 | [021](./decisions/021-wildcard-serving-origin-provisioning.md) | One wildcard domain and certificate; claiming is a database write | `s20` |
 | [022](./decisions/022-realtime-parity-is-editors-only.md) | Real-time parity is defined over editors, not visitors | `s07b` |
+| [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) | WebSocket-only transport; the multi-instance answer is the adapter, never sticky routing | `s07b` |
 
 ### `product/` — what it does and for whom
 | File | Contents |

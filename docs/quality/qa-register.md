@@ -1,5 +1,66 @@
 # RecopyFast QA Register
 
+> ## 🔴 NEW 2026-08-17 — `NEXT_PUBLIC_APP_URL` is the apex, and only ONE reader canonicalises it
+>
+> Measured against production, not inferred:
+>
+> ```
+> GET https://recopyfa.st/embed/recopyfast.js   → 308 → https://www.recopyfa.st/…
+> GET https://www.recopyfa.st/embed/recopyfast.js → 200
+>     cache-control: public, max-age=0, must-revalidate
+>     etag: "489475dff486f36755347aa611cddd11"   174420 bytes
+> ```
+>
+> `.env` sets `NEXT_PUBLIC_APP_URL=https://recopyfa.st` — the apex, which 308s to `www`. That
+> redirect is incident **B-11**, and `canonicalizePublicAppUrl` (`embed-script.ts:29-40`) exists to
+> rewrite it. **It is called from exactly one place**: `getPublicAppUrl` in the same file. Sixteen
+> other call sites read `process.env.NEXT_PUBLIC_APP_URL` raw. The embed snippet is therefore
+> correct and every other consumer emits an apex URL.
+>
+> **D-1 · SEO — every sitemap, robots and canonical URL 308s. Live, and it undercuts `s17`–`s19`.**
+> `sitemap.ts:14` and `robots.ts:13` build from the raw value via `resolveSiteUrl()`, and
+> `layout.tsx:50` uses it as `metadataBase`, so every `<link rel="canonical">` and every OG URL
+> points at the apex too. A sitemap whose entries all redirect wastes crawl budget and muddies
+> which host is canonical. **The three SEO cluster stories exist to rank; they will publish their
+> URLs through this same path.** Fix before `s17` ships, or the cluster inherits the defect at
+> scale.
+>
+> **D-2 · The content route's CORS fallback can never produce a working grant.**
+> `content/[siteId]/route.ts:178` falls back to `NEXT_PUBLIC_APP_URL` when `allowedOrigin` is null,
+> setting `Access-Control-Allow-Origin: https://recopyfa.st`. The app is served from
+> `www.recopyfa.st`, and ACAO must equal the request's `Origin` exactly — apex ≠ www — so this
+> branch cannot match any real first-party browser request. Not a security hole (the value is our
+> own origin, and "no grant" is still expressed by absence, never `*`), but it reads as a safety
+> net while being a no-op. Either canonicalise it or delete it; leaving it is the worst of the
+> three.
+>
+> **D-3 · Lower severity, same root.** `api/editor/editors/route.ts:203` puts an apex `/edit` link
+> in editor invitations, and `api/cron/generate-blog-post/route.ts:14,28` POSTs to an apex API URL.
+> Both work — browsers and `fetch` follow 308 and 308 preserves method and body — so these are
+> waste, not breakage. Listed because they share the cause and should be fixed in the same pass.
+>
+> **Deliberately NOT flagged:** `checkout.ts` and `auth/public-origin.ts` rank the deployment's own
+> origin above this variable on purpose, each carrying a tombstone (F-14, and the magic-link
+> cookie incident). They are correct as written — do not "fix" them into consistency with the
+> others.
+>
+> **The fix is one line of judgement, not sixteen edits:** either set `NEXT_PUBLIC_APP_URL` to
+> `https://www.recopyfa.st` in the environment — which fixes all sixteen at once and makes
+> `canonicalizePublicAppUrl` a no-op safety net rather than a load-bearing rewrite — or route the
+> SEO and CORS readers through `getPublicAppUrl()`. **Changing the env var is strictly safer**,
+> because it removes the failure mode instead of adding more call sites that must remember.
+>
+> ## ✅ VERIFIED SAME DAY — the embed artifact has zero production drift
+>
+> The deployed `/embed/recopyfast.js` ETag `489475dff486f36755347aa611cddd11` is exactly the md5 of
+> the committed `public/embed/recopyfast.js` on `main`, at an identical 174,420 bytes. The
+> source-of-truth → build-artifact discipline (AGENTS.md non-negotiable 1) is holding in
+> production, not merely in the repo. Also: `/embed/*` carries `max-age=0, must-revalidate`, so a
+> rebuilt artifact reaches every install on its next page load — **but nothing sets that
+> deliberately.** `next.config.ts` defines only security headers and `vercel.json` only a cron, so
+> it is Vercel's inherited default for `public/`. Adding long-lived caching to `/embed/*` as an
+> "optimisation" would create a stale-artifact window across every customer site at once.
+
 > **STATE: DEPLOYED.** `db677b0..f2951b8` pushed and live (deployment Ready).
 > `tsc` 0 errors, `lint` 0 errors, **1352 tests passing**, pre-commit hook run
 > on every commit.

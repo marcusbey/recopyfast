@@ -58,11 +58,19 @@ Criteria this plan must satisfy:
 > on. **This makes AC 4 flaky, not merely unproven**: "edit in A appears in B under 1 s" passes or
 > fails depending on machine placement.
 >
-> **2 — Handshake failure (loud).** `src/lib/collaboration/realtime.ts:93` sets
-> `transports: ["websocket", "polling"]`. A client that falls back to polling round-robins its
-> requests across both machines with no sticky routing, and the session breaks with
-> `Session ID unknown`. The adapter alone does **not** fix this — it needs either sticky routing or
-> websocket-only transport. Decide which, and record it.
+> **2 — Handshake failure (loud), and it is worse than it first looks.**
+> `src/lib/collaboration/realtime.ts:93` sets `transports: ["websocket", "polling"]`, so the
+> dashboard tries WebSocket first and usually survives. **The embed passes no `transports` option
+> at all** (`public/embed/recopyfast.src.js:2710`), so it takes socket.io-client's default —
+> *polling first*. On two machines the handshake round-robins with no sticky routing and dies with
+> `Session ID unknown`, **on every customer site**. The adapter does not fix this: it shares rooms,
+> not sessions.
+>
+> **Settled by [ADR 023](../decisions/023-websocket-only-transport-no-sticky-routing.md):
+> `transports: ['websocket']` on both clients AND on the server** (`server/index.js:215`, which
+> currently restricts neither). Sticky routing is rejected. Clients on WebSocket-hostile networks
+> lose realtime with no fallback — accepted under ADR 004, since HTTP stays authoritative and
+> realtime is additive. One console warning on failure, sharing `s08`'s `connect-src` warning path.
 >
 > `server/package.json` today carries `express`, `socket.io`, `cors`, `@supabase/supabase-js` and
 > `dotenv` — **no redis client and no adapter**. Both are added here.
