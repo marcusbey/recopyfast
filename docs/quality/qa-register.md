@@ -1,5 +1,47 @@
 # RecopyFast QA Register
 
+> ## 🔴 NEW 2026-08-17 — nobody has observed the live schema or the live RLS state
+>
+> This is the root cause behind two separate wrong claims made this week, and it will produce more
+> until someone runs a probe.
+>
+> **Migration files are not evidence of database state in this project.** Seven migrations aborted
+> in full and are marked applied, so they will never re-run
+> (`20260801200000_missing_base_tables.sql:29-56`). Supabase wraps each in a transaction, so one
+> `42P01` rolls back the whole file while the ledger records success. Benchmark:
+> `20250817000000_complete_database_setup.sql` declares **25 tables; 15 existed.**
+>
+> Two documents asserted schema facts by reading `CREATE TABLE` statements and were wrong:
+> `docs/stories.md` (retracted — see the A/B entry below) and `docs/architecture.md`'s "57 tables"
+> (now annotated). Both errors have the identical shape.
+>
+> **The unobserved part that matters most is RLS.**
+> [ADR 002](../decisions/002-rls-tenant-boundary.md) makes RLS the tenant boundary — the multi-tenant
+> security guarantee of this product. Its actual state has never been measured. What the files say,
+> in sequence:
+> - `20260731008000` left `site_permissions`, `teams`, `team_members`, `domain_verifications` and
+>   `content_history` with **RLS enabled and zero policies** — a total lockout for anon-key clients,
+>   because RLS applies recursively inside policy subqueries and every per-site policy is an
+>   `EXISTS` over `site_permissions`.
+> - `20260804130000_restore_missing_rls_policies.sql` restored `site_permissions` and
+>   `content_history` three days later, and documents the recursive-`EXISTS` trap in its own header.
+> - `security_events` and `rate_limits` have `ENABLE ROW LEVEL SECURITY` **only** in
+>   `20260611010000_rls_hardening.sql`, which is one of the seven that aborted — at its first
+>   statement.
+>
+> **Whether any of that is true in production is unknown.** `teams` / `team_members` are graveyard
+> surfaces so a lockout there is consistent with them being dead; `domain_verifications` is read by
+> live code (`api/domains/verify/route.ts:188,219`, `api/security/stats/route.ts:151`).
+>
+> **What to run, once, from a host with IPv6 or the pooler region:** a `pg_catalog` probe listing
+> tables, `pg_class.relrowsecurity`, and `pg_policies` counts per table. Compare against
+> `architecture.md`'s Data model. That single query replaces every inference in this entry and
+> should be committed as a script so it is repeatable — `scripts/check-ab-schema.mjs` is the
+> template, and its `pg_catalog` half is already written and already unrun.
+>
+> Until then: **the security boundary this product depends on is unverified**, and the app largely
+> works around it — 28 of 77 routes use the service-role client, which bypasses RLS entirely.
+
 > ## 🔴 NEW 2026-08-17 — the A/B data plane is dead in production, and always has been
 >
 > **`ab_test_results` and `visitor_buckets` do not exist.** Probed live over PostgREST during

@@ -213,7 +213,37 @@ noise; a comment that says *what broke last time* is the asset.
 
 ## Data model
 
-57 tables across 43 migrations. Grouped by what they serve:
+> ### ⚠ This section is derived from migration files, not from the database — and they disagree
+>
+> **Corrected 2026-08-17.** "57 tables" is a count of what the migrations *declare*. It is not a
+> count of what exists, and the gap is not small.
+>
+> Seven migrations **aborted in full and are nonetheless marked applied**, so they will never re-run
+> (`20260801200000_missing_base_tables.sql:29-56`). Supabase wraps each migration in a transaction,
+> so a single `42P01` rolls the whole file back while the ledger records success. The precedent is
+> blunt: `20250817000000_complete_database_setup.sql` declares **25 tables and only 15 existed.**
+>
+> **Known-absent, listed below as though present:** `ab_test_results` and `visitor_buckets`. Their
+> migration (`20260127_ab_testing_v2.sql`) aborted on `REFERENCES ab_tests` before `ab_tests`
+> existed. Confirmed live via `PGRST205` on 2026-08-17. `ab_tests` and `ab_test_variants` *were*
+> later created by `20260801200000`, so the A/B group below is half real.
+>
+> **The RLS state is unknown, and that matters more than the table count.**
+> [ADR 002](./decisions/002-rls-tenant-boundary.md) makes RLS *the* tenant boundary. Whether that
+> boundary is actually in place has never been observed — only inferred from files that demonstrably
+> lie about their own success. What is known: `20260731008000` left five tables with RLS enabled and
+> zero policies (a total lockout, since RLS applies recursively inside policy subqueries and every
+> per-site policy is an `EXISTS` over `site_permissions`); `20260804130000_restore_missing_rls_
+> policies.sql` then restored policies for `site_permissions` and `content_history` three days
+> later. Whether it applied, and what state `teams`, `team_members`, `domain_verifications`,
+> `security_events` and `rate_limits` are in, **cannot be determined from this repository.**
+>
+> **The instrument exists and has not been run:** a `pg_catalog` probe for tables, `rowsecurity`,
+> and policy counts, from a host with IPv6 or the pooler region. Until it runs, treat everything
+> below as *intended* schema. Do not plan a story against it — `s12-ab-results` was withdrawn to
+> `validated: no` for exactly this reason.
+
+57 tables across 43 migrations **as declared by the migrations**. Grouped by what they serve:
 
 **Tenancy and content (the core loop)**
 `sites` · `site_permissions` (ownership + roles; the real ownership record) · `content_elements`
