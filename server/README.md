@@ -15,7 +15,7 @@ and why the rollback is a single environment variable.
 |---|---|
 | Platform | Fly.io, app `recopyfast-ws`, region `iad` |
 | Origin | `https://recopyfast-ws.fly.dev` / `wss://recopyfast-ws.fly.dev` |
-| Machines | **one** — see below, this is load-bearing |
+| Machines | **one** — [ADR 026](../docs/decisions/026-one-machine-no-adapter-supersedes-023.md), see below, this is load-bearing |
 | Size | `shared-cpu-1x`, 512 MB |
 | Port | 4001, from `WS_PORT`; `PORT` is not read |
 | Config | [`fly.toml`](./fly.toml), whose header carries the reconciliation history |
@@ -24,8 +24,16 @@ and why the rollback is a single environment variable.
 
 ## The instance count: ONE, deliberately
 
-Decided 2026-08-17. Recorded here because ADR 004 requires the number to be explicit rather
-than assumed, and `fly.toml` pins it (`min_machines_running = 1`, `auto_stop_machines = false`).
+Decided 2026-08-17 and recorded as
+[ADR 026](../docs/decisions/026-one-machine-no-adapter-supersedes-023.md). Written here as well
+because ADR 004 requires the number to be explicit rather than assumed, and `fly.toml` pins it
+(`min_machines_running = 1`, `auto_stop_machines = false`).
+
+**Read ADR 026 before ADR 023 on this point.** ADR 023 opens by stating the service "now runs
+**two machines**" and treats `@socket.io/redis-adapter` as shipped. Neither is true: ADR 026
+supersedes it on the deployment shape, and the adapter was never added. ADR 023's *actual*
+decision — the transport pin and the rejection of sticky routing — is untouched and still
+binding, which is why it is still cited below.
 
 **Why one is enough.** Socket.io rooms live in the memory of a single process. With one
 process they are coherent by construction — no shared state, no adapter, no Redis. The service
@@ -51,10 +59,20 @@ the same deploy:
    emitted on A reaches a client on B. Without it, "more than one machine" is a claim.
 
 The adapter shares *rooms*, not *sessions*. The handshake half is covered separately by
-[ADR 023](../docs/decisions/023-websocket-only-transport-no-sticky-routing.md):
-`transports: ['websocket']` is pinned on the server and on both clients, so there is no polling
-exchange to split across machines. Two independent problems — do not treat the single machine
-as covering both.
+[ADR 023](../docs/decisions/023-websocket-only-transport-no-sticky-routing.md), whose transport
+decision ADR 026 leaves standing: `transports: ['websocket']` is pinned on the server
+(`server/index.js:121`, in the `new Server(...)` options) and on the embed client
+(`public/embed/recopyfast.src.js:2908`, in the `io(RECOPYFAST_WS, {…})` options — rebuild the
+artifact after touching it, AGENTS.md non-negotiable 1). Those two are the whole of it: there is
+no polling exchange to split across machines. Two independent problems — do not treat the single
+machine as covering both.
+
+> ADR 023 describes a *third* pin, on a dashboard socket client at
+> `src/lib/collaboration/realtime.ts`. **That file no longer exists** (deleted 2026-08-17: it was
+> imported by nothing but its own test, and its production branch fell back to a placeholder
+> origin `wss://your-production-ws-server.com`). The dashboard has never opened a socket to this
+> service; the embed widget is the only first-party client. Nothing about ADR 023's decision
+> changes — there is simply one fewer place to pin.
 
 ---
 
@@ -62,9 +80,29 @@ as covering both.
 
 ### Prerequisites
 
+Gather all of these *before* starting. The deploy below ships code that refuses to boot without
+`REDIS_URL`, and this document names the database but has never said where the string comes
+from — so reaching `fly deploy` still looking for it is a crash loop on a service production is
+already pointed at.
+
 - `flyctl` installed and authenticated (`fly auth login`)
-- Access to the `recopyfast-ws` app
+- Access to the `recopyfast-ws` app, **including `fly ssh console`** — the only check that proves
+  *which* image is running reads the container's filesystem, and neither `fly status` nor
+  `fly logs` can substitute for it
+- `jq`, for the app-side health check at the end of Verify
 - The Supabase project URL and **service-role** key
+- **The `REDIS_URL` connection string.** It is not in this repo and not in Fly — Fly stores
+  secrets write-only, so `fly secrets list` gives you the name and never the value. Get it from
+  the Upstash console (`console.upstash.com`), database **`informed-ghost-153511`**, on the
+  database page's connect panel.
+
+  **It must be the `rediss://` string, not `redis://`.** `rate-limit.js:76-98` passes the value
+  straight to node-redis' `createClient({ url })` and configures nothing else about the
+  connection, so the URL scheme is the entire TLS decision and there is no fallback if it is
+  wrong. Upstash hands the string out already TLS-scheme'd; the format is
+  `rediss://default:<password>@<host>.upstash.io:6379`, documented for the Next app at
+  `.env.example:104-126`, which reads the same database. A wrong scheme does not degrade — the
+  limiter is fail-closed, so it takes the process down with it.
 
 ### Secrets
 
@@ -77,9 +115,21 @@ fly secrets set \
   NEXT_PUBLIC_SUPABASE_URL=... \
   SUPABASE_SERVICE_ROLE_KEY=... \
   REDIS_URL=... \
+  --stage \
   -a recopyfast-ws
 fly secrets list -a recopyfast-ws     # names only; values are never readable back
 ```
+
+**`--stage` is not optional, and the incident at the bottom of this file is why.** Without it
+`fly secrets set` releases immediately, against whatever image is currently deployed — so the
+machine restarts once for the secret and again for the `fly deploy` that follows. `fly.toml`'s
+`auto_stop_machines`/`min_machines_running` block says why that costs something: a stop drops
+every open editing session, and this procedure would pay it twice. `--stage` writes the secret and
+defers it to the next deploy, which still satisfies the ordering rule two paragraphs down — the
+secret lands *with* the code that needs it, in one restart instead of two. Setting a secret to the
+value it already has is a no-op that releases nothing, so this only bites when a value actually
+changes — that is, precisely while following this section. The incident at the bottom of this file
+was closed with `--stage` for exactly this reason; the procedure now agrees with it.
 
 `REDIS_URL` points at the **same Upstash database the Next app's own rate limiter uses**
 (`informed-ghost-153511`). That is deliberate and it is fine at current traffic, but it carries a
@@ -109,7 +159,9 @@ all day while `/health` keeps answering 200.
 
 ### Deploy
 
-**The whole procedure is two commands, and both matter.**
+**This step is two commands, and both matter. It is not the whole procedure** — Secrets above
+runs first, and on a fresh app or a changed value it is the step that decides whether this one
+boots at all.
 
 ```sh
 cd server
@@ -151,21 +203,45 @@ reports that *a* process is up, not *which* one. Check the code that is actually
 ```sh
 fly ssh console -a recopyfast-ws -C "sh -c '
   wc -l /app/index.js
-  for s in createRealtimeServer createRateLimiter revalidateSocket assertProductionEnvironment; do
+  for s in createRealtimeServer createRateLimiter revalidateSocket assertProductionEnvironment isOriginAllowed; do
     printf \"%s=%s\n\" \"\$s\" \"\$(grep -c \"\$s\" /app/index.js)\"
   done'"
 ```
 
 The line count must equal `wc -l server/index.js` in the tree you deployed, and every marker must
-be non-zero. `fly deploy` also prints a "not listening on the expected address" warning on a
-rolling update when its probe races the bind; the health check passing immediately afterwards is
-what settles it.
+be non-zero. The five are the same five as the incident table at the bottom of this file, so its
+`before`/`after` columns are directly comparable to this output. On today's tree:
 
-Then confirm the app sees it:
+```
+773 /app/index.js
+createRealtimeServer=3
+createRateLimiter=2
+revalidateSocket=4
+assertProductionEnvironment=2
+isOriginAllowed=3
+```
+
+`fly deploy` also prints a "not listening on the expected address" warning on a rolling update
+when its probe races the bind; the health check passing immediately afterwards is what settles it.
+
+Then confirm the app sees it. **Wait at least 12 s after the deploy finishes before running
+this.** `src/app/api/health/route.ts` memoises the realtime probe for
+`REALTIME_PROBE_MEMO_TTL_MS = 10_000` (`route.ts:289`), so an immediate `curl` is answered from a
+memo taken *before* the deploy — you read the previous state, see `realtime: "timeout"`, and
+conclude the deploy failed when it did not.
 
 ```sh
 curl -s https://www.recopyfa.st/api/health | jq '.status, .checks.realtime'
+# pass: "healthy"  and  { "status": "ok", ... }
 ```
+
+Anything else is a fail, and the three shapes mean different things:
+
+| Output | Meaning |
+|---|---|
+| `"degraded"` + `realtime` `"timeout"`/`"error"` | the app cannot reach the service — or you did not wait out the memo. Re-run after 12 s before investigating anything else |
+| `.checks.realtime` is `null` (absent from `checks`) | `NEXT_PUBLIC_WS_URL` is unset on the Vercel **Production** build. That is the kill switch, not a service fault — see below |
+| `"unhealthy"` | something other than realtime is down. A dead realtime service can only ever produce `degraded` (AC 3) |
 
 ### Logs and rollback
 
@@ -191,8 +267,21 @@ rooms — cross-environment room bleed on live customer content, with edits from
 appearing in a customer's editing session. A preview needs its own service before it gets a
 value here.
 
-**Verify:** a preview deployment's issued snippet carries no `data-ws-url` at all, which is the
-same "off" state every install had before this story.
+**Verify.** The claim is that a preview deployment's issued snippet carries no `data-ws-url` at
+all — the same "off" state every install had before this story. Two commands check it without
+needing a session on the preview:
+
+```sh
+vercel env ls --scope <team>          # NEXT_PUBLIC_WS_URL must show Production only
+curl -sI https://<preview-deployment>.vercel.app/login \
+  | tr ';' '\n' | grep -i connect-src
+# must NOT name recopyfast-ws.fly.dev
+```
+
+The second is a proxy, and an exact one: `src/middleware.ts:233` feeds `connect-src` from
+`NEXT_PUBLIC_WS_URL` and from nothing else, so the origin's absence there is the variable's
+absence in that environment. `<team>` and the preview URL come from `vercel ls` — see the
+sourcing note under the kill switch below.
 
 ---
 
@@ -222,6 +311,20 @@ trace at all.
 
 So: **set the variable, then redeploy, then compare the two snippets.**
 
+The *code* half of that comparison is automated now and is the thing to run:
+
+```sh
+npx jest src/__tests__/api/sites/ws-url-parity.test.ts
+```
+
+It asserts that `GET /api/sites`, `POST /api/sites/register` and the dashboard's
+`buildEmbedScript` fallback emit an identical `data-ws-url`, and omit the attribute rather than
+emitting it empty when nothing is configured. It does **not** close the *deploy* half — Jest reads
+`process.env` at call time on all three paths, so the build/runtime split this section is about
+does not exist inside the suite (see "The two-snippet comparison is a test now" below). **Nobody
+has yet looked at the snippet rendered on the deployed dashboard.** That look is still owed by a
+human and this test does not discharge it.
+
 Two operational notes, both learned the hard way during the drill below:
 
 - **`vercel env add` needs `--value` and `--no-sensitive`.** Piping the value on stdin
@@ -235,6 +338,18 @@ Two operational notes, both learned the hard way during the drill below:
   <team>` rebuilds the same git commit, so the env change is picked up without shipping a
   different source tree. `--scope` is required or it fails with "Deployment belongs to a
   different team".
+
+  Both placeholders have to be looked up; neither is guessable:
+
+  ```sh
+  vercel teams ls                       # <team> is the slug column, not the display name
+  vercel ls --scope <team>              # newest Production entry is <deploymentId>
+  ```
+
+  `vercel redeploy` accepts either the deployment id or its URL, so the URL `vercel ls` prints
+  can be pasted straight in. The team slug is also the first path segment of the project's
+  dashboard URL (`vercel.com/<team>/<project>`), which is the faster route if a browser is
+  already open.
 
 ```sh
 curl -sI https://www.recopyfa.st/login \
@@ -251,13 +366,23 @@ Two checks live in `e2e/realtime-parity.spec.ts`, both driven against a fixture 
 `localhost:4176` — a **non-RecopyFast domain**, which is the only place either claim means
 anything.
 
+**Both invocations below run the same spec file** (`npm run test:e2e:parity` is
+`playwright test realtime-parity`). The difference is `RUN_RECOPYFAST_PARITY=1` and the
+credentials, and the difference is easy to miss in the output: without them the two gated cases
+call `test.skip()` from inside the test body (`e2e/realtime-parity.spec.ts:241` and `:313`), so
+Playwright reports them as **skipped** and the run is still green. **Read the counts, not the
+colour** — the first command is a pass at `1 passed, 2 skipped`, and a green run showing that
+line has proven nothing about AC 4.
+
 ```sh
 # Legacy snippets: no database, no editing session, runs against any origin.
+# Expect: 1 passed, 2 skipped.
 CI=1 PLAYWRIGHT_BASE_URL=https://www.recopyfa.st npm run test:e2e:parity
 ```
 
 ```sh
 # Parity (AC 4): two browser contexts in an editing session, measured.
+# Expect: 3 passed, 0 skipped. Any skip here means a variable below is missing.
 CI=1 \
 RUN_RECOPYFAST_PARITY=1 \
 PLAYWRIGHT_BASE_URL=https://www.recopyfa.st \
@@ -287,8 +412,21 @@ not run when the process is killed, and a hanging parity test is exactly the one
 
 ## Local development
 
+**Run one of these, never both.** The root script already starts this service, so running the
+second one alongside it is an `EADDRINUSE` on 4001 — and the port does not walk (below), so the
+loser exits rather than quietly moving to 4002.
+
+Normally you want the first: from the repo root, Next on `:3000` **and** this service on `:4001`,
+because `dev` fans out to `dev:next` + `dev:ws` under `concurrently` (`package.json:6-8`).
+
 ```sh
-npm run dev        # from the repo root: Next on :3000 and this service on :4001
+npm run dev
+```
+
+Use the second only to run this service on its own — Next already running in another terminal, or
+not needed at all:
+
+```sh
 cd server && npm run dev
 ```
 

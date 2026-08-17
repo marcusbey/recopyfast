@@ -82,19 +82,28 @@ Criteria this plan must satisfy:
 > on. **This makes AC 4 flaky, not merely unproven**: "edit in A appears in B under 1 s" passes or
 > fails depending on machine placement.
 >
-> **2 — Handshake failure (loud), and it is worse than it first looks.**
-> `src/lib/collaboration/realtime.ts:93` sets `transports: ["websocket", "polling"]`, so the
-> dashboard tries WebSocket first and usually survives. **The embed passes no `transports` option
-> at all** (`public/embed/recopyfast.src.js:2710`), so it takes socket.io-client's default —
-> *polling first*. On two machines the handshake round-robins with no sticky routing and dies with
+> **2 — Handshake failure (loud), and it is worse than it first looks.** Socket.io's handshake
+> begins with a stateful HTTP polling exchange, and a client left on the default transport takes
+> *polling first*. On two machines that round-robins with no sticky routing and dies with
 > `Session ID unknown`, **on every customer site**. The adapter does not fix this: it shares rooms,
 > not sessions.
 >
 > **Settled by [ADR 023](../decisions/023-websocket-only-transport-no-sticky-routing.md):
-> `transports: ['websocket']` on both clients AND on the server** — **already shipped**, so the
+> `transports: ['websocket']` on the clients AND on the server** — **already shipped**, so the
 > handshake half is closed regardless of machine count. Sticky routing is rejected. Clients on WebSocket-hostile networks
 > lose realtime with no fallback — accepted under ADR 004, since HTTP stays authoritative and
 > realtime is additive. One console warning on failure, sharing `s08`'s `connect-src` warning path.
+>
+> **Where the pin lives, checked 2026-08-17 — verify it is still in both before scaling:**
+> `server/index.js:121` (the `new Server(...)` options) and
+> `public/embed/recopyfast.src.js:2908` (the `io(RECOPYFAST_WS, {…})` options; the artifact is
+> rebuilt from that source, never hand-edited). This paragraph originally named a third,
+> `src/lib/collaboration/realtime.ts:93`, described as the dashboard's client. **That file was
+> deleted on 2026-08-17**: nothing but its own test ever imported it, the dashboard has never
+> opened a socket to this service, and its production branch fell back to a placeholder origin
+> (`wss://your-production-ws-server.com`) that would have defeated the widget's own
+> `NEXT_PUBLIC_WS_URL`-is-empty off switch had anyone wired it up. Two pins, not three; ADR 023's
+> decision is unchanged.
 >
 > `server/package.json` carries **no `@socket.io/redis-adapter`**, and at one machine it should
 > not — nothing above is a task for this story. It *does* carry `redis`: that is node-redis, the
