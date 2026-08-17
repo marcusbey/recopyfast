@@ -1,5 +1,26 @@
 # Research — Story s09-section-impressions
 
+> ## 🔴 SCHEMA CORRECTION, 2026-08-17 — read before trusting any table description below
+>
+> **`ab_test_results` and `visitor_buckets` DO NOT EXIST in the database.** Every claim in this
+> report about their columns, constraints and indexes is sourced from
+> `supabase/migrations/20260127_ab_testing_v2.sql` and is **accurate about that file** — but that
+> migration **aborted in full** with `42P01` (it creates `ab_test_results` with
+> `REFERENCES ab_tests`, and `ab_tests` did not exist), rolled back inside its transaction, and is
+> nonetheless **marked applied**, so it will never run again. See
+> `supabase/migrations/20260801200000_missing_base_tables.sql:41-42` and `:64-68`, which document
+> this explicitly. Confirmed live during `s11a`'s fix run: both tables return `PGRST205`.
+>
+> **A migration file containing a `CREATE TABLE` is not evidence the table exists.** This report
+> read the file and described a schema; the schema is not there. Treat every `20260127_…` citation
+> below as *intended* shape, not observed shape.
+>
+> This does not invalidate the report's reasoning about impression grain or anonymity — see
+> [ADR 015](../decisions/015-impression-grain-and-anonymity.md), which stands. It does mean **any
+> task here that reads from or writes to those two tables has no substrate**, and creating them is
+> a scope decision reserved to the operator (`s11a`'s Task 9 was withdrawn on exactly that rule).
+> **Re-probe the live schema before `s09` executes.**
+
 > **Review gate warning.** `docs/reviews/stories.md` ends `Max severity: major` /
 > `Stories ready: no`. Three of its open findings name `s09` directly — **M2** (the `s09`/`s12`
 > data-model conflict, `reviews/stories.md:116-132`), **m2** (the byte allocation double-counts

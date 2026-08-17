@@ -1,5 +1,26 @@
 # Research — Story s12-ab-results
 
+> ## 🔴 SCHEMA CORRECTION, 2026-08-17 — this report's data source does not exist
+>
+> **`ab_test_results` and `visitor_buckets` DO NOT EXIST in the database.** Every citation of
+> `supabase/migrations/20260127_ab_testing_v2.sql` below is **accurate about that file** and wrong
+> about the database: the migration **aborted in full** with `42P01` (`ab_test_results REFERENCES
+> ab_tests`, and `ab_tests` did not exist), rolled back inside its transaction, and is still
+> **marked applied**, so it will never re-run. Documented at
+> `supabase/migrations/20260801200000_missing_base_tables.sql:41-42` and `:64-68`; confirmed live
+> during `s11a`'s fix run, both returning `PGRST205`.
+>
+> **This hits `s12` harder than any other story.** `s12` computes results *from* `ab_test_results`
+> — the N+1 count queries, the per-variant views and conversions, the significance math. There is
+> no substrate for any of it. The conversion definition in
+> [ADR 017](../decisions/017-ab-conversion-is-per-visitor.md) stands as a definition; what does not
+> stand is the assumption that a table exists to evaluate it against.
+>
+> **`s12` cannot execute until the tables are created**, and creating them is a scope decision
+> reserved to the operator — `s11a` withdrew its own Task 9 rather than ship a migration that would
+> abort, be marked applied, and reproduce the original scar. Re-probe the live schema, including
+> RLS and `UNIQUE(visitor_id, test_id)`, before planning around any of it.
+
 > **Warning carried over from `docs/reviews/stories.md`:** that file ends `Stories ready: no`
 > (max severity: major, `docs/reviews/stories.md:262-263`). **`s12` is one of the contested
 > stories** — review finding **M2** (`docs/reviews/stories.md:116-132`) says `s12`'s conversion

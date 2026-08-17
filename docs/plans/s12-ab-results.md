@@ -1,6 +1,28 @@
 ---
-validated: yes
+validated: no
 ---
+
+> **Validation WITHDRAWN 2026-08-17 — the data source does not exist.**
+> This plan was validated on 2026-08-16 against a schema that was read from a migration file rather
+> than observed in the database. **`ab_test_results` does not exist**, and every number this story
+> computes — per-variant views and conversions, the significance math, the whole results surface —
+> reads from it.
+>
+> The migration that would have created it (`20260127_ab_testing_v2.sql`) aborted in full with
+> `42P01` and is nonetheless marked applied, so it will never re-run
+> (`20260801200000_missing_base_tables.sql:41-42`, `:64-68`; confirmed live via `PGRST205` during
+> `s11a`'s fix run). **Two of the four A/B tables exist** — `ab_tests` and `ab_test_variants`,
+> created by `20260801200000` — and the two this story needs do not.
+>
+> [ADR 017](../decisions/017-ab-conversion-is-per-visitor.md) stands as a *definition*. What does
+> not stand is the assumption that there is a table to evaluate it against.
+>
+> **To lift this gate:** creating those tables is a scope decision reserved to the operator —
+> `s11a` withdrew its own Task 9 rather than ship a migration that would abort, be marked applied,
+> and reproduce the original scar. Run `scripts/check-ab-schema.mjs` with a pooler-region
+> `SUPABASE_DB_URL` first, including RLS, policies and `UNIQUE(visitor_id, test_id)`, **before**
+> anything creates them.
+
 # Plan — Story s12-ab-results
 
 Branch: `feature/s12-ab-results`
