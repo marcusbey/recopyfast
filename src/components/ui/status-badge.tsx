@@ -4,7 +4,6 @@ import * as React from "react";
 import {
   CheckCircle2,
   CircleDashed,
-  CircleSlash,
   Clock,
   FileText,
   FlaskConical,
@@ -47,7 +46,7 @@ interface StatusDefinition {
   description: string;
 }
 
-export type SiteStatus = "active" | "inactive" | "verifying";
+export type SiteStatus = "awaiting-install" | "live" | "stale";
 export type ContentStatus = "original" | "edited" | "pending";
 export type VersionChangeType =
   | "manual"
@@ -65,48 +64,65 @@ export type ABTestStatus =
 /**
  * What a site's status actually means, as opposed to what it used to say.
  *
- * `GET /api/sites` derives the flag from exactly one thing — `content_elements`
+ * `GET /api/sites` derived the flag from exactly one thing — `content_elements`
  * rows exist for this site, or they do not. It has never consulted
  * `domain_verifications`, and nothing else does either: the embed script is
  * admitted by `authorizeSiteRequest`, which checks an HMAC site token and the
  * request origin against `sites.domain`. A site with no verification record at
  * all serves and saves content perfectly.
  *
- * So the previous entry here — "Verifying / Site verification in progress" —
- * described a process that does not exist, could not be started from anywhere
- * in the dashboard, and that no owner action would ever finish. Two live sites
- * sat on it indefinitely while their script worked, and the overview counted
- * them as zero. (The widget not reporting its content map at all was the other
- * half of that; see register F-10.)
+ * So the entry that used to sit here — "Verifying / Site verification in
+ * progress" — described a process that does not exist, could not be started
+ * from anywhere in the dashboard, and that no owner action would ever finish.
+ * Two live sites sat on it indefinitely while their script worked, and the
+ * overview counted them as zero. (The widget not reporting its content map at
+ * all was the other half of that; see register F-10.)
+ *
+ * `active` / `inactive` / `verifying` are RETIRED, not aliased. They were three
+ * words for one snapshot — "do we hold rows for this site" — recomputed per
+ * request, with nowhere to record when anything changed. `sites.status` is now
+ * a real state machine (`awaiting-install` → `live`, ADR 006) and `stale` is
+ * derived from `last_reported_at` at read time. Keeping the old words alongside
+ * would have left two vocabularies for one fact, which is the exact drift this
+ * registry exists to stop.
  */
 export const siteStatuses: Record<SiteStatus, StatusDefinition> = {
-  active: {
-    label: "Active",
-    tone: "success",
-    icon: CheckCircle2,
-    description: "ReCopyFast has content from this site.",
-  },
-  verifying: {
-    label: "No content yet",
+  "awaiting-install": {
+    label: "Awaiting install",
     tone: "neutral",
     icon: CircleDashed,
     description:
-      "Registered and ready. ReCopyFast has not recorded any content from this site yet — nothing is blocking it.",
+      "Registered and ready. Add the snippet to your site and this turns itself green — nothing here needs your approval.",
   },
-  inactive: {
-    label: "Inactive",
-    tone: "neutral",
-    icon: CircleSlash,
-    description: "Site is not currently active.",
+  live: {
+    label: "Live",
+    tone: "success",
+    icon: CheckCircle2,
+    description: "The script on this site has reported in. Editing is on.",
+  },
+  stale: {
+    label: "Stale",
+    tone: "warning",
+    icon: Clock,
+    description:
+      "No report from this site recently. Nothing is blocked — content still serves and the site stays editable.",
   },
 };
 
-/** Falls back safely when the API sends a status this build does not know. */
+/**
+ * Falls back safely when the API sends a status this build does not know.
+ *
+ * The fallback is `awaiting-install`, the state that claims nothing. It used to
+ * be `inactive`, and before that a site the API said nothing about was drawn as
+ * healthy — the one direction a default must never guess in. `stale` is not the
+ * safe fallback either: it asserts the site was verified once.
+ */
 export function resolveSiteStatus(
   status: string | undefined,
 ): StatusDefinition {
   return (
-    siteStatuses[(status ?? "inactive") as SiteStatus] ?? siteStatuses.inactive
+    siteStatuses[(status ?? "awaiting-install") as SiteStatus] ??
+    siteStatuses["awaiting-install"]
   );
 }
 

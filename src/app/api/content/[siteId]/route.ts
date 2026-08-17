@@ -4,7 +4,9 @@ import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
+  parseOrigin,
 } from "@/lib/security/site-auth";
+import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import {
   redactControlCharacters,
   validateDiscoveredElement,
@@ -226,6 +228,32 @@ function shedUnauthenticatedLoad(request: NextRequest, endpoint: string) {
   });
 }
 
+/**
+ * Install-state bookkeeping never gets to break the request it rides on.
+ *
+ * Everything this wraps — the `awaiting-install` → `live` flip, the liveness
+ * bump, the domain-mismatch record — is dashboard bookkeeping. The request it
+ * hangs off is the customer's own page fetching or reporting its copy, and the
+ * widget degrades rather than breaks: a visitor must never lose the published
+ * text on a page because a column on `sites` could not be written. The failure
+ * goes to the log, where it is visible to us, and the response is untouched.
+ *
+ * `stale` in particular is advisory (AC 7). Nothing here may stand between a
+ * visitor and the content they asked for, which is also why this is the only
+ * shape these calls are ever made in.
+ */
+async function bestEffortSiteWrite(
+  what: string,
+  siteId: string,
+  run: () => Promise<void>,
+): Promise<void> {
+  try {
+    await run();
+  } catch (error) {
+    console.error(`[content] ${what} failed for site ${siteId}:`, error);
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ siteId: string }> },
@@ -238,6 +266,9 @@ export async function GET(
     const supabase = createServiceRoleClient();
 
     let allowedOrigin: string | null = null;
+    // Only the widget's own token proves the script is still running on the
+    // customer's site; a dashboard session proves their owner is logged in.
+    let isWidgetRequest = false;
 
     // Dashboard requests are same-origin with a Supabase session and never
     // carry a site token, so try that path first; only fall back to the
@@ -259,6 +290,7 @@ export async function GET(
           origin,
           referer,
         }));
+        isWidgetRequest = true;
       } catch (authError) {
         console.error("Content GET authorization failed:", authError);
         return NextResponse.json(
@@ -308,6 +340,23 @@ export async function GET(
         element.published_content ?? element.original_content ?? "",
     }));
 
+    // The one ongoing "this site is still running our script" signal.
+    //
+    // POST goes quiet on a healthy site: the widget tracks which element ids the
+    // server already holds and stops reporting once a page is fully discovered
+    // (recopyfast.src.js), so discovery is a one-time event per element. This
+    // read is what every page view makes. Deriving staleness from POST instead
+    // would have marked every working, unchanged site stale a fortnight after
+    // install.
+    //
+    // Not on the first-party branch: an owner opening their dashboard says
+    // nothing about whether visitors' browsers are still running the script.
+    if (isWidgetRequest) {
+      await bestEffortSiteWrite("liveness bump", siteId, () =>
+        recordSiteReport(supabase, siteId),
+      );
+    }
+
     return withCors(NextResponse.json(transformedContent), allowedOrigin);
   } catch (error) {
     console.error("Error in content fetch:", error);
@@ -344,6 +393,50 @@ export async function POST(
       }));
     } catch (authError) {
       console.error("Content POST authorization failed:", authError);
+
+      // AC 4 — a report from a domain other than the registered one is
+      // recorded, and changes nothing else.
+      //
+      // The request keeps failing exactly as it did: this branch is reached
+      // before a single byte of the content map is read, and the answer is
+      // still 403. What was missing is that the owner had no way to find out.
+      // The commonest cause of a card that never turns green is the snippet
+      // pasted on staging, or on the apex when the site is registered on www —
+      // and the only place that fact existed was a server log.
+      //
+      // The host comes from the same `parseOrigin` the refusal itself used, not
+      // from a raw Referer: the decision and the record have to agree about
+      // what "the domain that reported" means, and a Referer is a whole URL
+      // with a path and a port on it.
+      //
+      // Only for "Origin not allowed". "Invalid site token" or "Site not found"
+      // name no domain worth showing an owner — and a caller with no valid
+      // token has no business writing to their row at all.
+      if (
+        authError instanceof Error &&
+        authError.message === "Origin not allowed"
+      ) {
+        const reportedHost = parseOrigin(origin) ?? parseOrigin(referer);
+
+        if (reportedHost) {
+          await bestEffortSiteWrite(
+            "domain mismatch record",
+            siteId,
+            async () => {
+              const { error } = await supabase
+                .from("sites")
+                .update({
+                  last_mismatch_domain: reportedHost,
+                  last_mismatch_at: new Date().toISOString(),
+                })
+                .eq("id", siteId);
+
+              if (error) throw new Error(error.message);
+            },
+          );
+        }
+      }
+
       return NextResponse.json(
         {
           error:
@@ -392,6 +485,25 @@ export async function POST(
         allowedOrigin,
       );
     }
+
+    // AC 2 — the first authenticated content report flips the site to `live`,
+    // with no user action anywhere.
+    //
+    // BEFORE the map is parsed, deliberately. What proves the install is that
+    // an authorized report arrived from the registered domain, not that any
+    // particular row survived validation. A page whose every element is skipped
+    // — an oversized inline data: image, a malformed selector — would otherwise
+    // never verify, and its owner would be told to install a script that has
+    // been running all along.
+    //
+    // `markSiteLive` is guarded on `status = 'awaiting-install'` in its own
+    // WHERE clause, so the second report and the two-hundredth match zero rows
+    // and `live_at` keeps naming the first one. `recordSiteReport` is
+    // unconditional: it is the liveness signal, and it has to keep landing.
+    await bestEffortSiteWrite("install status update", siteId, async () => {
+      await markSiteLive(supabase, siteId);
+      await recordSiteReport(supabase, siteId);
+    });
 
     const discovered = buildDiscoveryRows(siteId, contentMap);
 

@@ -65,16 +65,30 @@ const mockServiceClient = {
 describe("GET /api/sites", () => {
   const mockUser = { id: "user-123", email: "test@example.com" };
 
-  const mockSites = [
-    {
-      id: "site-1",
-      domain: "example.com",
-      name: "Example Site",
-      api_key: "test-api-key-1",
-      created_at: "2024-01-01T00:00:00Z",
-      updated_at: "2024-01-15T00:00:00Z",
-    },
-  ];
+  /**
+   * A `sites` row as the route now reads it.
+   *
+   * `status` and the four transition timestamps are columns since
+   * 20260817001000_sites_install_status.sql. The route used to derive a status
+   * from a `content_elements` count on every request; it reads the persisted
+   * state machine instead and resolves `stale` from `last_reported_at`.
+   */
+  const siteRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "site-1",
+    domain: "example.com",
+    name: "Example Site",
+    api_key: "test-api-key-1",
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: "2024-01-15T00:00:00Z",
+    status: "awaiting-install",
+    live_at: null,
+    last_reported_at: null,
+    last_mismatch_domain: null,
+    last_mismatch_at: null,
+    ...overrides,
+  });
+
+  const mockSites = [siteRow()];
 
   const mockPermissions = [{ site_id: "site-1", permission: "admin" }];
 
@@ -222,22 +236,81 @@ describe("GET /api/sites", () => {
       views: 0,
       last_activity: "2024-01-15T00:00:00Z",
     });
-    // A site with content reports as active.
-    expect(data.sites[0].status).toBe("active");
   });
 
-  it("reports a site with no content elements as verifying", async () => {
-    queryQueue.push({ data: mockPermissions });
-    queryQueue.push({ data: mockSites });
-    queueSiteStats({ elementsCount: 0 });
+  /**
+   * The status the API reports is the persisted state machine, resolved once
+   * per site — not a `content_elements` count wearing a status's clothes.
+   *
+   * The count answered a different question and answered it badly: it could not
+   * say when anything happened, and a site that reported for months and then
+   * went quiet was indistinguishable from one whose script was never installed.
+   */
+  describe("site status", () => {
+    const respondWith = async (site: Record<string, unknown>) => {
+      queryQueue.push({ data: mockPermissions });
+      queryQueue.push({ data: [site] });
+      queueSiteStats({ elementsCount: 5, elementIds: ["element-1"] });
 
-    const response = await GET(
-      new NextRequest("http://localhost:3000/api/sites"),
-    );
-    const data = await response.json();
+      const response = await GET(
+        new NextRequest("http://localhost:3000/api/sites"),
+      );
+      return (await response.json()).sites[0];
+    };
 
-    expect(data.sites[0].status).toBe("verifying");
-    expect(data.sites[0].stats.content_elements_count).toBe(0);
+    it("reports a site that has never been heard from as awaiting-install", async () => {
+      // Content elements exist in this fixture; the persisted status still wins.
+      const site = await respondWith(siteRow({ status: "awaiting-install" }));
+
+      expect(site.status).toBe("awaiting-install");
+    });
+
+    it("reports a recently-reporting live site as live", async () => {
+      const site = await respondWith(
+        siteRow({
+          status: "live",
+          live_at: "2026-01-01T00:00:00Z",
+          last_reported_at: new Date().toISOString(),
+        }),
+      );
+
+      expect(site.status).toBe("live");
+    });
+
+    it("reports a live site that has gone quiet as stale", async () => {
+      const site = await respondWith(
+        siteRow({
+          status: "live",
+          live_at: "2026-01-01T00:00:00Z",
+          last_reported_at: new Date(
+            Date.now() - 60 * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        }),
+      );
+
+      // Derived, never stored — `sites.status` still holds 'live'.
+      expect(site.status).toBe("stale");
+    });
+
+    /** AC 8: s03 reads these off the sites API rather than re-deriving them. */
+    it("passes the transition timestamps through verbatim", async () => {
+      const site = await respondWith(
+        siteRow({
+          status: "live",
+          live_at: "2026-02-03T04:05:06Z",
+          last_reported_at: "2026-02-04T04:05:06Z",
+          last_mismatch_domain: "staging.example.net",
+          last_mismatch_at: "2026-02-02T04:05:06Z",
+        }),
+      );
+
+      expect(site).toMatchObject({
+        live_at: "2026-02-03T04:05:06Z",
+        last_reported_at: "2026-02-04T04:05:06Z",
+        last_mismatch_domain: "staging.example.net",
+        last_mismatch_at: "2026-02-02T04:05:06Z",
+      });
+    });
   });
 
   it("includes the site token and embed script in response", async () => {

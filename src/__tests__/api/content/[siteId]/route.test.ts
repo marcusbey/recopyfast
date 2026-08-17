@@ -233,6 +233,86 @@ describe("/api/content/[siteId]", () => {
         response.headers.get("Access-Control-Allow-Origin"),
       ).not.toBeNull();
     });
+
+    /**
+     * The liveness signal for AC 7, and why it lives on GET.
+     *
+     * POST goes silent on a healthy site: the widget tracks which element ids
+     * the server already holds and stops reporting once the page is fully
+     * discovered. This GET is the request every page view makes, so it is the
+     * only ongoing evidence that the script is still running — without it every
+     * working, unchanged site would drift into `stale` a fortnight after
+     * install.
+     */
+    describe("liveness", () => {
+      const queueContentQuery = () => {
+        mockServiceClient.eq
+          .mockImplementationOnce(() => mockServiceClient) // site_id
+          .mockImplementationOnce(() => mockServiceClient) // language
+          .mockImplementationOnce(() =>
+            Promise.resolve({ data: mockContentElements, error: null }),
+          ); // variant
+      };
+
+      it("records a report when the widget's own token authorized the read", async () => {
+        queueContentQuery();
+
+        await GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+        expect(mockServiceClient.update).toHaveBeenCalledWith({
+          last_reported_at: expect.any(String),
+        });
+      });
+
+      it("records nothing when the dashboard's own session authorized the read", async () => {
+        // An owner opening the dashboard is not evidence that their visitors'
+        // browsers are still running the script — which is the only thing
+        // staleness is about. Counting it would keep an uninstalled site
+        // looking alive for as long as its owner kept checking on it.
+        mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce({
+          site: { id: "site-123", domain: "example.com", api_key: "api-key" },
+          allowedOrigin: null,
+        });
+        queueContentQuery();
+
+        await GET(new NextRequest("http://localhost/api/content/site-123"), {
+          params: Promise.resolve({ siteId: "site-123" }),
+        });
+
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+      });
+
+      it("serves the content even when the liveness write fails", async () => {
+        // `stale` is advisory. Nothing about it may stand between a visitor and
+        // the copy on the page they asked for.
+        queueContentQuery();
+        mockServiceClient.update.mockImplementation(() => {
+          throw new Error("sites table unavailable");
+        });
+
+        const response = await GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+        const data = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(data).toEqual(mockContentElements);
+      });
+    });
   });
 
   describe("POST", () => {
@@ -307,6 +387,156 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(404);
       expect(data.error).toBe("Site not found");
+    });
+
+    /**
+     * The install flip (AC 2), and the three ways it could be got wrong.
+     *
+     * It fires on an authorized report, not on rows written: a page whose every
+     * element is skipped (oversized inline images, malformed selectors) is
+     * still proof the script ran on the registered domain. It is guarded so it
+     * cannot re-fire and rewrite `live_at`. And it can never turn a successful
+     * report into a failed one — the widget's fetch is fire-and-forget on the
+     * customer's own page, so a status write that throws must not become an
+     * error the customer's page has to survive.
+     */
+    describe("first authenticated report", () => {
+      const postContentMap = (body: unknown = mockContentMap) =>
+        POST(
+          new NextRequest("http://localhost/api/content/site-123", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+            body: JSON.stringify(body),
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+      it("flips the site to live", async () => {
+        const response = await postContentMap();
+
+        expect(response.status).toBe(200);
+        expect(mockServiceClient.update).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: "live",
+            live_at: expect.any(String),
+            last_reported_at: expect.any(String),
+          }),
+        );
+      });
+
+      it("guards the flip so a later report cannot rewrite live_at", async () => {
+        await postContentMap();
+
+        expect(mockServiceClient.eq).toHaveBeenCalledWith(
+          "status",
+          "awaiting-install",
+        );
+      });
+
+      it("bumps the liveness timestamp as well as flipping the status", async () => {
+        await postContentMap();
+
+        expect(mockServiceClient.update).toHaveBeenCalledWith({
+          last_reported_at: expect.any(String),
+        });
+      });
+
+      it("flips on a report with nothing storable in it", async () => {
+        // An authorized report of an empty map is still proof the script ran.
+        const response = await postContentMap({});
+
+        expect(response.status).toBe(200);
+        expect(mockServiceClient.update).toHaveBeenCalledWith(
+          expect.objectContaining({ status: "live" }),
+        );
+      });
+
+      it("answers the widget normally when the status write fails", async () => {
+        mockServiceClient.update.mockImplementation(() => {
+          throw new Error("sites table unavailable");
+        });
+
+        const response = await postContentMap();
+        const data = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(data).toEqual({ success: true });
+      });
+
+      it("never writes the derived stale state", async () => {
+        await postContentMap();
+
+        expect(
+          JSON.stringify(mockServiceClient.update.mock.calls),
+        ).not.toContain("stale");
+      });
+    });
+
+    /**
+     * AC 4 — a report from the wrong domain is recorded, and changes nothing
+     * else. The request keeps failing exactly as it did: `authorizeSiteRequest`
+     * throws before any content is read, the answer is still 403, and the site
+     * stays `awaiting-install`. Recording it is what lets the dashboard tell an
+     * owner "we heard from staging.example.net, not example.com" instead of
+     * leaving them staring at a card that never turns green.
+     */
+    describe("a report from an unregistered domain", () => {
+      const postFromWrongOrigin = () =>
+        POST(
+          new NextRequest("http://localhost/api/content/site-123", {
+            method: "POST",
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://wrong-domain.example",
+            },
+            body: JSON.stringify(mockContentMap),
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+      beforeEach(() => {
+        mockAuthorizeSiteRequest.mockRejectedValue(
+          new Error("Origin not allowed"),
+        );
+      });
+
+      it("is still refused with a 403 and writes no content", async () => {
+        const response = await postFromWrongOrigin();
+
+        expect(response.status).toBe(403);
+        expect(mockServiceClient.upsert).not.toHaveBeenCalled();
+      });
+
+      it("records the domain that reported and when", async () => {
+        await postFromWrongOrigin();
+
+        expect(mockServiceClient.update).toHaveBeenCalledWith({
+          last_mismatch_domain: "wrong-domain.example",
+          last_mismatch_at: expect.any(String),
+        });
+      });
+
+      it("does not verify the site", async () => {
+        await postFromWrongOrigin();
+
+        expect(mockServiceClient.update).not.toHaveBeenCalledWith(
+          expect.objectContaining({ status: "live" }),
+        );
+      });
+
+      it("records nothing for a rejected token, which names no domain", async () => {
+        mockAuthorizeSiteRequest.mockRejectedValue(
+          new Error("Invalid site token"),
+        );
+
+        const response = await postFromWrongOrigin();
+
+        expect(response.status).toBe(401);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+      });
     });
 
     it("should return 500 when upsert fails", async () => {

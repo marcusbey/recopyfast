@@ -115,16 +115,23 @@ export default function DashboardPage() {
 
   /**
    * The lead metric used to be "Active sites", which counted only sites the
-   * API flags `active` — and that flag means "we hold content for this site",
+   * API flagged `active` — and that flag meant "we hold content for this site",
    * nothing more. An owner with two working, script-installed sites read
    * "Active sites 0" as the first and largest number on the page.
    *
    * The number that leads is now the one that is unambiguously true — how many
    * sites are connected — with the content figure demoted to its hint, where it
    * cannot be mistaken for a health verdict.
+   *
+   * `stale` counts here as well as `live`: both mean the script has reported at
+   * least once, which is exactly what this hint claims. Only `awaiting-install`
+   * has never been heard from. Counting `live` alone would have made a quiet
+   * site disappear from a figure about its past, not its present.
    */
   const sitesWithContentCount = useMemo(
-    () => sites.filter((site) => site.status === "active").length,
+    () =>
+      sites.filter((site) => site.status === "live" || site.status === "stale")
+        .length,
     [sites],
   );
 

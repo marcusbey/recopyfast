@@ -8,17 +8,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  StatusBadge,
-  resolveSiteStatus,
-  type SiteStatus,
-} from "@/components/ui/status-badge";
+import { type SiteStatus } from "@/components/ui/status-badge";
 import { DomainVerification } from "./DomainVerification";
+import { SiteInstallationCard } from "./SiteInstallationCard";
 import {
   CheckCircle2,
-  AlertCircle,
   Copy,
   ExternalLink,
   Code,
@@ -44,6 +39,10 @@ interface SiteWithDetails extends Site {
     last_activity?: string;
   };
   status?: SiteStatus;
+  live_at?: string | null;
+  last_reported_at?: string | null;
+  last_mismatch_domain?: string | null;
+  last_mismatch_at?: string | null;
   embedScript?: string;
   siteToken?: string;
 }
@@ -85,15 +84,9 @@ function StatTile({ label, value, icon: Icon }: StatTileProps) {
 }
 
 export function SiteDetailView({ site }: SiteDetailViewProps) {
-  // Content elements only ever reach the database by the embed script POSTing
-  // them from the customer's page, so a non-zero count is proof the script has
-  // run at least once against the live API.
-  const hasReportedContent = (site.stats?.content_elements_count ?? 0) > 0;
-
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
-  const statusDefinition = resolveSiteStatus(site.status);
 
   const embedScript =
     site.embedScript ||
@@ -152,33 +145,15 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
                 <History className="w-4 h-4 mr-2" />
                 History
               </Button>
-              <StatusBadge status={statusDefinition} />
+              {/* The status pill moved into the Installation card below. It
+                  used to sit here as well, next to a "Status" paragraph and an
+                  "Integration Status" card, all three derived from the same
+                  content_elements count and all three worded differently. */}
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            <div>
-              <p className="text-sm text-muted-foreground mb-1">Status</p>
-              <p className="text-sm text-foreground">
-                {statusDefinition.description}
-              </p>
-              {/*
-                The dashboard used to leave an owner staring at "Verifying"
-                with nothing to act on and no way to tell whether their site was
-                degraded. Both of those are answerable: nothing is queued on our
-                side, no domain verification gates the script, and the script
-                behaves identically either way.
-              */}
-              {!hasReportedContent && (
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Nothing is pending review, and no domain verification gates
-                  your script. This reads Active once ReCopyFast has recorded
-                  content for {site.domain}; until then the embed script serves
-                  and applies saved copy exactly as it does for a site that has.
-                </p>
-              )}
-            </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <p className="text-sm text-muted-foreground mb-1">Created</p>
@@ -303,59 +278,14 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         </Card>
       )}
 
-      {/* Integration Status */}
-      <Card className="border-border">
-        <CardHeader>
-          <CardTitle>Integration Status</CardTitle>
-          <CardDescription>
-            Current integration health and setup status
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {/*
-              These two rows were hardcoded to "Verified" / "Connected", so a
-              site whose script had never been installed still reported a
-              healthy integration. The only first-party evidence the script ran
-              is that it posted content elements back, so that is what drives
-              the status now.
-            */}
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-foreground">
-                Script Installation
-              </span>
-              {hasReportedContent ? (
-                <Badge variant="tone-success">
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Verified
-                </Badge>
-              ) : (
-                <Badge variant="tone-warning">
-                  <AlertCircle className="w-3 h-3 mr-1" />
-                  Not detected yet
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-foreground">API Connection</span>
-              {hasReportedContent ? (
-                <Badge variant="tone-success">
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Connected
-                </Badge>
-              ) : (
-                <Badge variant="tone-neutral">Awaiting first request</Badge>
-              )}
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm text-foreground">Content Elements</span>
-              <Badge variant="tone-info">
-                {site.stats?.content_elements_count || 0} Found
-              </Badge>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Installation.
+          This replaces the "Integration Status" card that stood here. Its
+          "Script Installation" and "API Connection" rows were two differently
+          worded readings of one `content_elements` count — which was itself a
+          third reading of what the header pill already said. The card below is
+          the single source, driven by the persisted state machine on `sites`
+          rather than by a count. */}
+      <SiteInstallationCard site={{ ...site, embedScript }} />
 
       {/* Domain ownership.
           `DomainVerification` and the `domain_verifications` table have existed

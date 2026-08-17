@@ -30,7 +30,17 @@ export function normalizeDomain(domain: string) {
   }
 }
 
-function parseOrigin(originHeader?: string | null) {
+/**
+ * The host a request claims to come from, or null.
+ *
+ * Exported so callers that need to *record* a rejected origin resolve it the
+ * same way the authorization decision did. A raw `Referer` is not that: it is a
+ * full URL with a path, a port and whatever casing the browser sent, and
+ * comparing or storing it verbatim is how the two ends of "did this match"
+ * drift apart. Returns `URL.hostname` lowercased, so a port is already stripped
+ * and an IPv6 loopback arrives bracketed.
+ */
+export function parseOrigin(originHeader?: string | null) {
   if (!originHeader) return null;
   try {
     return new URL(originHeader).hostname.toLowerCase();

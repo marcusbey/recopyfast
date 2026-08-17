@@ -15,7 +15,10 @@ describe("SiteDetailView", () => {
       content_elements_count?: number;
       last_activity?: string;
     };
-    status?: "active" | "inactive" | "verifying";
+    status?: "awaiting-install" | "live" | "stale";
+    live_at?: string | null;
+    last_reported_at?: string | null;
+    last_mismatch_domain?: string | null;
     embedScript?: string;
     siteToken?: string;
   } = {
@@ -25,7 +28,9 @@ describe("SiteDetailView", () => {
     api_key: "test-api-key",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-15T00:00:00Z",
-    status: "active",
+    status: "live",
+    live_at: "2026-08-01T00:00:00Z",
+    last_reported_at: "2026-08-16T00:00:00Z",
     stats: {
       edits_count: 42,
       views: 1337,
@@ -58,13 +63,18 @@ describe("SiteDetailView", () => {
     expect(screen.getByText("example.com")).toBeInTheDocument();
   });
 
-  it("displays status badge with correct information", () => {
+  /**
+   * REWRITTEN with s02. The header used to carry a status pill and a "Status"
+   * paragraph beside a separate "Integration Status" card — three readings of
+   * one `content_elements` count, worded three ways. The install state now has
+   * exactly one home on this screen.
+   */
+  it("shows the install state once, in the installation card", () => {
     render(<SiteDetailView site={mockSite} />);
 
-    expect(screen.getByText("Active")).toBeInTheDocument();
-    expect(
-      screen.getByText("ReCopyFast has content from this site."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Installation")).toBeInTheDocument();
+    expect(screen.getAllByText("Live")).toHaveLength(1);
+    expect(screen.queryByText("Integration Status")).not.toBeInTheDocument();
   });
 
   it("renders all quick stats correctly", () => {
@@ -153,14 +163,20 @@ describe("SiteDetailView", () => {
     expect(screen.queryByText("Site Token")).not.toBeInTheDocument();
   });
 
-  it("renders integration status section", () => {
+  /**
+   * REWRITTEN with s02. "Integration Status" is gone: its two rows were
+   * hardcoded to "Verified"/"Connected" until they were rewired to the same
+   * count that drove the header pill, at which point the screen said the same
+   * thing three times. The installation card replaces all three.
+   */
+  it("renders the installation card in place of the integration status rows", () => {
     render(<SiteDetailView site={mockSite} />);
 
-    expect(screen.getByText("Integration Status")).toBeInTheDocument();
-    expect(screen.getByText("Script Installation")).toBeInTheDocument();
-    expect(screen.getByText("API Connection")).toBeInTheDocument();
-    // "Content Elements" labels both the stats tile and the integration row.
-    expect(screen.getAllByText("Content Elements")).toHaveLength(2);
+    expect(screen.getByText("Installation")).toBeInTheDocument();
+    expect(screen.queryByText("Script Installation")).not.toBeInTheDocument();
+    expect(screen.queryByText("API Connection")).not.toBeInTheDocument();
+    // "Content Elements" now labels only the stats tile.
+    expect(screen.getAllByText("Content Elements")).toHaveLength(1);
   });
 
   it("displays external link to site", () => {
@@ -185,50 +201,53 @@ describe("SiteDetailView", () => {
     expect(mockOnClose).not.toHaveBeenCalled();
   });
 
+  /**
+   * REWRITTEN with s02, along with the two `hasReportedContent` message tests
+   * it replaces.
+   *
+   * F-10: two live sites sat on "Verifying" with nothing in the dashboard
+   * saying what was being waited on. Nothing was — the embed script is admitted
+   * by its signed site token and its origin, and `domain_verifications` is
+   * never consulted on that path. The old answer was a paragraph of reassurance
+   * under a pill that still said the wrong thing. The answer now is that the
+   * state itself names what is true, and says what to do about it.
+   */
   it("handles different status types correctly", () => {
     const { rerender } = render(
-      <SiteDetailView site={{ ...mockSite, status: "verifying" }} />,
+      <SiteDetailView site={{ ...mockSite, status: "awaiting-install" }} />,
     );
-    expect(screen.getByText("No content yet")).toBeInTheDocument();
-    expect(
-      screen.getByText(/has not recorded any content from this site yet/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Awaiting install")).toBeInTheDocument();
+    expect(screen.getByText(/no refresh needed/i)).toBeInTheDocument();
 
-    rerender(<SiteDetailView site={{ ...mockSite, status: "inactive" }} />);
-    expect(screen.getByText("Inactive")).toBeInTheDocument();
+    rerender(<SiteDetailView site={{ ...mockSite, status: "stale" }} />);
+    expect(screen.getByText("Stale")).toBeInTheDocument();
     expect(
-      screen.getByText("Site is not currently active."),
+      screen.getByText(/keeps working and stays editable/i),
     ).toBeInTheDocument();
   });
 
-  /**
-   * F-10: two live sites sat on "Verifying" with nothing in the dashboard
-   * saying what was being waited on. Nothing was: the embed script is admitted
-   * by its signed site token and its origin, and `domain_verifications` is
-   * never consulted on that path.
-   */
-  it("tells an owner with no recorded content that nothing is pending", () => {
+  it("tells an owner with no recorded content exactly where the snippet goes", () => {
     render(
       <SiteDetailView
         site={{
           ...mockSite,
-          status: "verifying",
+          status: "awaiting-install",
           stats: { ...mockSite.stats, content_elements_count: 0 },
         }}
       />,
     );
 
-    expect(
-      screen.getByText(/no domain verification gates your script/i),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "WordPress" })).toBeInTheDocument();
+    expect(screen.getByText(/footer\.php/i)).toBeInTheDocument();
   });
 
-  it("does not claim anything is pending once content has been recorded", () => {
+  it("does not ask for an install once the site has reported", () => {
     render(<SiteDetailView site={mockSite} />);
 
     expect(
-      screen.queryByText(/no domain verification gates your script/i),
+      screen.queryByText(/add this snippet to your site/i),
     ).not.toBeInTheDocument();
+    expect(screen.getByText(/editing is on/i)).toBeInTheDocument();
   });
 
   /**

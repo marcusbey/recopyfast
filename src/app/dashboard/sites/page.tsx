@@ -56,15 +56,26 @@ interface SiteWithStats extends Site {
 type SortOption = "name" | "date" | "activity";
 type FilterOption = "all" | SiteStatus;
 
-/* This filter was labelled "Verifying", naming a check that nothing in this
-   product performs — see the `siteStatuses` note in `@/components/ui/status-badge`. The
-   key is still the one the API sends; only the word the owner reads changed. */
+/* The filters follow the site state machine, one for one. They used to read
+   Active / No content yet / Inactive — three words for one recomputed
+   `content_elements` count, one of which ("Verifying") named a check nothing in
+   this product performs. See `siteStatuses` in `@/components/ui/status-badge`
+   and docs/decisions/006-site-status-persisted-state-machine.md. */
 const STATUS_FILTERS: ReadonlyArray<{ value: FilterOption; label: string }> = [
   { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "verifying", label: "No content yet" },
-  { value: "inactive", label: "Inactive" },
+  { value: "awaiting-install", label: "Awaiting install" },
+  { value: "live", label: "Live" },
+  { value: "stale", label: "Stale" },
 ];
+
+/**
+ * How often an open `awaiting-install` site re-checks itself.
+ *
+ * AC 3 gives this ten seconds; five leaves room for the request itself, so the
+ * owner who pasted the snippet in another tab sees the card turn over inside
+ * the promise rather than exactly on it.
+ */
+const INSTALL_POLL_INTERVAL_MS = 5000;
 
 const SORT_LABELS: Record<SortOption, string> = {
   name: "Name",
@@ -249,11 +260,44 @@ export default function SitesPage() {
   const statusCounts = useMemo(() => {
     return {
       all: sites.length,
-      active: sites.filter((s) => s.status === "active").length,
-      inactive: sites.filter((s) => s.status === "inactive").length,
-      verifying: sites.filter((s) => s.status === "verifying").length,
+      "awaiting-install": sites.filter((s) => s.status === "awaiting-install")
+        .length,
+      live: sites.filter((s) => s.status === "live").length,
+      stale: sites.filter((s) => s.status === "stale").length,
     };
   }, [sites]);
+
+  /**
+   * AC 3 — the card turns green by itself while the owner watches it.
+   *
+   * The flip is a server-side event: the embed script's first authorized report
+   * writes `sites.status`, and nothing pushes that to an open tab. The moment
+   * this exists for is the owner pasting the snippet in another tab and coming
+   * back — telling them to reload is not an answer, because they cannot know
+   * whether anything changed.
+   *
+   * Only while an `awaiting-install` site is on screen. A live or stale site
+   * has nothing to watch for, and an unbounded timer on a dashboard somebody
+   * leaves open is a request every few seconds until they close the laptop.
+   * Deselecting or unmounting clears it for the same reason. No new endpoint:
+   * this re-runs the list fetch the page already makes.
+   */
+  useEffect(() => {
+    if (!selectedSite || selectedSite.status !== "awaiting-install") return;
+
+    const timer = setInterval(() => {
+      void fetchSites();
+    }, INSTALL_POLL_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+    // `fetchSites` and `selectedSite` are deliberately not dependencies:
+    // both are rebuilt on every render (the first is a plain function, the
+    // second a `find` over freshly-set state), so depending on either would
+    // tear down and re-arm the timer on each poll — which is a timer that never
+    // fires. The identity that matters is which site is open and what state it
+    // is in, and that is what is listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite?.id, selectedSite?.status]);
 
   // If viewing site details
   if (selectedSite) {
