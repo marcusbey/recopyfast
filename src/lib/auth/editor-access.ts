@@ -8,9 +8,29 @@ import {
   readStagingDeviceFingerprint,
   type StagingDeviceFingerprint,
 } from "@/lib/auth/staging-device";
+import type { DeviceContext } from "@/lib/auth/editor-grants";
+import { readDeviceContext } from "@/lib/auth/editor-request";
 
-export type EditorAccessKind = "staging" | "edit-session";
+export type EditorAccessKind = "staging" | "edit-session" | "device-grant";
 export type EditorPermission = "view" | "edit" | "publish" | "admin";
+
+/**
+ * The one and only channel a device grant may arrive on.
+ *
+ * Header, never a URL parameter, never a body field. A grant authorises writes
+ * to a customer's live page; put it in a URL and it is in browser history, in
+ * the `Referer` sent to every third-party asset on that page, and in every
+ * access log between here and there. The `staging_access` token still travels
+ * in a hand-delivered URL, and migration `20260801100000_editor_access_2fa.sql`
+ * exists precisely because that entry URL was deliberately made to carry no
+ * secret — copying the older pattern here would reverse that decision.
+ *
+ * Also add it to `ALLOW_HEADERS` in `src/lib/http/public-cors.ts` if that ever
+ * gets rewritten: a header the preflight does not allow is stripped by the
+ * browser, which fails silently on every customer domain while passing every
+ * server-side test.
+ */
+export const EDITOR_GRANT_HEADER = "X-RCF-Editor-Grant";
 
 export interface EditorToken {
   kind: EditorAccessKind;
@@ -167,6 +187,23 @@ export function extractEditorToken(
   request: EditorTokenRequest,
   body?: Record<string, unknown> | null,
 ): EditorToken | null {
+  // Checked FIRST — before `rcf_token`, before `rcf_edit_token`, and before
+  // `Authorization: Bearer`. That ordering is load-bearing, not cosmetic: the
+  // widget already sends `Authorization: Bearer <SITE_TOKEN>` on the very same
+  // content requests that now carry a grant (recopyfast.src.js
+  // `hydrateStoredContent` and `startPolling`), and the Bearer branch below
+  // reads its value as a STAGING token. Checking the grant later would send a
+  // grant-carrying request down the staging validator and refuse it, with the
+  // site token blamed for failing to prove something it never could.
+  //
+  // Read only from the header. A grant offered in the query string or the body
+  // is ignored outright rather than accepted "just this once" — see
+  // EDITOR_GRANT_HEADER.
+  const deviceGrant = request.headers.get(EDITOR_GRANT_HEADER)?.trim();
+  if (deviceGrant) {
+    return { kind: "device-grant", token: deviceGrant };
+  }
+
   const params =
     request.nextUrl?.searchParams ?? new URL(request.url).searchParams;
   const stagingToken =
@@ -201,6 +238,7 @@ export async function validateEditorAccess({
   token,
   allowUnverified = false,
   device,
+  deviceContext,
 }: {
   siteId: string;
   token: EditorToken;
@@ -212,7 +250,21 @@ export async function validateEditorAccess({
    * access. Ignored for edit-session tokens, which carry no device binding.
    */
   device?: StagingDeviceFingerprint;
+  /**
+   * Where the request says it came from, for a device grant.
+   *
+   * Deliberately a second, differently named parameter rather than a widening
+   * of `device` above: they are different objects binding different things (a
+   * staging fingerprint is a cookie-ish browser mark, this is an Origin plus a
+   * User-Agent), and conflating them is how one would start standing in for the
+   * other. Absent means refused — see `validateDeviceGrantAccess`.
+   */
+  deviceContext?: DeviceContext;
 }): Promise<EditorAccessValidation> {
+  if (token.kind === "device-grant") {
+    return validateDeviceGrantAccess(siteId, token.token, deviceContext);
+  }
+
   if (token.kind === "staging") {
     return validateStagingEditorAccess(
       siteId,
@@ -223,6 +275,83 @@ export async function validateEditorAccess({
   }
 
   return validateEditSessionAccess(siteId, token.token);
+}
+
+/**
+ * The device grant, as a principal on the content write path.
+ *
+ * FAIL CLOSED ON A MISSING DEVICE CONTEXT. This is the single most consequential
+ * line in the module. A grant is only safe because it is pinned to the origin it
+ * was minted on — that pin, inside `validateDeviceGrant`, is what makes a grant
+ * copied out of someone's localStorage worthless on an attacker's page. The pin
+ * needs an `Origin`, and `Origin` is optional on a `Request`. Defaulting it,
+ * deriving it from the request URL, or "helpfully" skipping the check when it is
+ * absent would each turn this credential into a permanent cross-site editing
+ * token, minted with our name on it, redeemable from any page an attacker
+ * controls, against a customer's live site.
+ *
+ * So: no context, no grant. Refused here, before any database read, because
+ * there is nothing a lookup could tell us that would make an unpinnable grant
+ * acceptable.
+ *
+ * The refusal reason is the same vocabulary `POST /api/editor/validate-grant`
+ * already returns to the same caller (`origin_mismatch`, `expired`,
+ * `editor_revoked`, …), so this leaks nothing new: the holder already knows
+ * which token, origin and browser they used.
+ */
+async function validateDeviceGrantAccess(
+  siteId: string,
+  grant: string,
+  deviceContext?: DeviceContext,
+): Promise<EditorAccessValidation> {
+  if (!deviceContext) {
+    console.warn(
+      `[editor-access] device grant refused for site ${siteId}: no usable Origin, so nothing to pin it to`,
+    );
+    return { valid: false, error: "origin_mismatch", status: 401 };
+  }
+
+  // Imported lazily, like `@/lib/supabase/server` above and for a sharper
+  // reason: `editor-grants` imports `normalizePermissions` from this module, so
+  // a static edge back the other way closes a require cycle, and whichever of
+  // the two a route or a test happens to load first then decides whether the
+  // other's top-level constants exist yet. That is not hypothetical — it failed
+  // as "Cannot access 'EDITOR_GRANT_HEADER' before initialization" in a suite
+  // that does `jest.requireActual` on this module. A dynamic import inside the
+  // function body has no such ordering.
+  const { validateDeviceGrant } = await import("@/lib/auth/editor-grants");
+
+  const result = await validateDeviceGrant({
+    grant,
+    siteId,
+    device: deviceContext,
+  });
+
+  if (!result.valid) {
+    console.warn(
+      `[editor-access] device grant refused (${result.reason}) for site ${siteId} from ${deviceContext.origin}`,
+    );
+    return { valid: false, error: result.reason, status: 401 };
+  }
+
+  return {
+    valid: true,
+    access: {
+      kind: "device-grant",
+      siteId,
+      token: grant,
+      // Graded from the parent `site_editors` row by `normalizePermissions` —
+      // the single widening rule in this codebase, not a second one. Nothing
+      // inside the token itself decides what its holder may do.
+      permissions: result.grant.permissions,
+      email: result.grant.email,
+      expiresAt: result.grant.expiresAt,
+      verified: true,
+      // Null on purpose: this edit is not attributable to any staging invite,
+      // and pointing it at one would misattribute the edit.
+      stagingAccessId: null,
+    },
+  };
 }
 
 async function validateStagingEditorAccess(
@@ -351,11 +480,20 @@ export async function validateEditorTokenFromRequest({
   // Every route that authenticates by token goes through here, so deriving the
   // fingerprint at this one point is what makes the staging device binding
   // impossible to forget at an individual call site.
+  //
+  // The device grant's origin pin is derived at the same single point, and for
+  // the same reason, only more so: forgetting the staging fingerprint costs an
+  // editor a re-verification, while forgetting the grant's device context would
+  // hand out a credential that works from any website on the internet.
+  // `readDeviceContext` returns null when there is no usable `Origin`, and the
+  // device-grant branch treats null as a refusal — so the fail-closed answer is
+  // the default rather than something each caller has to remember.
   return validateEditorAccess({
     siteId,
     token,
     allowUnverified,
     device: readStagingDeviceFingerprint(request),
+    deviceContext: readDeviceContext(request) ?? undefined,
   });
 }
 
