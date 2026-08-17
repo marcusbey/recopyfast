@@ -38,23 +38,25 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
  * `s06c` will ratchet the constants down. Nothing in this file has to change
  * when it does — these are upper bounds, not equalities.
  */
-// RE-SEEDED 2026-08-17, from 46875 / 34063.
+// RE-SEEDED 2026-08-17, and the net movement was DOWNWARD: 46875 → 46681,
+// 34063 → 33865. The route there is worth recording, because it went up first and
+// this assertion is what forced each step to be justified.
 //
-// This assertion did its job: it caught the raise and refused it, which is exactly
-// what it was written for. The raise is nonetheless correct here, and the distinction
-// is the whole point of this guard, so it is recorded rather than just applied.
+//   46875 / 34063  seeded when the gate was written
+//   +19 / +18      ADR 023 pinned the embed to transports: ['websocket'], dropping
+//                  socket.io's polling fallback — a polling handshake is stateful
+//                  and cannot survive being split across processes
+//   −982 / −977    s04 retired the graveyard surfaces
+//   +56 / +53      s11a's A/B bucketing
+//   +713 / +708    s14a's grant-authorized editing
+//   46681 / 33865  measured after all four merged
 //
-// These seeds track `main`'s artifact. `main` moved: ADR 023 pinned the embed to
-// `transports: ['websocket']`, dropping socket.io's polling fallback because a
-// polling handshake is stateful and cannot survive being split across processes.
-// That one line costs +19 gz on the bundle and +18 on the widget.
-//
-// So this is a re-measurement of a moved baseline, not a widened budget. The test
-// still forbids the thing it was built to forbid: a branch that is over the ceiling
-// raising the number to get itself through. If your change is over, it is over —
-// `s06c-embed-shrink` is the story that creates room.
-const SEEDED_MAX_BUNDLE_GZ = 46894;
-const SEEDED_MAX_WIDGET_GZ = 34081;
+// The ratchet's rule held throughout: it moved up only when `main` itself moved,
+// never to let a branch through, and it is now pinned at what the merged tree
+// actually earned. A branch that is over is still over. `s06c-embed-shrink` is the
+// story that creates real headroom.
+const SEEDED_MAX_BUNDLE_GZ = 46681;
+const SEEDED_MAX_WIDGET_GZ = 33865;
 
 interface CheckRun {
   status: number;

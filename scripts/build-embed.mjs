@@ -107,8 +107,8 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * moved, and only to the newly measured value, with the cause named. If your branch
  * is over, the branch is over. `s06c-embed-shrink` is the story that creates room.
  */
-const MAX_BUNDLE_GZ = 46894;
-const MAX_WIDGET_GZ = 34081;
+const MAX_BUNDLE_GZ = 46681;
+const MAX_WIDGET_GZ = 33865;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
