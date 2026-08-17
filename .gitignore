@@ -78,3 +78,8 @@ supabase/.temp/
 
 # Agent worktrees — transient, each is its own git repo
 .claude/worktrees/
+
+# Agent state, at ANY depth. `/.omc/` anchors to the repo root only, so a
+# nested one (server/.omc/) stayed untracked-but-not-ignored and the next
+# `git add -A` would have swept replay logs into someone's commit.
+.omc/
