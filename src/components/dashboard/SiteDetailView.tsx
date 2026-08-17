@@ -25,6 +25,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
+import { WebhooksPanel } from "./WebhooksPanel";
 import { ShareButton } from "./ShareButton";
 import { SiteEditorsCard } from "./SiteEditorsCard";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
@@ -299,6 +300,12 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           <DomainVerification siteId={site.id} siteDomain={site.domain} />
         </CardContent>
       </Card>
+
+      {/* Outbound webhooks. Sits beside domain ownership because both are
+          "how this site talks to the outside world", and because the config
+          API, the delivery engine and its tables all existed with no surface
+          an owner could reach — the same way DomainVerification did. */}
+      <WebhooksPanel siteId={site.id} />
 
       {/* Version History Panel */}
       <VersionHistoryPanel

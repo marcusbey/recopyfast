@@ -264,6 +264,20 @@ describe("SiteDetailView", () => {
     ).toBeInTheDocument();
   });
 
+  /**
+   * Same class of defect as the domain panel above: the webhook config API,
+   * the delivery engine and its tables all existed while nothing in the
+   * dashboard rendered any of them, so the feature was unreachable by an owner.
+   */
+  it("mounts the webhooks panel for this site", async () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    expect(await screen.findByText("Webhooks")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Call an endpoint on your build system/i),
+    ).toBeInTheDocument();
+  });
+
   it("handles missing stats gracefully", () => {
     const siteWithoutStats = { ...mockSite };
     delete siteWithoutStats.stats;
