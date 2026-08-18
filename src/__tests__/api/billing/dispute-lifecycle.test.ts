@@ -28,6 +28,18 @@ const mockChargeRetrieve = jest.fn();
  */
 const mockDisputeRetrieve = jest.fn();
 
+/**
+ * HARNESS ONLY — the behaviour asserted below is unchanged.
+ *
+ * A dispute closed AGAINST us now also stops the subscription the disputed
+ * invoice was billing, which means asking Stripe which invoice the payment
+ * paid (see dispute-subscription.test.ts, which is what covers that). Every
+ * dispute in this file is against a Lifetime Pro payment intent — a one-off
+ * purchase, which pays no invoice — so Stripe answers with an empty list and
+ * there is no subscription to stop, exactly as these tests already assume.
+ */
+const mockInvoicePaymentsList = jest.fn(async () => ({ data: [] }));
+
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
@@ -35,6 +47,9 @@ jest.mock("stripe", () =>
     charges: { retrieve: (...args: unknown[]) => mockChargeRetrieve(...args) },
     disputes: {
       retrieve: (...args: unknown[]) => mockDisputeRetrieve(...args),
+    },
+    invoicePayments: {
+      list: () => mockInvoicePaymentsList(),
     },
   })),
 );

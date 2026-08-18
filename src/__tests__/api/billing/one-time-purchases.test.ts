@@ -34,7 +34,40 @@ interface QueryBuilder {
   returns: jest.Mock;
   maybeSingle: jest.Mock;
   insert: jest.Mock;
+  update: jest.Mock;
 }
+
+/**
+ * HARNESS ONLY — the behaviour asserted below is unchanged.
+ *
+ * The route now claims the `billing_events` row before the switch and marks it
+ * `processed` after it, so an awaitable `.update().eq().select()` chain has to
+ * exist on the fake client. It answers with one affected row, which is what
+ * `assertRowMatched` expects of a ledger row that was just claimed. Nothing in
+ * this file asserts on it: these tests are about credit top-ups and Lifetime
+ * Pro, and the ledger itself is covered in stripe-webhook-ledger.test.ts.
+ */
+interface UpdateChain {
+  eq: jest.Mock;
+  select: jest.Mock;
+  then: <T>(
+    resolve: (value: { data: Array<{ id: string }>; error: null }) => T,
+    reject?: (reason: unknown) => T,
+  ) => Promise<T>;
+}
+
+const updateChain: UpdateChain = {
+  eq: jest.fn((): UpdateChain => updateChain),
+  select: jest.fn((): UpdateChain => updateChain),
+  then: <T>(
+    resolve: (value: { data: Array<{ id: string }>; error: null }) => T,
+    reject?: (reason: unknown) => T,
+  ) =>
+    Promise.resolve({ data: [{ id: "billing_event_row" }], error: null }).then(
+      resolve,
+      reject,
+    ),
+};
 
 const queryBuilder: QueryBuilder = {
   select: jest.fn((): QueryBuilder => queryBuilder),
@@ -43,6 +76,7 @@ const queryBuilder: QueryBuilder = {
   returns: jest.fn(() => liveSubscriptionsMock()),
   maybeSingle: maybeSingleMock,
   insert: insertMock,
+  update: jest.fn(() => updateChain),
 };
 
 jest.mock("@/lib/supabase/service", () => ({
@@ -248,7 +282,14 @@ describe("payment_intent.succeeded", () => {
   });
 
   it("short-circuits an event it has already processed", async () => {
-    maybeSingleMock.mockResolvedValue({ data: { id: "row-1" }, error: null });
+    // HARNESS ONLY — `processed: true` added to the fixture. The ledger row is
+    // now written BEFORE the handler runs, so its mere existence no longer
+    // means the event was applied; `processed` is what says so. The assertion
+    // (a processed event does not grant twice) is unchanged.
+    maybeSingleMock.mockResolvedValue({
+      data: { id: "row-1", processed: true },
+      error: null,
+    });
 
     const response = await deliver(
       paymentIntentEvent({
