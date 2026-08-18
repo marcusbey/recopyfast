@@ -30,6 +30,7 @@ import {
   getPlanCatalogue,
   getPlanCyclePrice,
   getPlanDisplayPrice,
+  findPaidPlanIdByStripePriceId,
   findPlanById,
   isPaidPlanId,
   PAID_PLAN_IDS,
@@ -376,6 +377,77 @@ describe("plan catalogue loader", () => {
       await expect(resolveStripePriceId("pro", "yearly")).rejects.toThrow(
         /STRIPE_PRO_YEARLY_PRICE_ID/,
       );
+    });
+  });
+
+  /**
+   * The inverse lookup the Stripe webhook resolves a subscription's plan with.
+   *
+   * It exists because `plan: subscription.metadata?.plan_id || "pro"` made the
+   * most expensive plan the fail-open default on exactly the subscriptions that
+   * carry no metadata — dashboard-created ones and Payment Links — and because
+   * `updateSubscription` is the only code path that keeps `metadata.plan_id` in
+   * step with the price, so any change made outside it left the metadata stale.
+   */
+  describe("resolving a Stripe price id back to a plan", () => {
+    it("maps a monthly price id to the plan that bills it", async () => {
+      await expect(
+        findPaidPlanIdByStripePriceId("price_pro_monthly"),
+      ).resolves.toBe("pro");
+      await expect(
+        findPaidPlanIdByStripePriceId("price_starter_monthly"),
+      ).resolves.toBe("starter");
+    });
+
+    it("maps a yearly price id to the same plan as its monthly twin", async () => {
+      await expect(
+        findPaidPlanIdByStripePriceId("price_starter_yearly"),
+      ).resolves.toBe("starter");
+    });
+
+    it("follows a populated column override, exactly as resolveStripePriceId does", async () => {
+      respondWith([
+        FREE_ROW,
+        STARTER_ROW,
+        planRow({ stripe_price_id_test: "price_promo_override" }),
+        CREDITS_ROW,
+        LIFETIME_ROW,
+      ]);
+
+      await expect(
+        findPaidPlanIdByStripePriceId("price_promo_override"),
+      ).resolves.toBe("pro");
+    });
+
+    it("answers null for a price the catalogue does not sell", async () => {
+      // The caller refuses the event on null. Guessing would write a plan the
+      // customer is not paying for, or trip billing_subscriptions_plan_valid.
+      await expect(
+        findPaidPlanIdByStripePriceId("price_deleted_in_2024"),
+      ).resolves.toBeNull();
+    });
+
+    it("answers null when two plans claim the same price id", async () => {
+      // A misconfiguration rather than a real state, but a silent first-match
+      // would hand out whichever plan the iteration order happened to reach.
+      process.env.STRIPE_STARTER_PRICE_ID = "price_pro_monthly";
+
+      await expect(
+        findPaidPlanIdByStripePriceId("price_pro_monthly"),
+      ).resolves.toBeNull();
+    });
+
+    it("still resolves the other plans when one has no price configured", async () => {
+      // An unset STRIPE_STARTER_YEARLY_PRICE_ID must cost only the yearly
+      // Starter subscriptions, not 500 every subscription webhook there is.
+      delete process.env.STRIPE_STARTER_YEARLY_PRICE_ID;
+
+      await expect(
+        findPaidPlanIdByStripePriceId("price_pro_monthly"),
+      ).resolves.toBe("pro");
+      await expect(
+        findPaidPlanIdByStripePriceId("price_starter_yearly"),
+      ).resolves.toBeNull();
     });
   });
 

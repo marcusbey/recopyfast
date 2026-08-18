@@ -17,13 +17,36 @@
 
 const mockConstructEvent = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
+const mockSubscriptionRetrieve = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
-    subscriptions: { update: mockSubscriptionUpdate },
+    subscriptions: {
+      update: mockSubscriptionUpdate,
+      retrieve: mockSubscriptionRetrieve,
+    },
   })),
 );
+
+/**
+ * HARNESS ONLY — the behaviour asserted below is unchanged.
+ *
+ * `handleSubscriptionCreated` / `handleSubscriptionUpdated` now re-read the
+ * subscription from Stripe before writing, so a late delivery cannot resurrect
+ * a cancelled row (see stripe-webhook-stale-writes.test.ts, which is what
+ * covers that). `deliver` therefore answers every retrieve with the delivered
+ * event's own object: "Stripe holds exactly what this event says" is the
+ * assumption every case in this file was written under.
+ *
+ * The plan lookup is stubbed for the same reason. It is real end-to-end in
+ * stripe-webhook-stale-writes.test.ts; here it would only mean maintaining a
+ * `plans` fixture for a file that is about matching zero rows.
+ */
+jest.mock("@/lib/stripe/plans", () => ({
+  ...jest.requireActual("@/lib/stripe/plans"),
+  findPaidPlanIdByStripePriceId: jest.fn(async () => "pro"),
+}));
 
 process.env.STRIPE_SECRET_KEY = "sk_test_fake";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_fake";
@@ -198,6 +221,9 @@ function subscriptionEvent(
 
 async function deliver(event: unknown): Promise<WebhookResponse> {
   mockConstructEvent.mockReturnValue(event);
+  mockSubscriptionRetrieve.mockResolvedValue(
+    (event as { data: { object: unknown } }).data.object,
+  );
   const request = { text: async () => JSON.stringify(event) };
   return POST(request as never) as unknown as WebhookResponse;
 }
