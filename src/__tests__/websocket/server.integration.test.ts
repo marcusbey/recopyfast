@@ -1093,9 +1093,25 @@ describe("revocation reaches a live socket", () => {
 
     db.rows("staging_access")[0].revoked_at = new Date().toISOString();
 
+    // Both conditions are waited on, not one waited on and the other asserted.
+    //
+    // `socket.disconnected` is the CLIENT observing the close; leaving the room
+    // is the SERVER reacting to it. They are separate events, and on a busy
+    // machine the client can flip first — so asserting `roomSize` immediately
+    // after the first `waitFor` went red while the server was behaving
+    // correctly. That is a suite failing under load rather than on a defect,
+    // which is what `waitFor`'s own comment says it exists to avoid.
+    //
+    // Not a weakened assertion: the room still has to reach 0, and `waitFor`
+    // throws naming the condition if it never does. Removing the predicate
+    // makes this test time out, which is how it was checked.
     await waitFor(
       () => editor.socket.disconnected,
       "the sweep to drop the silent socket",
+    );
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
+      "the server to remove the dropped socket from the staging room",
     );
     expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
   });
