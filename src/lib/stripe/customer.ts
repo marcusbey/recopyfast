@@ -49,9 +49,38 @@ export async function createOrGetCustomer(
     return { customer, stripeCustomer: retrieved };
   };
 
+  /**
+   * A stored customer id the current key cannot see.
+   *
+   * Two ways to get here: the customer was deleted in the Stripe dashboard,
+   * or — because live and test mode share this database — the row was
+   * enrolled under the OTHER mode's key (`resource_missing`: "a similar
+   * object exists in test mode, but a live mode key was used"). Every
+   * account that ever checked out against test Stripe hits this the moment
+   * production goes live, and the stale row failed their checkout with a 500
+   * forever. Stale is stale: discard the row and enrol again under the key
+   * actually in use.
+   */
+  const isStaleCustomer = (error: unknown): boolean => {
+    if (
+      error instanceof Error &&
+      error.message === "Stripe customer has been deleted"
+    ) {
+      return true;
+    }
+    return (error as { code?: string } | null)?.code === "resource_missing";
+  };
+
   const existingCustomer = await readCustomer();
   if (existingCustomer) {
-    return resolveStripeCustomer(existingCustomer);
+    try {
+      return await resolveStripeCustomer(existingCustomer);
+    } catch (error) {
+      if (!isStaleCustomer(error)) {
+        throw error;
+      }
+      await supabase.from("billing_customers").delete().eq("user_id", userId);
+    }
   }
 
   const stripeCustomer = await stripe.customers.create({
