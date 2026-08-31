@@ -136,18 +136,28 @@ test.describe("realtime is additive with the service stopped", () => {
     page.on("request", (request: Request) => {
       const url = request.url();
       requests.push(url);
-      // socket.io opens with an HTTP polling handshake at
-      // `<wsUrl>/socket.io/?EIO=4&transport=polling` before it ever upgrades,
-      // so this fires even when the endpoint refuses the connection outright —
-      // which is exactly the AC 5 case. It is the observable difference between
-      // "the widget tried to connect" and "the widget never entered its
-      // realtime bootstrap", and asserting on it is what stops the AC 6 case
-      // passing vacuously: socket.io is compiled INTO the built artifact, so
-      // "no request for socket.io-client.min.js" is true even of a widget that
-      // connects on every page load.
+      // The polling handshake at `<wsUrl>/socket.io/?EIO=4&transport=polling`,
+      // when the widget uses it. The widget currently connects with
+      // `transports: ['websocket']` (recopyfast.src.js establishConnection),
+      // so this path stays for the day polling comes back — the observable
+      // signals for a websocket-only client are the two handlers below.
       if (url.includes("/socket.io/")) socketAttempts.push(url);
     });
+    // A websocket that completes its handshake far enough for CDP to report it.
     page.on("websocket", (ws) => socketAttempts.push(ws.url()));
+    // A websocket REFUSED at the TCP level — the AC 5 case — never reaches
+    // Playwright's "websocket" event and issues no HTTP request, but Chromium
+    // reports it on the console as "WebSocket connection to '<url>' failed".
+    // That console line is the only observable left, and it is exactly the
+    // discriminator AC 5 needs: it proves the widget entered its realtime
+    // bootstrap and tried the configured endpoint.
+    page.on("console", (message) => {
+      const text = message.text();
+      const match = text.match(/WebSocket connection to '([^']+)' failed/);
+      if (match && match[1].includes("/socket.io/")) {
+        socketAttempts.push(match[1]);
+      }
+    });
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     return { requests, pageErrors, socketAttempts };

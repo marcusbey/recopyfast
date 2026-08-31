@@ -4,8 +4,9 @@
  *
  * The landing page is served by the main Next.js app at the root URL.
  * Pricing section is at #pricing with Monthly/Yearly toggle.
- * Plans: Starter ($9), Pro ($19), Enterprise ($39) monthly.
- * Yearly: Starter ($7.47), Pro ($15.77), Enterprise ($32.37).
+ * The catalogue is DB-driven (see /api/pricing): Starter ($9/mo, $7.5/mo
+ * yearly), Pro ($19/mo, $15.75/mo yearly), plus the one-time Lifetime Pro
+ * ($199) card. There is no Enterprise plan.
  */
 
 import { test, expect } from "@playwright/test";
@@ -43,23 +44,30 @@ test.describe("Landing Page", () => {
     // Scroll to pricing section
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
+    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
+    // hold still, and the landing page animates continuously, so it times out
+    // on an element that is right there. A plain scrollIntoView has no
+    // stability wait.
+    await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
-    // Check plan names exist
+    // Plan names, matched exactly: `has-text('Pro')` also matches the
+    // "Lifetime Pro" card and fails strict mode.
     await expect(
-      page.locator("#pricing h3:has-text('Starter')"),
+      pricing.locator("h3").filter({ hasText: /^Starter$/ }),
     ).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("#pricing h3:has-text('Pro')")).toBeVisible();
     await expect(
-      page.locator("#pricing h3:has-text('Enterprise')"),
+      pricing.locator("h3").filter({ hasText: /^Pro$/ }),
+    ).toBeVisible();
+    await expect(
+      pricing.locator("h3").filter({ hasText: /^Lifetime Pro$/ }),
     ).toBeVisible();
 
     // Check prices visible
     const pricingText = await pricing.textContent();
     expect(pricingText).toContain("$9");
     expect(pricingText).toContain("$19");
-    expect(pricingText).toContain("$39");
+    expect(pricingText).toContain("$199");
   });
 
   // E2E-013: Yearly toggle shows discounted prices
@@ -79,12 +87,11 @@ test.describe("Landing Page", () => {
     await yearlyButton.click();
     await page.waitForTimeout(1000);
 
-    // Verify yearly prices appear
-    await expect(page.locator('#pricing :text("$7.47")')).toBeVisible({
+    // Verify yearly prices appear (catalogue: Starter $7.5/mo, Pro $15.75/mo)
+    await expect(page.locator('#pricing :text("$7.5")')).toBeVisible({
       timeout: 5000,
     });
-    await expect(page.locator('#pricing :text("$15.77")')).toBeVisible();
-    await expect(page.locator('#pricing :text("$32.37")')).toBeVisible();
+    await expect(page.locator('#pricing :text("$15.75")')).toBeVisible();
   });
 
   // E2E-014: Monthly toggle restores original prices
@@ -94,7 +101,11 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
+    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
+    // hold still, and the landing page animates continuously, so it times out
+    // on an element that is right there. A plain scrollIntoView has no
+    // stability wait.
+    await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
     // Wait for buttons to render
@@ -114,7 +125,6 @@ test.describe("Landing Page", () => {
     const pricingText = await pricing.textContent();
     expect(pricingText).toContain("$9");
     expect(pricingText).toContain("$19");
-    expect(pricingText).toContain("$39");
   });
 
   // E2E-015: Pro shows "Most popular" badge
@@ -124,13 +134,18 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
+    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
+    // hold still, and the landing page animates continuously, so it times out
+    // on an element that is right there. A plain scrollIntoView has no
+    // stability wait.
+    await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
     const popularBadge = page.locator(
       '#pricing :text("Most popular"), #pricing :text("MOST POPULAR")',
     );
-    await expect(popularBadge.first()).toBeVisible({ timeout: 5000 });
+    // The badge arrives with the client-side /api/pricing fetch.
+    await expect(popularBadge.first()).toBeVisible({ timeout: 15000 });
   });
 
   // E2E-016: Starter CTA links to /signup
@@ -140,12 +155,17 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    await pricing.scrollIntoViewIfNeeded({ timeout: 15000 });
+    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
+    // hold still, and the landing page animates continuously, so it times out
+    // on an element that is right there. A plain scrollIntoView has no
+    // stability wait.
+    await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
-    // Starter card has "Get started" linking to /signup
+    // Starter card has "Get started" linking to /signup — the cards render
+    // after the client-side /api/pricing fetch, so give them time.
     const starterLink = pricing.locator('a[href="/signup"]').first();
-    await expect(starterLink).toBeVisible();
+    await expect(starterLink).toBeVisible({ timeout: 15000 });
     expect(await starterLink.getAttribute("href")).toBe("/signup");
   });
 

@@ -20,7 +20,10 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
-import { readTrialGrant } from "@/lib/billing/effective-plan";
+import {
+  readGrantedPlanIds,
+  readTrialGrant,
+} from "@/lib/billing/effective-plan";
 import { trialDaysRemaining } from "@/lib/billing/trial";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import { isPaidPlanId } from "@/lib/stripe/plan-types";
@@ -60,6 +63,15 @@ async function readTrialCountdown(
 
   const subscription = await getUserSubscription(userId);
   if (subscription) {
+    return null;
+  }
+
+  // A subscription is not the only way to convert: a Lifetime purchase (or a
+  // comp) is a non-trial `plan_entitlements` grant with no subscription row,
+  // and the unexpired trial survives underneath it for up to fourteen days.
+  // Someone who paid $199 outright must not be told their trial is running out.
+  const grantedPlanIds = await readGrantedPlanIds(supabase, userId);
+  if (grantedPlanIds.length > 0) {
     return null;
   }
 

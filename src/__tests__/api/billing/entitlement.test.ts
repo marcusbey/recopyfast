@@ -24,6 +24,7 @@ jest.mock("@/lib/billing/entitlements", () => ({
 
 jest.mock("@/lib/billing/effective-plan", () => ({
   readTrialGrant: jest.fn(),
+  readGrantedPlanIds: jest.fn(),
 }));
 
 jest.mock("@/lib/stripe/subscription", () => ({
@@ -32,7 +33,10 @@ jest.mock("@/lib/stripe/subscription", () => ({
 
 import { GET } from "@/app/api/billing/entitlement/route";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
-import { readTrialGrant } from "@/lib/billing/effective-plan";
+import {
+  readGrantedPlanIds,
+  readTrialGrant,
+} from "@/lib/billing/effective-plan";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import type { Entitlement } from "@/lib/billing/effective-plan";
 import type { Subscription } from "@/types/billing";
@@ -42,6 +46,9 @@ const mockGetEffectivePlan = getEffectivePlan as jest.MockedFunction<
 >;
 const mockReadTrialGrant = readTrialGrant as jest.MockedFunction<
   typeof readTrialGrant
+>;
+const mockReadGrantedPlanIds = readGrantedPlanIds as jest.MockedFunction<
+  typeof readGrantedPlanIds
 >;
 
 const signedIn = () =>
@@ -54,6 +61,8 @@ describe("GET /api/billing/entitlement", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.spyOn(console, "error").mockImplementation(() => {});
+    // No purchase unless a test says otherwise — the common case.
+    mockReadGrantedPlanIds.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -220,6 +229,25 @@ describe("GET /api/billing/entitlement", () => {
       (getUserSubscription as jest.Mock).mockResolvedValue({
         id: "sub_1",
       } as unknown as Subscription);
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toBeUndefined();
+    });
+
+    it("stops counting down once the customer has bought outright", async () => {
+      // A Lifetime purchase (or a comp) is a non-trial grant with no
+      // subscription row at all, and the unexpired trial survives underneath
+      // it. Someone who paid $199 must not be told their trial is running out.
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+        expiresAt: IN_NINE_DAYS,
+        isActive: true,
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue(null);
+      mockReadGrantedPlanIds.mockResolvedValue(["pro"]);
 
       const body = await (await GET()).json();
 

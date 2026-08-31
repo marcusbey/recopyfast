@@ -29,7 +29,11 @@
 import { test, expect, devices } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
-test.use({ ...devices["iPhone 13"] });
+// The device profile carries `defaultBrowserType: "webkit"`, which would
+// launch mobile WebKit — where `mouse.wheel` and the CDP touch dispatch this
+// spec depends on both do not exist. The point of the profile is the
+// viewport/touch emulation, not the engine, so pin the engine back.
+test.use({ ...devices["iPhone 13"], browserName: "chromium" });
 
 /** The demo site's own scrolling viewport — `siteScrollRef` in InteractiveHero. */
 const DEMO_SCROLLER = "[data-demo-scroller]";

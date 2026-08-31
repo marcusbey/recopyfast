@@ -243,40 +243,76 @@ async function main() {
   if (!userId) throw new Fatal("The signed-up user is not in auth.users.");
   record("1.4", "auth.users row exists", "pass", userId);
 
-  // -- 2. an unpaid session is held at the paywall --------------------------
-  console.log("\n2. Paywall");
-  const unpaid = await json(await app("/api/billing/entitlement"));
-  if (unpaid.kind !== "none") {
-    record("2.1", "Fresh account is unentitled", "fail", `expected kind=none, got ${JSON.stringify(unpaid)}`);
+  // -- 2. a fresh account gets its 14-day Pro trial (ADR 014) ---------------
+  //
+  // This used to assert `kind: "none"` and a redirect to billing. Since ADR
+  // 014, first contact with the entitlement surface starts the one-per-user
+  // 14-day Pro trial, so the honest expectations are "trialling on Pro" and
+  // "admitted to the dashboard".
+  console.log("\n2. Trial on first contact");
+  const fresh = await json(await app("/api/billing/entitlement"));
+  if (fresh.kind === "plan" && fresh.planId === "pro" && fresh.trial) {
+    record(
+      "2.1",
+      "Fresh account starts the 14-day Pro trial (ADR 014)",
+      "pass",
+      `trial ends ${fresh.trial.endsAt} (${fresh.trial.daysRemaining} days)`,
+    );
   } else {
-    record("2.1", "Fresh account is unentitled", "pass", 'kind="none"');
+    record(
+      "2.1",
+      "Fresh account starts the 14-day Pro trial (ADR 014)",
+      "fail",
+      `expected a Pro plan with a trial countdown, got ${JSON.stringify(fresh).slice(0, 200)}`,
+    );
   }
 
-  const gated = await app("/dashboard");
-  const gatedTo = gated.headers.get("location") ?? "";
-  if (gated.status >= 300 && gated.status < 400 && gatedTo.includes("billing")) {
-    record("2.2", "Unpaid session is redirected to billing", "pass", `→ ${gatedTo}`);
+  const admitted = await app("/dashboard");
+  if (admitted.status === 200) {
+    record("2.2", "Trialling session reaches the dashboard", "pass");
   } else {
-    record("2.2", "Unpaid session is redirected to billing", "warn", `status ${gated.status} → ${gatedTo || "no redirect"}`);
+    record(
+      "2.2",
+      "Trialling session reaches the dashboard",
+      "fail",
+      `status ${admitted.status} → ${admitted.headers.get("location") ?? "no redirect"}`,
+    );
   }
 
   // -- 3. checkout reaches Stripe (register F-1 died HERE) ------------------
+  //
+  // Only ONE subscription checkout is expected to open: the checkout route
+  // holds a per-user lock while a subscription session is in progress, so the
+  // second and third subscription intents must be refused with a 409 rather
+  // than minting parallel sessions. Credits and Lifetime are different intents
+  // and go through regardless.
   console.log("\n3. Checkout reaches Stripe");
   const intents = [
-    { id: "3.1", label: "Pro monthly subscription", body: { intent: "subscription", planId: "pro", billingPeriod: "monthly" } },
-    { id: "3.2", label: "Pro yearly subscription", body: { intent: "subscription", planId: "pro", billingPeriod: "yearly" } },
-    { id: "3.3", label: "Starter monthly subscription", body: { intent: "subscription", planId: "starter", billingPeriod: "monthly" } },
-    { id: "3.4", label: "Credit pack", body: { intent: "credits", quantity: 1 } },
-    { id: "3.5", label: "Lifetime Pro (register F-9)", body: { intent: "lifetime" } },
+    { id: "3.1", label: "Pro monthly subscription", locked: false, body: { intent: "subscription", planId: "pro", billingPeriod: "monthly" } },
+    { id: "3.2", label: "Pro yearly while one is open", locked: true, body: { intent: "subscription", planId: "pro", billingPeriod: "yearly" } },
+    { id: "3.3", label: "Starter monthly while one is open", locked: true, body: { intent: "subscription", planId: "starter", billingPeriod: "monthly" } },
+    { id: "3.4", label: "Credit pack", locked: false, body: { intent: "credits", quantity: 1 } },
+    { id: "3.5", label: "Lifetime Pro (register F-9)", locked: false, body: { intent: "lifetime" } },
   ];
 
-  for (const { id, label, body } of intents) {
+  for (const { id, label, locked, body } of intents) {
     const response = await app("/api/billing/checkout", {
       method: "POST",
       body: JSON.stringify(body),
     });
     const payload = await json(response);
-    if (response.ok && typeof payload.url === "string" && payload.url.includes("stripe.com")) {
+    if (locked) {
+      if (response.status === 409) {
+        record(id, `${label} → refused by the checkout lock`, "pass", "409");
+      } else {
+        record(
+          id,
+          `${label} → refused by the checkout lock`,
+          "fail",
+          `expected 409, got ${response.status} ${JSON.stringify(payload).slice(0, 180)} — parallel subscription checkouts are possible`,
+        );
+      }
+    } else if (response.ok && typeof payload.url === "string" && payload.url.includes("stripe.com")) {
       record(id, `${label} → Stripe`, "pass", payload.url.slice(0, 72) + "…");
     } else {
       record(id, `${label} → Stripe`, "fail", `${response.status} ${JSON.stringify(payload).slice(0, 220)}`);
@@ -466,7 +502,7 @@ async function main() {
     const listed2 = await json(await app("/api/sites"));
     const sites2 = Array.isArray(listed2) ? listed2 : (listed2.sites ?? []);
     const thisSite = sites2.find((s) => (s.id ?? s.site_id) === siteId);
-    if (thisSite?.status === "active") {
+    if (thisSite?.status === "active" || thisSite?.status === "live") {
       record("5b.1b", "Site leaves \"Verifying\" once content is reported (F-10)", "pass", `status=${thisSite.status}`);
     } else {
       record(
