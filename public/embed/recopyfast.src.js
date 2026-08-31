@@ -84,7 +84,13 @@
   const STAGING_MODE = urlParams.get('rcf_staging') === '1';
   const STAGING_TOKEN = urlParams.get('rcf_token');
   const EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
-  const EDITOR_MODE = (STAGING_MODE && STAGING_TOKEN) || !!EDIT_SESSION_TOKEN;
+  // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
+  // evaluates to the TOKEN STRING when a staging link is opened, and the value
+  // travels into the socket handshake as `stagingMode=<token>`, which the
+  // realtime service compares against the literal 'true' — so every
+  // invite-link editor connected as a NON-staging socket and had their
+  // realtime saves refused with "Live updates must be saved through staging".
+  const EDITOR_MODE = !!((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN);
 
   // Immediately strip staging params from the visible URL so they don't persist
   // in browser history, bookmarks, or copy-pasted links.
@@ -2906,8 +2912,8 @@
             editToken: this.editSessionToken || ''
           },
           transports: ['websocket'],
-          reconnection: true,
-          reconnectionDelay: 1000,
+          // reconnection:true and reconnectionDelay:1000 are socket.io's own
+          // defaults — only the attempt cap is non-default.
           reconnectionAttempts: 5
         });
 
