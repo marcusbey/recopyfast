@@ -34,7 +34,7 @@ test.describe("Landing Page", () => {
     await expect(ctaButton.first()).toBeVisible({ timeout: 15000 });
   });
 
-  // E2E-012: Pricing shows 3 plans: $9, $19, $39
+  // E2E-012: Pricing shows the catalogue: Starter $9, Pro $19, Lifetime Pro $199
   test("E2E-012: Pricing shows 3 plans with correct prices", async ({
     page,
   }) => {
@@ -101,10 +101,7 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
-    // hold still, and the landing page animates continuously, so it times out
-    // on an element that is right there. A plain scrollIntoView has no
-    // stability wait.
+    // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
@@ -134,10 +131,7 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
-    // hold still, and the landing page animates continuously, so it times out
-    // on an element that is right there. A plain scrollIntoView has no
-    // stability wait.
+    // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
@@ -155,10 +149,7 @@ test.describe("Landing Page", () => {
 
     const pricing = page.locator("#pricing");
     await expect(pricing).toBeAttached({ timeout: 15000 });
-    // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
-    // hold still, and the landing page animates continuously, so it times out
-    // on an element that is right there. A plain scrollIntoView has no
-    // stability wait.
+    // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
@@ -179,6 +170,13 @@ test.describe("Landing Page", () => {
     // Scoped to #pricing, not the whole body: asserting on body would pass even
     // if these terms moved out of the pricing section entirely, which is the
     // only place they mean anything.
+    //
+    // Wait for one indicator with a retrying assertion before reading the
+    // whole section's text: under a fully parallel run the single immediate
+    // textContent read raced hydration and flaked.
+    await expect(pricing.getByText("14-day free trial")).toBeAttached({
+      timeout: 15000,
+    });
     const pricingText = await pricing.textContent();
     expect(pricingText).toContain("14-day free trial");
     expect(pricingText).toContain("No credit card required");
