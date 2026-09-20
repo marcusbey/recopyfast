@@ -902,6 +902,42 @@ surface in the backlog and the one the product's main angle depends on.
 
 ---
 
+## Story s14d-invited-editor-publish — let a scoped editor finish the job
+
+**As an** invited site editor **I want** a Publish action when the owner granted publish
+permission **so that** the copy I saved can actually reach visitors without asking the owner to
+finish it for me.
+
+### Complexity
+2 — one existing widget surface and one already-authorized publish path, plus terminal-session
+recovery on the same edit lifecycle.
+
+**Risk:** exposing Publish to an edit-only grant bypasses the owner's permission boundary;
+leaving stale credentials editable loses work and invites repeated requests that can never
+succeed.
+
+### Acceptance criteria
+- [ ] A device grant containing `publish` or `admin` renders one accessible Publish control in the invited-editor banner; `view`-only and `edit`-only grants render none.
+- [ ] Save remains a draft write: a fresh visitor keeps the prior published copy until Publish is explicitly confirmed.
+- [ ] Publish uses the existing header-only device grant, sends no credential in the URL or body, and makes the saved draft visible to a fresh visitor.
+- [ ] A grant is still pinned to its site: the same browser cannot open or publish to a second site that did not invite the address.
+- [ ] A terminal 401/403 during Save preserves the typed draft in session storage and in the current DOM, disables further mutation controls, emits one non-blocking recovery state, and offers the correct owner-dashboard or editor-hub re-authentication path.
+- [ ] A non-auth write failure stays retryable and does not get misclassified as an expired session.
+- [ ] The generated embed artifact is rebuilt, remains within both gzip ceilings, and owner edit-session Publish behaviour is unchanged.
+- [ ] A real cross-origin site proves invited-editor email code → handoff → save → Publish → fresh-visitor visibility, followed by restoration and revocation cleanup.
+
+### Dependencies
+`s14a-grant-authorized-editing`; uses the existing `X-RCF-Editor-Grant` principal and
+`/api/staging/publish` authorization without adding a fourth auth path.
+
+### Agentic notes
+- Live production proof on 2026-09-19 found the exact gap: a View/Edit/Publish allowlist row and device grant enabled inline Save, but `showEditorBanner()` intentionally rendered no Publish control while `persistContentUpdate()` wrote `staging_content`; a fresh visitor stayed on the old copy.
+- `showPublishConfirmation()` already sends `X-RCF-Editor-Grant` and the route already grades `publish`, so this is UI parity, not a new authorization model.
+- Preserve the public widget contract: edit `public/embed/recopyfast.src.js`, rebuild `recopyfast.js`, never raise the byte ceiling, and never expose the grant in a URL, body, report, screenshot, or log.
+- The earlier B-19 failure is still present in the same Save catch: native alerts repeat and edit controls remain live after terminal auth failure. Repair it in the shared edit lifecycle rather than adding a second invited-editor-only error path.
+
+---
+
 ## Story s15-agency-digest — show the agency what it saved
 
 **As a** web agency **I want** a monthly summary of what my clients changed themselves **so

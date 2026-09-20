@@ -196,6 +196,7 @@ describe("the widget presents a device grant in a header, never a URL", () => {
       content: "New copy",
     });
     expect(JSON.stringify(save!.body)).not.toContain(GRANT);
+    expect(callsTo(recorded, "/staging/publish")).toHaveLength(0);
   });
 
   it("polls with the grant header and a clean URL", async () => {
@@ -222,6 +223,13 @@ describe("the widget presents a device grant in a header, never a URL", () => {
 
     await widget().showPublishConfirmation();
     await settle();
+
+    const preview = callsTo(recorded, "/staging/publish").find(
+      (call) => call.method === "GET",
+    );
+    expect(preview?.headers[GRANT_HEADER]).toBe(GRANT);
+    expect(preview?.url).toBe(`${API}/staging/publish?siteId=${SITE_ID}`);
+    expect(preview?.body).toBeNull();
 
     const confirm = document.querySelector(
       ".rcf-modal-btn-success",
