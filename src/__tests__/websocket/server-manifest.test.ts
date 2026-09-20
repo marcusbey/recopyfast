@@ -26,6 +26,10 @@ import fs from "fs";
 import path from "path";
 
 const SERVER_DIR = path.resolve(__dirname, "../../../server");
+const SERVER_SECURITY_WORKFLOW = path.resolve(
+  SERVER_DIR,
+  "../.github/workflows/server-security.yml",
+);
 
 const BUILTINS = new Set([
   ...builtinModules,
@@ -64,6 +68,18 @@ describe("server manifest", () => {
     devDependencies?: Record<string, string>;
   };
 
+  const lock = JSON.parse(
+    fs.readFileSync(path.join(SERVER_DIR, "package-lock.json"), "utf8"),
+  ) as {
+    packages?: Record<
+      string,
+      {
+        dependencies?: Record<string, string>;
+        version?: string;
+      }
+    >;
+  };
+
   it("declares every package its source requires", () => {
     const declared = new Set(Object.keys(manifest.dependencies ?? {}));
 
@@ -76,18 +92,35 @@ describe("server manifest", () => {
     expect(undeclared).toEqual([]);
   });
 
-  it("has a lockfile that agrees with the manifest", () => {
+  it("has a patched lockfile that agrees with the manifest and is CI-gated", () => {
     // `npm ci` (Dockerfile:16) refuses to run against a lockfile that does not
     // match package.json — it does not silently resolve, it exits non-zero. A
     // hand-edited manifest therefore breaks the build rather than the runtime.
-    const lock = JSON.parse(
-      fs.readFileSync(path.join(SERVER_DIR, "package-lock.json"), "utf8"),
-    ) as {
-      packages?: Record<string, { dependencies?: Record<string, string> }>;
-    };
-
     const rootEntry = lock.packages?.[""];
     expect(rootEntry?.dependencies).toEqual(manifest.dependencies);
+
+    // In September 2026 the root audit stayed green while this separately
+    // deployed lock still resolved Express 4.22.2 -> body-parser 1.20.6 ->
+    // qs 6.15.3. Both active qs advisories were only moderate, so a high-only
+    // gate missed them. Pin the compatible Express 4 floor and its reviewed
+    // transitive resolution here so regenerating this independent lock cannot
+    // silently restore the vulnerable tree.
+    expect(manifest.dependencies?.express).toBe("^4.22.3");
+    expect(lock.packages?.["node_modules/express"]?.version).toBe("4.22.3");
+    expect(lock.packages?.["node_modules/body-parser"]?.version).toBe("1.20.8");
+    expect(lock.packages?.["node_modules/qs"]?.version).toBe("6.16.0");
+
+    expect(fs.existsSync(SERVER_SECURITY_WORKFLOW)).toBe(true);
+    const workflow = fs.readFileSync(SERVER_SECURITY_WORKFLOW, "utf8");
+    expect(workflow).toMatch(/\bpush:/);
+    expect(workflow).toMatch(/\bpull_request:/);
+    expect(workflow).toContain('node-version: "24.14.0"');
+    expect(workflow).toContain("run: npm ci --omit=dev");
+    expect(workflow).toContain(
+      "run: npm audit --omit=dev --audit-level=moderate",
+    );
+    expect(workflow.match(/working-directory: server/g)).toHaveLength(2);
+    expect(workflow).not.toContain("continue-on-error:");
   });
 
   it("carries no nested package inside the Docker build context", () => {
