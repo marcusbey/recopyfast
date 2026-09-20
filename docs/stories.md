@@ -1061,15 +1061,62 @@ I recognise the product as being for me.
 - [ ] No page duplicates another page's body content.
 
 ### Dependencies
+
 `s17-cluster-engine`.
 
 ### Agentic notes
+
 - Runs on `s17`'s engine. If this needs new route code, `s17` was built wrong — fix `s17`
   rather than special-casing here.
-- The agency pages carry the PRD's wedge — *"stop doing free copy changes for your clients"*
+- The agency pages carry the PRD's wedge — _"stop doing free copy changes for your clients"_
   — and should use the real arithmetic from `s13`'s comparison against per-site pricing.
 - Lowest complexity here and closest to the money. Last only because it depends on the
   engine.
+
+---
+
+## Story s21-stripe-webhook-signing-secret — make live billing events verifiable again
+
+**As the** ReCopyFast operator **I want** the deployed webhook secret to match the exact live
+Stripe endpoint **so that** a paid Checkout event can provision access instead of retrying for
+three days and expiring.
+
+### Complexity
+
+2 — redundant endpoint rotation, one production environment update, one redeploy and one
+disposable live proof.
+
+**Risk:** rotating the wrong endpoint or deleting the old endpoint before the new deployment is
+ready creates a billing-event outage; exposing either signing secret turns a trusted boundary into
+public data.
+
+### Acceptance criteria
+
+- [x] Live Stripe has exactly one enabled endpoint at `https://www.recopyfa.st/api/webhooks/stripe`, subscribed to the route's exact 13 handled event types.
+- [x] The Vercel production value `STRIPE_WEBHOOK_SECRET_LIVE` is the write-only secret returned for that exact endpoint; no secret appears in source, shell output, logs, screenshots, review or PR text.
+- [x] Recovery retains the old endpoint until the replacement processes a signed event; it does not claim uninterrupted delivery from the already-failing baseline.
+- [x] A controlled live `customer.created` event reaches the deployed handler with valid signature, returns 2xx, records a processed billing-event row, and reaches `pending_webhooks = 0`.
+- [x] A live $19 Pro Checkout Session reaches hosted Checkout but remains open/unpaid until payment; no subscription or entitlement is created before payment.
+- [x] The disposable Checkout Session was expired and retained by Stripe; the test customer, billing rows and Auth user were deleted. Immutable session/event history is documented.
+- [x] The operator guide names the canonical host, all 13 events, per-endpoint secret rule, rotation sequence, rollback point, and a real-delivery verification that cannot be replaced by an unsigned curl probe.
+
+### Dependencies
+
+None. This is inbound Stripe billing configuration, not the customer-configurable outbound webhook
+feature in `s16-webhook-config`.
+
+### Agentic notes
+
+- On 2026-09-19 the endpoint URL and event list were correct, but a real live Checkout-created
+  customer remained `pending_webhooks=1`; Vercel logged repeated signature verification failures.
+  An unsigned canonical POST returned the expected 400 and therefore did not prove secret parity.
+- The safe sequence keeps the old endpoint while the replacement is created and the new secret is
+  deployed. After the new deployment is `READY`, prove the replacement with a signed overlap
+  event, then delete only the resolved old endpoint id and run a new tagged customer event. If
+  redeploy fails, retain the endpoints and repair forward unless a secret verified to belong to the
+  old endpoint is securely available. Never restore the known-mismatched value or invent a backup.
+- Stripe Tax registration/collection is outside this repair and remains a separate commercial
+  launch check.
 
 ---
 
