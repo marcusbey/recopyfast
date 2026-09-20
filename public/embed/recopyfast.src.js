@@ -1261,6 +1261,7 @@
       if (!this.editorAuth) return;
       if (document.querySelector('#rcf-editor-banner')) return;
       const previousBodyPaddingTop = document.body.style.paddingTop;
+      const previousBodyPaddingPriority = document.body.style.getPropertyPriority('padding-top');
       const bodyPaddingTop = parseFloat(window.getComputedStyle(document.body).paddingTop) || 0;
 
       if (!document.querySelector('#rcf-editor-banner-styles')) {
@@ -1407,7 +1408,11 @@
       dismiss.setAttribute('aria-label', 'Dismiss the ReCopyFast editor bar');
       dismiss.onclick = function() {
         if (banner.parentNode) banner.parentNode.removeChild(banner);
-        document.body.style.paddingTop = previousBodyPaddingTop;
+        if (previousBodyPaddingTop) {
+          document.body.style.setProperty('padding-top', previousBodyPaddingTop, previousBodyPaddingPriority);
+        } else {
+          document.body.style.removeProperty('padding-top');
+        }
       };
       banner.appendChild(dismiss);
 
@@ -1418,7 +1423,9 @@
       // element starts at the top, the editor bar intercepted the click and
       // made that content impossible to edit. Preserve existing host padding
       // and restore its original inline declaration when Done removes the bar.
-      document.body.style.paddingTop = (banner.offsetHeight + bodyPaddingTop) + 'px';
+      // Important is intentional: host styles frequently mark layout rules
+      // important, and a normal inline value loses to an author-important rule.
+      document.body.style.setProperty('padding-top', (banner.offsetHeight + bodyPaddingTop) + 'px', 'important');
     }
 
     /**
