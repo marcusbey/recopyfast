@@ -1,19 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
+import {
+  createLocalServiceRoleClient,
+  deleteCapturedSiteFixture,
+} from "./support/local-supabase";
 
-const RUN_CORE_E2E = process.env.RUN_RECOPYFAST_CORE_E2E === "1";
-const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:4001";
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://127.0.0.1:4001";
 const TARGET_PORT = Number(process.env.RECOPYFAST_TARGET_PORT || "4173");
 const TARGET_URL = `http://localhost:${TARGET_PORT}`;
 
 test.describe("share edit publish flow", () => {
-  test.skip(
-    !RUN_CORE_E2E,
-    "Set RUN_RECOPYFAST_CORE_E2E=1 with a disposable Supabase project to run the mutating core E2E flow.",
-  );
   test.describe.configure({ mode: "serial" });
 
   // The default 30s is not enough now that each run clears a real device
@@ -22,8 +21,8 @@ test.describe("share edit publish flow", () => {
   // which each poll the database.
   test.setTimeout(180_000);
 
-  let supabase: SupabaseClient;
-  let targetServer: Server;
+  let supabase: SupabaseClient | null = null;
+  let targetServer: Server | null = null;
 
   /** Stands in for the emailed code. Stored plaintext, compared timing-safely. */
   const STAGING_VERIFICATION_CODE = "424242";
@@ -62,39 +61,31 @@ test.describe("share edit publish flow", () => {
   let elementId: string | null = null;
 
   test.beforeAll(async () => {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      throw new Error(
-        "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for core E2E.",
-      );
-    }
-
-    supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
-
+    supabase = createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E");
+    await deleteCapturedSiteFixture(supabase, siteId);
     await seedCoreFlowData();
     targetServer = await startTargetServer();
   });
 
   test.afterAll(async () => {
-    if (supabase) {
-      await supabase.from("staging_access").delete().eq("site_id", siteId);
-      await supabase.from("edit_sessions").delete().eq("site_id", siteId);
-      await supabase.from("content_elements").delete().eq("site_id", siteId);
-      await supabase.from("sites").delete().eq("id", siteId);
-    }
-
-    await new Promise<void>((resolve) => {
-      if (!targetServer) {
-        resolve();
-        return;
+    try {
+      if (supabase) {
+        try {
+          await restoreCapturedContent();
+        } finally {
+          await deleteCapturedSiteFixture(supabase, siteId);
+        }
       }
+    } finally {
+      await new Promise<void>((resolve) => {
+        if (!targetServer) {
+          resolve();
+          return;
+        }
 
-      targetServer.close(() => resolve());
-    });
+        targetServer.close(() => resolve());
+      });
+    }
   });
 
   test("staging token edits staging content and publishes live", async ({
@@ -171,12 +162,10 @@ test.describe("share edit publish flow", () => {
     await page.waitForLoadState("networkidle");
   }
 
-  async function exerciseShareFlow(
-    page: Page,
-    query: string,
-    newText: string,
-  ) {
-    await page.goto(`${TARGET_URL}/?${query}`, { waitUntil: "domcontentloaded" });
+  async function exerciseShareFlow(page: Page, query: string, newText: string) {
+    await page.goto(`${TARGET_URL}/?${query}`, {
+      waitUntil: "domcontentloaded",
+    });
 
     await completeDeviceVerificationIfPrompted(page);
 
@@ -191,7 +180,9 @@ test.describe("share edit publish flow", () => {
 
     const discoveredId = await heading.getAttribute("data-rcf-id");
     if (!discoveredId) {
-      throw new Error("The widget did not assign an element id to the heading.");
+      throw new Error(
+        "The widget did not assign an element id to the heading.",
+      );
     }
 
     if (elementId === null) {
@@ -228,7 +219,9 @@ test.describe("share edit publish flow", () => {
     await expect
       .poll(() => getContentColumn("staging_content"), { timeout: 20_000 })
       .toBe(newText);
-    await expect.poll(() => getContentColumn("published_content")).not.toBe(newText);
+    await expect
+      .poll(() => getContentColumn("published_content"))
+      .not.toBe(newText);
 
     await page.locator("#rcf-publish-btn").click();
     await page.getByRole("button", { name: /publish now/i }).click();
@@ -256,6 +249,8 @@ test.describe("share edit publish flow", () => {
       throw new Error("No element id has been discovered from the page yet.");
     }
 
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
     const { data, error } = await supabase
       .from("content_elements")
       .select(column)
@@ -272,7 +267,7 @@ test.describe("share edit publish flow", () => {
   }
 
   async function seedCoreFlowData() {
-    await supabase.from("sites").delete().eq("id", siteId);
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
     const { error: siteError } = await supabase.from("sites").insert({
       id: siteId,
@@ -286,24 +281,28 @@ test.describe("share edit publish flow", () => {
     }
 
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    const { error: stagingError } = await supabase.from("staging_access").insert({
-      site_id: siteId,
-      access_type: "link",
-      email: "e2e@recopyfast.local",
-      // Unverified on purpose. Seeding `true` without the binding columns
-      // produces a row the widget refuses, which is the correct behaviour and
-      // is what this test used to mistake for a broken banner. The code is
-      // stored in plaintext and compared with `timingSafeEqualString`, so a
-      // known value here is exactly what a real emailed code would be.
-      email_verified: false,
-      verification_code: STAGING_VERIFICATION_CODE,
-      verification_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      token: stagingToken,
-      permissions: ["view", "edit", "publish"],
-      label: "Core E2E",
-      expires_at: expiresAt,
-      is_active: true,
-    });
+    const { error: stagingError } = await supabase
+      .from("staging_access")
+      .insert({
+        site_id: siteId,
+        access_type: "link",
+        email: "e2e@recopyfast.local",
+        // Unverified on purpose. Seeding `true` without the binding columns
+        // produces a row the widget refuses, which is the correct behaviour and
+        // is what this test used to mistake for a broken banner. The code is
+        // stored in plaintext and compared with `timingSafeEqualString`, so a
+        // known value here is exactly what a real emailed code would be.
+        email_verified: false,
+        verification_code: STAGING_VERIFICATION_CODE,
+        verification_expires_at: new Date(
+          Date.now() + 60 * 60 * 1000,
+        ).toISOString(),
+        token: stagingToken,
+        permissions: ["view", "edit", "publish"],
+        label: "Core E2E",
+        expires_at: expiresAt,
+        is_active: true,
+      });
 
     if (stagingError) {
       throw stagingError;
@@ -331,6 +330,8 @@ test.describe("share edit publish flow", () => {
    * keeps ordinary page views from inserting duplicate rows.
    */
   async function seedContentElement(liveText: string) {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
     const { error } = await supabase.from("content_elements").upsert(
       {
         site_id: siteId,
@@ -350,6 +351,21 @@ test.describe("share edit publish flow", () => {
     if (error) {
       throw error;
     }
+  }
+
+  async function restoreCapturedContent() {
+    if (!supabase || !elementId) return;
+
+    const { error } = await supabase
+      .from("content_elements")
+      .update({
+        current_content: "Original live copy",
+        published_content: "Original live copy",
+        staging_content: null,
+      })
+      .eq("site_id", siteId)
+      .eq("element_id", elementId);
+    if (error) throw error;
   }
 
   async function startTargetServer() {

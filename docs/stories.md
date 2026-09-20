@@ -1178,6 +1178,27 @@ User approved the concrete remediation plan on 20 September 2026 UTC ("looking g
 Canonical plan: `docs/plans/s22-production-dependency-security.md`.
 Research: `docs/research/s22-production-dependency-security.md`.
 
+## Story s24-executed-playwright-ci — run browser gates instead of skipping them
+
+As the operator, I need GitHub to execute the owner/editor/realtime browser suite against an
+ephemeral stack so a green E2E badge means browser behavior actually ran.
+
+Complexity: **4**. CI orchestration across Next, Supabase, Redis and the one-process Socket.IO
+service, plus safety/cleanup and four currently skipped tests.
+
+- [ ] GitHub Actions starts a throwaway local Supabase stack, Redis, Socket.IO and production Next
+  server; no production Supabase, Redis, Fly or Stripe credential is present.
+- [ ] A fail-closed safety assertion refuses any mutating E2E target that is not loopback/local.
+- [ ] The core owner/share/edit/publish and realtime parity specs execute; the four current suite
+  skips are removed only when their real fixtures and assertions are available.
+- [ ] Migrations, plan seed, disposable rows, ports, processes and artifacts are deterministic and
+  cleaned on success/failure; one CI run cannot contaminate another.
+- [ ] The job fails on test failure and publishes a report; it cannot pass through a missing-secret
+  guard. Unit/type/build/audit gates remain unchanged.
+
+Research: `docs/research/s24-executed-playwright-ci.md`.
+Plan: `docs/plans/s24-executed-playwright-ci.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim

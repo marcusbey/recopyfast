@@ -364,51 +364,31 @@ curl -sI https://www.recopyfa.st/login \
 
 ## Verifying realtime end to end
 
-Two checks live in `e2e/realtime-parity.spec.ts`, both driven against a fixture page served on
-`localhost:4176` — a **non-RecopyFast domain**, which is the only place either claim means
-anything.
+`e2e/realtime-parity.spec.ts` still drives the fixture through the reserved
+`e2e-parity-<run-uuid>.invalid` hostname, but s24 changed where the backing services live: **never
+run the automated parity spec against Fly, production Next or hosted Supabase.** It now executes
+against the disposable local stack in `.github/workflows/ci.yml`:
 
-**Both invocations below run the same spec file** (`npm run test:e2e:parity` is
-`playwright test realtime-parity`). The difference is `RUN_RECOPYFAST_PARITY=1` and the
-credentials, and the difference is easy to miss in the output: without them the two gated cases
-call `test.skip()` from inside the test body (`e2e/realtime-parity.spec.ts:241` and `:313`), so
-Playwright reports them as **skipped** and the run is still green. **Read the counts, not the
-colour** — the first command is a pass at `1 passed, 2 skipped`, and a green run showing that
-line has proven nothing about AC 4.
+- Supabase on `127.0.0.1:54321`
+- Redis on `127.0.0.1:6379`
+- this service on `127.0.0.1:4001`
+- a production Next build on `127.0.0.1:3000`
 
-```sh
-# Legacy snippets: no database, no editing session, runs against any origin.
-# Expect: 1 passed, 2 skipped.
-CI=1 PLAYWRIGHT_BASE_URL=https://www.recopyfa.st npm run test:e2e:parity
-```
+`RUN_RECOPYFAST_PARITY=1` remains an explicit opt-in, but omitting it is a hard failure rather
+than a skip. Before a service-role client is created, the shared guard also verifies all three
+HTTP origins and ports and rejects the known production project reference. The core flow applies
+the same rule under `RUN_RECOPYFAST_CORE_E2E=1`.
 
-```sh
-# Parity (AC 4): two browser contexts in an editing session, measured.
-# Expect: 3 passed, 0 skipped. Any skip here means a variable below is missing.
-CI=1 \
-RUN_RECOPYFAST_PARITY=1 \
-PLAYWRIGHT_BASE_URL=https://www.recopyfa.st \
-NEXT_PUBLIC_WS_URL=wss://recopyfast-ws.fly.dev \
-NEXT_PUBLIC_SUPABASE_URL=... \
-SUPABASE_SERVICE_ROLE_KEY=... \
-npm run test:e2e:parity
-```
+CI executes the complete inventory: **39 passed, 0 failed, 0 skipped, 0 flaky**. A custom reporter
+turns any missing, skipped or flaky case into a non-zero job and uploads only a credential-free
+summary. Traces, screenshots and videos are disabled in CI because the fixture URLs contain
+short-lived editor credentials.
 
-The parity case is gated because it needs credentials rather than code: the two editors have to
-authenticate against **the same Supabase project the deployed service reads**, since the service
-holds its own service-role key. Given a different project, both browsers fail the handshake and
-the run reports "realtime never connected" — which looks like a service fault and is not one.
-
-It seeds one `sites` row, one `edit_sessions` row and one `content_elements` row, and deletes them
-afterwards. It prints the seeded site id, the measured interval, the fixture hostname and both
-socket ids on `[s07b AC 4]` lines; those lines are the evidence.
-
-The seeded site's domain is `e2e-parity-<unix-ts>.invalid`. `.invalid` is reserved by RFC 2606 and
-can never resolve, so a row that survives a crash is recognisable as test debris at a glance and
-routable by nothing. The fixture is reachable under that hostname only inside the test's own
-Chromium, via `--host-resolver-rules`, which dies with the browser. Cleanup runs **before** seeding
-as well as after and matches on the domain pattern rather than an in-memory id — `afterAll` does
-not run when the process is killed, and a hanging parity test is exactly the one someone kills.
+The parity case seeds one fresh `sites` row, one `edit_sessions` row and one
+`content_elements` row. Cleanup is by the exact site UUID captured by that run; it no longer
+deletes every row matching a shared domain pattern, so parallel runs cannot clean each other up.
+The `.invalid` hostname is resolved to loopback only inside the test's own Chromium process via
+`--host-resolver-rules`.
 
 ---
 

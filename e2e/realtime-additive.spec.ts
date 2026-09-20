@@ -26,10 +26,10 @@ import { randomUUID } from "node:crypto";
  *     on screen, and the HTTP content path still exercised.
  *
  * The mutating half of AC 5 — that a save, a stage and a publish all land — is
- * `share-edit-publish.spec.ts`, which needs a disposable Supabase project and is
- * gated behind RUN_RECOPYFAST_CORE_E2E for that reason. Everything in this file
- * is assertable without a database, so it is not gated: the point of a drill you
- * only run when someone remembers to set an env var is largely lost.
+ * `share-edit-publish.spec.ts`, which runs against CI's disposable local
+ * Supabase stack. Everything in this file is assertable without a database;
+ * the full CI job nevertheless executes all 39 cases and fails if any case is
+ * skipped, so the two halves cannot drift into differently-green runs.
  */
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
