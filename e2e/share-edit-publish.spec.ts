@@ -6,6 +6,7 @@ import {
   createLocalServiceRoleClient,
   deleteCapturedSiteFixture,
 } from "./support/local-supabase";
+import { withCoreSetupDiagnostic } from "./support/core-setup-diagnostics";
 
 const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://127.0.0.1:4001";
@@ -61,10 +62,24 @@ test.describe("share edit publish flow", () => {
   let elementId: string | null = null;
 
   test.beforeAll(async () => {
-    supabase = createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E");
-    await deleteCapturedSiteFixture(supabase, siteId);
-    await seedCoreFlowData();
-    targetServer = await startTargetServer();
+    supabase = await withCoreSetupDiagnostic("create local client", () =>
+      createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E"),
+    );
+    await withCoreSetupDiagnostic("delete captured fixture", () =>
+      deleteCapturedSiteFixture(supabase!, siteId),
+    );
+
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    await withCoreSetupDiagnostic("seed site", () => seedSite());
+    await withCoreSetupDiagnostic("seed staging access", () =>
+      seedStagingAccess(expiresAt),
+    );
+    await withCoreSetupDiagnostic("seed edit session", () =>
+      seedEditSession(expiresAt),
+    );
+    targetServer = await withCoreSetupDiagnostic("start target server", () =>
+      startTargetServer(),
+    );
   });
 
   test.afterAll(async () => {
@@ -266,7 +281,7 @@ test.describe("share edit publish flow", () => {
     return row?.[column] ?? null;
   }
 
-  async function seedCoreFlowData() {
+  async function seedSite() {
     if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
     const { error: siteError } = await supabase.from("sites").insert({
@@ -279,8 +294,11 @@ test.describe("share edit publish flow", () => {
     if (siteError) {
       throw siteError;
     }
+  }
 
-    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  async function seedStagingAccess(expiresAt: string) {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
     const { error: stagingError } = await supabase
       .from("staging_access")
       .insert({
@@ -307,6 +325,10 @@ test.describe("share edit publish flow", () => {
     if (stagingError) {
       throw stagingError;
     }
+  }
+
+  async function seedEditSession(expiresAt: string) {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
     const { error: editError } = await supabase.from("edit_sessions").insert({
       site_id: siteId,

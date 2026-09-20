@@ -15,6 +15,7 @@ import {
   type FinalTestOutcome,
   type FinalTestRecord,
 } from "./strict-run-contract";
+import { redactDiagnostic } from "./redacted-diagnostics";
 
 interface StrictReporterOptions {
   expected?: number;
@@ -34,44 +35,6 @@ interface SerializableReport {
 }
 
 const MAX_DIAGNOSTICS_PER_TEST = 3;
-const MAX_DIAGNOSTIC_LENGTH = 1600;
-
-/**
- * Keep the one line that says *why* setup/assertion failed, while refusing all
- * credential-shaped values that have appeared in these specs. CI deliberately
- * does not retain traces, screenshots, request logs or raw stacks; this bounded
- * message is the only failure evidence the redacted artifact carries.
- */
-function redactDiagnostic(value: string): string {
-  return value
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    .replace(
-      /([?&](?:rcf_(?:edit_)?token|token|code|key|secret|authorization)=)[^&\s>"']+/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\brcf_(?:edit_)?token=[^&\s>"']+/gi, "credential=[REDACTED]")
-    .replace(/authorization:\s*bearer\s+\S+/gi, "authorization: [REDACTED]")
-    .replace(
-      /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
-      "[REDACTED JWT]",
-    )
-    .replace(/\bsb_secret_[A-Za-z0-9_-]+\b/g, "[REDACTED SECRET]")
-    .replace(
-      /\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]+\b/g,
-      "[REDACTED STRIPE KEY]",
-    )
-    .replace(/\bwhsec_[A-Za-z0-9_-]+\b/g, "[REDACTED WEBHOOK SECRET]")
-    .replace(
-      /(\b(?:SUPABASE_SERVICE_ROLE_KEY|NEXT_PUBLIC_SUPABASE_ANON_KEY|service[_-]?role[_-]?key|anon[_-]?key|api[_-]?key|verification[_-]?code|token|secret|authorization|code)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi,
-      "$1[REDACTED]",
-    )
-    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[REDACTED EMAIL]")
-    .replace(/\b[a-f0-9]{32,}\b/gi, "[REDACTED DIGEST]")
-    .replace(/[\r\n\t]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, MAX_DIAGNOSTIC_LENGTH);
-}
 
 function resultDiagnostics(result: TestResult): string[] {
   const messages = result.errors
@@ -82,7 +45,7 @@ function resultDiagnostics(result: TestResult): string[] {
     messages.push(result.error.message);
   }
 
-  return messages.map(redactDiagnostic).filter(Boolean);
+  return messages.map((message) => redactDiagnostic(message)).filter(Boolean);
 }
 
 function testDiagnostics(test: TestCase): string[] {
