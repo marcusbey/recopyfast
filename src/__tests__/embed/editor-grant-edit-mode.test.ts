@@ -81,7 +81,7 @@ function widget(): WidgetInstance {
   return (window as unknown as { ReCopyFast: WidgetInstance }).ReCopyFast;
 }
 
-async function bootWithGrant(permissions: string[]) {
+async function bootWithGrant(permissions?: string[]) {
   window.localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
@@ -201,12 +201,48 @@ describe("the editor banner", () => {
     expect(text).toContain(EMAIL);
     expect(text).toContain("Done");
 
-    // No staging/live vocabulary and no Publish button on this bar: both
-    // authenticate with credentials this holder does not have, and the
-    // distinction is a "mode" this audience should never have to learn.
+    // Save is still a draft write, but the storage model remains an
+    // implementation detail rather than vocabulary this audience has to learn.
     expect(text).not.toContain("Publish");
     expect(text).not.toMatch(/staging/i);
   });
+
+  it.each([["publish"], ["admin"]])(
+    "renders one accessible Publish control for a %s grant and opens the existing confirmation",
+    async (permission) => {
+      await bootWithGrant(["view", "edit", permission]);
+
+      const publish = document.querySelectorAll(
+        '#rcf-editor-banner button[aria-label="Publish"]',
+      );
+      expect(publish).toHaveLength(1);
+      expect(
+        document.querySelector("#rcf-editor-banner [data-rcf-id]"),
+      ).toBeNull();
+
+      (publish[0] as HTMLButtonElement).click();
+      await settle();
+
+      expect(document.querySelector(".rcf-modal-btn-success")).not.toBeNull();
+      expect(document.body.textContent).toContain("Publish Changes");
+      expect(
+        document.querySelector("#rcf-editor-banner [contenteditable]"),
+      ).toBeNull();
+    },
+  );
+
+  it.each([["view"], ["view", "edit"]])(
+    "renders no Publish control for permissions %j",
+    async (...permissions) => {
+      await bootWithGrant(permissions);
+
+      expect(
+        document.querySelector(
+          '#rcf-editor-banner button[aria-label="Publish"]',
+        ),
+      ).toBeNull();
+    },
+  );
 
   it("keeps the full address available when it is truncated", async () => {
     await bootWithGrant(["view", "edit"]);
@@ -216,6 +252,12 @@ describe("the editor banner", () => {
     );
     expect(email).not.toBeNull();
     expect(email!.getAttribute("title")).toBe(EMAIL);
+  });
+
+  it("offers no Publish action when permissions are omitted", async () => {
+    await bootWithGrant();
+    expect(document.querySelector('button[aria-label="Publish"]')).toBeNull();
+    expect(widget().editMode).toBe(false);
   });
 
   it("dismisses for this page load without signing anyone out", async () => {

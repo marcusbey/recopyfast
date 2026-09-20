@@ -853,6 +853,7 @@
       this.editSessionToken = EDIT_SESSION_TOKEN;
       this.stagingAccess = null;
       this.editMode = false;
+      this.isMutationLocked = false;
 
       // Magic-code editor identity, once /api/editor/* has confirmed one. Kept
       // apart from stagingAccess above because the two are different
@@ -1108,8 +1109,81 @@
      * no mode to understand.
      */
     setEditorSaveStatus(text) {
+      // A later in-flight response must not erase the terminal recovery state.
+      if (this.isMutationLocked) return;
       const status = document.querySelector('#rcf-editor-banner .rcf-editor-banner-status');
       if (status) status.textContent = text;
+    }
+
+    /**
+     * Turn an expired write credential into a recoverable, read-only state.
+     *
+     * The B-19 failure left the customer's page editable after a 401, then
+     * opened the same blocking alert on every retry. Preserve the dirty text
+     * first and open authentication elsewhere so this tab remains the recovery
+     * copy instead of looking like a session that can still save.
+     */
+    handleTerminalWriteFailure(error, elementId, content) {
+      if (!error || (error.status !== 401 && error.status !== 403)) return false;
+      if (this.isMutationLocked) return true;
+
+      this.isMutationLocked = true;
+      const keepDraft = function(id, text) {
+        try {
+          if (id) window.sessionStorage.setItem('rcf_unsaved_draft:' + SITE_ID + ':' + id, text);
+        } catch (e) { /* The visible DOM remains the recovery copy. */ }
+      };
+      keepDraft(elementId, content);
+
+      document.querySelectorAll('[data-rcf-editing]').forEach(function(element) {
+        // Typing can continue while Save is in flight; the latest DOM wins.
+        if (element.hasAttribute('contenteditable')) keepDraft(element.getAttribute('data-rcf-id'), element.textContent);
+        ['contenteditable', 'spellcheck', 'role', 'aria-multiline'].forEach(function(attr) {
+          element.removeAttribute(attr);
+        });
+      });
+
+      this.showEditorBanner();
+      document.querySelectorAll(
+        '[data-rcf-toolbar] button, .rcf-field-panel input, ' +
+        '#rcf-editor-banner .rcf-editor-banner-publish, #rcf-publish-btn, .rcf-modal-btn-success, ' +
+        '#rcf-edit-board-btn, #rcf-edit-board-panel button'
+      ).forEach(function(control) {
+        control.disabled = true;
+      });
+      if (this.editBoard) {
+        if (this.editBoard.panel) this.editBoard.panel.inert = true;
+        this.editBoard.close();
+      }
+
+      const banner = document.querySelector('#rcf-editor-banner') ||
+                     document.querySelector('#rcf-staging-banner');
+      if (!banner) return true;
+
+      const status = banner.querySelector('.rcf-editor-banner-status') || document.createElement('span');
+      status.setAttribute('data-rcf-terminal-status', '');
+      status.setAttribute('role', 'status');
+      if (!status.parentNode) { status.className = 'rcf-banner-meta'; banner.appendChild(status); }
+      status.textContent = 'Session ended — draft kept';
+
+      if (!banner.querySelector('[data-rcf-reauthenticate]')) {
+        const self = this;
+        const recovery = document.createElement('button');
+        recovery.type = 'button';
+        recovery.setAttribute('data-rcf-reauthenticate', '');
+        recovery.setAttribute('aria-label', 'Re-authenticate');
+        recovery.textContent = 'Re-authenticate';
+        recovery.className = banner.id === 'rcf-editor-banner'
+          ? 'rcf-editor-banner-dismiss'
+          : 'rcf-banner-btn rcf-banner-btn-ghost';
+        recovery.onclick = function() {
+          const path = self.editorGrant() ? '/edit' : '/dashboard/sites';
+          window.open(new URL(path, RECOPYFAST_API).toString(), '_blank', 'noopener');
+        };
+        banner.appendChild(recovery);
+      }
+
+      return true;
     }
 
     /** The device grant this page load holds, or null. */
@@ -1177,11 +1251,11 @@
      * why editing is off — if it is off, that is the grant's permissions
      * talking, and the honest banner simply does not claim editing.
      *
-     * Deliberately still not `showStagingBanner`: that toolbar offers Publish
-     * and Edit Board, both of which authenticate with a staging or edit-session
-     * token this holder does not have, so every button on it would answer 401.
-     * No Publish button and no staging/live vocabulary here for the same
-     * reason — "Saved" only ever claims the edit was written.
+     * Deliberately still not `showStagingBanner`: Edit Board authenticates with
+     * a staging or edit-session token this holder does not have. Publish is the
+     * narrow exception now that the shared publish route grades device grants;
+     * it appears only when the verified permission says `publish` or `admin`.
+     * "Saved" still only ever claims the draft was written.
      */
     showEditorBanner() {
       if (!this.editorAuth) return;
@@ -1258,12 +1332,23 @@
           #rcf-editor-banner .rcf-editor-banner-dismiss:hover {
             background: hsl(200 12% 16%);
           }
+          #rcf-editor-banner .rcf-editor-banner-publish {
+            background: hsl(174 48% 48%);
+            border-color: hsl(174 48% 48%);
+            color: hsl(200 18% 7%);
+            font-weight: 600;
+          }
+          #rcf-editor-banner .rcf-editor-banner-publish:hover {
+            background: hsl(174 48% 58%);
+          }
         `;
         document.head.appendChild(style);
       }
 
       const banner = document.createElement('div');
       banner.id = 'rcf-editor-banner';
+      // Banner actions are editor chrome, never discoverable customer content.
+      banner.setAttribute('data-rcf-ignore', '');
       banner.setAttribute('role', 'region');
       banner.setAttribute('aria-label', 'ReCopyFast editor session');
 
@@ -1297,6 +1382,17 @@
       status.className = 'rcf-editor-banner-status';
       status.setAttribute('role', 'status');
       banner.appendChild(status);
+
+      const permissions = this.editorAuth.permissions || [];
+      if (permissions.indexOf('publish') !== -1 || permissions.indexOf('admin') !== -1) {
+        const publish = document.createElement('button');
+        publish.type = 'button';
+        publish.className = 'rcf-editor-banner-dismiss rcf-editor-banner-publish';
+        publish.textContent = 'Publish';
+        publish.setAttribute('aria-label', 'Publish');
+        publish.onclick = this.showPublishConfirmation.bind(this);
+        banner.appendChild(publish);
+      }
 
       const dismiss = document.createElement('button');
       dismiss.type = 'button';
@@ -2165,6 +2261,7 @@
     }
 
     async showPublishConfirmation() {
+      if (this.isMutationLocked) return;
       const self = this;
       const overlay = this.createOverlay();
       const modal = document.createElement('div');
@@ -2248,10 +2345,9 @@
       try {
         const publishPreviewUrl =
           RECOPYFAST_API + '/staging/publish?siteId=' + SITE_ID +
-          (self.editSessionToken
-            ? '&rcf_edit_token=' + encodeURIComponent(self.editSessionToken)
-            : '&rcf_token=' + encodeURIComponent(self.stagingToken));
-        const response = await fetch(publishPreviewUrl);
+          self.editorTokenQuery().replace('?', '&');
+        const response = await fetch(publishPreviewUrl, { headers: self.editorAuthHeaders() });
+        if (self.handleTerminalWriteFailure(response)) { close(); return; }
         const result = await response.json();
 
         if (result.success && result.pendingChanges === 0) {
@@ -2276,6 +2372,7 @@
       }
 
       confirmBtn.onclick = async function() {
+        if (self.isMutationLocked) return;
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<span>Publishing...</span>';
 
@@ -2288,6 +2385,7 @@
             }, self.editorTokenBody()))
           });
 
+          if (self.handleTerminalWriteFailure(response)) { close(); return; }
           const result = await response.json();
 
           if (result.success) {
@@ -2807,6 +2905,7 @@
     }
 
     async persistContentUpdate(elementId, content, extra) {
+      if (this.isMutationLocked) throw new Error('Session ended — draft kept');
       // A device grant is a third way to be allowed to write here, alongside a
       // staging link and an edit session. It used to throw at this line for a
       // grant holder — which is what the banner's deleted note was apologising
@@ -2836,7 +2935,10 @@
       const result = await response.json().catch(function() { return {}; });
       if (!response.ok || result.error) {
         this.setEditorSaveStatus('');
-        throw new Error(result.error || 'Failed to save content');
+        const error = new Error(result.error || 'Failed to save content');
+        error.status = response.status;
+        this.handleTerminalWriteFailure(error, elementId, content);
+        throw error;
       }
 
       this.setEditorSaveStatus('Saved');
@@ -3626,6 +3728,7 @@
       this.injectStyles();
 
       document.addEventListener('click', function(e) {
+        if (self.isMutationLocked) return;
         const element = e.target.closest('[data-rcf-id]');
         if (!element) return;
 
@@ -3704,40 +3807,37 @@
     }
 
     injectStyles() {
+      /*
+       * Nothing here may participate in layout. The old editor put position:
+       * relative and transition: all on every target, moving positioned children,
+       * changing stacking contexts and animating host properties. Outline is safe:
+       * it paints outside the box without reflow. The hover hint is a single fixed
+       * node for the same reason; a pseudo-element needed a positioned target.
+       *
+       * The edit affordance once copied transformed getBoundingClientRect sizes
+       * (growing a scale(1.35) target by 35%), hid overflow (changing margin
+       * collapse), and forced containment and whitespace. Contenteditable needs
+       * none of those. Its only floor is computed-layout min-height applied in
+       * startTextEdit, never a transformed rect. Keep these incident explanations
+       * outside the CSS literal: esbuild preserves CSS comments as shipped bytes.
+       *
+       * Hover outlines use the brand accent, not Tailwind blue-500: the design
+       * system forbids a second brand colour and the correct literal already
+       * exists in .rcf-banner-btn:focus-visible (hsl(174 48% 58%)). The hint is
+       * flat, like the icon tile, using the surface token hsl(200 18% 10%).
+       */
       const style = document.createElement('style');
       style.textContent = `
-        /*
-         * Nothing here may participate in layout.
-         *
-         * The previous version set \`position: relative\` and \`transition: all\`
-         * on every editable element the moment edit mode turned on, which moves
-         * absolutely-positioned children, creates stacking contexts across the
-         * whole page, and animates every property we subsequently touch.
-         * Outline, cursor and colour are the only safe affordances: outline is
-         * painted outside the box and never reflows anything.
-         */
         .rcf-hovering {
           cursor: pointer !important;
-          /* Brand accent, not Tailwind blue-500: the design system forbids a
-             second brand colour outright, and this file already had the right
-             literal two hundred lines away in .rcf-banner-btn:focus-visible.
-             Derived from the accent token hsl(174 48% 58%). */
           outline: 2px dashed hsl(174 48% 58% / 0.7) !important;
           outline-offset: 4px !important;
         }
-        /*
-         * The hover hint used to be an ::before/::after on the element itself,
-         * which needed \`position: relative\` on every editable element to anchor
-         * it. It is now a single fixed-position node positioned from JS, so the
-         * page's own layout is never touched.
-         */
         .rcf-hover-hint {
           position: fixed;
           display: flex;
           align-items: center;
           gap: 6px;
-          /* Flat, not a gradient — same rule as the icon tile. Derived from the
-             surface token hsl(200 18% 10%). */
           background: hsl(200 18% 10% / 0.95);
           color: #e2e8f0;
           padding: 6px 12px;
@@ -3751,21 +3851,6 @@
           box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
           border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        /*
-         * EDIT AFFORDANCE — layout-neutral by construction.
-         *
-         * Everything the previous version put here changed layout: min/max
-         * width and height taken from getBoundingClientRect (which an ancestor
-         * transform has already scaled, so a scale(1.35) parent grew the element
-         * by 35% on every edit), \`overflow: hidden\` (establishes a block
-         * formatting context, so margins stop collapsing and the page shifts),
-         * \`contain: layout style\`, a forced \`white-space\`, and a border-radius
-         * override. None of that is needed: contenteditable does not resize an
-         * element, so the correct number of geometry properties to set is zero.
-         * The one floor we do apply — min-height, from computed layout px — is
-         * set inline per element in startTextEdit so it can never come from a
-         * transformed rect.
-         */
         .rcf-editing {
           user-select: text !important;
           -webkit-user-select: text !important;
@@ -4090,6 +4175,7 @@
      *   payload(values)  extra body merged into the persist call
      */
     startTextEdit(element, options) {
+      if (this.isMutationLocked) return;
       const self = this;
       const opts = options || {};
 
@@ -4493,6 +4579,7 @@
       window.addEventListener('beforeunload', unloadGuard);
 
       const save = async function() {
+        if (self.isMutationLocked) return;
         const newContent = sanitizeContent();
         const textChanged = newContent !== originalText;
 
@@ -4525,6 +4612,7 @@
             typeof opts.payload === 'function' ? opts.payload(values) : undefined
           );
         } catch (error) {
+          if (self.isMutationLocked) return;
           alert(error.message || 'Failed to save content. Please try again.');
           return;
         }
@@ -4544,6 +4632,7 @@
       };
 
       const cancel = function() {
+        if (self.isMutationLocked) return;
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
@@ -4619,6 +4708,7 @@
 
     // Image editor modal for image elements
     openImageEditor(element) {
+      if (this.isMutationLocked) return;
       const self = this;
       const elementId = element.getAttribute('data-rcf-id');
       const elementData = this.elements.get(elementId);
@@ -4887,6 +4977,7 @@
             height: uploadedDimensions ? uploadedDimensions.height : undefined
           });
         } catch (error) {
+          if (self.isMutationLocked) return;
           alert(error.message || 'Failed to save image. Please try again.');
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save Changes';
@@ -4981,6 +5072,7 @@
     }
     // Form element editing
     startFormEdit(element) {
+      if (this.isMutationLocked) return;
       const self = this;
       const elementId = element.getAttribute('data-rcf-id');
       const elementData = this.elements.get(elementId);
@@ -5086,6 +5178,7 @@
             contentType: 'form'
           });
         } catch (error) {
+          if (self.isMutationLocked) return;
           alert(error.message || 'Failed to save form content. Please try again.');
           return;
         }
@@ -5425,7 +5518,7 @@
     }
 
     open() {
-      if (this.isOpen) return;
+      if (this.isOpen || this.rcf.isMutationLocked) return;
       this.isOpen = true;
       this.createPanel();
       this.loadTabData();
