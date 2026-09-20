@@ -1260,6 +1260,8 @@
     showEditorBanner() {
       if (!this.editorAuth) return;
       if (document.querySelector('#rcf-editor-banner')) return;
+      const previousBodyPaddingTop = document.body.style.paddingTop;
+      const bodyPaddingTop = parseFloat(window.getComputedStyle(document.body).paddingTop) || 0;
 
       if (!document.querySelector('#rcf-editor-banner-styles')) {
         const style = document.createElement('style');
@@ -1405,10 +1407,18 @@
       dismiss.setAttribute('aria-label', 'Dismiss the ReCopyFast editor bar');
       dismiss.onclick = function() {
         if (banner.parentNode) banner.parentNode.removeChild(banner);
+        document.body.style.paddingTop = previousBodyPaddingTop;
       };
       banner.appendChild(dismiss);
 
       document.body.appendChild(banner);
+      // The first executed invited-editor E2E exposed the difference from the
+      // owner toolbar: both bars are fixed across the full viewport, but only
+      // the owner toolbar reserved its height. On a page whose first editable
+      // element starts at the top, the editor bar intercepted the click and
+      // made that content impossible to edit. Preserve existing host padding
+      // and restore its original inline declaration when Done removes the bar.
+      document.body.style.paddingTop = (banner.offsetHeight + bodyPaddingTop) + 'px';
     }
 
     /**

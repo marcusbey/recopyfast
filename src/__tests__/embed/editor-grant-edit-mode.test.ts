@@ -274,6 +274,29 @@ describe("the editor banner", () => {
     expect(widget().editMode).toBe(true);
   });
 
+  it("reserves host-page space for the fixed banner and restores it on Done", async () => {
+    const hostStyle = document.createElement("style");
+    hostStyle.textContent = "body { padding-top: 8px; }";
+    document.head.appendChild(hostStyle);
+    jest
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.id === "rcf-editor-banner" ? 42 : 0;
+      });
+
+    await bootWithGrant(["view", "edit"]);
+
+    expect(document.body.style.paddingTop).toBe("50px");
+
+    const done = document.querySelector(
+      "#rcf-editor-banner .rcf-editor-banner-dismiss",
+    ) as HTMLButtonElement;
+    done.click();
+
+    expect(document.body.style.paddingTop).toBe("");
+    expect(window.getComputedStyle(document.body).paddingTop).toBe("8px");
+  });
+
   it("does not claim editing when the grant is view-only", async () => {
     await bootWithGrant(["view"]);
 
