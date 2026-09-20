@@ -61,4 +61,19 @@ describe("Playwright CI contract", () => {
     expect(coreFlow).toContain("rcf_handoff");
     expect(coreFlow).toContain('.eq("id", verificationCodeId)');
   });
+
+  it("uses credential-specific editor chrome for invited editors and owner sessions", () => {
+    expect(coreFlow).toContain(
+      'type ShareCredentialKind = "invited-editor" | "edit-session"',
+    );
+    expect(coreFlow).toContain('"invited-editor": {');
+    expect(coreFlow).toContain('banner: "#rcf-editor-banner"');
+    expect(coreFlow).toContain(
+      "publish: '.rcf-editor-banner-publish[aria-label=\"Publish\"]'",
+    );
+    expect(coreFlow).toContain('"edit-session": {');
+    expect(coreFlow).toContain('banner: "#rcf-staging-banner"');
+    expect(coreFlow).toContain('publish: "#rcf-publish-btn"');
+    expect(coreFlow).toContain("credentialKind: ShareCredentialKind");
+  });
 });

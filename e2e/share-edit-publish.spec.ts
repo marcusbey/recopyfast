@@ -14,6 +14,24 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://127.0.0.1:4001";
 const TARGET_PORT = Number(process.env.RECOPYFAST_TARGET_PORT || "4173");
 const TARGET_URL = `http://localhost:${TARGET_PORT}`;
 
+type ShareCredentialKind = "invited-editor" | "edit-session";
+
+const SHARE_CHROME: Record<
+  ShareCredentialKind,
+  { banner: string; wrongBanner: string; publish: string }
+> = {
+  "invited-editor": {
+    banner: "#rcf-editor-banner",
+    wrongBanner: "#rcf-staging-banner",
+    publish: '.rcf-editor-banner-publish[aria-label="Publish"]',
+  },
+  "edit-session": {
+    banner: "#rcf-staging-banner",
+    wrongBanner: "#rcf-editor-banner",
+    publish: "#rcf-publish-btn",
+  },
+};
+
 test.describe("share edit publish flow", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -115,6 +133,7 @@ test.describe("share edit publish flow", () => {
     await exerciseShareFlow(
       page,
       redirectUrl,
+      "invited-editor",
       "Published through invited editor grant",
     );
   });
@@ -125,6 +144,7 @@ test.describe("share edit publish flow", () => {
     await exerciseShareFlow(
       page,
       `${TARGET_URL}/?rcf_edit_token=${encodeURIComponent(editToken)}`,
+      "edit-session",
       "Published through edit token",
     );
   });
@@ -188,14 +208,21 @@ test.describe("share edit publish flow", () => {
     return redirectUrl;
   }
 
-  async function exerciseShareFlow(page: Page, url: string, newText: string) {
+  async function exerciseShareFlow(
+    page: Page,
+    url: string,
+    credentialKind: ShareCredentialKind,
+    newText: string,
+  ) {
     await page.goto(url, {
       waitUntil: "domcontentloaded",
     });
 
-    await expect(page.locator("#rcf-staging-banner")).toBeVisible({
+    const chrome = SHARE_CHROME[credentialKind];
+    await expect(page.locator(chrome.banner)).toBeVisible({
       timeout: 20_000,
     });
+    await expect(page.locator(chrome.wrongBanner)).toHaveCount(0);
 
     const heading = page.locator("main h1");
     await expect(heading).toHaveAttribute("data-rcf-id", /.+/, {
@@ -247,7 +274,7 @@ test.describe("share edit publish flow", () => {
       .poll(() => getContentColumn("published_content"))
       .not.toBe(newText);
 
-    await page.locator("#rcf-publish-btn").click();
+    await page.locator(chrome.publish).click();
     await page.getByRole("button", { name: /publish now/i }).click();
 
     await expect
