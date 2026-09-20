@@ -6,6 +6,10 @@ const ROOT = process.cwd();
 describe("Playwright CI contract", () => {
   const workflow = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
   const config = readFileSync(join(ROOT, "playwright.config.ts"), "utf8");
+  const coreFlow = readFileSync(
+    join(ROOT, "e2e/share-edit-publish.spec.ts"),
+    "utf8",
+  );
 
   it("cannot pass by omitting hosted E2E secrets", () => {
     expect(workflow).not.toContain("secrets.E2E_SUPABASE");
@@ -43,5 +47,18 @@ describe("Playwright CI contract", () => {
     expect(config).toContain('trace: process.env.CI ? "off"');
     expect(config).toContain('screenshot: process.env.CI ? "off"');
     expect(config).toContain('video: process.env.CI ? "off"');
+  });
+
+  it("models invited-editor access through the current allowlist, verification and handoff flow", () => {
+    expect(coreFlow).not.toContain('.from("staging_access")');
+    expect(coreFlow).not.toContain('access_type: "link"');
+    expect(coreFlow).toContain('.from("site_editors")');
+    expect(coreFlow).toContain('permissions: ["view", "edit", "publish"]');
+    expect(coreFlow).toContain('.from("editor_verification_codes")');
+    expect(coreFlow).toContain("hashVerificationCode");
+    expect(coreFlow).toContain("/api/editor/submit-code");
+    expect(coreFlow).toContain("/api/editor/handoff/create");
+    expect(coreFlow).toContain("rcf_handoff");
+    expect(coreFlow).toContain('.eq("id", verificationCodeId)');
   });
 });

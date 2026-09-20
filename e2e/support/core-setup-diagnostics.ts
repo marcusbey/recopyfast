@@ -7,7 +7,8 @@ export type CoreSetupStage =
   | "create local client"
   | "delete captured fixture"
   | "seed site"
-  | "seed staging access"
+  | "seed invited editor"
+  | "seed verification code"
   | "seed edit session"
   | "start target server";
 

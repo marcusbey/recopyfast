@@ -21,14 +21,14 @@ describe("withCoreSetupDiagnostic", () => {
     };
 
     await expect(
-      withCoreSetupDiagnostic("seed staging access", async () => {
+      withCoreSetupDiagnostic("seed verification code", async () => {
         throw originalError;
       }),
     ).rejects.toBe(originalError);
 
     expect(consoleError).toHaveBeenCalledTimes(1);
     const output = String(consoleError.mock.calls[0][0]);
-    expect(output).toContain("[core-e2e setup] seed staging access:");
+    expect(output).toContain("[core-e2e setup] seed verification code:");
     expect(output).toContain("insert rejected");
     expect(output).toContain("code=23514");
     expect(output).toContain("hint=Use access_type='invite'");

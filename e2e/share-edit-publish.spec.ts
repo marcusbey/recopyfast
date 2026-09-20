@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
+import { hashVerificationCode } from "../src/lib/auth/editor-crypto";
 import {
   createLocalServiceRoleClient,
   deleteCapturedSiteFixture,
@@ -25,10 +26,12 @@ test.describe("share edit publish flow", () => {
   let supabase: SupabaseClient | null = null;
   let targetServer: Server | null = null;
 
-  /** Stands in for the emailed code. Stored plaintext, compared timing-safely. */
-  const STAGING_VERIFICATION_CODE = "424242";
-
   const siteId = randomUUID();
+  const siteEditorId = randomUUID();
+  const verificationCodeId = randomUUID();
+  const editorEmail = `e2e-${siteId}@recopyfast.local`;
+  /** Stands in for the emailed code; only its keyed digest is persisted. */
+  const editorVerificationCode = "424242";
   /**
    * The site's API key, and the embed token derived from it.
    *
@@ -52,7 +55,6 @@ test.describe("share edit publish flow", () => {
       .digest("hex");
     return `${payload}.${signature}`;
   })();
-  const stagingToken = `e2e_staging_${randomUUID()}`;
   const editToken = `e2e_edit_${randomUUID()}`;
 
   // Discovered from the running widget, never hand-authored. A real customer
@@ -66,13 +68,16 @@ test.describe("share edit publish flow", () => {
       createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E"),
     );
     await withCoreSetupDiagnostic("delete captured fixture", () =>
-      deleteCapturedSiteFixture(supabase!, siteId),
+      deleteCoreFixture(),
     );
 
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     await withCoreSetupDiagnostic("seed site", () => seedSite());
-    await withCoreSetupDiagnostic("seed staging access", () =>
-      seedStagingAccess(expiresAt),
+    await withCoreSetupDiagnostic("seed invited editor", () =>
+      seedInvitedEditor(),
+    );
+    await withCoreSetupDiagnostic("seed verification code", () =>
+      seedHubVerificationCode(),
     );
     await withCoreSetupDiagnostic("seed edit session", () =>
       seedEditSession(expiresAt),
@@ -88,7 +93,7 @@ test.describe("share edit publish flow", () => {
         try {
           await restoreCapturedContent();
         } finally {
-          await deleteCapturedSiteFixture(supabase, siteId);
+          await deleteCoreFixture();
         }
       }
     } finally {
@@ -103,13 +108,14 @@ test.describe("share edit publish flow", () => {
     }
   });
 
-  test("staging token edits staging content and publishes live", async ({
+  test("invited-editor grant edits staging content and publishes live", async ({
     page,
   }) => {
+    const redirectUrl = await createInvitedEditorHandoff(page);
     await exerciseShareFlow(
       page,
-      `rcf_staging=1&rcf_token=${encodeURIComponent(stagingToken)}`,
-      "Published through staging token",
+      redirectUrl,
+      "Published through invited editor grant",
     );
   });
 
@@ -118,71 +124,74 @@ test.describe("share edit publish flow", () => {
   }) => {
     await exerciseShareFlow(
       page,
-      `rcf_edit_token=${encodeURIComponent(editToken)}`,
+      `${TARGET_URL}/?rcf_edit_token=${encodeURIComponent(editToken)}`,
       "Published through edit token",
     );
   });
 
   /**
-   * Clear the emailed-code prompt when the widget raises one.
+   * Exercise the secure editor entry path without sending external mail.
    *
-   * A staging link is bound to a device now. `email_verified` alone stopped
-   * being sufficient in 9f1aa70, which closed the hole where forwarding an
-   * already-verified URL handed the recipient full access — verification is
-   * pinned to a User-Agent fingerprint captured at the moment the code is
-   * accepted, and pre-existing verified rows deliberately fail closed rather
-   * than being grandfathered.
-   *
-   * This test predated that change and seeded `email_verified: true` with none
-   * of the binding columns, so it sat on the code prompt until it timed out and
-   * reported the failure as "the staging banner never appeared". The banner was
-   * never going to appear: the widget was correctly refusing an unbound device.
-   *
-   * Driving the real prompt rather than forging `verified_user_agent_hash` is
-   * deliberate. Writing the hash would test our ability to reproduce a hashing
-   * function, and would keep passing if the widget stopped asking at all —
-   * which is precisely the regression worth catching.
-   *
-   * Conditional because only the staging-token path is device-bound; the
-   * edit-session token is a different credential and raises no prompt.
+   * The old fixture inserted `staging_access.access_type='link'`, the exact
+   * first-opener self-authorisation path the database now rejects. This fixture
+   * instead persists a keyed stand-in for the emailed code, spends it through
+   * the real hub endpoint, carries the returned httpOnly session into the real
+   * handoff endpoint, then lets the widget redeem the one-shot handoff into an
+   * origin-bound device grant. The plaintext code and handoff never reach a log
+   * or artifact.
    */
-  async function completeDeviceVerificationIfPrompted(page: Page) {
-    const codeInput = page.getByPlaceholder("000000");
+  async function createInvitedEditorHandoff(page: Page): Promise<string> {
+    const verificationResponse = await page.request.post(
+      `${APP_URL}/api/editor/submit-code`,
+      {
+        data: {
+          email: editorEmail,
+          code: editorVerificationCode,
+        },
+      },
+    );
+    expect(verificationResponse.ok()).toBe(true);
 
-    // `isVisible()` resolves immediately and ignores a timeout, so using it
-    // here silently answered "no prompt" before the widget had rendered one,
-    // and the failure surfaced much later as a missing banner. `waitFor` is
-    // the call that actually waits.
-    const prompted = await codeInput
-      .waitFor({ state: "visible", timeout: 15_000 })
-      .then(() => true)
-      .catch(() => false);
+    const verificationBody = (await verificationResponse.json()) as {
+      mode?: string;
+      sites?: Array<{ siteId?: string; permissions?: string[] }>;
+    };
+    const verifiedSite = verificationBody.sites?.find(
+      (site) => site.siteId === siteId,
+    );
+    expect(verificationBody.mode === "hub").toBe(true);
+    expect(Boolean(verifiedSite)).toBe(true);
+    expect(verifiedSite?.permissions).toEqual(["view", "edit", "publish"]);
 
-    if (!prompted) {
-      return;
-    }
+    const setCookie = verificationResponse.headers()["set-cookie"] ?? "";
+    const hubCookie = setCookie.split(";", 1)[0];
+    expect(hubCookie.startsWith("rcf_editor_hub=")).toBe(true);
 
-    await codeInput.fill(STAGING_VERIFICATION_CODE);
-    await page.getByRole("button", { name: /verify & continue/i }).click();
+    const handoffResponse = await page.request.post(
+      `${APP_URL}/api/editor/handoff/create`,
+      {
+        headers: { cookie: hubCookie },
+        data: { siteId, rememberDevice: false },
+      },
+    );
+    expect(handoffResponse.ok()).toBe(true);
 
-    // The prompt must actually go away. Asserting only that the banner appears
-    // would let a widget that renders both at once pass.
-    await expect(codeInput).toBeHidden({ timeout: 20_000 });
+    const handoffBody = (await handoffResponse.json()) as {
+      redirectUrl?: string;
+    };
+    const redirectUrl = handoffBody.redirectUrl ?? "";
+    expect(Boolean(redirectUrl)).toBe(true);
 
-    // Then let the widget finish re-initialising. Clearing verification puts it
-    // through a reboot into staging mode, and an edit started before that
-    // settles is discarded along with the pre-reboot DOM — which surfaced as
-    // typing that appeared to do nothing, with the snapshot at failure showing
-    // the page stripped of every piece of widget chrome.
-    await page.waitForLoadState("networkidle");
+    const parsed = new URL(redirectUrl);
+    expect(parsed.origin === TARGET_URL).toBe(true);
+    expect(Boolean(parsed.searchParams.get("rcf_handoff"))).toBe(true);
+    return redirectUrl;
   }
 
-  async function exerciseShareFlow(page: Page, query: string, newText: string) {
-    await page.goto(`${TARGET_URL}/?${query}`, {
+  async function exerciseShareFlow(page: Page, url: string, newText: string) {
+    await page.goto(url, {
       waitUntil: "domcontentloaded",
     });
-
-    await completeDeviceVerificationIfPrompted(page);
 
     await expect(page.locator("#rcf-staging-banner")).toBeVisible({
       timeout: 20_000,
@@ -286,7 +295,7 @@ test.describe("share edit publish flow", () => {
 
     const { error: siteError } = await supabase.from("sites").insert({
       id: siteId,
-      domain: `localhost:${TARGET_PORT}`,
+      domain: TARGET_URL,
       name: "ReCopyFast E2E Target",
       api_key: siteApiKey,
     });
@@ -296,35 +305,34 @@ test.describe("share edit publish flow", () => {
     }
   }
 
-  async function seedStagingAccess(expiresAt: string) {
+  async function seedInvitedEditor() {
     if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
-    const { error: stagingError } = await supabase
-      .from("staging_access")
-      .insert({
-        site_id: siteId,
-        access_type: "link",
-        email: "e2e@recopyfast.local",
-        // Unverified on purpose. Seeding `true` without the binding columns
-        // produces a row the widget refuses, which is the correct behaviour and
-        // is what this test used to mistake for a broken banner. The code is
-        // stored in plaintext and compared with `timingSafeEqualString`, so a
-        // known value here is exactly what a real emailed code would be.
-        email_verified: false,
-        verification_code: STAGING_VERIFICATION_CODE,
-        verification_expires_at: new Date(
-          Date.now() + 60 * 60 * 1000,
-        ).toISOString(),
-        token: stagingToken,
-        permissions: ["view", "edit", "publish"],
-        label: "Core E2E",
-        expires_at: expiresAt,
-        is_active: true,
-      });
+    const { error } = await supabase.from("site_editors").insert({
+      id: siteEditorId,
+      site_id: siteId,
+      email: editorEmail,
+      permissions: ["view", "edit", "publish"],
+      revoked_at: null,
+    });
 
-    if (stagingError) {
-      throw stagingError;
-    }
+    if (error) throw error;
+  }
+
+  async function seedHubVerificationCode() {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
+    const { error } = await supabase.from("editor_verification_codes").insert({
+      id: verificationCodeId,
+      email: editorEmail,
+      site_id: null,
+      code_hash: hashVerificationCode(editorEmail, editorVerificationCode),
+      attempts: 0,
+      expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      consumed_at: null,
+    });
+
+    if (error) throw error;
   }
 
   async function seedEditSession(expiresAt: string) {
@@ -388,6 +396,22 @@ test.describe("share edit publish flow", () => {
       .eq("site_id", siteId)
       .eq("element_id", elementId);
     if (error) throw error;
+  }
+
+  async function deleteCoreFixture() {
+    if (!supabase) return;
+
+    // Hub-scoped codes deliberately have no site_id, so the final site cascade
+    // cannot reach them. Delete this run's captured code id explicitly, then
+    // delete the exact site id; that cascade owns its site_editor, handoff and
+    // device-grant children without a broad email/domain sweep.
+    const { error } = await supabase
+      .from("editor_verification_codes")
+      .delete()
+      .eq("id", verificationCodeId);
+    if (error) throw error;
+
+    await deleteCapturedSiteFixture(supabase, siteId);
   }
 
   async function startTargetServer() {
