@@ -2,142 +2,145 @@
 
 ## Scope and verdict
 
-Fresh-context review of `origin/main...HEAD`, from baseline
-`46f810f89b8e4cfd35f93a944e9f6e5d1f18367e` to story head
-`729b3ee7b9132fd1fcb36452f5d257046b00585f`.
+Fresh-context review of the complete story diff from `origin/main`
+(`46f810f89b8e4cfd35f93a944e9f6e5d1f18367e`) through reviewed code head
+`f6f03d6caccec0d4bada4435905857c38344d5ba`.
 
-No actionable defect was found in the reviewed diff. The original review's unit-test blocker is
-withdrawn: the four failures reproduce only when the Supabase/app placeholder environment is
-absent, while the exact affected paths and the full suite pass under the same safe placeholder
-environment committed in CI.
+No actionable defect remains in the reviewed diff. The story now executes the complete Playwright
+inventory against a disposable local stack, fails closed on non-local mutation targets and on any
+missing/skipped/flaky/failed browser case, uploads only a redacted summary, and cleans up both
+processes and disposable data. The two widget defects exposed by the first executed invited-editor
+runs were repaired narrowly and regression-tested.
 
-This verdict authorizes the story to proceed to its draft-PR/CI evidence stage. It does not claim
-that the Docker-backed stack or the 39 browser tests ran locally; those remain mandatory before
-merge.
+## What the story delivers
 
-## Plan and implementation comparison
+### A real blocking browser gate
 
-- The validated plan's target guard exists and is used before either mutating spec constructs a
-  service-role client.
-- The prior missing-secret success path is removed. The E2E job now installs root/server
-  dependencies, starts local Supabase, builds the production app, starts Socket.IO and Next,
-  waits for both readiness endpoints, runs Playwright, checks the exact terminal report, and uses
-  `always()` cleanup/upload steps.
-- Core and parity fixtures use fresh UUID-scoped rows and exact site-id cleanup. The former broad
-  parity-domain sweep is gone. Core cleanup restores the captured content state before deleting
-  the disposable fixture, with deletion in `finally`.
-- All four former suite skip gates are removed. Static Playwright discovery reports exactly 39
-  tests in 9 files, matching the workflow, reporter and documentation contract.
-- The local twice-clean full-stack run, migration application, draft PR, and actual GitHub Actions
-  execution remain open exactly as the plan records; the code does not pretend those steps were
-  completed.
+- The former missing-secret success path is gone. GitHub installs the root and realtime locks,
+  starts Redis plus Supabase CLI `2.117.0`, builds production Next, starts Socket.IO and Next on
+  deterministic ports, waits for both health surfaces, and runs Playwright with both mutating
+  suites explicitly enabled.
+- `assertLocalMutationTargets` allows only exact loopback HTTP origins on Supabase `54321`, Next
+  `3000`, and Socket.IO `4001`; it also refuses the known production project reference. A missing
+  opt-in throws instead of becoming a skip. Both service-role browser fixtures construct their
+  client through this guard.
+- The strict reporter requires exactly 39 passed tests and zero failed, skipped, or flaky tests.
+  Any non-passed Playwright terminal result also fails the run. The workflow independently parses
+  the final JSON and enforces the same contract.
+- CI disables traces, screenshots, and video because editor credentials can appear in fixture
+  URLs. The only uploaded browser artifact contains redacted titles, repo-relative paths, outcomes,
+  and durations.
 
-## Independent verification
+### Secure, isolated fixtures
 
-- Exact environment-sensitive regression paths, invoked with `--runTestsByPath` and the committed
-  CI placeholders: 3 suites, **64/64 tests passed**.
-- Focused s24 contract suites (`local-targets`, `strict-run-contract`, `strict-reporter`, and
-  `playwright-ci-contract`): 4 suites, **27/27 tests passed**.
-- Full placeholder-environment `npm run precommit`: lint completed with 0 errors (39 existing
-  warnings), TypeScript completed successfully, and Jest reported **209 passed suites / 2,720
-  passed tests / 0 failures**, with the existing baseline of 1 skipped suite / 36 skipped tests.
-- `npm run format:check`: passed.
-- `npm run type-check:build`: passed.
-- `npm run audit:prod`: passed with 0 vulnerabilities.
-- `node scripts/build-embed.mjs --check`: passed; the committed embed artifact is current and
-  remains below its ratcheted ceilings.
-- Placeholder-environment `npm run build`: passed, including the embed rebuild, production
-  compilation, TypeScript phase, and static-page generation.
-- `git diff --check origin/main...HEAD`: passed.
-- Prettier validation of the changed workflow, Playwright config, support modules and specs:
-  passed.
-- `playwright test --list`: **39 tests in 9 files**.
-- Repository scan across `e2e/`: no `test.skip`, `test.fixme`, `test.only`, `describe.skip`, or
-  `describe.only` declaration remains.
-- Changed-file credential scan found no committed credential artifact. The only service-role-like
-  value is the intentionally inert placeholder JWT in CI.
+- The core flow no longer seeds the rejected first-opener `staging_access` shortcut. It creates a
+  run-scoped `site_editors` row and a keyed verification-code digest, submits the code through the
+  real hub endpoint, carries the returned HTTP-only hub cookie to the real handoff endpoint, and
+  lets the widget redeem the one-shot handoff into an origin-bound device grant.
+- The invited-editor case asserts its own editor banner and Publish control; the edit-session case
+  asserts the owner staging banner and owner Publish control. Each rejects the other credential's
+  chrome, so a flow cannot pass while silently exercising the wrong principal.
+- Fixture ids are fresh UUIDs. Cleanup explicitly deletes the captured hub-code id, restores the
+  captured content row, and deletes only the captured site id; schema cascades own that site's
+  editor, handoff, grant, and content children. The parity fixture likewise deletes only its
+  captured site id. HTTP servers and browser contexts close in teardown/finally paths.
+- Setup diagnostics name the failed fixture stage but redact URLs with queries, authorization,
+  tokens, keys, codes, emails, UUIDs, JWTs, and long digests before logging. The original error is
+  rethrown, so diagnostics cannot turn a failing setup into a pass.
 
-## Anti-hallucination and mutation checks
+### Two executed-run widget repairs
 
-- Every new import resolves to an installed package, Node built-in, Playwright reporter API, or
-  checked-in support module. The changed specs' service-role creation sites both call
-  `createLocalServiceRoleClient`; there is no second direct service-role construction under
-  `e2e/`.
-- Guard mutation was performed in an isolated archive, not in the story worktree: removing the
-  loopback-host predicate made **2 tests fail** (`non-loopback alias` and `bind-all address`). The
-  production-safety predicate is therefore covered by tests that demonstrably bite.
-- Reporter behavior is covered directly by the focused suite: a green Playwright `FullResult`
-  containing a skipped test must return `{ status: "failed" }`, while the strict run contract
-  separately rejects failed, skipped, flaky, and missing-test summaries. Static inspection also
-  confirms any non-passed runner status marks the report failed and that the workflow independently
-  rejects any terminal summary other than exactly 39 passed / 0 failed / 0 skipped / 0 flaky.
-- A separate reporter neutralization run was not completed before review finalization. No source
-  file in the story worktree was mutated for either check; the completed guard mutation was
-  isolated from it.
+1. **Invited-editor banner no longer covers host content.** `showEditorBanner` reserves the
+   banner's measured height in addition to the host's computed body padding. The temporary
+   declaration is inline-important so an author-important stylesheet cannot defeat it. On Done,
+   the widget restores the exact prior inline value and priority, or removes only its injected
+   longhand when the host had none. Regression tests cover author-stylesheet `!important`,
+   inline-important restoration, and credential persistence after dismissal.
+2. **Inline Save chrome no longer sits behind either editor banner.** Toolbar geometry now treats
+   `#rcf-editor-banner` and `#rcf-staging-banner` as equivalent top chrome and flips below the
+   edited element when an above-element placement would collide. Geometry tests cover invited
+   editor and owner edit-session modes. Neutralizing the selector reproduces the invited-editor
+   failure (`28px` inside the banner instead of the safe `128px` position).
 
-## Security and workflow review
+Both changes were made in `public/embed/recopyfast.src.js`; the permanent public artifact
+`public/embed/recopyfast.js` was regenerated and passes its source-hash and gzip ratchet.
 
-### Local-target guard
+## Independent local evidence
 
-`assertLocalMutationTargets` accepts only plain HTTP origins on the exact loopback hosts and fixed
-ports: Supabase `54321`, Next `3000`, and Socket.IO `4001`. It rejects missing/invalid URLs,
-non-loopback hosts, bind-all addresses, credentials, paths, queries, fragments and wrong ports.
-It also rejects the known production project reference in either raw credential text or a decoded
-JWT payload. The explicit mutating flag must equal `1`; absence is a hard failure, not a skip.
-Consequently a hosted/production Supabase target cannot pass merely by supplying a valid
-service-role credential.
+The final reviewed code head produced:
 
-### Strict reporter and artifact secrecy
+- Placeholder-environment `npm run precommit`: lint completed with 0 errors (39 existing
+  warnings), TypeScript completed successfully, and Jest reported **211 passed suites, 1 baseline
+  skipped suite; 2,733 passed tests, 36 skipped tests, 0 failed tests**.
+- All embed regressions: **121/121 passed**. The focused toolbar/terminal suite passed **14/14**.
+- `npm run build`: production compilation, TypeScript, page collection, and static generation
+  completed successfully.
+- `node scripts/build-embed.mjs --check`: artifact current; gzip **46,480 B bundle / 33,707 B
+  widget / 13,122 B transport**, within the committed ratchets.
+- Static Playwright inventory: **39 tests in 9 files**, with no `test.skip`, `test.fixme`,
+  `test.only`, `describe.skip`, or `describe.only` declaration.
+- `git diff --check`: clean.
 
-The reporter derives final outcomes from Playwright's aggregate outcome plus the final attempt,
-counts the complete discovered suite, and converts wrong count, failure, skip, flake, interruption,
-timeout or other non-passed runner result into a failed process status. The workflow performs a
-second exact JSON check after Playwright returns.
+Mutation checks were run outside the story worktree:
 
-CI disables traces, screenshots and video because editor credentials occur in fixture URLs. The
-uploaded artifact contains only redacted titles, repo-relative paths, final outcomes and durations;
-it contains no environment, request/response, console, error, screenshot, video or trace payload.
-The summary is written mode `0600`. Test-title logging applies the same token/JWT/secret redaction.
+- Removing the loopback-host predicate made the non-loopback-alias and bind-all-address tests red.
+- Removing the banner-height reservation made its regression red; removing padding restoration
+  also made it red.
+- Dropping the temporary `important` priority made two tests red; dropping restoration of the
+  saved priority made one test red.
+- Reverting toolbar lookup to staging-only made exactly the invited-editor geometry case red while
+  preserving the owner case.
 
-### Setup, credentials and cleanup
+## GitHub execution proof
 
-The workflow uses the disposable loopback stack only. Local Supabase anon/service-role values are
-parsed from `supabase status -o env`, appended to `GITHUB_ENV` without being printed, and the
-temporary status file is removed. Supabase startup output and status files are removed by the
-`always()` cleanup step and are not uploaded. App and WebSocket processes have an `EXIT INT TERM`
-trap; Supabase has a separate unconditional `supabase stop --no-backup` step. Redis is a GitHub
-service container with a health check and no hosted credential.
+### CI run 35534281982
 
-### Fixture cleanup and restoration
+[GitHub Actions run 35534281982](https://github.com/marcusbey/recopyfast/actions/runs/35534281982)
+completed successfully for pull request head
+`f6f03d6caccec0d4bada4435905857c38344d5ba`.
 
-Both mutating suites generate their own site UUID. Cleanup filters every explicit delete by that
-captured UUID and finishes with the exact site row, relying on its schema-owned cascades for any
-children created by the widget. Core restoration filters by both captured `site_id` and discovered
-`element_id`, then deletion still executes in `finally`. Fixture HTTP servers and parity browser
-contexts are closed in `finally`/`afterAll` paths.
+- Root audit, lint, production type-check, embed freshness/size gate, production build, and blocking
+  Jest steps all completed successfully. The separate full TypeScript job also completed.
+- Redis initialized healthy. `supabase start` and `supabase status -o env` completed under
+  `set -euo pipefail`, so the disposable project started with the repository migration catalogue
+  applied and returned local anon/service-role credentials. Those credentials entered
+  `GITHUB_ENV`, remained masked in later logs, and the temporary status file was removed.
+- The blocking browser step started realtime and Next with an `EXIT INT TERM` cleanup trap, then
+  successfully passed readiness checks for `http://127.0.0.1:4001/health` and
+  `http://127.0.0.1:3000/login` before invoking Playwright.
+- The executed log ended with: **39 passed, 0 failed, 0 skipped, 0 flaky, 39 total (expected 39)**.
+  Both secure core cases passed: invited-editor grant and edit-session token. The two-client
+  realtime parity case also passed under its one-second budget.
+- The downloaded `playwright-summary` artifact reports `contract: passed`, `expected: 39`,
+  `total: 39`, `passed: 39`, and zeros for failed/skipped/flaky. It contains 39 test records and
+  matched none of the forbidden token, Authorization, JWT, Supabase-secret, or service-role-key
+  patterns checked during review.
+- `supabase stop --no-backup` completed successfully; Supabase start/status files were deleted,
+  the service-process trap ran on step exit, GitHub stopped the Redis container, and the redacted
+  summary artifact uploaded successfully.
 
-### Migration applicability
+This run supplies the full-stack migration, readiness, executed-browser, report, and cleanup
+evidence that the broken local Docker daemon could not provide earlier. It supersedes the old
+review statement that the migration catalogue and 39-browser run were unobserved.
 
-The story changes no migration. Static inspection confirms the two historical from-scratch
-ordering hazards named in `supabase/README.md` are guarded with `to_regclass(...)` and re-applied
-after their tables exist by `20260731010000_deferred_billing_constraints.sql`. The workflow pins
-the CLI and uses the repository's local config/ports rather than a linked hosted project.
-Actual application of all 51 migrations was not observed on this host, so this is a static
-compatibility check only.
+### Realtime dependency audit 35534282000
 
-## Evidence limits and mandatory next evidence
+[Server Dependency Security run 35534282000](https://github.com/marcusbey/recopyfast/actions/runs/35534282000)
+completed successfully on the same `f6f03d6` head. It performed a clean
+`npm ci --omit=dev` in `server/`, audited 160 installed production packages, then ran
+`npm audit --omit=dev --audit-level=moderate`; both reported **0 vulnerabilities**.
 
-- Docker failed on this host, so `supabase start`, application of the 51-migration catalogue,
-  Redis/Supabase-backed service readiness, and the real 39-test Chromium run were not executed in
-  this review.
-- The local twice-clean isolation run was therefore not performed.
-- No deployed, provider, payment, or physical-device behavior is claimed by this CI-infrastructure
-  story.
-- The draft PR's GitHub Actions E2E job must be treated as mandatory completion evidence. Before
-  merge, its logs must show Supabase start/migration completion, both readiness checks, an actual
-  Playwright invocation, and the uploaded strict summary reporting exactly **39 passed, 0 failed,
-  0 skipped, 0 flaky**. A skipped, cancelled, setup-failed, placeholder-only or absent run does not
-  satisfy the story despite this code-review verdict.
+## Evidence boundaries
+
+- Pull request [#21](https://github.com/marcusbey/recopyfast/pull/21) is still open as a draft and
+  unmerged. This review does not claim merge, main-branch CI, production deployment, or branch
+  cleanup.
+- The full disposable stack was executed in GitHub Actions, not reproduced twice on this Mac after
+  its Docker daemon failed. The GitHub run is the observed full-stack proof; the local limitation
+  is no longer a claim that browser execution itself is missing.
+- The workflow uses local Supabase/Redis and inert Stripe placeholders. It proves application
+  browser behavior and isolation, not hosted-production state, real payment/provider behavior, or
+  physical-device behavior.
 
 Max severity: none
 Ship allowed: yes
