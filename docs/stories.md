@@ -1073,6 +1073,28 @@ I recognise the product as being for me.
 
 ---
 
+## Story s22-production-dependency-security — clear the production security release gate
+
+As an owner, I need the deployed app's dependencies to pass the existing production security
+audit so that the reviewed editor release does not ship known vulnerable runtime packages.
+
+Complexity: **3**. Non-UI, inherited stack maintenance; no product or architecture redesign.
+User approved the concrete remediation plan on 20 September 2026 UTC ("looking good").
+
+- [ ] Patch the seven audited root dependency packages through targeted changes; retain the
+  nested fflate minor line and include Dependabot PR16's fast-uri fix without editing that PR.
+- [ ] Preserve other direct dependencies, the Fly server tree, application behavior, all CI
+  thresholds, test expectations, embed artifacts and byte ceilings.
+- [ ] Clean install, production audit, Sharp loading, typechecks, lint, formatting, production
+  build, full tests/coverage and representative image/owner/editor smoke checks pass.
+- [ ] Independent review and real CI gate results precede authorized merge/deployment; explicitly
+  distinguish a skipped Playwright job from executed browser evidence.
+- [ ] Prove the exact deployed release and complete the separately authorized editor rollout
+  with restored disposable copy; do not infer paid access or physical-device proof.
+
+Canonical plan: `docs/plans/s22-production-dependency-security.md`.
+Research: `docs/research/s22-production-dependency-security.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
