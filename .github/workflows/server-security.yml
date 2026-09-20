@@ -1,0 +1,41 @@
+name: Server Dependency Security
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+
+jobs:
+  server-audit:
+    name: Realtime server production audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 24.14.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      # The realtime service is a separate Fly deploy target with its own lock.
+      # In September 2026 its vulnerable qs tree stayed invisible while the root
+      # production audit passed, because that audit never reads server/package-lock.json.
+      # Keep this as a clean production install followed by a moderate-level gate:
+      # raising the threshold to high would reintroduce the exact blind spot.
+      - name: Clean install realtime server production dependencies
+        working-directory: server
+        run: npm ci --omit=dev
+
+      - name: Audit realtime server production dependencies
+        working-directory: server
+        run: npm audit --omit=dev --audit-level=moderate

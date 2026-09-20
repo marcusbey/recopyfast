@@ -1178,6 +1178,26 @@ User approved the concrete remediation plan on 20 September 2026 UTC ("looking g
 Canonical plan: `docs/plans/s22-production-dependency-security.md`.
 Research: `docs/research/s22-production-dependency-security.md`.
 
+## Story s23-websocket-dependency-security — clear the realtime server audit
+
+As the operator, I need the separately deployed WebSocket server to carry no known production
+dependency advisory so that realtime does not remain the weaker half of the release.
+
+Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and its release gate.
+
+- [ ] Raise the server's Express 4 floor to a patched compatible release and regenerate only
+  `server/package-lock.json`; no Express 5 migration, override or server behavior change.
+- [ ] `npm audit --omit=dev --prefix server` reports zero findings, including moderate findings.
+- [ ] Existing WebSocket integration/parity behavior, `/health`, one-machine topology and
+  websocket-only transport remain unchanged.
+- [ ] CI gains a blocking clean-install and zero-advisory server audit so the regression cannot
+  return while the root audit stays green.
+- [ ] Independent review, exact Fly deployment, `/health`, app readiness and two-client realtime
+  evidence pass with a documented rollback image/release.
+
+Research: `docs/research/s23-websocket-dependency-security.md`.
+Plan: `docs/plans/s23-websocket-dependency-security.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
