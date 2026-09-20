@@ -6,6 +6,7 @@ import type {
   FullResult,
   Suite,
   TestCase,
+  TestError,
   TestResult,
 } from "@playwright/test/reporter";
 import StrictReporter from "../../../e2e/support/strict-reporter";
@@ -160,6 +161,50 @@ describe("StrictReporter", () => {
     );
     expect(consoleLog.mock.calls.flat().join("\n")).not.toContain(
       "secret-edit-token",
+    );
+    consoleLog.mockRestore();
+  });
+
+  it("captures redacted hook errors from the reporter global error channel", async () => {
+    const outputFile = join(
+      mkdtempSync(join(tmpdir(), "rcf-e2e-")),
+      "summary.json",
+    );
+    const reporter = new StrictReporter({ expected: 1, outputFile });
+    const consoleLog = jest.spyOn(console, "log").mockImplementation(() => {});
+    const rawDiagnostic =
+      "beforeAll failed: staging_access rejected access_type='link' " +
+      "rcf_token=secret-staging-token verification_code=424242 " +
+      "SUPABASE_SERVICE_ROLE_KEY=qa-secret e2e@example.test";
+    reporter.onBegin(
+      { rootDir: "/repo" } as FullConfig,
+      fakeSuite([fakeTest("fixture setup", "unexpected", "failed")]),
+    );
+    reporter.onError({ message: rawDiagnostic } as TestError);
+
+    await expect(
+      reporter.onEnd({ status: "failed" } as FullResult),
+    ).resolves.toEqual({ status: "failed" });
+
+    const reportText = readFileSync(outputFile, "utf8");
+    const report = JSON.parse(reportText);
+    expect(report.diagnostics).toEqual([
+      expect.stringContaining("staging_access rejected access_type='link'"),
+    ]);
+    expect(reportText).toContain("[REDACTED]");
+    for (const secret of [
+      "secret-staging-token",
+      "424242",
+      "qa-secret",
+      "e2e@example.test",
+    ]) {
+      expect(reportText).not.toContain(secret);
+    }
+    expect(consoleLog).toHaveBeenCalledWith(
+      expect.stringContaining("staging_access rejected access_type='link'"),
+    );
+    expect(consoleLog.mock.calls.flat().join("\n")).not.toContain(
+      "secret-staging-token",
     );
     consoleLog.mockRestore();
   });

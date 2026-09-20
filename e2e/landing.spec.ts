@@ -10,6 +10,7 @@
  */
 
 import { test, expect } from "@playwright/test";
+import { pricingSection } from "./support/landing-locators";
 
 // Increase timeout for landing page tests (homepage can be slow to hydrate)
 test.describe("Landing Page", () => {
@@ -42,7 +43,7 @@ test.describe("Landing Page", () => {
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
     // Scroll to pricing section
-    const pricing = page.locator("#pricing");
+    const pricing = pricingSection(page);
     await expect(pricing).toBeAttached({ timeout: 15000 });
     // Not scrollIntoViewIfNeeded: it waits for the element's bounding box to
     // hold still, and the landing page animates continuously, so it times out
@@ -75,12 +76,18 @@ test.describe("Landing Page", () => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
+    const pricing = pricingSection(page);
+    await expect(pricing).toBeAttached({ timeout: 15000 });
+
     // Navigate to pricing section via anchor link to ensure scroll
-    await page.locator('a[href*="pricing"], a:has-text("Pricing")').first().click();
+    await page
+      .locator('a[href*="pricing"], a:has-text("Pricing")')
+      .first()
+      .click();
     await page.waitForTimeout(1000);
 
     // Wait for the pricing button to be visible and interactive
-    const yearlyButton = page.locator('#pricing button:has-text("Yearly")');
+    const yearlyButton = pricing.getByRole("button", { name: "Yearly" });
     await expect(yearlyButton).toBeVisible({ timeout: 15000 });
 
     // Click yearly toggle
@@ -88,10 +95,10 @@ test.describe("Landing Page", () => {
     await page.waitForTimeout(1000);
 
     // Verify yearly prices appear (catalogue: Starter $7.5/mo, Pro $15.75/mo)
-    await expect(page.locator('#pricing :text("$7.5")')).toBeVisible({
+    await expect(pricing.getByText("$7.5", { exact: true })).toBeVisible({
       timeout: 5000,
     });
-    await expect(page.locator('#pricing :text("$15.75")')).toBeVisible();
+    await expect(pricing.getByText("$15.75", { exact: true })).toBeVisible();
   });
 
   // E2E-014: Monthly toggle restores original prices
@@ -99,14 +106,14 @@ test.describe("Landing Page", () => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
-    const pricing = page.locator("#pricing");
+    const pricing = pricingSection(page);
     await expect(pricing).toBeAttached({ timeout: 15000 });
     // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
     // Wait for buttons to render
-    const yearlyButton = page.locator('#pricing button:has-text("Yearly")');
+    const yearlyButton = pricing.getByRole("button", { name: "Yearly" });
     await expect(yearlyButton).toBeVisible({ timeout: 15000 });
 
     // Switch to yearly first
@@ -114,7 +121,7 @@ test.describe("Landing Page", () => {
     await page.waitForTimeout(500);
 
     // Switch back to monthly
-    const monthlyButton = page.locator('#pricing button:has-text("Monthly")');
+    const monthlyButton = pricing.getByRole("button", { name: "Monthly" });
     await monthlyButton.click();
     await page.waitForTimeout(500);
 
@@ -129,15 +136,13 @@ test.describe("Landing Page", () => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
-    const pricing = page.locator("#pricing");
+    const pricing = pricingSection(page);
     await expect(pricing).toBeAttached({ timeout: 15000 });
     // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
     await page.waitForTimeout(500);
 
-    const popularBadge = page.locator(
-      '#pricing :text("Most popular"), #pricing :text("MOST POPULAR")',
-    );
+    const popularBadge = pricing.getByText("Most popular", { exact: true });
     // The badge arrives with the client-side /api/pricing fetch.
     await expect(popularBadge.first()).toBeVisible({ timeout: 15000 });
   });
@@ -147,7 +152,7 @@ test.describe("Landing Page", () => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
-    const pricing = page.locator("#pricing");
+    const pricing = pricingSection(page);
     await expect(pricing).toBeAttached({ timeout: 15000 });
     // Plain scrollIntoView — see the note on E2E-012.
     await pricing.evaluate((el) => el.scrollIntoView({ block: "start" }));
@@ -164,7 +169,7 @@ test.describe("Landing Page", () => {
   test("E2E-017: Trust indicators are present", async ({ page }) => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
-    const pricing = page.locator("#pricing");
+    const pricing = pricingSection(page);
     await expect(pricing).toBeAttached({ timeout: 15000 });
 
     // Scoped to #pricing, not the whole body: asserting on body would pass even
@@ -189,7 +194,7 @@ test.describe("Landing Page", () => {
     page,
   }) => {
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
-    await expect(page.locator("#pricing")).toBeAttached({ timeout: 15000 });
+    await expect(pricingSection(page)).toBeAttached({ timeout: 15000 });
 
     const pageText = await page.textContent("body");
 

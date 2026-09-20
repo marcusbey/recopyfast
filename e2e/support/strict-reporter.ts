@@ -6,6 +6,7 @@ import type {
   Reporter,
   Suite,
   TestCase,
+  TestError,
   TestResult,
 } from "@playwright/test/reporter";
 import {
@@ -29,6 +30,7 @@ interface SerializableReport {
   skipped: number;
   flaky: number;
   tests: FinalTestRecord[];
+  diagnostics?: string[];
 }
 
 const MAX_DIAGNOSTICS_PER_TEST = 3;
@@ -121,6 +123,7 @@ export default class StrictReporter implements Reporter {
   private readonly outputFile: string;
   private rootDir = process.cwd();
   private suite: Suite | null = null;
+  private readonly globalDiagnostics = new Set<string>();
 
   constructor(options: StrictReporterOptions = {}) {
     this.expected = options.expected ?? 39;
@@ -139,6 +142,19 @@ export default class StrictReporter implements Reporter {
       `[playwright] ${result.status} ${redactDiagnostic(test.titlePath().join(" > "))} ` +
         `(${result.duration}ms)${diagnostic ? ` — ${diagnostic}` : ""}`,
     );
+  }
+
+  onError(error: TestError): void {
+    const rawDiagnostic = error.message ?? error.value;
+    if (!rawDiagnostic) return;
+
+    const diagnostic = redactDiagnostic(rawDiagnostic);
+    if (!diagnostic) return;
+
+    if (this.globalDiagnostics.size < MAX_DIAGNOSTICS_PER_TEST) {
+      this.globalDiagnostics.add(diagnostic);
+    }
+    console.log(`[playwright] global error — ${diagnostic}`);
   }
 
   async onEnd(result: FullResult): Promise<{ status: "failed" } | undefined> {
@@ -165,7 +181,12 @@ export default class StrictReporter implements Reporter {
       contract = "failed";
     }
 
-    const report: SerializableReport = { contract, ...summary };
+    const diagnostics = [...this.globalDiagnostics];
+    const report: SerializableReport = {
+      contract,
+      ...summary,
+      ...(diagnostics.length > 0 ? { diagnostics } : {}),
+    };
     mkdirSync(dirname(this.outputFile), { recursive: true });
     writeFileSync(this.outputFile, `${JSON.stringify(report, null, 2)}\n`, {
       encoding: "utf8",
