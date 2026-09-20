@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type {
   FullConfig,
   FullResult,
+  Reporter,
   Suite,
   TestCase,
   TestError,
@@ -207,5 +208,91 @@ describe("StrictReporter", () => {
       "secret-staging-token",
     );
     consoleLog.mockRestore();
+  });
+
+  it("does not forward unrelated worker output from either channel", () => {
+    const reporter: Reporter = new StrictReporter();
+    const stdoutWrite = jest
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const stderrWrite = jest
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    reporter.onStdOut?.(
+      "ordinary worker log http://127.0.0.1:3000 token=must-not-print\n",
+      undefined,
+      undefined,
+    );
+    reporter.onStdErr?.(
+      "database error http://127.0.0.1:54321 secret=must-not-print\n",
+      undefined,
+      undefined,
+    );
+
+    expect(stdoutWrite).not.toHaveBeenCalled();
+    expect(stderrWrite).not.toHaveBeenCalled();
+    stdoutWrite.mockRestore();
+    stderrWrite.mockRestore();
+  });
+
+  it("forwards one bounded redacted core setup stderr line", () => {
+    const reporter: Reporter = new StrictReporter();
+    const stderrWrite = jest
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const diagnostic = Buffer.from(
+      "[core-e2e setup] seed staging access: insert failed " +
+        "at http://127.0.0.1:54321/rest/v1/staging_access " +
+        "via postgresql://postgres:database-secret@127.0.0.1:54322/postgres " +
+        "site=123e4567-e89b-12d3-a456-426614174000 " +
+        "rcf_token=secret-token verification_code=424242 " +
+        "SUPABASE_SERVICE_ROLE_KEY=qa-secret " +
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.signature " +
+        "e2e@example.test " +
+        "x".repeat(3000),
+    );
+
+    reporter.onStdErr?.(diagnostic, undefined, undefined);
+
+    expect(stderrWrite).toHaveBeenCalledTimes(1);
+    const output = String(stderrWrite.mock.calls[0][0]);
+    expect(output).toContain("[core-e2e setup] seed staging access:");
+    expect(output).toContain("insert failed");
+    expect(output).toContain("[REDACTED]");
+    expect(output.endsWith("\n")).toBe(true);
+    expect(output.length).toBeLessThanOrEqual(1601);
+    for (const secret of [
+      "123e4567-e89b-12d3-a456-426614174000",
+      "http://127.0.0.1:54321/rest/v1/staging_access",
+      "postgresql://postgres:database-secret@127.0.0.1:54322/postgres",
+      "secret-token",
+      "424242",
+      "qa-secret",
+      "eyJhbGciOiJIUzI1NiJ9",
+      "e2e@example.test",
+    ]) {
+      expect(output).not.toContain(secret);
+    }
+    stderrWrite.mockRestore();
+  });
+
+  it("forwards an allowlisted core setup diagnostic from stdout", () => {
+    const reporter: Reporter = new StrictReporter();
+    const stdoutWrite = jest
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    reporter.onStdOut?.(
+      "[core-e2e setup] stage: safe error\n",
+      undefined,
+      undefined,
+    );
+
+    expect(stdoutWrite).toHaveBeenCalledTimes(1);
+    expect(stdoutWrite).toHaveBeenCalledWith(
+      "[core-e2e setup] stage: safe error\n",
+    );
+    stdoutWrite.mockRestore();
   });
 });

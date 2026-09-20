@@ -35,6 +35,22 @@ interface SerializableReport {
 }
 
 const MAX_DIAGNOSTICS_PER_TEST = 3;
+const CORE_SETUP_DIAGNOSTIC_PREFIX = "[core-e2e setup]";
+
+function redactedCoreSetupChunk(chunk: string | Buffer): string | null {
+  const line = (typeof chunk === "string" ? chunk : chunk.toString("utf8"))
+    .split(/\r?\n/)
+    .map((candidate) => candidate.trim())
+    .find((candidate) => candidate.startsWith(CORE_SETUP_DIAGNOSTIC_PREFIX));
+  if (!line) return null;
+
+  const withoutUrls = line.replace(
+    /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>]+/gi,
+    "[REDACTED URL]",
+  );
+  const diagnostic = redactDiagnostic(withoutUrls);
+  return diagnostic ? `${diagnostic}\n` : null;
+}
 
 function resultDiagnostics(result: TestResult): string[] {
   const messages = result.errors
@@ -118,6 +134,25 @@ export default class StrictReporter implements Reporter {
       this.globalDiagnostics.add(diagnostic);
     }
     console.log(`[playwright] global error — ${diagnostic}`);
+  }
+
+  /**
+   * The first executed s24 Actions run proved that Playwright routes worker
+   * console output through reporter hooks when a custom reporter is the only
+   * configured reporter. The core fixture already emits one deliberately
+   * bounded/redacted setup diagnostic, but the missing hooks discarded it and
+   * left a 0ms beforeAll failure with no actionable stage. Forward only that
+   * trusted prefix after a second redaction pass. General worker output stays
+   * suppressed because page/fixture logs can contain short-lived editor URLs.
+   */
+  onStdOut(chunk: string | Buffer): void {
+    const output = redactedCoreSetupChunk(chunk);
+    if (output) process.stdout.write(output);
+  }
+
+  onStdErr(chunk: string | Buffer): void {
+    const output = redactedCoreSetupChunk(chunk);
+    if (output) process.stderr.write(output);
   }
 
   async onEnd(result: FullResult): Promise<{ status: "failed" } | undefined> {
