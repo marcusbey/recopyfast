@@ -5,6 +5,7 @@ export interface FinalTestRecord {
   file: string;
   outcome: FinalTestOutcome;
   durationMs: number;
+  diagnostics?: string[];
 }
 
 export interface StrictRunSummary {
