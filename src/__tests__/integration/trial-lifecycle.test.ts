@@ -257,6 +257,9 @@ function createFakeClient() {
         status: "pending",
         stripe_session_id: null,
         checkout_url: null,
+        stripe_price_id: args.p_stripe_price_id,
+        plan_id: args.p_plan_id,
+        billing_period: args.p_billing_period,
         expires_at: args.p_expires_at,
       };
       mockDb.checkout_pending_intents = [
@@ -335,11 +338,12 @@ jest.mock("@/lib/stripe/plans", () => ({
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
   getPaidPlan: jest.fn(),
-  resolveStripePriceId: jest.fn(),
+  resolveStripePriceId: jest.fn(async () => "price_pro_monthly"),
 }));
 
 const mockCreateCheckoutSession = jest.fn();
 const mockFindCheckoutSessionForIntent = jest.fn();
+const mockExpireCheckoutSession = jest.fn();
 
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
@@ -347,6 +351,8 @@ jest.mock("@/lib/stripe/checkout", () => ({
   findCheckoutSessionForIntent: (...args: unknown[]) =>
     mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: jest.fn(),
+  expireCheckoutSession: (...args: unknown[]) =>
+    mockExpireCheckoutSession(...args),
 }));
 
 import { ensureTrialStarted } from "@/lib/billing/trial";

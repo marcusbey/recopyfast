@@ -23,6 +23,7 @@ type RowsResult = { data: Row[] | null; error: null };
 
 let db: Record<string, Row[]> = {};
 let pendingIntent: Row | null = null;
+let pendingIntentAfterFinish: Row | null = null;
 let failNextAttach = false;
 let failSubscriptionRead = false;
 let failClaim = false;
@@ -122,11 +123,26 @@ const mockIntentClient = {
           user_id: USER_ID,
           stripe_session_id: null,
           checkout_url: null,
+          stripe_price_id: args.p_stripe_price_id,
+          plan_id: args.p_plan_id,
+          billing_period: args.p_billing_period,
           expires_at: args.p_expires_at,
         };
         return { data: [{ ...pendingIntent, is_new: true }], error: null };
       }
-      return { data: [{ ...pendingIntent, is_new: false }], error: null };
+      return {
+        data: [
+          {
+            ...pendingIntent,
+            stripe_price_id:
+              pendingIntent.stripe_price_id ?? "price_pro_monthly",
+            plan_id: pendingIntent.plan_id ?? "pro",
+            billing_period: pendingIntent.billing_period ?? "monthly",
+            is_new: false,
+          },
+        ],
+        error: null,
+      };
     }
     if (name === "attach_subscription_checkout_session") {
       if (failNextAttach) {
@@ -146,7 +162,8 @@ const mockIntentClient = {
       name === "finish_subscription_checkout_intent" ||
       name === "expire_unattached_subscription_checkout_intent"
     ) {
-      pendingIntent = null;
+      pendingIntent = pendingIntentAfterFinish;
+      pendingIntentAfterFinish = null;
       return { data: null, error: null };
     }
     throw new Error(`Unexpected RPC ${name}`);
@@ -160,6 +177,7 @@ jest.mock("@/lib/supabase/service", () => ({
 const mockCreateCheckoutSession = jest.fn();
 const mockFindCheckoutSessionForIntent = jest.fn();
 const mockGetCheckoutSessionStatus = jest.fn();
+const mockExpireCheckoutSession = jest.fn();
 
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
@@ -168,6 +186,8 @@ jest.mock("@/lib/stripe/checkout", () => ({
     mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: (...args: unknown[]) =>
     mockGetCheckoutSessionStatus(...args),
+  expireCheckoutSession: (...args: unknown[]) =>
+    mockExpireCheckoutSession(...args),
 }));
 
 const mockGetUserSubscription = jest.fn();
@@ -196,6 +216,10 @@ jest.mock("@/lib/stripe/plans", () => ({
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  resolveStripePriceId: jest.fn(
+    async (planId: string, billingPeriod: string) =>
+      `price_${planId}_${billingPeriod}`,
+  ),
 }));
 
 import { POST } from "@/app/api/billing/checkout/route";
@@ -236,6 +260,7 @@ describe("A-21: two checkouts started at once", () => {
     jest.spyOn(console, "error").mockImplementation(() => {});
     db = { billing_subscriptions: [] };
     pendingIntent = null;
+    pendingIntentAfterFinish = null;
     failNextAttach = false;
     failSubscriptionRead = false;
     failClaim = false;
@@ -249,6 +274,7 @@ describe("A-21: two checkouts started at once", () => {
     mockGetGrantedPlanIds.mockResolvedValue([]);
     mockFindCheckoutSessionForIntent.mockResolvedValue(null);
     mockGetCheckoutSessionStatus.mockResolvedValue({ status: "open" });
+    mockExpireCheckoutSession.mockResolvedValue(undefined);
     mockCreateCheckoutSession.mockImplementation(async () => ({
       sessionId: `cs_${mockCreateCheckoutSession.mock.calls.length}`,
       url: "https://checkout.stripe.com/c/pay/cs_test",
@@ -327,6 +353,7 @@ describe("A-21: two checkouts started at once", () => {
       {
         pendingIntentId: pendingIntent?.id,
         expiresAt: pendingIntent?.expires_at,
+        priceId: "price_pro_monthly",
       },
     ]);
     expect(mockFindCheckoutSessionForIntent).not.toHaveBeenCalled();
@@ -397,6 +424,227 @@ describe("A-21: two checkouts started at once", () => {
     expect(await second.json()).toMatchObject({
       url: expect.stringContaining("checkout.stripe.com"),
     });
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("expires a Pro yearly session and redirects a new Starter monthly choice", async () => {
+    pendingIntent = {
+      id: "intent_pro_yearly",
+      user_id: USER_ID,
+      stripe_session_id: "cs_pro_yearly",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_pro_yearly",
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockCreateCheckoutSession.mockResolvedValueOnce({
+      sessionId: "cs_starter_monthly",
+      url: "https://checkout.stripe.com/c/pay/cs_starter_monthly",
+    });
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      sessionId: "cs_starter_monthly",
+      url: "https://checkout.stripe.com/c/pay/cs_starter_monthly",
+    });
+    expect(mockExpireCheckoutSession).toHaveBeenCalledWith("cs_pro_yearly");
+    expect(mockCreateCheckoutSession).toHaveBeenCalledWith(
+      USER_ID,
+      "buyer@example.com",
+      { type: "subscription", planId: "starter", billingPeriod: "monthly" },
+      undefined,
+      expect.objectContaining({
+        pendingIntentId: expect.any(String),
+        priceId: "price_starter_monthly",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "Stripe Price",
+      stripePriceId: "price_retired_pro_monthly",
+      planId: "pro",
+      billingPeriod: "monthly",
+    },
+    {
+      label: "billing period",
+      stripePriceId: "price_pro_monthly",
+      planId: "pro",
+      billingPeriod: "yearly",
+    },
+  ])(
+    "replaces a stored checkout when only its $label differs",
+    async ({ stripePriceId, planId, billingPeriod }) => {
+      pendingIntent = {
+        id: "intent_old_choice",
+        user_id: USER_ID,
+        stripe_session_id: "cs_old_choice",
+        checkout_url: "https://checkout.stripe.com/c/pay/cs_old_choice",
+        stripe_price_id: stripePriceId,
+        plan_id: planId,
+        billing_period: billingPeriod,
+        expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+      };
+
+      const response = await post({
+        intent: "subscription",
+        planId: "pro",
+        billingPeriod: "monthly",
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockExpireCheckoutSession).toHaveBeenCalledWith("cs_old_choice");
+      expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not release or replace the intent when session expiry is ambiguous", async () => {
+    pendingIntent = {
+      id: "intent_pro_yearly",
+      user_id: USER_ID,
+      stripe_session_id: "cs_pro_yearly",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_pro_yearly",
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockExpireCheckoutSession.mockRejectedValueOnce(
+      new Error("socket timeout"),
+    );
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockIntentClient.rpc).not.toHaveBeenCalledWith(
+      "finish_subscription_checkout_intent",
+      expect.anything(),
+    );
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of expiring a concurrent successor choice", async () => {
+    pendingIntent = {
+      id: "intent_original",
+      user_id: USER_ID,
+      stripe_session_id: "cs_original",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_original",
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    pendingIntentAfterFinish = {
+      id: "intent_concurrent",
+      user_id: USER_ID,
+      stripe_session_id: "cs_concurrent",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_concurrent",
+      stripe_price_id: "price_pro_monthly",
+      plan_id: "pro",
+      billing_period: "monthly",
+      expires_at: new Date(Date.now() + 50 * 60_000).toISOString(),
+    };
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(409);
+    expect(mockExpireCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(mockExpireCheckoutSession).toHaveBeenCalledWith("cs_original");
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("expires a recovered session when the customer requests a different choice", async () => {
+    pendingIntent = {
+      id: "intent_pro_yearly",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockFindCheckoutSessionForIntent.mockResolvedValueOnce({
+      sessionId: "cs_recovered_pro_yearly",
+      url: "https://checkout.stripe.com/c/pay/cs_recovered_pro_yearly",
+      status: "open",
+    });
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockExpireCheckoutSession).toHaveBeenCalledWith(
+      "cs_recovered_pro_yearly",
+    );
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when a concurrent request claimed a different unattached choice", async () => {
+    pendingIntent = {
+      id: "intent_pro_yearly",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(409);
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+    expect(mockExpireCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("releases an expired unattached different choice after provider recovery finds nothing", async () => {
+    pendingIntent = {
+      id: "intent_old_choice",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      stripe_price_id: "price_pro_yearly",
+      plan_id: "pro",
+      billing_period: "yearly",
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    };
+
+    const response = await post({
+      intent: "subscription",
+      planId: "starter",
+      billingPeriod: "monthly",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockIntentClient.rpc).toHaveBeenCalledWith(
+      "expire_unattached_subscription_checkout_intent",
+      expect.objectContaining({ p_intent_id: "intent_old_choice" }),
+    );
     expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
   });
 

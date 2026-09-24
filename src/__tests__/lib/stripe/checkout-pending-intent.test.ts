@@ -1,5 +1,7 @@
 const mockSessionCreate = jest.fn();
 const mockSessionList = jest.fn();
+const mockSessionExpire = jest.fn();
+const mockSessionRetrieve = jest.fn();
 
 jest.mock("@/lib/stripe/config", () => ({
   stripe: {
@@ -7,6 +9,8 @@ jest.mock("@/lib/stripe/config", () => ({
       sessions: {
         create: (...args: unknown[]) => mockSessionCreate(...args),
         list: (...args: unknown[]) => mockSessionList(...args),
+        expire: (...args: unknown[]) => mockSessionExpire(...args),
+        retrieve: (...args: unknown[]) => mockSessionRetrieve(...args),
       },
     },
   },
@@ -32,6 +36,7 @@ jest.mock("@/lib/deployment/origin", () => ({
 
 import {
   createCheckoutSession,
+  expireCheckoutSession,
   findCheckoutSessionForIntent,
 } from "@/lib/stripe/checkout";
 
@@ -52,19 +57,28 @@ describe("subscription Checkout pending-intent contract", () => {
       "buyer@example.com",
       { type: "subscription", planId: "pro", billingPeriod: "yearly" },
       undefined,
-      { pendingIntentId: "intent_1", expiresAt },
+      {
+        pendingIntentId: "intent_1",
+        expiresAt,
+        priceId: "price_locked_on_intent",
+      },
     );
     await createCheckoutSession(
       "user-1",
       "buyer@example.com",
       { type: "subscription", planId: "pro", billingPeriod: "yearly" },
       undefined,
-      { pendingIntentId: "intent_1", expiresAt },
+      {
+        pendingIntentId: "intent_1",
+        expiresAt,
+        priceId: "price_locked_on_intent",
+      },
     );
 
     expect(mockSessionCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         expires_at: Date.parse(expiresAt) / 1000,
+        line_items: [{ price: "price_locked_on_intent", quantity: 1 }],
         metadata: expect.objectContaining({ checkout_intent_id: "intent_1" }),
         subscription_data: expect.objectContaining({
           metadata: expect.objectContaining({
@@ -133,6 +147,33 @@ describe("subscription Checkout pending-intent contract", () => {
       expect.objectContaining({
         created: { gte: Date.parse("2026-09-24T17:30:00.000Z") / 1000 },
       }),
+    );
+  });
+
+  it("treats a concurrently expired Checkout Session as an idempotent success", async () => {
+    const providerError = new Error("Checkout Session is no longer open");
+    mockSessionExpire.mockRejectedValueOnce(providerError);
+    mockSessionRetrieve.mockResolvedValueOnce({
+      id: "cs_already_expired",
+      status: "expired",
+    });
+
+    await expect(
+      expireCheckoutSession("cs_already_expired"),
+    ).resolves.toBeUndefined();
+    expect(mockSessionRetrieve).toHaveBeenCalledWith("cs_already_expired");
+  });
+
+  it("keeps an ambiguous expiry failure closed when Stripe does not confirm expiry", async () => {
+    const providerError = new Error("socket timeout");
+    mockSessionExpire.mockRejectedValueOnce(providerError);
+    mockSessionRetrieve.mockResolvedValueOnce({
+      id: "cs_still_open",
+      status: "open",
+    });
+
+    await expect(expireCheckoutSession("cs_still_open")).rejects.toBe(
+      providerError,
     );
   });
 });

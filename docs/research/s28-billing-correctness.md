@@ -41,7 +41,7 @@ The previous checkout_reservations table carries no Stripe session id. The new p
 
 ## A-21 execution evidence
 
-Migration: `supabase/migrations/20260924020000_checkout_pending_intents.sql` (unapplied). It uses a per-user advisory transaction lock plus a partial unique index for pending rows. Its service-only claim checks existing nonterminal subscriptions before creating a new row, closing the webhook-release/new-claim race. Expiry is one hour, fixed before Stripe creation; a timestamp alone never releases an attached intent. Provider recovery scans all customer session pages and matches both user and intent metadata. A lost creation response or attach write recovers the original session; an unattached expired intent with no provider session can be safely replaced. Completion persists current subscription state before release, including incomplete/unpaid obligations; a delayed old event cannot alter a newer intent.
+Migration: `supabase/migrations/20260924020000_checkout_pending_intents.sql` (unapplied). It uses a per-user advisory transaction lock plus a partial unique index for pending rows. Its service-only claim checks active/trialing/past_due subscriptions before creating a new row, closing the webhook-release/new-claim race only for those live statuses. Incomplete, unpaid and paused subscriptions do not block checkout and may later recover, creating parallel live subscriptions (re-review N2; explicitly deferred in the plan). Expiry is one hour, fixed before Stripe creation; a timestamp alone never releases an attached intent. Provider recovery scans all customer session pages and matches both user and intent metadata. A lost creation response or attach write recovers the original session; an unattached expired intent with no provider session can be safely replaced. Completion persists current subscription state before release, including incomplete/unpaid rows, but those statuses do not block a new claim. Persistence is not protection against their later recovery. A delayed old event cannot alter a newer intent.
 
 The new unpaid checkout completion assertion was red with missing subscription state, then green after reconciliation was placed ahead of the one-off unpaid guard. Focused checkout/concurrency/webhook/SDK tests: 3 suites, 28 passed. Full billing and Stripe command: `npm test -- --runInBand src/__tests__/api/billing src/__tests__/lib/stripe`: 19 suites, 217 passed. Type-check passed.
 
@@ -69,7 +69,7 @@ The migration is statically inspected and mocked at application boundaries only;
 
 The reviewer-owned `docs/reviews/s28-billing-correctness.md` is preserved byte-for-byte and excluded from all commits. Its blocked verdict is historical evidence, not replaced by this repair report.
 
-C2 and m4 now have RED evidence (3 failed / 14 passed) and GREEN evidence (17 focused tests, 56 across 6 credit suites). The exact Feb 28 → Mar 31 / Mar 29 and Apr 30 → May 31 / May 30 fixtures retain all usage from the Stripe monthly period. Annual terms retain anchored UTC stepping. The database fake now implements ordering, limit and multi-row errors, so the newest live subscription regression cannot pass through an unrealistically permissive `maybeSingle`.
+C2 and m4 now have RED evidence (3 failed / 14 passed) and GREEN evidence (17 focused tests, 56 across 6 credit suites). The exact Feb 28 → Mar 31 / Mar 29 and Apr 30 → May 31 / May 30 fixtures retain all usage from the Stripe monthly period. Annual terms retain anchored UTC stepping. The database fake implements ordering, limit and multi-row errors. Re-review mutation R5 showed that the original two-row fixture still passed without ordering because both windows excluded the sampled usage; the fixture did not yet prove newest-row selection. Fix mode 2 strengthens that fixture and records a fresh mutation result below.
 
 M2 has RED evidence (1 failed / 1 passed), then 21 passing tests across 3 billing component suites. A 409 with a non-empty URL follows the existing full-browser navigation; a conflict without a URL remains an error. The billing page already renders `BillingDashboard` → `UpgradeDialog` → `useCheckout`, so this repair covers its purchase entry point without a separate page redirect implementation.
 
@@ -107,3 +107,40 @@ Integrated `origin/main` at `a687181` (PR #22 lockfile and PR #26 auth hotfix). 
 All Critical/Major findings and m1–m4/m6–m9 are fixed. m5's invalid-expiry 500 is replaced by an explicit bounded 409/retryAt; immediate recovery before the fixed expiry remains deferred for the duplicate-payment safety reason above. The independent review file remains byte-identical (SHA-256 `40d7508d8af3d2399877ada79301b86d2b6987c2b0186739710a6e4ad4985f0b`) and excluded from repair commits. Remote migration application and deployment remain operator actions.
 
 The durable-intent ADR uses 028 because open PR #24 already owns ADR 027 for page-scoped identity/content attributes. Only its identifier and references changed; the decision is unchanged.
+
+
+## Re-review fix mode 2 — 2026-09-24
+
+The current reviewer-owned re-review permits ship (`Max severity: major`, `Ship allowed: yes`). It remains unmodified and uncommitted. N2 is explicitly out of scope: incomplete/unpaid/paused subscriptions may recover after a second checkout. The plan records the required follow-up; this fix does not change that eligibility contract.
+
+N3: the operations runbook now lists all 14 handler events, including `checkout.session.expired`, and requires the operator to update the live endpoint subscription at cutover. No Stripe configuration was accessed or changed.
+
+N4: the two-row fixture now includes April 30 usage inside the newer monthly window and outside the older annual row's May 1 window. Removing `.order("created_at", { ascending: false })` produces exactly one failing test (16 pass): expected usage 275, received 75. The order clause was restored byte-for-byte; `src/lib/credits/system.ts` has no fix-mode-2 diff. This replaces the earlier R5 zero-red gap with observed mutation evidence.
+
+m5: a valid 409 `retryAt` is appended to the existing billing error as “You can start a new checkout at HH:MM.” in the browser's local 24-hour time. Missing/invalid timestamps preserve the error; a reusable URL still redirects. The hook regression was red (1 failed, 20 passed) before implementation. Hook, rendered LifetimeOfferCard, and annual-period suites then passed 35 tests across 3 suites. The same hook error is displayed by UpgradeDialog on the billing subscription purchase path.
+
+
+N1: `20260924050000_checkout_intent_requested_choice.sql` adds the requested Stripe price, plan and billing period and a service-only five-argument claim RPC. A pending row returns its original choice unchanged. The route resumes only an identical choice; a changed choice expires the known or recovered Stripe session, confirms any already-expired error by retrieval, then finishes/reclaims before creating the new checkout. A request replaces at most one different choice, so it does not cancel a competing successor. Completed sessions and ambiguous expiry stay closed. An unattached ambiguous choice waits until recovery or expiry, with `retryAt`; after expiry and an empty recovery result, a changed choice can be claimed. The exact persisted price is passed into Stripe line items and pinned by the SDK test.
+
+The two-argument service-only claim overload is intentionally retained for rollback compatibility with the preceding s28 application. The current application's sole caller passes all five named arguments. Legacy rows may have null choice columns and are treated as non-identical; the existing no-mixed-version cutover requirement still applies. No browser role can invoke either claim RPC.
+
+N1 TDD evidence: initial route/helper run had 5 failures and 26 passes; the final checkout/Stripe/webhook/trial-lifecycle set passed 59 tests across 4 suites. No scoped failing markers were added, removed or flipped in this pass; existing guards remain enabled.
+
+The new migration was executed twice after its predecessor in a disposable socket-only PostgreSQL cluster with minimal auth/subscription stubs. Checks passed for exact choice persistence, immutable reuse, replacement after idempotent finish, one pending row, service-only RPC/table privileges, active/trialing/past_due blocking and null-choice rejection. The cluster was stopped and removed. This is local PostgreSQL evidence, not a full Supabase/PostgREST or remote migration execution. The new prefix has zero matches across fetched remote branches.
+
+
+### Fix mode 2 final gates
+
+Merged `origin/main` at `9f22598` in `3d5f04e`; the merge only adds s25 documentation. All gates used the exact CI placeholder values extracted from `.github/workflows/ci.yml` in a clean environment, native Node 24.14.0. No `.env` was copied. A temporary npm launcher bounds Jest to `--maxWorkers=2 --workerIdleMemoryLimit=512MB`; it preserves every test and repository hook.
+
+- `npm run precommit`: **213 suites passed, 1 inherited skipped; 2,809 tests passed, 36 inherited skipped, 0 failed**. Lint **0 errors / 39 inherited warnings**; full type-check passed.
+- `npm run build`: passed, **96/96** static pages.
+- `npm run type-check:build`: passed.
+- `npm run format:check`: passed.
+- `node scripts/build-embed.mjs --check`: fresh; Node zlib bundle **46,604 / 46,681 B**, widget **33,828 / 33,865 B**, transport **13,141 B**. Embed source and generated files unchanged.
+- `npm run audit:prod`: **0 vulnerabilities**.
+- `git diff --check`: passed.
+
+The preserved re-review SHA-256 is `bab8cd3a7576f507e1630c4fe044e304983ce542a2cf0a9eed8e97bfca3240dd`. Its content is excluded from this commit. Provider behavior is SDK-mocked; no real Stripe checkout, endpoint update, remote migration, merge into main or deployment was performed. N2 and the bounded ambiguous-unattached retry wait remain explicit limitations.
+
+Independent fix-mode-2 review passed 78 targeted tests across 6 suites. Forcing `isIdenticalChoice = true` produced **7 failing / 24 passing** checkout tests; the reviewer restored the exact source and reran **31/31 passing**. No current blocking finding remains. This review evidence does not overwrite the independent re-review file or its gate.

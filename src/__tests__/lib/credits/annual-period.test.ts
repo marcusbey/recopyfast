@@ -305,14 +305,16 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
       }),
     ];
     db.credit_usage = [
-      usage(200, "2025-04-01T00:00:00.000Z"),
+      // The newest monthly row starts on April 30, while the older annual row
+      // steps to May 1. This charge makes choosing the wrong row observable.
+      usage(200, "2025-04-30T11:00:00.000Z"),
       usage(75, "2025-05-01T00:00:00.000Z"),
     ];
 
     const balance = await getUserCreditBalance(USER_ID);
 
-    expect(balance.usedThisMonth).toBe(75);
-    expect(balance.total).toBe(MONTHLY_CREDITS - 75);
+    expect(balance.usedThisMonth).toBe(275);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 275);
   });
 
   it("falls back to the calendar month when there is no subscription", async () => {

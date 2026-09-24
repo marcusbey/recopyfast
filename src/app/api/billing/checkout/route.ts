@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   createCheckoutSession,
+  expireCheckoutSession,
   findCheckoutSessionForIntent,
   getCheckoutSessionStatus,
   type CheckoutIntent,
@@ -13,6 +14,7 @@ import {
   getLifetimeGrantPlanId,
   isBillingPeriod,
   isPaidPlanId,
+  resolveStripePriceId,
 } from "@/lib/stripe/plans";
 import { getGrantedPlanIds } from "@/lib/billing/entitlements";
 import {
@@ -141,6 +143,15 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const requestedChoice = {
+        stripePriceId: await resolveStripePriceId(
+          parsed.intent.planId,
+          parsed.intent.billingPeriod,
+        ),
+        planId: parsed.intent.planId,
+        billingPeriod: parsed.intent.billingPeriod,
+      };
+
       const locked = await withUserLock(user.id, async () => {
         // Read the table directly so a concurrent test can still barrier on
         // getUserSubscription (called once per request, above) while this
@@ -165,12 +176,14 @@ export async function POST(req: NextRequest) {
         // One retry is enough: an expired known session is released, then the
         // second claim creates (or observes) the successor. The partial UNIQUE
         // index remains the cross-isolate arbiter between those two steps.
+        let hasReplacedDifferentChoice = false;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           let pending;
           try {
             pending = await claimSubscriptionCheckoutIntent(
               intentClient,
               user.id,
+              requestedChoice,
             );
           } catch (error: unknown) {
             if (error instanceof ExistingSubscriptionBlocksCheckoutError) {
@@ -179,12 +192,35 @@ export async function POST(req: NextRequest) {
             throw error;
           }
 
+          const isIdenticalChoice =
+            pending.stripePriceId === requestedChoice.stripePriceId &&
+            pending.planId === requestedChoice.planId &&
+            pending.billingPeriod === requestedChoice.billingPeriod;
+
           if (pending.checkoutUrl && pending.stripeSessionId) {
             const current = await getCheckoutSessionStatus(
               user.id,
               pending.stripeSessionId,
             );
             if (current.status === "open") {
+              if (!isIdenticalChoice) {
+                if (hasReplacedDifferentChoice) {
+                  return {
+                    kind: "conflict" as const,
+                    alreadySubscribed: false,
+                    retryAt: pending.expiresAt,
+                  };
+                }
+                await expireCheckoutSession(pending.stripeSessionId);
+                await finishSubscriptionCheckoutIntent(
+                  intentClient,
+                  pending.id,
+                  pending.stripeSessionId,
+                  "expired",
+                );
+                hasReplacedDifferentChoice = true;
+                continue;
+              }
               return {
                 kind: "conflict" as const,
                 alreadySubscribed: false,
@@ -208,6 +244,7 @@ export async function POST(req: NextRequest) {
               pending.stripeSessionId,
               "expired",
             );
+            if (!isIdenticalChoice) hasReplacedDifferentChoice = true;
             continue;
           }
 
@@ -236,6 +273,25 @@ export async function POST(req: NextRequest) {
                 recovered.sessionId,
                 "expired",
               );
+              if (!isIdenticalChoice) hasReplacedDifferentChoice = true;
+              continue;
+            }
+            if (recovered.status === "open" && !isIdenticalChoice) {
+              if (hasReplacedDifferentChoice) {
+                return {
+                  kind: "conflict" as const,
+                  alreadySubscribed: false,
+                  retryAt: pending.expiresAt,
+                };
+              }
+              await expireCheckoutSession(recovered.sessionId);
+              await finishSubscriptionCheckoutIntent(
+                intentClient,
+                pending.id,
+                recovered.sessionId,
+                "expired",
+              );
+              hasReplacedDifferentChoice = true;
               continue;
             }
             return {
@@ -260,6 +316,19 @@ export async function POST(req: NextRequest) {
               user.id,
             );
             continue;
+          }
+
+          // With no provider session to inspect, changing any part of the
+          // immutable choice would reuse the old Stripe idempotency key with
+          // different parameters. Stripe may already have accepted the old
+          // request, so neither replacing nor releasing it is safe before the
+          // reservation expires.
+          if (!isIdenticalChoice) {
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              retryAt: pending.expiresAt,
+            };
           }
 
           // A reused unattached intent means a prior Stripe result was
@@ -292,7 +361,11 @@ export async function POST(req: NextRequest) {
               typeof user.user_metadata?.name === "string"
                 ? user.user_metadata.name
                 : undefined,
-              { pendingIntentId: pending.id, expiresAt: pending.expiresAt },
+              {
+                pendingIntentId: pending.id,
+                expiresAt: pending.expiresAt,
+                priceId: requestedChoice.stripePriceId,
+              },
             );
           } catch (error: unknown) {
             if (isStripeIdempotencyConflict(error)) {

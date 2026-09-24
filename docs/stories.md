@@ -1228,12 +1228,14 @@ Scope: audit A-19 and A-21 / migration M-5 in `docs/archive/goal-audit-closeout.
 Acceptance criteria:
 - Compute the current monthly allowance window from the subscription anchor, with deterministic UTC month-end clamping and no accumulated drift.
 - Use the existing live-subscription entitlement statuses (active, trialing, past_due); preserve the separate one-time trial-grant allowance and purchased credits.
-- Reserve one pending subscription intent per user in Postgres before Stripe creation, with a partial unique index. Reuse the session URL or return 409 with it on subsequent requests.
+- Reserve one pending subscription intent per user in Postgres before Stripe creation, with a partial unique index. Persist the requested price, plan and interval; reuse the session URL only for the same choice. A changed choice expires the old session before releasing the intent and creating the newly requested checkout.
 - Align bounded intent/session expiry, safely handle concurrent claims and ambiguous provider failures, and release only the matching intent on completed/expired webhooks without duplicate side effects.
 - Add a forward-only idempotent migration with RLS and service-role grants; do not apply it.
 - Keep all audit guards, flip the remaining scoped failing markers, run local gates with CI placeholders, then push a draft PR only.
 
 Operator prevalidated this scope in the current task. No UI design is needed. Independent review is pending; no merge or deployment is authorized.
+
+Re-review fix mode 2 adds the 409 retry-time sentence, an ordering-sensitive allowance regression, and corrected webhook/research documentation. N2 (recoverable incomplete/unpaid/paused subscriptions becoming parallel live subscriptions) is explicitly deferred to the follow-up in the plan; the one-pending-intent invariant does not close that pre-existing window.
 
 Research: `docs/research/s28-billing-correctness.md`.
 Plan: `docs/plans/s28-billing-correctness.md`.

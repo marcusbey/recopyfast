@@ -61,4 +61,56 @@ describe("useCheckout", () => {
     );
     expect(result.current.isRedirecting).toBe(false);
   });
+
+  it("shows when a checkout conflict with a valid retry time can be retried", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "Checkout recovery is still in progress.",
+        retryAt: "2099-01-02T15:47:00",
+        url: null,
+      }),
+    });
+    const { result } = renderHook(() => useCheckout());
+
+    await act(async () => {
+      await result.current.startCheckout({
+        intent: "subscription",
+        planId: "pro",
+        billingPeriod: "monthly",
+      });
+    });
+
+    expect(result.current.error).toBe(
+      "Checkout recovery is still in progress. You can start a new checkout at 15:47.",
+    );
+    expect(result.current.isRedirecting).toBe(false);
+  });
+
+  it("does not show a retry sentence for an invalid retry time", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "Checkout recovery is still in progress.",
+        retryAt: "not-a-date",
+        url: null,
+      }),
+    });
+    const { result } = renderHook(() => useCheckout());
+
+    await act(async () => {
+      await result.current.startCheckout({
+        intent: "subscription",
+        planId: "pro",
+        billingPeriod: "monthly",
+      });
+    });
+
+    expect(result.current.error).toBe(
+      "Checkout recovery is still in progress.",
+    );
+    expect(result.current.isRedirecting).toBe(false);
+  });
 });

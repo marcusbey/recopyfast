@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { BillingPeriod, PaidPlanId } from "@/lib/stripe/plans";
 
 // Stripe refuses Checkout `expires_at` values under 30 minutes. The intent gets
 // a full hour so ordinary retries retain enough headroom, while the route stops
@@ -13,6 +14,9 @@ export interface SubscriptionCheckoutIntent {
   userId: string;
   stripeSessionId: string | null;
   checkoutUrl: string | null;
+  stripePriceId: string | null;
+  planId: PaidPlanId | null;
+  billingPeriod: BillingPeriod | null;
   expiresAt: string;
   isNew: boolean;
 }
@@ -22,6 +26,9 @@ interface IntentRow {
   user_id: string;
   stripe_session_id: string | null;
   checkout_url: string | null;
+  stripe_price_id: string | null;
+  plan_id: PaidPlanId | null;
+  billing_period: BillingPeriod | null;
   expires_at: string;
   is_new: boolean;
 }
@@ -40,11 +47,22 @@ function oneRow<T>(data: T | T[] | null): T | null {
 export async function claimSubscriptionCheckoutIntent(
   supabase: SupabaseClient,
   userId: string,
+  choice: {
+    stripePriceId: string;
+    planId: PaidPlanId;
+    billingPeriod: BillingPeriod;
+  },
   expiresAt = new Date(Date.now() + SUBSCRIPTION_CHECKOUT_TTL_MS).toISOString(),
 ): Promise<SubscriptionCheckoutIntent> {
   const { data, error } = await supabase.rpc(
     "claim_subscription_checkout_intent",
-    { p_user_id: userId, p_expires_at: expiresAt },
+    {
+      p_user_id: userId,
+      p_expires_at: expiresAt,
+      p_stripe_price_id: choice.stripePriceId,
+      p_plan_id: choice.planId,
+      p_billing_period: choice.billingPeriod,
+    },
   );
   if (
     error?.code === "P0001" &&
@@ -63,6 +81,9 @@ export async function claimSubscriptionCheckoutIntent(
     userId: row.user_id,
     stripeSessionId: row.stripe_session_id,
     checkoutUrl: row.checkout_url,
+    stripePriceId: row.stripe_price_id,
+    planId: row.plan_id,
+    billingPeriod: row.billing_period,
     expiresAt: row.expires_at,
     isNew: row.is_new,
   };

@@ -27,6 +27,25 @@ interface UseCheckoutResult {
 const GENERIC_ERROR =
   "We could not reach the payment service. Check your connection and try again.";
 
+function formatRetrySentence(retryAt: unknown): string | null {
+  if (typeof retryAt !== "string") {
+    return null;
+  }
+
+  const retryDate = new Date(retryAt);
+  if (Number.isNaN(retryDate.getTime())) {
+    return null;
+  }
+
+  const retryTime = new Intl.DateTimeFormat("en-CA", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(retryDate);
+
+  return `You can start a new checkout at ${retryTime}.`;
+}
+
 export function useCheckout(): UseCheckoutResult {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +78,13 @@ export function useCheckout(): UseCheckoutResult {
         data.url.length > 0;
 
       if (!response.ok && !canResumeOpenCheckout) {
-        throw new Error(data?.error || "Failed to start checkout");
+        const responseError = data?.error || "Failed to start checkout";
+        const retrySentence =
+          response.status === 409 ? formatRetrySentence(data?.retryAt) : null;
+
+        throw new Error(
+          retrySentence ? `${responseError} ${retrySentence}` : responseError,
+        );
       }
 
       if (!data?.url) {

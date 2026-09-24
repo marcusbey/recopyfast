@@ -38,12 +38,28 @@ export interface CheckoutSessionResult {
 export interface CheckoutSessionCreationOptions {
   pendingIntentId?: string;
   expiresAt?: string;
+  priceId?: string;
 }
 
 export interface PendingCheckoutSession {
   sessionId: string;
   url: string | null;
   status: Stripe.Checkout.Session.Status | null;
+}
+
+/**
+ * Expire an open Checkout Session before replacing its reserved choice.
+ * Stripe can win the race between our status read and this write; only a
+ * follow-up read that proves the session is already expired makes that error
+ * safe to suppress. Network errors and completed sessions remain fail closed.
+ */
+export async function expireCheckoutSession(sessionId: string): Promise<void> {
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+  } catch (error) {
+    const current = await stripe.checkout.sessions.retrieve(sessionId);
+    if (current.status !== "expired") throw error;
+  }
 }
 
 /** Recover a Checkout Session when its response or our attach write was lost. */
@@ -185,10 +201,9 @@ export async function createCheckoutSession(
         mode: "subscription",
         line_items: [
           {
-            price: await resolveStripePriceId(
-              intent.planId,
-              intent.billingPeriod,
-            ),
+            price:
+              options.priceId ??
+              (await resolveStripePriceId(intent.planId, intent.billingPeriod)),
             quantity: 1,
           },
         ],

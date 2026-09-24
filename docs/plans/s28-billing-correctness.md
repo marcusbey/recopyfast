@@ -34,3 +34,21 @@ The operator prevalidated the following repair scope. Preserve the independent r
 - [x] Merge `origin/main` (PR #22 and #26), preserve both stories in the sole `docs/stories.md` conflict, and repeat precommit/build/embed/audit gates. Delivery uses focused `fix(s28):` commits and a push to draft PR #25.
 
 No remote database, real Stripe operation, production deployment, merge into main, or review-verdict edit is authorized.
+
+## Re-review fix mode 2 — 2026-09-24
+
+Operator-prevalidated scope below; retain `validated: yes`. The current independent re-review allows ship and must remain unchanged and uncommitted.
+
+- [x] N1: persist requested price, plan and interval on each intent through a forward-only idempotent migration. Resume only an identical choice. For a different choice, confirm the old Stripe session expired (including already-expired responses), finish the old intent and re-claim before creating the requested session. Preserve fail-closed handling of completed or ambiguous provider outcomes and concurrent requests. Prove Pro yearly → Starter monthly returns the new Starter session and expires the old one, including recovered-session and expiry-retry cases.
+- [x] N3: list all 14 webhook events in the Stripe operations runbook, adding `checkout.session.expired` and the required operator update of the live endpoint. No Stripe configuration action.
+- [x] N4: use two live subscription rows with observably different allowance windows; demonstrate the test fails with the balance query's `.order(...)` removed, then restore it.
+- [x] N5: correct the research's nonterminal-subscription protection and ordering-regression claims.
+- [x] m5: render valid 409 `retryAt` in the existing billing error surface as “You can start a new checkout at HH:MM”; test the sentence and preserve URL-resume behavior.
+- [x] Merge current `origin/main` at `9f22598` (s25 documentation); no conflict.
+- [x] Run required placeholder-only precommit, build, embed freshness/ceiling and production audit gates; preserve all tests and inherited warning ceiling.
+
+Delivery after these gates: commit `fix(s28): ...`, push to existing draft PR #25, and preserve the reviewer file. Commit/push identifiers belong in the PR and final report.
+
+### Out-of-scope follow-up — N2
+
+The existing active/trialing/past_due guard allows checkout while another subscription is incomplete, unpaid or paused. If that prior subscription recovers, parallel live subscriptions can result. A separate story must decide whether to block recoverable obligations or reconcile/cancel older subscriptions when one becomes live, record the consequences in an ADR, and cover delayed settlement and recovery. This fix does not change subscription eligibility or claim to close that window.
