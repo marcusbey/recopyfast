@@ -846,6 +846,8 @@
        * redundant write. See postContentMap.
        */
       this.serverKnownElementIds = null;
+      /** A refused install credential gets one actionable warning per boot. */
+      this.hasWarnedSiteTokenRefusal = false;
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -3666,6 +3668,28 @@
         });
 
         if (!response.ok) {
+          let refusal = null;
+          try {
+            refusal = await response.json();
+          } catch (_error) {
+            refusal = null;
+          }
+
+          if (
+            refusal &&
+            (refusal.code === 'site_token_invalid' || refusal.code === 'site_token_missing')
+          ) {
+            // The server cannot distinguish a forged token from one signed by
+            // the site's previous api_key. Both are safely refused; for a real
+            // installation, rotation is the actionable cause. Keep the page's
+            // authored copy and name the owner-controlled recovery path once.
+            if (!this.hasWarnedSiteTokenRefusal) {
+              this.hasWarnedSiteTokenRefusal = true;
+              console.warn('ReCopyFast: site token refused; regenerate your snippet in the dashboard. Showing the page as authored.');
+            }
+            return;
+          }
+
           console.warn('ReCopyFast: could not load saved content (HTTP ' + response.status + '); showing the page as authored.');
           return;
         }

@@ -13,9 +13,6 @@
 
 const crypto = require('crypto');
 
-/** Maximum token lifetime: 90 days in seconds (mirrors site-auth.ts). */
-const SITE_TOKEN_MAX_AGE_SECONDS = 90 * 24 * 60 * 60;
-
 function normalizeDomain(domain) {
   if (!domain) return null;
   try {
@@ -43,9 +40,12 @@ function parseHost(header) {
  *  1. Three-part structure
  *  2. siteId claim matches expected
  *  3. issuedAt is a digit-only unix timestamp
- *  4. Token is not older than 90 days
- *  5. Token is not future-dated (allows 60 s clock skew)
- *  6. HMAC signature is valid (timing-safe compare)
+ *  4. Token is not future-dated (allows 60 s clock skew)
+ *  5. HMAC signature is valid (timing-safe compare)
+ *
+ * There is intentionally no age cap. Rotating the site's api_key revokes every
+ * token signed by the old key, matching the HTTP verifier and preventing an
+ * installed snippet from dying merely because time passed.
  */
 function verifySiteToken(siteId, apiKey, token) {
   if (!token) return false;
@@ -58,9 +58,6 @@ function verifySiteToken(siteId, apiKey, token) {
 
   const issuedAtSeconds = parseInt(issuedAtStr, 10);
   const nowSeconds = Math.floor(Date.now() / 1000);
-
-  // Reject tokens older than 90 days
-  if (nowSeconds - issuedAtSeconds > SITE_TOKEN_MAX_AGE_SECONDS) return false;
 
   // Reject future-dated tokens (allow 60 s of clock skew)
   if (issuedAtSeconds > nowSeconds + 60) return false;
@@ -244,7 +241,6 @@ async function resolveEditSessionGrant(supabase, siteId, editToken) {
 }
 
 module.exports = {
-  SITE_TOKEN_MAX_AGE_SECONDS,
   isOriginAllowed,
   normalizeDomain,
   normalizePermissions,

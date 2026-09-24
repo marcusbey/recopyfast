@@ -47,8 +47,8 @@ jest.mock("@/lib/feature-gating/permissions", () => ({
 // stubbing it would let a malformed address through the test unnoticed.
 jest.mock("@/lib/auth/editor-directory", () => ({
   ...jest.requireActual("@/lib/auth/editor-directory"),
+  activateSiteEditor: jest.fn(),
   findActiveSiteEditor: jest.fn(),
-  upsertSiteEditor: jest.fn(),
   listSiteEditors: jest.fn(),
   revokeSiteEditor: jest.fn(),
 }));
@@ -57,8 +57,8 @@ import { NextRequest } from "next/server";
 import { POST } from "@/app/api/editor/editors/route";
 import { canShareSite } from "@/lib/feature-gating/permissions";
 import {
+  activateSiteEditor,
   findActiveSiteEditor,
-  upsertSiteEditor,
 } from "@/lib/auth/editor-directory";
 
 const mockCanShareSite = canShareSite as jest.MockedFunction<
@@ -67,8 +67,8 @@ const mockCanShareSite = canShareSite as jest.MockedFunction<
 const mockFindActiveSiteEditor = findActiveSiteEditor as jest.MockedFunction<
   typeof findActiveSiteEditor
 >;
-const mockUpsertSiteEditor = upsertSiteEditor as jest.MockedFunction<
-  typeof upsertSiteEditor
+const mockActivateSiteEditor = activateSiteEditor as jest.MockedFunction<
+  typeof activateSiteEditor
 >;
 
 const SITE_ID = "site-1";
@@ -86,7 +86,7 @@ const enrolledEditor = {
   id: "editor-1",
   siteId: SITE_ID,
   email: "ada@clientcompany.com",
-  permissions: ["view", "edit"] as const,
+  permissions: ["view", "edit"] as Array<"view" | "edit">,
   createdAt: new Date("2026-07-01T00:00:00.000Z"),
 };
 
@@ -104,9 +104,12 @@ describe("POST /api/editor/editors — seat quota", () => {
       data: { permission: "admin" },
       error: null,
     });
-    mockUpsertSiteEditor.mockResolvedValue(
-      enrolledEditor as unknown as Awaited<ReturnType<typeof upsertSiteEditor>>,
-    );
+    mockActivateSiteEditor.mockResolvedValue({
+      editor: enrolledEditor,
+      // Seat tests exercise metering, not delivery. The invitation suite owns
+      // the activation transition and mail assertions.
+      didActivate: false,
+    });
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -125,7 +128,7 @@ describe("POST /api/editor/editors — seat quota", () => {
 
     expect(response.status).toBe(200);
     expect(mockCanShareSite).toHaveBeenCalledWith(SITE_ID, OWNER_ID);
-    expect(mockUpsertSiteEditor).toHaveBeenCalled();
+    expect(mockActivateSiteEditor).toHaveBeenCalled();
   });
 
   it("refuses the enrolment before writing anything when seats are gone", async () => {
@@ -150,7 +153,7 @@ describe("POST /api/editor/editors — seat quota", () => {
     );
 
     expect(response.status).toBe(403);
-    expect(mockUpsertSiteEditor).not.toHaveBeenCalled();
+    expect(mockActivateSiteEditor).not.toHaveBeenCalled();
 
     const body = await response.json();
     expect(body.error).toBe("seat_limit");
@@ -195,7 +198,7 @@ describe("POST /api/editor/editors — seat quota", () => {
 
     expect(response.status).toBe(200);
     expect(mockCanShareSite).not.toHaveBeenCalled();
-    expect(mockUpsertSiteEditor).toHaveBeenCalled();
+    expect(mockActivateSiteEditor).toHaveBeenCalled();
   });
 
   it("re-checks the quota when restoring a revoked editor", async () => {
@@ -219,7 +222,7 @@ describe("POST /api/editor/editors — seat quota", () => {
 
     expect(response.status).toBe(403);
     expect(mockCanShareSite).toHaveBeenCalled();
-    expect(mockUpsertSiteEditor).not.toHaveBeenCalled();
+    expect(mockActivateSiteEditor).not.toHaveBeenCalled();
   });
 
   it("checks admin rights before spending a quota lookup", async () => {
@@ -241,7 +244,7 @@ describe("POST /api/editor/editors — seat quota", () => {
     expect(response.status).toBe(403);
     expect((await response.json()).error).toBe("forbidden");
     expect(mockCanShareSite).not.toHaveBeenCalled();
-    expect(mockUpsertSiteEditor).not.toHaveBeenCalled();
+    expect(mockActivateSiteEditor).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed address before reaching the quota at all", async () => {
@@ -255,6 +258,6 @@ describe("POST /api/editor/editors — seat quota", () => {
 
     expect(response.status).toBe(400);
     expect(mockCanShareSite).not.toHaveBeenCalled();
-    expect(mockUpsertSiteEditor).not.toHaveBeenCalled();
+    expect(mockActivateSiteEditor).not.toHaveBeenCalled();
   });
 });

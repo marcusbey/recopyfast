@@ -22,6 +22,11 @@ export interface SiteEditor {
   createdAt: Date;
 }
 
+export interface SiteEditorActivation {
+  editor: SiteEditor;
+  didActivate: boolean;
+}
+
 export interface EditorSiteSummary {
   siteEditorId: string;
   siteId: string;
@@ -168,6 +173,66 @@ export async function upsertSiteEditor(params: {
     email: data.email,
     permissions: normalizePermissions(data.permissions),
     createdAt: new Date(data.created_at),
+  };
+}
+
+/**
+ * Atomically add, restore, or update an editor and report whether access moved
+ * from inactive to active in this transaction.
+ *
+ * Email delivery must key off `didActivate`, never a lookup performed before
+ * this call. Two simultaneous requests can both observe no active row, and the
+ * old lookup also deliberately returns null on database errors. The RPC
+ * serializes the site/address pair so only the transaction that inserts or
+ * restores the row earns the invitation send.
+ */
+export async function activateSiteEditor(params: {
+  siteId: string;
+  email: string;
+  permissions: EditorPermission[];
+  invitedBy: string | null;
+}): Promise<SiteEditorActivation | null> {
+  const supabase = createServiceRoleClient();
+  const email = normalizeEmail(params.email);
+  const permissions = normalizePermissions(params.permissions);
+
+  if (permissions.length === 0) {
+    console.error(
+      "[editor-directory] refusing to activate an empty permission set",
+    );
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .rpc("activate_site_editor", {
+      p_site_id: params.siteId,
+      p_email: email,
+      p_permissions: permissions,
+      p_invited_by: params.invitedBy,
+    })
+    .single<{
+      id: string;
+      site_id: string;
+      email: string;
+      permissions: string[] | null;
+      created_at: string;
+      did_activate: boolean;
+    }>();
+
+  if (error) {
+    console.error("[editor-directory] activation failed:", error.message);
+    return null;
+  }
+
+  return {
+    editor: {
+      id: data.id,
+      siteId: data.site_id,
+      email: data.email,
+      permissions: normalizePermissions(data.permissions),
+      createdAt: new Date(data.created_at),
+    },
+    didActivate: data.did_activate,
   };
 }
 

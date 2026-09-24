@@ -48,6 +48,7 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
 
 const fetchMock = jest.fn();
 global.fetch = fetchMock as unknown as typeof fetch;
+const writeTextMock = jest.fn();
 
 function callsWithMethod(method: string) {
   return fetchMock.mock.calls.filter(
@@ -64,6 +65,12 @@ describe("SiteEditorsCard", () => {
     fetchMock.mockReset();
     // The component logs the underlying failure before showing a human message.
     jest.spyOn(console, "error").mockImplementation(() => {});
+    writeTextMock.mockReset();
+    writeTextMock.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: writeTextMock },
+    });
   });
 
   afterEach(() => {
@@ -140,7 +147,7 @@ describe("SiteEditorsCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("enrols an editor, shows them in the list, and says no email was sent", async () => {
+  it("enrols an editor, shows them in the list, and confirms the invitation email", async () => {
     const user = userEvent.setup();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
@@ -149,6 +156,7 @@ describe("SiteEditorsCard", () => {
           ok: true,
           editor: { id: grace.id, email: grace.email, permissions: ["view"] },
           hubUrl: "https://app.recopyfast.com/edit",
+          invitationEmailSent: true,
         }),
       )
       .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
@@ -170,15 +178,133 @@ describe("SiteEditorsCard", () => {
       permissions: ["view", "edit"],
     });
 
-    // The whole point of the defect: enrolment sends nothing, and an owner who
-    // believes otherwise waits for an email that will never arrive.
-    expect(screen.getByText(/No invitation email is sent/)).toBeInTheDocument();
+    expect(
+      screen.getByText(`We emailed ${grace.email} an invitation.`),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy link/i }),
+    ).not.toBeInTheDocument();
+
+    // Form cleared, ready for the next address.
+    expect(screen.getByLabelText(/editor email/i)).toHaveValue("");
+  });
+
+  it("keeps manual hub instructions and copies the link when email delivery fails", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          editor: { id: grace.id, email: grace.email, permissions: ["view"] },
+          hubUrl: "https://app.recopyfast.com/edit",
+          invitationEmailSent: false,
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
+
+    renderCard();
+    await screen.findByText("No editors yet");
+    await user.type(screen.getByLabelText(/editor email/i), grace.email);
+    await user.click(screen.getByRole("button", { name: /add editor/i }));
+
+    expect(
+      await screen.findByText(/No invitation email was sent/),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: /the editor hub/i }),
     ).toHaveAttribute("href", "https://app.recopyfast.com/edit");
 
-    // Form cleared, ready for the next address.
-    expect(screen.getByLabelText(/editor email/i)).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: /copy link/i }));
+    expect(await navigator.clipboard.readText()).toBe(
+      "https://app.recopyfast.com/edit",
+    );
+    expect(await screen.findByText("Link copied.")).toBeInTheDocument();
+  });
+
+  it("resends an invitation with a pending state and reports success", async () => {
+    const user = userEvent.setup();
+    let resolveResend!: (response: Response) => void;
+    const resendResponse = new Promise<Response>((resolve) => {
+      resolveResend = resolve;
+    });
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
+      .mockReturnValueOnce(resendResponse);
+
+    renderCard();
+    await screen.findByText(ada.email);
+    await user.click(screen.getByRole("button", { name: /resend invite/i }));
+
+    expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+    const [patchUrl, patchInit] = callsWithMethod("PATCH")[0];
+    expect(patchUrl).toBe("/api/editor/editors");
+    expect(JSON.parse((patchInit as RequestInit).body as string)).toEqual({
+      siteId: SITE_ID,
+      siteEditorId: ada.id,
+    });
+
+    resolveResend(
+      jsonResponse({
+        ok: true,
+        invitationEmailSent: true,
+        hubUrl: "https://app.recopyfast.com/edit",
+      }),
+    );
+
+    expect(
+      await screen.findByText(`We emailed ${ada.email} an invitation.`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /resend invite/i }),
+    ).toBeEnabled();
+  });
+
+  it("shows a resend rate-limit failure on the active editor row", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            error: "Rate limit exceeded",
+            message:
+              "This editor has already received several invitations. Try again later.",
+          },
+          429,
+        ),
+      );
+
+    renderCard();
+    await screen.findByText(ada.email);
+    await user.click(screen.getByRole("button", { name: /resend invite/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This editor has already received several invitations",
+    );
+    expect(screen.getByText(ada.email)).toBeInTheDocument();
+  });
+
+  it("shows the copyable hub fallback when a resend provider call fails", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          invitationEmailSent: false,
+          hubUrl: "https://app.recopyfast.com/edit",
+        }),
+      );
+
+    renderCard();
+    await screen.findByText(ada.email);
+    await user.click(screen.getByRole("button", { name: /resend invite/i }));
+
+    expect(
+      await screen.findByText(/No invitation email was sent/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /copy link/i })).toBeEnabled();
   });
 
   it("sends the permissions the owner actually picked", async () => {

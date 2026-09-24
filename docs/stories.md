@@ -1219,6 +1219,27 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+
+## Story s29-editor-invite-and-token-lifetime — deliver invitations and keep installs alive
+
+As a site owner, I can invite an editor by email and revoke installation credentials deliberately,
+so collaborators find the editor hub and installed widgets do not stop after 90 days.
+
+Complexity: **4**. Operator-prevalidated scope and D3, 2026-09-24.
+
+- Send one best-effort Resend invitation on new enrolment/restoration, never on an active duplicate.
+  Include inviter, site name/domain, plain-language permissions, token-free hub CTA and code sign-in instructions.
+- Return `invitationEmailSent`; show emailed or manual-link/copy-link notice. Active rows offer
+  admin-guarded resend, limited per editor (3/hour) and owner using the existing limiter.
+- Remove only the site-token age cap; preserve HMAC, shape, future-time and origin checks.
+- Provide admin-only snippet regeneration with an explicit old-snippet invalidation warning.
+- Return readable structured auth errors with CORS only to the permitted origin; widget warns once
+  with dashboard regeneration guidance and preserves authored content.
+- Flip A-25 markers, preserving their intent under D3; pass local gates and open a draft PR.
+
+Research: `docs/research/s29-editor-invite-and-token-lifetime.md`.
+Plan: `docs/plans/s29-editor-invite-and-token-lifetime.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
