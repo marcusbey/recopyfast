@@ -1219,6 +1219,28 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+## s32-try-on-any-site — Try any live site without an account
+
+Operator-approved GTM story (2026-09-24). Complexity: 3. UI: yes.
+
+As an agency owner or founder filming an outbound demo, I can activate a bookmarklet
+on a live page, edit text and preview images locally, and discover the trial without
+registering, installing the production widget, or persisting changes.
+
+Acceptance: separate dependency-free `public/try/rcf-try.js` at most 8 KB gzipped;
+headings, paragraphs, list items, buttons, links (navigation requires Alt), images;
+hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit;
+complete cleanup and idempotence; no API, analytics, or content upload; plain-text
+writes. /try includes a versioned draggable bookmarklet, browser instructions,
+live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.
+Static script delivery must bypass auth and include JS MIME, cache, wildcard CORS,
+and nosniff. Unit, page, and local-fixture Playwright coverage are required; update
+the exact browser inventory from 39 to 40. No production embed changes or SQL.
+
+Research: `docs/research/s32-try-on-any-site.md`.
+Design: `docs/designs/s32-try-on-any-site.md`.
+Plan: `docs/plans/s32-try-on-any-site.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim

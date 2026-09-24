@@ -50,6 +50,27 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/try/rcf-try.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+        ],
+      },
+      {
         // Apply to all routes
         source: '/(.*)',
         headers: [
