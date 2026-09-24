@@ -1240,6 +1240,26 @@ Complexity: **4**. Operator-prevalidated scope and D3, 2026-09-24.
 Research: `docs/research/s29-editor-invite-and-token-lifetime.md`.
 Plan: `docs/plans/s29-editor-invite-and-token-lifetime.md`.
 
+## Story s31-magic-link-landing — land confirmed magic links in the app
+
+As a user opening a magic link, I land on my requested app page after confirmation,
+without an authentication error for a session that was already established.
+
+Complexity: **1**. Production hotfix, no UI or architecture change. Scope and decisions
+pre-validated by the operator in the 2026-09-24 task instruction.
+
+- Confirm unwraps same-origin `/auth/` redirect destinations to their sanitized `next`,
+  defaulting to `/dashboard`; the canonical-origin restriction stays intact.
+- Callback without a code accepts a user verified through `auth.getUser()` and lands on
+  sanitized `next`. Explicit auth errors, failed exchanges and missing sessions still error.
+- Route tests cover absolute callback URLs, nested destinations, apex/www, cross-origin
+  and open-redirect guards, error precedence and unchanged trial behavior.
+- Required local gates pass before a focused commit and draft PR. Independent review
+  remains pending; no merge, ready transition, deployment, template/config or SQL changes.
+
+Research: `docs/research/s31-magic-link-landing.md`.
+Plan: `docs/plans/s31-magic-link-landing.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
