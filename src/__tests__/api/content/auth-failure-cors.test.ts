@@ -64,6 +64,8 @@ type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
 };
@@ -72,6 +74,8 @@ const serviceClient: MockServiceClient = {
   from: jest.fn(() => serviceClient),
   select: jest.fn(() => serviceClient),
   eq: jest.fn(() => serviceClient),
+  order: jest.fn(() => serviceClient),
+  range: jest.fn(),
   single: jest.fn(() =>
     Promise.resolve({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },
@@ -155,6 +159,8 @@ describe("/api/content/[siteId] authorization failures", () => {
     serviceClient.from.mockReturnValue(serviceClient);
     serviceClient.select.mockReturnValue(serviceClient);
     serviceClient.eq.mockReturnValue(serviceClient);
+    serviceClient.order.mockReturnValue(serviceClient);
+    serviceClient.range.mockResolvedValue({ data: [], error: null });
     serviceClient.single.mockResolvedValue({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },
       error: null,
@@ -275,16 +281,7 @@ describe("/api/content/[siteId] authorization failures", () => {
     });
 
     it("accepts an 89-day-old token, pinning the boundary", async () => {
-      serviceClient.eq
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(
-          Promise.resolve({
-            data: [],
-            error: null,
-          }) as unknown as typeof serviceClient,
-        );
+      serviceClient.range.mockResolvedValueOnce({ data: [], error: null });
 
       const response = await handlers.GET(
         widgetRequest("GET", tokenIssuedDaysAgo(89)),

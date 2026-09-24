@@ -14,6 +14,7 @@ import {
 } from "@/lib/security/discovered-text";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
 interface ContentElementRow {
   site_id: string;
@@ -24,6 +25,7 @@ interface ContentElementRow {
   published_content: string;
   language: string;
   variant: string;
+  page_path: string | null;
   metadata: Record<string, unknown>;
 }
 
@@ -127,12 +129,28 @@ function buildDiscoveryRows(
       continue;
     }
 
-    const attributes = validateContentAttributePatch(
-      data as Record<string, unknown>,
-    );
-    if (!attributes.ok) {
-      skipped.push({ elementId: id.value, reason: attributes.error });
-      continue;
+    const reported = data as Record<string, unknown>;
+    const attributes: Record<string, string> = {};
+
+    // Discovery reports what the author already put on the page. A disallowed
+    // destination still must not become a published href, but dropping the
+    // entire element made its safe text impossible to edit. Validate each
+    // optional attribute independently and omit only the offending value.
+    if (reported.href !== undefined) {
+      const href = validateContentAttributePatch({ href: reported.href });
+      if (href.ok && href.value.href !== undefined) {
+        attributes.href = href.value.href;
+      }
+    }
+    if (reported.alt !== undefined && reported.alt !== null) {
+      const normalizedAlt =
+        typeof reported.alt === "string"
+          ? reported.alt.replace(/\s+/g, " ").trim()
+          : reported.alt;
+      const alt = validateContentAttributePatch({ alt: normalizedAlt });
+      if (alt.ok && alt.value.alt !== undefined) {
+        attributes.alt = alt.value.alt;
+      }
     }
 
     rows.push({
@@ -144,9 +162,11 @@ function buildDiscoveryRows(
       published_content: element.value.content,
       language: "en",
       variant: "default",
+      page_path:
+        typeof reported.page_path === "string" ? reported.page_path : null,
       metadata: {
         ...(element.value.type ? { type: element.value.type } : {}),
-        ...attributes.value,
+        ...attributes,
       },
     });
   }
@@ -325,16 +345,32 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const pagePath = searchParams.get("page_path");
 
-    // Fetch content elements - use published_content for live sites
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, published_content, original_content, language, variant, metadata, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    // A scoped page read includes author-declared ids (page_path IS NULL),
+    // while an omitted path keeps old widgets working. Both paths paginate:
+    // once ids became page-scoped, an all-site unbounded read crossed the
+    // PostgREST 1,000-row cap on ordinary multi-page sites.
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        let query = supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching content:", error);

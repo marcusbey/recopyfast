@@ -14,10 +14,12 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
 type PublishRpcRow = {
   element_id: string;
   content: string | null;
+  attributes: Record<string, string>;
 };
 
 function stagedMetadata(value: unknown) {
@@ -36,7 +38,9 @@ function stagedMetadata(value: unknown) {
 
   return {
     metadata: { ...publishedMetadata, ...stagingAttributes },
-    hasAttributeChanges: Object.keys(stagingAttributes).length > 0,
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
   };
 }
 
@@ -55,10 +59,25 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const siteId = typeof body.siteId === "string" ? body.siteId : "";
+    const rawPagePath = body.page_path;
 
     if (!siteId) {
       return withPublicCors(
         NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
+        request,
+      );
+    }
+
+    if (
+      rawPagePath !== undefined &&
+      rawPagePath !== null &&
+      typeof rawPagePath !== "string"
+    ) {
+      return withPublicCors(
+        NextResponse.json(
+          { error: "page_path must be a string or null" },
+          { status: 400 },
+        ),
         request,
       );
     }
@@ -151,12 +170,15 @@ export async function POST(request: NextRequest) {
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();
     const { data, error } = await serviceClient.rpc(
-      "publish_staging_content_atomic",
+      "publish_staging_content_with_attributes_atomic",
       {
         p_site_id: siteId,
         p_element_ids: elementIds,
         p_published_by: publisherId,
         p_user_email: publisherEmail || "unknown",
+        ...(typeof rawPagePath === "string"
+          ? { p_page_path: rawPagePath }
+          : {}),
       },
     );
 
@@ -223,6 +245,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const siteId = request.nextUrl.searchParams.get("siteId");
+    const pagePath = request.nextUrl.searchParams.get("page_path");
 
     if (!siteId) {
       return withPublicCors(
@@ -269,12 +292,22 @@ export async function GET(request: NextRequest) {
     }
 
     const serviceClient = createServiceRoleClient();
-    const { data: elementsWithChanges, error: fetchError } = await serviceClient
-      .from("content_elements")
-      .select(
-        "id, element_id, selector, staging_content, published_content, staging_updated_at, metadata",
-      )
-      .eq("site_id", siteId);
+    const { data: elementsWithChanges, error: fetchError } =
+      await fetchPageScopedRows((scope) => {
+        let query = serviceClient
+          .from("content_elements")
+          .select(
+            "id, element_id, selector, staging_content, published_content, staging_updated_at, page_path, metadata",
+          )
+          .eq("site_id", siteId);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      }, pagePath);
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);

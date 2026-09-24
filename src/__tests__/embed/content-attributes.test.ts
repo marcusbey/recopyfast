@@ -69,7 +69,7 @@ async function boot(
         const submitted = JSON.parse(options?.body || "{}");
         if (
           typeof submitted.href === "string" &&
-          /^(?:javascript|data|vbscript):/i.test(submitted.href)
+          /^(?:javascript|data|vbscript|sms):/i.test(submitted.href)
         ) {
           return response(400, { error: "Invalid link URL." });
         }
@@ -78,7 +78,7 @@ async function boot(
       if (input.includes(`/staging/content/${SITE_ID}`)) {
         return response(200, { content: rows() });
       }
-      if (input.endsWith(`/content/${SITE_ID}`) && method === "GET") {
+      if (input.includes(`/content/${SITE_ID}?`) && method === "GET") {
         return response(200, rows());
       }
       if (input.endsWith(`/content/${SITE_ID}`) && method === "POST") {
@@ -216,8 +216,7 @@ describe("embed content attributes", () => {
 
   it("hydrates text and image source when legacy rows have no metadata", async () => {
     document.body.innerHTML =
-      '<a class="rcf-editable-link" href="/old">Plans</a>' +
-      '<img src="/hero.jpg" alt="Old alt">';
+      '<a class="rcf-editable-link">Plans</a>' + '<img src="/hero.jpg">';
 
     await boot(
       () =>
@@ -235,6 +234,8 @@ describe("embed content attributes", () => {
     expect(document.querySelector("img")?.getAttribute("src")).toBe(
       "/new-hero.jpg",
     );
+    expect(document.querySelector("a")?.hasAttribute("href")).toBe(false);
+    expect(document.querySelector("img")?.hasAttribute("alt")).toBe(false);
   });
 
   it("reports authored href and alt as discovery extras", async () => {
@@ -262,6 +263,59 @@ describe("embed content attributes", () => {
         expect.objectContaining({ type: "img", alt: "Original hero" }),
       ]),
     );
+  });
+
+  it("keeps absent href and alt absent in discovery", async () => {
+    document.body.innerHTML =
+      '<a class="rcf-editable-link">Plans</a>' + '<img src="/hero.jpg">';
+    const recorded: Array<{ url: string; method: string; body?: string }> = [];
+
+    await boot(() => [], recorded);
+
+    const discovery = recorded.find(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    const entries = Object.values(
+      JSON.parse(discovery!.body!) as Record<string, Record<string, unknown>>,
+    );
+
+    expect(entries.find((entry) => entry.type === "a")).not.toHaveProperty(
+      "href",
+    );
+    expect(entries.find((entry) => entry.type === "img")).not.toHaveProperty(
+      "alt",
+    );
+    expect(document.querySelector("a")?.hasAttribute("href")).toBe(false);
+    expect(document.querySelector("img")?.hasAttribute("alt")).toBe(false);
+  });
+
+  it("sends the normalized page path and marks authored ids as shared", async () => {
+    window.history.replaceState(null, "", "/team/%7Emarcus/index.html");
+    document.body.innerHTML =
+      '<h1>Computed heading</h1><p data-rcf-id="shared-footer">Shared footer</p>';
+    const recorded: Array<{ url: string; method: string; body?: string }> = [];
+
+    await boot(() => [], recorded);
+
+    expect(recorded.find((request) => request.method === "GET")?.url).toContain(
+      "page_path=%2Fteam%2F~marcus",
+    );
+    const discovery = recorded.find(
+      (request) =>
+        request.url.endsWith(`/content/${SITE_ID}`) &&
+        request.method === "POST",
+    );
+    const contentMap = JSON.parse(discovery!.body!) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(contentMap["shared-footer"].page_path).toBeNull();
+    expect(
+      Object.entries(contentMap).find(([id]) => id !== "shared-footer")?.[1]
+        .page_path,
+    ).toBe("/team/~marcus");
   });
 
   it("keeps realtime href and alt updates on the same client safety boundary", async () => {
@@ -383,5 +437,70 @@ describe("embed content attributes", () => {
     );
     expect(link.getAttribute("href")).toBe("/old");
     expect(window.alert).toHaveBeenCalledWith("Invalid link URL.");
+  });
+
+  it.each(["sms:+14165550123", "javascript:void(0)"])(
+    "omits unchanged unsupported href %s from a text-only edit",
+    async (href) => {
+      window.history.replaceState(
+        null,
+        "",
+        "/pricing?rcf_staging=1&rcf_token=test_attributes",
+      );
+      document.body.innerHTML = `<a class="rcf-editable-link" href="${href}">Text us</a>`;
+      const recorded: Array<{ url: string; method: string; body?: string }> =
+        [];
+      await boot(() => [], recorded);
+      const link = document.querySelector("a")!;
+      const widget = (
+        window as unknown as {
+          ReCopyFast: { startLinkEdit(element: Element): void };
+        }
+      ).ReCopyFast;
+
+      widget.startLinkEdit(link);
+      link.textContent = "Message us";
+      (document.querySelector(".rcf-btn-save") as HTMLButtonElement).click();
+      await settle();
+
+      const save = recorded.find((request) => request.method === "PUT");
+      expect(JSON.parse(save!.body!)).toEqual(
+        expect.objectContaining({ content: "Message us" }),
+      );
+      expect(JSON.parse(save!.body!)).not.toHaveProperty("href");
+      expect(link.textContent).toBe("Message us");
+      expect(link.getAttribute("href")).toBe(href);
+    },
+  );
+
+  it("does not synthesize alt when only an image URL changes", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/pricing?rcf_staging=1&rcf_token=test_attributes",
+    );
+    document.body.innerHTML = '<img src="/hero.jpg">';
+    const recorded: Array<{ url: string; method: string; body?: string }> = [];
+    await boot(() => [], recorded);
+    const image = document.querySelector("img")!;
+    const widget = (
+      window as unknown as {
+        ReCopyFast: { openImageEditor(element: Element): void };
+      }
+    ).ReCopyFast;
+
+    widget.openImageEditor(image);
+    const urlInput = document.querySelector<HTMLInputElement>(
+      '.rcf-modal input[type="url"]',
+    )!;
+    urlInput.value = "https://cdn.example.com/new-hero.jpg";
+    (
+      document.querySelector(".rcf-modal-btn-success") as HTMLButtonElement
+    ).click();
+    await settle();
+
+    const save = recorded.find((request) => request.method === "PUT");
+    expect(JSON.parse(save!.body!)).not.toHaveProperty("alt");
+    expect(image.hasAttribute("alt")).toBe(false);
   });
 });

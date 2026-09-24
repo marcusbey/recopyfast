@@ -52,6 +52,9 @@ class SqlTableQuery implements PromiseLike<{ data: unknown; error: null }> {
   private columns = "*";
   private payload: Record<string, unknown> = {};
   private readonly filters: Filter[] = [];
+  private readonly orderColumns: string[] = [];
+  private rangeStart: number | null = null;
+  private rangeEnd: number | null = null;
 
   constructor(private readonly table: string) {}
 
@@ -75,6 +78,22 @@ class SqlTableQuery implements PromiseLike<{ data: unknown; error: null }> {
 
   eq(column: string, value: unknown): this {
     this.filters.push({ column, value });
+    return this;
+  }
+
+  is(column: string, value: null): this {
+    this.filters.push({ column, value });
+    return this;
+  }
+
+  order(column: string): this {
+    this.orderColumns.push(column);
+    return this;
+  }
+
+  range(start: number, end: number): this {
+    this.rangeStart = start;
+    this.rangeEnd = end;
     return this;
   }
 
@@ -107,9 +126,10 @@ class SqlTableQuery implements PromiseLike<{ data: unknown; error: null }> {
     };
     const where = this.filters.length
       ? ` WHERE ${this.filters
-          .map(
-            ({ column, value }) =>
-              `${quoteIdentifier(column)} = ${bind(value)}`,
+          .map(({ column, value }) =>
+            value === null
+              ? `${quoteIdentifier(column)} IS NULL`
+              : `${quoteIdentifier(column)} = ${bind(value)}`,
           )
           .join(" AND ")}`
       : "";
@@ -126,7 +146,15 @@ class SqlTableQuery implements PromiseLike<{ data: unknown; error: null }> {
               .join(", ");
       const result = await routeDatabase.query(
         `SELECT ${projection} FROM ${quoteIdentifier(this.table)}${where}${
-          single ? " LIMIT 1" : ""
+          this.orderColumns.length
+            ? ` ORDER BY ${this.orderColumns.map(quoteIdentifier).join(", ")}`
+            : ""
+        }${
+          single
+            ? " LIMIT 1"
+            : this.rangeStart !== null && this.rangeEnd !== null
+              ? ` LIMIT ${this.rangeEnd - this.rangeStart + 1} OFFSET ${this.rangeStart}`
+              : ""
         }`,
         values,
       );
@@ -163,13 +191,37 @@ function sqlBackedServiceClient() {
     rpc: async (name: string, args: Record<string, unknown>) => {
       if (!routeDatabase) throw new Error("route database used before setup");
 
-      if (name === "publish_staging_content_atomic") {
+      if (
+        name === "publish_staging_content_atomic" ||
+        name === "publish_staging_content_with_attributes_atomic"
+      ) {
+        const isScopedPublish =
+          name === "publish_staging_content_with_attributes_atomic";
         const result = await routeDatabase.query(
-          "SELECT * FROM publish_staging_content_atomic($1, $2, $3, $4)",
+          `SELECT * FROM ${quoteIdentifier(name)}($1, $2, $3, $4${
+            isScopedPublish ? ", $5" : ""
+          })`,
           [
             args.p_site_id,
             args.p_element_ids,
             args.p_published_by,
+            args.p_user_email,
+            ...(isScopedPublish ? [args.p_page_path ?? null] : []),
+          ],
+        );
+        return { data: result.rows, error: null };
+      }
+      if (name === "save_staging_content_atomic") {
+        const result = await routeDatabase.query(
+          "SELECT * FROM save_staging_content_atomic($1, $2, $3, $4, $5, $6, $7, $8)",
+          [
+            args.p_site_id,
+            args.p_element_id,
+            args.p_language,
+            args.p_variant,
+            args.p_staging_content,
+            JSON.stringify(args.p_attribute_patch ?? {}),
+            args.p_staging_access_id,
             args.p_user_email,
           ],
         );
@@ -301,18 +353,21 @@ jest.mock("next/server", () => {
   };
 });
 
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { PUT as putStagingContent } from "@/app/api/staging/content/[siteId]/route";
-import { POST as publishStagingContent } from "@/app/api/staging/publish/route";
+import {
+  GET as getPublishPreview,
+  POST as publishStagingContent,
+} from "@/app/api/staging/publish/route";
 import { GET as getPublicContent } from "@/app/api/content/[siteId]/route";
 import { POST as restoreContentVersion } from "@/app/api/edit-board/history/[versionId]/route";
 
 const DB_URL = process.env.RCF_TEST_DB_URL;
 const TEST_TIMEOUT_MS = 60_000;
-const MIGRATION = path.join(
-  process.cwd(),
+const MIGRATIONS = [
   "supabase/migrations/20260924010000_content_attributes_lifecycle.sql",
-);
+  "supabase/migrations/20260924030000_content_page_path.sql",
+].map((migration) => path.join(process.cwd(), migration));
 
 function validateScratchTarget(connectionString: string): URL {
   const target = new URL(connectionString);
@@ -367,6 +422,10 @@ if (!DB_URL) {
       sql: string,
       values?: unknown[],
     ): Promise<QueryResult<R>> => db.query<R>(sql, values);
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
 
     beforeAll(async () => {
       admin = new Pool({ connectionString: adminTarget.toString(), max: 1 });
@@ -489,11 +548,13 @@ if (!DB_URL) {
       };
       await query("DELETE FROM sites WHERE id = $1", [priorSiteId]);
 
-      const migrationSql = readFileSync(MIGRATION, "utf8");
-      await query(migrationSql);
-      // The operator may need to replay a forward migration after a partially
-      // failed deploy. The file promises idempotence, so execute that promise.
-      await query(migrationSql);
+      for (const migration of MIGRATIONS) {
+        const migrationSql = readFileSync(migration, "utf8");
+        await query(migrationSql);
+        // The operator may need to replay a forward migration after a partially
+        // failed deploy. Each file promises idempotence, so execute that promise.
+        await query(migrationSql);
+      }
     }, TEST_TIMEOUT_MS);
 
     afterAll(async () => {
@@ -623,6 +684,99 @@ if (!DB_URL) {
         "new_metadata",
         "previous_metadata",
       ]);
+
+      const { rows: pagePathColumns } = await query<{ column_name: string }>(`
+        SELECT column_name
+          FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'content_elements'
+           AND column_name = 'page_path'
+      `);
+      const { rows: indexes } = await query<{ indexname: string }>(`
+        SELECT indexname FROM pg_indexes
+         WHERE schemaname = 'public'
+           AND tablename = 'content_elements'
+           AND indexname = 'idx_content_elements_site_page_path'
+      `);
+      expect(pagePathColumns).toHaveLength(1);
+      expect(indexes).toHaveLength(1);
+    });
+
+    test("atomic staging save rolls back the content update when history insertion fails", async () => {
+      const { siteId, rowId } = await seedElement({ type: "p" });
+      await query(`
+        CREATE OR REPLACE FUNCTION reject_s27_history_insert()
+        RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'history unavailable';
+        END
+        $$;
+        CREATE TRIGGER reject_s27_history_insert
+          BEFORE INSERT ON staging_history
+          FOR EACH ROW EXECUTE FUNCTION reject_s27_history_insert();
+      `);
+
+      try {
+        await expect(
+          query(
+            `SELECT * FROM save_staging_content_atomic(
+              $1, 'rcf-nav-link', 'en', 'default', 'Changed',
+              '{"alt":"Changed alt"}'::jsonb, NULL, 'db-test@example.com'
+            )`,
+            [siteId],
+          ),
+        ).rejects.toThrow("history unavailable");
+      } finally {
+        await query(
+          "DROP TRIGGER reject_s27_history_insert ON staging_history",
+        );
+        await query("DROP FUNCTION reject_s27_history_insert()");
+      }
+
+      const { rows } = await query<{
+        staging_content: string | null;
+        metadata: Record<string, unknown>;
+      }>(
+        "SELECT staging_content, metadata FROM content_elements WHERE id = $1",
+        [rowId],
+      );
+      expect(rows[0]).toEqual({
+        staging_content: null,
+        metadata: { type: "p" },
+      });
+    });
+
+    test("concurrent atomic saves serialize into a truthful history chain", async () => {
+      const { siteId, rowId } = await seedElement({ type: "p" });
+      const save = (content: string) =>
+        query(
+          `SELECT * FROM save_staging_content_atomic(
+            $1, 'rcf-nav-link', 'en', 'default', $2,
+            '{}'::jsonb, NULL, $3
+          )`,
+          [siteId, content, `${content}@example.com`],
+        );
+
+      await Promise.all([save("Version B"), save("Version C")]);
+
+      const { rows } = await query<{
+        previous_content: string | null;
+        new_content: string;
+      }>(
+        `SELECT previous_content, new_content
+           FROM staging_history
+          WHERE content_element_id = $1 AND action IN ('create', 'update')`,
+        [rowId],
+      );
+      const initial = rows.find((row) => row.previous_content === null);
+      const chained = rows.find((row) => row.previous_content !== null);
+
+      expect(rows).toHaveLength(2);
+      expect(new Set(rows.map((row) => row.new_content))).toEqual(
+        new Set(["Version B", "Version C"]),
+      );
+      expect(initial).toBeDefined();
+      expect(chained?.previous_content).toBe(initial?.new_content);
     });
 
     test("guard: the actual pre-s27 RPC drops an attribute-only publish", () => {
@@ -800,6 +954,17 @@ if (!DB_URL) {
         });
       const firstPublish = await publishStagingContent(publishRequest());
       expect(firstPublish.status).toBe(200);
+      await expect(firstPublish.json()).resolves.toMatchObject({
+        elements: [
+          {
+            element_id: "rcf-nav-link",
+            attributes: {
+              href: "https://route.example.com/new",
+              alt: "Route updated alt",
+            },
+          },
+        ],
+      });
 
       const edited = {
         type: "a",
@@ -836,7 +1001,7 @@ if (!DB_URL) {
       ]);
     });
 
-    test("a new snapshot with no href/alt clears later additions without losing unrelated metadata", async () => {
+    test("a snapshot with no href/alt does not invent empty attribute drafts", async () => {
       const { siteId, rowId } = await seedElement({
         type: "a",
         analytics_key: "keep-me",
@@ -859,18 +1024,163 @@ if (!DB_URL) {
            FROM content_elements WHERE id = $1`,
         [rowId],
       );
-      expect(rows[0].staging_attributes).toEqual({ href: "", alt: "" });
+      expect(rows[0].staging_attributes).toBeNull();
 
-      await publish(siteId);
+      const noOpPublish = await query(
+        "SELECT * FROM publish_staging_content_atomic($1, NULL, NULL, 'db-test@example.com')",
+        [siteId],
+      );
+      expect(noOpPublish.rows).toHaveLength(0);
       expect(await publishedRow(siteId)).toEqual({
         content: "Documentation",
         metadata: {
           type: "a",
           analytics_key: "keep-me",
-          href: "",
-          alt: "",
+          href: "/later",
+          alt: "Added later",
         },
       });
+    });
+
+    test("restoring an unchanged four-element snapshot publishes zero rows, history entries and webhooks", async () => {
+      const { rows: sites } = await query<{ id: string }>(
+        "INSERT INTO sites (domain, name) VALUES ($1, 'restore no-op') RETURNING id",
+        [`s27-noop-${Date.now()}.invalid`],
+      );
+      const siteId = sites[0].id;
+      await query(
+        `INSERT INTO content_elements
+           (site_id, element_id, selector, original_content, current_content,
+            published_content, metadata)
+         VALUES
+           ($1, 'paragraph', 'p', 'Paragraph', 'Paragraph', 'Paragraph', '{"type":"p"}'),
+           ($1, 'anchor-no-href', 'a', 'Anchor', 'Anchor', 'Anchor', '{"type":"a"}'),
+           ($1, 'image-no-alt', 'img', '/hero.png', '/hero.png', '/hero.png', '{"type":"img"}'),
+           ($1, 'authored-link', 'a', 'Docs', 'Docs', 'Docs', '{"type":"a","href":"/docs"}')`,
+        [siteId],
+      );
+      const versionId = await snapshot(siteId, "unchanged four elements");
+
+      await query("SELECT restore_content_version($1, 'db-test@example.com')", [
+        versionId,
+      ]);
+
+      const legacyPublish = await query(
+        "SELECT * FROM publish_staging_content_atomic($1, NULL, NULL, 'db-test@example.com')",
+        [siteId],
+      );
+      expect(legacyPublish.rows).toHaveLength(0);
+
+      const response = await publishStagingContent(
+        new NextRequest("https://owner.example.com/api/staging/publish", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ siteId }),
+        }),
+      );
+      const body = (await response.json()) as { published: number };
+      const { rows: history } = await query(
+        `SELECT id FROM staging_history
+          WHERE content_element_id IN (
+            SELECT id FROM content_elements WHERE site_id = $1
+          )`,
+        [siteId],
+      );
+      const { rows: stored } = await query<{
+        element_id: string;
+        metadata: Record<string, unknown>;
+      }>(
+        `SELECT element_id, metadata FROM content_elements
+          WHERE site_id = $1 ORDER BY element_id`,
+        [siteId],
+      );
+
+      expect(response.status).toBe(200);
+      expect(body.published).toBe(0);
+      expect(history).toHaveLength(0);
+      expect(after).not.toHaveBeenCalled();
+      expect(stored).toEqual([
+        { element_id: "anchor-no-href", metadata: { type: "a" } },
+        {
+          element_id: "authored-link",
+          metadata: { type: "a", href: "/docs" },
+        },
+        { element_id: "image-no-alt", metadata: { type: "img" } },
+        { element_id: "paragraph", metadata: { type: "p" } },
+      ]);
+    });
+
+    test("page-scoped publish changes exactly the scoped preview rows", async () => {
+      const { rows: sites } = await query<{ id: string }>(
+        "INSERT INTO sites (domain, name) VALUES ($1, 'scoped publish') RETURNING id",
+        [`s27-scope-${Date.now()}.invalid`],
+      );
+      const siteId = sites[0].id;
+      await query(
+        `INSERT INTO content_elements
+           (site_id, element_id, selector, original_content, current_content,
+            published_content, staging_content, page_path, metadata)
+         VALUES
+           ($1, 'pricing-row', 'p', 'Pricing', 'Pricing', 'Pricing', 'Pricing draft', '/pricing', '{"type":"p"}'),
+           ($1, 'about-row', 'p', 'About', 'About', 'About', 'About draft', '/about', '{"type":"p"}'),
+           ($1, 'shared-row', 'nav', 'Shared', 'Shared', 'Shared', 'Shared draft', NULL, '{"type":"nav"}')`,
+        [siteId],
+      );
+
+      const previewResponse = await getPublishPreview(
+        new NextRequest(
+          `https://owner.example.com/api/staging/publish?siteId=${siteId}&page_path=%2Fpricing`,
+        ),
+      );
+      const preview = (await previewResponse.json()) as {
+        elements: Array<{ elementId: string }>;
+      };
+      const publishResponse = await publishStagingContent(
+        new NextRequest("https://owner.example.com/api/staging/publish", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ siteId, page_path: "/pricing" }),
+        }),
+      );
+      const published = (await publishResponse.json()) as {
+        elements: Array<{ element_id: string }>;
+      };
+      const { rows } = await query<{
+        element_id: string;
+        published_content: string;
+        staging_content: string | null;
+      }>(
+        `SELECT element_id, published_content, staging_content
+           FROM content_elements WHERE site_id = $1 ORDER BY element_id`,
+        [siteId],
+      );
+
+      expect(previewResponse.status).toBe(200);
+      expect(publishResponse.status).toBe(200);
+      expect(preview.elements.map((row) => row.elementId).sort()).toEqual([
+        "pricing-row",
+        "shared-row",
+      ]);
+      expect(published.elements.map((row) => row.element_id).sort()).toEqual(
+        preview.elements.map((row) => row.elementId).sort(),
+      );
+      expect(rows).toEqual([
+        {
+          element_id: "about-row",
+          published_content: "About",
+          staging_content: "About draft",
+        },
+        {
+          element_id: "pricing-row",
+          published_content: "Pricing draft",
+          staging_content: null,
+        },
+        {
+          element_id: "shared-row",
+          published_content: "Shared draft",
+          staging_content: null,
+        },
+      ]);
     });
 
     test("a legacy snapshot without an attributes property preserves current href and alt", async () => {
@@ -914,7 +1224,9 @@ if (!DB_URL) {
     });
 
     test.each([
+      "save_staging_content_atomic(uuid,text,text,text,text,jsonb,uuid,text)",
       "publish_staging_content_atomic(uuid,text[],uuid,text)",
+      "publish_staging_content_with_attributes_atomic(uuid,text[],uuid,text,text)",
       "create_content_version(uuid,text,text,text)",
       "restore_content_version(uuid,text)",
       "revert_staging_content(uuid,uuid[])",

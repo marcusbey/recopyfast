@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const { data: contentElements, error } = await supabase
       .from("content_elements")
       .select(
-        "id, site_id, element_id, selector, published_content, original_content, language, variant, metadata, published_at",
+        "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
       )
       .eq("site_id", siteId)
       .eq("language", language)

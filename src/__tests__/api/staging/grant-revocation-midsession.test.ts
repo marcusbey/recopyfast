@@ -198,7 +198,24 @@ function makeWorld(options: { sweepGrants: boolean }) {
 
   return {
     state,
-    client: { from } as unknown as ReturnType<typeof createServiceRoleClient>,
+    client: {
+      from,
+      rpc: async (name: string) => {
+        if (name !== "save_staging_content_atomic") {
+          return { data: [], error: null };
+        }
+        state.contentWrites += 1;
+        return {
+          data: [
+            {
+              content_element_id: "content-element-1",
+              updated_at: "2026-09-24T12:00:00.000Z",
+            },
+          ],
+          error: null,
+        };
+      },
+    } as unknown as ReturnType<typeof createServiceRoleClient>,
   };
 }
 

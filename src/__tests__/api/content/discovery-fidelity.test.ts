@@ -74,6 +74,7 @@ interface StoredRow {
   published_content: string;
   language: string;
   variant: string;
+  page_path: string | null;
   metadata: { type?: string; href?: string; alt?: string };
 }
 
@@ -110,6 +111,7 @@ type ContentMap = Record<
     type?: string;
     href?: string;
     alt?: string | null;
+    page_path?: string | null;
   }
 >;
 
@@ -668,8 +670,8 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       });
     });
 
-    it("skips a discovered element with an unsafe authored href", async () => {
-      const body = await postAndReport({
+    it("keeps a discovered element while omitting an unsafe authored href", async () => {
+      const rows = await postContentMap({
         "rcf-link": {
           selector: "a",
           content: "Unsafe link",
@@ -678,9 +680,65 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
         },
       });
 
-      expect(body.skippedCount).toBe(1);
-      expect(skipFor(body, "rcf-link").reason).toContain("unsupported scheme");
-      expect(serviceClient.upsert).not.toHaveBeenCalled();
+      expect(storedFor(rows, "rcf-link")).toMatchObject({
+        original_content: "Unsafe link",
+        metadata: { type: "a" },
+      });
+    });
+
+    it("normalizes authored alt tabs and newlines without dropping the image", async () => {
+      const rows = await postContentMap({
+        "rcf-image": {
+          selector: "img",
+          content: "https://cdn.example.com/hero.png",
+          type: "img",
+          alt: "  Product\tteam\nreviewing the launch  ",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-image").metadata).toEqual({
+        type: "img",
+        alt: "Product team reviewing the launch",
+      });
+    });
+
+    it("keeps absent href and alt absent while recording page provenance", async () => {
+      const rows = await postContentMap({
+        "computed-id": {
+          selector: "p",
+          content: "Page-local",
+          type: "p",
+          page_path: "/pricing",
+        },
+        "author-id": {
+          selector: "p",
+          content: "Shared",
+          type: "p",
+          page_path: null,
+        },
+        legacy: {
+          selector: "p",
+          content: "Legacy",
+          type: "p",
+        },
+      });
+
+      expect(storedFor(rows, "computed-id")).toMatchObject({
+        page_path: "/pricing",
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "author-id")).toMatchObject({
+        page_path: null,
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "legacy")).toMatchObject({
+        page_path: null,
+        metadata: { type: "p" },
+      });
+      expect(storedFor(rows, "computed-id").metadata).not.toHaveProperty(
+        "href",
+      );
+      expect(storedFor(rows, "computed-id").metadata).not.toHaveProperty("alt");
     });
   });
 

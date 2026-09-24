@@ -301,7 +301,7 @@ describe("identity properties the current scheme does hold", () => {
     ).toBe("pricing-headline");
   });
 
-  it("normalizes only a trailing slash and ignores query and hash", () => {
+  it("normalizes a trailing slash and ignores query and hash", () => {
     const canonical = renderPage(
       "https://acme.example.com/About",
       marketingPage("About Acme", "Lead.", "CTA"),
@@ -318,6 +318,68 @@ describe("identity properties the current scheme does hold", () => {
     ).toBe(
       loadComputeStableElementId(noisy)(noisy.querySelector("h1") as Element),
     );
+  });
+
+  it.each([
+    ["/", "/index.html"],
+    ["/docs", "/docs/index.htm"],
+    ["/~team", "/%7Eteam"],
+    ["/~team", "/%7eteam"],
+  ])(
+    "normalizes %s and %s to one page identity",
+    (canonicalPath, aliasPath) => {
+      const canonical = renderPage(
+        `https://acme.example.com${canonicalPath}`,
+        marketingPage("About Acme", "Lead.", "CTA"),
+      );
+      const alias = renderPage(
+        `https://acme.example.com${aliasPath}`,
+        marketingPage("About Acme", "Lead.", "CTA"),
+      );
+
+      expect(
+        loadComputeStableElementId(canonical)(
+          canonical.querySelector("h1") as Element,
+        ),
+      ).toBe(
+        loadComputeStableElementId(alias)(alias.querySelector("h1") as Element),
+      );
+    },
+  );
+
+  it("preserves an encoded path separator as a distinct identity", () => {
+    const encoded = renderPage(
+      "https://acme.example.com/docs%2Fguide",
+      marketingPage("Guide", "Lead.", "CTA"),
+    );
+    const separator = renderPage(
+      "https://acme.example.com/docs/guide",
+      marketingPage("Guide", "Lead.", "CTA"),
+    );
+
+    expect(
+      loadComputeStableElementId(encoded)(
+        encoded.querySelector("h1") as Element,
+      ),
+    ).not.toBe(
+      loadComputeStableElementId(separator)(
+        separator.querySelector("h1") as Element,
+      ),
+    );
+  });
+
+  it("uses the current path for a fresh node after client navigation", () => {
+    const page = renderPage(
+      "https://acme.example.com/blog/a",
+      marketingPage("Article", "Lead.", "CTA"),
+    );
+    const computeId = loadComputeStableElementId(page);
+    const firstId = computeId(page.querySelector("h1") as Element);
+
+    page.defaultView!.history.pushState(null, "", "/blog/b");
+    page.body.innerHTML = marketingPage("Article", "Lead.", "CTA");
+
+    expect(computeId(page.querySelector("h1") as Element)).not.toBe(firstId);
   });
 
   it("keeps pathname case significant", () => {

@@ -30,6 +30,8 @@ function queryResult(result: unknown) {
   builder.select = jest.fn(() => builder);
   builder.eq = jest.fn(() => builder);
   builder.not = jest.fn(() => builder);
+  builder.order = jest.fn(() => builder);
+  builder.range = jest.fn(() => builder);
   builder.then = (
     resolve: (value: unknown) => unknown,
     reject: (reason: unknown) => unknown,

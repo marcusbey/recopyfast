@@ -175,8 +175,10 @@ describe("the widget presents a device grant in a header, never a URL", () => {
 
     expect(hydrate).toBeDefined();
     expect(hydrate.headers[GRANT_HEADER]).toBe(GRANT);
-    // No `?rcf_token=`, no `?rcf_grant=`, nothing.
-    expect(hydrate.url).toBe(`${API}/staging/content/${SITE_ID}`);
+    // The page scope is not a credential; no staging token or grant enters the URL.
+    expect(hydrate.url).toBe(
+      `${API}/staging/content/${SITE_ID}?page_path=%2Fpricing`,
+    );
   });
 
   it("saves an edit with the grant header, and puts nothing in the URL or the body", async () => {
@@ -215,10 +217,13 @@ describe("the widget presents a device grant in a header, never a URL", () => {
 
     expect(poll).toBeDefined();
     expect(poll!.headers[GRANT_HEADER]).toBe(GRANT);
-    expect(poll!.url).toBe(`${API}/staging/content/${SITE_ID}`);
+    expect(poll!.url).toBe(
+      `${API}/staging/content/${SITE_ID}?page_path=%2Fpricing`,
+    );
   });
 
-  it("publishes with the grant header, and puts nothing in the URL or the body", async () => {
+  it("publishes the same page scope previewed without exposing the grant", async () => {
+    window.history.replaceState(null, "", "/team/%7Emarcus/index.html");
     const { recorded } = await bootSignedIn(["view", "edit", "publish"]);
 
     await widget().showPublishConfirmation();
@@ -228,7 +233,9 @@ describe("the widget presents a device grant in a header, never a URL", () => {
       (call) => call.method === "GET",
     );
     expect(preview?.headers[GRANT_HEADER]).toBe(GRANT);
-    expect(preview?.url).toBe(`${API}/staging/publish?siteId=${SITE_ID}`);
+    expect(preview?.url).toBe(
+      `${API}/staging/publish?siteId=${SITE_ID}&page_path=%2Fteam%2F~marcus`,
+    );
     expect(preview?.body).toBeNull();
 
     const confirm = document.querySelector(
@@ -245,6 +252,10 @@ describe("the widget presents a device grant in a header, never a URL", () => {
     expect(publish).toBeDefined();
     expect(publish!.headers[GRANT_HEADER]).toBe(GRANT);
     expect(publish!.url).toBe(`${API}/staging/publish`);
+    expect(publish!.body).toEqual({
+      siteId: SITE_ID,
+      page_path: "/team/~marcus",
+    });
     expect(JSON.stringify(publish!.body)).not.toContain(GRANT);
   });
 

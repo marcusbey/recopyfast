@@ -1227,9 +1227,11 @@ Complexity: **4**. One rebuilt embed artifact for A-14 and A-26; no new dependen
 
 - Computed stable IDs incorporate normalized case-sensitive pathname, ignoring query/hash and trailing slash except root; explicit `data-rcf-id` remains shared across pages.
 - Preserve all existing identity guards. D2 accepted by operator: re-key on discovery, no backfill or legacy fallback; zero real customers, QA rows may be orphaned.
-- Validate trimmed, bounded href/alt; allow only http/https/mailto/tel and relative/root/fragment references. Unsafe or unknown schemes receive 400.
+- Validate trimmed, bounded href/alt; allow only http/https/mailto/tel and relative/root/fragment references. Changing href to unsafe or unknown schemes receives 400; discovery omits unsupported attributes while retaining the element.
 - Retain attributes in metadata across staging, publish, history, fresh public hydration and version restore; drafts remain private until publish.
-- Audit discovery, hydration, dashboard, bulk, A/B and impressions for opaque-ID compatibility. Show existing page field only if available.
+- Persist nullable page_path for computed identities; author IDs remain All pages. Filter public/staging/preview reads by page plus shared rows, with deterministic pagination. Show Page in the dashboard content list.
+- Preserve absent attributes through capture/restore/publish; detect changes by value. Discovery keeps elements whose authored attributes are unsupported; strict validation applies when a user changes href.
+- Save staging plus history atomically; realtime and webhooks carry attribute changes. SPA client-side routing is a known pre-existing limitation deferred to a follow-up.
 - Preserve embed ceilings; all requested gates pass; draft PR only, pending independent review.
 
 Research: `docs/research/s27-launch-content-integrity.md`. Plan: `docs/plans/s27-launch-content-integrity.md`.

@@ -27,7 +27,7 @@
       } else if (deriveApiUrl()) {
         window.RECOPYFAST_API = deriveApiUrl();
       } else {
-        console.warn('ReCopyFast: RECOPYFAST_API is not set. Add a data-api-url attribute to the script tag or set window.RECOPYFAST_API before loading this script.');
+        console.warn('ReCopyFast: set data-api-url.');
       }
     }
     if (!window.RECOPYFAST_WS) {
@@ -793,6 +793,17 @@
     return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
   }
 
+  function normalizedPagePath() {
+    let pathname = document.location.pathname;
+    try { pathname = decodeURI(pathname); } catch (e) {}
+    return pathname.replace(/(?:\/index\.html?|\/+)$/i, '') || '/';
+  }
+
+  function contentReadEndpoint(staged, token) {
+    return RECOPYFAST_API + (staged ? '/staging' : '') + '/content/' + SITE_ID +
+      (token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(normalizedPagePath());
+  }
+
   /**
    * A deterministic identifier for an element, stable across page loads.
    *
@@ -828,9 +839,9 @@
 
     // A-14: structural twins on different pages used to alias one database row,
     // so visiting /pricing could hydrate /about's copy into the same template.
-    // `pathname` already excludes query/hash; only a trailing slash is folded so
-    // links to /about and /about/ keep one identity while case stays significant.
-    return 'rcf-' + hashPath((document.location.pathname.replace(/\/+$/, '') || '/') + '\0' + structuralPath(element));
+    // `pathname` excludes query/hash. Unreserved escapes and index documents are
+    // canonicalized, while reserved escapes and pathname case stay significant.
+    return 'rcf-' + hashPath(normalizedPagePath() + '\0' + structuralPath(element));
   }
 
   class ReCopyFast {
@@ -936,7 +947,6 @@
         }
 
         this.isInitialized = true;
-        console.log('ReCopyFast initialized (' + (this.stagingMode ? 'staging' : 'live') + ' mode)');
       } catch (error) {
         console.error('ReCopyFast initialization error:', error);
       }
@@ -951,7 +961,6 @@
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
         if (isDemoToken && isLocalhost) {
-          console.log('ReCopyFast: Demo mode enabled (test token on localhost)');
           this.stagingAccess = {
             verified: true,
             email: 'demo@recopyfast.local',
@@ -1044,7 +1053,7 @@
       try {
         outcome = await EditorAuth.boot(HANDOFF_CODE);
       } catch (error) {
-        console.warn('ReCopyFast: editor sign-in check failed; continuing as a visitor.', error);
+        console.warn('ReCopyFast: editor auth failed; visitor mode.', error);
         return;
       }
 
@@ -2366,6 +2375,7 @@
       try {
         const publishPreviewUrl =
           RECOPYFAST_API + '/staging/publish?siteId=' + SITE_ID +
+          '&page_path=' + encodeURIComponent(normalizedPagePath()) +
           self.editorTokenQuery().replace('?', '&');
         const response = await fetch(publishPreviewUrl, { headers: self.editorAuthHeaders() });
         if (self.handleTerminalWriteFailure(response)) { close(); return; }
@@ -2402,7 +2412,8 @@
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
             body: JSON.stringify(Object.assign({
-              siteId: SITE_ID
+              siteId: SITE_ID,
+              page_path: normalizedPagePath()
             }, self.editorTokenBody()))
           });
 
@@ -2654,6 +2665,7 @@
 
     scanForContent() {
       const self = this;
+      const path = normalizedPagePath();
       const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, ' +
                        'a.rcf-editable-link, img, div[data-rcf-content]';
       const textElements = this.queryDeep(selector);
@@ -2669,6 +2681,9 @@
         // Deterministic — see computeStableElementId. The same element yields
         // the same id on every load, which is what lets saved content find its
         // way back onto the page.
+        const stampedId = element.getAttribute('data-rcf-id');
+        const stamped = self.elements.get(stampedId);
+        const pagePath = stamped ? stamped.path : stampedId === null ? path : null;
         const elementId = computeStableElementId(element);
         element.setAttribute('data-rcf-id', elementId);
 
@@ -2676,10 +2691,11 @@
           element: element,
           originalContent: text,
           selector: self.generateSelector(element),
-          type: element.tagName.toLowerCase()
+          type: element.tagName.toLowerCase(),
+          path: pagePath
         };
-        elementData.extras = isImage ? { alt: element.getAttribute('alt') || '' } :
-          element.tagName === 'A' ? { href: element.getAttribute('href') || '' } : null;
+        elementData.extras = isImage && element.hasAttribute('alt') ? { alt: element.getAttribute('alt') } :
+          element.tagName === 'A' && element.hasAttribute('href') ? { href: element.getAttribute('href') } : null;
         self.elements.set(elementId, elementData);
 
         if (self.editMode) {
@@ -2988,18 +3004,18 @@
         if (typeof this.socket.timeout === 'function') {
           this.socket.timeout(2000).emit('content-update', payload, function(err, response) {
             if (err || (response && response.error)) {
-              console.warn('ReCopyFast: Realtime fanout failed:', err || response.error);
+              console.warn('ReCopyFast: realtime failed', err || response.error);
             }
           });
         } else {
           this.socket.emit('content-update', payload, function(response) {
             if (response && response.error) {
-              console.warn('ReCopyFast: Realtime fanout failed:', response.error);
+              console.warn('ReCopyFast: realtime failed', response.error);
             }
           });
         }
       } catch (error) {
-        console.warn('ReCopyFast: Realtime fanout failed:', error);
+        console.warn('ReCopyFast: realtime failed', error);
       }
     }
 
@@ -3042,7 +3058,6 @@
         });
 
         this.socket.on('connect', function() {
-          console.log('ReCopyFast: Connected to server');
           self.sendContentMap();
         });
 
@@ -3052,10 +3067,6 @@
 
         this.socket.on('ab-test-update', function(data) {
           self.handleABTestUpdate(data);
-        });
-
-        this.socket.on('disconnect', function() {
-          console.log('ReCopyFast: Disconnected from server');
         });
 
         this.socket.on('error', function(error) {
@@ -3114,7 +3125,8 @@
         const entry = contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
-          type: data.type
+          type: data.type,
+          page_path: data.path
         };
         Object.assign(entry, data.extras);
       });
@@ -3306,7 +3318,6 @@
         this.activeTests = data.tests || [];
       } catch (error) {
         // Silent failure — A/B tests won't run if fetch fails
-        console.log('ReCopyFast: A/B tests unavailable');
         this.activeTests = [];
       }
     }
@@ -3348,7 +3359,7 @@
         // client-side fallback below stays — but it is a degraded path, and one
         // warning makes it visible to anyone who looks at the console instead
         // of leaving it indistinguishable from a normal load.
-        console.warn('ReCopyFast: A/B bucketing unavailable');
+        console.warn('ReCopyFast: A/B unavailable');
       }
 
       // Client-side fallback using FNV-1a hash
@@ -3640,6 +3651,8 @@
         target.textContent = content;
       }
 
+      // Keep the map in step with the DOM: the edit board and content map both
+      // read originalContent as what the element currently says.
       elementData.originalContent = content;
       return true;
     }
@@ -3669,9 +3682,7 @@
       if (!RECOPYFAST_API) return;
 
       const staged = this.canReachStagingContent();
-      const endpoint = staged
-        ? RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery()
-        : RECOPYFAST_API + '/content/' + SITE_ID;
+      const endpoint = contentReadEndpoint(staged, this.editorTokenQuery());
 
       let rows;
       try {
@@ -3683,11 +3694,14 @@
           headers: Object.assign({ 'Authorization': 'Bearer ' + SITE_TOKEN }, this.editorAuthHeaders())
         });
 
-        if (!response.ok) return;
+        if (!response.ok) throw response.status;
 
         const body = await response.json();
         rows = staged ? (body && body.content) : body;
-      } catch (error) { return; }
+      } catch (error) {
+        console.warn('ReCopyFast: load failed', error);
+        return;
+      }
 
       if (!Array.isArray(rows)) return;
 
@@ -4624,7 +4638,9 @@
         }
 
         const values = {};
-        fieldInputs.forEach(function(f) { values[f.def.key] = f.input.value.trim(); });
+        fieldInputs.forEach(function(f) {
+          if (f.input.value !== f.initial) values[f.def.key] = f.input.value.trim();
+        });
 
         try {
           await self.persistContentUpdate(
@@ -4741,7 +4757,7 @@
 
       const isImg = element.tagName.toLowerCase() === 'img';
       const currentSrc = isImg ? element.src : (element.style.backgroundImage || '').replace(/url\(['"]?([^'"]+)['"]?\)/, '$1');
-      const currentAlt = isImg ? element.alt : '';
+      const currentAlt = isImg ? (element.getAttribute('alt') || '') : '';
       const imgComputed = window.getComputedStyle(element);
       const currentWidth = Math.round(parseFloat(imgComputed.width) || 0);
       const currentHeight = Math.round(parseFloat(imgComputed.height) || 0);
@@ -4974,7 +4990,7 @@
       saveBtn.onclick = async function() {
         const newSrc = urlInput.value.trim();
         if (!newSrc || /^data:/i.test(newSrc)) {
-          alert('Enter an image URL.');
+          alert('Use an image URL (data: unsupported).');
           return;
         }
 
@@ -4983,17 +4999,18 @@
         // of base64 per revision. Uploads go through /api/upload/image and come
         // back as a URL; anything else here is a bug or a hand-pasted blob.
         const newAlt = isImg ? altInput.value.trim() : null;
+        const imagePatch = {
+          contentType: 'image',
+          alt: isImg && altInput.value !== currentAlt ? newAlt : undefined,
+          width: uploadedDimensions ? uploadedDimensions.width : undefined,
+          height: uploadedDimensions ? uploadedDimensions.height : undefined
+        };
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
 
         try {
-          await self.persistContentUpdate(elementId, newSrc, {
-            contentType: 'image',
-            alt: newAlt,
-            width: uploadedDimensions ? uploadedDimensions.width : undefined,
-            height: uploadedDimensions ? uploadedDimensions.height : undefined
-          });
+          await self.persistContentUpdate(elementId, newSrc, imagePatch);
         } catch (error) {
           if (self.isMutationLocked) return;
           alert(error.message || 'Save failed.');
@@ -5004,7 +5021,7 @@
 
         if (isImg) {
           applyImageSource(element, newSrc);
-          if (altInput) {
+          if (altInput && altInput.value !== currentAlt) {
             element.alt = newAlt;
           }
         } else {
@@ -5483,9 +5500,7 @@
       setInterval(async function() {
         try {
           const staged = self.canReachStagingContent();
-          const endpoint = staged
-            ? RECOPYFAST_API + '/staging/content/' + SITE_ID + self.editorTokenQuery()
-            : RECOPYFAST_API + '/content/' + SITE_ID;
+          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery());
 
           const response = await fetch(endpoint, {
             headers: Object.assign({

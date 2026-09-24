@@ -39,6 +39,8 @@ type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
   update: jest.Mock;
@@ -50,6 +52,8 @@ const mockServiceClient: MockServiceClient = {
   from: jest.fn(() => mockServiceClient),
   select: jest.fn(() => mockServiceClient),
   eq: jest.fn(() => mockServiceClient),
+  order: jest.fn(() => mockServiceClient),
+  range: jest.fn(),
   single: jest.fn(),
   upsert: jest.fn(),
   update: jest.fn(() => mockServiceClient),
@@ -83,6 +87,8 @@ describe("/api/content/[siteId]", () => {
     mockServiceClient.from.mockReturnValue(mockServiceClient);
     mockServiceClient.select.mockReturnValue(mockServiceClient);
     mockServiceClient.eq.mockImplementation(() => mockServiceClient);
+    mockServiceClient.order.mockImplementation(() => mockServiceClient);
+    mockServiceClient.range.mockResolvedValue({ data: [], error: null });
     mockServiceClient.single.mockResolvedValue({
       data: { id: "site-123" },
       error: null,
@@ -107,12 +113,10 @@ describe("/api/content/[siteId]", () => {
     ];
 
     it("should fetch content elements with default parameters", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -134,12 +138,10 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should fetch content elements with custom language and variant", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest(
         "http://localhost/api/content/site-123?language=es&variant=mobile",
@@ -165,12 +167,10 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should return empty array when no content found", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: null, error: null }),
-        );
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: null,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -198,12 +198,10 @@ describe("/api/content/[siteId]", () => {
           staging_attributes: { href: "/draft", alt: "Draft alt" },
         },
       };
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: [row], error: null }),
-        );
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: [row],
+        error: null,
+      });
 
       const response = await GET(
         new NextRequest("http://localhost/api/content/site-123", {
@@ -243,12 +241,10 @@ describe("/api/content/[siteId]", () => {
         site: { id: "site-123", domain: "example.com", api_key: "api-key" },
         allowedOrigin: null,
       });
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       // No Authorization header, no Origin header, no ?token= — the dashboard
       // never sends these; only the session cookie authorizes this request.
@@ -281,12 +277,10 @@ describe("/api/content/[siteId]", () => {
      */
     describe("liveness", () => {
       const queueContentQuery = () => {
-        mockServiceClient.eq
-          .mockImplementationOnce(() => mockServiceClient) // site_id
-          .mockImplementationOnce(() => mockServiceClient) // language
-          .mockImplementationOnce(() =>
-            Promise.resolve({ data: mockContentElements, error: null }),
-          ); // variant
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: mockContentElements,
+          error: null,
+        });
       };
 
       it("records a report when the widget's own token authorized the read", async () => {

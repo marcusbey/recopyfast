@@ -71,6 +71,8 @@ type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
 };
@@ -81,23 +83,17 @@ const serviceClient: MockServiceClient = {
   from: jest.fn(() => serviceClient),
   select: jest.fn(() => serviceClient),
   eq: jest.fn(() => serviceClient),
+  order: jest.fn(() => serviceClient),
+  range: jest.fn(),
   single: jest.fn(() =>
     Promise.resolve({ data: { id: SITE_ID }, error: null }),
   ),
   upsert: jest.fn(() => Promise.resolve({ error: null })),
 };
 
-/** The content query ends on the third `.eq()`; only that one resolves. */
+/** The content query resolves at its explicit PostgREST range boundary. */
 function resolveContentQuery(rows: unknown[]) {
-  serviceClient.eq
-    .mockReturnValueOnce(serviceClient)
-    .mockReturnValueOnce(serviceClient)
-    .mockReturnValueOnce(
-      Promise.resolve({
-        data: rows,
-        error: null,
-      }) as unknown as typeof serviceClient,
-    );
+  serviceClient.range.mockResolvedValueOnce({ data: rows, error: null });
 }
 
 type Method = "GET" | "POST" | "PUT" | "OPTIONS";
@@ -145,6 +141,10 @@ describe("/api/content/[siteId] rate limiting", () => {
     serviceClient.select.mockReturnValue(serviceClient);
     serviceClient.eq.mockReset();
     serviceClient.eq.mockReturnValue(serviceClient);
+    serviceClient.order.mockReset();
+    serviceClient.order.mockReturnValue(serviceClient);
+    serviceClient.range.mockReset();
+    serviceClient.range.mockResolvedValue({ data: [], error: null });
     serviceClient.single.mockReset();
     serviceClient.single.mockResolvedValue({
       data: { id: SITE_ID },

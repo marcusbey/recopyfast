@@ -15,6 +15,7 @@ import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
 function jsonObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -30,7 +31,9 @@ function stagedMetadata(value: unknown) {
 
   return {
     metadata: { ...publishedMetadata, ...stagingAttributes },
-    hasAttributeChanges: Object.keys(stagingAttributes).length > 0,
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
   };
 }
 
@@ -80,16 +83,28 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const pagePath = searchParams.get("page_path");
 
-    // Fetch content elements with staging content
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, metadata, staging_updated_at, staging_updated_by, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        let query = supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, page_path, metadata, staging_updated_at, staging_updated_by, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching staging content:", error);
@@ -258,58 +273,25 @@ export async function PUT(
     const sanitizedContent = sanitizeIncomingContent(String(content));
     const supabase = createServiceRoleClient();
 
-    // Get current element for history
-    const { data: currentElement } = await supabase
-      .from("content_elements")
-      .select("id, staging_content, metadata")
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant)
-      .single();
-
-    if (!currentElement) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: "Content element not found" },
-          { status: 404 },
-        ),
-        request,
-      );
-    }
-
-    const existingMetadata = jsonObject(currentElement.metadata);
-    const existingStagingAttributes = jsonObject(
-      existingMetadata.staging_attributes,
+    // The draft and its audit entry are one database operation. This used to
+    // update content_elements first and insert staging_history second; a failed
+    // insert therefore returned 500 after the draft had already committed.
+    const { data: savedRows, error: saveError } = await supabase.rpc(
+      "save_staging_content_atomic",
+      {
+        p_site_id: siteId,
+        p_element_id: elementId,
+        p_language: language,
+        p_variant: variant,
+        p_staging_content: sanitizedContent,
+        p_attribute_patch: attributePatch.value,
+        p_staging_access_id: access.stagingAccessId || null,
+        p_user_email: access.email || access.userId || access.kind,
+      },
     );
-    const hasAttributePatch = Object.keys(attributePatch.value).length > 0;
-    const nextMetadata = hasAttributePatch
-      ? {
-          ...existingMetadata,
-          staging_attributes: {
-            ...existingStagingAttributes,
-            ...attributePatch.value,
-          },
-        }
-      : existingMetadata;
 
-    // Update staging content. Attribute drafts stay nested until publish so a
-    // public read can never expose an unapproved destination or alt value.
-    const { error: updateError } = await supabase
-      .from("content_elements")
-      .update({
-        staging_content: sanitizedContent,
-        ...(hasAttributePatch ? { metadata: nextMetadata } : {}),
-        staging_updated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant);
-
-    if (updateError) {
-      console.error("Error updating staging content:", updateError);
+    if (saveError) {
+      console.error("Error saving staging content atomically:", saveError);
       return withPublicCors(
         NextResponse.json(
           { error: "Failed to update staging content" },
@@ -319,28 +301,12 @@ export async function PUT(
       );
     }
 
-    // Record in staging history
-    const { error: historyError } = await supabase
-      .from("staging_history")
-      .insert({
-        content_element_id: currentElement.id,
-        // Null for a first-party edit: the owner's change is not attributable to
-        // any staging invite, and pointing it at one would misattribute the edit.
-        staging_access_id: access.stagingAccessId || null,
-        previous_content: currentElement.staging_content,
-        new_content: sanitizedContent,
-        previous_metadata: existingMetadata,
-        new_metadata: nextMetadata,
-        user_email: access.email || access.userId || access.kind,
-        action: currentElement.staging_content ? "update" : "create",
-      });
-
-    if (historyError) {
-      console.error("Error recording staging history:", historyError);
+    const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+    if (!saved) {
       return withPublicCors(
         NextResponse.json(
-          { error: "Failed to record staging history" },
-          { status: 500 },
+          { error: "Content element not found" },
+          { status: 404 },
         ),
         request,
       );
@@ -350,7 +316,10 @@ export async function PUT(
       NextResponse.json({
         success: true,
         elementId,
-        updatedAt: new Date().toISOString(),
+        updatedAt:
+          typeof saved.updated_at === "string"
+            ? saved.updated_at
+            : new Date().toISOString(),
       }),
       request,
     );

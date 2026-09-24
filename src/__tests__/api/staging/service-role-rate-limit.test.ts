@@ -82,9 +82,20 @@ function wireServiceClient() {
 
   const client = {
     from: jest.fn(() => chain),
-    rpc: jest.fn(() => {
+    rpc: jest.fn((name: string) => {
       calls.push("rpc");
-      return Promise.resolve({ data: [], error: null });
+      return Promise.resolve({
+        data:
+          name === "save_staging_content_atomic"
+            ? [
+                {
+                  content_element_id: "element-1",
+                  updated_at: "2026-09-24T12:00:00.000Z",
+                },
+              ]
+            : [],
+        error: null,
+      });
     }),
   };
 

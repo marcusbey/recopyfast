@@ -59,47 +59,43 @@ let updatePayloads: Record<string, unknown>[] = [];
 let historyRows: Record<string, unknown>[] = [];
 let historyError: { message: string } | null = null;
 
-/**
- * A supabase-js query chain that resolves to `result` however many `.eq()`
- * filters are hung off it, and is awaitable at the end like the real builder.
- */
-function chain(result: unknown) {
-  const node: Record<string, unknown> = {};
-  node.eq = jest.fn(() => node);
-  node.single = jest.fn(() => Promise.resolve(result));
-  node.then = (
-    resolve: (value: unknown) => unknown,
-    reject: (reason: unknown) => unknown,
-  ) => Promise.resolve(result).then(resolve, reject);
-  return node;
-}
-
 const serviceClient = {
-  from: jest.fn((table: string) => {
-    if (table === "staging_history") {
-      return {
-        insert: jest.fn((row: Record<string, unknown>) => {
-          historyRows.push(row);
-          return Promise.resolve({ error: historyError });
-        }),
-      };
+  rpc: jest.fn(async (name: string, args: Record<string, unknown>) => {
+    expect(name).toBe("save_staging_content_atomic");
+    if (historyError) {
+      return { data: null, error: historyError };
     }
 
+    const previousMetadata = { type: "a", analytics_key: "keep-me" };
+    const attributePatch = args.p_attribute_patch as Record<string, unknown>;
+    const hasAttributes = Object.keys(attributePatch).length > 0;
+    const newMetadata = hasAttributes
+      ? {
+          ...previousMetadata,
+          staging_attributes: attributePatch,
+        }
+      : previousMetadata;
+
+    updatePayloads.push({
+      staging_content: args.p_staging_content,
+      ...(hasAttributes ? { metadata: newMetadata } : {}),
+    });
+    historyRows.push({
+      content_element_id: "row-1",
+      previous_content: "Documentation",
+      new_content: args.p_staging_content,
+      previous_metadata: previousMetadata,
+      new_metadata: newMetadata,
+      user_email: args.p_user_email,
+    });
     return {
-      select: jest.fn(() =>
-        chain({
-          data: {
-            id: "row-1",
-            staging_content: "Documentation",
-            metadata: { type: "a", analytics_key: "keep-me" },
-          },
-          error: null,
-        }),
-      ),
-      update: jest.fn((payload: Record<string, unknown>) => {
-        updatePayloads.push(payload);
-        return chain({ error: null });
-      }),
+      data: [
+        {
+          content_element_id: "row-1",
+          updated_at: "2026-09-24T12:00:00.000Z",
+        },
+      ],
+      error: null,
     };
   }),
 };
@@ -288,14 +284,14 @@ describe("PUT /api/staging/content/[siteId] link and image extras", () => {
     expect(persistedRow()).not.toHaveProperty("metadata");
   });
 
-  it("does not confirm a save when its history record fails", async () => {
+  it("does not confirm a save when the atomic save fails", async () => {
     historyError = { message: "history unavailable" };
 
     const response = await widgetSave("Docs", { href: "/new-destination" });
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({
-      error: "Failed to record staging history",
+      error: "Failed to update staging content",
     });
   });
 
