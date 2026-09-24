@@ -286,14 +286,35 @@ describe("handshake authentication", () => {
     expect(await handshake.refused()).toBe("Invalid site token");
   });
 
-  it("refuses a token older than its 90-day lifetime", async () => {
+  it("accepts a genuine token older than 90 days", async () => {
     const issuedAt = Math.floor(Date.now() / 1000) - 91 * DAY_SECONDS;
-    const handshake = connect({
+    connect({
       siteId: SITE_ID,
       token: buildSiteToken(SITE_ID, API_KEY, issuedAt),
     });
 
-    expect(await handshake.refused()).toBe("Invalid site token");
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}`) === 1,
+      "the old genuine token to join its site room",
+    );
+  });
+
+  it("refuses that old token after the site's api_key rotates", async () => {
+    const issuedAt = Math.floor(Date.now() / 1000) - 91 * DAY_SECONDS;
+    const site = db.rows("sites").find((row) => row.id === SITE_ID);
+    if (!site) throw new Error("Expected the seeded site");
+
+    site.api_key = "rotated-api-key";
+    try {
+      const handshake = connect({
+        siteId: SITE_ID,
+        token: buildSiteToken(SITE_ID, API_KEY, issuedAt),
+      });
+
+      expect(await handshake.refused()).toBe("Invalid site token");
+    } finally {
+      site.api_key = API_KEY;
+    }
   });
 
   it("refuses a future-dated token beyond the clock-skew allowance", async () => {

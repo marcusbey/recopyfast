@@ -1236,6 +1236,48 @@ Complexity: **4**. One rebuilt embed artifact for A-14 and A-26; no new dependen
 
 Research: `docs/research/s27-launch-content-integrity.md`. Plan: `docs/plans/s27-launch-content-integrity.md`.
 
+## Story s28-billing-correctness — monthly allowances and one open checkout
+
+As a subscriber, I receive the monthly credits my plan grants even when billed annually, and opening Checkout twice cannot create two subscriptions.
+
+Scope: audit A-19 and A-21 / migration M-5 in `docs/archive/goal-audit-closeout.md`. Complexity: 3.
+
+Acceptance criteria:
+- Compute the current monthly allowance window from the subscription anchor, with deterministic UTC month-end clamping and no accumulated drift.
+- Use the existing live-subscription entitlement statuses (active, trialing, past_due); preserve the separate one-time trial-grant allowance and purchased credits.
+- Reserve one pending subscription intent per user in Postgres before Stripe creation, with a partial unique index. Persist the requested price, plan and interval; reuse the session URL only for the same choice. A changed choice expires the old session before releasing the intent and creating the newly requested checkout.
+- Align bounded intent/session expiry, safely handle concurrent claims and ambiguous provider failures, and release only the matching intent on completed/expired webhooks without duplicate side effects.
+- Add a forward-only idempotent migration with RLS and service-role grants; do not apply it.
+- Keep all audit guards, flip the remaining scoped failing markers, run local gates with CI placeholders, then push a draft PR only.
+
+Operator prevalidated this scope in the current task. No UI design is needed. Independent review is pending; no merge or deployment is authorized.
+
+Re-review fix mode 2 adds the 409 retry-time sentence, an ordering-sensitive allowance regression, and corrected webhook/research documentation. N2 (recoverable incomplete/unpaid/paused subscriptions becoming parallel live subscriptions) is explicitly deferred to the follow-up in the plan; the one-pending-intent invariant does not close that pre-existing window.
+
+Research: `docs/research/s28-billing-correctness.md`.
+Plan: `docs/plans/s28-billing-correctness.md`.
+
+## Story s29-editor-invite-and-token-lifetime — deliver invitations and keep installs alive
+
+As a site owner, I can invite an editor by email and revoke installation credentials deliberately,
+so collaborators find the editor hub and installed widgets do not stop after 90 days.
+
+Complexity: **4**. Operator-prevalidated scope and D3, 2026-09-24.
+
+- Send one best-effort Resend invitation on new enrolment/restoration, never on an active duplicate.
+  Include inviter, site name/domain, plain-language permissions, token-free hub CTA and code sign-in instructions.
+- Return `invitationEmailSent`; show emailed or manual-link/copy-link notice. Active rows offer
+  admin-guarded resend, limited per recipient across invite/restore/resend (3/hour) and per owner
+  using the existing limiter.
+- Remove only the site-token age cap; preserve HMAC, shape, future-time and origin checks.
+- Provide admin-only snippet regeneration with an explicit old-snippet invalidation warning.
+- Return readable structured auth errors with CORS only to the permitted origin; preserve authored
+  content on refusal. No widget warning or source-byte increase (fix-run decision C1).
+- Flip A-25 markers, preserving their intent under D3; pass local gates and open a draft PR.
+
+Research: `docs/research/s29-editor-invite-and-token-lifetime.md`.
+Plan: `docs/plans/s29-editor-invite-and-token-lifetime.md`.
+
 ## Story s31-magic-link-landing — land confirmed magic links in the app
 
 As a user opening a magic link, I land on my requested app page after confirmation,

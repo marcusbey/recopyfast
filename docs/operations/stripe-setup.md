@@ -42,7 +42,7 @@ The one enabled live endpoint is:
 The `www` host is mandatory. The apex host redirects, and Stripe signature delivery must reach
 the route directly rather than traverse a redirect.
 
-Subscribe the endpoint to exactly these 13 event types, matching the switch in
+Subscribe the endpoint to exactly these 14 event types, matching the switch in
 `src/app/api/webhooks/stripe/route.ts`:
 
 1. `customer.subscription.created`
@@ -58,6 +58,12 @@ Subscribe the endpoint to exactly these 13 event types, matching the switch in
 11. `payment_intent.payment_failed`
 12. `customer.created`
 13. `customer.updated`
+14. `checkout.session.expired`
+
+The live endpoint must be updated by the operator to subscribe to
+`checkout.session.expired` when deploying the durable checkout-intent handlers. Updating
+this runbook does not update Stripe; verify the subscription during cutover. The event
+releases the matching expired checkout intent, with lazy route recovery as a fallback.
 
 The production endpoint's write-only secret is the value of
 `STRIPE_WEBHOOK_SECRET_LIVE`. `STRIPE_WEBHOOK_SECRET` is the separate test-mode secret. Stripe's
@@ -79,7 +85,7 @@ can cause retries. Reconcile legitimate failed deliveries separately before decl
    source commit. Confirm there is exactly one current endpoint before choosing any mutation
    target.
 2. **Create the replacement first.** Create a live endpoint with the same canonical URL and exact
-   13-event set. Capture its returned signing secret without printing it. Leave the old endpoint
+   14-event set. Capture its returned signing secret without printing it. Leave the old endpoint
    in place; during the overlap Stripe may deliver to both endpoints, and idempotency in
    `billing_events` prevents a successfully authenticated duplicate from granting twice.
 3. **Patch the existing Vercel variable by environment-variable id.** Resolve the production
@@ -101,7 +107,7 @@ can cause retries. Reconcile legitimate failed deliveries separately before decl
    parity from endpoint metadata alone.
 6. **Remove only the old endpoint.** After the replacement proof succeeds, delete the previously
    resolved old endpoint id. Re-read Stripe configuration and require exactly one enabled
-   canonical endpoint with the exact 13-event set.
+   canonical endpoint with the exact 14-event set.
 7. **Run a fresh post-cutover proof.** Create one disposable, clearly tagged Stripe customer and
    require its new `customer.created` event to reach `pending_webhooks = 0` and a processed
    ledger row. Remove both proof customers and both application ledger rows. Stripe's immutable
@@ -134,7 +140,7 @@ guess a signing secret.
 ## Verification and cleanup checklist
 
 - [ ] One enabled live endpoint uses the canonical `www` URL.
-- [ ] Its enabled event set is exactly the 13 events above.
+- [ ] Its enabled event set is exactly the 14 events above.
 - [ ] The production deployment is `READY` at the intended source commit.
 - [ ] A real signed delivery returns 2xx, reaches `pending_webhooks = 0`, and records a processed
       `billing_events` row.

@@ -20,7 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { AlertCircle, CheckCircle2, Loader2, Lock, Users } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Copy,
+  Loader2,
+  Lock,
+  Users,
+} from "lucide-react";
 import Link from "next/link";
 import { InviteEditorForm } from "./InviteEditorForm";
 import { SiteEditorRow, type SiteEditorSummary } from "./SiteEditorRow";
@@ -54,7 +61,13 @@ type LoadState =
   | { status: "ready"; editors: SiteEditorSummary[] };
 
 type Notice =
-  | { kind: "invited"; email: string; hubUrl: string }
+  | {
+      kind: "invited";
+      email: string;
+      hubUrl: string;
+      invitationEmailSent: boolean;
+      action: "invite" | "resend";
+    }
   | { kind: "removed"; email: string; devicesSignedOut: number };
 
 const NETWORK_ERROR =
@@ -152,6 +165,11 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
   );
   const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<{
+    editorId: string;
+    pending: boolean;
+    error: string | null;
+  } | null>(null);
 
   const loadEditors = useCallback(async () => {
     setState({ status: "loading" });
@@ -215,13 +233,18 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
           return false;
         }
 
-        const data: { editor?: { email?: string }; hubUrl?: string } =
-          await response.json();
+        const data: {
+          editor?: { email?: string };
+          hubUrl?: string;
+          invitationEmailSent?: boolean;
+        } = await response.json();
 
         setNotice({
           kind: "invited",
           email: data.editor?.email ?? email,
           hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
+          invitationEmailSent: data.invitationEmailSent === true,
+          action: "invite",
         });
         await loadEditors();
         return true;
@@ -237,6 +260,62 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
   const openRevokeConfirm = (editor: SiteEditorSummary) => {
     setRevokeError(null);
     setRevokeTarget(editor);
+  };
+
+  const handleResend = async (editor: SiteEditorSummary) => {
+    setActionFailure(null);
+    setNotice(null);
+    setResendState({ editorId: editor.id, pending: true, error: null });
+
+    try {
+      const response = await fetch("/api/editor/editors", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ siteId, siteEditorId: editor.id }),
+      });
+
+      if (!response.ok) {
+        setResendState({
+          editorId: editor.id,
+          pending: false,
+          error: await readEditorsError(
+            response,
+            "Could not resend that invitation",
+          ),
+        });
+        return;
+      }
+
+      const data: { invitationEmailSent?: boolean; hubUrl?: string } =
+        await response.json();
+      if (data.invitationEmailSent !== true) {
+        setResendState(null);
+        setNotice({
+          kind: "invited",
+          email: editor.email,
+          hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
+          invitationEmailSent: false,
+          action: "resend",
+        });
+        return;
+      }
+
+      setResendState(null);
+      setNotice({
+        kind: "invited",
+        email: editor.email,
+        hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
+        invitationEmailSent: true,
+        action: "resend",
+      });
+    } catch (error) {
+      console.error("Failed to resend editor invitation:", error);
+      setResendState({
+        editorId: editor.id,
+        pending: false,
+        error: NETWORK_ERROR,
+      });
+    }
   };
 
   const handleRevokeConfirm = async () => {
@@ -395,6 +474,15 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
                     key={editor.id}
                     editor={editor}
                     onRevoke={openRevokeConfirm}
+                    onResend={handleResend}
+                    isResending={
+                      resendState?.editorId === editor.id && resendState.pending
+                    }
+                    resendError={
+                      resendState?.editorId === editor.id
+                        ? resendState.error
+                        : null
+                    }
                   />
                 ))}
               </ul>
@@ -411,6 +499,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
                       key={editor.id}
                       editor={editor}
                       onRevoke={openRevokeConfirm}
+                      onResend={handleResend}
                     />
                   ))}
                 </ul>
@@ -493,12 +582,12 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
   );
 }
 
-/**
- * Enrolment sends no mail. Saying so is the point of this panel: the owner
- * otherwise assumes an invitation went out, and the editor's silence looks
- * like a broken inbox rather than a step nobody has taken yet.
- */
+/** Delivery confirmation or the manual handoff that keeps a mail outage soft. */
 function NoticePanel({ notice }: { notice: Notice }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+
   if (notice.kind === "removed") {
     const { devicesSignedOut } = notice;
     return (
@@ -521,6 +610,16 @@ function NoticePanel({ notice }: { notice: Notice }) {
 
   const href = editorHubHref(notice.hubUrl);
 
+  const copyHubLink = async () => {
+    if (!href) return;
+    try {
+      await navigator.clipboard.writeText(href);
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+  };
+
   return (
     <div
       role="status"
@@ -528,23 +627,45 @@ function NoticePanel({ notice }: { notice: Notice }) {
     >
       <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
       <div className="space-y-1">
-        <p>{notice.email} can now edit this site.</p>
-        <p>
-          No invitation email is sent. Ask them to open{" "}
-          {href ? (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium underline underline-offset-2"
-            >
-              the editor hub
-            </a>
-          ) : (
-            <span className="font-medium">the editor hub</span>
-          )}{" "}
-          and request a sign-in code.
-        </p>
+        {notice.invitationEmailSent ? (
+          <p>We emailed {notice.email} an invitation.</p>
+        ) : (
+          <>
+            <p>
+              {notice.action === "resend"
+                ? `We could not resend the invitation email to ${notice.email}. They still have access.`
+                : `${notice.email} can now edit this site.`}
+            </p>
+            <p>
+              No invitation email was sent. Ask them to open{" "}
+              {href ? (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  the editor hub
+                </a>
+              ) : (
+                <span className="font-medium">the editor hub</span>
+              )}{" "}
+              and request a sign-in code.
+            </p>
+            {href && (
+              <div className="flex items-center gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={copyHubLink}>
+                  <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+                  Copy link
+                </Button>
+                {copyState === "copied" && <span>Link copied.</span>}
+                {copyState === "failed" && (
+                  <span role="alert">Could not copy link.</span>
+                )}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

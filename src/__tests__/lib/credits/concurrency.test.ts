@@ -111,6 +111,10 @@ function createFakeClient() {
         predicates.push((row) => row[column] === value);
         return builder;
       },
+      in: (column: string, values: readonly unknown[]) => {
+        predicates.push((row) => values.includes(row[column]));
+        return builder;
+      },
       gt: (column: string, value: number) => {
         predicates.push((row) => Number(row[column] ?? 0) > value);
         return builder;

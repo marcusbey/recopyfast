@@ -169,7 +169,10 @@ export function requireUuid(
   if (typeof raw !== "string" || !UUID_PATTERN.test(raw.trim())) {
     return fail(`Field "${field}" must be a valid UUID`);
   }
-  return { ok: true, value: raw.trim() };
+  // PostgreSQL accepts several spellings for the same UUID. Canonicalising at
+  // the HTTP boundary prevents one database identity from opening distinct
+  // rate-limit buckets through upper-case input.
+  return { ok: true, value: raw.trim().toLowerCase() };
 }
 
 export function requireEnum<T extends string>(

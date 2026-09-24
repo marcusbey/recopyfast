@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Card,
   CardContent,
@@ -9,6 +9,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { type SiteStatus } from "@/components/ui/status-badge";
 import { DomainVerification } from "./DomainVerification";
 import { SiteInstallationCard } from "./SiteInstallationCard";
@@ -21,6 +30,8 @@ import {
   FileText,
   Activity,
   History,
+  Loader2,
+  RotateCcw,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Site } from "@/types";
@@ -89,12 +100,69 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [regenerateError, setRegenerateError] = useState<string | null>(null);
+  const [regenerated, setRegenerated] = useState(false);
+  const credentialSiteId = useRef(site.id);
+  const latestSelection = useRef({
+    siteId: site.id,
+    canInstall: Boolean(site.siteToken),
+  });
+  latestSelection.current = {
+    siteId: site.id,
+    canInstall: Boolean(site.siteToken),
+  };
+  const [credentials, setCredentials] = useState({
+    siteToken: site.siteToken,
+    embedScript: site.embedScript,
+  });
+
+  useEffect(() => {
+    // Dashboard selection can replace `site` without remounting this view. A
+    // credential rotated for site A must never remain visible after switching
+    // to site B, especially when B is a viewer-only site with no install
+    // credentials. Same-site prop refreshes deliberately do not overwrite the
+    // local result: the parent may still hold the pre-rotation payload while
+    // this request has already made that snippet invalid.
+    const didChangeSite = credentialSiteId.current !== site.id;
+    const didLoseInstallAccess =
+      !site.siteToken && (credentials.siteToken || credentials.embedScript);
+
+    if (didChangeSite || didLoseInstallAccess) {
+      credentialSiteId.current = site.id;
+      setCredentials({
+        siteToken: site.siteToken,
+        embedScript: site.embedScript,
+      });
+      setRegenerated(false);
+      setCopiedScript(false);
+      setCopiedToken(false);
+      setRegenerateDialogOpen(false);
+      setRegenerateError(null);
+    }
+  }, [
+    credentials.embedScript,
+    credentials.siteToken,
+    site.id,
+    site.siteToken,
+    site.embedScript,
+  ]);
+
+  // Effects run after paint. During the first render for a newly selected site,
+  // use its props immediately so the previous site's secret cannot flash on
+  // screen while the state synchronisation above is queued.
+  const displayedCredentials = !site.siteToken
+    ? { siteToken: undefined, embedScript: undefined }
+    : credentialSiteId.current === site.id
+      ? credentials
+      : { siteToken: site.siteToken, embedScript: site.embedScript };
 
   const embedScript =
-    site.embedScript ||
+    displayedCredentials.embedScript ||
     buildEmbedScript({
       siteId: site.id,
-      siteToken: site.siteToken || "YOUR_SITE_TOKEN",
+      siteToken: displayedCredentials.siteToken || "YOUR_SITE_TOKEN",
     });
 
   const handleCopyScript = async () => {
@@ -104,10 +172,61 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
   };
 
   const handleCopyToken = async () => {
-    if (site.siteToken) {
-      await navigator.clipboard.writeText(site.siteToken);
+    if (displayedCredentials.siteToken) {
+      await navigator.clipboard.writeText(displayedCredentials.siteToken);
       setCopiedToken(true);
       setTimeout(() => setCopiedToken(false), 2000);
+    }
+  };
+
+  const handleRegenerateSnippet = async () => {
+    const requestedSiteId = site.id;
+    setRegenerating(true);
+    setRegenerateError(null);
+
+    try {
+      const response = await fetch(
+        `/api/sites/${requestedSiteId}/regenerate-snippet`,
+        { method: "POST" },
+      );
+      const body: {
+        siteToken?: string;
+        embedScript?: string;
+        error?: string;
+      } = await response.json();
+
+      if (!response.ok || !body.siteToken || !body.embedScript) {
+        throw new Error(body.error || "Failed to regenerate snippet");
+      }
+
+      // The owner may switch sites while the request is in flight. Its result
+      // belongs only to the site that initiated it and must not replace the
+      // credentials now displayed for another site.
+      if (
+        latestSelection.current.siteId !== requestedSiteId ||
+        !latestSelection.current.canInstall
+      ) {
+        return;
+      }
+
+      // These values feed every credential consumer on this screen: the main
+      // snippet, installation instructions/disclosure, token copy control and
+      // the history panel. Keeping one state object prevents an old token from
+      // surviving in a less-visible surface after the server has revoked it.
+      setCredentials({
+        siteToken: body.siteToken,
+        embedScript: body.embedScript,
+      });
+      setCopiedScript(false);
+      setCopiedToken(false);
+      setRegenerated(true);
+      setRegenerateDialogOpen(false);
+    } catch (error) {
+      setRegenerateError(
+        error instanceof Error ? error.message : "Failed to regenerate snippet",
+      );
+    } finally {
+      setRegenerating(false);
     }
   };
 
@@ -219,6 +338,16 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {regenerated && (
+              <Alert variant="success">
+                <AlertTitle>Snippet regenerated</AlertTitle>
+                <AlertDescription>
+                  Copy this new snippet to your site. Old snippets no longer
+                  work for new requests. Existing live editing connections may
+                  continue until they reconnect.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="bg-surface-1 rounded-lg p-4 border border-border">
               <code className="text-sm text-foreground break-all">
                 {embedScript}
@@ -237,12 +366,25 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
                 </>
               )}
             </Button>
+            {displayedCredentials.siteToken && (
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => {
+                  setRegenerateError(null);
+                  setRegenerateDialogOpen(true);
+                }}
+              >
+                <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+                Regenerate snippet
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Site Token */}
-      {site.siteToken && (
+      {displayedCredentials.siteToken && (
         <Card className="border-border">
           <CardHeader>
             <CardTitle>Site Token</CardTitle>
@@ -255,7 +397,7 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
             <div className="space-y-4">
               <div className="bg-surface-1 rounded-lg p-4 border border-border">
                 <code className="text-sm text-foreground break-all font-mono">
-                  {site.siteToken}
+                  {displayedCredentials.siteToken}
                 </code>
               </div>
               <Button
@@ -287,7 +429,13 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           third reading of what the header pill already said. The card below is
           the single source, driven by the persisted state machine on `sites`
           rather than by a count. */}
-      <SiteInstallationCard site={{ ...site, embedScript }} />
+      <SiteInstallationCard
+        site={{
+          ...site,
+          embedScript,
+          siteToken: displayedCredentials.siteToken,
+        }}
+      />
 
       {/* Domain ownership.
           `DomainVerification` and the `domain_verifications` table have existed
@@ -322,8 +470,67 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         open={historyPanelOpen}
         onClose={() => setHistoryPanelOpen(false)}
         siteId={site.id}
-        stagingToken={site.siteToken || ""}
+        stagingToken={displayedCredentials.siteToken || ""}
       />
+
+      <Dialog
+        open={regenerateDialogOpen && Boolean(site.siteToken)}
+        onOpenChange={(open) => {
+          if (!regenerating) {
+            setRegenerateDialogOpen(open);
+            if (!open) setRegenerateError(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Regenerate snippet?</DialogTitle>
+            <DialogDescription>
+              Old snippets stop working for new requests as soon as this
+              succeeds. Existing live editing connections may continue until
+              they reconnect. Replace the snippet on {site.domain} with the new
+              one shown here.
+            </DialogDescription>
+          </DialogHeader>
+
+          {regenerateError && (
+            <Alert variant="destructive">
+              <AlertTitle>Snippet was not regenerated</AlertTitle>
+              <AlertDescription>{regenerateError}</AlertDescription>
+            </Alert>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={regenerating}
+              onClick={() => {
+                setRegenerateDialogOpen(false);
+                setRegenerateError(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={regenerating}
+              onClick={handleRegenerateSnippet}
+            >
+              {regenerating ? (
+                <>
+                  <Loader2
+                    className="mr-2 h-4 w-4 animate-spin"
+                    aria-hidden="true"
+                  />
+                  Regenerating...
+                </>
+              ) : (
+                "Regenerate now"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
