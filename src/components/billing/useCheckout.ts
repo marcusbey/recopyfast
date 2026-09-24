@@ -1,7 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { BillingPeriod, PaidPlanId } from "@/lib/stripe/plan-types";
+import type {
+  BillingPeriod,
+  OneTimeProductId,
+  PaidPlanId,
+} from "@/lib/stripe/plan-types";
 
 /**
  * Starts a Stripe Checkout Session and hands the browser over to Stripe.
@@ -14,7 +18,7 @@ import type { BillingPeriod, PaidPlanId } from "@/lib/stripe/plan-types";
 export type CheckoutRequest =
   | { intent: "subscription"; planId: PaidPlanId; billingPeriod: BillingPeriod }
   | { intent: "credits"; quantity: number }
-  | { intent: "lifetime" }
+  | { intent: "lifetime"; productId?: OneTimeProductId }
   | { intent: "payment_method" };
 
 interface UseCheckoutResult {

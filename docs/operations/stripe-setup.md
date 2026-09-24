@@ -22,6 +22,44 @@ features change independently of this document and must come from the applicatio
 Never reconstruct prices, quotas or feature bullets from this guide. Never add a hardcoded
 fallback catalogue: a database or Stripe failure must not silently sell stale terms.
 
+## Creating Agency prices
+
+The catalogue sync tool can create the two recurring Agency prices and the one-time Founding
+Agency price. Creation is deliberately separate from verification: Stripe price amounts are
+immutable, and the newly returned ids must first be installed in the matching environment.
+Creation uses stable mode/plan/amount idempotency keys, so retrying the same interrupted command
+recovers the same products and prices instead of multiplying catalogue entries.
+
+For test mode, export the active `plans` rows from a disposable local Supabase instance to a
+reviewed JSON file (either an array or `{ "plans": [...] }`). The tool refuses to read a remote
+Supabase endpoint in test mode unless `--catalogue` is supplied, and it refuses any secret key
+whose prefix is not `sk_test_`:
+
+```bash
+node scripts/sync-stripe-catalogue.mjs --mode=test --catalogue=/absolute/path/plans.json --create=agency,lifetime_agency
+npm run sync:stripe -- --catalogue=/absolute/path/plans.json --create=agency,lifetime_agency
+npm run check:stripe -- --catalogue=/absolute/path/plans.json --only=agency,lifetime_agency
+```
+
+The first command is a no-write preview. The second creates exactly three Stripe test prices and
+prints the environment-variable assignments for `STRIPE_AGENCY_PRICE_ID`,
+`STRIPE_AGENCY_YEARLY_PRICE_ID` and `STRIPE_LIFETIME_AGENCY_PRICE_ID`. Install those ids in the
+test environment before running the final verification command.
+
+At ship, an authorized operator runs the corresponding live sequence. These are the exact live
+commands; do not run them before the catalogue migration is applied and reviewed:
+
+```bash
+node scripts/sync-stripe-catalogue.mjs --mode=live --create=agency,lifetime_agency
+npm run sync:stripe:live -- --create=agency,lifetime_agency
+npm run check:stripe:live
+```
+
+The live creation command requires `STRIPE_SECRET_KEY_LIVE` with an `sk_live_` prefix. Install its
+printed ids as `STRIPE_AGENCY_PRICE_ID_LIVE`, `STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE` and
+`STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE`, then run the read-only live check. Never copy test ids into
+live variables or infer successful verification from creation alone.
+
 ## Environments
 
 Test and live mode have different API keys, Price ids, endpoint ids and webhook signing secrets.
@@ -42,7 +80,7 @@ The one enabled live endpoint is:
 The `www` host is mandatory. The apex host redirects, and Stripe signature delivery must reach
 the route directly rather than traverse a redirect.
 
-Subscribe the endpoint to exactly these 13 event types, matching the switch in
+Subscribe the endpoint to exactly these 14 event types, matching the switch in
 `src/app/api/webhooks/stripe/route.ts`:
 
 1. `customer.subscription.created`
@@ -52,12 +90,13 @@ Subscribe the endpoint to exactly these 13 event types, matching the switch in
 5. `invoice.payment_failed`
 6. `payment_intent.succeeded`
 7. `checkout.session.completed`
-8. `charge.refunded`
-9. `charge.dispute.created`
-10. `charge.dispute.closed`
-11. `payment_intent.payment_failed`
-12. `customer.created`
-13. `customer.updated`
+8. `checkout.session.expired`
+9. `charge.refunded`
+10. `charge.dispute.created`
+11. `charge.dispute.closed`
+12. `payment_intent.payment_failed`
+13. `customer.created`
+14. `customer.updated`
 
 The production endpoint's write-only secret is the value of
 `STRIPE_WEBHOOK_SECRET_LIVE`. `STRIPE_WEBHOOK_SECRET` is the separate test-mode secret. Stripe's
@@ -79,7 +118,7 @@ can cause retries. Reconcile legitimate failed deliveries separately before decl
    source commit. Confirm there is exactly one current endpoint before choosing any mutation
    target.
 2. **Create the replacement first.** Create a live endpoint with the same canonical URL and exact
-   13-event set. Capture its returned signing secret without printing it. Leave the old endpoint
+   14-event set. Capture its returned signing secret without printing it. Leave the old endpoint
    in place; during the overlap Stripe may deliver to both endpoints, and idempotency in
    `billing_events` prevents a successfully authenticated duplicate from granting twice.
 3. **Patch the existing Vercel variable by environment-variable id.** Resolve the production
@@ -101,7 +140,7 @@ can cause retries. Reconcile legitimate failed deliveries separately before decl
    parity from endpoint metadata alone.
 6. **Remove only the old endpoint.** After the replacement proof succeeds, delete the previously
    resolved old endpoint id. Re-read Stripe configuration and require exactly one enabled
-   canonical endpoint with the exact 13-event set.
+   canonical endpoint with the exact 14-event set.
 7. **Run a fresh post-cutover proof.** Create one disposable, clearly tagged Stripe customer and
    require its new `customer.created` event to reach `pending_webhooks = 0` and a processed
    ledger row. Remove both proof customers and both application ledger rows. Stripe's immutable
@@ -134,7 +173,7 @@ guess a signing secret.
 ## Verification and cleanup checklist
 
 - [ ] One enabled live endpoint uses the canonical `www` URL.
-- [ ] Its enabled event set is exactly the 13 events above.
+- [ ] Its enabled event set is exactly the 14 events above.
 - [ ] The production deployment is `READY` at the intended source commit.
 - [ ] A real signed delivery returns 2xx, reaches `pending_webhooks = 0`, and records a processed
       `billing_events` row.

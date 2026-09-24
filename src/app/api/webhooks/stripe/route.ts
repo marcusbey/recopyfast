@@ -26,6 +26,10 @@ import {
   recordCreditRevocation,
 } from "@/lib/billing/credit-revocations";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
+import {
+  completeFoundingAgencyPurchase,
+  releaseFoundingAgencyCheckout,
+} from "@/lib/billing/founding-agency";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
 // STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
@@ -243,6 +247,10 @@ export async function POST(req: NextRequest) {
 
       case "checkout.session.completed":
         await handleCheckoutSessionCompleted(event.data.object);
+        break;
+
+      case "checkout.session.expired":
+        await handleCheckoutSessionExpired(event.data.object);
         break;
 
       case "charge.refunded":
@@ -747,6 +755,8 @@ async function grantLifetime(
   userId: string,
   grantsPlanId: string | undefined,
   paymentIntentId: string,
+  productId?: string,
+  foundingReservationId?: string,
 ): Promise<void> {
   if (!grantsPlanId) {
     throw new Error(
@@ -766,11 +776,28 @@ async function grantLifetime(
     );
   }
 
-  const result = await grantPlanEntitlement(
-    userId,
-    grantsPlanId,
-    paymentIntentId,
-  );
+  let result: { granted: boolean; duplicate: boolean };
+  if (productId === "lifetime_agency") {
+    if (grantsPlanId !== "agency") {
+      throw new Error(
+        `payment ${paymentIntentId} names Founding Agency product but grants ` +
+          `"${grantsPlanId}" instead of "agency"`,
+      );
+    }
+    if (!foundingReservationId) {
+      throw new Error(
+        `payment ${paymentIntentId} is a Founding Agency purchase with no ` +
+          `founding_reservation_id`,
+      );
+    }
+    result = await completeFoundingAgencyPurchase(
+      foundingReservationId,
+      userId,
+      paymentIntentId,
+    );
+  } else {
+    result = await grantPlanEntitlement(userId, grantsPlanId, paymentIntentId);
+  }
 
   if (result.duplicate) {
     console.log(`Lifetime entitlement for ${paymentIntentId} already granted.`);
@@ -907,7 +934,13 @@ async function handlePaymentIntentSucceeded(
     }
 
     case "lifetime_purchase":
-      await grantLifetime(userId, metadata.grants_plan_id, paymentIntent.id);
+      await grantLifetime(
+        userId,
+        metadata.grants_plan_id,
+        paymentIntent.id,
+        metadata.product_id,
+        metadata.founding_reservation_id,
+      );
       break;
 
     default:
@@ -950,7 +983,32 @@ async function handleCheckoutSessionCompleted(
     metadata.grants_plan_id ??
       (await catalogueLifetimeGrant(session.id, paymentIntentId)),
     paymentIntentId,
+    metadata.product_id,
+    metadata.founding_reservation_id,
   );
+}
+
+/**
+ * Release a founding spot only from Stripe's signed proof that its Checkout
+ * Session can no longer complete. The reservation id lives in session metadata
+ * even when the create response timed out or the follow-up database bind
+ * failed, so this also safely recovers those uncertain remote outcomes.
+ */
+async function handleCheckoutSessionExpired(
+  session: Stripe.Checkout.Session,
+): Promise<void> {
+  const metadata = session.metadata ?? {};
+  if (metadata.product_id !== "lifetime_agency") return;
+
+  const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
+  const reservationId = metadata.founding_reservation_id;
+  if (!userId || !reservationId) {
+    throw new Error(
+      `expired Founding Agency Checkout ${session.id} has no user or reservation id`,
+    );
+  }
+
+  await releaseFoundingAgencyCheckout(reservationId, userId, session.id);
 }
 
 /**

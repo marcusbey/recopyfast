@@ -22,6 +22,7 @@ import {
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
 interface UpgradeDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ interface UpgradeDialogProps {
    * the dialog and the sidebar card cannot disagree about who may see it.
    */
   lifetimeOffer: OneTimeProduct | null;
+  foundingAgencyAvailability: FoundingAgencyAvailability | null;
   onSuccess: () => void;
 }
 
@@ -50,6 +52,7 @@ export function UpgradeDialog({
   currentPlan,
   catalogue,
   lifetimeOffer,
+  foundingAgencyAvailability,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
@@ -205,7 +208,7 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Subscription plan"
-            className="grid grid-cols-1 md:grid-cols-2 gap-6"
+            className="grid grid-cols-1 md:grid-cols-3 gap-6"
           >
             {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
@@ -288,13 +291,40 @@ export function UpgradeDialog({
                     {hasSubscription &&
                       " Your current subscription stops renewing once the purchase completes."}
                   </p>
+                  {lifetimeOffer.id === "lifetime_agency" && (
+                    <p className="mt-1 text-sm font-medium text-primary">
+                      {foundingAgencyAvailability == null
+                        ? "Availability temporarily unavailable"
+                        : foundingAgencyAvailability.soldOut
+                          ? "Sold out"
+                          : `${foundingAgencyAvailability.remaining} of ${foundingAgencyAvailability.limit} founding spots left`}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => startCheckout({ intent: "lifetime" })}
-                  disabled={isBusy}
+                  onClick={() =>
+                    startCheckout({
+                      intent: "lifetime",
+                      ...(lifetimeOffer.id === "lifetime_agency"
+                        ? { productId: lifetimeOffer.id }
+                        : {}),
+                    })
+                  }
+                  disabled={
+                    isBusy ||
+                    (lifetimeOffer.id === "lifetime_agency" &&
+                      (foundingAgencyAvailability == null ||
+                        foundingAgencyAvailability.soldOut))
+                  }
                 >
-                  Buy once
+                  {lifetimeOffer.id === "lifetime_agency" &&
+                  foundingAgencyAvailability == null
+                    ? "Availability unavailable"
+                    : lifetimeOffer.id === "lifetime_agency" &&
+                        foundingAgencyAvailability?.soldOut
+                      ? "Sold out"
+                      : "Buy once"}
                 </Button>
               </div>
             </div>

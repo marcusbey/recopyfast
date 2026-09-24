@@ -37,9 +37,12 @@ jobs:
       STRIPE_STARTER_YEARLY_PRICE_ID: "price_test_starter_yearly_placeholder"
       STRIPE_PRO_PRICE_ID: "price_test_pro_monthly_placeholder"
       STRIPE_PRO_YEARLY_PRICE_ID: "price_test_pro_yearly_placeholder"
+      STRIPE_AGENCY_PRICE_ID: "price_test_agency_monthly_placeholder"
+      STRIPE_AGENCY_YEARLY_PRICE_ID: "price_test_agency_yearly_placeholder"
       STRIPE_ENTERPRISE_PRICE_ID: "price_test_enterprise_monthly_placeholder"
       STRIPE_ENTERPRISE_YEARLY_PRICE_ID: "price_test_enterprise_yearly_placeholder"
       STRIPE_TICKETS_PRICE_ID: "price_test_tickets_placeholder"
+      STRIPE_LIFETIME_AGENCY_PRICE_ID: "price_test_lifetime_agency_placeholder"
 
       # ── App URL ───────────────────────────────────────────────────────────
       NEXT_PUBLIC_APP_URL: "http://localhost:3000"
@@ -117,6 +120,9 @@ jobs:
       - name: Test (Jest – CI mode, blocking)
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
+      - name: Test Stripe catalogue tooling (Node, blocking)
+        run: node --test scripts/__tests__/sync-stripe-catalogue.test.mjs
+
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
   # This job owns a disposable stack. No hosted Supabase/Redis/Fly credential is
   # accepted: the mutating specs also enforce the exact loopback ports before
@@ -157,9 +163,12 @@ jobs:
       STRIPE_STARTER_YEARLY_PRICE_ID: "price_local_starter_yearly"
       STRIPE_PRO_PRICE_ID: "price_local_pro_monthly"
       STRIPE_PRO_YEARLY_PRICE_ID: "price_local_pro_yearly"
+      STRIPE_AGENCY_PRICE_ID: "price_local_agency_monthly"
+      STRIPE_AGENCY_YEARLY_PRICE_ID: "price_local_agency_yearly"
       STRIPE_ENTERPRISE_PRICE_ID: "price_local_enterprise_monthly"
       STRIPE_ENTERPRISE_YEARLY_PRICE_ID: "price_local_enterprise_yearly"
       STRIPE_TICKETS_PRICE_ID: "price_local_tickets"
+      STRIPE_LIFETIME_AGENCY_PRICE_ID: "price_local_lifetime_agency"
       CI: "true"
 
     steps:
@@ -210,6 +219,38 @@ jobs:
           printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$anon_key" >> "$GITHUB_ENV"
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
           rm -f "$status_file"
+
+      - name: Test Founding Agency capacity against disposable Postgres
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+        run: |
+          node <<'NODE'
+          const { Client } = require("pg");
+
+          (async () => {
+            const client = new Client({ connectionString: process.env.RCF_TEST_DB_URL });
+            await client.connect();
+            try {
+              const { rows } = await client.query(`
+                SELECT to_regclass('public.founding_agency_reservations')::text AS reservations,
+                       to_regprocedure('public.reserve_founding_agency_spot(uuid)')::text AS reserve_rpc,
+                       to_regprocedure('public.bind_founding_agency_checkout(uuid,uuid,text)')::text AS bind_rpc,
+                       to_regprocedure('public.release_founding_agency_checkout(uuid,uuid,text)')::text AS release_rpc,
+                       to_regprocedure('public.complete_founding_agency_purchase(uuid,uuid,text)')::text AS complete_rpc,
+                       to_regprocedure('public.get_founding_agency_availability()')::text AS availability_rpc
+              `);
+              if (!rows[0] || Object.values(rows[0]).some((value) => value === null)) {
+                throw new Error("Founding Agency migration schema is incomplete.");
+              }
+            } finally {
+              await client.end();
+            }
+          })().catch((error) => {
+            console.error(error.message);
+            process.exit(1);
+          });
+          NODE
+          npm test -- --runInBand src/__tests__/db/founding-agency-cap.test.ts
 
       - name: Build production app
         run: npm run build

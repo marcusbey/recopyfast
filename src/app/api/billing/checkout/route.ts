@@ -3,18 +3,24 @@ import { createClient } from "@/lib/supabase/server";
 import {
   createCheckoutSession,
   getCheckoutSessionStatus,
+  preflightLifetimeCheckout,
   type CheckoutIntent,
 } from "@/lib/stripe/checkout";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
-  getLifetimeGrantPlanId,
+  getOneTimeProduct,
   isBillingPeriod,
+  isLifetimeProductId,
   isPaidPlanId,
 } from "@/lib/stripe/plans";
 import { getGrantedPlanIds } from "@/lib/billing/entitlements";
 import { claimSubscriptionReservation } from "@/lib/billing/checkout-reservation";
 import { withUserLock } from "@/lib/billing/user-lock";
+import {
+  bindFoundingAgencyCheckout,
+  reserveFoundingAgencySpot,
+} from "@/lib/billing/founding-agency";
 
 /**
  * Stripe Checkout entry point.
@@ -28,6 +34,7 @@ interface CheckoutRequestBody {
   intent?: unknown;
   planId?: unknown;
   billingPeriod?: unknown;
+  productId?: unknown;
   quantity?: unknown;
 }
 
@@ -68,8 +75,13 @@ async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
       return { ok: true, intent: { type: "credits", quantity } };
     }
 
-    case "lifetime":
-      return { ok: true, intent: { type: "lifetime" } };
+    case "lifetime": {
+      const productId = body.productId ?? "lifetime_pro";
+      if (!isLifetimeProductId(productId)) {
+        return { ok: false, error: "Invalid lifetime product ID" };
+      }
+      return { ok: true, intent: { type: "lifetime", productId } };
+    }
 
     case "payment_method":
       return { ok: true, intent: { type: "payment_method" } };
@@ -176,7 +188,9 @@ export async function POST(req: NextRequest) {
     // trusting the dialog not to offer it; this is the same rule applied to the
     // more expensive product.
     if (parsed.intent.type === "lifetime") {
-      const grantedPlanId = await getLifetimeGrantPlanId();
+      const productId = parsed.intent.productId ?? "lifetime_pro";
+      const product = await getOneTimeProduct(productId);
+      const grantedPlanId = product.grantsPlanId;
       // The GRANT, not the effective plan. Asking `getEffectivePlanId` here
       // refused every Pro monthly subscriber — it falls back to a live
       // subscription when there is no grant, so a subscriber resolved to `pro`
@@ -194,6 +208,84 @@ export async function POST(req: NextRequest) {
           },
           { status: 409 },
         );
+      }
+
+      if (productId === "lifetime_agency") {
+        const buyerName =
+          typeof user.user_metadata?.name === "string"
+            ? user.user_metadata.name
+            : undefined;
+
+        // Missing price ids, origin configuration and customer-creation
+        // failures are all known before a capacity row exists. After this
+        // point a create error is an uncertain Stripe outcome and the durable
+        // reservation must stay held for idempotent recovery.
+        const prepared = await preflightLifetimeCheckout(
+          user.id,
+          user.email!,
+          productId,
+          buyerName,
+        );
+
+        const reservation = await reserveFoundingAgencySpot(user.id);
+
+        if (reservation.outcome === "owned") {
+          return NextResponse.json(
+            {
+              error:
+                "You already have lifetime Agency access. There is nothing further to buy.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "sold_out") {
+          return NextResponse.json(
+            {
+              error: "All 50 Founding Agency lifetime spots are sold out.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "capacity_busy") {
+          return NextResponse.json(
+            {
+              error:
+                "The remaining Founding Agency spots are temporarily held in checkout. Please try again shortly.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome !== "reserved") {
+          throw new Error("Unexpected Founding Agency reservation outcome");
+        }
+
+        const session = await createCheckoutSession(
+          user.id,
+          user.email!,
+          {
+            ...parsed.intent,
+            reservationId: reservation.reservationId,
+            checkoutExpiresAt: reservation.checkoutExpiresAt,
+            prepared,
+          },
+          buyerName,
+        );
+
+        // A successful Stripe create with a failed bind is returned as 500.
+        // The next request reuses both the database reservation and Stripe
+        // idempotency key, recovers that same session, and retries this bind.
+        // Releasing here would be unsafe: a customer may already be paying in
+        // the remotely-created session while another buyer takes the spot.
+        await bindFoundingAgencyCheckout(
+          reservation.reservationId,
+          user.id,
+          session.sessionId,
+        );
+
+        return NextResponse.json(session);
       }
     }
 

@@ -82,7 +82,12 @@ function renderDashboard(data: BillingDashboardData) {
     ok: true,
     json: async () => data,
   });
-  render(<BillingDashboard lifetimeGrant={{ kind: "none" }} />);
+  render(
+    <BillingDashboard
+      lifetimeGrant={{ kind: "none" }}
+      foundingAgencyAvailability={null}
+    />,
+  );
 }
 
 beforeEach(() => {

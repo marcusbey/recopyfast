@@ -56,6 +56,7 @@ function planRow(overrides: SeedRowOverrides = {}) {
     description: "Up to 5 websites",
     price_monthly: "19.00",
     price_yearly_monthly_equivalent: "15.77",
+    price_yearly_total: null,
     stripe_price_id_test: null,
     stripe_price_id_live: null,
     stripe_yearly_price_id_test: null,
@@ -128,6 +129,26 @@ const CREDITS_ROW = planRow({
   sort_order: 30,
 });
 
+const AGENCY_ROW = planRow({
+  id: "agency",
+  name: "Agency",
+  description: "10 client websites",
+  price_monthly: "49.00",
+  price_yearly_monthly_equivalent: "40.83",
+  price_yearly_total: "490.00",
+  limits: {
+    websites: 10,
+    collaborators: -1,
+    ai_features: true,
+    translations: -1,
+    ab_testing: true,
+    monthly_credits: 1000,
+  },
+  features: ["10 client websites"],
+  additional_site_price: "4.00",
+  sort_order: 25,
+});
+
 const LIFETIME_ROW = planRow({
   id: "lifetime_pro",
   kind: "one_time",
@@ -142,7 +163,30 @@ const LIFETIME_ROW = planRow({
   sort_order: 40,
 });
 
-const FULL_SEED = [FREE_ROW, STARTER_ROW, planRow(), CREDITS_ROW, LIFETIME_ROW];
+const LIFETIME_AGENCY_ROW = planRow({
+  id: "lifetime_agency",
+  kind: "one_time",
+  name: "Founding Agency (lifetime)",
+  description: "Founding Agency access",
+  price_monthly: "299.00",
+  price_yearly_monthly_equivalent: null,
+  price_yearly_total: null,
+  limits: {},
+  features: ["Everything in Agency"],
+  additional_site_price: null,
+  grants_plan_id: "agency",
+  sort_order: 45,
+});
+
+const FULL_SEED = [
+  FREE_ROW,
+  STARTER_ROW,
+  planRow(),
+  AGENCY_ROW,
+  CREDITS_ROW,
+  LIFETIME_ROW,
+  LIFETIME_AGENCY_ROW,
+];
 
 function respondWith(rows: unknown[]) {
   selectMock.mockResolvedValue({ data: rows, error: null });
@@ -161,6 +205,9 @@ describe("plan catalogue loader", () => {
     process.env.STRIPE_STARTER_YEARLY_PRICE_ID = "price_starter_yearly";
     process.env.STRIPE_TICKETS_PRICE_ID = "price_credits";
     process.env.STRIPE_LIFETIME_PRICE_ID = "price_lifetime";
+    process.env.STRIPE_AGENCY_PRICE_ID = "price_agency_monthly";
+    process.env.STRIPE_AGENCY_YEARLY_PRICE_ID = "price_agency_yearly";
+    process.env.STRIPE_LIFETIME_AGENCY_PRICE_ID = "price_lifetime_agency";
   });
 
   afterEach(() => {
@@ -189,6 +236,20 @@ describe("plan catalogue loader", () => {
       });
     });
 
+    it("loads Agency limits for feature gates, credits and extra-site billing", async () => {
+      const plan = await getPaidPlan("agency");
+
+      expect(plan.limits).toEqual({
+        websites: 10,
+        collaborators: -1,
+        aiFeatures: true,
+        translations: -1,
+        abTesting: true,
+        monthlyCredits: 1000,
+      });
+      expect(plan.additionalSitePrice).toBe(4);
+    });
+
     it("leaves additionalSitePrice null when the plan sells no extra sites", async () => {
       const plan = await getPaidPlan("starter");
 
@@ -202,10 +263,12 @@ describe("plan catalogue loader", () => {
         "free",
         "starter",
         "pro",
+        "agency",
       ]);
       expect(catalogue.oneTimeProducts.map((product) => product.id)).toEqual([
         "credits",
         "lifetime_pro",
+        "lifetime_agency",
       ]);
     });
 
@@ -342,6 +405,13 @@ describe("plan catalogue loader", () => {
       await expect(getPlanCyclePrice("pro", "yearly")).resolves.toBe(189.24);
       await expect(getPlanCyclePrice("pro", "monthly")).resolves.toBe(19);
     });
+
+    it("uses the catalogue's exact annual total when twelve rounded monthly equivalents drift", async () => {
+      await expect(getPlanDisplayPrice("agency", "yearly")).resolves.toBe(
+        40.83,
+      );
+      await expect(getPlanCyclePrice("agency", "yearly")).resolves.toBe(490);
+    });
   });
 
   describe("Stripe price id resolution", () => {
@@ -355,6 +425,15 @@ describe("plan catalogue loader", () => {
       await expect(resolveOneTimePriceId("lifetime_pro")).resolves.toBe(
         "price_lifetime",
       );
+      await expect(resolveStripePriceId("agency", "monthly")).resolves.toBe(
+        "price_agency_monthly",
+      );
+      await expect(resolveStripePriceId("agency", "yearly")).resolves.toBe(
+        "price_agency_yearly",
+      );
+      await expect(resolveOneTimePriceId("lifetime_agency")).resolves.toBe(
+        "price_lifetime_agency",
+      );
     });
 
     it("prefers a populated column over the environment", async () => {
@@ -362,8 +441,10 @@ describe("plan catalogue loader", () => {
         FREE_ROW,
         STARTER_ROW,
         planRow({ stripe_price_id_test: "price_promo_override" }),
+        AGENCY_ROW,
         CREDITS_ROW,
         LIFETIME_ROW,
+        LIFETIME_AGENCY_ROW,
       ]);
 
       await expect(resolveStripePriceId("pro", "monthly")).resolves.toBe(
@@ -410,8 +491,10 @@ describe("plan catalogue loader", () => {
         FREE_ROW,
         STARTER_ROW,
         planRow({ stripe_price_id_test: "price_promo_override" }),
+        AGENCY_ROW,
         CREDITS_ROW,
         LIFETIME_ROW,
+        LIFETIME_AGENCY_ROW,
       ]);
 
       await expect(
@@ -453,7 +536,8 @@ describe("plan catalogue loader", () => {
 
   describe("plan identity", () => {
     it("accepts only the paid plan ids", () => {
-      expect(PAID_PLAN_IDS).toEqual(["starter", "pro"]);
+      expect(PAID_PLAN_IDS).toEqual(["starter", "pro", "agency"]);
+      expect(isPaidPlanId("agency")).toBe(true);
       expect(isPaidPlanId("pro")).toBe(true);
       expect(isPaidPlanId("free")).toBe(false);
       expect(isPaidPlanId("enterprise")).toBe(false);
@@ -549,6 +633,7 @@ describe("sellablePlans", () => {
     expect(sellablePlans(catalogue).map((p) => p.id)).toEqual([
       "starter",
       "pro",
+      "agency",
     ]);
   });
 });

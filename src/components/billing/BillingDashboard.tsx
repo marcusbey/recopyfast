@@ -19,6 +19,7 @@ import {
   type LifetimeGrantStatus,
 } from "./LifetimeOfferCard";
 import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import type { BillingDashboardData } from "@/types/billing";
 
 interface BillingDashboardProps {
@@ -28,9 +29,13 @@ interface BillingDashboardProps {
    * LifetimeOfferCard for why — and it decides whether Lifetime Pro is offered.
    */
   lifetimeGrant: LifetimeGrantStatus;
+  foundingAgencyAvailability: FoundingAgencyAvailability | null;
 }
 
-export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
+export function BillingDashboard({
+  lifetimeGrant,
+  foundingAgencyAvailability,
+}: BillingDashboardProps) {
   const router = useRouter();
   const [dashboardData, setDashboardData] =
     useState<BillingDashboardData | null>(null);
@@ -176,6 +181,7 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
             <LifetimeOfferCard
               product={lifetimeOffer}
               hasLiveSubscription={hasLiveSubscription}
+              availability={foundingAgencyAvailability}
             />
           </div>
         )}
@@ -186,6 +192,7 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
           currentPlan={null}
           catalogue={dashboardData.catalogue}
           lifetimeOffer={lifetimeOffer}
+          foundingAgencyAvailability={foundingAgencyAvailability}
           onSuccess={handleSubscriptionUpdate}
         />
       </div>
@@ -260,6 +267,7 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
             <LifetimeOfferCard
               product={lifetimeOffer}
               hasLiveSubscription={hasLiveSubscription}
+              availability={foundingAgencyAvailability}
             />
           )}
         </div>
@@ -271,6 +279,7 @@ export function BillingDashboard({ lifetimeGrant }: BillingDashboardProps) {
         currentPlan={currentPlan}
         catalogue={dashboardData.catalogue}
         lifetimeOffer={lifetimeOffer}
+        foundingAgencyAvailability={foundingAgencyAvailability}
         onSuccess={handleSubscriptionUpdate}
       />
     </div>

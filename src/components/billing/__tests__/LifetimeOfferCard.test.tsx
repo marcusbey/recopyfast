@@ -18,6 +18,16 @@ const LIFETIME_PRO: OneTimeProduct = {
   sortOrder: 40,
 };
 
+const LIFETIME_AGENCY: OneTimeProduct = {
+  id: "lifetime_agency",
+  name: "Founding Agency (lifetime)",
+  description: "One payment for permanent Agency access",
+  price: 299,
+  features: ["Everything in Agency"],
+  grantsPlanId: "agency",
+  sortOrder: 35,
+};
+
 const CREDITS: OneTimeProduct = {
   id: "credits",
   name: "AI credits",
@@ -49,6 +59,14 @@ describe("resolveLifetimeOffer — who may be sold a permanent grant", () => {
     const grant: LifetimeGrantStatus = { kind: "none" };
 
     expect(resolveLifetimeOffer(CATALOGUE, grant)).toEqual(LIFETIME_PRO);
+  });
+
+  it("prefers the founding Agency offer when both lifetime products exist", () => {
+    expect(
+      resolveLifetimeOffer(catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]), {
+        kind: "none",
+      }),
+    ).toEqual(LIFETIME_AGENCY);
   });
 
   it("withholds it from someone whose grant already confers that plan", () => {
@@ -169,6 +187,61 @@ describe("LifetimeOfferCard", () => {
         body: JSON.stringify({ intent: "lifetime" }),
       });
     });
+  });
+
+  it("identifies the founding product when starting checkout", async () => {
+    const user = userEvent.setup();
+    render(
+      <LifetimeOfferCard
+        product={LIFETIME_AGENCY}
+        hasLiveSubscription={false}
+        availability={{ remaining: 1, limit: 50, soldOut: false }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /buy once/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          intent: "lifetime",
+          productId: "lifetime_agency",
+        }),
+      });
+    });
+  });
+
+  it("disables a sold-out founding offer", () => {
+    render(
+      <LifetimeOfferCard
+        product={LIFETIME_AGENCY}
+        hasLiveSubscription={false}
+        availability={{ remaining: 0, limit: 50, soldOut: true }}
+      />,
+    );
+
+    expect(screen.getAllByText("Sold out")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Sold out" })).toBeDisabled();
+  });
+
+  it("withholds founding checkout when availability could not be read", () => {
+    render(
+      <LifetimeOfferCard
+        product={LIFETIME_AGENCY}
+        hasLiveSubscription={false}
+        availability={null}
+      />,
+    );
+
+    expect(screen.queryByText(/founding spots left/i)).toBeNull();
+    expect(
+      screen.getByText("Availability temporarily unavailable"),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Availability unavailable" }),
+    ).toBeDisabled();
   });
 
   it("surfaces a checkout failure instead of pretending it worked", async () => {

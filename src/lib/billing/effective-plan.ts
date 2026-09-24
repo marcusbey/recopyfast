@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { findPlanById } from "@/lib/stripe/plans";
-import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
+import { PAID_PLAN_IDS, type SubscriptionPlan } from "@/lib/stripe/plan-types";
 import {
   readPurchasedCreditBalance,
   spendableFilter,
@@ -42,6 +42,14 @@ const RETIRED_PLAN_IDS: readonly string[] = ["free"];
 
 function isRetired(planId: string): boolean {
   return RETIRED_PLAN_IDS.includes(planId);
+}
+
+const HIGHEST_PAID_PLAN_ID = PAID_PLAN_IDS[PAID_PLAN_IDS.length - 1];
+
+function isRecognisedPaidPlanId(planId: string): boolean {
+  return (
+    !isRetired(planId) && (PAID_PLAN_IDS as readonly string[]).includes(planId)
+  );
 }
 
 /**
@@ -183,9 +191,11 @@ export function hasAnyEntitlement(entitlement: Entitlement): boolean {
  *     purchase and comp writes; a trial is the same row with a date on it
  *     (ADR 014), and lapses by simply not being selected any more.
  *
- * An entitlement wins over a subscription: someone who bought Lifetime Pro and
- * later starts a Starter subscription should keep Pro, and a lifetime grant can
- * never be downgraded by a lapsed card.
+ * A permanent grant ordinarily wins over a subscription: someone who bought
+ * Lifetime Pro and later starts a Starter subscription should keep Pro. Agency
+ * is the highest paid tier and wins regardless of which store holds it, so an
+ * Agency subscription cannot be masked by an earlier Pro trial/grant and a
+ * permanent Agency purchase cannot be masked by a newer lower grant.
  *
  * Retired ids are normalised to `null` here, at the one point both the router
  * and the gates read through, so a `free` row cannot mean one thing to
@@ -247,7 +257,7 @@ export async function readEffectivePlanId(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<string | null> {
-  const { data: entitlement, error: entitlementError } = await supabase
+  const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
     .select("plan_id")
     .eq("user_id", userId)
@@ -255,21 +265,18 @@ export async function readEffectivePlanId(
     // Expiry is a predicate INSIDE the query, never a check on the row after
     // it comes back, and the difference is a paying customer's access.
     //
-    // The branch below is `if (entitlement && ...) return entitlement.plan_id`
-    // with nothing under it but the subscription fallback. Selecting an expired
-    // trial and then discarding it here would return null and skip that
-    // fallback entirely — so somebody who converted mid-trial, is being billed,
-    // and whose earlier trial has since lapsed would be shown the paywall. Not
-    // selecting the row instead lets `.limit(1)` find the next live grant, or
-    // fall through to their subscription, which is what makes conversion free.
+    // Selecting an expired trial and then discarding it after the query used to
+    // skip the subscription fallback entirely — so somebody who converted
+    // mid-trial, is being billed, and whose earlier trial has since lapsed was
+    // shown the paywall. Excluding it here leaves only live candidates before
+    // grant/subscription precedence is resolved below.
     //
     // Same shape and same function as the credit wallet's "not expired yet"
     // filter, reused rather than restated: NULL means never expires, which is
     // what every pre-trial grant row holds and why none of them need a backfill.
     .or(spendableFilter())
     .order("granted_at", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ plan_id: string }>();
+    .returns<Array<{ plan_id: string }>>();
 
   // A read failure here must not silently downgrade a paying customer, so it is
   // surfaced rather than swallowed.
@@ -279,8 +286,22 @@ export async function readEffectivePlanId(
     );
   }
 
-  if (entitlement && !isRetired(entitlement.plan_id)) {
-    return entitlement.plan_id;
+  const grantedPlanId =
+    entitlements?.find((entitlement) =>
+      isRecognisedPaidPlanId(entitlement.plan_id),
+    )?.plan_id ?? null;
+
+  // Agency is the highest tier in the closed identity contract. It wins even
+  // when an older permanent purchase sits under a newer Pro trial/support
+  // grant; using only the newest row made that lower grant a silent downgrade.
+  // Other grants retain their inherited newest-grant-wins semantics.
+  if (
+    isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
+    entitlements?.some(
+      (entitlement) => entitlement.plan_id === HIGHEST_PAID_PLAN_ID,
+    )
+  ) {
+    return HIGHEST_PAID_PLAN_ID;
   }
 
   const { data: subscription, error: subscriptionError } = await supabase
@@ -298,10 +319,15 @@ export async function readEffectivePlanId(
     );
   }
 
-  if (!subscription || isRetired(subscription.plan)) {
-    return null;
+  if (
+    isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
+    subscription?.plan === HIGHEST_PAID_PLAN_ID
+  ) {
+    return HIGHEST_PAID_PLAN_ID;
   }
 
+  if (grantedPlanId) return grantedPlanId;
+  if (!subscription || !isRecognisedPaidPlanId(subscription.plan)) return null;
   return subscription.plan;
 }
 

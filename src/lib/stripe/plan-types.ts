@@ -26,11 +26,16 @@ export type BillingPeriod = "monthly" | "yearly";
  * `loadPlanCatalogue` verifies the database actually contains these ids, so the
  * union cannot silently drift from the seed.
  */
-export type PaidPlanId = "starter" | "pro";
+export type PaidPlanId = "starter" | "pro" | "agency";
 export type SubscriptionPlanId = "free" | PaidPlanId;
-export type OneTimeProductId = "credits" | "lifetime_pro";
+export type OneTimeProductId = "credits" | "lifetime_pro" | "lifetime_agency";
 
-export const PAID_PLAN_IDS: readonly PaidPlanId[] = ["starter", "pro"] as const;
+/** Ascending entitlement priority; later plans must include earlier access. */
+export const PAID_PLAN_IDS: readonly PaidPlanId[] = [
+  "starter",
+  "pro",
+  "agency",
+] as const;
 
 export const SUBSCRIPTION_PLAN_IDS: readonly SubscriptionPlanId[] = [
   "free",
@@ -57,6 +62,12 @@ export function isBillingPeriod(value: unknown): value is BillingPeriod {
   return value === "monthly" || value === "yearly";
 }
 
+export function isLifetimeProductId(
+  value: unknown,
+): value is Extract<OneTimeProductId, "lifetime_pro" | "lifetime_agency"> {
+  return value === "lifetime_pro" || value === "lifetime_agency";
+}
+
 /** `-1` means unlimited, matching the gates in src/lib/feature-gating. */
 export interface PlanLimits {
   websites: number;
@@ -76,6 +87,8 @@ export interface SubscriptionPlan {
   price: number;
   /** Monthly-equivalent price when billed annually. */
   yearlyPrice: number;
+  /** Exact amount Stripe charges once per annual billing cycle. */
+  yearlyTotal?: number;
   features: readonly string[];
   limits: PlanLimits;
   /** Per-month cost of each site beyond `limits.websites`; null if not sold. */
@@ -163,7 +176,7 @@ export function planCyclePrice(
   billingPeriod: BillingPeriod,
 ): number {
   return billingPeriod === "yearly"
-    ? roundToCents(plan.yearlyPrice * 12)
+    ? (plan.yearlyTotal ?? roundToCents(plan.yearlyPrice * 12))
     : plan.price;
 }
 

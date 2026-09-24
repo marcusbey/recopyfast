@@ -284,11 +284,18 @@ jest.mock("@/lib/stripe/plans", () => ({
         }
       : null,
   ),
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+  isLifetimeProductId: (value: unknown) =>
+    value === "lifetime_pro" || value === "lifetime_agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  getOneTimeProduct: jest.fn(async () => ({
+    id: "lifetime_pro",
+    grantsPlanId: "pro",
+  })),
   getPaidPlan: jest.fn(),
   resolveStripePriceId: jest.fn(),
 }));
@@ -298,6 +305,7 @@ const mockCreateCheckoutSession = jest.fn();
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  preflightLifetimeCheckout: jest.fn(),
   getCheckoutSessionStatus: jest.fn(),
 }));
 

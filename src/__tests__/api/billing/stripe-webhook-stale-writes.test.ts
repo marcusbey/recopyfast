@@ -50,6 +50,9 @@ process.env.STRIPE_PRO_PRICE_ID = "price_pro_monthly";
 process.env.STRIPE_PRO_YEARLY_PRICE_ID = "price_pro_yearly";
 process.env.STRIPE_TICKETS_PRICE_ID = "price_credits";
 process.env.STRIPE_LIFETIME_PRICE_ID = "price_lifetime";
+process.env.STRIPE_AGENCY_PRICE_ID = "price_agency_monthly";
+process.env.STRIPE_AGENCY_YEARLY_PRICE_ID = "price_agency_yearly";
+process.env.STRIPE_LIFETIME_AGENCY_PRICE_ID = "price_lifetime_agency";
 
 jest.mock("next/headers", () => ({
   headers: jest.fn(async () => new Headers({ "stripe-signature": "sig_test" })),
@@ -261,6 +264,24 @@ const PLAN_ROWS: Row[] = [
   }),
   planRow(),
   planRow({
+    id: "agency",
+    name: "Agency",
+    price_monthly: "49.00",
+    price_yearly_monthly_equivalent: "40.83",
+    price_yearly_total: "490.00",
+    limits: {
+      websites: 10,
+      collaborators: -1,
+      ai_features: true,
+      translations: -1,
+      ab_testing: true,
+      monthly_credits: 1000,
+    },
+    features: ["10 client websites"],
+    additional_site_price: "4.00",
+    sort_order: 25,
+  }),
+  planRow({
     id: "credits",
     kind: "one_time",
     name: "Credits",
@@ -282,6 +303,18 @@ const PLAN_ROWS: Row[] = [
     additional_site_price: null,
     grants_plan_id: "pro",
     sort_order: 40,
+  }),
+  planRow({
+    id: "lifetime_agency",
+    kind: "one_time",
+    name: "Founding Agency (lifetime)",
+    price_monthly: "299.00",
+    price_yearly_monthly_equivalent: null,
+    limits: {},
+    features: ["Everything in Agency"],
+    additional_site_price: null,
+    grants_plan_id: "agency",
+    sort_order: 45,
   }),
 ];
 

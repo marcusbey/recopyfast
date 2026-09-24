@@ -68,6 +68,7 @@ const navGroups: NavGroup[] = [
 const PLAN_RANK: Record<PaidPlanId, number> = {
   starter: 1,
   pro: 2,
+  agency: 3,
 };
 
 /**

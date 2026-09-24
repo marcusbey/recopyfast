@@ -1,8 +1,10 @@
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
+import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
 import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
 /**
  * Does this account already hold a permanent plan grant?
@@ -56,7 +58,32 @@ async function readLifetimeGrant(): Promise<LifetimeGrantStatus> {
  * the skeleton below still renders while the grant is being read.
  */
 async function BillingDashboardSection() {
-  return <BillingDashboard lifetimeGrant={await readLifetimeGrant()} />;
+  const [lifetimeGrant, foundingAgencyAvailability] = await Promise.all([
+    readLifetimeGrant(),
+    readFoundingAgencyAvailability(),
+  ]);
+
+  return (
+    <BillingDashboard
+      lifetimeGrant={lifetimeGrant}
+      foundingAgencyAvailability={foundingAgencyAvailability}
+    />
+  );
+}
+
+async function readFoundingAgencyAvailability(): Promise<FoundingAgencyAvailability | null> {
+  try {
+    return await getFoundingAgencyAvailability();
+  } catch (error) {
+    // This is a sales-cap guard, not decorative scarcity copy. If the aggregate
+    // cannot be read, the dashboard must withhold checkout rather than invent
+    // spots and risk offering the fifty-first founding purchase.
+    console.error(
+      "[billing] could not read founding Agency availability:",
+      error,
+    );
+    return null;
+  }
 }
 
 export default function BillingPage() {

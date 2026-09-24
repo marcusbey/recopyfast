@@ -23,6 +23,8 @@
 
 const mockConstructEvent = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
+const mockCompleteFoundingAgencyPurchase = jest.fn();
+const mockReleaseFoundingAgencyCheckout = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
@@ -163,11 +165,19 @@ jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(async () => createFakeClient()),
 }));
 
+jest.mock("@/lib/billing/founding-agency", () => ({
+  completeFoundingAgencyPurchase: (...args: unknown[]) =>
+    mockCompleteFoundingAgencyPurchase(...args),
+  releaseFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockReleaseFoundingAgencyCheckout(...args),
+}));
+
 /** What the catalogue says Lifetime Pro confers. `null` = not on sale. */
 let lifetimeGrantPlanId: string | null = "starter";
 
 jest.mock("@/lib/stripe/plans", () => ({
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   resolveStripePriceId: jest.fn(async () => "price_test"),
@@ -242,6 +252,11 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
     lifetimeGrantPlanId = "starter";
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: true,
+      duplicate: false,
+    });
+    mockReleaseFoundingAgencyCheckout.mockResolvedValue(true);
     db = {
       billing_events: [],
       billing_subscriptions: [],
@@ -412,5 +427,66 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
 
     expect(response.status).toBe(200);
     expect(db.plan_entitlements).toHaveLength(0);
+  });
+
+  it("completes the durable founding reservation before granting Agency", async () => {
+    const response = await deliver(
+      paymentIntentEvent("evt_founding", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+        product_id: "lifetime_agency",
+        grants_plan_id: "agency",
+        founding_reservation_id: "reservation-1",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCompleteFoundingAgencyPurchase).toHaveBeenCalledWith(
+      "reservation-1",
+      USER_ID,
+      PAYMENT_INTENT,
+    );
+  });
+
+  it("fails closed when Founding Agency metadata names another grant", async () => {
+    const response = await deliver(
+      paymentIntentEvent("evt_founding_mismatch", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+        product_id: "lifetime_agency",
+        grants_plan_id: "pro",
+        founding_reservation_id: "reservation-1",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockCompleteFoundingAgencyPurchase).not.toHaveBeenCalled();
+  });
+
+  it("releases an abandoned spot only from a signed expired session", async () => {
+    const event = {
+      id: "evt_founding_expired",
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_expired",
+          client_reference_id: USER_ID,
+          metadata: {
+            user_id: USER_ID,
+            product_id: "lifetime_agency",
+            founding_reservation_id: "reservation-1",
+          },
+        },
+      },
+    };
+
+    const response = await deliver(event);
+
+    expect(response.status).toBe(200);
+    expect(mockReleaseFoundingAgencyCheckout).toHaveBeenCalledWith(
+      "reservation-1",
+      USER_ID,
+      "cs_expired",
+    );
   });
 });

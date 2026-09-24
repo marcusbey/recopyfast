@@ -93,10 +93,13 @@ jest.mock("@/lib/supabase/server", () => ({
 }));
 
 const mockCreateCheckoutSession = jest.fn();
+const mockPreflightLifetimeCheckout = jest.fn();
 
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  preflightLifetimeCheckout: (...args: unknown[]) =>
+    mockPreflightLifetimeCheckout(...args),
   getCheckoutSessionStatus: jest.fn(),
 }));
 
@@ -113,11 +116,28 @@ jest.mock("@/lib/billing/entitlements", () => ({
 }));
 
 jest.mock("@/lib/stripe/plans", () => ({
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+  isLifetimeProductId: (value: unknown) =>
+    value === "lifetime_pro" || value === "lifetime_agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  getOneTimeProduct: jest.fn(async (productId: string) => ({
+    id: productId,
+    grantsPlanId: productId === "lifetime_agency" ? "agency" : "pro",
+  })),
+}));
+
+const mockReserveFoundingAgencySpot = jest.fn();
+const mockBindFoundingAgencyCheckout = jest.fn();
+
+jest.mock("@/lib/billing/founding-agency", () => ({
+  reserveFoundingAgencySpot: (...args: unknown[]) =>
+    mockReserveFoundingAgencySpot(...args),
+  bindFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockBindFoundingAgencyCheckout(...args),
 }));
 
 import { POST } from "@/app/api/billing/checkout/route";
@@ -163,6 +183,21 @@ describe("A-21: two checkouts started at once", () => {
       error: null,
     });
     mockGetGrantedPlanIds.mockResolvedValue([]);
+    mockReserveFoundingAgencySpot.mockResolvedValue({
+      outcome: "reserved",
+      reservationId: "reservation-1",
+      checkoutExpiresAt: 1_800_000_000,
+    });
+    mockBindFoundingAgencyCheckout.mockResolvedValue(undefined);
+    mockPreflightLifetimeCheckout.mockResolvedValue({
+      productId: "lifetime_agency",
+      productName: "Founding Agency (lifetime)",
+      grantsPlanId: "agency",
+      priceId: "price_lifetime_agency",
+      stripeCustomerId: "cus_agency",
+      successUrl: "https://example.test/success",
+      cancelUrl: "https://example.test/cancel",
+    });
     mockCreateCheckoutSession.mockImplementation(async () => ({
       sessionId: `cs_${mockCreateCheckoutSession.mock.calls.length}`,
       url: "https://checkout.stripe.com/c/pay/cs_test",
@@ -272,6 +307,73 @@ describe("A-21: two checkouts started at once", () => {
     const response = await post({ intent: "lifetime" });
 
     expect(response.status).toBe(409);
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["sold_out", "sold out"],
+    ["capacity_busy", "temporarily held"],
+  ])(
+    "returns a clear %s response before Stripe checkout",
+    async (outcome, message) => {
+      mockReserveFoundingAgencySpot.mockResolvedValue({
+        outcome,
+        reservationId: null,
+        checkoutExpiresAt: null,
+      });
+
+      const response = await post({
+        intent: "lifetime",
+        productId: "lifetime_agency",
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining(message),
+      });
+      expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("binds the founding reservation before returning checkout", async () => {
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateCheckoutSession).toHaveBeenCalledWith(
+      USER_ID,
+      "buyer@example.com",
+      expect.objectContaining({
+        productId: "lifetime_agency",
+        reservationId: "reservation-1",
+        checkoutExpiresAt: 1_800_000_000,
+      }),
+      undefined,
+    );
+    expect(mockBindFoundingAgencyCheckout).toHaveBeenCalledWith(
+      "reservation-1",
+      USER_ID,
+      expect.any(String),
+    );
+    expect(
+      mockPreflightLifetimeCheckout.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockReserveFoundingAgencySpot.mock.invocationCallOrder[0]);
+  });
+
+  it("does not reserve capacity when founding checkout preflight fails", async () => {
+    mockPreflightLifetimeCheckout.mockRejectedValue(
+      new Error("No Stripe price configured for Founding Agency"),
+    );
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
   });
 

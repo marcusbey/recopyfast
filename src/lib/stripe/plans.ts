@@ -81,6 +81,16 @@ const PRICE_ID_ENV_VARS = {
       live: "STRIPE_PRO_YEARLY_PRICE_ID_LIVE",
     },
   },
+  agency: {
+    monthly: {
+      test: "STRIPE_AGENCY_PRICE_ID",
+      live: "STRIPE_AGENCY_PRICE_ID_LIVE",
+    },
+    yearly: {
+      test: "STRIPE_AGENCY_YEARLY_PRICE_ID",
+      live: "STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE",
+    },
+  },
   credits: {
     monthly: {
       test: "STRIPE_TICKETS_PRICE_ID",
@@ -91,6 +101,12 @@ const PRICE_ID_ENV_VARS = {
     monthly: {
       test: "STRIPE_LIFETIME_PRICE_ID",
       live: "STRIPE_LIFETIME_PRICE_ID_LIVE",
+    },
+  },
+  lifetime_agency: {
+    monthly: {
+      test: "STRIPE_LIFETIME_AGENCY_PRICE_ID",
+      live: "STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE",
     },
   },
 } as const satisfies Record<
@@ -111,6 +127,7 @@ interface PlanRow {
   description: string;
   price_monthly: string | number;
   price_yearly_monthly_equivalent: string | number | null;
+  price_yearly_total?: string | number | null;
   stripe_price_id_test: string | null;
   stripe_price_id_live: string | null;
   stripe_yearly_price_id_test: string | null;
@@ -140,8 +157,10 @@ function toNumber(value: string | number | null, field: string): number {
   return parsed;
 }
 
-function toOptionalNumber(value: string | number | null): number | null {
-  if (value === null) return null;
+function toOptionalNumber(
+  value: string | number | null | undefined,
+): number | null {
+  if (value === null || value === undefined) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -218,6 +237,14 @@ function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
     yearlyPrice:
       toOptionalNumber(row.price_yearly_monthly_equivalent) ??
       toNumber(row.price_monthly, `price_monthly (${row.id})`),
+    yearlyTotal:
+      toOptionalNumber(row.price_yearly_total) ??
+      Math.round(
+        (toOptionalNumber(row.price_yearly_monthly_equivalent) ??
+          toNumber(row.price_monthly, `price_monthly (${row.id})`)) *
+          12 *
+          100,
+      ) / 100,
     features: toFeatures(row.features, row.id),
     limits: toPlanLimits(row.limits, row.id),
     additionalSitePrice: toOptionalNumber(row.additional_site_price),
@@ -226,7 +253,11 @@ function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
 }
 
 function isOneTimeProductId(value: string): value is OneTimeProductId {
-  return value === "credits" || value === "lifetime_pro";
+  return (
+    value === "credits" ||
+    value === "lifetime_pro" ||
+    value === "lifetime_agency"
+  );
 }
 
 function toOneTimeProduct(row: PlanRow): OneTimeProduct {
@@ -431,7 +462,7 @@ export async function getPlanCyclePrice(
 ): Promise<number> {
   const plan = await getPaidPlan(planId);
   return billingPeriod === "yearly"
-    ? Math.round(plan.yearlyPrice * 12 * 100) / 100
+    ? (plan.yearlyTotal ?? Math.round(plan.yearlyPrice * 12 * 100) / 100)
     : plan.price;
 }
 

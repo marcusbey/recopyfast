@@ -1,0 +1,3 @@
+# Design — s33-agency-plan
+
+Follow docs/design-system.md and existing Pricing layout. Keep landing marketing sky/slate surface, typography, spacing, focus and existing card primitives. Show Starter, Pro and Agency subscription cards, preserving existing credit purchase placement. Put Founding Agency (lifetime) in a highlighted teal/sky card below the grid with $299, exact benefit copy, remaining-count text and an accessible disabled “Sold out” action at zero. Loading/unavailable counts must not invent availability. Billing uses existing Card/Button/StatusBadge and app tokens; Agency names come from catalogue. Yearly view displays $40.83/month and $490 charged annually.

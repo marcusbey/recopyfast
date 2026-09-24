@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { stripe } from "@/lib/stripe/config";
+import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import {
   getPlanCatalogue,
   resolveOneTimePriceId,
@@ -32,6 +33,7 @@ interface PlanPayload {
   description: string;
   monthlyPrice: number;
   yearlyPrice: number;
+  yearlyTotal: number;
   currency: string;
   features: string[];
   limits: SubscriptionPlan["limits"];
@@ -54,6 +56,9 @@ interface OneTimeProductPayload {
 interface PricingResponse {
   plans: PlanPayload[];
   oneTimeProducts: OneTimeProductPayload[];
+  foundingAgencyAvailability: Awaited<
+    ReturnType<typeof getFoundingAgencyAvailability>
+  > | null;
   fetchedAt: string;
   /** "stripe" when live amounts were read, "database" when the seed was used. */
   source: "stripe" | "database";
@@ -84,6 +89,7 @@ const DEFAULT_CURRENCY = "usd";
 interface StripeAmounts {
   monthlyPrice?: number;
   yearlyPrice?: number;
+  yearlyTotal?: number;
   currency?: string;
 }
 
@@ -123,8 +129,8 @@ async function readStripeAmounts(
     );
     if (yearly.unit_amount != null) {
       // Stripe stores the annual total; the UI shows the monthly equivalent.
-      amounts.yearlyPrice =
-        Math.round((yearly.unit_amount / 100 / 12) * 100) / 100;
+      amounts.yearlyTotal = yearly.unit_amount / 100;
+      amounts.yearlyPrice = Math.round((amounts.yearlyTotal / 12) * 100) / 100;
     }
   } catch {
     // Keep the database value.
@@ -157,6 +163,10 @@ function toPlanPayload(
     description: plan.description,
     monthlyPrice: amounts.monthlyPrice ?? plan.price,
     yearlyPrice: amounts.yearlyPrice ?? plan.yearlyPrice,
+    yearlyTotal:
+      amounts.yearlyTotal ??
+      plan.yearlyTotal ??
+      Math.round(plan.yearlyPrice * 12 * 100) / 100,
     currency: amounts.currency ?? DEFAULT_CURRENCY,
     features: [...plan.features],
     limits: plan.limits,
@@ -169,6 +179,17 @@ function toPlanPayload(
 
 async function buildPricingResponse(): Promise<PricingResponse> {
   const catalogue = await getPlanCatalogue();
+  let foundingAgencyAvailability: PricingResponse["foundingAgencyAvailability"] =
+    null;
+
+  try {
+    foundingAgencyAvailability = await getFoundingAgencyAvailability();
+  } catch (error) {
+    // The catalogue is still useful when the aggregate read fails, but the
+    // response must carry an explicit unknown state. A fabricated remaining
+    // count could advertise a fifty-first founding purchase.
+    console.error("Failed to read founding Agency availability:", error);
+  }
 
   // The free plan is the absence of a subscription, not something to sell.
   const sellablePlans = catalogue.subscriptions.filter(
@@ -197,6 +218,7 @@ async function buildPricingResponse(): Promise<PricingResponse> {
       features: [...product.features],
       grantsPlanId: product.grantsPlanId,
     })),
+    foundingAgencyAvailability,
     fetchedAt: new Date().toISOString(),
     source: sawStripePrice ? "stripe" : "database",
   };
@@ -258,9 +280,15 @@ export async function GET(request: Request) {
     console.error("Failed to build the pricing response:", error);
 
     // Serving a stale catalogue beats serving nothing on the marketing page,
-    // and the cached copy came from the same database.
+    // and the cached copy came from the same database. The founding count is a
+    // different promise: once its five-minute window has passed, continuing to
+    // advertise it through every failed refresh could claim spots that have
+    // since sold. Keep the prices, but force the UI into its unavailable state.
     if (cachedResponse) {
-      return NextResponse.json(cachedResponse.data, { headers });
+      return NextResponse.json(
+        { ...cachedResponse.data, foundingAgencyAvailability: null },
+        { headers },
+      );
     }
 
     return NextResponse.json(
