@@ -5,6 +5,7 @@ import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
+  SiteAuthError,
 } from "@/lib/security/site-auth";
 
 jest.mock("@/lib/supabase/service");
@@ -190,7 +191,7 @@ describe("/api/content/[siteId]", () => {
 
     it("should return 401 when authorization fails", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Missing site token"),
+        new SiteAuthError("Missing site token", "site_token_missing", 401),
       );
 
       const request = new NextRequest("http://localhost/api/content/site-123");
@@ -201,6 +202,21 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(401);
       expect(data.error).toBe("Missing site token");
+      expect(data.code).toBe("site_token_missing");
+    });
+
+    it("does not reflect an untyped authorization exception", async () => {
+      mockAuthorizeSiteRequest.mockRejectedValueOnce(
+        new Error("Missing site token"),
+      );
+
+      const request = new NextRequest("http://localhost/api/content/site-123");
+      const response = await GET(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
     });
 
     it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
@@ -499,7 +515,11 @@ describe("/api/content/[siteId]", () => {
 
       beforeEach(() => {
         mockAuthorizeSiteRequest.mockRejectedValue(
-          new Error("Origin not allowed"),
+          new SiteAuthError(
+            "Origin not allowed",
+            "site_origin_not_allowed",
+            403,
+          ),
         );
       });
 
@@ -529,7 +549,7 @@ describe("/api/content/[siteId]", () => {
 
       it("records nothing for a rejected token, which names no domain", async () => {
         mockAuthorizeSiteRequest.mockRejectedValue(
-          new Error("Invalid site token"),
+          new SiteAuthError("Invalid site token", "site_token_invalid", 401),
         );
 
         const response = await postFromWrongOrigin();
@@ -612,7 +632,7 @@ describe("/api/content/[siteId]", () => {
 
     it("should return 401 when the site token is rejected", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Invalid token"),
+        new SiteAuthError("Invalid site token", "site_token_invalid", 401),
       );
 
       const response = await PUT(
@@ -622,12 +642,13 @@ describe("/api/content/[siteId]", () => {
       const data = await response.json();
 
       expect(response.status).toBe(401);
-      expect(data.error).toBe("Invalid token");
+      expect(data.error).toBe("Invalid site token");
+      expect(data.code).toBe("site_token_invalid");
     });
 
     it("should return 403 when the origin is rejected", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
-        new Error("Origin not allowed"),
+        new SiteAuthError("Origin not allowed", "site_origin_not_allowed", 403),
       );
 
       const response = await PUT(
