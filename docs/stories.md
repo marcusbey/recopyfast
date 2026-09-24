@@ -1240,6 +1240,27 @@ Re-review fix mode 2 adds the 409 retry-time sentence, an ordering-sensitive all
 Research: `docs/research/s28-billing-correctness.md`.
 Plan: `docs/plans/s28-billing-correctness.md`.
 
+## Story s29-editor-invite-and-token-lifetime — deliver invitations and keep installs alive
+
+As a site owner, I can invite an editor by email and revoke installation credentials deliberately,
+so collaborators find the editor hub and installed widgets do not stop after 90 days.
+
+Complexity: **4**. Operator-prevalidated scope and D3, 2026-09-24.
+
+- Send one best-effort Resend invitation on new enrolment/restoration, never on an active duplicate.
+  Include inviter, site name/domain, plain-language permissions, token-free hub CTA and code sign-in instructions.
+- Return `invitationEmailSent`; show emailed or manual-link/copy-link notice. Active rows offer
+  admin-guarded resend, limited per recipient across invite/restore/resend (3/hour) and per owner
+  using the existing limiter.
+- Remove only the site-token age cap; preserve HMAC, shape, future-time and origin checks.
+- Provide admin-only snippet regeneration with an explicit old-snippet invalidation warning.
+- Return readable structured auth errors with CORS only to the permitted origin; preserve authored
+  content on refusal. No widget warning or source-byte increase (fix-run decision C1).
+- Flip A-25 markers, preserving their intent under D3; pass local gates and open a draft PR.
+
+Research: `docs/research/s29-editor-invite-and-token-lifetime.md`.
+Plan: `docs/plans/s29-editor-invite-and-token-lifetime.md`.
+
 ## Story s31-magic-link-landing — land confirmed magic links in the app
 
 As a user opening a magic link, I land on my requested app page after confirmation,
