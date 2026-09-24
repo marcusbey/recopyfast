@@ -138,7 +138,7 @@ The operator explicitly approved review items 1–11 for this fix run. Preserve
 ## Remaining boundaries
 
 The existing independent review allows shipping and remains unchanged and uncommitted.
-Full 43-case disposable-stack execution is owned by PR CI; local evidence is the
+Full 44-case disposable-stack execution is owned by PR CI; local evidence is the
 preview browser fixture plus the full collected inventory.
 Host CSP may reject the loader origin or inline style; browser-internal pages,
 closed shadow roots and cross-origin frame contents are not editable by this script.
@@ -146,3 +146,67 @@ The fallback is /try's scoped sample. Images accept embedded raster data URLs an
 honor the no-network instruction; remote image URLs remain rejected.
 Exit stops editing and clears chrome; saved preview DOM persists until refresh.
 Do not merge, mark ready, or deploy from this lane.
+
+## Fix mode 2 — operator-prevalidated 2026-09-24
+
+Preserve the uncommitted independent delta review byte-for-byte (SHA-256
+`811f2159658e03e8bc45abb451a65a10dde767d23011f1abae986f7e7b1cf2f0`).
+The user's explicit D1–D8 instructions validate this bounded plan.
+
+- [x] D1: test-first normal navigation and hover for WordPress/Bootstrap/mega menus;
+  only Alt+click edits link labels; link-only wrappers never hijack plain clicks.
+- [x] D2: bound interactive-ancestor suppression at nearest block container or four
+  levels, excluding body/root; preserve controls outside the edited element.
+- [x] D3: plain-text paste/drop applies to every descendant of the active edit.
+- [x] D4: resume removes cloned stale preview UI before restoring the live bar.
+- [x] D5: keep native Space/Enter/undo/IME for ordinary text; only intercept activating
+  button/link labels, and never hand-insert during composition.
+- [x] D6: add a behavioral guard sensitive to moving window capture to document.
+- [x] D7: reject files above 5 MiB before reading, with distinct size and empty/corrupt
+  messages; prove valid raster still works with zero network.
+- [x] D8: synchronize all active browser inventory pins and QA register with collection.
+- [x] Run focused Jest and real Chromium regressions, full precommit, build, format,
+  production typecheck, embed freshness/budgets, audit; independent bounded verification.
+- [x] Commit `fix(s32): ...`, push to existing draft PR #27 and refresh its evidence.
+
+No new dependency, SQL, deployment, merge of the PR, or review-file modification.
+Existing guard assertions remain; explain any fixture adaptation required by D2.
+The D2 browser fixture keeps its original zero-host-click assertion by placing the
+editable heading directly inside the clickable card anchor. Separate DOM tests cover
+the new stop boundary with a generic block-level `onclick`, a fifth ancestor, and body.
+
+## Fix mode 2 verification (2026-09-24)
+
+- Merged `origin/main` at `e43010a` (PR #23) via `4fbff04`; story-list conflict
+  resolved by keeping both s29 and s32. No production operation or remote DB access.
+- All commands used Node 24.14.0 and only the 17 main-job placeholder variables
+  parsed from `.github/workflows/ci.yml`; no `.env` copied or inherited service keys.
+- `npm run precommit -- -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB`: exit 0;
+  lint **0 errors / 39 inherited warnings**; full TypeScript clean; Jest **219 passed
+  suites / 2 inherited skipped suites; 2,865 passed / 38 skipped / 0 failed tests**.
+- `npm run build`, `npm run type-check:build`, `npm run format:check`: passed.
+  Changed runtime/browser/config files also pass targeted `prettier --check`.
+  Existing Markdown formatting outside the repository format gate is retained to
+  avoid unrelated reformatting. `git diff --check`: clean.
+- `node scripts/build-embed.mjs --check`: fresh; bundle **46,604 / 46,681 B**,
+  widget **33,828 / 33,865 B**, transport **13,141 B**. Preview gzip-9 **6,662 / 8,192 B**.
+  Production embed unchanged. `npm run audit:prod`: **0 vulnerabilities**.
+- `CI=true npx playwright test e2e/try-preview.spec.ts --reporter=line --retries=0`:
+  **5 passed / 0 failed / 0 skipped / 0 retried** in Chromium. Includes WordPress,
+  Bootstrap, mega-menu links, wrapper padding, native ordinary-text undo, activating
+  labels, empty/corrupt local-file errors and valid image decoding with zero network
+  beyond the intercepted runtime request. `--list --reporter=list`: **44 in 10 files**.
+- Runtime Jest **29/29**; CI/reporter contract Jest **18/18**. Initial red run had
+  six expected failures; CSS block-boundary and button-insertion corrections were
+  also observed red before repair. Moving the click listener to document made D6
+  fail (two document-capture calls); restored window capture passes.
+- Fresh-context bounded functional verification: **no remaining D1–D8 findings**;
+  independent rerun **3 Jest suites / 40 tests** and **5 Chromium cases** passed.
+  This does not replace or alter the user's independent delta review.
+- All active browser pins now say **44**, including QA register, server README and
+  Supabase README. Historical dated evidence and review documents remain historical.
+- Failing markers flipped: **none** (none in scope). Migrations/dependencies: **none**.
+  The migration arriving through the main merge belongs to PR #23, not this fix.
+- Review file hash remains **811f2159658e03e8bc45abb451a65a10dde767d23011f1abae986f7e7b1cf2f0**;
+  it remains unmodified by this lane and uncommitted. Draft PR #27 is retained.
+  Full disposable-stack execution belongs to PR CI; no merge, ready or deployment.

@@ -1235,7 +1235,7 @@ writes. /try includes a stable-URL draggable bookmarklet, browser instructions,
 live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.
 Static script delivery must bypass auth and include JS MIME, cache, wildcard CORS,
 and nosniff. Unit, page, and local-fixture Playwright coverage are required; update
-the exact browser inventory from 39 to 43 after pre-share regression coverage.
+the exact browser inventory from 39 to 44 after pre-share regression coverage.
 No production embed changes or SQL.
 
 Research: `docs/research/s32-try-on-any-site.md`.

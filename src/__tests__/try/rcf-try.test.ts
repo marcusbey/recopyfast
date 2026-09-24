@@ -64,12 +64,20 @@ describe("standalone try-on-any-site runtime", () => {
     inject("#sample");
 
     for (const target of document.querySelectorAll(
-      "#sample h1, #sample p, #sample li, #sample button, #sample a, #sample img",
+      "#sample h1, #sample p, #sample li, #sample button, #sample img",
     )) {
       target.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
       expect(target).toHaveAttribute("data-rcf-try-hover");
       target.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
     }
+    const link = document.querySelector("#sample a")!;
+    link.dispatchEvent(
+      new MouseEvent("mouseover", { bubbles: true, altKey: true }),
+    );
+    expect(link).toHaveAttribute("data-rcf-try-hover");
+    link.dispatchEvent(
+      new MouseEvent("mouseout", { bubbles: true, altKey: true }),
+    );
     document
       .querySelector("#outside")!
       .dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
@@ -79,7 +87,45 @@ describe("standalone try-on-any-site runtime", () => {
   });
 
   test("requires Alt to edit a navigation link", () => {
-    document.body.innerHTML = `<div role="navigation"><a href="/pricing">Pricing</a></div>`;
+    document.body.innerHTML = `
+      <nav><ul><li id="wordpress"><a href="#wordpress-target">WordPress</a></li></ul></nav>
+      <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#bootstrap-target">Bootstrap</a></li></ul>
+      <nav><ul><li class="mega"><a href="#mega-target">Mega</a><div class="mega-panel"><p>Panel</p></div></li></ul></nav>
+      <nav><a href="#nested-target"><p id="nested-nav-label">Nested label</p></a></nav>
+      <p id="only-paragraph-link"><a href="#paragraph-target">Paragraph link</a></p>
+      <ul><li id="nested-only-link"><span><a href="#nested-only-target">Nested only link</a></span></li></ul>
+    `;
+    inject();
+    const links = Array.from(
+      document.querySelectorAll("main a, nav a, .navbar-nav a"),
+    );
+
+    for (const link of links) {
+      click(link);
+      expect(link).not.toHaveAttribute("contenteditable");
+      if (link.closest("li"))
+        expect(link.closest("li")).not.toHaveAttribute("contenteditable");
+    }
+    click(document.querySelector(".navbar-nav li")!);
+    expect(document.querySelector(".navbar-nav li")).not.toHaveAttribute(
+      "contenteditable",
+    );
+    click(document.querySelector("#nested-nav-label")!);
+    expect(document.querySelector("#nested-nav-label")).not.toHaveAttribute(
+      "contenteditable",
+    );
+    for (const wrapper of document.querySelectorAll(
+      "#only-paragraph-link, #nested-only-link",
+    )) {
+      click(wrapper);
+      expect(wrapper).not.toHaveAttribute("contenteditable");
+    }
+    click(links[0], { altKey: true });
+    expect(links[0]).toHaveAttribute("contenteditable", "plaintext-only");
+  });
+
+  test("keeps the direct navigation-link guard", () => {
+    document.body.innerHTML = `<div role="navigation"><a href="#pricing">Pricing</a></div>`;
     inject();
     const link = document.querySelector("a")!;
 
@@ -170,6 +216,90 @@ describe("standalone try-on-any-site runtime", () => {
     expect(heading).toHaveAttribute("contenteditable", "plaintext-only");
   });
 
+  test("bounds click suppression at the nearest block and never reaches a page-wide handler", () => {
+    document.body.innerHTML = `
+      <div id="page" onclick="void 0">
+        <h2>Editable title</h2>
+        <input id="outside" type="checkbox">
+      </div>
+    `;
+    const page = document.querySelector("#page")!;
+    const outside = document.querySelector("#outside")!;
+    const pageClick = jest.fn();
+    const outsideClick = jest.fn();
+    page.addEventListener("click", pageClick);
+    outside.addEventListener("click", outsideClick);
+    inject();
+
+    click(document.querySelector("h2")!);
+    click(outside);
+
+    expect(outsideClick).toHaveBeenCalledTimes(1);
+    expect(pageClick).toHaveBeenCalledTimes(1);
+  });
+
+  test("uses computed layout for a custom nearest block boundary", () => {
+    document.body.innerHTML = `
+      <span id="custom-page" style="display:block" onclick="void 0">
+        <h2>Editable title</h2>
+        <input id="custom-outside" type="checkbox">
+      </span>
+    `;
+    const wrapperClick = jest.fn();
+    const outsideClick = jest.fn();
+    document
+      .querySelector("#custom-page")!
+      .addEventListener("click", wrapperClick);
+    document
+      .querySelector("#custom-outside")!
+      .addEventListener("click", outsideClick);
+    inject();
+
+    click(document.querySelector("h2")!);
+    click(document.querySelector("#custom-outside")!);
+
+    expect(outsideClick).toHaveBeenCalledTimes(1);
+    expect(wrapperClick).toHaveBeenCalledTimes(1);
+  });
+
+  test("caps interactive ancestor suppression at four levels and excludes body", () => {
+    document.body.innerHTML = `
+      <span id="far-control" role="button">
+        <i><b><em><small><h2>Editable title</h2></small></em></b></i>
+        <span id="far-target">Far target</span>
+      </span>
+    `;
+    const farControlClick = jest.fn();
+    const bodyClick = jest.fn();
+    document
+      .querySelector("#far-control")!
+      .addEventListener("click", farControlClick);
+    document.body.addEventListener("click", bodyClick);
+    inject();
+
+    click(document.querySelector("h2")!);
+    click(document.querySelector("#far-target")!);
+
+    expect(farControlClick).toHaveBeenCalledTimes(1);
+    expect(bodyClick).toHaveBeenCalledTimes(1);
+  });
+
+  test("window capture keeps a pre-existing document capture handler out of active clicks", () => {
+    document.body.innerHTML = `<button type="button">Edit label</button>`;
+    const documentCapture = jest.fn();
+    document.addEventListener("click", documentCapture, true);
+    try {
+      inject();
+      const button = document.querySelector("button")!;
+      click(button);
+      click(button);
+
+      expect(documentCapture).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("click", documentCapture, true);
+    }
+  });
+
   test("Cancel restores the original child nodes and their event handlers", () => {
     document.body.innerHTML = `<p>Before <button type="button">child</button></p>`;
     const paragraph = document.querySelector("p")!;
@@ -189,7 +319,36 @@ describe("standalone try-on-any-site runtime", () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  test("forces paste and drop input to plain text", () => {
+  test("forces descendant paste and drop input to plain text", () => {
+    document.body.innerHTML = `<p>Edit <strong>inside</strong> me</p>`;
+    inject();
+    const paragraph = document.querySelector("p")!;
+    const descendant = document.querySelector("strong")!;
+    click(descendant);
+    paragraph.textContent = "";
+    paragraph.appendChild(descendant);
+    descendant.textContent = "";
+
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", {
+      value: { getData: () => "<strong>Pasted</strong>" },
+    });
+    descendant.dispatchEvent(paste);
+    const drop = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(drop, "dataTransfer", {
+      value: { getData: () => "<em>Dropped</em>" },
+    });
+    descendant.dispatchEvent(drop);
+
+    expect(paragraph.textContent).toBe(
+      "<strong>Pasted</strong><em>Dropped</em>",
+    );
+    expect(paragraph.querySelector("strong")?.innerHTML).toBe("");
+    expect(paste.defaultPrevented).toBe(true);
+    expect(drop.defaultPrevented).toBe(true);
+  });
+
+  test("keeps the root-target plain-text paste and drop guard", () => {
     document.body.innerHTML = `<p>Edit me</p>`;
     inject();
     const paragraph = document.querySelector("p")!;
@@ -275,12 +434,116 @@ describe("standalone try-on-any-site runtime", () => {
     });
     Object.defineProperty(input, "files", { value: [file] });
 
+    const OriginalImage = window.Image;
+    class DecodableImage {
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      set src(_value: string) {
+        setTimeout(() => this.onload?.(), 0);
+      }
+    }
+    Object.defineProperty(window, "Image", {
+      configurable: true,
+      value: DecodableImage,
+    });
+
     input.dispatchEvent(new Event("change", { bubbles: true }));
 
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(image.getAttribute("src")).toMatch(/^data:image\/webp;base64,/);
     expect(image).toHaveAttribute("data-rcf-try-published", "true");
     expect(document.querySelector(".rcf-try-toolbar")).toBeNull();
+    Object.defineProperty(window, "Image", {
+      configurable: true,
+      value: OriginalImage,
+    });
+  });
+
+  test("rejects oversized, empty, and corrupt local images with distinct messages", async () => {
+    document.body.innerHTML = `<img alt="Sample" src="data:image/png;base64,AA==">`;
+    const OriginalFileReader = window.FileReader;
+    const OriginalImage = window.Image;
+    const readAsDataURL = jest.fn();
+    class TrackingFileReader {
+      result: string | null = null;
+      onerror: null | (() => void) = null;
+      onload: null | (() => void) = null;
+
+      readAsDataURL(file: File) {
+        readAsDataURL(file);
+        this.result = "data:image/png;base64,Y29ycnVwdA==";
+        this.onload?.();
+      }
+    }
+    class CorruptImage {
+      onload: null | (() => void) = null;
+      onerror: null | (() => void) = null;
+
+      set src(_value: string) {
+        this.onerror?.();
+      }
+    }
+    Object.defineProperty(window, "FileReader", {
+      configurable: true,
+      value: TrackingFileReader,
+    });
+    Object.defineProperty(window, "Image", {
+      configurable: true,
+      value: CorruptImage,
+    });
+
+    try {
+      inject();
+      const image = document.querySelector("img")!;
+      click(image);
+      const input = document.querySelector(
+        '.rcf-try-toolbar input[type="file"]',
+      ) as HTMLInputElement;
+
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: [
+          new File([new Uint8Array(5 * 1024 * 1024 + 1)], "large.png", {
+            type: "",
+          }),
+        ],
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(readAsDataURL).not.toHaveBeenCalled();
+      expect(document.querySelector(".rcf-try-error")).toHaveTextContent(
+        "5 MB or smaller",
+      );
+
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: [new File([], "empty.unknown", { type: "" })],
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(readAsDataURL).not.toHaveBeenCalled();
+      expect(document.querySelector(".rcf-try-error")).toHaveTextContent(
+        "empty or corrupt",
+      );
+
+      Object.defineProperty(input, "files", {
+        configurable: true,
+        value: [new File(["corrupt"], "corrupt.png", { type: "image/png" })],
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(readAsDataURL).toHaveBeenCalledTimes(1);
+      expect(document.querySelector(".rcf-try-error")).toHaveTextContent(
+        "empty or corrupt",
+      );
+    } finally {
+      Object.defineProperty(window, "FileReader", {
+        configurable: true,
+        value: OriginalFileReader,
+      });
+      Object.defineProperty(window, "Image", {
+        configurable: true,
+        value: OriginalImage,
+      });
+    }
   });
 
   test("rejects a local SVG file before reading it", async () => {
@@ -447,6 +710,69 @@ describe("standalone try-on-any-site runtime", () => {
     );
     click(document.querySelector("#rcf-try-exit")!);
     expect(document.querySelector("#rcf-try-topbar")).toBeNull();
+  });
+
+  test("resume removes preview UI cloned with a restored body", () => {
+    document.body.innerHTML = `<h1>Original page</h1>`;
+    const preview = inject()!;
+    const restored = document.body.cloneNode(true) as HTMLBodyElement;
+    document.documentElement.replaceChild(restored, document.body);
+
+    expect(document.querySelectorAll("#rcf-try-topbar")).toHaveLength(1);
+    expect(preview.resume()).toBe(true);
+    expect(document.querySelectorAll("#rcf-try-topbar")).toHaveLength(1);
+    expect(document.querySelector("#rcf-try-topbar")).toBe(restored.lastChild);
+    click(document.querySelector("#rcf-try-exit")!);
+    expect(document.querySelector("[data-rcf-try-ui]")).toBeNull();
+  });
+
+  test("leaves ordinary text Space, Enter, undo, and composition to native editing", () => {
+    document.body.innerHTML = `<p>Edit me</p><button type="button">Button label</button>`;
+    inject();
+    const paragraph = document.querySelector("p")!;
+    click(paragraph);
+
+    for (const event of [
+      new KeyboardEvent("keydown", {
+        key: " ",
+        bubbles: true,
+        cancelable: true,
+      }),
+      new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+      }),
+      new KeyboardEvent("keydown", {
+        key: "z",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+      new KeyboardEvent("keydown", {
+        key: "Process",
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    ]) {
+      paragraph.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    }
+
+    click(toolbarButton("Cancel")!);
+    const button = document.querySelector("button")!;
+    click(button);
+    for (const key of [" ", "Enter"]) {
+      const composing = new KeyboardEvent("keydown", {
+        key,
+        isComposing: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      button.dispatchEvent(composing);
+      expect(composing.defaultPrevented).toBe(false);
+    }
   });
 
   test("shows only one preview status after repeated saves", () => {

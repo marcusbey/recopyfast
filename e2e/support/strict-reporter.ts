@@ -105,7 +105,7 @@ export default class StrictReporter implements Reporter {
   private readonly globalDiagnostics = new Set<string>();
 
   constructor(options: StrictReporterOptions = {}) {
-    this.expected = options.expected ?? 43;
+    this.expected = options.expected ?? 44;
     this.outputFile =
       options.outputFile ?? "test-results/playwright-summary.json";
   }

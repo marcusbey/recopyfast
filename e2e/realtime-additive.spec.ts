@@ -28,7 +28,7 @@ import { randomUUID } from "node:crypto";
  * The mutating half of AC 5 — that a save, a stage and a publish all land — is
  * `share-edit-publish.spec.ts`, which runs against CI's disposable local
  * Supabase stack. Everything in this file is assertable without a database;
- * the full CI job nevertheless executes all 43 cases and fails if any case is
+ * the full CI job nevertheless executes all 44 cases and fails if any case is
  * skipped, so the two halves cannot drift into differently-green runs.
  */
 

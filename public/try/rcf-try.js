@@ -72,7 +72,37 @@
     if (!records.size) ownedAttributes.delete(target);
   }
 
-  function candidateFrom(eventTarget) {
+  function onlyEditableContentIsLink(candidate) {
+    var links = candidate.querySelectorAll("a");
+    if (links.length !== 1) return false;
+    var link = links[0];
+    var hasOtherContent = false;
+
+    function inspect(node) {
+      if (hasOtherContent || node === link) return;
+      if (node.nodeType === 3) {
+        if (String(node.nodeValue || "").trim()) hasOtherContent = true;
+        return;
+      }
+      if (node.nodeType !== 1) return;
+      if (
+        node.matches(
+          "button,img,input,select,textarea,video,audio,canvas,svg,iframe",
+        )
+      ) {
+        hasOtherContent = true;
+        return;
+      }
+      for (var i = 0; i < node.childNodes.length; i += 1)
+        inspect(node.childNodes[i]);
+    }
+
+    for (var i = 0; i < candidate.childNodes.length; i += 1)
+      inspect(candidate.childNodes[i]);
+    return !hasOtherContent;
+  }
+
+  function candidateFrom(eventTarget, altKey) {
     var target =
       eventTarget && eventTarget.nodeType === 1
         ? eventTarget
@@ -81,9 +111,20 @@
     // Prefer the containing text block over inline links so editing a sentence
     // keeps its anchors and emphasis in place. A standalone link remains an
     // editable target when it is not part of a larger supported text block.
+    var link = target.closest("a");
+    if (link && !root.contains(link)) link = null;
+    if (link && altKey) return link;
+    if (link && isNavigationLink(link)) return null;
     var candidate = target.closest("h1,h2,h3,h4,h5,h6,p,li,button,img");
     if (!candidate) candidate = target.closest("a");
     if (!candidate || !root.contains(candidate)) return null;
+    // Navigation menus commonly make the <li> the nearest supported text
+    // block. Treating that wrapper as the edit target swallowed the anchor's
+    // normal click before WordPress, Bootstrap and mega-menu handlers saw it.
+    // Inline anchors inside a real paragraph still select the paragraph; a
+    // direct link or menu-item link requires Alt so navigation stays native.
+    if (link && (candidate === link || candidate.tagName === "LI")) return null;
+    if (onlyEditableContentIsLink(candidate)) return null;
     return candidate;
   }
 
@@ -358,15 +399,55 @@
   }
 
   function onMouseOver(event) {
-    var target = candidateFrom(event.target);
+    var target = candidateFrom(event.target, event.altKey);
     if (!target || target === (active && active.element)) return;
     if (isNavigationLink(target) && !event.altKey) return;
     ownAttribute(target, "data-rcf-try-hover", "true");
   }
 
   function onMouseOut(event) {
-    var target = candidateFrom(event.target);
+    var target = candidateFrom(event.target, event.altKey);
     if (target) restoreAttribute(target, "data-rcf-try-hover");
+  }
+
+  function isBlockContainer(target) {
+    var display = window.getComputedStyle
+      ? window.getComputedStyle(target).display
+      : "";
+    return (
+      /^(?:block|flow-root|flex|grid|list-item|table|inline-block|inline-flex|inline-grid|table-cell|table-caption|table-row|table-row-group|table-header-group|table-footer-group)$/.test(
+        display,
+      ) ||
+      target.matches(
+        "address,article,aside,blockquote,div,dl,fieldset,figure,footer,form,header,li,main,nav,ol,pre,section,table,ul",
+      )
+    );
+  }
+
+  function boundedInteractiveAncestorContains(target) {
+    if (!active) return false;
+    var ancestor = active.element.parentElement;
+    var depth = 0;
+    while (
+      ancestor &&
+      depth < 4 &&
+      ancestor !== root &&
+      ancestor !== document.body &&
+      ancestor !== document.documentElement &&
+      root.contains(ancestor)
+    ) {
+      var isBlock = isBlockContainer(ancestor);
+      if (isBlock && !ancestor.matches("a,button,[role='button']")) break;
+      if (
+        ancestor.matches("a,[onclick],[role='button']") &&
+        ancestor.contains(target)
+      )
+        return true;
+      depth += 1;
+      if (isBlock) break;
+      ancestor = ancestor.parentElement;
+    }
+    return false;
   }
 
   function onClick(event) {
@@ -392,28 +473,16 @@
     if (event.target.closest && event.target.closest("[data-rcf-try-ui]"))
       return;
     if (active) {
-      var activeContainer = active.element;
-      var isInsideInteractiveAncestor = false;
-      while (activeContainer && root.contains(activeContainer)) {
-        if (
-          activeContainer.matches("a,[onclick],[role='button']") &&
-          activeContainer.contains(event.target)
-        ) {
-          isInsideInteractiveAncestor = true;
-          break;
-        }
-        activeContainer = activeContainer.parentElement;
-      }
       if (
         active.element.contains(event.target) ||
-        isInsideInteractiveAncestor
+        boundedInteractiveAncestorContains(event.target)
       ) {
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
     }
-    var target = candidateFrom(event.target);
+    var target = candidateFrom(event.target, event.altKey);
     if (!target || (isNavigationLink(target) && !event.altKey)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -430,8 +499,20 @@
     var toolbar = input.closest(".rcf-try-toolbar");
     var error = toolbar.querySelector(".rcf-try-error");
     var file = input.files && input.files[0];
+    if (!file) {
+      error.textContent = "Choose a PNG, JPEG, GIF, WebP or AVIF image.";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      error.textContent = "Choose an image that is 5 MB or smaller.";
+      return;
+    }
+    if (!file.size) {
+      error.textContent =
+        "That image is empty or corrupt. Choose another file.";
+      return;
+    }
     if (
-      !file ||
       !/^(?:image\/png|image\/jpeg|image\/gif|image\/webp|image\/avif)$/i.test(
         file.type,
       )
@@ -442,17 +523,32 @@
     var reader = new FileReader();
     var editingSession = active;
     reader.onerror = function () {
-      error.textContent = "ReCopyFast could not read that local image.";
+      error.textContent =
+        "That image is empty or corrupt. Choose another file.";
     };
     reader.onload = function () {
       if (active !== editingSession) return;
-      saveImageValue(String(reader.result || ""), error);
+      var value = String(reader.result || "");
+      var decoded = new Image();
+      decoded.onerror = function () {
+        if (active === editingSession)
+          error.textContent =
+            "That image is empty or corrupt. Choose another file.";
+      };
+      decoded.onload = function () {
+        if (active === editingSession) saveImageValue(value, error);
+      };
+      decoded.src = value;
     };
     reader.readAsDataURL(file);
   }
 
   function onPaste(event) {
-    if (!active || active.type !== "text" || event.target !== active.element)
+    if (
+      !active ||
+      active.type !== "text" ||
+      !active.element.contains(event.target)
+    )
       return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -462,7 +558,11 @@
   }
 
   function onDrop(event) {
-    if (!active || active.type !== "text" || event.target !== active.element)
+    if (
+      !active ||
+      active.type !== "text" ||
+      !active.element.contains(event.target)
+    )
       return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -488,9 +588,12 @@
       active.element.contains(event.target)
     ) {
       if (
-        event.key === " " ||
-        event.key === "Spacebar" ||
-        event.key === "Enter"
+        !event.isComposing &&
+        (event.key === " " ||
+          event.key === "Spacebar" ||
+          event.key === "Enter") &&
+        (active.element.matches("a,button,[role='button']") ||
+          boundedInteractiveAncestorContains(active.element))
       ) {
         event.preventDefault();
         insertPlainText(event.key === "Enter" ? "\n" : " ");
@@ -504,6 +607,9 @@
       active &&
       active.type === "text" &&
       active.element.contains(event.target) &&
+      !event.isComposing &&
+      (active.element.matches("a,button,[role='button']") ||
+        boundedInteractiveAncestorContains(active.element)) &&
       (event.key === " " || event.key === "Spacebar" || event.key === "Enter")
     ) {
       event.preventDefault();
@@ -548,6 +654,19 @@
     if (!nextRoot) return false;
     root = nextRoot;
     if (active && !active.element.isConnected) cancel();
+    // Turbo and similar routers can restore a cloned body containing our old
+    // chrome. Those clones have no live listeners; remove them before the
+    // owned nodes are reattached so the page never carries two preview bars.
+    var staleUi = document.querySelectorAll("[data-rcf-try-ui='true']");
+    for (var i = 0; i < staleUi.length; i += 1) {
+      if (
+        staleUi[i] !== style &&
+        staleUi[i] !== topbar &&
+        staleUi[i] !== toolbarNode &&
+        staleUi[i] !== statusNode
+      )
+        staleUi[i].remove();
+    }
     if (!style.isConnected) document.head.appendChild(style);
     if (!topbar.isConnected) document.body.appendChild(topbar);
     if (statusNode && !statusNode.isConnected)

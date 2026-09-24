@@ -81,7 +81,16 @@ test("the standalone preview completes its full local flow with only the script 
   );
 
   await page.locator("main img").click();
-  await page.locator('.rcf-try-toolbar input[type="file"]').setInputFiles({
+  const fileInput = page.locator('.rcf-try-toolbar input[type="file"]');
+  await fileInput.setInputFiles({
+    name: "too-large.png",
+    mimeType: "image/png",
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1),
+  });
+  await expect(page.locator(".rcf-try-error")).toHaveText(
+    "Choose an image that is 5 MB or smaller.",
+  );
+  await fileInput.setInputFiles({
     name: "replacement.png",
     mimeType: "image/png",
     buffer: Buffer.from(
@@ -100,6 +109,16 @@ test("the standalone preview completes its full local flow with only the script 
         .evaluate((image) => (image as HTMLImageElement).naturalWidth),
     )
     .toBeGreaterThan(0);
+
+  await page.locator("main img").click();
+  await page.locator('.rcf-try-toolbar input[type="file"]').setInputFiles({
+    name: "corrupt.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("not a png"),
+  });
+  await expect(page.locator(".rcf-try-error")).toHaveText(
+    "That image is empty or corrupt. Choose another file.",
+  );
 
   await page.locator("#rcf-try-exit").click();
   await expect(page.locator('[data-rcf-try-ui="true"]')).toHaveCount(0);
@@ -154,17 +173,68 @@ test("a first click edits a linked heading at the clicked text without activatin
   await expect(page.locator("#card-link strong")).toContainText("X");
 });
 
-test("editing a heading blocks clicks anywhere in its clickable card ancestor", async ({
+test("WordPress, Bootstrap, and mega-menu links navigate normally unless Alt-clicked", async ({
   page,
 }) => {
   await page.setContent(`
     <main style="margin-top:80px">
-      <a id="outer-card" href="https://host.example/card">
-        <article id="card" role="button" tabindex="0">
-          <h3>Editable card title</h3>
-          <p>Inner card body</p>
-        </article>
-        <p id="outer-card-body">Outer linked card body</p>
+      <nav id="wordpress-menu">
+        <ul><li class="menu-item"><a href="#wordpress-target">WordPress page</a></li></ul>
+      </nav>
+      <ul class="navbar-nav">
+        <li class="nav-item"><a class="nav-link" href="#bootstrap-target">Bootstrap page</a></li>
+      </ul>
+      <nav id="mega-menu">
+        <ul>
+          <li class="mega-menu-item">
+            <a href="#mega-target">Mega page</a>
+            <div class="mega-panel"><p>Products and resources</p></div>
+          </li>
+        </ul>
+      </nav>
+    </main>
+  `);
+  await injectRuntime(page);
+
+  await page.locator("#wordpress-menu li").dispatchEvent("click");
+  await expect(page.locator("#wordpress-menu li")).not.toHaveAttribute(
+    "contenteditable",
+    /.+/,
+  );
+
+  for (const [selector, hash] of [
+    ["#wordpress-menu a", "#wordpress-target"],
+    [".navbar-nav a", "#bootstrap-target"],
+    ["#mega-menu > ul > li > a", "#mega-target"],
+  ] as const) {
+    const link = page.locator(selector);
+    await link.hover();
+    await expect(link).not.toHaveAttribute("data-rcf-try-hover", "true");
+    await link.click();
+    await expect.poll(() => new URL(page.url()).hash).toBe(hash);
+    await expect(link).not.toHaveAttribute("contenteditable", /.+/);
+    await expect(link.locator("xpath=..")).not.toHaveAttribute(
+      "contenteditable",
+      /.+/,
+    );
+  }
+
+  const wordpressLink = page.locator("#wordpress-menu a");
+  await wordpressLink.click({ modifiers: ["Alt"] });
+  await expect(wordpressLink).toHaveAttribute(
+    "contenteditable",
+    "plaintext-only",
+  );
+});
+
+test("editing a heading blocks clicks anywhere in its immediate clickable card ancestor", async ({
+  page,
+}) => {
+  await page.setContent(`
+    <main style="margin-top:80px">
+      <a id="outer-card" role="button" href="#card-target">
+        <h3>Editable card title</h3>
+        <span id="outer-card-body">Linked card body</span>
       </a>
     </main>
     <script>
@@ -174,8 +244,8 @@ test("editing a heading blocks clicks anywhere in its clickable card ancestor", 
   `);
   await injectRuntime(page);
 
-  await page.locator("#card h3").click();
-  await page.locator("#card h3").click();
+  await page.locator("#outer-card h3").click();
+  await page.locator("#outer-card h3").click();
   await page.locator("#outer-card-body").click();
 
   expect(
@@ -183,7 +253,7 @@ test("editing a heading blocks clicks anywhere in its clickable card ancestor", 
       () => (window as unknown as { hostClicks: number }).hostClicks,
     ),
   ).toBe(0);
-  await expect(page.locator("#card h3")).toHaveAttribute(
+  await expect(page.locator("#outer-card h3")).toHaveAttribute(
     "contenteditable",
     "plaintext-only",
   );
@@ -194,6 +264,7 @@ test("editing a button label blocks Space and Enter from host handlers", async (
 }) => {
   await page.setContent(`
     <main style="margin-top:80px">
+      <p id="copy">Ordinary copy</p>
       <button id="cta" type="button">Start now</button>
     </main>
     <script>
@@ -206,6 +277,22 @@ test("editing a button label blocks Space and Enter from host handlers", async (
     </script>
   `);
   await injectRuntime(page);
+
+  const copy = page.locator("#copy");
+  const originalCopy = await copy.innerText();
+  await copy.click();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" native");
+  const beforeEnter = await copy.innerText();
+  expect(beforeEnter).not.toBe(originalCopy);
+  await page.keyboard.press("Enter");
+  const afterEnter = await copy.innerText();
+  expect(afterEnter).not.toBe(beforeEnter);
+  await page.keyboard.press("ControlOrMeta+z");
+  const afterUndo = await copy.innerText();
+  expect(afterUndo).not.toBe(afterEnter);
+  expect([originalCopy, beforeEnter]).toContain(afterUndo);
+  await page.getByRole("button", { name: "Cancel" }).click();
 
   const originalLabel = await page.locator("#cta").textContent();
   await page.locator("#cta").click();

@@ -42,3 +42,15 @@ and use a stable URL with revalidation. Real-browser request events must cover t
 whole preview lifecycle, including image replacement, rather than mocked transports.
 The independent review remains untouched; its initial count/evidence is historical.
 No new dependency, database, auth, billing or deployment work.
+
+## Fix mode 2 delta evidence (2026-09-24)
+
+The independent `Delta review 889041c` reproduces list-item selection before the
+Alt navigation check, unbounded clickable ancestors, descendant paste/drop escaping
+exact-target guards, cloned bars after body restoration, and native text editing
+being replaced by Range insertion. D6 needs a pre-existing document capture listener
+to prove window precedence. File MIME validation alone cannot prove decodability;
+validate local image decode without a remote request, and reject >5 MiB before read.
+The active inventory is currently 43; historical verification counts remain dated
+evidence, while CI/config/reporter/contracts/QA register must match new collection.
+Merged origin/main e43010a (PR #23); story-list conflict retains both s29 and s32.
