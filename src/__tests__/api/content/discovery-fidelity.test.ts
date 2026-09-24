@@ -74,7 +74,7 @@ interface StoredRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type?: string };
+  metadata: { type?: string; href?: string; alt?: string };
 }
 
 let storedRows: StoredRow[] = [];
@@ -104,7 +104,13 @@ const serviceClient: MockServiceClient = {
 
 type ContentMap = Record<
   string,
-  { selector: string; content: unknown; type?: string }
+  {
+    selector: string;
+    content: unknown;
+    type?: string;
+    href?: string;
+    alt?: string | null;
+  }
 >;
 
 /**
@@ -642,6 +648,39 @@ describe("POST /api/content/[siteId] discovery fidelity", () => {
       });
 
       expect(storedFor(rows, "rcf-headline").metadata).toEqual({ type: "h1" });
+    });
+
+    it("captures safe authored href and alt values as the published baseline", async () => {
+      const rows = await postContentMap({
+        "rcf-link": {
+          selector: "a",
+          content: "Documentation",
+          type: "a",
+          href: "  /docs/getting-started  ",
+          alt: "  Product documentation  ",
+        },
+      });
+
+      expect(storedFor(rows, "rcf-link").metadata).toEqual({
+        type: "a",
+        href: "/docs/getting-started",
+        alt: "Product documentation",
+      });
+    });
+
+    it("skips a discovered element with an unsafe authored href", async () => {
+      const body = await postAndReport({
+        "rcf-link": {
+          selector: "a",
+          content: "Unsafe link",
+          type: "a",
+          href: "javascript:alert(1)",
+        },
+      });
+
+      expect(body.skippedCount).toBe(1);
+      expect(skipFor(body, "rcf-link").reason).toContain("unsupported scheme");
+      expect(serviceClient.upsert).not.toHaveBeenCalled();
     });
   });
 

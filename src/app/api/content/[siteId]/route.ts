@@ -13,6 +13,7 @@ import {
   validateElementId,
 } from "@/lib/security/discovered-text";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { validateContentAttributePatch } from "@/lib/api/validation";
 
 interface ContentElementRow {
   site_id: string;
@@ -23,7 +24,7 @@ interface ContentElementRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type?: string };
+  metadata: Record<string, unknown>;
 }
 
 /** One element that could not be stored, and why. */
@@ -126,6 +127,14 @@ function buildDiscoveryRows(
       continue;
     }
 
+    const attributes = validateContentAttributePatch(
+      data as Record<string, unknown>,
+    );
+    if (!attributes.ok) {
+      skipped.push({ elementId: id.value, reason: attributes.error });
+      continue;
+    }
+
     rows.push({
       site_id: siteId,
       element_id: id.value,
@@ -135,7 +144,10 @@ function buildDiscoveryRows(
       published_content: element.value.content,
       language: "en",
       variant: "default",
-      metadata: element.value.type ? { type: element.value.type } : {},
+      metadata: {
+        ...(element.value.type ? { type: element.value.type } : {}),
+        ...attributes.value,
+      },
     });
   }
 
@@ -334,11 +346,27 @@ export async function GET(
 
     // Transform: use published_content as current_content for backward compatibility
     // Fall back to original_content if published_content is null (for existing data)
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      current_content:
-        element.published_content ?? element.original_content ?? "",
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      // Draft attributes share the metadata JSONB column with published ones,
+      // but they are private to staging until the atomic publish promotes them.
+      // Removing the nested patch here prevents a public visitor from learning
+      // or applying a destination that an editor has not published yet.
+      const metadata =
+        typeof element.metadata === "object" &&
+        element.metadata !== null &&
+        !Array.isArray(element.metadata)
+          ? (element.metadata as Record<string, unknown>)
+          : {};
+      const publishedMetadata = { ...metadata };
+      delete publishedMetadata.staging_attributes;
+
+      return {
+        ...element,
+        metadata: publishedMetadata,
+        current_content:
+          element.published_content ?? element.original_content ?? "",
+      };
+    });
 
     // The one ongoing "this site is still running our script" signal.
     //

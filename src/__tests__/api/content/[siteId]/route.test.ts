@@ -188,6 +188,41 @@ describe("/api/content/[siteId]", () => {
       expect(data).toEqual([]);
     });
 
+    it("returns published attributes without leaking staged attribute drafts", async () => {
+      const row = {
+        ...mockContentElements[0],
+        metadata: {
+          type: "a",
+          href: "/published",
+          analytics_key: "keep-me",
+          staging_attributes: { href: "/draft", alt: "Draft alt" },
+        },
+      };
+      mockServiceClient.eq
+        .mockImplementationOnce(() => mockServiceClient)
+        .mockImplementationOnce(() => mockServiceClient)
+        .mockImplementationOnce(() =>
+          Promise.resolve({ data: [row], error: null }),
+        );
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+      const [element] = await response.json();
+
+      expect(element.metadata).toEqual({
+        type: "a",
+        href: "/published",
+        analytics_key: "keep-me",
+      });
+    });
+
     it("should return 401 when authorization fails", async () => {
       mockAuthorizeSiteRequest.mockRejectedValueOnce(
         new Error("Missing site token"),

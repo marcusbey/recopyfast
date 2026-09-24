@@ -86,6 +86,81 @@ export function optionalString(
   return requireString(body, field, options);
 }
 
+export const MAX_CONTENT_HREF_LENGTH = 2048;
+export const MAX_CONTENT_ALT_LENGTH = 2000;
+
+export interface ContentAttributePatch {
+  href?: string;
+  alt?: string;
+}
+
+const URI_SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/i;
+const ALLOWED_HREF_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
+const ATTRIBUTE_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * Validate the two non-text values the embed editor can stage.
+ *
+ * Link destinations eventually become a DOM `href`, so accepting an arbitrary
+ * scheme here would turn a saved edit into stored script execution on every
+ * visitor. Relative URLs are intentional (including root-relative paths and
+ * fragments); protocol-relative URLs are refused because their effective
+ * scheme depends on the host page. Empty strings are valid and mean "clear the
+ * attribute". The image editor sends `alt: null` for background images, where
+ * there is no alt attribute to edit, so that one value is treated as omitted.
+ */
+export function validateContentAttributePatch(
+  body: Record<string, unknown>,
+): ValidationResult<ContentAttributePatch> {
+  const patch: ContentAttributePatch = {};
+
+  if (body.href !== undefined) {
+    if (typeof body.href !== "string") {
+      return fail('Field "href" must be a string');
+    }
+
+    const href = body.href.trim();
+    if (href.length > MAX_CONTENT_HREF_LENGTH) {
+      return fail(
+        `Field "href" must be at most ${MAX_CONTENT_HREF_LENGTH} characters`,
+      );
+    }
+    if (ATTRIBUTE_CONTROL_PATTERN.test(href) || href.includes("\\")) {
+      return fail('Field "href" contains unsafe characters');
+    }
+    if (href.startsWith("//")) {
+      return fail('Field "href" must use an explicit http or https scheme');
+    }
+
+    const scheme = URI_SCHEME_PATTERN.exec(href)?.[1]?.toLowerCase();
+    if (scheme && !ALLOWED_HREF_SCHEMES.has(scheme)) {
+      return fail(`Field "href" uses an unsupported scheme`);
+    }
+
+    patch.href = href;
+  }
+
+  if (body.alt !== undefined && body.alt !== null) {
+    if (typeof body.alt !== "string") {
+      return fail('Field "alt" must be a string');
+    }
+
+    const alt = body.alt.trim();
+    if (alt.length > MAX_CONTENT_ALT_LENGTH) {
+      return fail(
+        `Field "alt" must be at most ${MAX_CONTENT_ALT_LENGTH} characters`,
+      );
+    }
+    if (ATTRIBUTE_CONTROL_PATTERN.test(alt)) {
+      return fail('Field "alt" contains control characters');
+    }
+
+    patch.alt = alt;
+  }
+
+  return { ok: true, value: patch };
+}
+
 export function requireUuid(
   body: Record<string, unknown>,
   field: string,

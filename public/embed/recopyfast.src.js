@@ -826,7 +826,11 @@
     const authored = element.getAttribute('data-rcf-id');
     if (authored) return authored;
 
-    return 'rcf-' + hashPath(structuralPath(element));
+    // A-14: structural twins on different pages used to alias one database row,
+    // so visiting /pricing could hydrate /about's copy into the same template.
+    // `pathname` already excludes query/hash; only a trailing slash is folded so
+    // links to /about and /about/ keep one identity while case stays significant.
+    return 'rcf-' + hashPath((document.location.pathname.replace(/\/+$/, '') || '/') + '\0' + structuralPath(element));
   }
 
   class ReCopyFast {
@@ -2668,19 +2672,20 @@
         const elementId = computeStableElementId(element);
         element.setAttribute('data-rcf-id', elementId);
 
-        self.elements.set(elementId, {
+        const elementData = {
           element: element,
           originalContent: text,
           selector: self.generateSelector(element),
           type: element.tagName.toLowerCase()
-        });
+        };
+        elementData.extras = isImage ? { alt: element.getAttribute('alt') || '' } :
+          element.tagName === 'A' ? { href: element.getAttribute('href') || '' } : null;
+        self.elements.set(elementId, elementData);
 
         if (self.editMode) {
           element.classList.add('rcf-editable');
         }
       });
-
-      console.log('ReCopyFast: Found ' + this.elements.size + ' editable elements');
     }
 
     shouldSkipElement(element) {
@@ -2952,7 +2957,7 @@
       const result = await response.json().catch(function() { return {}; });
       if (!response.ok || result.error) {
         this.setEditorSaveStatus('');
-        const error = new Error(result.error || 'Failed to save content');
+        const error = new Error(result.error || 'Save failed.');
         error.status = response.status;
         this.handleTerminalWriteFailure(error, elementId, content);
         throw error;
@@ -3106,11 +3111,12 @@
       const contentMap = {};
 
       this.elements.forEach(function(data, elementId) {
-        contentMap[elementId] = {
+        const entry = contentMap[elementId] = {
           selector: data.selector,
           content: data.originalContent,
           type: data.type
         };
+        Object.assign(entry, data.extras);
       });
 
       // Report over HTTP, not over the socket.
@@ -3588,7 +3594,7 @@
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
 
-      if (!this.applyContentToElement(elementData, content, data.alt)) return;
+      if (!this.applyContentToElement(elementData, content, data)) return;
 
       elementData.element.classList.add('rcf-updated');
       setTimeout(function() {
@@ -3603,11 +3609,26 @@
      * below, so both agree on how each element type is written and on what is
      * off-limits. Returns whether the write happened.
      */
-    applyContentToElement(elementData, content, alt) {
+    applyContentToElement(elementData, content, attributes) {
       const target = elementData.element;
 
       // Never overwrite what someone is actively typing.
       if (target.getAttribute('data-rcf-editing')) return false;
+
+      const attribute = target.tagName === 'A' ? 'href' : target.tagName === 'IMG' ? 'alt' : null;
+      let value = null;
+      if (attribute) {
+        value = attributes && attributes[attribute];
+        if (typeof value === 'string') {
+          value = value.trim();
+          const isHref = attribute === 'href';
+          if (value.length > (isHref ? 2048 : 2000) || /[\0-\x1f\x7f-\x9f]/.test(value) ||
+              (isHref && /\\|^\/\/|^(?!(?:https?|mailto|tel):)[a-z][\w+.-]*:/i.test(value))) value = null;
+        } else value = null;
+        if (value !== null) target.setAttribute(attribute, value);
+      }
+
+      if (content === elementData.originalContent) return value !== null;
 
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         target.value = content;
@@ -3615,13 +3636,10 @@
         // Same no-reflow swap the editor uses, so a realtime update from another
         // session cannot resize the page under the reader.
         applyImageSource(target, content);
-        if (alt !== undefined && alt !== null) target.alt = alt;
       } else {
         target.textContent = content;
       }
 
-      // Keep the map in step with the DOM: the edit board and the content map
-      // both read `originalContent` as "what this element currently says".
       elementData.originalContent = content;
       return true;
     }
@@ -3665,17 +3683,11 @@
           headers: Object.assign({ 'Authorization': 'Bearer ' + SITE_TOKEN }, this.editorAuthHeaders())
         });
 
-        if (!response.ok) {
-          console.warn('ReCopyFast: could not load saved content (HTTP ' + response.status + '); showing the page as authored.');
-          return;
-        }
+        if (!response.ok) return;
 
         const body = await response.json();
         rows = staged ? (body && body.content) : body;
-      } catch (error) {
-        console.warn('ReCopyFast: could not load saved content; showing the page as authored.', error);
-        return;
-      }
+      } catch (error) { return; }
 
       if (!Array.isArray(rows)) return;
 
@@ -3687,8 +3699,6 @@
           this.serverKnownElementIds.add(rows[i].element_id);
         }
       }
-
-      let applied = 0;
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
@@ -3702,14 +3712,8 @@
         // empty string here means every stored column was null — a data gap,
         // not somebody deliberately publishing nothing.
         if (typeof content !== 'string' || content === '') continue;
-        if (content === elementData.originalContent) continue;
-
-        if (this.applyContentToElement(elementData, content, row.metadata && row.metadata.alt)) {
-          applied++;
-        }
+        this.applyContentToElement(elementData, content, row.metadata);
       }
-
-      console.log('ReCopyFast: applied ' + applied + ' saved element(s) of ' + rows.length + ' stored');
     }
 
     setupMutationObserver() {
@@ -4630,7 +4634,7 @@
           );
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save content. Please try again.');
+          alert(error.message || 'Save failed.');
           return;
         }
 
@@ -4639,7 +4643,7 @@
           elementData.originalContent = newContent;
         }
         fieldInputs.forEach(function(f) {
-          if (f.input.value !== f.initial) f.def.set(element, f.input.value.trim());
+          if (f.input.value !== f.initial) f.def.set(element, values[f.def.key]);
         });
 
         cleanup();
@@ -4969,8 +4973,8 @@
 
       saveBtn.onclick = async function() {
         const newSrc = urlInput.value.trim();
-        if (!newSrc) {
-          alert('Please enter an image URL');
+        if (!newSrc || /^data:/i.test(newSrc)) {
+          alert('Enter an image URL.');
           return;
         }
 
@@ -4978,10 +4982,7 @@
         // content_history on every subsequent edit — a 2 MB photo becomes ~2.7 MB
         // of base64 per revision. Uploads go through /api/upload/image and come
         // back as a URL; anything else here is a bug or a hand-pasted blob.
-        if (/^data:/i.test(newSrc)) {
-          alert('Inline image data cannot be saved. Use "Upload New Image" so the file is hosted, or paste an image URL.');
-          return;
-        }
+        const newAlt = isImg ? altInput.value.trim() : null;
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
@@ -4989,13 +4990,13 @@
         try {
           await self.persistContentUpdate(elementId, newSrc, {
             contentType: 'image',
-            alt: isImg ? altInput.value : null,
+            alt: newAlt,
             width: uploadedDimensions ? uploadedDimensions.width : undefined,
             height: uploadedDimensions ? uploadedDimensions.height : undefined
           });
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save image. Please try again.');
+          alert(error.message || 'Save failed.');
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save Changes';
           return;
@@ -5004,7 +5005,7 @@
         if (isImg) {
           applyImageSource(element, newSrc);
           if (altInput) {
-            element.alt = altInput.value;
+            element.alt = newAlt;
           }
         } else {
           element.style.backgroundImage = 'url("' + newSrc + '")';
@@ -5048,9 +5049,9 @@
           type: 'url',
           placeholder: 'https://example.com',
           get: function(el) { return el.getAttribute('href') || ''; },
-          set: function(el, value) { if (value) el.setAttribute('href', value); }
+          set: (el, value) => el.setAttribute('href', value)
         }],
-        payload: function(values) { return { href: values.href }; }
+        payload: values => values
       });
     }
 
@@ -5196,7 +5197,7 @@
           });
         } catch (error) {
           if (self.isMutationLocked) return;
-          alert(error.message || 'Failed to save form content. Please try again.');
+          alert(error.message || 'Save failed.');
           return;
         }
 

@@ -154,7 +154,7 @@ describe("element ids across two pages of one template", () => {
     },
   );
 
-  test.failing.each(sharedElements)(
+  test.each(sharedElements)(
     "gives %s a different id on /about than on /pricing",
     (_label, selector) => {
       const about = ABOUT.querySelector(selector);
@@ -184,7 +184,7 @@ describe("element ids across two pages of one template", () => {
     expect(ids.every((id) => id.startsWith("rcf-"))).toBe(true);
   });
 
-  test.failing("keeps every element of the two pages in distinct rows", () => {
+  test("keeps every element of the two pages in distinct rows", () => {
     // The product-level statement: a site with two templated pages and three
     // editable elements each has six things to edit, not three. Today the set
     // collapses to three, and the dashboard shows exactly that.
@@ -211,7 +211,7 @@ describe("element ids across two pages of one template", () => {
     expect(idOnPricing(pricingHeadline)).toMatch(/^rcf-/);
   });
 
-  test.failing("does not let /about's copy be served on /pricing", () => {
+  test("does not let /about's copy be served on /pricing", () => {
     // The visitor-facing consequence. `/about` is discovered first, so its
     // headline is what the row holds; `hydrateStoredContent` skips only when
     // `content === elementData.originalContent` (recopyfast.src.js:3322), and
@@ -299,5 +299,58 @@ describe("identity properties the current scheme does hold", () => {
     expect(
       loadComputeStableElementId(doc)(doc.querySelector("h1") as Element),
     ).toBe("pricing-headline");
+  });
+
+  it("normalizes only a trailing slash and ignores query and hash", () => {
+    const canonical = renderPage(
+      "https://acme.example.com/About",
+      marketingPage("About Acme", "Lead.", "CTA"),
+    );
+    const noisy = renderPage(
+      "https://acme.example.com/About/?campaign=fall#team",
+      marketingPage("About Acme", "Lead.", "CTA"),
+    );
+
+    expect(
+      loadComputeStableElementId(canonical)(
+        canonical.querySelector("h1") as Element,
+      ),
+    ).toBe(
+      loadComputeStableElementId(noisy)(noisy.querySelector("h1") as Element),
+    );
+  });
+
+  it("keeps pathname case significant", () => {
+    const upper = renderPage(
+      "https://acme.example.com/About",
+      marketingPage("About Acme", "Lead.", "CTA"),
+    );
+    const lower = renderPage(
+      "https://acme.example.com/about",
+      marketingPage("About Acme", "Lead.", "CTA"),
+    );
+
+    expect(
+      loadComputeStableElementId(upper)(upper.querySelector("h1") as Element),
+    ).not.toBe(
+      loadComputeStableElementId(lower)(lower.querySelector("h1") as Element),
+    );
+  });
+
+  it("keeps an author-supplied id shared across pages", () => {
+    const about = renderPage(
+      "https://acme.example.com/about",
+      '<footer data-rcf-id="shared-footer">Acme</footer>',
+    );
+    const pricing = renderPage(
+      "https://acme.example.com/pricing",
+      '<footer data-rcf-id="shared-footer">Acme</footer>',
+    );
+
+    expect(
+      loadComputeStableElementId(about)(about.querySelector("footer")!),
+    ).toBe(
+      loadComputeStableElementId(pricing)(pricing.querySelector("footer")!),
+    );
   });
 });

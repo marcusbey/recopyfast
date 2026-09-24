@@ -14,6 +14,25 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { validateContentAttributePatch } from "@/lib/api/validation";
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stagedMetadata(value: unknown) {
+  const metadata = jsonObject(value);
+  const stagingAttributes = jsonObject(metadata.staging_attributes);
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.keys(stagingAttributes).length > 0,
+  };
+}
 
 export async function GET(
   request: NextRequest,
@@ -84,15 +103,22 @@ export async function GET(
     }
 
     // Transform content: use staging_content if available, otherwise published_content
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      // For display, use staging_content if it exists, otherwise published_content
-      current_content: element.staging_content ?? element.published_content,
-      // Include flags for UI
-      has_staging_changes:
-        element.staging_content !== null &&
-        element.staging_content !== element.published_content,
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      const projection = stagedMetadata(element.metadata);
+
+      return {
+        ...element,
+        metadata: projection.metadata,
+        // For display, use staging_content if it exists, otherwise published_content
+        current_content: element.staging_content ?? element.published_content,
+        // Attribute-only edits must remain visible and publishable even when the
+        // editor did not change the element's text in the same save.
+        has_staging_changes:
+          projection.hasAttributeChanges ||
+          (element.staging_content !== null &&
+            element.staging_content !== element.published_content),
+      };
+    });
 
     return withPublicCors(
       NextResponse.json({
@@ -125,6 +151,14 @@ export async function PUT(
       typeof requestBody.language === "string" ? requestBody.language : "en";
     const variant =
       typeof requestBody.variant === "string" ? requestBody.variant : "default";
+    const attributePatch = validateContentAttributePatch(requestBody);
+
+    if (!attributePatch.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: attributePatch.error }, { status: 400 }),
+        request,
+      );
+    }
 
     // The site's own owner is signed in and holds a `site_permissions` row; they
     // carry no editor token and never can, so validating tokens alone refused
@@ -227,7 +261,7 @@ export async function PUT(
     // Get current element for history
     const { data: currentElement } = await supabase
       .from("content_elements")
-      .select("id, staging_content")
+      .select("id, staging_content, metadata")
       .eq("site_id", siteId)
       .eq("element_id", elementId)
       .eq("language", language)
@@ -244,11 +278,28 @@ export async function PUT(
       );
     }
 
-    // Update staging content
+    const existingMetadata = jsonObject(currentElement.metadata);
+    const existingStagingAttributes = jsonObject(
+      existingMetadata.staging_attributes,
+    );
+    const hasAttributePatch = Object.keys(attributePatch.value).length > 0;
+    const nextMetadata = hasAttributePatch
+      ? {
+          ...existingMetadata,
+          staging_attributes: {
+            ...existingStagingAttributes,
+            ...attributePatch.value,
+          },
+        }
+      : existingMetadata;
+
+    // Update staging content. Attribute drafts stay nested until publish so a
+    // public read can never expose an unapproved destination or alt value.
     const { error: updateError } = await supabase
       .from("content_elements")
       .update({
         staging_content: sanitizedContent,
+        ...(hasAttributePatch ? { metadata: nextMetadata } : {}),
         staging_updated_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
@@ -269,16 +320,31 @@ export async function PUT(
     }
 
     // Record in staging history
-    await supabase.from("staging_history").insert({
-      content_element_id: currentElement.id,
-      // Null for a first-party edit: the owner's change is not attributable to
-      // any staging invite, and pointing it at one would misattribute the edit.
-      staging_access_id: access.stagingAccessId || null,
-      previous_content: currentElement.staging_content,
-      new_content: sanitizedContent,
-      user_email: access.email || access.userId || access.kind,
-      action: currentElement.staging_content ? "update" : "create",
-    });
+    const { error: historyError } = await supabase
+      .from("staging_history")
+      .insert({
+        content_element_id: currentElement.id,
+        // Null for a first-party edit: the owner's change is not attributable to
+        // any staging invite, and pointing it at one would misattribute the edit.
+        staging_access_id: access.stagingAccessId || null,
+        previous_content: currentElement.staging_content,
+        new_content: sanitizedContent,
+        previous_metadata: existingMetadata,
+        new_metadata: nextMetadata,
+        user_email: access.email || access.userId || access.kind,
+        action: currentElement.staging_content ? "update" : "create",
+      });
+
+    if (historyError) {
+      console.error("Error recording staging history:", historyError);
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Failed to record staging history" },
+          { status: 500 },
+        ),
+        request,
+      );
+    }
 
     return withPublicCors(
       NextResponse.json({

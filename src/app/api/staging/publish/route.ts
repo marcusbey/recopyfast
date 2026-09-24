@@ -20,6 +20,26 @@ type PublishRpcRow = {
   content: string | null;
 };
 
+function stagedMetadata(value: unknown) {
+  const metadata =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const stagingAttributes =
+    typeof metadata.staging_attributes === "object" &&
+    metadata.staging_attributes !== null &&
+    !Array.isArray(metadata.staging_attributes)
+      ? (metadata.staging_attributes as Record<string, unknown>)
+      : {};
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.keys(stagingAttributes).length > 0,
+  };
+}
+
 function extractElementIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) {
     return null;
@@ -254,8 +274,7 @@ export async function GET(request: NextRequest) {
       .select(
         "id, element_id, selector, staging_content, published_content, staging_updated_at, metadata",
       )
-      .eq("site_id", siteId)
-      .not("staging_content", "is", null);
+      .eq("site_id", siteId);
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);
@@ -268,17 +287,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const changedElements = (elementsWithChanges || [])
-      .filter((el) => el.staging_content !== el.published_content)
-      .map((el) => ({
-        id: el.id,
-        elementId: el.element_id,
-        selector: el.selector,
-        stagingContent: el.staging_content,
-        publishedContent: el.published_content,
-        stagingUpdatedAt: el.staging_updated_at,
-        metadata: el.metadata,
-      }));
+    const changedElements = (elementsWithChanges || []).flatMap((el) => {
+      const projection = stagedMetadata(el.metadata);
+      const hasTextChanges =
+        el.staging_content !== null &&
+        el.staging_content !== el.published_content;
+      if (!projection.hasAttributeChanges && !hasTextChanges) {
+        return [];
+      }
+
+      return [
+        {
+          id: el.id,
+          elementId: el.element_id,
+          selector: el.selector,
+          stagingContent: el.staging_content,
+          publishedContent: el.published_content,
+          stagingUpdatedAt: el.staging_updated_at,
+          metadata: projection.metadata,
+        },
+      ];
+    });
 
     return withPublicCors(
       NextResponse.json({

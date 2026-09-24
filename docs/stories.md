@@ -1219,6 +1219,21 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+## s27-launch-content-integrity — page identity and durable link/image attributes
+
+As a customer installing ReCopyFast on multiple pages, every edit must land on its intended element and survive publishing, a fresh visitor load, and restoration.
+
+Complexity: **4**. One rebuilt embed artifact for A-14 and A-26; no new dependencies.
+
+- Computed stable IDs incorporate normalized case-sensitive pathname, ignoring query/hash and trailing slash except root; explicit `data-rcf-id` remains shared across pages.
+- Preserve all existing identity guards. D2 accepted by operator: re-key on discovery, no backfill or legacy fallback; zero real customers, QA rows may be orphaned.
+- Validate trimmed, bounded href/alt; allow only http/https/mailto/tel and relative/root/fragment references. Unsafe or unknown schemes receive 400.
+- Retain attributes in metadata across staging, publish, history, fresh public hydration and version restore; drafts remain private until publish.
+- Audit discovery, hydration, dashboard, bulk, A/B and impressions for opaque-ID compatibility. Show existing page field only if available.
+- Preserve embed ceilings; all requested gates pass; draft PR only, pending independent review.
+
+Research: `docs/research/s27-launch-content-integrity.md`. Plan: `docs/plans/s27-launch-content-integrity.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
