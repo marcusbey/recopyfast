@@ -241,7 +241,55 @@ function createFakeClient() {
     return builder;
   };
 
-  return { auth: { getUser: mockGetUser }, from };
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    if (name === "claim_subscription_checkout_intent") {
+      const existing = (mockDb.checkout_pending_intents ?? []).find(
+        (row) => row.user_id === args.p_user_id && row.status === "pending",
+      );
+      if (existing) {
+        return { data: [{ ...existing, is_new: false }], error: null };
+      }
+
+      const row = {
+        id: nextId("checkout_intent"),
+        user_id: args.p_user_id,
+        intent: "subscription",
+        status: "pending",
+        stripe_session_id: null,
+        checkout_url: null,
+        stripe_price_id: args.p_stripe_price_id,
+        plan_id: args.p_plan_id,
+        billing_period: args.p_billing_period,
+        expires_at: args.p_expires_at,
+      };
+      mockDb.checkout_pending_intents = [
+        ...(mockDb.checkout_pending_intents ?? []),
+        row,
+      ];
+      return { data: [{ ...row, is_new: true }], error: null };
+    }
+
+    if (name === "attach_subscription_checkout_session") {
+      mockDb.checkout_pending_intents = (
+        mockDb.checkout_pending_intents ?? []
+      ).map((row) =>
+        row.id === args.p_intent_id &&
+        row.user_id === args.p_user_id &&
+        row.status === "pending"
+          ? {
+              ...row,
+              stripe_session_id: args.p_stripe_session_id,
+              checkout_url: args.p_checkout_url,
+            }
+          : row,
+      );
+      return { data: null, error: null };
+    }
+
+    throw new Error(`Unexpected RPC in trial lifecycle test: ${name}`);
+  };
+
+  return { auth: { getUser: mockGetUser }, from, rpc };
 }
 
 jest.mock("@/lib/supabase/server", () => ({
@@ -290,15 +338,21 @@ jest.mock("@/lib/stripe/plans", () => ({
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
   getPaidPlan: jest.fn(),
-  resolveStripePriceId: jest.fn(),
+  resolveStripePriceId: jest.fn(async () => "price_pro_monthly"),
 }));
 
 const mockCreateCheckoutSession = jest.fn();
+const mockFindCheckoutSessionForIntent = jest.fn();
+const mockExpireCheckoutSession = jest.fn();
 
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  findCheckoutSessionForIntent: (...args: unknown[]) =>
+    mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: jest.fn(),
+  expireCheckoutSession: (...args: unknown[]) =>
+    mockExpireCheckoutSession(...args),
 }));
 
 import { ensureTrialStarted } from "@/lib/billing/trial";
@@ -354,6 +408,7 @@ beforeEach(() => {
     billing_customers: [],
     credit_purchases: [],
     checkout_reservations: [],
+    checkout_pending_intents: [],
     sites: [],
     site_permissions: [],
     content_elements: [],
@@ -366,6 +421,7 @@ beforeEach(() => {
     sessionId: "cs_test_1",
     url: "https://checkout.stripe.test/cs_test_1",
   });
+  mockFindCheckoutSessionForIntent.mockResolvedValue(null);
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -459,7 +515,7 @@ describe("a trial, from sign-in to expiry", () => {
       sessionId: "cs_test_1",
     });
     expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
-    expect(mockDb.checkout_reservations).toHaveLength(1);
+    expect(mockDb.checkout_pending_intents).toHaveLength(1);
   });
 
   it("keeps the customer entitled through conversion, with no gap", async () => {
