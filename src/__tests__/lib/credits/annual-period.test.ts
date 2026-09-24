@@ -23,14 +23,31 @@ let db: Record<string, Row[]> = {};
 function createFakeClient() {
   const from = (table: string) => {
     const predicates: Array<(row: Row) => boolean> = [];
+    let ordering: { column: string; ascending: boolean } | null = null;
+    let rowLimit: number | null = null;
 
     const rows = (): Row[] => db[table] ?? [];
-    const run = (): RowsResult => ({
-      data: rows().filter((row) =>
+    const run = (): RowsResult => {
+      let data = rows().filter((row) =>
         predicates.every((predicate) => predicate(row)),
-      ),
-      error: null,
-    });
+      );
+
+      if (ordering) {
+        const { column, ascending } = ordering;
+        data = [...data].sort((left, right) => {
+          const comparison = String(left[column] ?? "").localeCompare(
+            String(right[column] ?? ""),
+          );
+          return ascending ? comparison : -comparison;
+        });
+      }
+
+      if (rowLimit !== null) {
+        data = data.slice(0, rowLimit);
+      }
+
+      return { data, error: null };
+    };
 
     const builder = {
       select: () => builder,
@@ -52,11 +69,24 @@ function createFakeClient() {
       },
       // spendableFilter(): the fixtures use `expires_at: null`.
       or: () => builder,
-      order: () => builder,
-      limit: () => builder,
+      order: (column: string, options?: { ascending?: boolean }) => {
+        ordering = { column, ascending: options?.ascending ?? true };
+        return builder;
+      },
+      limit: (count: number) => {
+        rowLimit = count;
+        return builder;
+      },
       maybeSingle: async () => {
         const { data } = run();
-        return { data: data?.[0] ?? null, error: null };
+        return data && data.length > 1
+          ? {
+              data: null,
+              error: {
+                message: "JSON object requested, multiple rows returned",
+              },
+            }
+          : { data: data?.[0] ?? null, error: null };
       },
       then: <T>(
         resolve: (result: RowsResult) => T,
@@ -100,13 +130,22 @@ function monthsAgo(months: number): string {
   return date.toISOString();
 }
 
-function subscription(periodStart: string, status = "active"): Row {
+function subscription(
+  periodStart: string,
+  status = "active",
+  options: { periodEnd?: string; createdAt?: string } = {},
+): Row {
+  const defaultPeriodEnd = new Date(periodStart);
+  defaultPeriodEnd.setUTCFullYear(defaultPeriodEnd.getUTCFullYear() + 1);
+
   return {
     id: "row_1",
     user_id: USER_ID,
     status,
     plan: "pro",
     current_period_start: periodStart,
+    current_period_end: options.periodEnd ?? defaultPeriodEnd.toISOString(),
+    created_at: options.createdAt ?? periodStart,
   };
 }
 
@@ -201,14 +240,79 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
   it("counts a monthly subscriber's spend inside the current period", async () => {
     const fiveDaysAgo = new Date();
     fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+    const nextMonth = new Date(fiveDaysAgo);
+    nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
 
-    db.billing_subscriptions = [subscription(fiveDaysAgo.toISOString())];
+    db.billing_subscriptions = [
+      subscription(fiveDaysAgo.toISOString(), "active", {
+        periodEnd: nextMonth.toISOString(),
+      }),
+    ];
     db.credit_usage = [usage(200, new Date().toISOString())];
 
     const balance = await getUserCreditBalance(USER_ID);
 
     expect(balance.usedThisMonth).toBe(200);
     expect(balance.total).toBe(MONTHLY_CREDITS - 200);
+  });
+
+  it("keeps the February 28 Stripe period as the window until a March 31 renewal", async () => {
+    jest.setSystemTime(new Date("2025-03-29T12:00:00.000Z"));
+    db.billing_subscriptions = [
+      subscription("2025-02-28T10:00:00.000Z", "active", {
+        periodEnd: "2025-03-31T10:00:00.000Z",
+      }),
+    ];
+    db.credit_usage = [
+      usage(175, "2025-03-01T10:00:00.000Z"),
+      usage(40, "2025-03-29T11:00:00.000Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(215);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 215);
+  });
+
+  it("keeps the April 30 Stripe period as the window until a May 31 renewal", async () => {
+    jest.setSystemTime(new Date("2025-05-30T12:00:00.000Z"));
+    db.billing_subscriptions = [
+      subscription("2025-04-30T10:00:00.000Z", "active", {
+        periodEnd: "2025-05-31T10:00:00.000Z",
+      }),
+    ];
+    db.credit_usage = [
+      usage(125, "2025-05-01T10:00:00.000Z"),
+      usage(25, "2025-05-30T11:00:00.000Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(150);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 150);
+  });
+
+  it("uses the newest live subscription row for the allowance window", async () => {
+    jest.setSystemTime(new Date("2025-05-30T12:00:00.000Z"));
+    db.billing_subscriptions = [
+      subscription("2024-06-01T00:00:00.000Z", "past_due", {
+        periodEnd: "2025-06-01T00:00:00.000Z",
+        createdAt: "2024-06-01T00:00:00.000Z",
+      }),
+      subscription("2025-04-30T10:00:00.000Z", "active", {
+        periodEnd: "2025-05-31T10:00:00.000Z",
+        createdAt: "2025-04-30T10:00:00.000Z",
+      }),
+    ];
+    db.credit_usage = [
+      usage(200, "2025-04-01T00:00:00.000Z"),
+      usage(75, "2025-05-01T00:00:00.000Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(75);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 75);
   });
 
   it("falls back to the calendar month when there is no subscription", async () => {

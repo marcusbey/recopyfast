@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+// Stripe refuses Checkout `expires_at` values under 30 minutes. The intent gets
+// a full hour so ordinary retries retain enough headroom, while the route stops
+// retrying an ambiguous creation once that floor is reached. Releasing it at
+// 30 minutes would recreate the exact duplicate-payable-session window this guard
+// exists to close: Stripe may have accepted a response we never received.
 export const SUBSCRIPTION_CHECKOUT_TTL_MS = 60 * 60 * 1000;
+export const STRIPE_CHECKOUT_MIN_EXPIRY_MS = 30 * 60 * 1000;
 
 export interface SubscriptionCheckoutIntent {
   id: string;
@@ -67,15 +73,20 @@ export async function attachCheckoutSession(
   intentId: string,
   userId: string,
   session: { sessionId: string; url: string | null },
-): Promise<void> {
+  options: { ignoreMissingIntent?: boolean } = {},
+): Promise<boolean> {
   const { error } = await supabase.rpc("attach_subscription_checkout_session", {
     p_intent_id: intentId,
     p_user_id: userId,
     p_stripe_session_id: session.sessionId,
     p_checkout_url: session.url,
   });
+  if (error && options.ignoreMissingIntent && error.code === "P0002") {
+    return false;
+  }
   if (error)
     throw new Error(`Failed to persist checkout session: ${error.message}`);
+  return true;
 }
 
 export async function finishSubscriptionCheckoutIntent(

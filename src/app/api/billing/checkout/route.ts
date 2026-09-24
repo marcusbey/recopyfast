@@ -21,8 +21,11 @@ import {
   ExistingSubscriptionBlocksCheckoutError,
   expireUnattachedSubscriptionCheckoutIntent,
   finishSubscriptionCheckoutIntent,
+  STRIPE_CHECKOUT_MIN_EXPIRY_MS,
+  SUBSCRIPTION_CHECKOUT_TTL_MS,
 } from "@/lib/billing/checkout-reservation";
 import { withUserLock } from "@/lib/billing/user-lock";
+import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 
 /**
  * Stripe Checkout entry point.
@@ -42,6 +45,15 @@ interface CheckoutRequestBody {
 type ParsedIntent =
   | { ok: true; intent: CheckoutIntent }
   | { ok: false; error: string };
+
+function isStripeIdempotencyConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { type?: unknown; code?: unknown };
+  return (
+    candidate.type === "StripeIdempotencyError" ||
+    candidate.code === "idempotency_key_in_use"
+  );
+}
 
 async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
   switch (body.intent) {
@@ -137,14 +149,7 @@ export async function POST(req: NextRequest) {
           .from("billing_subscriptions")
           .select("id")
           .eq("user_id", user.id)
-          .in("status", [
-            "active",
-            "trialing",
-            "past_due",
-            "incomplete",
-            "paused",
-            "unpaid",
-          ])
+          .in("status", LIVE_SUBSCRIPTION_STATUSES)
           .maybeSingle();
         if (liveRowError) {
           throw new Error(
@@ -175,7 +180,11 @@ export async function POST(req: NextRequest) {
           }
 
           if (pending.checkoutUrl && pending.stripeSessionId) {
-            if (new Date(pending.expiresAt).getTime() > Date.now()) {
+            const current = await getCheckoutSessionStatus(
+              user.id,
+              pending.stripeSessionId,
+            );
+            if (current.status === "open") {
               return {
                 kind: "conflict" as const,
                 alreadySubscribed: false,
@@ -185,22 +194,12 @@ export async function POST(req: NextRequest) {
                 },
               };
             }
-
-            const current = await getCheckoutSessionStatus(
-              user.id,
-              pending.stripeSessionId,
-            );
             if (current.status !== "expired") {
-              return current.status === "open"
-                ? {
-                    kind: "conflict" as const,
-                    alreadySubscribed: false,
-                    session: {
-                      sessionId: pending.stripeSessionId,
-                      url: pending.checkoutUrl,
-                    },
-                  }
-                : { kind: "conflict" as const, alreadySubscribed: false };
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                isCompleted: current.status === "complete",
+              };
             }
 
             await finishSubscriptionCheckoutIntent(
@@ -212,14 +211,19 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const recovered = await findCheckoutSessionForIntent(
-            user.id,
-            user.email!,
-            pending.id,
-            typeof user.user_metadata?.name === "string"
-              ? user.user_metadata.name
-              : undefined,
-          );
+          const recovered = pending.isNew
+            ? null
+            : await findCheckoutSessionForIntent(
+                user.id,
+                user.email!,
+                pending.id,
+                typeof user.user_metadata?.name === "string"
+                  ? user.user_metadata.name
+                  : undefined,
+                new Date(
+                  Date.parse(pending.expiresAt) - SUBSCRIPTION_CHECKOUT_TTL_MS,
+                ).toISOString(),
+              );
           if (recovered) {
             await attachCheckoutSession(intentClient, pending.id, user.id, {
               sessionId: recovered.sessionId,
@@ -237,6 +241,7 @@ export async function POST(req: NextRequest) {
             return {
               kind: "conflict" as const,
               alreadySubscribed: false,
+              isCompleted: recovered.status === "complete",
               ...(recovered.url
                 ? {
                     session: {
@@ -257,18 +262,48 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
+          // A reused unattached intent means a prior Stripe result was
+          // ambiguous. Once less than Stripe's 30-minute expiry floor remains,
+          // resending the immutable idempotent request would be rejected for
+          // its old expires_at. Changing that value or key could create a
+          // second payable session, so keep the intent closed until provider
+          // recovery finds the original or the fixed deadline passes.
+          if (
+            !pending.isNew &&
+            new Date(pending.expiresAt).getTime() - Date.now() <
+              STRIPE_CHECKOUT_MIN_EXPIRY_MS
+          ) {
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              retryAt: pending.expiresAt,
+            };
+          }
+
           // A provider error is ambiguous: Stripe may have accepted the
           // request. Nothing below releases the intent on error; the next
           // request searches Stripe by metadata before creating again.
-          const session = await createCheckoutSession(
-            user.id,
-            user.email!,
-            parsed.intent,
-            typeof user.user_metadata?.name === "string"
-              ? user.user_metadata.name
-              : undefined,
-            { pendingIntentId: pending.id, expiresAt: pending.expiresAt },
-          );
+          let session;
+          try {
+            session = await createCheckoutSession(
+              user.id,
+              user.email!,
+              parsed.intent,
+              typeof user.user_metadata?.name === "string"
+                ? user.user_metadata.name
+                : undefined,
+              { pendingIntentId: pending.id, expiresAt: pending.expiresAt },
+            );
+          } catch (error: unknown) {
+            if (isStripeIdempotencyConflict(error)) {
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                isCreating: true,
+              };
+            }
+            throw error;
+          }
           await attachCheckoutSession(
             intentClient,
             pending.id,
@@ -282,12 +317,24 @@ export async function POST(req: NextRequest) {
       });
 
       if (locked.kind === "conflict") {
+        const isCompleted =
+          "isCompleted" in locked && locked.isCompleted === true;
+        const isCreating = "isCreating" in locked && locked.isCreating === true;
+        const retryAt = "retryAt" in locked ? locked.retryAt : undefined;
+        const session = "session" in locked ? locked.session : undefined;
         return NextResponse.json(
           {
             error: locked.alreadySubscribed
               ? "You already have a subscription. Use the upgrade flow to change plans."
-              : "You already have a checkout in progress. Finish or wait for it to expire.",
-            ...(locked.session ? locked.session : {}),
+              : isCompleted
+                ? "Your checkout completed, but your subscription is still being reconciled. Refresh shortly, or contact support if access does not appear."
+                : isCreating
+                  ? "A checkout is already being created. Please try again in a moment."
+                  : retryAt
+                    ? "Checkout recovery is still in progress. Try again after the current checkout expires."
+                    : "You already have a checkout in progress. Finish or wait for it to expire.",
+            ...(retryAt ? { retryAt } : {}),
+            ...(session ? session : {}),
           },
           { status: 409 },
         );

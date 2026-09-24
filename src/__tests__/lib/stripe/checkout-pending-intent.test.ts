@@ -117,4 +117,22 @@ describe("subscription Checkout pending-intent contract", () => {
       expect.objectContaining({ starting_after: "cs_other" }),
     );
   });
+
+  it("bounds recovery history to the intent creation window", async () => {
+    mockSessionList.mockResolvedValue({ data: [], has_more: false });
+
+    await findCheckoutSessionForIntent(
+      "user-1",
+      "buyer@example.com",
+      "intent_1",
+      undefined,
+      "2026-09-24T17:30:00.000Z",
+    );
+
+    expect(mockSessionList).toHaveBeenCalledWith(
+      expect.objectContaining({
+        created: { gte: Date.parse("2026-09-24T17:30:00.000Z") / 1000 },
+      }),
+    );
+  });
 });

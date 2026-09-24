@@ -19,3 +19,18 @@ Delivery follows the verified gates: create one focused conventional commit, pus
 ## Risk and rollback
 
 Application deployment requires operator-applied migration first. The DB invariant is reviewed statically here, not execution-proven. Roll back application via revert, retain compatible schema and repair forward. Do not reopen sessions after uncertain Stripe creation. Independent reviewer owns the verdict.
+
+## Independent review fix pass — 2026-09-24
+
+The operator prevalidated the following repair scope. Preserve the independent review verbatim and uncommitted; its blocked verdict remains reviewer-owned.
+
+- [x] C1: rename the unapplied migration to `20260924020000_checkout_pending_intents.sql` and update owned references.
+- [x] C2, m4: keep monthly Stripe periods intact, step annual windows only, select the newest live subscription, and add month-end/multiple-row regressions.
+- [x] M1: pin route-to-provider intent id/expiry options and prove mutation M5 fails.
+- [x] M2: route reusable 409 session URLs through the checkout hook and billing page, with UI tests.
+- [x] M3: restore the existing active/trialing/past_due guard in route and claim RPC; test new-checkout access for unpaid/incomplete/paused.
+- [x] m1–m3, m5–m7, m9: cover independent request races, idempotent late webhook handling, URL preservation, safe late-retry 409/retryAt (immediate retry deferred for immutable-key safety), fresh-claim lookup avoidance, TTL rationale and completed-payment messaging.
+- [x] m8: record the durable protocol decision and ADR 014 pointer erratum without editing the accepted ADR.
+- [ ] Merge `origin/main` (PR #22 and #26), resolve conflicts, repeat precommit/build/embed/audit gates, and push focused `fix(s28):` commits to draft PR #25.
+
+No remote database, real Stripe operation, production deployment, merge into main, or review-verdict edit is authorized.

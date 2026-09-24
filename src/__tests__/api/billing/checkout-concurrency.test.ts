@@ -27,6 +27,7 @@ let failNextAttach = false;
 let failSubscriptionRead = false;
 let failClaim = false;
 let blockClaimForSubscription = false;
+let mockBypassUserLock = false;
 
 const mockGetUser = jest.fn();
 
@@ -181,6 +182,14 @@ jest.mock("@/lib/billing/entitlements", () => ({
   getGrantedPlanIds: (...args: unknown[]) => mockGetGrantedPlanIds(...args),
 }));
 
+jest.mock("@/lib/billing/user-lock", () => {
+  const actual = jest.requireActual("@/lib/billing/user-lock");
+  return {
+    withUserLock: (userId: string, operation: () => Promise<unknown>) =>
+      mockBypassUserLock ? operation() : actual.withUserLock(userId, operation),
+  };
+});
+
 jest.mock("@/lib/stripe/plans", () => ({
   isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
   isBillingPeriod: (value: unknown) =>
@@ -231,6 +240,7 @@ describe("A-21: two checkouts started at once", () => {
     failSubscriptionRead = false;
     failClaim = false;
     blockClaimForSubscription = false;
+    mockBypassUserLock = false;
 
     mockGetUser.mockResolvedValue({
       data: { user: { id: USER_ID, email: "buyer@example.com" } },
@@ -238,6 +248,7 @@ describe("A-21: two checkouts started at once", () => {
     });
     mockGetGrantedPlanIds.mockResolvedValue([]);
     mockFindCheckoutSessionForIntent.mockResolvedValue(null);
+    mockGetCheckoutSessionStatus.mockResolvedValue({ status: "open" });
     mockCreateCheckoutSession.mockImplementation(async () => ({
       sessionId: `cs_${mockCreateCheckoutSession.mock.calls.length}`,
       url: "https://checkout.stripe.com/c/pay/cs_test",
@@ -245,7 +256,10 @@ describe("A-21: two checkouts started at once", () => {
     // Reads the table the Stripe webhook writes — empty until a payment
     // completes, which is the whole point.
     mockGetUserSubscription.mockImplementation(
-      async () => db.billing_subscriptions?.[0] ?? null,
+      async () =>
+        db.billing_subscriptions?.find((row) =>
+          ["active", "trialing", "past_due"].includes(String(row.status)),
+        ) ?? null,
     );
   });
 
@@ -305,6 +319,70 @@ describe("A-21: two checkouts started at once", () => {
     // Nothing reached `billing_subscriptions` — which is exactly why the
     // second request below has nothing to trip over.
     expect(db.billing_subscriptions).toHaveLength(0);
+    expect(mockCreateCheckoutSession.mock.calls[0]).toEqual([
+      USER_ID,
+      "buyer@example.com",
+      { type: "subscription", planId: "pro", billingPeriod: "monthly" },
+      undefined,
+      {
+        pendingIntentId: pendingIntent?.id,
+        expiresAt: pendingIntent?.expires_at,
+      },
+    ]);
+    expect(mockFindCheckoutSessionForIntent).not.toHaveBeenCalled();
+  });
+
+  it("returns a sanitized 409 for a cross-isolate Stripe idempotency conflict", async () => {
+    mockBypassUserLock = true;
+    mockCreateCheckoutSession
+      .mockResolvedValueOnce({
+        sessionId: "cs_winner",
+        url: "https://checkout.stripe.com/c/pay/cs_winner",
+      })
+      .mockRejectedValueOnce({
+        type: "StripeIdempotencyError",
+        code: "idempotency_key_in_use",
+        message: "provider detail that must not reach the caller",
+      });
+
+    const responses = await Promise.all([
+      post({ intent: "subscription", planId: "pro" }),
+      post({ intent: "subscription", planId: "pro" }),
+    ]);
+    const loser = responses.find((response) => response.status === 409);
+
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(2);
+    expect(responses.map((response) => response.status).sort()).toEqual([
+      200, 409,
+    ]);
+    await expect(loser?.json()).resolves.toEqual({
+      error:
+        "A checkout is already being created. Please try again in a moment.",
+    });
+  });
+
+  it("returns the same sanitized 409 for an idempotency parameter mismatch", async () => {
+    pendingIntent = {
+      id: "intent_reused",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockCreateCheckoutSession.mockRejectedValueOnce({
+      type: "StripeIdempotencyError",
+      code: "idempotency_error",
+      message:
+        "Keys for idempotent requests can only be used with the same parameters",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "A checkout is already being created. Please try again in a moment.",
+    });
   });
 
   it("a second subscription checkout is refused while the first is still unconfirmed", async () => {
@@ -403,12 +481,97 @@ describe("A-21: two checkouts started at once", () => {
       "buyer@example.com",
       "intent_abandoned",
       undefined,
+      expect.any(String),
     );
     expect(mockIntentClient.rpc).toHaveBeenCalledWith(
       "expire_unattached_subscription_checkout_intent",
       expect.objectContaining({ p_intent_id: "intent_abandoned" }),
     );
     expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry ambiguous creation once the immutable Stripe expiry is under 30 minutes away", async () => {
+    pendingIntent = {
+      id: "intent_aging",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      expires_at: new Date(Date.now() + 20 * 60_000).toISOString(),
+    };
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "Checkout recovery is still in progress. Try again after the current checkout expires.",
+      retryAt: pendingIntent?.expires_at,
+    });
+    expect(mockFindCheckoutSessionForIntent).toHaveBeenCalledTimes(1);
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("bounds provider recovery to the lifetime of the reused intent", async () => {
+    const expiresAt = new Date(Date.now() + 45 * 60_000).toISOString();
+    pendingIntent = {
+      id: "intent_reused",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      expires_at: expiresAt,
+    };
+
+    await post({ intent: "subscription", planId: "pro" });
+
+    expect(mockFindCheckoutSessionForIntent).toHaveBeenCalledWith(
+      USER_ID,
+      "buyer@example.com",
+      "intent_reused",
+      undefined,
+      new Date(Date.parse(expiresAt) - 60 * 60_000).toISOString(),
+    );
+  });
+
+  it("explains that a completed checkout is waiting for reconciliation", async () => {
+    pendingIntent = {
+      id: "intent_complete",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockFindCheckoutSessionForIntent.mockResolvedValue({
+      sessionId: "cs_complete",
+      url: null,
+      status: "complete",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "Your checkout completed, but your subscription is still being reconciled. Refresh shortly, or contact support if access does not appear.",
+    });
+  });
+
+  it("does not present a stored URL as resumable after the attached session completed", async () => {
+    pendingIntent = {
+      id: "intent_attached_complete",
+      user_id: USER_ID,
+      stripe_session_id: "cs_attached_complete",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_attached_complete",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+    mockGetCheckoutSessionStatus.mockResolvedValue({ status: "complete" });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error:
+        "Your checkout completed, but your subscription is still being reconciled. Refresh shortly, or contact support if access does not appear.",
+    });
   });
 
   it("fails closed when the subscription recheck cannot be read", async () => {
@@ -458,6 +621,20 @@ describe("A-21: two checkouts started at once", () => {
     });
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
   });
+
+  it.each(["incomplete", "paused", "unpaid"])(
+    "allows a new checkout for a %s row that does not grant entitlement",
+    async (status) => {
+      db.billing_subscriptions = [
+        { id: "row_1", user_id: USER_ID, plan: "pro", status },
+      ];
+
+      const response = await post({ intent: "subscription", planId: "pro" });
+
+      expect(response.status).toBe(200);
+      expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+    },
+  );
 
   /**
    * Fix-stable, and the contrast the finding draws: the more expensive product

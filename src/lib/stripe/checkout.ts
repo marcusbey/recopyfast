@@ -52,6 +52,7 @@ export async function findCheckoutSessionForIntent(
   email: string,
   pendingIntentId: string,
   name?: string,
+  createdAfter?: string,
 ): Promise<PendingCheckoutSession | null> {
   const { stripeCustomer } = await createOrGetCustomer(userId, email, name);
   let startingAfter: string | undefined;
@@ -59,6 +60,9 @@ export async function findCheckoutSessionForIntent(
     const sessions = await stripe.checkout.sessions.list({
       customer: stripeCustomer.id,
       limit: 100,
+      ...(createdAfter
+        ? { created: { gte: Math.floor(Date.parse(createdAfter) / 1000) } }
+        : {}),
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     });
     const session = sessions.data.find(

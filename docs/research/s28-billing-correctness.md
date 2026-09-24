@@ -41,7 +41,7 @@ The previous checkout_reservations table carries no Stripe session id. The new p
 
 ## A-21 execution evidence
 
-Migration: `supabase/migrations/20260924010000_checkout_pending_intents.sql` (unapplied). It uses a per-user advisory transaction lock plus a partial unique index for pending rows. Its service-only claim checks existing nonterminal subscriptions before creating a new row, closing the webhook-release/new-claim race. Expiry is one hour, fixed before Stripe creation; a timestamp alone never releases an attached intent. Provider recovery scans all customer session pages and matches both user and intent metadata. A lost creation response or attach write recovers the original session; an unattached expired intent with no provider session can be safely replaced. Completion persists current subscription state before release, including incomplete/unpaid obligations; a delayed old event cannot alter a newer intent.
+Migration: `supabase/migrations/20260924020000_checkout_pending_intents.sql` (unapplied). It uses a per-user advisory transaction lock plus a partial unique index for pending rows. Its service-only claim checks existing nonterminal subscriptions before creating a new row, closing the webhook-release/new-claim race. Expiry is one hour, fixed before Stripe creation; a timestamp alone never releases an attached intent. Provider recovery scans all customer session pages and matches both user and intent metadata. A lost creation response or attach write recovers the original session; an unattached expired intent with no provider session can be safely replaced. Completion persists current subscription state before release, including incomplete/unpaid obligations; a delayed old event cannot alter a newer intent.
 
 The new unpaid checkout completion assertion was red with missing subscription state, then green after reconciliation was placed ahead of the one-off unpaid guard. Focused checkout/concurrency/webhook/SDK tests: 3 suites, 28 passed. Full billing and Stripe command: `npm test -- --runInBand src/__tests__/api/billing src/__tests__/lib/stripe`: 19 suites, 217 passed. Type-check passed.
 
@@ -63,3 +63,29 @@ All provider values came from the CI placeholders in `.github/workflows/ci.yml`;
 The native full run had one inherited BulkOperations import-size test failure (2,753 passed, 36 skipped). It failed identically in a clean archive of base a9e3f21 under Node 20.15.1. A direct timing probe measured 1,326 ms for the real FileReader/Blob-envelope path against the test's default one-second alert wait. No test assertion or timeout was modified. The complete Linux run above passes that same test. Git-hook Jest runs use the same Linux volume, freshly synchronized from the worktree, with unchanged CI placeholders and assertion settings.
 
 The migration is statically inspected and mocked at application boundaries only; it has not been executed by this task. Independent review remains pending.
+
+
+## Independent review repair — 2026-09-24
+
+The reviewer-owned `docs/reviews/s28-billing-correctness.md` is preserved byte-for-byte and excluded from all commits. Its blocked verdict is historical evidence, not replaced by this repair report.
+
+C2 and m4 now have RED evidence (3 failed / 14 passed) and GREEN evidence (17 focused tests, 56 across 6 credit suites). The exact Feb 28 → Mar 31 / Mar 29 and Apr 30 → May 31 / May 30 fixtures retain all usage from the Stripe monthly period. Annual terms retain anchored UTC stepping. The database fake now implements ordering, limit and multi-row errors, so the newest live subscription regression cannot pass through an unrealistically permissive `maybeSingle`.
+
+M2 has RED evidence (1 failed / 1 passed), then 21 passing tests across 3 billing component suites. A 409 with a non-empty URL follows the existing full-browser navigation; a conflict without a URL remains an error. The billing page already renders `BillingDashboard` → `UpgradeDialog` → `useCheckout`, so this repair covers its purchase entry point without a separate page redirect implementation.
+
+M3 follows the existing live entitlement contract, not a new dunning policy: `LIVE_SUBSCRIPTION_STATUSES` in `src/lib/billing/effective-plan.ts` and `getUserSubscription` in `src/lib/stripe/subscription.ts` use active/trialing/past_due. Unpaid/incomplete/paused rows can start a new checkout, while current live subscriptions remain guarded transactionally.
+
+m8 is recorded in ADR 027 and the ADR 014 pointer erratum. The immutable accepted ADR body remains untouched.
+
+m5 has a bounded mitigation, with immediate late-retry recovery deferred: once fewer than 30 minutes remain on a reused unattached intent, provider recovery still runs, but a missing session no longer triggers a Stripe create request with an invalid expiry. The response is a 409 with the fixed retry time. The intent remains reserved until its original expiry, because changing expiry/idempotency parameters after an ambiguous request can permit a duplicate payable session. Eliminating that remaining wait requires a separately designed provider-confirmed cancellation/replacement protocol.
+
+
+The checkout repair produced 11 failing regression cases before implementation. The final route/webhook/SDK set passes 42 tests across 3 suites. The exact reviewer M5 mutation (replacing the fifth `createCheckoutSession` argument with `{}`) now fails the route test on both the intent id and the database row's exact expiry; restoring the options makes it green. Existing expiry-order assertions are preserved with the new recovery-time-bound argument added. Missing-intent webhook fakes now emit the SQL's `P0002`; `P0003` session mismatches and all other write failures remain retryable errors.
+
+
+A disposable PostgreSQL 14.17 cluster executed the renamed migration twice and passed 11 validation groups. Twenty simultaneous claims yielded 1 new intent, 19 reused results and 1 row. The tests covered active/trialing/past_due blocking; unpaid/incomplete/paused eligibility; URL COALESCE; exact P0001/P0002/P0003 behavior; terminal replay; anon/authenticated table and four-RPC denial; service-role execution and DELETE denial. The socket-only cluster was stopped and removed. This used a minimal required schema, not the complete Supabase migration chain or PostgREST.
+
+A native macOS full run with exact CI placeholders reached 2,785 passing tests, 36 inherited skips and one failure: the unchanged database grant test found `update_translation_coverage(uuid) -> authenticated` in an already-running local ReCopyFast database. That schema/function is outside this repair; neither its source nor assertion changed. No attempt was made to alter that database. Final full validation uses isolated Linux/Node 20 as CI does, where the database-invariant suite's existing no-database gate applies. The new SQL has the separate execution evidence above.
+
+
+Pre-integration repair gates: `npm run precommit -- -- --maxWorkers=2 --workerIdleMemoryLimit=512MB` passed with native lint/type-check and isolated Linux/Node 20 Jest: 213 suites passed, 1 inherited skipped; 2,773 tests passed, 36 inherited skipped, 0 failed. Lint stayed at 0 errors / 39 inherited warnings. `npm run build` passed, generating 96/96 static pages. An independent repair review found zero actionable issues and passed 5 targeted suites / 61 tests, with zero TypeScript diagnostics. The reviewer-owned ship verdict remains blocked pending its owner's re-review.

@@ -938,10 +938,19 @@ async function handleCheckoutSessionCompleted(
 
   const pendingIntentId = metadata.checkout_intent_id;
   if (pendingIntentId && userId) {
-    await attachCheckoutSession(supabase, pendingIntentId, userId, {
-      sessionId: session.id,
-      url: session.url,
-    });
+    const attached = await attachCheckoutSession(
+      supabase,
+      pendingIntentId,
+      userId,
+      { sessionId: session.id, url: session.url },
+      { ignoreMissingIntent: true },
+    );
+    // An intent can disappear with its auth user or be safely released before
+    // a delayed Stripe event arrives. Retrying those events for days cannot
+    // recreate the authoritative row, and reconciling a subscription for a
+    // missing user can poison every retry. A session mismatch still throws;
+    // only the migration's typed P0002 "not found" result reaches this no-op.
+    if (!attached) return;
   }
 
   if (pendingIntentId && session.mode === "subscription") {
@@ -1003,10 +1012,14 @@ async function handleCheckoutSessionExpired(
     session.metadata?.user_id ?? session.client_reference_id ?? undefined;
   if (!pendingIntentId || !userId) return;
 
-  await attachCheckoutSession(supabase, pendingIntentId, userId, {
-    sessionId: session.id,
-    url: session.url,
-  });
+  const attached = await attachCheckoutSession(
+    supabase,
+    pendingIntentId,
+    userId,
+    { sessionId: session.id, url: session.url },
+    { ignoreMissingIntent: true },
+  );
+  if (!attached) return;
   await finishSubscriptionCheckoutIntent(
     supabase,
     pendingIntentId,

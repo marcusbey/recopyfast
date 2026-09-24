@@ -49,7 +49,16 @@ export function useCheckout(): UseCheckoutResult {
 
       const data = await response.json().catch(() => null);
 
-      if (!response.ok) {
+      // A pending-intent conflict can carry the still-open Stripe URL. Treat
+      // that one response as a resumable handoff: the customer may have used
+      // Stripe's cancel link, and discarding the URL here previously trapped
+      // them on the billing page until the hour-long intent expired.
+      const canResumeOpenCheckout =
+        response.status === 409 &&
+        typeof data?.url === "string" &&
+        data.url.length > 0;
+
+      if (!response.ok && !canResumeOpenCheckout) {
         throw new Error(data?.error || "Failed to start checkout");
       }
 

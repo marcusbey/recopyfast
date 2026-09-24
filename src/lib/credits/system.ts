@@ -134,13 +134,24 @@ export async function getUserCreditBalance(
   // trialing or past-due customer still has the plan and its credits there, so
   // dropping either status here would reset their allowance against a
   // different calendar and could under- or over-serve the same entitlement.
+  //
+  // There can briefly be more than one live row while Stripe lifecycle events
+  // settle. Entitlement resolution already treats the newest row as canonical;
+  // using `maybeSingle()` without the same ordering made the billing dashboard
+  // throw PGRST116, or made credits follow a different subscription than the
+  // plan. Keep these reads deliberately identical.
   const subscription = assertRead(
     await supabase
       .from("billing_subscriptions")
-      .select("current_period_start")
+      .select("current_period_start, current_period_end")
       .eq("user_id", userId)
       .in("status", [...LIVE_SUBSCRIPTION_STATUSES])
-      .maybeSingle<{ current_period_start: string }>(),
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{
+        current_period_start: string;
+        current_period_end: string | null;
+      }>(),
     "billing_subscriptions read",
   );
 
@@ -166,7 +177,12 @@ export async function getUserCreditBalance(
 
   const startOfPeriod =
     (subscription?.current_period_start
-      ? startOfCurrentAllowanceWindow(subscription.current_period_start)
+      ? spansMoreThanOneCalendarMonth(
+          subscription.current_period_start,
+          subscription.current_period_end,
+        )
+        ? startOfCurrentAllowanceWindow(subscription.current_period_start)
+        : subscription.current_period_start
       : null) || (trial?.isActive ? trial.grantedAt : startOfCurrentMonth());
 
   const usage = assertRead(
@@ -203,6 +219,31 @@ function startOfCurrentMonth(): string {
   start.setDate(1);
   start.setHours(0, 0, 0, 0);
   return start.toISOString();
+}
+
+/**
+ * Monthly subscriptions already carry the exact allowance window Stripe chose.
+ * Re-stepping a clamped start such as Feb 28 in a Feb 28 -> Mar 31 period would
+ * invent a Mar 28 reset and hand out a second allowance before renewal. Only a
+ * multi-month billing term needs the catalogue's monthly allowance subdivided.
+ */
+function spansMoreThanOneCalendarMonth(
+  periodStart: string,
+  periodEnd: string | null,
+): boolean {
+  if (!periodEnd) return false;
+
+  const start = new Date(periodStart);
+  const end = new Date(periodEnd);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return false;
+  }
+
+  const calendarMonthSpan =
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth());
+
+  return calendarMonthSpan > 1;
 }
 
 /**

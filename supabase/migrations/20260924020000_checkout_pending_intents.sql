@@ -42,15 +42,13 @@ BEGIN
       pending.checkout_url, pending.expires_at, false;
     RETURN;
   END IF;
-  -- The completed-session webhook persists even `incomplete` subscriptions
-  -- before it finishes the intent. Checking the full non-terminal set in this
-  -- same transaction closes the release-then-new-claim race.
+  -- Checkout is blocked only by statuses that grant entitlement. Incomplete,
+  -- paused and unpaid rows have no portal path in this product; treating them
+  -- as live stranded the customer with neither access nor a way to retry.
   IF EXISTS (
     SELECT 1 FROM public.billing_subscriptions AS subscription
     WHERE subscription.user_id = p_user_id
-      AND subscription.status IN (
-        'active', 'trialing', 'past_due', 'incomplete', 'paused', 'unpaid'
-      )
+      AND subscription.status IN ('active', 'trialing', 'past_due')
   ) THEN
     RAISE EXCEPTION USING
       ERRCODE = 'P0001', MESSAGE = 'user already has a non-terminal subscription';
@@ -67,17 +65,33 @@ CREATE OR REPLACE FUNCTION public.attach_subscription_checkout_session(
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
   UPDATE public.checkout_pending_intents SET
-    stripe_session_id = p_stripe_session_id, checkout_url = p_checkout_url,
+    stripe_session_id = p_stripe_session_id,
+    checkout_url = COALESCE(p_checkout_url, checkout_url),
     updated_at = now()
   WHERE id = p_intent_id AND user_id = p_user_id AND status = 'pending'
     AND (stripe_session_id IS NULL OR stripe_session_id = p_stripe_session_id);
-  IF NOT FOUND AND NOT EXISTS (
+  IF FOUND THEN RETURN; END IF;
+  IF EXISTS (
     SELECT 1 FROM public.checkout_pending_intents AS existing
     WHERE existing.id = p_intent_id AND existing.user_id = p_user_id
       AND existing.stripe_session_id = p_stripe_session_id
   ) THEN
-    RAISE EXCEPTION 'pending checkout intent not found or session mismatch';
+    RETURN;
   END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.checkout_pending_intents AS existing
+    WHERE existing.id = p_intent_id
+      AND (
+        existing.user_id <> p_user_id OR
+        (existing.stripe_session_id IS NOT NULL AND
+          existing.stripe_session_id <> p_stripe_session_id)
+      )
+  ) THEN
+    RAISE EXCEPTION USING ERRCODE = 'P0003',
+      MESSAGE = 'pending checkout intent session mismatch';
+  END IF;
+  RAISE EXCEPTION USING ERRCODE = 'P0002',
+    MESSAGE = 'pending checkout intent not found';
 END; $$;
 
 CREATE OR REPLACE FUNCTION public.finish_subscription_checkout_intent(
