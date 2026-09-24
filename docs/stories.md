@@ -1254,6 +1254,29 @@ pre-validated by the operator in the 2026-09-24 task instruction.
 Research: `docs/research/s31-magic-link-landing.md`.
 Plan: `docs/plans/s31-magic-link-landing.md`.
 
+## Story s25-stripe-test-entitlement-e2e — prove payment provisions access
+
+As the operator, I need a completed Stripe test Checkout to travel through a genuine signed
+webhook into a durable entitlement so paid access is demonstrated rather than inferred.
+
+Complexity: **4**. Real test-mode provider, ephemeral data stack, authenticated Checkout,
+webhook causality/idempotency and exact cleanup. Depends on `s24-executed-playwright-ci`.
+
+- [ ] A confirmed disposable user with no trial/paid entitlement creates Checkout through the
+  real authenticated application route for one known test-mode subscription SKU.
+- [ ] Stripe-hosted Checkout completes with a Stripe test payment method and genuine signed events
+  reach the real webhook handler; no synthetic database entitlement is inserted.
+- [ ] Checkout reconciles paid, the expected customer/subscription and processed event IDs persist,
+  and `/api/billing/entitlement` returns the purchased plan.
+- [ ] Replaying the same event is idempotent and creates no duplicate effect.
+- [ ] Cleanup cancels/deletes only captured test provider objects and captured ephemeral DB/Auth
+  rows, and proves no residue. Secrets/payment data never enter source, artifacts or logs.
+- [ ] Evidence says test mode. A live charge remains a separate human action requiring exact SKU,
+  period, maximum total, payer and cancel/refund decision.
+
+Research: `docs/research/s25-stripe-test-entitlement-e2e.md`.
+Plan: `docs/plans/s25-stripe-test-entitlement-e2e.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
