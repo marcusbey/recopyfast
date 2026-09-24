@@ -1,4 +1,4 @@
-# ADR 027 — Durable subscription checkout intents
+# ADR 028 — Durable subscription checkout intents
 
 - Status: accepted
 - Date: 2026-09-24

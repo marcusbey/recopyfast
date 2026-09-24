@@ -75,7 +75,7 @@ M2 has RED evidence (1 failed / 1 passed), then 21 passing tests across 3 billin
 
 M3 follows the existing live entitlement contract, not a new dunning policy: `LIVE_SUBSCRIPTION_STATUSES` in `src/lib/billing/effective-plan.ts` and `getUserSubscription` in `src/lib/stripe/subscription.ts` use active/trialing/past_due. Unpaid/incomplete/paused rows can start a new checkout, while current live subscriptions remain guarded transactionally.
 
-m8 is recorded in ADR 027 and the ADR 014 pointer erratum. The immutable accepted ADR body remains untouched.
+m8 is recorded in ADR 028 and the ADR 014 pointer erratum. The immutable accepted ADR body remains untouched.
 
 m5 has a bounded mitigation, with immediate late-retry recovery deferred: once fewer than 30 minutes remain on a reused unattached intent, provider recovery still runs, but a missing session no longer triggers a Stripe create request with an invalid expiry. The response is a 409 with the fixed retry time. The intent remains reserved until its original expiry, because changing expiry/idempotency parameters after an ambiguous request can permit a duplicate payable session. Eliminating that remaining wait requires a separately designed provider-confirmed cancellation/replacement protocol.
 
@@ -89,3 +89,21 @@ A native macOS full run with exact CI placeholders reached 2,785 passing tests, 
 
 
 Pre-integration repair gates: `npm run precommit -- -- --maxWorkers=2 --workerIdleMemoryLimit=512MB` passed with native lint/type-check and isolated Linux/Node 20 Jest: 213 suites passed, 1 inherited skipped; 2,773 tests passed, 36 inherited skipped, 0 failed. Lint stayed at 0 errors / 39 inherited warnings. `npm run build` passed, generating 96/96 static pages. An independent repair review found zero actionable issues and passed 5 targeted suites / 61 tests, with zero TypeScript diagnostics. The reviewer-owned ship verdict remains blocked pending its owner's re-review.
+
+
+## Final integrated repair gates
+
+Integrated `origin/main` at `a687181` (PR #22 lockfile and PR #26 auth hotfix). The only merge conflict was the adjacent story additions in `docs/stories.md`; both complete entries were retained. Clean installs refreshed the merged lockfile in native and isolated Linux environments.
+
+- `npm run precommit -- -- --maxWorkers=2 --workerIdleMemoryLimit=512MB`: **213 suites passed, 1 inherited skipped; 2,796 tests passed, 36 inherited skipped, 0 failed**. Lint **0 errors / 39 inherited warnings**; full type-check passed. Jest runs the current worktree under Linux/Node 20 with exact CI placeholders, two workers and `NODE_OPTIONS=--max-old-space-size=3072`. Native lint/type-check use Node 24.14.0.
+- `npm run build`: passed, **96/96** static pages.
+- `npm run type-check:build`: passed.
+- `npm run format:check`: passed.
+- `node scripts/build-embed.mjs --check`: fresh; Node 24 zlib bundle **46,604 / 46,681 B**, widget **33,828 / 33,865 B**, transport **13,141 B**. Source and generated embed unchanged.
+- `npm run audit:prod`: **0 vulnerabilities**.
+- `git diff --check`: passed.
+- No new failing markers flipped during fix mode; the original two A-19 tests remain enabled. No test was removed, skipped or weakened.
+
+All Critical/Major findings and m1–m4/m6–m9 are fixed. m5's invalid-expiry 500 is replaced by an explicit bounded 409/retryAt; immediate recovery before the fixed expiry remains deferred for the duplicate-payment safety reason above. The independent review file remains byte-identical (SHA-256 `40d7508d8af3d2399877ada79301b86d2b6987c2b0186739710a6e4ad4985f0b`) and excluded from repair commits. Remote migration application and deployment remain operator actions.
+
+The durable-intent ADR uses 028 because open PR #24 already owns ADR 027 for page-scoped identity/content attributes. Only its identifier and references changed; the decision is unchanged.

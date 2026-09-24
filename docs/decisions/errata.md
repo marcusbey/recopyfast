@@ -77,4 +77,4 @@ purpose was fixing stale cites**. Nothing about the pin changed.
 
 **Says:** trial conversion uses `claimSubscriptionReservation` / `withUserLock` in the subscription checkout branch.
 
-**Correction.** s28 replaces the removed `claimSubscriptionReservation` with `claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. `withUserLock` remains around the subscription branch. [ADR 027](./027-durable-subscription-checkout-intents.md) records the structural protocol change; the trial-grant decision and conversion-inside-the-lock constraint remain unchanged.
+**Correction.** s28 replaces the removed `claimSubscriptionReservation` with `claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. `withUserLock` remains around the subscription branch. [ADR 028](./028-durable-subscription-checkout-intents.md) records the structural protocol change; the trial-grant decision and conversion-inside-the-lock constraint remain unchanged.

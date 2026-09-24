@@ -7,6 +7,7 @@ import { ensureTrialStarted } from "@/lib/billing/trial";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
+  const hasAuthError = searchParams.has("error");
   const next = sanitizeNext(searchParams.get("next"));
 
   // Resolved once and reused for both the success and error redirects, so the
@@ -15,8 +16,17 @@ export async function GET(request: Request) {
   // and applied AFTER the session cookie was set.
   const origin = resolvePublicOrigin(request);
 
+  // Supabase can return both an error and stale transport parameters. The
+  // explicit provider error is authoritative; attempting an exchange or
+  // accepting an existing session here would turn a rejected link into a
+  // successful-looking redirect.
+  if (hasAuthError) {
+    return NextResponse.redirect(`${origin}/auth/error`);
+  }
+
+  const supabase = await createClient();
+
   if (code) {
-    const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       // The 14-day trial starts here because there is nowhere earlier: sign-up
@@ -47,6 +57,28 @@ export async function GET(request: Request) {
     // opened in a different browser than the one that requested it (the PKCE
     // code verifier lives in a cookie). Log it rather than losing the reason.
     console.error("[auth] exchangeCodeForSession failed", error.message);
+    return NextResponse.redirect(`${origin}/auth/error`);
+  }
+
+  // The email template now confirms the OTP in /auth/confirm before arriving
+  // here. That leaves no PKCE code, but it does leave a server-readable session
+  // cookie. On 2026-09-24 this exact successful sign-in was sent to the error
+  // page. Accept only getUser's verified user response; lookup errors, throws,
+  // and an absent user keep the old fail-closed result. Trial creation remains
+  // exclusively on the two session-establishment paths above and in confirm.
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    if (user && !error) {
+      return NextResponse.redirect(`${origin}${next}`);
+    }
+  } catch (sessionError) {
+    console.error(
+      "[auth] session lookup failed without callback code",
+      sessionError,
+    );
   }
 
   // Return the user to an error page with instructions

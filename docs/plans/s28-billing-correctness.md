@@ -31,6 +31,6 @@ The operator prevalidated the following repair scope. Preserve the independent r
 - [x] M3: restore the existing active/trialing/past_due guard in route and claim RPC; test new-checkout access for unpaid/incomplete/paused.
 - [x] m1–m3, m5–m7, m9: cover independent request races, idempotent late webhook handling, URL preservation, safe late-retry 409/retryAt (immediate retry deferred for immutable-key safety), fresh-claim lookup avoidance, TTL rationale and completed-payment messaging.
 - [x] m8: record the durable protocol decision and ADR 014 pointer erratum without editing the accepted ADR.
-- [ ] Merge `origin/main` (PR #22 and #26), resolve conflicts, repeat precommit/build/embed/audit gates, and push focused `fix(s28):` commits to draft PR #25.
+- [x] Merge `origin/main` (PR #22 and #26), preserve both stories in the sole `docs/stories.md` conflict, and repeat precommit/build/embed/audit gates. Delivery uses focused `fix(s28):` commits and a push to draft PR #25.
 
 No remote database, real Stripe operation, production deployment, merge into main, or review-verdict edit is authorized.
