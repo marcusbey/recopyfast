@@ -89,16 +89,15 @@ be audited; **they should be deleted once that audit is signed off.**
 
 ## Known outstanding issues
 
-1. **Two existing migrations fail on a from-scratch build** (they were written
-   against a database that had been seeded by the loose files):
-   - `20260531000000_stripe_event_idempotency.sql` — `ALTER TABLE billing_events`
-     runs before any migration creates `billing_events`.
-   - `20260611040000_billing_constraints.sql` — touches `ticket_transactions`,
-     which is not created until `20260617001000_ticket_wallet_compat.sql`.
-
-   Both need the referenced statements wrapped in a `to_regclass(...) IS NOT NULL`
-   guard, or the whole chain squashed into a new baseline. Until then
-   `supabase db reset` cannot complete.
+1. **The two former from-scratch ordering failures are guarded.** This section
+   used to say `supabase db reset` could not complete because
+   `20260531000000_stripe_event_idempotency.sql` touched `billing_events` before
+   it existed and `20260611040000_billing_constraints.sql` touched
+   `ticket_transactions` before it existed. Both migrations now check
+   `to_regclass(...)` first and defer the work to
+   `20260731010000_deferred_billing_constraints.sql`, after both tables exist.
+   Do not reintroduce an unconditional early `ALTER`/`DELETE`, and do not treat
+   this historical warning as permission to skip a fresh migration run.
 
 2. **`team_activity` is orphaned.** `20250817000000_complete_database_setup.sql`
    creates `team_activity` (`activity_type`/`entity_type`/`entity_id`/`metadata`)
@@ -125,3 +124,25 @@ be audited; **they should be deleted once that audit is signed off.**
    `content_history.content`, which is `NOT NULL` — so inserting a
    `content_elements` row without `current_content` fails with a not-null
    violation.
+
+## Playwright's disposable local database
+
+The GitHub E2E job starts this project with Supabase CLI **2.117.0** and never
+links it to a hosted project. The mutating specs fail closed unless all three
+targets are the exact local origins below:
+
+- Supabase: `http://127.0.0.1:54321`
+- Next: `http://127.0.0.1:3000`
+- Socket.IO: `http://127.0.0.1:4001`
+
+Local anon/service-role values come from `supabase status -o env`, are passed in
+process environment only, and are never committed, printed or uploaded. The
+suite seeds fresh UUID-scoped sites, restores any captured content, and deletes
+only the current run's captured site id. `supabase stop --no-backup` removes the
+throwaway stack on both success and failure.
+
+The browser contract is exactly **39 passed, 0 failed, 0 skipped, 0 flaky**.
+Playwright's normal rich trace/video bundle is disabled in CI because editor
+credentials appear in fixture URLs; CI uploads only
+`test-results/playwright-summary.json`, which contains fixed test names, paths,
+outcomes and durations.

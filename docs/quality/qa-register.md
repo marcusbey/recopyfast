@@ -685,14 +685,15 @@ site. Both verified directly, not just by reading.
   consequence of stable ids: the probe set is byte-identical across loads, so
   `(site_id, element_id, language, variant)` now collides and the upsert
   matches instead of inserting a fresh row set per page view.
-- [~] **Why it shipped:** the hand-authored-fixture problem is fixed —
+- [x] **Why it shipped is configured as a blocking CI gate:** the hand-authored-fixture problem is fixed —
   `e2e/share-edit-publish.spec.ts` no longer pre-seeds `data-rcf-id`; the id is
   now read off the DOM after the widget assigns it, with the comment there
   explaining why: a real customer page never carries the attribute
-  (`e2e/share-edit-publish.spec.ts:27-31, 100-111`). What is still true: the
-  suite remains `test.skip`'d unless `RUN_RECOPYFAST_CORE_E2E=1`
-  (`share-edit-publish.spec.ts:13-16`), so the core loop still has no coverage
-  in a default run — only against a disposable Supabase project on demand.
+  (`e2e/share-edit-publish.spec.ts`). s24 removed the skip path entirely: GitHub
+  starts a disposable local Supabase/Redis/Socket.IO/Next stack, explicitly opts
+  into both mutating suites, and requires an exact 39 passed / 0 failed / 0
+  skipped / 0 flaky report. Missing opt-in or any non-loopback target fails
+  before a service-role client is created.
 
 ## 2. Editor auth — two systems, neither complete
 

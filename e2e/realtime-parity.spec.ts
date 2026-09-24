@@ -5,12 +5,16 @@ import {
   type Page,
   type Request,
 } from "@playwright/test";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServer, type Server } from "node:http";
 import { createHmac, randomUUID } from "node:crypto";
+import {
+  createLocalServiceRoleClient,
+  deleteCapturedSiteFixture,
+} from "./support/local-supabase";
 
 /**
- * s07b AC 4 (the parity demo) and AC 6 carried to production (legacy snippets),
+ * s07b AC 4 (the parity demo) and AC 6 for legacy snippets,
  * both driven against a fixture page on a **non-RecopyFast domain** — which is
  * the only place either claim means anything, since that is where the widget
  * actually lives.
@@ -40,23 +44,14 @@ import { createHmac, randomUUID } from "node:crypto";
  * the interval covers the authoritative HTTP write *and* the fan-out, which is
  * what "an edit in A appears in B" means to the person watching.
  *
- * ## What a human still has to do — two of the three tests here
- *
- * **Only the legacy-snippet test is ungated and reaches CI.** Both of the others
- * — the HTTP-save regression and the parity measurement itself — are behind
- * `RUN_RECOPYFAST_PARITY=1`, because both need a Supabase project that the
- * **deployed** realtime service also reads (the service holds its own
- * service-role key), plus the deployed origins. Those are credentials, not code,
- * so they cannot run unattended in CI — see server/README.md for the one command
- * and the exact variables.
- *
- * Worth stating plainly, because the HTTP-save case below is written as a
- * regression guard and reads like one: it only guards for whoever sets the
- * variable. A gated test catches nothing on a branch nobody runs it on.
+ * s24 replaced the old production-backed opt-in with an ephemeral local stack.
+ * All three cases now execute in CI. The shared guard refuses any service-role
+ * client unless Supabase, Next and Socket.IO are on their exact loopback ports;
+ * a missing RUN_RECOPYFAST_PARITY opt-in is a hard failure, never a skip.
  */
 
-const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:3000";
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:4001";
+const APP_URL = process.env.PLAYWRIGHT_BASE_URL || "http://127.0.0.1:3000";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://127.0.0.1:4001";
 const FIXTURE_PORT = Number(process.env.RECOPYFAST_PARITY_PORT || "4176");
 const FIXTURE_HOST = `localhost:${FIXTURE_PORT}`;
 const FIXTURE_URL = `http://${FIXTURE_HOST}`;
@@ -68,15 +63,12 @@ const FIXTURE_URL = `http://${FIXTURE_HOST}`;
  * the run is stamped into the label. Two reasons, both about the day this goes
  * wrong rather than the day it works:
  *
- *  - **Recognisability.** The parity case seeds into the same project the
- *    deployed service reads, which in this deployment is production. If a crash
- *    leaves a row behind, whoever finds it must be able to tell at a glance that
- *    it is test debris and not a customer. `e2e-parity-…invalid` cannot be
- *    mistaken for either, and cannot be routed to by anything.
- *  - **Idempotence.** `sites.domain` is UNIQUE, so a fixed value turns leftover
- *    debris into a duplicate-key failure on the next run. `purgeParityDebris`
- *    sweeps the whole `e2e-parity-%.invalid` family before seeding, which makes
- *    the suite self-healing after a kill rather than permanently wedged.
+ *  - **Recognisability.** If a killed local run leaves a row until Supabase is
+ *    stopped, `e2e-parity-…invalid` cannot be mistaken for customer data and
+ *    cannot be routed to by anything.
+ *  - **Isolation.** `sites.domain` is UNIQUE, so its fresh run UUID prevents
+ *    parallel jobs from sharing a record. Cleanup deletes only the captured site
+ *    UUID; it never sweeps another process's marker family.
  *
  * The host is made resolvable only inside this test's own browser, by
  * `--host-resolver-rules` (see `launchResolvingBrowser`) — not in `/etc/hosts`,
@@ -84,13 +76,10 @@ const FIXTURE_URL = `http://${FIXTURE_HOST}`;
  * handshake to the site's registered domain via `new URL(...).hostname`, which
  * drops the port, so serving on :4176 under this hostname satisfies the pin.
  */
-const PARITY_DOMAIN = `e2e-parity-${Math.floor(Date.now() / 1000)}.invalid`;
-const PARITY_DOMAIN_PATTERN = "e2e-parity-%.invalid";
+const PARITY_DOMAIN = `e2e-parity-${randomUUID()}.invalid`;
 
 /** The measured budget AC 4 states, in milliseconds. */
 const PARITY_BUDGET_MS = 1000;
-
-const RUN_PARITY = process.env.RUN_RECOPYFAST_PARITY === "1";
 
 test.describe("realtime parity on a non-RecopyFast fixture", () => {
   test.describe.configure({ mode: "serial" });
@@ -103,8 +92,8 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    *
    * Built here from the wire format rather than imported from
    * `@/lib/security/site-auth`, so a change to the token shape fails this
-   * instead of being silently followed — the deployed service verifies with its
-   * own copy of the rule (server/index.js), and the two have to agree.
+   * instead of being silently followed — the local realtime service verifies
+   * with its own copy of the rule (server/index.js), and the two have to agree.
    */
   const siteToken = (() => {
     const issuedAt = Math.floor(Date.now() / 1000);
@@ -123,58 +112,42 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
   const editToken = `parity_edit_${randomUUID()}`;
 
   let supabase: SupabaseClient | null = null;
-  let fixtureServer: Server;
+  let fixtureServer: Server | null = null;
 
   test.beforeAll(async () => {
-    fixtureServer = await startFixtureServer();
-
-    if (!RUN_PARITY) return;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!supabaseUrl || !serviceRoleKey) {
-      throw new Error(
-        "RUN_RECOPYFAST_PARITY=1 requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY — " +
-          "and they must name the project the DEPLOYED realtime service reads, or the two editors " +
-          "will authenticate against different databases.",
-      );
-    }
-
-    supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
-    // Before seeding, not only after: `afterAll` does not run when the process
-    // is killed, and a parity test that hangs is exactly the one someone kills.
-    await purgeParityDebris(supabase);
+    supabase = createLocalServiceRoleClient("RUN_RECOPYFAST_PARITY");
+    await deleteCapturedSiteFixture(supabase, siteId);
     await seedParityData(supabase);
+    fixtureServer = await startFixtureServer();
   });
 
   test.afterAll(async () => {
-    if (supabase) {
-      await purgeParityDebris(supabase);
-    }
-
-    await new Promise<void>((resolve) => {
-      if (!fixtureServer) {
-        resolve();
-        return;
+    try {
+      if (supabase) {
+        await deleteCapturedSiteFixture(supabase, siteId);
       }
-      fixtureServer.close(() => resolve());
-    });
+    } finally {
+      await new Promise<void>((resolve) => {
+        if (!fixtureServer) {
+          resolve();
+          return;
+        }
+        fixtureServer.close(() => resolve());
+      });
+    }
   });
 
   /**
-   * AC 6, carried to production.
+   * AC 6, exercised against the same production build CI starts locally.
    *
-   * Ungated on purpose: it needs no database and no editing session, and it is
-   * the check that turning realtime ON did not quietly make every snippet issued
-   * before this story second-class. `/embed/recopyfast.js` is a permanent public
+   * It is the check that turning realtime ON did not quietly make every snippet
+   * issued before this story second-class. `/embed/recopyfast.js` is a permanent public
    * URL baked into every install that already exists (AGENTS.md non-negotiable 2),
    * so "the old ones behave exactly as they did" is a promise about live customer
    * sites, not a nicety.
    *
-   * Point `PLAYWRIGHT_BASE_URL` at the deployed app to run it against production;
-   * unset it and this runs against the local dev server.
+   * The suite deliberately refuses deployed origins; CI runs it against local
+   * `next start` on port 3000.
    */
   test("a snippet with no data-ws-url is untouched by realtime being on", async ({
     page,
@@ -200,12 +173,9 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
     ).toEqual([]);
 
     // The widget still goes to HTTP for its content, on a page that has no
-    // socket. What is asserted is exactly that: the REQUEST was issued. The site
-    // id is a random uuid and the token is fabricated, so the API rejects it and
-    // nothing here claims a response came back — that would need a seeded site,
-    // which is what the gated tests below have and this one deliberately does
-    // not. The regression this catches is the widget skipping the HTTP path
-    // altogether once realtime is on.
+    // socket. What is asserted is exactly that the REQUEST was issued; response
+    // and mutation semantics belong to the two cases below. The regression this
+    // catches is the widget skipping HTTP altogether once realtime is on.
     expect(
       observed.requests.filter((url) => url.includes(`/api/content/${siteId}`)),
     ).not.toEqual([]);
@@ -214,7 +184,7 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
   });
 
   /**
-   * ADR 004 rule 2, against the deployed system: realtime is *provably* additive.
+   * ADR 004 rule 2, against the production build: realtime is *provably* additive.
    *
    * The claim is that with realtime off — switched off, undeployed, or simply
    * broken — an editor can still save, and the save is still authoritative. That
@@ -238,12 +208,6 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    * without a database. This is the mutating half, which needs one.
    */
   test("an editor still saves over HTTP with realtime off", async () => {
-    test.skip(
-      !RUN_PARITY,
-      "Set RUN_RECOPYFAST_PARITY=1 with the Supabase project the deployed app writes to. " +
-        "See server/README.md.",
-    );
-
     // Served under the registered `.invalid` domain rather than `localhost`, so
     // the HTTP API's own origin pin is genuinely satisfied. `site-auth.ts`
     // exempts localhost as a local-demo convenience; leaning on that exemption
@@ -310,12 +274,6 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
    * AC 4. Two editing sessions, two browser contexts, two connections.
    */
   test("an edit in browser A reaches browser B in under a second", async () => {
-    test.skip(
-      !RUN_PARITY,
-      "Set RUN_RECOPYFAST_PARITY=1 with NEXT_PUBLIC_WS_URL, PLAYWRIGHT_BASE_URL and the " +
-        "Supabase project the deployed realtime service reads. See server/README.md.",
-    );
-
     // Its own browser, not the shared `browser` fixture: the resolver rule that
     // makes `.invalid` reachable is a launch argument, and it must not leak into
     // any other spec.
@@ -445,45 +403,10 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
     return id;
   }
 
-  /**
-   * Remove every row this suite has ever created, by marker rather than by id.
-   *
-   * Deleting `.eq("id", siteId)` would only ever clean up the run that is still
-   * holding that id in memory — which is the run that did not crash. The marker
-   * is the only handle a later run has on an earlier run's debris.
-   *
-   * `content_elements.site_id` and `edit_sessions.site_id` are both
-   * `REFERENCES sites(id) ON DELETE CASCADE` (checked in the migrations, not
-   * assumed), so deleting the site is sufficient. The children are deleted first
-   * anyway: if a future migration ever drops the cascade, this keeps working
-   * instead of silently leaving orphans behind.
-   */
-  async function purgeParityDebris(client: SupabaseClient) {
-    const { data, error } = await client
-      .from("sites")
-      .select("id")
-      .like("domain", PARITY_DOMAIN_PATTERN);
-    if (error) throw error;
-
-    const ids = (data ?? []).map((row: { id: string }) => row.id);
-    if (ids.length === 0) return;
-
-    console.log(
-      `[s07b AC 4] purging ${ids.length} parity site(s): ${ids.join(", ")}`,
-    );
-    await client.from("edit_sessions").delete().in("site_id", ids);
-    await client.from("content_elements").delete().in("site_id", ids);
-    const { error: siteError } = await client
-      .from("sites")
-      .delete()
-      .in("id", ids);
-    if (siteError) throw siteError;
-  }
-
   async function seedParityData(client: SupabaseClient) {
     const { error: siteError } = await client.from("sites").insert({
       id: siteId,
-      // The deployed service pins the handshake to the site's registered domain
+      // The realtime service pins the handshake to the site's registered domain
       // (server/auth.js `isOriginAllowed`) — the fixture's host has to normalise
       // to this exact value or every connection is refused, which presents as
       // "realtime never connected" rather than as an origin failure.

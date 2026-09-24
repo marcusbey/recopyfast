@@ -395,3 +395,88 @@ describe("terminal Save recovery", () => {
     );
   });
 });
+
+describe("inline toolbar placement below editor chrome", () => {
+  beforeEach(() => {
+    document.head.innerHTML = "";
+    document.body.innerHTML =
+      '<h1 id="headline">Original copy</h1><p>Another element</p>';
+    document.body.style.paddingTop = "";
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/pricing");
+    delete (window as unknown as Record<string, unknown>).ReCopyFast;
+    delete (window as unknown as Record<string, unknown>).RECOPYFAST_API;
+    delete (window as unknown as Record<string, unknown>).RECOPYFAST_WS;
+    installScriptTag();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (
+          this.id === "rcf-editor-banner" ||
+          this.id === "rcf-staging-banner"
+        ) {
+          return {
+            top: 0,
+            bottom: 46,
+            left: 0,
+            right: 800,
+            width: 800,
+            height: 46,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        if (this.id === "headline") {
+          return {
+            top: 80,
+            bottom: 120,
+            left: 100,
+            right: 300,
+            width: 200,
+            height: 40,
+            x: 100,
+            y: 80,
+            toJSON: () => ({}),
+          } as DOMRect;
+        }
+        return {
+          top: 0,
+          bottom: 0,
+          left: 0,
+          right: 0,
+          width: 0,
+          height: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        } as DOMRect;
+      });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each([
+    ["invited editor", false, "#rcf-editor-banner"],
+    ["owner edit session", true, "#rcf-staging-banner"],
+  ])(
+    "places the %s toolbar below its fixed banner",
+    async (_, owner, banner) => {
+      await boot(200, owner);
+      expect(document.querySelector(banner)).not.toBeNull();
+
+      (document.querySelector("#headline") as HTMLElement).click();
+
+      const toolbar = document.querySelector(
+        ".rcf-actions-inline",
+      ) as HTMLElement;
+      expect(toolbar.style.top).toBe("128px");
+    },
+  );
+});

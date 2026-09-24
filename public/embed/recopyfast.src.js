@@ -1260,6 +1260,9 @@
     showEditorBanner() {
       if (!this.editorAuth) return;
       if (document.querySelector('#rcf-editor-banner')) return;
+      const previousBodyPaddingTop = document.body.style.paddingTop;
+      const previousBodyPaddingPriority = document.body.style.getPropertyPriority('padding-top');
+      const bodyPaddingTop = parseFloat(window.getComputedStyle(document.body).paddingTop) || 0;
 
       if (!document.querySelector('#rcf-editor-banner-styles')) {
         const style = document.createElement('style');
@@ -1405,10 +1408,24 @@
       dismiss.setAttribute('aria-label', 'Dismiss the ReCopyFast editor bar');
       dismiss.onclick = function() {
         if (banner.parentNode) banner.parentNode.removeChild(banner);
+        if (previousBodyPaddingTop) {
+          document.body.style.setProperty('padding-top', previousBodyPaddingTop, previousBodyPaddingPriority);
+        } else {
+          document.body.style.removeProperty('padding-top');
+        }
       };
       banner.appendChild(dismiss);
 
       document.body.appendChild(banner);
+      // The first executed invited-editor E2E exposed the difference from the
+      // owner toolbar: both bars are fixed across the full viewport, but only
+      // the owner toolbar reserved its height. On a page whose first editable
+      // element starts at the top, the editor bar intercepted the click and
+      // made that content impossible to edit. Preserve existing host padding
+      // and restore its original inline declaration when Done removes the bar.
+      // Important is intentional: host styles frequently mark layout rules
+      // important, and a normal inline value loses to an author-important rule.
+      document.body.style.setProperty('padding-top', (banner.offsetHeight + bodyPaddingTop) + 'px', 'important');
     }
 
     /**
@@ -4390,8 +4407,8 @@
         const th = actionsDiv.offsetHeight || 44;
         const tw = actionsDiv.offsetWidth || 200;
 
-        // Flip below the element when the toolbar would collide with the
-        // staging banner, not merely when it would leave the viewport.
+        // Flip below the element when the toolbar would collide with either
+        // editor banner, not merely when it would leave the viewport.
         //
         // The banner is `position: fixed` across the top at z-index 99999,
         // and this toolbar sits at 10000, so anywhere they overlap the banner
@@ -4400,7 +4417,7 @@
         // page, the editor could see their own Save button and not press it.
         // The old threshold of 4 only avoided the viewport edge, which left
         // the whole band beneath the banner as a dead zone.
-        const topChrome = document.getElementById('rcf-staging-banner');
+        const topChrome = document.querySelector('#rcf-editor-banner, #rcf-staging-banner');
         const minTop =
           (topChrome ? topChrome.getBoundingClientRect().bottom : 0) + 4;
 

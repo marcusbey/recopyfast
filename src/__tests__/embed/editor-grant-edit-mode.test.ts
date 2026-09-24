@@ -274,6 +274,60 @@ describe("the editor banner", () => {
     expect(widget().editMode).toBe(true);
   });
 
+  it("overrides host stylesheet important padding, then removes only its inline reservation", async () => {
+    const hostStyle = document.createElement("style");
+    hostStyle.textContent = "body { padding-top: 8px !important; }";
+    document.head.appendChild(hostStyle);
+    jest
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.id === "rcf-editor-banner" ? 42 : 0;
+      });
+
+    await bootWithGrant(["view", "edit"]);
+
+    expect(document.body.style.paddingTop).toBe("50px");
+    expect(document.body.style.getPropertyPriority("padding-top")).toBe(
+      "important",
+    );
+    expect(window.getComputedStyle(document.body).paddingTop).toBe("50px");
+
+    const done = document.querySelector(
+      "#rcf-editor-banner .rcf-editor-banner-dismiss",
+    ) as HTMLButtonElement;
+    done.click();
+
+    expect(document.body.style.paddingTop).toBe("");
+    expect(document.body.style.getPropertyPriority("padding-top")).toBe("");
+    expect(window.getComputedStyle(document.body).paddingTop).toBe("8px");
+  });
+
+  it("restores the host's exact inline padding value and priority on Done", async () => {
+    document.body.style.setProperty("padding-top", "12px", "important");
+    jest
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.id === "rcf-editor-banner" ? 42 : 0;
+      });
+
+    await bootWithGrant(["view", "edit"]);
+
+    expect(document.body.style.paddingTop).toBe("54px");
+    expect(document.body.style.getPropertyPriority("padding-top")).toBe(
+      "important",
+    );
+
+    const done = document.querySelector(
+      "#rcf-editor-banner .rcf-editor-banner-dismiss",
+    ) as HTMLButtonElement;
+    done.click();
+
+    expect(document.body.style.paddingTop).toBe("12px");
+    expect(document.body.style.getPropertyPriority("padding-top")).toBe(
+      "important",
+    );
+  });
+
   it("does not claim editing when the grant is view-only", async () => {
     await bootWithGrant(["view"]);
 

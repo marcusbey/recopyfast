@@ -118,81 +118,168 @@ jobs:
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
   # ─── Playwright end-to-end tests ───────────────────────────────────────────
-  # Verified green locally: 29 passed, 2 skipped, 0 failed (2026-07-31).
-  #
-  # These drive a real browser against a real `next build && next start`, so they
-  # need a real Supabase project — placeholder credentials make the API routes
-  # fail and the specs that touch /api/health and /api/content go red for the
-  # wrong reason. The job therefore self-skips until a staging Supabase project
-  # is wired up as repo secrets, and is BLOCKING once it does run.
-  #
-  # To enable: add repo secrets E2E_SUPABASE_URL, E2E_SUPABASE_ANON_KEY,
-  # E2E_SUPABASE_SERVICE_ROLE_KEY pointing at a throwaway staging project.
-  #
-  # The 2 skipped specs (share-edit-publish) need seeded site + staging-token
-  # fixtures that do not exist yet — see e2e/share-edit-publish.spec.ts.
+  # This job owns a disposable stack. No hosted Supabase/Redis/Fly credential is
+  # accepted: the mutating specs also enforce the exact loopback ports before
+  # constructing a service-role client, so changing only this workflow cannot
+  # point them at production. The strict reporter makes skipped/flaky/missing
+  # tests a failure and writes the only uploaded artifact: a credential-free
+  # summary with the exact expected 39-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
 
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     env:
-      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
-      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
-      PLAYWRIGHT_BASE_URL: "http://localhost:3000"
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:54321"
+      NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000"
+      PLAYWRIGHT_BASE_URL: "http://127.0.0.1:3000"
+      NEXT_PUBLIC_WS_URL: "http://127.0.0.1:4001"
+      REDIS_URL: "redis://127.0.0.1:6379"
+      WS_PORT: "4001"
+      RUN_RECOPYFAST_CORE_E2E: "1"
+      RUN_RECOPYFAST_PARITY: "1"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "pk_test_local_e2e_placeholder"
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_LIVE: "pk_live_local_e2e_placeholder"
+      STRIPE_SECRET_KEY: "sk_test_local_e2e_placeholder"
+      STRIPE_WEBHOOK_SECRET: "whsec_local_e2e_placeholder"
+      STRIPE_STARTER_PRICE_ID: "price_local_starter_monthly"
+      STRIPE_STARTER_YEARLY_PRICE_ID: "price_local_starter_yearly"
+      STRIPE_PRO_PRICE_ID: "price_local_pro_monthly"
+      STRIPE_PRO_YEARLY_PRICE_ID: "price_local_pro_yearly"
+      STRIPE_ENTERPRISE_PRICE_ID: "price_local_enterprise_monthly"
+      STRIPE_ENTERPRISE_YEARLY_PRICE_ID: "price_local_enterprise_yearly"
+      STRIPE_TICKETS_PRICE_ID: "price_local_tickets"
       CI: "true"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Skip if E2E Supabase secrets are not configured
-        id: guard
+      - name: Prepare redacted report placeholder
         run: |
-          if [ -z "${{ secrets.E2E_SUPABASE_URL }}" ]; then
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::E2E_SUPABASE_URL secret not set — skipping E2E job."
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          mkdir -p test-results
+          printf '%s\n' '{"contract":"not-run","expected":39,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          chmod 600 test-results/playwright-summary.json
 
       - name: Set up Node.js 20
-        if: steps.guard.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: "npm"
 
-      - name: Install dependencies
-        if: steps.guard.outputs.configured == 'true'
-        run: npm ci
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v3
+        with:
+          version: "2.117.0"
 
-      - name: Install Playwright browsers
-        if: steps.guard.outputs.configured == 'true'
+      - name: Install root and WebSocket dependencies
+        run: |
+          npm ci
+          npm ci --prefix server
+
+      - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Build
-        if: steps.guard.outputs.configured == 'true'
+      - name: Start Supabase and export local credentials
+        run: |
+          set -euo pipefail
+          start_log="$RUNNER_TEMP/supabase-start.log"
+          status_file="$RUNNER_TEMP/supabase-status.env"
+          supabase start > "$start_log" 2>&1
+          supabase status -o env > "$status_file" 2>/dev/null
+
+          anon_key="$(sed -n 's/^ANON_KEY="\([^"]*\)"$/\1/p' "$status_file")"
+          service_role_key="$(sed -n 's/^SERVICE_ROLE_KEY="\([^"]*\)"$/\1/p' "$status_file")"
+          if [ -z "$anon_key" ] || [ -z "$service_role_key" ]; then
+            echo "Local Supabase did not return both required credentials." >&2
+            exit 1
+          fi
+
+          printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$anon_key" >> "$GITHUB_ENV"
+          printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
+          rm -f "$status_file"
+
+      - name: Build production app
         run: npm run build
 
-      - name: Start production server
-        if: steps.guard.outputs.configured == 'true'
+      - name: Run all 39 Playwright tests (blocking)
         run: |
-          npm run start &
-          npx wait-on http://localhost:3000 --timeout 120000
+          set -euo pipefail
+          ws_log="$RUNNER_TEMP/recopyfast-ws.log"
+          app_log="$RUNNER_TEMP/recopyfast-next.log"
 
-      - name: Run Playwright tests (blocking)
-        if: steps.guard.outputs.configured == 'true'
-        run: npm run test:e2e
+          NODE_ENV=production npm --prefix server start > "$ws_log" 2>&1 &
+          ws_pid=$!
+          NODE_ENV=production npm run start > "$app_log" 2>&1 &
+          app_pid=$!
 
-      - name: Upload Playwright report
-        if: ${{ always() && steps.guard.outputs.configured == 'true' }}
+          cleanup() {
+            kill "$app_pid" "$ws_pid" 2>/dev/null || true
+            wait "$app_pid" 2>/dev/null || true
+            wait "$ws_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT INT TERM
+
+          wait_for_url() {
+            url="$1"
+            label="$2"
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error "$url" > /dev/null; then
+                return 0
+              fi
+              sleep 2
+            done
+            echo "$label did not become ready at its local URL." >&2
+            return 1
+          }
+
+          wait_for_url "http://127.0.0.1:4001/health" "WebSocket service"
+          wait_for_url "http://127.0.0.1:3000/login" "Next.js app"
+          npm run test:e2e
+
+          node <<'NODE'
+          const { readFileSync } = require("node:fs");
+          const report = JSON.parse(
+            readFileSync("test-results/playwright-summary.json", "utf8"),
+          );
+          if (
+            report.contract !== "passed" ||
+            report.expected !== 39 ||
+            report.total !== 39 ||
+            report.passed !== 39 ||
+            report.failed !== 0 ||
+            report.skipped !== 0 ||
+            report.flaky !== 0
+          ) {
+            throw new Error("Playwright did not produce the required clean 39-test summary.");
+          }
+          NODE
+
+      - name: Stop disposable Supabase
+        if: ${{ always() }}
+        run: |
+          supabase stop --no-backup > /dev/null 2>&1
+          rm -f "$RUNNER_TEMP/supabase-start.log" "$RUNNER_TEMP/supabase-status.env"
+
+      - name: Upload redacted Playwright summary
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: playwright-summary
+          path: test-results/playwright-summary.json
+          if-no-files-found: error
           retention-days: 7
 
   # ─── Separate job: full TypeScript check incl. tests ───────────────────────
