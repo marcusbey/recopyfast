@@ -1231,11 +1231,12 @@ Acceptance: separate dependency-free `public/try/rcf-try.js` at most 8 KB gzippe
 headings, paragraphs, list items, buttons, links (navigation requires Alt), images;
 hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit;
 complete cleanup and idempotence; no API, analytics, or content upload; plain-text
-writes. /try includes a versioned draggable bookmarklet, browser instructions,
+writes. /try includes a stable-URL draggable bookmarklet, browser instructions,
 live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.
 Static script delivery must bypass auth and include JS MIME, cache, wildcard CORS,
 and nosniff. Unit, page, and local-fixture Playwright coverage are required; update
-the exact browser inventory from 39 to 40. No production embed changes or SQL.
+the exact browser inventory from 39 to 43 after pre-share regression coverage.
+No production embed changes or SQL.
 
 Research: `docs/research/s32-try-on-any-site.md`.
 Design: `docs/designs/s32-try-on-any-site.md`.

@@ -1,23 +1,30 @@
 (function () {
   "use strict";
 
-  if (window.__rcfTryPreview) return;
+  if (window.__rcfTryPreview) {
+    window.__rcfTryPreview.resume();
+    return;
+  }
   if (!document.head || !document.body) return;
 
   var script = document.currentScript;
   var selector = script && script.getAttribute("data-rcf-try-root");
-  var root = document.body;
-  if (selector) {
+  var root;
+
+  function resolveRoot() {
+    if (!selector) return document.body;
     // The /try sample scopes this script so its own marketing navigation never
     // becomes editable. A stale or malformed selector must therefore fail
     // closed instead of silently widening the preview to the entire page.
     try {
-      root = document.querySelector(selector);
+      return document.querySelector(selector);
     } catch (_) {
-      return;
+      return null;
     }
-    if (!root) return;
   }
+
+  root = resolveRoot();
+  if (!root) return;
 
   var active = null;
   var listeners = [];
@@ -71,7 +78,11 @@
         ? eventTarget
         : eventTarget && eventTarget.parentElement;
     if (!target || target.closest("[data-rcf-try-ui]")) return null;
-    var candidate = target.closest("h1,h2,h3,h4,h5,h6,p,li,button,a,img");
+    // Prefer the containing text block over inline links so editing a sentence
+    // keeps its anchors and emphasis in place. A standalone link remains an
+    // editable target when it is not part of a larger supported text block.
+    var candidate = target.closest("h1,h2,h3,h4,h5,h6,p,li,button,img");
+    if (!candidate) candidate = target.closest("a");
     if (!candidate || !root.contains(candidate)) return null;
     return candidate;
   }
@@ -139,13 +150,32 @@
       statusNode.setAttribute("data-rcf-try-ui", "true");
       document.body.appendChild(statusNode);
       ui.push(statusNode);
+    } else if (!statusNode.isConnected) {
+      document.body.appendChild(statusNode);
     }
     ownAttribute(target, "data-rcf-try-published", "true");
   }
 
-  function restoreChildren(state) {
-    state.element.replaceChildren();
-    state.element.appendChild(state.originalChildren);
+  function snapshotTree(node) {
+    var children = Array.prototype.slice.call(node.childNodes);
+    return {
+      node: node,
+      children: children,
+      snapshots: children.map(function (child) {
+        return child.nodeType === 1
+          ? snapshotTree(child)
+          : { node: child, value: child.nodeValue };
+      }),
+    };
+  }
+
+  function restoreTree(snapshot) {
+    for (var i = 0; i < snapshot.snapshots.length; i += 1) {
+      var child = snapshot.snapshots[i];
+      if (child.children) restoreTree(child);
+      else child.node.nodeValue = child.value;
+    }
+    snapshot.node.replaceChildren.apply(snapshot.node, snapshot.children);
   }
 
   function finishEditing() {
@@ -159,30 +189,29 @@
 
   function cancel() {
     if (!active) return;
-    if (active.type === "text") restoreChildren(active);
+    if (active.type === "text") restoreTree(active.originalTree);
     finishEditing();
   }
 
   function saveText() {
     if (!active || active.type !== "text") return;
     var target = active.element;
-    var text = target.textContent || "";
-    target.textContent = text;
     finishEditing();
     showStatus(target);
   }
 
-  function saveImage(input, error) {
+  function isRasterDataUrl(value) {
+    return /^data:image\/(?:png|jpeg|gif|webp|avif);base64,[a-z0-9+/]+={0,2}$/i.test(
+      value,
+    );
+  }
+
+  function saveImageValue(value, error) {
     if (!active || active.type !== "image") return;
-    var value = input.value.trim();
     // A normal https image URL would make the host page perform a new request,
     // contradicting the preview's local-only promise. Raster data URLs keep
     // replacement bytes in this tab and also exclude executable SVG payloads.
-    if (
-      !/^data:image\/(?:png|jpeg|gif|webp|avif);base64,[a-z0-9+/]+={0,2}$/i.test(
-        value,
-      )
-    ) {
+    if (!isRasterDataUrl(value)) {
       error.textContent =
         "Use an embedded raster data URL (PNG, JPEG, GIF, WebP or AVIF).";
       return;
@@ -204,6 +233,10 @@
     showStatus(target);
   }
 
+  function saveImage(input, error) {
+    saveImageValue(input.value.trim(), error);
+  }
+
   function textToolbar() {
     var save = element("button", "rcf-try-primary", "Save");
     save.type = "button";
@@ -215,6 +248,12 @@
   }
 
   function imageToolbar() {
+    var fileLabel = element("label", "", "Choose a local image");
+    var fileInput = element("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/png,image/jpeg,image/gif,image/webp,image/avif";
+    fileInput.setAttribute("data-rcf-try-file", "true");
+    fileLabel.appendChild(fileInput);
     var label = element("label", "", "Image data URL");
     var input = element("input");
     input.type = "url";
@@ -230,6 +269,7 @@
     error.setAttribute("aria-live", "polite");
     return append(
       element("div", "rcf-try-toolbar"),
+      fileLabel,
       label,
       replace,
       cancelButton,
@@ -245,24 +285,44 @@
     toolbarNode = toolbar;
   }
 
-  function startText(target) {
+  function placeCaret(target, event) {
+    var range = null;
+    if (document.caretPositionFromPoint) {
+      var position = document.caretPositionFromPoint(
+        event.clientX,
+        event.clientY,
+      );
+      if (position) {
+        range = document.createRange();
+        range.setStart(position.offsetNode, position.offset);
+      }
+    } else if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(event.clientX, event.clientY);
+    }
+    if (!range || !target.contains(range.startContainer)) return;
+    range.collapse(true);
+    var selection = window.getSelection && window.getSelection();
+    if (!selection) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  function startText(target, event) {
     cancel();
-    // Detaching the original nodes preserves their identity and host event
-    // handlers. Cancel can put those exact nodes back; cloning would make a
-    // harmless preview permanently break interactive content on the host page.
-    var originalChildren = document.createDocumentFragment();
-    while (target.firstChild) originalChildren.appendChild(target.firstChild);
-    target.textContent = originalChildren.textContent || "";
     active = {
       type: "text",
       element: target,
-      originalChildren: originalChildren,
+      // Keep the actual inline nodes in place during editing. The recursive
+      // snapshot lets Cancel restore those same node identities and handlers,
+      // even after contenteditable has restructured or removed descendants.
+      originalTree: snapshotTree(target),
     };
     ownAttribute(target, "contenteditable", "plaintext-only");
     ownAttribute(target, "spellcheck", "true");
     ownAttribute(target, "data-rcf-try-editing", "true");
     mountToolbar(textToolbar());
     target.focus();
+    placeCaret(target, event);
   }
 
   function startImage(target) {
@@ -316,14 +376,14 @@
       action = null;
     if (action) {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       var name = action.getAttribute("data-rcf-try-action");
       if (name === "cancel") cancel();
       else if (name === "save-text") saveText();
       else if (name === "save-image") {
         var toolbar = action.closest(".rcf-try-toolbar");
         saveImage(
-          toolbar.querySelector("input"),
+          toolbar.querySelector("input[type='url']"),
           toolbar.querySelector(".rcf-try-error"),
         );
       }
@@ -331,19 +391,64 @@
     }
     if (event.target.closest && event.target.closest("[data-rcf-try-ui]"))
       return;
+    if (active) {
+      var activeContainer = active.element;
+      var isInsideInteractiveAncestor = false;
+      while (activeContainer && root.contains(activeContainer)) {
+        if (
+          activeContainer.matches("a,[onclick],[role='button']") &&
+          activeContainer.contains(event.target)
+        ) {
+          isInsideInteractiveAncestor = true;
+          break;
+        }
+        activeContainer = activeContainer.parentElement;
+      }
+      if (
+        active.element.contains(event.target) ||
+        isInsideInteractiveAncestor
+      ) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
     var target = candidateFrom(event.target);
     if (!target || (isNavigationLink(target) && !event.altKey)) return;
-    if (active && target === active.element) {
-      if (target.tagName === "A" || target.tagName === "BUTTON") {
-        event.preventDefault();
-      }
-      return;
-    }
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
     restoreAttribute(target, "data-rcf-try-hover");
     if (target.tagName === "IMG") startImage(target);
-    else startText(target);
+    else startText(target, event);
+  }
+
+  function onChange(event) {
+    if (!active || active.type !== "image") return;
+    var input = event.target;
+    if (!input.matches || !input.matches("[data-rcf-try-file]")) return;
+    event.stopImmediatePropagation();
+    var toolbar = input.closest(".rcf-try-toolbar");
+    var error = toolbar.querySelector(".rcf-try-error");
+    var file = input.files && input.files[0];
+    if (
+      !file ||
+      !/^(?:image\/png|image\/jpeg|image\/gif|image\/webp|image\/avif)$/i.test(
+        file.type,
+      )
+    ) {
+      error.textContent = "Choose a PNG, JPEG, GIF, WebP or AVIF image.";
+      return;
+    }
+    var reader = new FileReader();
+    var editingSession = active;
+    reader.onerror = function () {
+      error.textContent = "ReCopyFast could not read that local image.";
+    };
+    reader.onload = function () {
+      if (active !== editingSession) return;
+      saveImageValue(String(reader.result || ""), error);
+    };
+    reader.readAsDataURL(file);
   }
 
   function onPaste(event) {
@@ -375,14 +480,34 @@
   function onKeyDown(event) {
     if (event.key === "Escape" && active) {
       event.preventDefault();
-      event.stopPropagation();
+      event.stopImmediatePropagation();
       cancel();
     } else if (
       active &&
       active.type === "text" &&
-      event.target === active.element
+      active.element.contains(event.target)
     ) {
-      event.stopPropagation();
+      if (
+        event.key === " " ||
+        event.key === "Spacebar" ||
+        event.key === "Enter"
+      ) {
+        event.preventDefault();
+        insertPlainText(event.key === "Enter" ? "\n" : " ");
+      }
+      event.stopImmediatePropagation();
+    }
+  }
+
+  function onActivationKey(event) {
+    if (
+      active &&
+      active.type === "text" &&
+      active.element.contains(event.target) &&
+      (event.key === " " || event.key === "Spacebar" || event.key === "Enter")
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
     }
   }
 
@@ -417,16 +542,34 @@
     delete window.__rcfTryPreview;
   }
 
-  listen(root, "mouseover", onMouseOver);
-  listen(root, "mouseout", onMouseOut);
-  listen(document, "click", onClick, true);
-  listen(document, "paste", onPaste, true);
-  listen(document, "drop", onDrop, true);
-  listen(document, "beforeinput", onInput, true);
-  listen(document, "input", onInput, true);
-  listen(document, "keydown", onKeyDown, true);
-  listen(document, "submit", onSubmit, true);
+  function resume() {
+    if (!document.head || !document.body) return false;
+    var nextRoot = resolveRoot();
+    if (!nextRoot) return false;
+    root = nextRoot;
+    if (active && !active.element.isConnected) cancel();
+    if (!style.isConnected) document.head.appendChild(style);
+    if (!topbar.isConnected) document.body.appendChild(topbar);
+    if (statusNode && !statusNode.isConnected)
+      document.body.appendChild(statusNode);
+    return true;
+  }
+
+  // Capture at window so host handlers registered on document or elements never
+  // observe an activation gesture that belongs to the preview editor.
+  listen(window, "mouseover", onMouseOver, true);
+  listen(window, "mouseout", onMouseOut, true);
+  listen(window, "click", onClick, true);
+  listen(window, "change", onChange, true);
+  listen(window, "paste", onPaste, true);
+  listen(window, "drop", onDrop, true);
+  listen(window, "beforeinput", onInput, true);
+  listen(window, "input", onInput, true);
+  listen(window, "keydown", onKeyDown, true);
+  listen(window, "keypress", onActivationKey, true);
+  listen(window, "keyup", onActivationKey, true);
+  listen(window, "submit", onSubmit, true);
   listen(exitButton, "click", exit);
 
-  window.__rcfTryPreview = { exit: exit };
+  window.__rcfTryPreview = { exit: exit, resume: resume };
 })();

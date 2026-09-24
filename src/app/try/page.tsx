@@ -15,13 +15,17 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     url: "/try",
+    siteName: "ReCopyFast",
     title: "See your site editable in one click | ReCopyFast",
     description: DESCRIPTION,
+    locale: "en_US",
+    images: ["/opengraph-image"],
   },
   twitter: {
     card: "summary_large_image",
     title: "See your site editable in one click | ReCopyFast",
     description: DESCRIPTION,
+    images: ["/twitter-image"],
   },
 };
 

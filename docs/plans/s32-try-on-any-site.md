@@ -31,8 +31,8 @@ implementation, commit, push and draft PR; independent review remains pending.
   `node scripts/build-embed.mjs --check`, `npm run audit:prod`, production typecheck,
   changed-file formatting and browser check. CI placeholders only. Report any
   inherited formatting failures without mass-formatting unrelated files.
-- [ ] 6. Inspect final diff, record exact evidence and limitations here, retain
-  review placeholder, commit, push branch, open DRAFT PR with Why / What changed /
+- [x] 6. Inspect final diff, record exact evidence and limitations here, preserve
+  the independent review unchanged and uncommitted, commit, push branch, retain DRAFT PR #27 with Why / What changed /
   Decisions / Verification / Risk & rollback. Do not merge, ready or deploy.
 
 ## Decisions
@@ -41,7 +41,24 @@ No new dependencies or SQL. No production service calls. Images default to embed
 raster data URLs under the no-network requirement with the no-network default retained because no image-request exception was authorized. Unsupported CSP and browser-internal pages use the sample
 fallback; "any site" describes the target experience, not a CSP bypass guarantee.
 
-## Verification evidence
+## Pre-share fix scope (operator-validated 2026-09-24)
+
+The operator explicitly approved review items 1–11 for this fix run. Preserve
+`docs/reviews/s32-try-on-any-site.md` byte-for-byte and leave it uncommitted.
+
+- Capture click and keyboard activation before host handlers/default navigation;
+  preserve click-point caret placement and inline formatting while editing text nodes.
+- Use a stable script URL and short, revalidated caching; restore social metadata and
+  the sample's design-system marker, and remove its static-panel shadow.
+- Add real-browser request/WebSocket observation for injection through Exit, nested
+  interactive targets, raster validation, local FileReader images and body-swap recovery.
+- Keep every existing test guard and synchronize every active exact browser count
+  with the final collected inventory, including `server/README.md`.
+- Merge current `origin/main`, rerun the requested gates, then commit `fix(s32): ...`,
+  push and retain draft PR #27. No deployment, production access or migrations.
+
+## Verification evidence (initial implementation)
+
 
 - `npm run setup`: root and server installed successfully; both reported zero advisories.
 - Test-first: initial runtime tests failed because the script was absent; runtime is now
@@ -74,13 +91,58 @@ fallback; "any site" describes the target experience, not a CSP bypass guarantee
   privacy findings; this is not the independent pipeline review verdict.
 - Markers flipped: none (A-24 was already fixed). Migrations: none.
 
+## Pre-share fix verification (2026-09-24)
+
+- Merged `origin/main` at `9f22598`; merge commit `961ac4c`. The only conflict was
+  the appended story list, resolved by retaining all stories. Refetched before commit;
+  `origin/main` remains an ancestor of this branch.
+- `npm run precommit -- -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB`:
+  passed; lint **0 errors / 39 inherited warnings**, full TypeScript clean,
+  Jest **214 passed suites / 1 inherited skipped suite; 2,792 passed tests /
+  36 inherited skipped tests / 0 failed**. CI main-job placeholder environment only;
+  no environment file copied and no production service used.
+- `npm run build`, `npm run type-check:build`, `npm run format:check`: passed.
+- `node scripts/build-embed.mjs --check`: fresh; production embed unchanged.
+  Node 24.14.0 gzip-9: bundle **46,604 <= 46,681 B**, widget **33,828 <= 33,865 B**,
+  transport **13,141 B**. Preview runtime **5,584 <= 8,192 B**.
+- `npm run audit:prod`: **0 vulnerabilities**.
+- `CI=true npx playwright test e2e/try-preview.spec.ts --reporter=line --retries=0`:
+  **4 passed / 0 failed / 0 skipped / 0 retried**. Real clicks and keyboard input
+  prove linked-heading caret placement, preserved bold markup, nested interactive
+  ancestor isolation and button Space/Enter isolation through all key phases.
+- Browser request/WebSocket recording starts before injection and spans text save,
+  a valid local PNG FileReader replacement (decoded naturalWidth > 0), and Exit.
+  Exactly the intercepted script request is allowed. Temporarily inserting an image
+  beacon made this test fail with the extra request; it was aborted locally, the
+  mutation was removed, and the final four tests passed.
+- Runtime unit suite: **20/20**, including rejected SVG/javascript data URLs,
+  rejected local SVG, unchanged inline nodes, Cancel identity restoration, stale
+  FileReader callbacks, file-change isolation, and body-swap resume.
+- `CI=true npx playwright test --list --reporter=list`: **43 tests in 10 files**.
+  All active inventory pins, including server README, match 43 (rather than 40,
+  because three new browser cases were added). No guard test removed or weakened.
+- Production-mode local HTTP: stable and legacy query URLs return **200**, correct
+  JavaScript MIME/CORS/nosniff, **max-age=0, must-revalidate**, ETag, no Set-Cookie;
+  matching If-None-Match returns **304**. Rendered /try includes og:image,
+  twitter:image, og:site_name and og:locale.
+- A Chromium probe executed the actual hydrated bookmarklet, replaced the host body,
+  reinvoked the bookmarklet, edited the new heading and exited with zero preview UI.
+- Fresh-context fix verification: **APPROVE, 0 findings**; focused **39 Jest tests /
+  5 suites**, **4 Chromium cases**, full TypeScript and changed-file ESLint passed.
+  This verification did not replace or edit the independent review document.
+- The independent review's SHA-256 remains
+  `616728bde0c50a0f4fa17e0787d87c38704702cb070642fd3d35c642d536e17b`.
+  It remains uncommitted. Failing markers flipped: **none** (none in this scope).
+  Migrations/dependencies added: **none**. PR #27 remains draft; no deployment.
+
 ## Remaining boundaries
 
-Formal review stays `pending independent review`. Full 40-case disposable-stack
-execution is owned by PR CI; local evidence is the added fixture plus full inventory.
+The existing independent review allows shipping and remains unchanged and uncommitted.
+Full 43-case disposable-stack execution is owned by PR CI; local evidence is the
+preview browser fixture plus the full collected inventory.
 Host CSP may reject the loader origin or inline style; browser-internal pages,
 closed shadow roots and cross-origin frame contents are not editable by this script.
-The fallback is /try's scoped sample. Images accept embedded raster data URLs to
-honor the no-network instruction; remote image URLs would need explicit authorization.
+The fallback is /try's scoped sample. Images accept embedded raster data URLs and local raster files via FileReader to
+honor the no-network instruction; remote image URLs remain rejected.
 Exit stops editing and clears chrome; saved preview DOM persists until refresh.
 Do not merge, mark ready, or deploy from this lane.

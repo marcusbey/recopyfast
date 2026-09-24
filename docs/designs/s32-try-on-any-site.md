@@ -18,7 +18,8 @@ turning the marketing navigation into editable content. Include restart/reset.
 Preview chrome uses the real widget's compact white floating panel, dark text,
 teal Save action and thin outline. System fonts only on host sites, one namespaced
 style element. Top bar includes the exact preview disclaimer, signup CTA and Exit.
-Toolbar: text editing Save/Cancel; image mode labelled URL input and Replace image;
+Toolbar: text editing Save/Cancel; image mode local raster file picker, labelled
+data-URL input and Replace image;
 inline validation/status, including "Published (preview)". All controls keyboard
 reachable; Escape cancels; viewport-clamped panel and wrapping narrow top bar.
 
@@ -29,5 +30,5 @@ when possible and /try explains it regardless. Strict style CSP may prevent chro
 
 Design gap: React components cannot be embedded dependency-free on third-party
 pages. Reproduce the widget's small chrome with namespaced DOM/CSS and system fonts;
-no new app primitive. Image URL policy follows the explicit no-network constraint
-until clarified by the user.
+no new app primitive. Images use raster data URLs or local raster files read with
+FileReader; neither path uploads files or fetches remote replacement images.

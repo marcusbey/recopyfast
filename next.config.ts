@@ -58,7 +58,10 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
+            // Bookmarklets save this exact URL. A one-year immutable response
+            // pinned early preview defects in every already-saved bookmark, so
+            // the permanent URL must revalidate just like the production embed.
+            value: "public, max-age=0, must-revalidate",
           },
           {
             key: "Access-Control-Allow-Origin",

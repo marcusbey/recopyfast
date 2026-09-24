@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 
 const SCRIPT_PATH = path.join(process.cwd(), "public", "try", "rcf-try.js");
 
-type PreviewApi = { exit: () => void };
+type PreviewApi = { exit: () => void; resume: () => boolean };
 
 function inject(rootSelector?: string) {
   const source = readFileSync(SCRIPT_PATH, "utf8");
@@ -122,6 +122,54 @@ describe("standalone try-on-any-site runtime", () => {
     );
   });
 
+  test("preserves inline formatting while editing and after Save", () => {
+    document.body.innerHTML = `<p>Make <a href="/work">every <strong>word</strong></a> count.</p>`;
+    inject();
+    const paragraph = document.querySelector("p")!;
+    const link = paragraph.querySelector("a")!;
+    const strong = paragraph.querySelector("strong")!;
+
+    click(strong);
+
+    expect(paragraph.querySelector("a")).toBe(link);
+    expect(paragraph.querySelector("strong")).toBe(strong);
+    strong.firstChild!.textContent = "phrase";
+    click(toolbarButton("Save")!);
+
+    expect(paragraph.innerHTML).toBe(
+      'Make <a href="/work">every <strong>phrase</strong></a> count.',
+    );
+  });
+
+  test("blocks edited content and its interactive ancestor from host clicks and activation keys", () => {
+    document.body.innerHTML = `<div role="button"><h2>Editable title</h2><p>Card body</p></div>`;
+    const card = document.querySelector('[role="button"]')!;
+    const heading = document.querySelector("h2")!;
+    const cardBody = document.querySelector("p")!;
+    const hostClick = jest.fn();
+    const hostKey = jest.fn();
+    card.addEventListener("click", hostClick);
+    heading.addEventListener("keydown", hostKey);
+    inject();
+
+    click(heading);
+    click(heading);
+    click(cardBody);
+    for (const key of [" ", "Enter"]) {
+      heading.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }
+
+    expect(hostClick).not.toHaveBeenCalled();
+    expect(hostKey).not.toHaveBeenCalled();
+    expect(heading).toHaveAttribute("contenteditable", "plaintext-only");
+  });
+
   test("Cancel restores the original child nodes and their event handlers", () => {
     document.body.innerHTML = `<p>Before <button type="button">child</button></p>`;
     const paragraph = document.querySelector("p")!;
@@ -189,6 +237,18 @@ describe("standalone try-on-any-site runtime", () => {
       "embedded raster data URL",
     );
 
+    for (const unsafe of [
+      "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+      "javascript:alert(1)",
+    ]) {
+      input.value = unsafe;
+      click(toolbarButton("Replace image")!);
+      expect(image).toHaveAttribute("src", "data:image/png;base64,AA==");
+      expect(document.querySelector(".rcf-try-error")).toHaveTextContent(
+        "embedded raster data URL",
+      );
+    }
+
     input.value = "data:image/webp;base64,UklGRg==";
     click(toolbarButton("Replace image")!);
     expect(image).toHaveAttribute("src", "data:image/webp;base64,UklGRg==");
@@ -200,6 +260,105 @@ describe("standalone try-on-any-site runtime", () => {
     expect(image).toHaveAttribute("src", "data:image/webp;base64,UklGRg==");
     expect(image).toHaveAttribute("srcset", "");
     expect(source).toHaveAttribute("srcset", "");
+  });
+
+  test("replaces an image from a local raster file without a remote URL", async () => {
+    document.body.innerHTML = `<img alt="Sample" src="data:image/png;base64,AA==">`;
+    inject();
+    const image = document.querySelector("img")!;
+    click(image);
+    const input = document.querySelector(
+      '.rcf-try-toolbar input[type="file"]',
+    ) as HTMLInputElement;
+    const file = new File([new Uint8Array([82, 73, 70, 70])], "sample.webp", {
+      type: "image/webp",
+    });
+    Object.defineProperty(input, "files", { value: [file] });
+
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(image.getAttribute("src")).toMatch(/^data:image\/webp;base64,/);
+    expect(image).toHaveAttribute("data-rcf-try-published", "true");
+    expect(document.querySelector(".rcf-try-toolbar")).toBeNull();
+  });
+
+  test("rejects a local SVG file before reading it", async () => {
+    document.body.innerHTML = `<img alt="Sample" src="data:image/png;base64,AA==">`;
+    inject();
+    const image = document.querySelector("img")!;
+    click(image);
+    const input = document.querySelector(
+      '.rcf-try-toolbar input[type="file"]',
+    ) as HTMLInputElement;
+    const file = new File(["<svg></svg>"], "sample.svg", {
+      type: "image/svg+xml",
+    });
+    Object.defineProperty(input, "files", { value: [file] });
+
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(image).toHaveAttribute("src", "data:image/png;base64,AA==");
+    expect(document.querySelector(".rcf-try-error")).toHaveTextContent(
+      "PNG, JPEG, GIF, WebP or AVIF",
+    );
+  });
+
+  test("ignores a delayed local file read after the image edit is cancelled", () => {
+    document.body.innerHTML = `
+      <img id="first" alt="First" src="data:image/png;base64,AA==">
+      <img id="second" alt="Second" src="data:image/png;base64,AQ==">
+    `;
+    const readers: Array<{
+      result: string | null;
+      onload: null | (() => void);
+    }> = [];
+    const OriginalFileReader = window.FileReader;
+    class DeferredFileReader {
+      result: string | null = null;
+      onerror: null | (() => void) = null;
+      onload: null | (() => void) = null;
+
+      readAsDataURL() {
+        readers.push(this);
+      }
+    }
+    Object.defineProperty(window, "FileReader", {
+      configurable: true,
+      value: DeferredFileReader,
+    });
+
+    try {
+      inject();
+      click(document.querySelector("#first")!);
+      const input = document.querySelector(
+        '.rcf-try-toolbar input[type="file"]',
+      ) as HTMLInputElement;
+      Object.defineProperty(input, "files", {
+        value: [new File(["png"], "first.png", { type: "image/png" })],
+      });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      click(toolbarButton("Cancel")!);
+      click(document.querySelector("#second")!);
+
+      readers[0].result = "data:image/png;base64,Ag==";
+      readers[0].onload!();
+
+      expect(document.querySelector("#first")).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AA==",
+      );
+      expect(document.querySelector("#second")).toHaveAttribute(
+        "src",
+        "data:image/png;base64,AQ==",
+      );
+    } finally {
+      Object.defineProperty(window, "FileReader", {
+        configurable: true,
+        value: OriginalFileReader,
+      });
+    }
   });
 
   test("image Cancel does not assign a source that was originally absent", () => {
@@ -268,6 +427,26 @@ describe("standalone try-on-any-site runtime", () => {
     ).toBeUndefined();
     click(heading);
     expect(heading).not.toHaveAttribute("contenteditable");
+  });
+
+  test("resume reattaches the preview controls after the host replaces body", () => {
+    document.body.innerHTML = `<h1>Original page</h1>`;
+    const preview = inject()!;
+    const replacement = document.createElement("body");
+    replacement.innerHTML = `<h1>Replacement page</h1>`;
+    document.documentElement.replaceChild(replacement, document.body);
+
+    expect(document.querySelector("#rcf-try-exit")).toBeNull();
+    expect(preview.resume()).toBe(true);
+    expect(document.querySelectorAll("#rcf-try-topbar")).toHaveLength(1);
+
+    click(document.querySelector("h1")!);
+    expect(document.querySelector("h1")).toHaveAttribute(
+      "contenteditable",
+      "plaintext-only",
+    );
+    click(document.querySelector("#rcf-try-exit")!);
+    expect(document.querySelector("#rcf-try-topbar")).toBeNull();
   });
 
   test("shows only one preview status after repeated saves", () => {

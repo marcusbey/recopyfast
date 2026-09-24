@@ -30,7 +30,7 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("NODE_ENV=production npm run start");
   });
 
-  it("runs all 40 tests and always cleans up and uploads the redacted summary", () => {
+  it("runs all 43 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -38,11 +38,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":40');
-    expect(workflow).toContain("report.expected !== 40");
-    expect(workflow).toContain("report.total !== 40");
-    expect(workflow).toContain("report.passed !== 40");
-    expect(config).toContain("expected: 40");
+    expect(workflow).toContain('"expected":43');
+    expect(workflow).toContain("report.expected !== 43");
+    expect(workflow).toContain("report.total !== 43");
+    expect(workflow).toContain("report.passed !== 43");
+    expect(config).toContain("expected: 43");
     expect(workflow).toContain("if-no-files-found: error");
   });
 

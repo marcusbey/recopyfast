@@ -32,7 +32,13 @@ A new remote image necessarily makes an image request; user clarification is
 pending. Default to the explicit zero-network requirement (embedded data images)
 unless the user authorizes the requested-image exception.
 
-## Open questions
+## Pre-share fix decisions (2026-09-24)
 
-Image URL network policy above; no implementation dependency for text editing.
-Complexity remains 3. No new dependency, database, auth, billing or deployment work.
+The operator resolved image replacement: local raster files read via FileReader and
+raster data URLs only; no remote image requests. The review reproduced host link and
+button activation during editing and identified immutable caching on a saved URL.
+Fix capture-phase isolation with click-point caret placement, preserve inline nodes,
+and use a stable URL with revalidation. Real-browser request events must cover the
+whole preview lifecycle, including image replacement, rather than mocked transports.
+The independent review remains untouched; its initial count/evidence is historical.
+No new dependency, database, auth, billing or deployment work.

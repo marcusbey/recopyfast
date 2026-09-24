@@ -13,7 +13,7 @@ jest.mock("@/contexts/AuthContext", () => ({
 }));
 
 describe("Try page", () => {
-  it("offers the versioned production bookmarklet after hydration", async () => {
+  it("offers the stable production bookmarklet after hydration", async () => {
     render(<TryPage />);
 
     const bookmarklet = screen.getByRole("link", {
@@ -24,8 +24,10 @@ describe("Try page", () => {
       expect(bookmarklet.getAttribute("href")).toContain("javascript:");
     });
     expect(bookmarklet.getAttribute("href")).toContain(
-      "https://www.recopyfa.st/try/rcf-try.js?v=20260924",
+      "https://www.recopyfa.st/try/rcf-try.js",
     );
+    expect(bookmarklet.getAttribute("href")).not.toContain("?v=");
+    expect(bookmarklet.getAttribute("href")).toContain(".resume()");
     expect(bookmarklet.getAttribute("href")).toContain("scrollIntoView");
     expect(bookmarklet).toHaveAttribute("draggable", "true");
   });
@@ -67,7 +69,7 @@ describe("Try page", () => {
       .find(
         (node): node is HTMLScriptElement =>
           node instanceof HTMLScriptElement &&
-          node.src.includes("/try/rcf-try.js?v=20260924"),
+          node.src.endsWith("/try/rcf-try.js"),
       );
     expect(injected).toBeDefined();
     expect(injected?.dataset.rcfTryRoot).toBe("#rcf-try-sample");
@@ -85,7 +87,7 @@ describe("Try page", () => {
       .find(
         (node): node is HTMLScriptElement =>
           node instanceof HTMLScriptElement &&
-          node.src.includes("/try/rcf-try.js?v=20260924"),
+          node.src.endsWith("/try/rcf-try.js"),
       );
     expect(injected).toBeDefined();
 
@@ -100,8 +102,27 @@ describe("Try page", () => {
 
   it("publishes canonical and social metadata for /try", () => {
     expect(metadata.alternates).toMatchObject({ canonical: "/try" });
-    expect(metadata.openGraph).toMatchObject({ url: "/try" });
+    expect(metadata.openGraph).toMatchObject({
+      url: "/try",
+      siteName: "ReCopyFast",
+      locale: "en_US",
+      images: ["/opengraph-image"],
+    });
+    expect(metadata.twitter).toMatchObject({
+      images: ["/twitter-image"],
+    });
     expect(metadata.title).toMatch(/editable/i);
+  });
+
+  it("marks the static sample as a demo surface without a large shadow", () => {
+    render(<TryPage />);
+
+    const sample = screen.getByTestId("try-live-sample");
+    expect(sample).toHaveAttribute("data-demo-surface");
+    expect(sample).not.toHaveClass("shadow-xl");
+    expect(
+      screen.getByText(/choose a local raster image/i),
+    ).toBeInTheDocument();
   });
 
   it("links to the trial with campaign attribution", () => {

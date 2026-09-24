@@ -5,14 +5,13 @@ import Image from "next/image";
 import { MousePointerClick, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-export const TRY_RUNTIME_VERSION = "20260924";
 export const TRY_RUNTIME_URL =
-  `https://www.recopyfa.st/try/rcf-try.js?v=${TRY_RUNTIME_VERSION}` as const;
+  "https://www.recopyfa.st/try/rcf-try.js" as const;
 
 const SAMPLE_ROOT_SELECTOR = "#rcf-try-sample";
 
 type PreviewWindow = Window & {
-  __rcfTryPreview?: { exit: () => void };
+  __rcfTryPreview?: { exit: () => void; resume: () => void };
 };
 
 function discardPendingScript(ref: {
@@ -24,7 +23,7 @@ function discardPendingScript(ref: {
   // Removing a fetched script node does not guarantee its already-queued code
   // cannot execute. Invalidate the runtime scope first so a late execution
   // fails closed, then detach callbacks so it cannot revive stale UI state.
-  script.dataset.rcfTryRoot = `#rcf-try-cancelled-${TRY_RUNTIME_VERSION}`;
+  script.dataset.rcfTryRoot = "#rcf-try-cancelled-stable";
   script.onload = null;
   script.onerror = null;
   script.remove();
@@ -38,7 +37,7 @@ function discardPendingScript(ref: {
  * visible installer and the sample cannot drift onto different runtime builds.
  */
 function bookmarkletSource(): string {
-  return `javascript:(()=>{if(window.__rcfTryPreview||document.getElementById('rcf-try-loader'))return;const s=document.createElement('script');s.id='rcf-try-loader';s.src='${TRY_RUNTIME_URL}';s.onload=()=>s.remove();s.onerror=()=>{s.remove();if(document.getElementById('rcf-try-load-failed'))return;const n=document.createElement('div');n.id='rcf-try-load-failed';n.setAttribute('role','status');n.tabIndex=-1;n.textContent='ReCopyFast could not load here. Open ';const a=document.createElement('a');a.href='https://www.recopyfa.st/try#sample';a.textContent='the live sample';n.append(a);document.body.append(n);n.focus();n.scrollIntoView({block:'center'})};document.head.append(s)})()`;
+  return `javascript:(()=>{const p=window.__rcfTryPreview;if(p){p.resume();return}if(document.getElementById('rcf-try-loader'))return;const s=document.createElement('script');s.id='rcf-try-loader';s.src='${TRY_RUNTIME_URL}';s.onload=()=>s.remove();s.onerror=()=>{s.remove();if(document.getElementById('rcf-try-load-failed'))return;const n=document.createElement('div');n.id='rcf-try-load-failed';n.setAttribute('role','status');n.tabIndex=-1;n.textContent='ReCopyFast could not load here. Open ';const a=document.createElement('a');a.href='https://www.recopyfa.st/try#sample';a.textContent='the live sample';n.append(a);document.body.append(n);n.focus();n.scrollIntoView({block:'center'})};document.head.append(s)})()`;
 }
 
 export function TryExperience() {
@@ -77,7 +76,7 @@ export function TryExperience() {
     discardPendingScript(pendingScriptRef);
 
     const script = document.createElement("script");
-    script.src = `/try/rcf-try.js?v=${TRY_RUNTIME_VERSION}`;
+    script.src = "/try/rcf-try.js";
     script.dataset.rcfTryRoot = SAMPLE_ROOT_SELECTOR;
     script.onload = () => {
       if (pendingScriptRef.current !== script) return;
@@ -216,9 +215,9 @@ export function TryExperience() {
           </div>
 
           <p className="mt-2 text-sm leading-relaxed text-slate-500">
-            To keep the preview offline after it loads, image replacement
-            accepts embedded raster data URLs only. It does not fetch remote
-            image URLs.
+            To keep the preview offline after it loads, image replacement lets
+            you choose a local raster image. It does not fetch remote image
+            URLs.
           </p>
 
           <div
@@ -234,8 +233,9 @@ export function TryExperience() {
           <div
             key={sampleKey}
             id="rcf-try-sample"
+            data-demo-surface
             data-testid="try-live-sample"
-            className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-[#f6f0e7] shadow-xl"
+            className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-[#f6f0e7]"
           >
             <nav className="flex items-center justify-between border-b border-[#ded4c6] px-6 py-4 text-[#32291f] sm:px-10">
               <a href="#sample" className="font-semibold tracking-wide">
