@@ -35,6 +35,56 @@ export interface CheckoutSessionResult {
   url: string;
 }
 
+export interface CheckoutSessionCreationOptions {
+  pendingIntentId?: string;
+  expiresAt?: string;
+}
+
+export interface PendingCheckoutSession {
+  sessionId: string;
+  url: string | null;
+  status: Stripe.Checkout.Session.Status | null;
+}
+
+/** Recover a Checkout Session when its response or our attach write was lost. */
+export async function findCheckoutSessionForIntent(
+  userId: string,
+  email: string,
+  pendingIntentId: string,
+  name?: string,
+): Promise<PendingCheckoutSession | null> {
+  const { stripeCustomer } = await createOrGetCustomer(userId, email, name);
+  let startingAfter: string | undefined;
+  do {
+    const sessions = await stripe.checkout.sessions.list({
+      customer: stripeCustomer.id,
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const session = sessions.data.find(
+      (candidate) =>
+        candidate.metadata?.checkout_intent_id === pendingIntentId &&
+        candidate.client_reference_id === userId,
+    );
+    if (session) {
+      return {
+        sessionId: session.id,
+        url: session.url,
+        status: session.status,
+      };
+    }
+    if (!sessions.has_more) return null;
+    startingAfter = sessions.data.at(-1)?.id;
+    if (!startingAfter) {
+      throw new Error(
+        "Stripe returned an empty Checkout page with has_more=true",
+      );
+    }
+  } while (startingAfter);
+
+  return null;
+}
+
 export interface CheckoutSessionStatus {
   mode: Stripe.Checkout.Session.Mode;
   /** `open` = still payable, `complete` = finished, `expired` = abandoned. */
@@ -104,6 +154,7 @@ export async function createCheckoutSession(
   email: string,
   intent: CheckoutIntent,
   name?: string,
+  options: CheckoutSessionCreationOptions = {},
 ): Promise<CheckoutSessionResult> {
   // Ensures a billing_customers row exists before any webhook needs to resolve
   // the Stripe customer back to a user.
@@ -121,6 +172,10 @@ export async function createCheckoutSession(
 
   switch (intent.type) {
     case "subscription": {
+      const pendingIntentMetadata: Record<string, string> =
+        options.pendingIntentId
+          ? { checkout_intent_id: options.pendingIntentId }
+          : {};
       params = {
         ...baseParams,
         mode: "subscription",
@@ -134,6 +189,13 @@ export async function createCheckoutSession(
           },
         ],
         allow_promotion_codes: true,
+        ...(options.expiresAt
+          ? {
+              expires_at: Math.floor(
+                new Date(options.expiresAt).getTime() / 1000,
+              ),
+            }
+          : {}),
         // Read by handleSubscriptionCreated / handleSubscriptionUpdated in the
         // Stripe webhook to attribute the subscription and record the plan.
         subscription_data: {
@@ -141,9 +203,14 @@ export async function createCheckoutSession(
             user_id: userId,
             plan_id: intent.planId,
             billing_period: intent.billingPeriod,
+            ...pendingIntentMetadata,
           },
         },
-        metadata: { user_id: userId, plan_id: intent.planId },
+        metadata: {
+          user_id: userId,
+          plan_id: intent.planId,
+          ...pendingIntentMetadata,
+        },
       };
       break;
     }
@@ -238,7 +305,12 @@ export async function createCheckoutSession(
     }
   }
 
-  const session = await stripe.checkout.sessions.create(params);
+  const session = await stripe.checkout.sessions.create(
+    params,
+    options.pendingIntentId
+      ? { idempotencyKey: `subscription-checkout:${options.pendingIntentId}` }
+      : undefined,
+  );
 
   if (!session.url) {
     throw new Error("Stripe did not return a Checkout URL");

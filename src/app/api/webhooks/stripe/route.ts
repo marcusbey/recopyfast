@@ -26,6 +26,10 @@ import {
   recordCreditRevocation,
 } from "@/lib/billing/credit-revocations";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
+import {
+  attachCheckoutSession,
+  finishSubscriptionCheckoutIntent,
+} from "@/lib/billing/checkout-reservation";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
 // STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
@@ -242,7 +246,11 @@ export async function POST(req: NextRequest) {
         break;
 
       case "checkout.session.completed":
-        await handleCheckoutSessionCompleted(event.data.object);
+        await handleCheckoutSessionCompleted(event.data.object, supabase);
+        break;
+
+      case "checkout.session.expired":
+        await handleCheckoutSessionExpired(event.data.object, supabase);
         break;
 
       case "charge.refunded":
@@ -922,16 +930,49 @@ async function handlePaymentIntentSucceeded(
  */
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
+  supabase: ServiceClient,
 ) {
-  // `unpaid` sessions complete for invoice-style flows where money has not
-  // moved yet. Granting on those would hand out product for an unpaid invoice.
-  if (session.payment_status === "unpaid") {
-    return;
-  }
-
   const metadata = session.metadata ?? {};
   const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
   const paymentIntentId = idOf(session.payment_intent);
+
+  const pendingIntentId = metadata.checkout_intent_id;
+  if (pendingIntentId && userId) {
+    await attachCheckoutSession(supabase, pendingIntentId, userId, {
+      sessionId: session.id,
+      url: session.url,
+    });
+  }
+
+  if (pendingIntentId && session.mode === "subscription") {
+    const subscriptionId = idOf(session.subscription);
+    if (!subscriptionId) {
+      throw new Error(
+        `completed subscription Checkout Session ${session.id} has no subscription`,
+      );
+    }
+
+    // Stripe does not guarantee event order. Persist the subscription (even
+    // when it is still `incomplete`) before releasing the intent, otherwise a
+    // second checkout can slip in before customer.subscription.created lands.
+    await handleSubscriptionCreated(
+      { id: subscriptionId } as StripeSubscriptionWithPeriod,
+      supabase,
+    );
+    await finishSubscriptionCheckoutIntent(
+      supabase,
+      pendingIntentId,
+      session.id,
+      "completed",
+    );
+  }
+
+  // `unpaid` one-off sessions complete for invoice-style flows where money has
+  // not moved yet. Subscription completion is handled above because its row is
+  // the blocking obligation, even while Stripe still calls it `incomplete`.
+  if (session.payment_status === "unpaid") {
+    return;
+  }
 
   if (!userId || !paymentIntentId || metadata.type !== "lifetime_purchase") {
     return;
@@ -950,6 +991,27 @@ async function handleCheckoutSessionCompleted(
     metadata.grants_plan_id ??
       (await catalogueLifetimeGrant(session.id, paymentIntentId)),
     paymentIntentId,
+  );
+}
+
+async function handleCheckoutSessionExpired(
+  session: Stripe.Checkout.Session,
+  supabase: ServiceClient,
+) {
+  const pendingIntentId = session.metadata?.checkout_intent_id;
+  const userId =
+    session.metadata?.user_id ?? session.client_reference_id ?? undefined;
+  if (!pendingIntentId || !userId) return;
+
+  await attachCheckoutSession(supabase, pendingIntentId, userId, {
+    sessionId: session.id,
+    url: session.url,
+  });
+  await finishSubscriptionCheckoutIntent(
+    supabase,
+    pendingIntentId,
+    session.id,
+    "expired",
   );
 }
 

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   createCheckoutSession,
+  findCheckoutSessionForIntent,
   getCheckoutSessionStatus,
   type CheckoutIntent,
 } from "@/lib/stripe/checkout";
@@ -13,7 +15,13 @@ import {
   isPaidPlanId,
 } from "@/lib/stripe/plans";
 import { getGrantedPlanIds } from "@/lib/billing/entitlements";
-import { claimSubscriptionReservation } from "@/lib/billing/checkout-reservation";
+import {
+  attachCheckoutSession,
+  claimSubscriptionCheckoutIntent,
+  ExistingSubscriptionBlocksCheckoutError,
+  expireUnattachedSubscriptionCheckoutIntent,
+  finishSubscriptionCheckoutIntent,
+} from "@/lib/billing/checkout-reservation";
 import { withUserLock } from "@/lib/billing/user-lock";
 
 /**
@@ -125,30 +133,152 @@ export async function POST(req: NextRequest) {
         // Read the table directly so a concurrent test can still barrier on
         // getUserSubscription (called once per request, above) while this
         // isolate still notices a webhook that landed after that read.
-        const { data: liveRow } = await supabase
+        const { data: liveRow, error: liveRowError } = await supabase
           .from("billing_subscriptions")
           .select("id")
           .eq("user_id", user.id)
-          .in("status", ["active", "trialing", "past_due"])
+          .in("status", [
+            "active",
+            "trialing",
+            "past_due",
+            "incomplete",
+            "paused",
+            "unpaid",
+          ])
           .maybeSingle();
+        if (liveRowError) {
+          throw new Error(
+            `Failed to verify existing subscription: ${liveRowError.message}`,
+          );
+        }
         if (liveRow) {
           return { kind: "conflict" as const, alreadySubscribed: true };
         }
 
-        const claimed = await claimSubscriptionReservation(supabase, user.id);
-        if (!claimed) {
-          return { kind: "conflict" as const, alreadySubscribed: false };
+        const intentClient = createServiceRoleClient();
+
+        // One retry is enough: an expired known session is released, then the
+        // second claim creates (or observes) the successor. The partial UNIQUE
+        // index remains the cross-isolate arbiter between those two steps.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          let pending;
+          try {
+            pending = await claimSubscriptionCheckoutIntent(
+              intentClient,
+              user.id,
+            );
+          } catch (error: unknown) {
+            if (error instanceof ExistingSubscriptionBlocksCheckoutError) {
+              return { kind: "conflict" as const, alreadySubscribed: true };
+            }
+            throw error;
+          }
+
+          if (pending.checkoutUrl && pending.stripeSessionId) {
+            if (new Date(pending.expiresAt).getTime() > Date.now()) {
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                session: {
+                  sessionId: pending.stripeSessionId,
+                  url: pending.checkoutUrl,
+                },
+              };
+            }
+
+            const current = await getCheckoutSessionStatus(
+              user.id,
+              pending.stripeSessionId,
+            );
+            if (current.status !== "expired") {
+              return current.status === "open"
+                ? {
+                    kind: "conflict" as const,
+                    alreadySubscribed: false,
+                    session: {
+                      sessionId: pending.stripeSessionId,
+                      url: pending.checkoutUrl,
+                    },
+                  }
+                : { kind: "conflict" as const, alreadySubscribed: false };
+            }
+
+            await finishSubscriptionCheckoutIntent(
+              intentClient,
+              pending.id,
+              pending.stripeSessionId,
+              "expired",
+            );
+            continue;
+          }
+
+          const recovered = await findCheckoutSessionForIntent(
+            user.id,
+            user.email!,
+            pending.id,
+            typeof user.user_metadata?.name === "string"
+              ? user.user_metadata.name
+              : undefined,
+          );
+          if (recovered) {
+            await attachCheckoutSession(intentClient, pending.id, user.id, {
+              sessionId: recovered.sessionId,
+              url: recovered.url,
+            });
+            if (recovered.status === "expired") {
+              await finishSubscriptionCheckoutIntent(
+                intentClient,
+                pending.id,
+                recovered.sessionId,
+                "expired",
+              );
+              continue;
+            }
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              ...(recovered.url
+                ? {
+                    session: {
+                      sessionId: recovered.sessionId,
+                      url: recovered.url,
+                    },
+                  }
+                : {}),
+            };
+          }
+
+          if (new Date(pending.expiresAt).getTime() <= Date.now()) {
+            await expireUnattachedSubscriptionCheckoutIntent(
+              intentClient,
+              pending.id,
+              user.id,
+            );
+            continue;
+          }
+
+          // A provider error is ambiguous: Stripe may have accepted the
+          // request. Nothing below releases the intent on error; the next
+          // request searches Stripe by metadata before creating again.
+          const session = await createCheckoutSession(
+            user.id,
+            user.email!,
+            parsed.intent,
+            typeof user.user_metadata?.name === "string"
+              ? user.user_metadata.name
+              : undefined,
+            { pendingIntentId: pending.id, expiresAt: pending.expiresAt },
+          );
+          await attachCheckoutSession(
+            intentClient,
+            pending.id,
+            user.id,
+            session,
+          );
+          return { kind: "ok" as const, session };
         }
 
-        const session = await createCheckoutSession(
-          user.id,
-          user.email!,
-          parsed.intent,
-          typeof user.user_metadata?.name === "string"
-            ? user.user_metadata.name
-            : undefined,
-        );
-        return { kind: "ok" as const, session };
+        return { kind: "conflict" as const, alreadySubscribed: false };
       });
 
       if (locked.kind === "conflict") {
@@ -157,6 +287,7 @@ export async function POST(req: NextRequest) {
             error: locked.alreadySubscribed
               ? "You already have a subscription. Use the upgrade flow to change plans."
               : "You already have a checkout in progress. Finish or wait for it to expire.",
+            ...(locked.session ? locked.session : {}),
           },
           { status: 409 },
         );

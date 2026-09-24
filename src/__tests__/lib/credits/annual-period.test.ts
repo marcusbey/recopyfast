@@ -38,6 +38,10 @@ function createFakeClient() {
         predicates.push((row) => row[column] === value);
         return builder;
       },
+      in: (column: string, values: readonly unknown[]) => {
+        predicates.push((row) => values.includes(row[column]));
+        return builder;
+      },
       gt: (column: string, value: number) => {
         predicates.push((row) => Number(row[column] ?? 0) > value);
         return builder;
@@ -85,6 +89,7 @@ jest.mock("@/lib/billing/entitlements", () => ({
   })),
 }));
 
+import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 import { getUserCreditBalance } from "@/lib/credits/system";
 
 const USER_ID = "user-1";
@@ -95,11 +100,11 @@ function monthsAgo(months: number): string {
   return date.toISOString();
 }
 
-function subscription(periodStart: string): Row {
+function subscription(periodStart: string, status = "active"): Row {
   return {
     id: "row_1",
     user_id: USER_ID,
-    status: "active",
+    status,
     plan: "pro",
     current_period_start: periodStart,
   };
@@ -117,6 +122,8 @@ function usage(credits: number, createdAt: string): Row {
 
 describe("A-19: the included-credit window for an annual subscriber", () => {
   beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-09-24T15:30:00.000Z"));
     jest.clearAllMocks();
     db = {
       billing_subscriptions: [],
@@ -125,12 +132,17 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
     };
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   /**
-   * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-   * including a broken mock or a fixture the query never matches, so each
-   * marker needs a sibling proving the read really happened. Here: the plan's
-   * allowance and the purchased pot both resolve, so a wrong `total` can only
-   * come from the usage window. True on both sides of the fix.
+   * Guard for the former expected-failure assertion below. An expected failure
+   * passes on ANY failure, including a broken mock or a fixture the query never
+   * matches, so the audit marker needs a sibling proving the read really
+   * happened. Here: the plan's allowance and the purchased pot both resolve,
+   * so a wrong `total` can only come from the usage window. True on both sides
+   * of the fix.
    */
   it("guard: the balance read resolves the plan allowance for the same fixture", async () => {
     db.billing_subscriptions = [subscription(monthsAgo(11))];
@@ -142,21 +154,18 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
     expect(balance.purchased).toBe(0);
   });
 
-  test.failing(
-    "an annual subscriber's allowance resets monthly, not once a year",
-    async () => {
-      // Eleven months into a yearly term, having spent the allowance ten months
-      // ago. Ten monthly resets have been and gone.
-      db.billing_subscriptions = [subscription(monthsAgo(11))];
-      db.credit_usage = [usage(MONTHLY_CREDITS, monthsAgo(10))];
+  test("an annual subscriber's allowance resets monthly, not once a year", async () => {
+    // Eleven months into a yearly term, having spent the allowance ten months
+    // ago. Ten monthly resets have been and gone.
+    db.billing_subscriptions = [subscription(monthsAgo(11))];
+    db.credit_usage = [usage(MONTHLY_CREDITS, monthsAgo(10))];
 
-      const balance = await getUserCreditBalance(USER_ID);
+    const balance = await getUserCreditBalance(USER_ID);
 
-      expect(balance.included).toBe(MONTHLY_CREDITS);
-      expect(balance.usedThisMonth).toBe(0);
-      expect(balance.total).toBe(MONTHLY_CREDITS);
-    },
-  );
+    expect(balance.included).toBe(MONTHLY_CREDITS);
+    expect(balance.usedThisMonth).toBe(0);
+    expect(balance.total).toBe(MONTHLY_CREDITS);
+  });
 
   it("guard: both usage rows are visible to the balance read", async () => {
     db.billing_subscriptions = [subscription(monthsAgo(11))];
@@ -173,21 +182,18 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
     expect(balance.usedThisMonth).toBeGreaterThanOrEqual(100);
   });
 
-  test.failing(
-    "spend from earlier months does not eat into this month's allowance",
-    async () => {
-      db.billing_subscriptions = [subscription(monthsAgo(11))];
-      db.credit_usage = [
-        usage(MONTHLY_CREDITS, monthsAgo(10)),
-        usage(100, new Date().toISOString()),
-      ];
+  test("spend from earlier months does not eat into this month's allowance", async () => {
+    db.billing_subscriptions = [subscription(monthsAgo(11))];
+    db.credit_usage = [
+      usage(MONTHLY_CREDITS, monthsAgo(10)),
+      usage(100, new Date().toISOString()),
+    ];
 
-      const balance = await getUserCreditBalance(USER_ID);
+    const balance = await getUserCreditBalance(USER_ID);
 
-      expect(balance.usedThisMonth).toBe(100);
-      expect(balance.total).toBe(MONTHLY_CREDITS - 100);
-    },
-  );
+    expect(balance.usedThisMonth).toBe(100);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 100);
+  });
 
   /**
    * Fix-stable: the monthly subscriber is correct today and stays correct.
@@ -236,5 +242,79 @@ describe("A-19: the included-credit window for an annual subscriber", () => {
     // are never touched by the included-allowance window.
     expect(balance.purchased).toBe(1000);
     expect(balance.total).toBeGreaterThanOrEqual(1000);
+  });
+
+  it.each(LIVE_SUBSCRIPTION_STATUSES)(
+    "uses the monthly allowance window for a %s subscription",
+    async (status) => {
+      db.billing_subscriptions = [
+        subscription("2025-10-15T08:45:30.250Z", status),
+      ];
+      db.credit_usage = [
+        usage(MONTHLY_CREDITS, "2026-09-10T08:45:30.250Z"),
+        usage(75, "2026-09-24T15:29:59.999Z"),
+      ];
+
+      const balance = await getUserCreditBalance(USER_ID);
+
+      expect(balance.usedThisMonth).toBe(75);
+      expect(balance.total).toBe(MONTHLY_CREDITS - 75);
+    },
+  );
+
+  it("clamps a January 31 anchor to February month-end without losing its UTC timestamp", async () => {
+    jest.setSystemTime(new Date("2025-02-28T10:15:30.250Z"));
+    db.billing_subscriptions = [subscription("2025-01-31T10:15:30.250Z")];
+    db.credit_usage = [
+      usage(300, "2025-02-28T10:15:30.249Z"),
+      usage(125, "2025-02-28T10:15:30.250Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(125);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 125);
+  });
+
+  it("clamps a January 31 anchor to February 29 in a leap year", async () => {
+    jest.setSystemTime(new Date("2024-02-29T10:15:30.250Z"));
+    db.billing_subscriptions = [subscription("2024-01-31T10:15:30.250Z")];
+    db.credit_usage = [
+      usage(300, "2024-02-29T10:15:30.249Z"),
+      usage(80, "2024-02-29T10:15:30.250Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(80);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 80);
+  });
+
+  it("restores the original day after a clamped month and includes the exact boundary", async () => {
+    jest.setSystemTime(new Date("2025-03-31T10:15:30.250Z"));
+    db.billing_subscriptions = [subscription("2025-01-31T10:15:30.250Z")];
+    db.credit_usage = [
+      usage(210, "2025-03-31T10:15:30.249Z"),
+      usage(90, "2025-03-31T10:15:30.250Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(90);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 90);
+  });
+
+  it("keeps the previous clamped window before the original anchored day arrives", async () => {
+    jest.setSystemTime(new Date("2025-03-30T12:00:00.000Z"));
+    db.billing_subscriptions = [subscription("2025-01-31T10:15:30.250Z")];
+    db.credit_usage = [
+      usage(300, "2025-02-28T10:15:30.249Z"),
+      usage(60, "2025-02-28T10:15:30.250Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(60);
+    expect(balance.total).toBe(MONTHLY_CREDITS - 60);
   });
 });

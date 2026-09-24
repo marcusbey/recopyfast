@@ -61,6 +61,8 @@ type RowsResult = { data: Row[] | null; error: FakeError | null };
 
 /** In-memory tables, replaced wholesale per test. */
 let db: Record<string, Row[]> = {};
+let intentRpcError: string | null = null;
+let intentRpcFailureName: string | null = null;
 
 /**
  * A supabase-js-shaped client over `db`, faithful on the one detail this
@@ -169,7 +171,40 @@ function createFakeClient() {
     return builder;
   };
 
-  return { from };
+  const rpc = async (name: string, args: Record<string, unknown>) => {
+    if (
+      intentRpcError &&
+      (!intentRpcFailureName || intentRpcFailureName === name)
+    ) {
+      return { data: null, error: { message: intentRpcError } };
+    }
+    if (name === "attach_subscription_checkout_session") {
+      db.checkout_pending_intents = (db.checkout_pending_intents ?? []).map(
+        (row) =>
+          row.id === args.p_intent_id
+            ? {
+                ...row,
+                stripe_session_id: args.p_stripe_session_id,
+                checkout_url: args.p_checkout_url,
+              }
+            : row,
+      );
+      return { data: null, error: null };
+    }
+    if (name === "finish_subscription_checkout_intent") {
+      db.checkout_pending_intents = (db.checkout_pending_intents ?? []).map(
+        (row) =>
+          row.id === args.p_intent_id &&
+          row.stripe_session_id === args.p_stripe_session_id
+            ? { ...row, status: args.p_status }
+            : row,
+      );
+      return { data: null, error: null };
+    }
+    throw new Error(`Unexpected RPC ${name}`);
+  };
+
+  return { from, rpc };
 }
 
 jest.mock("@/lib/supabase/service", () => ({
@@ -219,10 +254,14 @@ function subscriptionEvent(
   };
 }
 
-async function deliver(event: unknown): Promise<WebhookResponse> {
+async function deliver(
+  event: unknown,
+  retrievedSubscription?: unknown,
+): Promise<WebhookResponse> {
   mockConstructEvent.mockReturnValue(event);
   mockSubscriptionRetrieve.mockResolvedValue(
-    (event as { data: { object: unknown } }).data.object,
+    retrievedSubscription ??
+      (event as { data: { object: unknown } }).data.object,
   );
   const request = { text: async () => JSON.stringify(event) };
   return POST(request as never) as unknown as WebhookResponse;
@@ -246,6 +285,9 @@ describe("A-7: subscription webhooks that match no row", () => {
         { id: "cust_row_1", user_id: "user-1", stripe_customer_id: "cus_1" },
       ],
     };
+    intentRpcError = null;
+    intentRpcFailureName = null;
+    intentRpcError = null;
   });
 
   /**
@@ -416,5 +458,177 @@ describe("A-7: subscription webhooks that match no row", () => {
       duplicate: true,
     });
     expect(storedSubscription()?.status).toBe("active");
+  });
+});
+
+describe("A-21: Checkout completion ordering", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    intentRpcError = null;
+    intentRpcFailureName = null;
+    db = {
+      billing_events: [],
+      billing_subscriptions: [],
+      billing_customers: [
+        { id: "cust_row_1", user_id: "user-1", stripe_customer_id: "cus_1" },
+      ],
+      checkout_pending_intents: [
+        { id: "intent_1", user_id: "user-1", status: "pending" },
+      ],
+    };
+  });
+
+  it("persists an incomplete subscription before releasing an unpaid completed session", async () => {
+    const currentSubscription = (
+      subscriptionEvent(
+        "evt_sub",
+        "customer.subscription.created",
+        "incomplete",
+      ) as {
+        data: { object: unknown };
+      }
+    ).data.object;
+    const response = await deliver(
+      {
+        id: "evt_checkout_completed",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: "cs_1",
+            mode: "subscription",
+            payment_status: "unpaid",
+            client_reference_id: "user-1",
+            customer: "cus_1",
+            subscription: "sub_1",
+            url: null,
+            metadata: {
+              user_id: "user-1",
+              checkout_intent_id: "intent_1",
+            },
+          },
+        },
+      },
+      currentSubscription,
+    );
+
+    expect(response.status).toBe(200);
+    expect(storedSubscription()?.status).toBe("incomplete");
+    expect(db.checkout_pending_intents[0]).toMatchObject({
+      stripe_session_id: "cs_1",
+      status: "completed",
+    });
+  });
+
+  it("keeps an expired-session release idempotent across distinct deliveries", async () => {
+    const expired = (eventId: string) => ({
+      id: eventId,
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_expired",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: "user-1",
+          url: null,
+          metadata: {
+            user_id: "user-1",
+            checkout_intent_id: "intent_1",
+          },
+        },
+      },
+    });
+
+    const first = await deliver(expired("evt_expired_1"));
+    const replay = await deliver(expired("evt_expired_2"));
+
+    expect(first.status).toBe(200);
+    expect(replay.status).toBe(200);
+    expect(db.checkout_pending_intents[0]).toMatchObject({
+      stripe_session_id: "cs_expired",
+      status: "expired",
+    });
+  });
+
+  it("does not let a delayed old expiry release a newer pending intent", async () => {
+    db.checkout_pending_intents = [
+      { id: "intent_new", user_id: "user-1", status: "pending" },
+    ];
+
+    const response = await deliver({
+      id: "evt_expired_old",
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_old",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: "user-1",
+          url: null,
+          metadata: {
+            user_id: "user-1",
+            checkout_intent_id: "intent_old",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(db.checkout_pending_intents).toEqual([
+      { id: "intent_new", user_id: "user-1", status: "pending" },
+    ]);
+  });
+
+  it("returns 500 when the intent release write fails so Stripe retries", async () => {
+    intentRpcError = "database unavailable";
+    intentRpcFailureName = "finish_subscription_checkout_intent";
+    const response = await deliver({
+      id: "evt_expired_failure",
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_expired",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: "user-1",
+          url: null,
+          metadata: {
+            user_id: "user-1",
+            checkout_intent_id: "intent_1",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(500);
+    expect(db.billing_events[0]).toMatchObject({ processed: false });
+    expect(db.checkout_pending_intents[0]).toMatchObject({ status: "pending" });
+  });
+
+  it("returns 500 when binding the Stripe session to the intent fails", async () => {
+    intentRpcError = "database unavailable";
+    intentRpcFailureName = "attach_subscription_checkout_session";
+    const response = await deliver({
+      id: "evt_expired_attach_failure",
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_expired",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: "user-1",
+          url: null,
+          metadata: {
+            user_id: "user-1",
+            checkout_intent_id: "intent_1",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(500);
+    expect(db.billing_events[0]).toMatchObject({ processed: false });
+    expect(db.checkout_pending_intents[0]).toMatchObject({ status: "pending" });
   });
 });
