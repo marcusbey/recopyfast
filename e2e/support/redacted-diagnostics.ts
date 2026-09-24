@@ -11,6 +11,10 @@ export function redactDiagnostic(
 ): string {
   return value
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(
+      /\bhttps:\/\/checkout\.stripe\.com\/[^\s"'<>]*/gi,
+      "[REDACTED CHECKOUT URL]",
+    )
     .replace(/\bhttps?:\/\/[^\s"'<>?]+\?[^\s"'<>]*/gi, "[REDACTED URL]")
     .replace(/authorization:\s*bearer\s+\S+/gi, "authorization: [REDACTED]")
     .replace(
@@ -36,6 +40,19 @@ export function redactDiagnostic(
       "[REDACTED STRIPE KEY]",
     )
     .replace(/\bwhsec_[A-Za-z0-9_-]+\b/g, "[REDACTED WEBHOOK SECRET]")
+    .replace(
+      /\bcs_(?:test|live)_[A-Za-z0-9_-]*secret[A-Za-z0-9_-]*\b/gi,
+      "[REDACTED CHECKOUT SECRET]",
+    )
+    .replace(/\b(?:\d[ -]?){13,19}\b/g, "[REDACTED CARD]")
+    .replace(
+      /(\b(?:card[_ -]?exp(?:iry|iration)?|expiry|expiration)\b\s*[:=]\s*)(?:\d{1,2}\s*\/\s*\d{2,4}|\d{3,4})/gi,
+      "$1[REDACTED]",
+    )
+    .replace(
+      /(\b(?:card[_ -]?(?:cvc|cvv)|cvc|cvv)\b\s*[:=]\s*)\d{3,4}/gi,
+      "$1[REDACTED]",
+    )
     .replace(
       /\b(?:e2e|parity)_(?:key|staging|edit)_[A-Za-z0-9_-]+\b/gi,
       "[REDACTED]",
