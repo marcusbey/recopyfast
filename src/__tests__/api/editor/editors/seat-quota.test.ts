@@ -71,8 +71,8 @@ const mockActivateSiteEditor = activateSiteEditor as jest.MockedFunction<
   typeof activateSiteEditor
 >;
 
-const SITE_ID = "site-1";
-const OWNER_ID = "owner-1";
+const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const OWNER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 function postRequest(body: Record<string, unknown>) {
   return new NextRequest("https://recopyfast.com/api/editor/editors", {
@@ -83,7 +83,7 @@ function postRequest(body: Record<string, unknown>) {
 }
 
 const enrolledEditor = {
-  id: "editor-1",
+  id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   siteId: SITE_ID,
   email: "ada@clientcompany.com",
   permissions: ["view", "edit"] as Array<"view" | "edit">,

@@ -28,8 +28,9 @@ const mockEnforceRateLimit = enforceRateLimit as jest.MockedFunction<
   typeof enforceRateLimit
 >;
 
-const SITE_ID = "site-1";
-const USER_ID = "owner-1";
+const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const OTHER_SITE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const OLD_KEY = "old-site-key";
 
 function request() {
@@ -115,6 +116,51 @@ describe("POST /api/sites/[siteId]/regenerate-snippet", () => {
     );
   });
 
+  it("rejects a malformed site id before authentication", async () => {
+    const response = await POST(request(), context("not-a-uuid"));
+
+    expect(response.status).toBe(400);
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("normalizes uppercase UUIDs before permission and update queries", async () => {
+    const client = permissionClient({ permission: "admin" });
+    mockCreateClient.mockResolvedValue(client as never);
+    const service = serviceClient();
+    mockCreateServiceRoleClient.mockReturnValue(service as never);
+
+    const response = await POST(request(), context(SITE_ID.toUpperCase()));
+
+    expect(response.status).toBe(200);
+    expect(client.permissionQuery.eqSite).toHaveBeenCalledWith(
+      "site_id",
+      SITE_ID,
+    );
+    expect(service.eq).toHaveBeenCalledWith("id", SITE_ID);
+  });
+
+  it("normalizes the authenticated user UUID before the owner rate-limit key", async () => {
+    const client = permissionClient({
+      permission: "admin",
+      user: { id: USER_ID.toUpperCase() },
+    });
+    mockCreateClient.mockResolvedValue(client as never);
+    mockCreateServiceRoleClient.mockReturnValue(serviceClient() as never);
+
+    const response = await POST(request(), context());
+
+    expect(response.status).toBe(200);
+    expect(client.permissionQuery.eqUser).toHaveBeenCalledWith(
+      "user_id",
+      USER_ID,
+    );
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.any(NextRequest),
+      expect.objectContaining({ identifier: USER_ID }),
+    );
+  });
+
   it("rejects an unauthenticated caller without writing", async () => {
     mockCreateClient.mockResolvedValue(
       permissionClient({ user: null }) as never,
@@ -152,12 +198,12 @@ describe("POST /api/sites/[siteId]/regenerate-snippet", () => {
     const service = serviceClient();
     mockCreateServiceRoleClient.mockReturnValue(service as never);
 
-    const response = await POST(request(), context("target-site"));
+    const response = await POST(request(), context(OTHER_SITE_ID));
 
     expect(response.status).toBe(403);
     expect(client.permissionQuery.eqSite).toHaveBeenCalledWith(
       "site_id",
-      "target-site",
+      OTHER_SITE_ID,
     );
     expect(client.permissionQuery.eqUser).toHaveBeenCalledWith(
       "user_id",

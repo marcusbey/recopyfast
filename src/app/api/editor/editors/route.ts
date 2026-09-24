@@ -16,9 +16,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   activateSiteEditor,
+  EditorActivationUnavailableError,
   findActiveSiteEditor,
   isPlausibleEmail,
   listSiteEditors,
+  normalizeEmail,
   revokeSiteEditor,
 } from "@/lib/auth/editor-directory";
 import { canShareSite } from "@/lib/feature-gating/permissions";
@@ -29,11 +31,14 @@ import {
 import { readJsonBody, readString } from "@/lib/auth/editor-request";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { sendEditorInvitationEmail } from "@/lib/email/resend";
+import { requireUuid } from "@/lib/api/validation";
 
 interface Caller {
   userId: string;
   email: string | null;
 }
+
+const RECIPIENT_RATE_LIMIT_ENDPOINT = "editor/editors:invitation:recipient";
 
 /** Authenticate, then authorise against this specific site. */
 async function requireSiteAdmin(
@@ -51,11 +56,20 @@ async function requireSiteAdmin(
     };
   }
 
+  const userIdResult = requireUuid({ userId: user.id }, "userId");
+  if (!userIdResult.ok) {
+    console.error("[editor-auth] authenticated user has a malformed UUID");
+    return {
+      response: NextResponse.json({ error: "unauthorized" }, { status: 401 }),
+    };
+  }
+  const userId = userIdResult.value;
+
   const { data: permission, error: permError } = await supabase
     .from("site_permissions")
     .select("permission")
     .eq("site_id", siteId)
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (permError || permission?.permission !== "admin") {
@@ -67,7 +81,7 @@ async function requireSiteAdmin(
     };
   }
 
-  return { caller: { userId: user.id, email: user.email ?? null } };
+  return { caller: { userId, email: user.email ?? null } };
 }
 
 function editorHubUrl(): string {
@@ -118,10 +132,14 @@ async function deliverInvitation(params: {
 
 export async function GET(request: NextRequest) {
   try {
-    const siteId = request.nextUrl.searchParams.get("siteId");
-    if (!siteId) {
+    const siteIdResult = requireUuid(
+      { siteId: request.nextUrl.searchParams.get("siteId") },
+      "siteId",
+    );
+    if (!siteIdResult.ok) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
+    const siteId = siteIdResult.value;
 
     const auth = await requireSiteAdmin(siteId);
     if ("response" in auth) return auth.response;
@@ -148,7 +166,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await readJsonBody(request);
-    const siteId = readString(body, "siteId");
+    const siteIdResult = body ? requireUuid(body, "siteId") : null;
+    const siteId = siteIdResult?.ok ? siteIdResult.value : null;
     const email = readString(body, "email");
     const rawPermissions = Array.isArray(body?.permissions)
       ? (body.permissions as unknown[]).filter(
@@ -238,12 +257,44 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const activation = await activateSiteEditor({
-      siteId,
-      email: email.trim(),
-      permissions,
-      invitedBy: auth.caller.userId,
+    // Check every POST, including an apparently active row. A concurrent DELETE
+    // can revoke that row after the lookup and make the atomic activation below
+    // restore it (and therefore send mail). Skipping this bucket for the earlier
+    // observation would reopen the remove/re-add recipient-spam path.
+    const recipientLimited = await enforceRateLimit(request, {
+      limit: "EDITOR_INVITE_RECIPIENT",
+      endpoint: RECIPIENT_RATE_LIMIT_ENDPOINT,
+      identifier: `${siteId}|${normalizeEmail(email)}`,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message:
+        "This editor has already received several invitations. Try again later.",
     });
+    if (recipientLimited) return recipientLimited;
+
+    let activation: Awaited<ReturnType<typeof activateSiteEditor>>;
+    try {
+      activation = await activateSiteEditor({
+        siteId,
+        email: email.trim(),
+        permissions,
+        invitedBy: auth.caller.userId,
+      });
+    } catch (error) {
+      if (error instanceof EditorActivationUnavailableError) {
+        console.error(
+          "[editor-auth] activation RPC unavailable; migration must be applied before app deployment",
+        );
+        return NextResponse.json(
+          {
+            error: "service_unavailable",
+            message: "Editor invitations are temporarily unavailable.",
+          },
+          { status: 503 },
+        );
+      }
+      throw error;
+    }
 
     if (!activation) {
       return NextResponse.json({ error: "server_error" }, { status: 500 });
@@ -279,8 +330,12 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await readJsonBody(request);
-    const siteId = readString(body, "siteId");
-    const siteEditorId = readString(body, "siteEditorId");
+    const siteIdResult = body ? requireUuid(body, "siteId") : null;
+    const siteEditorIdResult = body ? requireUuid(body, "siteEditorId") : null;
+    const siteId = siteIdResult?.ok ? siteIdResult.value : null;
+    const siteEditorId = siteEditorIdResult?.ok
+      ? siteEditorIdResult.value
+      : null;
     if (!siteId || !siteEditorId) {
       return NextResponse.json(
         {
@@ -317,17 +372,6 @@ export async function PATCH(request: NextRequest) {
     });
     if (ownerLimited) return ownerLimited;
 
-    const editorLimited = await enforceRateLimit(request, {
-      limit: "EDITOR_INVITE_RECIPIENT",
-      endpoint: "editor/editors:resend:editor",
-      identifier: `${siteId}|${siteEditorId}`,
-      identifierType: "user",
-      onStoreFailure: "deny",
-      message:
-        "This editor has already received several invitations. Try again later.",
-    });
-    if (editorLimited) return editorLimited;
-
     // Both predicates matter. Authorising site A must never make an editor id
     // from site B addressable, and revoked rows have no live access to invite.
     const service = createServiceRoleClient();
@@ -348,6 +392,17 @@ export async function PATCH(request: NextRequest) {
       }
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+
+    const editorLimited = await enforceRateLimit(request, {
+      limit: "EDITOR_INVITE_RECIPIENT",
+      endpoint: RECIPIENT_RATE_LIMIT_ENDPOINT,
+      identifier: `${siteId}|${normalizeEmail(editor.email)}`,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message:
+        "This editor has already received several invitations. Try again later.",
+    });
+    if (editorLimited) return editorLimited;
 
     const permissions = normalizePermissions(editor.permissions);
     const invitationEmailSent = auth.caller.email
@@ -371,10 +426,14 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const siteEditorId = request.nextUrl.searchParams.get("siteEditorId");
-    if (!siteEditorId) {
+    const siteEditorIdResult = requireUuid(
+      { siteEditorId: request.nextUrl.searchParams.get("siteEditorId") },
+      "siteEditorId",
+    );
+    if (!siteEditorIdResult.ok) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
+    const siteEditorId = siteEditorIdResult.value;
 
     // Resolve the owning site before the permission check — the caller supplies
     // an editor id, and we must authorise against the site that id belongs to

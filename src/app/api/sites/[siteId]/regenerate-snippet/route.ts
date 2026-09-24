@@ -5,6 +5,7 @@ import { buildSiteToken } from "@/lib/security/site-auth";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { requireUuid } from "@/lib/api/validation";
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
@@ -25,7 +26,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
     });
     if (floodLimited) return floodLimited;
 
-    const { siteId } = await context.params;
+    const { siteId: rawSiteId } = await context.params;
+    const siteIdResult = requireUuid({ siteId: rawSiteId }, "siteId");
+    if (!siteIdResult.ok) {
+      return NextResponse.json({ error: "Invalid site id" }, { status: 400 });
+    }
+    const siteId = siteIdResult.value;
     const supabase = await createClient();
     const {
       data: { user },
@@ -35,12 +41,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const userIdResult = requireUuid({ userId: user.id }, "userId");
+    if (!userIdResult.ok) {
+      console.error("Authenticated user has a malformed UUID");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = userIdResult.value;
 
     const { data: permission, error: permissionError } = await supabase
       .from("site_permissions")
       .select("permission")
       .eq("site_id", siteId)
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (permissionError || permission?.permission !== "admin") {
@@ -53,7 +65,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const ownerLimited = await enforceRateLimit(request, {
       limit: "USER_DOMAIN_VERIFY",
       endpoint: "sites/regenerate-snippet:owner",
-      identifier: user.id,
+      identifier: userId,
       identifierType: "user",
       onStoreFailure: "deny",
       message: "Too many snippet regenerations. Please try again shortly.",

@@ -5,6 +5,7 @@ import {
   authorizeSiteRequest,
   authorizeSiteOrigin,
   parseOrigin,
+  SiteAuthError,
 } from "@/lib/security/site-auth";
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import {
@@ -197,77 +198,16 @@ function withCors(
   return response;
 }
 
-interface SiteAuthFailureShape {
-  message: string;
-  code?: string;
-  status: number;
-  allowedOrigin: string | null;
-}
-
-/**
- * Read a typed site-auth refusal without making route tests depend on the
- * concrete Error class.
- *
- * Several route suites replace `site-auth` with narrow manual mocks. An
- * `instanceof SiteAuthError` check would turn their intentionally-thrown plain
- * Errors into a module-shape failure instead of exercising the catch path. The
- * production helper supplies code/status/allowedOrigin; legacy test doubles
- * keep the old message-based fallback until their scope reaches this contract.
- */
-function siteAuthFailure(error: unknown): SiteAuthFailureShape {
-  if (error instanceof Error) {
-    const candidate = error as Error & {
-      code?: unknown;
-      status?: unknown;
-      allowedOrigin?: unknown;
-    };
-
-    const knownLegacyMessages = new Set([
-      "Missing site token",
-      "Site not found",
-      "Invalid site token",
-      "Invalid token",
-      "Origin not allowed",
-    ]);
-    const hasTypedCode = typeof candidate.code === "string";
-
-    return {
-      // Typed production errors carry deliberately public messages. Plain
-      // Errors exist in older route tests, but only their established auth
-      // phrases are safe to preserve. A database/URL/library exception must
-      // not be reflected to an unauthenticated caller.
-      message:
-        hasTypedCode || knownLegacyMessages.has(error.message)
-          ? error.message
-          : "Unauthorized",
-      code: typeof candidate.code === "string" ? candidate.code : undefined,
-      status:
-        candidate.status === 401 || candidate.status === 403
-          ? candidate.status
-          : error.message === "Origin not allowed"
-            ? 403
-            : 401,
-      allowedOrigin:
-        typeof candidate.allowedOrigin === "string"
-          ? candidate.allowedOrigin
-          : null,
-    };
-  }
-
-  return {
-    message: "Unauthorized",
-    status: 401,
-    allowedOrigin: null,
-  };
-}
-
 function siteAuthFailureResponse(error: unknown) {
-  const failure = siteAuthFailure(error);
+  const failure =
+    error instanceof SiteAuthError
+      ? error
+      : new SiteAuthError("Unauthorized", "site_token_invalid", 401);
   return withCors(
     NextResponse.json(
       {
         error: failure.message,
-        ...(failure.code ? { code: failure.code } : {}),
+        ...(error instanceof SiteAuthError ? { code: failure.code } : {}),
       },
       { status: failure.status },
     ),

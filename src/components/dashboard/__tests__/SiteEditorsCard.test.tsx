@@ -234,7 +234,9 @@ describe("SiteEditorsCard", () => {
 
     renderCard();
     await screen.findByText(ada.email);
-    await user.click(screen.getByRole("button", { name: /resend invite/i }));
+    await user.click(
+      screen.getByRole("button", { name: `Resend invite to ${ada.email}` }),
+    );
 
     expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
     const [patchUrl, patchInit] = callsWithMethod("PATCH")[0];
@@ -256,8 +258,55 @@ describe("SiteEditorsCard", () => {
       await screen.findByText(`We emailed ${ada.email} an invitation.`),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /resend invite/i }),
+      screen.getByRole("button", { name: `Resend invite to ${ada.email}` }),
     ).toBeEnabled();
+  });
+
+  it("names each resend action for its editor", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ok: true, editors: [ada, grace] }),
+    );
+
+    renderCard();
+
+    expect(
+      await screen.findByRole("button", {
+        name: `Resend invite to ${ada.email}`,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: `Resend invite to ${grace.email}`,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not claim access was newly granted when a resend email fails", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ok: true,
+          invitationEmailSent: false,
+          hubUrl: "https://app.recopyfast.com/edit",
+        }),
+      );
+
+    renderCard();
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Resend invite to ${ada.email}`,
+      }),
+    );
+
+    expect(
+      await screen.findByText(/could not resend the invitation email/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/they still have access/i)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/can now edit this site/i),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a resend rate-limit failure on the active editor row", async () => {

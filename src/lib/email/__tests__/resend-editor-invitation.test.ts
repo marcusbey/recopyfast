@@ -59,4 +59,25 @@ describe("sendEditorInvitationEmail", () => {
     expect(message.text).toContain("no account or password");
     expect(message.text).not.toContain("token=");
   });
+
+  it("strips controls and caps the owner-controlled site label", async () => {
+    const { sendEditorInvitationEmail } = await import("../resend");
+    const siteName = `Client\r\nBcc: victim@example.com\u0000${"x".repeat(300)}TAIL`;
+
+    await sendEditorInvitationEmail({
+      to: "editor@example.com",
+      inviterEmail: "owner@example.com",
+      siteName,
+      siteDomain: "client.example",
+      permissions: ["edit"],
+      hubUrl: "https://app.recopyfa.st/edit",
+    });
+
+    const message = mockResendSend.mock.calls[0][0];
+    expect(message.subject).not.toMatch(/[\r\n\u0000-\u001f\u007f]/);
+    expect(message.subject).not.toContain("TAIL");
+    expect(message.text).not.toMatch(/[\r\n]Bcc:/);
+    expect(message.text).not.toContain("TAIL");
+    expect(message.html).not.toContain("TAIL");
+  });
 });

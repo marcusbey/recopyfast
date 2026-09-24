@@ -213,7 +213,7 @@ describe("SiteDetailView", () => {
     });
   });
 
-  it("warns that every old snippet stops working before regeneration", async () => {
+  it("explains the HTTP and existing WebSocket revocation timing", async () => {
     render(<SiteDetailView site={mockSite} />);
 
     fireEvent.click(
@@ -224,7 +224,12 @@ describe("SiteDetailView", () => {
       await screen.findByRole("heading", { name: /regenerate snippet/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/every old snippet will stop working/i),
+      screen.getByText(/old snippets stop working for new requests/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /existing live editing connections may continue until they reconnect/i,
+      ),
     ).toBeInTheDocument();
     expect(global.fetch).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate-snippet"),

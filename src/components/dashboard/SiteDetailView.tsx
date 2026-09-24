@@ -342,8 +342,9 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
               <Alert variant="success">
                 <AlertTitle>Snippet regenerated</AlertTitle>
                 <AlertDescription>
-                  Copy this new snippet to your site. Every old snippet has
-                  stopped working.
+                  Copy this new snippet to your site. Old snippets no longer
+                  work for new requests. Existing live editing connections may
+                  continue until they reconnect.
                 </AlertDescription>
               </Alert>
             )}
@@ -485,9 +486,10 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           <DialogHeader>
             <DialogTitle>Regenerate snippet?</DialogTitle>
             <DialogDescription>
-              Every old snippet will stop working immediately. You must replace
-              it on {site.domain} with the new snippet shown here after this
-              succeeds.
+              Old snippets stop working for new requests as soon as this
+              succeeds. Existing live editing connections may continue until
+              they reconnect. Replace the snippet on {site.domain} with the new
+              one shown here.
             </DialogDescription>
           </DialogHeader>
 

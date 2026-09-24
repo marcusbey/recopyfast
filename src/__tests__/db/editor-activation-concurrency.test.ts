@@ -32,6 +32,10 @@ interface PgClientConstructor {
   new (config: { connectionString: string }): PgClient;
 }
 
+type ActivationOutcome =
+  | { ok: true; didActivate: boolean }
+  | { ok: false; error: unknown };
+
 // The repository intentionally has no @types/pg; match the established DB
 // harness and load it through a structural type.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -138,11 +142,86 @@ describeWithDatabase("atomic editor activation migration", () => {
     return rows[0].did_activate;
   }
 
+  async function activateWithClient(client: PgClient, email: string) {
+    const { rows } = await client.query<{ did_activate: boolean }>(
+      `SELECT did_activate
+         FROM public.activate_site_editor($1, $2, $3, $4)`,
+      [siteId, email, ["view", "edit"], inviterId],
+    );
+    return rows[0].did_activate;
+  }
+
+  async function waitForDatabaseLock(backendPid: number) {
+    const deadline = Date.now() + 5_000;
+
+    while (Date.now() < deadline) {
+      const { rows } = await pool.query<{
+        wait_event_type: string | null;
+        wait_event: string | null;
+      }>(
+        `SELECT wait_event_type, wait_event
+           FROM pg_stat_activity
+          WHERE pid = $1`,
+        [backendPid],
+      );
+
+      if (rows[0]?.wait_event_type === "Lock") return rows[0].wait_event;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    throw new Error(
+      `Timed out waiting for PostgreSQL backend ${backendPid} to block`,
+    );
+  }
+
+  async function activateWithForcedOverlap(email: string) {
+    const firstClient = new Client({
+      connectionString: databaseConnectionString,
+    });
+    const secondClient = new Client({
+      connectionString: databaseConnectionString,
+    });
+    let firstTransactionOpen = false;
+    let secondActivation: Promise<ActivationOutcome> | null = null;
+
+    await Promise.all([firstClient.connect(), secondClient.connect()]);
+    try {
+      await firstClient.query("BEGIN");
+      firstTransactionOpen = true;
+      const firstDidActivate = await activateWithClient(firstClient, email);
+      const { rows: backendRows } = await secondClient.query<{ pid: number }>(
+        "SELECT pg_backend_pid() AS pid",
+      );
+
+      // Keep the first activation uncommitted while the second one enters the
+      // function. Pool scheduling used to serialize these calls before they
+      // overlapped, so deleting the advisory lock still left the test green.
+      // PostgreSQL exposes the exact lock class being awaited: the committed
+      // function must block here on `advisory`; without it the insert path
+      // reaches the unique index and waits on a transaction id instead.
+      secondActivation = activateWithClient(secondClient, email).then(
+        (didActivate): ActivationOutcome => ({ ok: true, didActivate }),
+        (error: unknown): ActivationOutcome => ({ ok: false, error }),
+      );
+      expect(await waitForDatabaseLock(backendRows[0].pid)).toBe("advisory");
+
+      await firstClient.query("COMMIT");
+      firstTransactionOpen = false;
+      const secondOutcome = await secondActivation;
+      if (!secondOutcome.ok) throw secondOutcome.error;
+
+      return [firstDidActivate, secondOutcome.didActivate];
+    } finally {
+      if (firstTransactionOpen) {
+        await firstClient.query("ROLLBACK").catch(() => undefined);
+      }
+      if (secondActivation) await secondActivation;
+      await Promise.all([firstClient.end(), secondClient.end()]);
+    }
+  }
+
   it("reports one activation across concurrent enrol and restore calls", async () => {
-    const first = await Promise.all([
-      activate("editor@example.com"),
-      activate("editor@example.com"),
-    ]);
+    const first = await activateWithForcedOverlap("editor@example.com");
     expect(first.sort()).toEqual([false, true]);
 
     expect(await activate("editor@example.com")).toBe(false);
@@ -151,12 +230,9 @@ describeWithDatabase("atomic editor activation migration", () => {
       "UPDATE public.site_editors SET revoked_at = NOW() WHERE site_id = $1 AND email = $2",
       [siteId, "editor@example.com"],
     );
-    const restored = await Promise.all([
-      activate("editor@example.com"),
-      activate("editor@example.com"),
-    ]);
+    const restored = await activateWithForcedOverlap("editor@example.com");
     expect(restored.sort()).toEqual([false, true]);
-  });
+  }, 15_000);
 
   it("exposes the RPC only to the service role", async () => {
     const { rows } = await pool.query<{
@@ -210,9 +286,3 @@ describeWithDatabase("atomic editor activation migration", () => {
     }
   });
 });
-
-if (!isLoopback) {
-  test("[gated] set a loopback RCF_S29_DB_URL to verify atomic editor activation", () => {
-    expect(isLoopback).not.toBe(true);
-  });
-}

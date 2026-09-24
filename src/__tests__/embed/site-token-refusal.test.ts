@@ -1,6 +1,7 @@
 /**
- * The public widget must turn a readable site-token refusal into one useful
- * warning while leaving the customer's authored copy untouched.
+ * The public widget must leave the customer's authored copy untouched when a
+ * site token is refused. The server response remains structured and readable,
+ * but the widget cannot afford story-specific handling inside its byte budget.
  *
  * The browser script is an IIFE, so this test slices hydrateStoredContent from
  * the source that is actually built and shipped. A transcription would let the
@@ -29,7 +30,6 @@ interface FakeWidget {
   editorTokenQuery: () => string;
   editorAuthHeaders: () => Record<string, string>;
   applyContentToElement: jest.Mock;
-  hasWarnedSiteTokenRefusal: boolean;
   hydrateStoredContent: () => Promise<void>;
 }
 
@@ -78,13 +78,12 @@ function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {
     editorTokenQuery: () => "",
     editorAuthHeaders: () => ({}),
     applyContentToElement: jest.fn(),
-    hasWarnedSiteTokenRefusal: false,
     hydrateStoredContent: loadHydrateStoredContent(fetch, warn),
   };
 }
 
 describe("widget handling of a refused site token", () => {
-  it("warns once with the dashboard recovery action and preserves authored copy", async () => {
+  it("preserves authored copy without adding a token-specific warning", async () => {
     const fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -97,10 +96,12 @@ describe("widget handling of a refused site token", () => {
     const widget = makeWidget(fetch, warn);
 
     await widget.hydrateStoredContent();
-    await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
+      "ReCopyFast: could not load saved content (HTTP 401); showing the page as authored.",
+    );
+    expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
     expect(widget.applyContentToElement).not.toHaveBeenCalled();
@@ -109,7 +110,7 @@ describe("widget handling of a refused site token", () => {
     );
   });
 
-  it("uses the same recovery warning for a missing installed token", async () => {
+  it("preserves authored copy for a missing installed token", async () => {
     const fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -124,8 +125,12 @@ describe("widget handling of a refused site token", () => {
     await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
+    expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
+    );
+    expect(widget.applyContentToElement).not.toHaveBeenCalled();
+    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
+      "Authored headline",
     );
   });
 });

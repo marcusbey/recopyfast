@@ -27,6 +27,15 @@ export interface SiteEditorActivation {
   didActivate: boolean;
 }
 
+export class EditorActivationUnavailableError extends Error {
+  readonly code = "ACTIVATION_RPC_UNAVAILABLE";
+
+  constructor() {
+    super("activate_site_editor is unavailable");
+    this.name = "EditorActivationUnavailableError";
+  }
+}
+
 export interface EditorSiteSummary {
   siteEditorId: string;
   siteId: string;
@@ -218,6 +227,13 @@ export async function activateSiteEditor(params: {
       created_at: string;
       did_activate: boolean;
     }>();
+
+  if (error?.code === "PGRST202" || error?.code === "42883") {
+    // The application route depends on the additive migration. Treat a missing
+    // function as a release-order failure with a stable signal so the route can
+    // fail closed and tell operators what must happen before deployment.
+    throw new EditorActivationUnavailableError();
+  }
 
   if (error) {
     console.error("[editor-directory] activation failed:", error.message);

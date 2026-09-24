@@ -150,6 +150,10 @@ describe("/api/content/[siteId] authorization failures", () => {
 
     serviceClient.from.mockReturnValue(serviceClient);
     serviceClient.select.mockReturnValue(serviceClient);
+    // `clearAllMocks` preserves queued `mockReturnValueOnce` implementations.
+    // A failed content-read assertion must not leak its unused query steps into
+    // the next test and turn an independent token check into a cascade failure.
+    serviceClient.eq.mockReset();
     serviceClient.eq.mockReturnValue(serviceClient);
     serviceClient.single.mockResolvedValue({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },

@@ -98,6 +98,7 @@ export function SiteEditorRow({
               size="sm"
               onClick={() => onResend(editor)}
               disabled={isResending}
+              aria-label={`${isResending ? "Sending invitation to" : "Resend invite to"} ${editor.email}`}
             >
               {isResending && (
                 <Loader2

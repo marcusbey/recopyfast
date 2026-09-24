@@ -66,6 +66,7 @@ type Notice =
       email: string;
       hubUrl: string;
       invitationEmailSent: boolean;
+      action: "invite" | "resend";
     }
   | { kind: "removed"; email: string; devicesSignedOut: number };
 
@@ -243,6 +244,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
           email: data.editor?.email ?? email,
           hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
           invitationEmailSent: data.invitationEmailSent === true,
+          action: "invite",
         });
         await loadEditors();
         return true;
@@ -293,6 +295,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
           email: editor.email,
           hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
           invitationEmailSent: false,
+          action: "resend",
         });
         return;
       }
@@ -303,6 +306,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
         email: editor.email,
         hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
         invitationEmailSent: true,
+        action: "resend",
       });
     } catch (error) {
       console.error("Failed to resend editor invitation:", error);
@@ -627,7 +631,11 @@ function NoticePanel({ notice }: { notice: Notice }) {
           <p>We emailed {notice.email} an invitation.</p>
         ) : (
           <>
-            <p>{notice.email} can now edit this site.</p>
+            <p>
+              {notice.action === "resend"
+                ? `We could not resend the invitation email to ${notice.email}. They still have access.`
+                : `${notice.email} can now edit this site.`}
+            </p>
             <p>
               No invitation email was sent. Ask them to open{" "}
               {href ? (

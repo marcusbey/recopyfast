@@ -2,6 +2,8 @@ const mockGetUser = jest.fn();
 const mockPermissionLookup = jest.fn();
 const mockSiteLookup = jest.fn();
 const mockEditorLookup = jest.fn();
+const mockEditorEq = jest.fn();
+const mockEditorIs = jest.fn();
 
 const mockSupabase = {
   auth: { getUser: mockGetUser },
@@ -19,8 +21,14 @@ const mockService = {
   from: jest.fn((table: string) => {
     const chain: Record<string, unknown> = {
       select: jest.fn(() => chain),
-      eq: jest.fn(() => chain),
-      is: jest.fn(() => chain),
+      eq:
+        table === "site_editors"
+          ? mockEditorEq.mockImplementation(() => chain)
+          : jest.fn(() => chain),
+      is:
+        table === "site_editors"
+          ? mockEditorIs.mockImplementation(() => chain)
+          : jest.fn(() => chain),
       maybeSingle: table === "sites" ? mockSiteLookup : mockEditorLookup,
     };
     return chain;
@@ -59,6 +67,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { PATCH, POST } from "@/app/api/editor/editors/route";
 import {
   activateSiteEditor,
+  EditorActivationUnavailableError,
   findActiveSiteEditor,
 } from "@/lib/auth/editor-directory";
 import { sendEditorInvitationEmail } from "@/lib/email/resend";
@@ -77,11 +86,12 @@ const mockEnforceRateLimit = enforceRateLimit as jest.MockedFunction<
   typeof enforceRateLimit
 >;
 
-const SITE_ID = "site-1";
-const EDITOR_ID = "editor-1";
-const OWNER_ID = "owner-1";
+const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const EDITOR_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const OWNER_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const OWNER_EMAIL = "owner@example.com";
 const EDITOR_EMAIL = "editor@example.com";
+const RECIPIENT_ENDPOINT = "editor/editors:invitation:recipient";
 
 const editor = {
   id: EDITOR_ID,
@@ -133,7 +143,7 @@ describe("editor invitation delivery", () => {
     });
     mockActivateSiteEditor.mockResolvedValue({ editor, didActivate: true });
     mockSendInvitation.mockResolvedValue({ sent: true });
-    mockEnforceRateLimit.mockResolvedValue(null);
+    mockEnforceRateLimit.mockReset().mockResolvedValue(null);
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -174,6 +184,14 @@ describe("editor invitation delivery", () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+      expect.any(NextRequest),
+      expect.objectContaining({
+        endpoint: RECIPIENT_ENDPOINT,
+        identifier: `${SITE_ID}|${EDITOR_EMAIL}`,
+        limit: "EDITOR_INVITE_RECIPIENT",
+      }),
+    );
     expect(mockSendInvitation).toHaveBeenCalledTimes(1);
     expect((await response.json()).invitationEmailSent).toBe(true);
   });
@@ -194,6 +212,29 @@ describe("editor invitation delivery", () => {
     expect(mockSendInvitation).not.toHaveBeenCalled();
     expect(mockSiteLookup).not.toHaveBeenCalled();
     expect((await response.json()).invitationEmailSent).toBe(false);
+  });
+
+  it("checks the recipient limit even when a concurrent revocation makes activation send mail", async () => {
+    mockFindActiveSiteEditor.mockResolvedValue(editor);
+    mockActivateSiteEditor.mockResolvedValue({ editor, didActivate: true });
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 }),
+      );
+
+    const response = await POST(
+      request("POST", {
+        siteId: SITE_ID,
+        email: EDITOR_EMAIL,
+        permissions: ["edit"],
+      }),
+    );
+
+    expect(response.status).toBe(429);
+    expect(mockActivateSiteEditor).not.toHaveBeenCalled();
+    expect(mockSendInvitation).not.toHaveBeenCalled();
   });
 
   it("keeps enrolment successful and reports false when Resend fails", async () => {
@@ -275,8 +316,8 @@ describe("editor invitation delivery", () => {
         onStoreFailure: "deny",
       }),
       expect.objectContaining({
-        endpoint: "editor/editors:resend:editor",
-        identifier: `${SITE_ID}|${EDITOR_ID}`,
+        endpoint: RECIPIENT_ENDPOINT,
+        identifier: `${SITE_ID}|${EDITOR_EMAIL}`,
         limit: "EDITOR_INVITE_RECIPIENT",
         onStoreFailure: "deny",
       }),
@@ -333,7 +374,7 @@ describe("editor invitation delivery", () => {
     expect(mockSendInvitation).not.toHaveBeenCalled();
   });
 
-  it("does not look up or email the editor when the recipient limit refuses", async () => {
+  it("resolves the editor before applying the shared recipient limit", async () => {
     mockEnforceRateLimit
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
@@ -346,11 +387,22 @@ describe("editor invitation delivery", () => {
     );
 
     expect(response.status).toBe(429);
-    expect(mockEditorLookup).not.toHaveBeenCalled();
+    expect(mockEditorLookup).toHaveBeenCalledTimes(1);
     expect(mockSendInvitation).not.toHaveBeenCalled();
   });
 
-  it("rejects revoked or missing rows scoped to the authorised site", async () => {
+  it("scopes resend lookup to the authorised site and active rows", async () => {
+    const response = await PATCH(
+      request("PATCH", { siteId: SITE_ID, siteEditorId: EDITOR_ID }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEditorEq).toHaveBeenCalledWith("id", EDITOR_ID);
+    expect(mockEditorEq).toHaveBeenCalledWith("site_id", SITE_ID);
+    expect(mockEditorIs).toHaveBeenCalledWith("revoked_at", null);
+  });
+
+  it("rejects revoked or missing rows before applying the recipient limit", async () => {
     mockEditorLookup.mockResolvedValue({ data: null, error: null });
 
     const response = await PATCH(
@@ -358,6 +410,118 @@ describe("editor invitation delivery", () => {
     );
 
     expect(response.status).toBe(404);
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(2);
     expect(mockSendInvitation).not.toHaveBeenCalled();
+  });
+
+  it("normalizes UUID spelling before lookup and rate-limit keys", async () => {
+    const response = await PATCH(
+      request("PATCH", {
+        siteId: SITE_ID.toUpperCase(),
+        siteEditorId: EDITOR_ID.toUpperCase(),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEditorEq).toHaveBeenCalledWith("id", EDITOR_ID);
+    expect(mockEditorEq).toHaveBeenCalledWith("site_id", SITE_ID);
+    expect(mockEnforceRateLimit).toHaveBeenLastCalledWith(
+      expect.any(NextRequest),
+      expect.objectContaining({ identifier: `${SITE_ID}|${EDITOR_EMAIL}` }),
+    );
+  });
+
+  it("shares one recipient bucket across restore and resend paths", async () => {
+    mockFindActiveSiteEditor.mockResolvedValue(null);
+
+    expect(
+      (
+        await POST(
+          request("POST", {
+            siteId: SITE_ID,
+            email: EDITOR_EMAIL.toUpperCase(),
+            permissions: ["edit"],
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await PATCH(
+          request("PATCH", { siteId: SITE_ID, siteEditorId: EDITOR_ID }),
+        )
+      ).status,
+    ).toBe(200);
+
+    const recipientCalls = mockEnforceRateLimit.mock.calls
+      .map(([, options]) => options)
+      .filter((options) => options.limit === "EDITOR_INVITE_RECIPIENT");
+    expect(recipientCalls).toHaveLength(2);
+    expect(recipientCalls).toEqual([
+      expect.objectContaining({
+        endpoint: RECIPIENT_ENDPOINT,
+        identifier: `${SITE_ID}|${EDITOR_EMAIL}`,
+      }),
+      expect.objectContaining({
+        endpoint: RECIPIENT_ENDPOINT,
+        identifier: `${SITE_ID}|${EDITOR_EMAIL}`,
+      }),
+    ]);
+  });
+
+  it("normalizes the authenticated owner UUID before owner rate-limit keys", async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: OWNER_ID.toUpperCase(), email: OWNER_EMAIL } },
+      error: null,
+    });
+
+    const response = await PATCH(
+      request("PATCH", { siteId: SITE_ID, siteEditorId: EDITOR_ID }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.any(NextRequest),
+      expect.objectContaining({ identifier: OWNER_ID }),
+    );
+  });
+
+  it.each([`{${SITE_ID}}`, SITE_ID.replaceAll("-", ""), "not-a-uuid"])(
+    "rejects non-canonical UUID input %s before authentication",
+    async (siteId) => {
+      const response = await PATCH(
+        request("PATCH", { siteId, siteEditorId: EDITOR_ID }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockGetUser).not.toHaveBeenCalled();
+      expect(mockEnforceRateLimit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails closed with 503 when the activation RPC is unavailable", async () => {
+    mockFindActiveSiteEditor.mockResolvedValue(null);
+    mockActivateSiteEditor.mockRejectedValue(
+      new EditorActivationUnavailableError(),
+    );
+
+    const response = await POST(
+      request("POST", {
+        siteId: SITE_ID,
+        email: EDITOR_EMAIL,
+        permissions: ["edit"],
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "service_unavailable",
+      message: "Editor invitations are temporarily unavailable.",
+    });
+    expect(mockSendInvitation).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[editor-auth] activation RPC unavailable; migration must be applied before app deployment",
+    );
   });
 });

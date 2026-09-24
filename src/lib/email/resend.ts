@@ -140,9 +140,17 @@ export async function sendEditorInvitationEmail(params: {
   }
 
   const permissions = describePermissions(params.permissions);
-  const subject = `${params.inviterEmail} invited you to edit ${params.siteName}`;
+  // Site names are owner-controlled and registration historically imposed no
+  // length or control-character bound. Keep them out of mail headers and cap
+  // the rendered label so one name cannot create an oversized message.
+  const siteName = params.siteName
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  const subject = `${params.inviterEmail} invited you to edit ${siteName}`;
   const text = [
-    `${params.inviterEmail} invited you to edit ${params.siteName} (${params.siteDomain}) in ReCopyFast.`,
+    `${params.inviterEmail} invited you to edit ${siteName} (${params.siteDomain}) in ReCopyFast.`,
     "",
     `You can: ${permissions}.`,
     "",
@@ -152,8 +160,8 @@ export async function sendEditorInvitationEmail(params: {
   ].join("\n");
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
-      <h2 style="margin:0 0 12px;font-size:20px">You can now edit ${escapeHtml(params.siteName)}</h2>
-      <p style="margin:0 0 12px;color:#475569"><strong>${escapeHtml(params.inviterEmail)}</strong> invited you to edit ${escapeHtml(params.siteName)} at ${escapeHtml(params.siteDomain)}.</p>
+      <h2 style="margin:0 0 12px;font-size:20px">You can now edit ${escapeHtml(siteName)}</h2>
+      <p style="margin:0 0 12px;color:#475569"><strong>${escapeHtml(params.inviterEmail)}</strong> invited you to edit ${escapeHtml(siteName)} at ${escapeHtml(params.siteDomain)}.</p>
       <p style="margin:0 0 20px;color:#475569">You can: ${escapeHtml(permissions)}.</p>
       <a href="${escapeHtml(hubUrl)}" style="display:inline-block;padding:10px 16px;border-radius:6px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600">Open the editor hub</a>
       <p style="margin:20px 0 0;color:#475569">Sign in with the 6-digit code sent to this email address, with no account or password.</p>

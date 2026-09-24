@@ -47,3 +47,13 @@ confirms invoker execution and explicit function execution grants. The new RPC u
 INVOKER and explicitly revokes PUBLIC/anon/authenticated execution, following the repository's
 20260805190000 precedent. The current changelog index was checked; no change to this existing
 PL/pgSQL/RPC pattern was identified. Local role-execution tests provide the implementation proof.
+
+## Fix-run findings and decisions
+
+The independent blocked review remains unmodified. The operator chose removal of the widget
+warning to preserve zero net source bytes after s27 lands. Server structured errors and safe
+CORS remain. Strict canonical UUIDs and a shared recipient mail bucket close limiter bypasses;
+predicate-aware tests and forced database overlap replace vacuous guard/concurrency evidence.
+Missing activation RPC is a logged 503 and a hard migration-before-app release requirement.
+ADR 027 records D3 and the handshake-only WebSocket revocation limitation/follow-up. Prior
+Homebrew Node byte measurements are superseded by explicit Node 20 and 24 runs.
