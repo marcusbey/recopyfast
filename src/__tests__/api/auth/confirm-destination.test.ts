@@ -34,8 +34,15 @@ import { NextRequest } from "next/server";
 const ORIGIN = "https://www.recopyfa.st";
 
 async function confirm(query: string): Promise<string> {
+  return confirmFromOrigin(ORIGIN, query);
+}
+
+async function confirmFromOrigin(
+  requestOrigin: string,
+  query: string,
+): Promise<string> {
   const response = await GET(
-    new NextRequest(`${ORIGIN}/auth/confirm?${query}`),
+    new NextRequest(`${requestOrigin}/auth/confirm?${query}`),
   );
   return response.headers.get("location") ?? "";
 }
@@ -77,11 +84,79 @@ describe("GET /auth/confirm destination", () => {
     expect(location).toBe(`${ORIGIN}/dashboard/billing`);
   });
 
+  it("unwraps the callback destination sent by the magic-link template", async () => {
+    const location = await confirm(
+      `${VALID}&redirect_to=${encodeURIComponent(`${ORIGIN}/auth/callback`)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("unwraps the callback's nested next destination", async () => {
+    const location = await confirm(
+      `${VALID}&redirect_to=${encodeURIComponent(`${ORIGIN}/auth/callback?next=${encodeURIComponent("/dashboard/sites")}`)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard/sites`);
+  });
+
+  it.each(["/auth/confirm", "/auth/confirm/deeper"])(
+    "unwraps the same-origin auth-internal destination %s",
+    async (authPath) => {
+      const location = await confirm(
+        `${VALID}&redirect_to=${encodeURIComponent(`${ORIGIN}${authPath}?next=${encodeURIComponent("/dashboard/billing")}`)}`,
+      );
+      expect(location).toBe(`${ORIGIN}/dashboard/billing`);
+    },
+  );
+
+  it("accepts the canonical www callback when the request arrived through the apex", async () => {
+    const location = await confirmFromOrigin(
+      "https://recopyfa.st",
+      `${VALID}&redirect_to=${encodeURIComponent(`${ORIGIN}/auth/callback?next=${encodeURIComponent("/dashboard/sites")}`)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard/sites`);
+  });
+
+  it("refuses the apex callback when the canonical origin is www", async () => {
+    const location = await confirm(
+      `${VALID}&redirect_to=${encodeURIComponent(`https://recopyfa.st/auth/callback?next=${encodeURIComponent("/dashboard/sites")}`)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "/\\evil.example/steal",
+  ])("refuses an unsafe direct next value: %s", async (unsafeNext) => {
+    const location = await confirm(
+      `${VALID}&next=${encodeURIComponent(unsafeNext)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "/\\evil.example/steal",
+  ])("refuses an unsafe nested next value: %s", async (unsafeNext) => {
+    const location = await confirm(
+      `${VALID}&redirect_to=${encodeURIComponent(`${ORIGIN}/auth/callback?next=${encodeURIComponent(unsafeNext)}`)}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard`);
+  });
+
   it("refuses a cross-origin redirect_to", async () => {
     // The whole risk of accepting an absolute URL. It must not become an open
     // redirect just because the value now arrives spelled differently.
     const location = await confirm(
       `${VALID}&redirect_to=${encodeURIComponent("https://evil.example/steal")}`,
+    );
+    expect(location).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("refuses a cross-origin auth-internal redirect_to before unwrapping next", async () => {
+    const location = await confirm(
+      `${VALID}&redirect_to=${encodeURIComponent("https://evil.example/auth/callback?next=/dashboard/sites")}`,
     );
     expect(location).toBe(`${ORIGIN}/dashboard`);
   });

@@ -30,6 +30,10 @@ jest.mock("@/lib/billing/trial", () => ({
   ensureTrialStarted: jest.fn(),
 }));
 
+jest.mock("@/app/auth/public-origin", () => ({
+  resolvePublicOrigin: () => "https://recopyfast.test",
+}));
+
 import { GET } from "@/app/auth/callback/route";
 import { ensureTrialStarted } from "@/lib/billing/trial";
 
@@ -51,6 +55,10 @@ function request(url: string): Request {
 function destination(response: Response): string {
   const location = response.headers.get("location");
   return location === null ? "" : new URL(location).pathname;
+}
+
+function location(response: Response): string {
+  return response.headers.get("location") ?? "";
 }
 
 beforeEach(() => {
@@ -104,12 +112,78 @@ describe("GET /auth/callback", () => {
     const response = await GET(request(`${ORIGIN}/auth/callback?code=abc`));
 
     expect(ensureTrialStarted).not.toHaveBeenCalled();
+    expect(mockGetUser).not.toHaveBeenCalled();
     expect(destination(response)).toBe("/auth/error");
   });
 
   it("attempts nothing when there is no code at all", async () => {
+    // The shared fixture is authenticated by default. This case specifically
+    // proves that an absent code and an absent established session still fail.
+    mockGetUser.mockResolvedValue({ data: { user: null }, error: null });
+
     const response = await GET(request(`${ORIGIN}/auth/callback`));
 
+    expect(ensureTrialStarted).not.toHaveBeenCalled();
+    expect(destination(response)).toBe("/auth/error");
+  });
+
+  it("continues an already-established magic-link session without a PKCE code", async () => {
+    const response = await GET(request(`${ORIGIN}/auth/callback`));
+
+    expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(ensureTrialStarted).not.toHaveBeenCalled();
+    expect(destination(response)).toBe("/dashboard");
+  });
+
+  it("preserves next for an already-established magic-link session", async () => {
+    const response = await GET(
+      request(`${ORIGIN}/auth/callback?next=%2Fdashboard%2Fsites`),
+    );
+
+    expect(ensureTrialStarted).not.toHaveBeenCalled();
+    expect(destination(response)).toBe("/dashboard/sites");
+  });
+
+  it.each([
+    "https://evil.example/steal",
+    "//evil.example/steal",
+    "/\\evil.example/steal",
+  ])("refuses an unsafe no-code next value: %s", async (unsafeNext) => {
+    const response = await GET(
+      request(`${ORIGIN}/auth/callback?next=${encodeURIComponent(unsafeNext)}`),
+    );
+
+    expect(location(response)).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("rejects a no-code request when reading the session returns an error", async () => {
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: "user-1" } },
+      error: { message: "session invalid" },
+    });
+
+    const response = await GET(request(`${ORIGIN}/auth/callback`));
+
+    expect(destination(response)).toBe("/auth/error");
+  });
+
+  it("rejects a no-code request when reading the session throws", async () => {
+    mockGetUser.mockRejectedValue(new Error("supabase unavailable"));
+
+    const response = await GET(request(`${ORIGIN}/auth/callback`));
+
+    expect(destination(response)).toBe("/auth/error");
+  });
+
+  it.each([
+    "error=access_denied",
+    "error=access_denied&code=abc",
+    "error=&code=abc",
+  ])("gives an explicit auth error precedence for %s", async (query) => {
+    const response = await GET(request(`${ORIGIN}/auth/callback?${query}`));
+
+    expect(mockExchangeCodeForSession).not.toHaveBeenCalled();
+    expect(mockGetUser).not.toHaveBeenCalled();
     expect(ensureTrialStarted).not.toHaveBeenCalled();
     expect(destination(response)).toBe("/auth/error");
   });
