@@ -101,7 +101,7 @@ export async function GET(request: NextRequest) {
         const canInstall = permission?.permission === "admin";
 
         // The HMAC secret and a minted token are install credentials, not a
-        // membership perk. Viewers and editors must not receive a fresh 90-day
+        // membership perk. Viewers and editors must not receive a fresh site
         // token just because they can see the site.
         const siteToken =
           canInstall && site.api_key

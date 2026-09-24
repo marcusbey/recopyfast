@@ -90,6 +90,20 @@ describe("site token verification parity", () => {
     expect(verifySiteTokenSignature(SITE_ID, API_KEY, token)).toBe(true);
     expect(verifySiteToken(SITE_ID, API_KEY, token)).toBe(true);
   });
+
+  it("accepts a token older than 90 days on both sides", () => {
+    const token = signedAt(-365 * DAY_SECONDS);
+
+    expect(verifySiteTokenSignature(SITE_ID, API_KEY, token)).toBe(true);
+    expect(verifySiteToken(SITE_ID, API_KEY, token)).toBe(true);
+  });
+
+  it("rejects that old token on both sides after key rotation", () => {
+    const token = signedAt(-365 * DAY_SECONDS);
+
+    expect(verifySiteTokenSignature(SITE_ID, "rotated-key", token)).toBe(false);
+    expect(verifySiteToken(SITE_ID, "rotated-key", token)).toBe(false);
+  });
 });
 
 describe("domain normalisation parity", () => {

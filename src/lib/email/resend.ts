@@ -7,6 +7,7 @@
  */
 
 import { Resend } from "resend";
+import type { EditorPermission } from "@/lib/auth/editor-access";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 // Verified sender. Must be a domain/address verified in the Resend dashboard.
@@ -79,6 +80,94 @@ async function send(opts: {
     console.error("[email] Resend threw:", err);
     return { sent: false, error: "Email send failed" };
   }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const PERMISSION_DESCRIPTIONS: Record<EditorPermission, string> = {
+  view: "View the site",
+  edit: "edit copy",
+  publish: "publish changes",
+  admin: "use administrator-level editing controls",
+};
+
+function describePermissions(permissions: EditorPermission[]): string {
+  return permissions
+    .map((permission) => PERMISSION_DESCRIPTIONS[permission])
+    .join(", ");
+}
+
+function tokenFreeHubUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Invite an editor to the hub after their allowlist row becomes active.
+ *
+ * The URL is deliberately stripped to origin + path before it reaches either
+ * body. Editor access is proved by the six-digit code sent later; putting a
+ * bearer token in an invitation would create a second, forwardable auth path.
+ */
+export async function sendEditorInvitationEmail(params: {
+  to: string;
+  inviterEmail: string;
+  siteName: string;
+  siteDomain: string;
+  permissions: EditorPermission[];
+  hubUrl: string;
+}): Promise<SendResult> {
+  const hubUrl = tokenFreeHubUrl(params.hubUrl);
+  if (!hubUrl) {
+    console.error(
+      "[email] Refusing editor invitation with an invalid hub URL.",
+    );
+    return { sent: false, error: "Invalid editor hub URL" };
+  }
+
+  const permissions = describePermissions(params.permissions);
+  // Site names are owner-controlled and registration historically imposed no
+  // length or control-character bound. Keep them out of mail headers and cap
+  // the rendered label so one name cannot create an oversized message.
+  const siteName = params.siteName
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  const subject = `${params.inviterEmail} invited you to edit ${siteName}`;
+  const text = [
+    `${params.inviterEmail} invited you to edit ${siteName} (${params.siteDomain}) in ReCopyFast.`,
+    "",
+    `You can: ${permissions}.`,
+    "",
+    `Open the editor hub: ${hubUrl}`,
+    "",
+    "Sign in with the 6-digit code sent to this email address, with no account or password.",
+  ].join("\n");
+  const html = `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#0f172a">
+      <h2 style="margin:0 0 12px;font-size:20px">You can now edit ${escapeHtml(siteName)}</h2>
+      <p style="margin:0 0 12px;color:#475569"><strong>${escapeHtml(params.inviterEmail)}</strong> invited you to edit ${escapeHtml(siteName)} at ${escapeHtml(params.siteDomain)}.</p>
+      <p style="margin:0 0 20px;color:#475569">You can: ${escapeHtml(permissions)}.</p>
+      <a href="${escapeHtml(hubUrl)}" style="display:inline-block;padding:10px 16px;border-radius:6px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:600">Open the editor hub</a>
+      <p style="margin:20px 0 0;color:#475569">Sign in with the 6-digit code sent to this email address, with no account or password.</p>
+    </div>`;
+
+  return send({ to: params.to, subject, html, text });
 }
 
 /**

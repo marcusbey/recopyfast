@@ -5,6 +5,7 @@ import {
   authorizeSiteRequest,
   authorizeSiteOrigin,
   parseOrigin,
+  SiteAuthError,
 } from "@/lib/security/site-auth";
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
 import {
@@ -171,13 +172,19 @@ function extractToken(request: NextRequest) {
   return token;
 }
 
-function withCors(response: NextResponse, allowedOrigin: string | null) {
+function withCors(
+  response: NextResponse,
+  allowedOrigin: string | null,
+  fallbackToAppOrigin = true,
+) {
   // "No grant" is expressed by the ABSENCE of the header, never by "*".
   // Refused preflights flow through here with a null origin, and
   // NEXT_PUBLIC_APP_URL is not guaranteed to be set on every deployment —
   // a "*" fallback would hand the grant this route just withheld to every
   // caller ("*" is also invalid alongside Allow-Credentials: true).
-  const originHeader = allowedOrigin || process.env.NEXT_PUBLIC_APP_URL || null;
+  const originHeader =
+    allowedOrigin ||
+    (fallbackToAppOrigin ? process.env.NEXT_PUBLIC_APP_URL || null : null);
   if (originHeader) {
     response.headers.set("Access-Control-Allow-Origin", originHeader);
     response.headers.set("Access-Control-Allow-Credentials", "true");
@@ -189,6 +196,24 @@ function withCors(response: NextResponse, allowedOrigin: string | null) {
   response.headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS");
   response.headers.set("Vary", "Origin");
   return response;
+}
+
+function siteAuthFailureResponse(error: unknown) {
+  const failure =
+    error instanceof SiteAuthError
+      ? error
+      : new SiteAuthError("Unauthorized", "site_token_invalid", 401);
+  return withCors(
+    NextResponse.json(
+      {
+        error: failure.message,
+        ...(error instanceof SiteAuthError ? { code: failure.code } : {}),
+      },
+      { status: failure.status },
+    ),
+    failure.allowedOrigin,
+    false,
+  );
 }
 
 /**
@@ -293,19 +318,7 @@ export async function GET(
         isWidgetRequest = true;
       } catch (authError) {
         console.error("Content GET authorization failed:", authError);
-        return NextResponse.json(
-          {
-            error:
-              authError instanceof Error ? authError.message : "Unauthorized",
-          },
-          {
-            status:
-              authError instanceof Error &&
-              authError.message === "Origin not allowed"
-                ? 403
-                : 401,
-          },
-        );
+        return siteAuthFailureResponse(authError);
       }
     }
 
@@ -437,19 +450,7 @@ export async function POST(
         }
       }
 
-      return NextResponse.json(
-        {
-          error:
-            authError instanceof Error ? authError.message : "Unauthorized",
-        },
-        {
-          status:
-            authError instanceof Error &&
-            authError.message === "Origin not allowed"
-              ? 403
-              : 401,
-        },
-      );
+      return siteAuthFailureResponse(authError);
     }
 
     // The second limiter, behind authorization: bucketed by site, and fails
@@ -593,19 +594,7 @@ export async function PUT(
       }));
     } catch (authError) {
       console.error("Content PUT authorization failed:", authError);
-      return NextResponse.json(
-        {
-          error:
-            authError instanceof Error ? authError.message : "Unauthorized",
-        },
-        {
-          status:
-            authError instanceof Error &&
-            authError.message === "Origin not allowed"
-              ? 403
-              : 401,
-        },
-      );
+      return siteAuthFailureResponse(authError);
     }
 
     return withCors(
