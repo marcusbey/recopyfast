@@ -72,6 +72,18 @@ function resolveDestination(
   try {
     const target = new URL(redirectTo, origin);
     if (target.origin !== new URL(origin).origin) return sanitizeNext(null);
+
+    // The 2026-09-24 production incident exposed a loop hidden by a successful
+    // OTP verification: Supabase's template forwarded AuthContext's
+    // `/auth/callback?next=...` RedirectTo here, so confirmation established the
+    // session and then sent the browser to a callback with no PKCE code. Auth
+    // routes are transport details, not post-login destinations. Unwrap their
+    // own `next` through the same guard used everywhere else; without one, land
+    // on the normal default rather than re-entering the auth flow.
+    if (target.pathname.startsWith("/auth/")) {
+      return sanitizeNext(target.searchParams.get("next"));
+    }
+
     return sanitizeNext(`${target.pathname}${target.search}${target.hash}`);
   } catch {
     return sanitizeNext(null);
