@@ -1007,6 +1007,13 @@ None.
 
 ## Story s17-cluster-engine — comparison pages that rank
 
+Route update (s37, 2026-09-25): reuse `/compare` and `/compare/*`; the former
+`/alternatives/*` plan is superseded. s37 delivers four comparisons, not all of
+this story's engine, discovery and performance acceptance criteria. See
+[ADR 032](./decisions/032-comparison-routes-supersede-alternatives.md): s17 owns
+the dynamic route migration, shared SoftwareApplication schema and Lighthouse
+gate for `/compare` and all comparison detail URLs.
+
 **As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that** I
 can tell in one screen whether this fits my site.
 
@@ -1014,7 +1021,7 @@ can tell in one screen whether this fits my site.
 3 — content-driven routes with structured data and generated sitemap entries.
 
 ### Acceptance criteria
-- [ ] `/alternatives/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
+- [ ] `/compare/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
 - [ ] Each page states what the competitor does better, not only what we do better.
 - [ ] Each page carries `SoftwareApplication`, `FAQPage` and `BreadcrumbList` JSON-LD that validates.
 - [ ] Every generated page appears in `sitemap.ts` automatically — the sitemap is never hand-maintained.
@@ -1440,3 +1447,29 @@ Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-acti
 Research: `docs/research/s35-activation-checklist.md`. Design: `docs/designs/s35-activation-checklist.md`. Plan: `docs/plans/s35-activation-checklist.md`. Embed allocation: 0 bytes.
 
 Delivery: original implementation `e361c35` is pushed in draft PR #33. The independent review allows ship and records four majors; the operator authorized the fix scope on 2026-09-25. Current fix verification and deferred batching are recorded in the plan. No PR merge or deployment is authorized.
+
+
+## Story s37-comparison-pages — Agency comparison pages
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Marketing SEO/GTM, extending
+the PRD comparison intent and ADR 020 at the explicitly requested `/compare` URLs.
+
+- [x] `/compare` and `/compare/webflow-editor`, `/compare/duda`, `/compare/tinacms`,
+  `/compare/cloudcannon` render original, fair, dated content on the Marketing surface.
+- [x] Each competitor page leads with a short answer, includes a comparison table,
+  both products' best-fit scenarios, visible FAQ and matching FAQPage JSON-LD,
+  official pricing/docs citations marked “as of 2026-09”, and `/signup` + `/try` CTAs.
+- [x] Repo-verified ReCopyFast capabilities and live catalogue offers honoring the Agency
+  switch and Founding availability; dated snapshots apply only to competitor facts.
+- [x] Unique canonical metadata/OG, sitemap entries, related-page links and landing footer discovery.
+- [x] Render, structured-data and sitemap tests pass; no audit guards weakened, migrations,
+  dependencies, customer claims or Playwright count changes.
+- [x] Required local gates pass; focused fix commit for the existing draft PR #34.
+  Delivery stays draft; independent review and release are separate gates.
+
+Research: `docs/research/s37-comparison-pages.md`. Plan: `docs/plans/s37-comparison-pages.md`.
+Initial delivery: `121c9c4`, draft PR #34. Independent review blocked it (C1, M1, M2
+and nine minors); fix `ba25a30` addressed those blockers. The independent
+re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
+mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
+JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.
