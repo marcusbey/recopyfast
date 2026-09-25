@@ -1406,6 +1406,26 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
 
 
+## Story s36-deflake-share-edit-publish — deterministic save and publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 2. An invited editor or edit-session
+holder can save and publish without a late duplicate save restoring staging content.
+
+- Establish the root cause from CI logs, source and deterministic regression tests.
+- Fix the product if duplicate writes are possible; preserve every existing E2E assertion.
+- No retries, timeout increases, skips, weakened guards or new dependencies.
+- Saving works when `AbortSignal.timeout` is absent, keeps the 15-second deadline
+  where the helper exists, and never replaces the staging mode badge with
+  transient save status.
+- Lifecycle regressions boot a fresh widget per test so each guard's mutation
+  count is independently meaningful.
+- Prove at least 20 consecutive local passes with the disposable stack, or three green
+  PR E2E jobs if the local stack cannot run. Keep the strict 44-test contract.
+- Run required gates; open a draft PR only, with independent review pending.
+
+Research: `docs/research/s36-deflake-share-edit-publish.md`.
+Plan: `docs/plans/s36-deflake-share-edit-publish.md`.
+
 ## Story s35-activation-checklist — First client publish
 
 Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-activation-checklist`.

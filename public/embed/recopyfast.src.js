@@ -1116,15 +1116,13 @@
      * The banner's save status: "Saving…" while a write is in flight, "Saved"
      * when it lands, blank when it did not.
      *
-     * Text only, and it never claims more than "written". Whether the write
-     * went to staging or straight live is a distinction this audience should
-     * not have to learn — the whole point of an invited editor is that there is
-     * no mode to understand.
+     * Text only, and it never claims more than "written". Staging keeps its
+     * permanent mode badge beside this transient status.
      */
     setEditorSaveStatus(text) {
       // A later in-flight response must not erase the terminal recovery state.
       if (this.isMutationLocked) return;
-      const status = document.querySelector('#rcf-editor-banner .rcf-editor-banner-status');
+      const status = document.querySelector('.rcf-editor-banner-status');
       if (status) status.textContent = text;
     }
 
@@ -2198,9 +2196,10 @@
       const modeLabel = document.createElement('span');
       modeLabel.textContent = 'Staging';
 
-      statusContainer.appendChild(statusDot);
-      statusContainer.appendChild(modeLabel);
-      infoDiv.appendChild(statusContainer);
+      statusContainer.append(statusDot, modeLabel);
+      const saveStatus = document.createElement('span');
+      saveStatus.className = 'rcf-editor-banner-status';
+      infoDiv.append(statusContainer, saveStatus);
 
       infoDiv.appendChild(divider('email'));
 
@@ -2911,28 +2910,33 @@
 
       this.setEditorSaveStatus('Saving…');
 
-      let response;
+      // Older supported browsers have AbortController but no timeout helper.
+      // They keep saving without a client deadline instead of losing editing.
+      const signal = AbortSignal.timeout ? AbortSignal.timeout(15000) : new AbortController().signal;
       try {
-        response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
+        const response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
           method: 'PUT',
           headers: Object.assign({ 'Content-Type': 'application/json' }, this.editorAuthHeaders()),
           body: JSON.stringify(Object.assign({
             elementId: elementId,
             content: content
-          }, this.editorTokenBody(), extra || {}))
+          }, this.editorTokenBody(), extra)),
+          signal: signal
         });
+        const result = await response.json().catch(function(error) {
+          if (signal.aborted) throw error;
+          return {};
+        });
+        if (!response.ok || result.error) {
+          const error = new Error(result.error || 'Save failed.');
+          error.status = response.status;
+          this.handleTerminalWriteFailure(error, elementId, content);
+          throw error;
+        }
       } catch (error) {
         // Never leave "Saving…" standing over a write that will never land.
         this.setEditorSaveStatus('');
-        throw error;
-      }
-
-      const result = await response.json().catch(function() { return {}; });
-      if (!response.ok || result.error) {
-        this.setEditorSaveStatus('');
-        const error = new Error(result.error || 'Save failed.');
-        error.status = response.status;
-        this.handleTerminalWriteFailure(error, elementId, content);
+        if (signal.aborted) throw new Error('Save timed out.');
         throw error;
       }
 
@@ -2945,11 +2949,9 @@
         token: SITE_TOKEN,
         stagingMode: this.stagingMode,
         stagingToken: this.stagingToken || '',
-        editToken: this.editSessionToken || '',
-        persisted: true
-      }, extra || {}));
+        editToken: this.editSessionToken || ''
+      }, extra));
 
-      return result;
     }
 
     emitRealtimeContentUpdate(payload) {
@@ -4249,7 +4251,7 @@
       element.classList.remove('rcf-hovering');
       if (this.hideHoverHint) this.hideHoverHint();
 
-      const editSessionId = 'rcf-edit-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+      const editSessionId = Math.random();
       element.setAttribute('data-rcf-edit-session', editSessionId);
 
       // ---------------------------------------------------------------------
@@ -4257,7 +4259,6 @@
       // participate in layout, so none of them can move a single glyph.
       // ---------------------------------------------------------------------
       const selectionStyle = document.createElement('style');
-      selectionStyle.id = editSessionId + '-styles';
       const sel = '[data-rcf-edit-session="' + editSessionId + '"]';
       selectionStyle.textContent = [
         sel + '::selection { background: ' + colors.selectionBackground + '; color: ' + colors.selectionColor + '; }',
@@ -4309,24 +4310,20 @@
       const aiBtn = document.createElement('button');
       aiBtn.className = 'rcf-btn-ai';
       aiBtn.type = 'button';
-      aiBtn.title = 'AI Suggestions';
+      aiBtn.title = 'AI tools';
       aiBtn.textContent = '🪄 AI';
 
-      const saveBtn = document.createElement('button');
+      const saveBtn = aiBtn.cloneNode();
       saveBtn.className = 'rcf-btn-save';
-      saveBtn.type = 'button';
-      saveBtn.title = 'Save changes (Cmd/Ctrl + Enter)';
+      saveBtn.title = 'Save (Cmd/Ctrl+Enter)';
       saveBtn.textContent = '✓ Save';
 
-      const cancelBtn = document.createElement('button');
+      const cancelBtn = aiBtn.cloneNode();
       cancelBtn.className = 'rcf-btn-cancel';
-      cancelBtn.type = 'button';
-      cancelBtn.title = 'Cancel editing (Esc)';
+      cancelBtn.title = 'Cancel (Esc)';
       cancelBtn.textContent = '✕ Cancel';
 
-      actionsDiv.appendChild(aiBtn);
-      actionsDiv.appendChild(saveBtn);
-      actionsDiv.appendChild(cancelBtn);
+      actionsDiv.append(aiBtn, saveBtn, cancelBtn);
 
       const counter = document.createElement('div');
       counter.className = 'rcf-char-counter-inline';
@@ -4361,15 +4358,13 @@
           input.style.color = colors.chromeText;
           input.style.borderColor = colors.chromeBorder;
 
-          fieldsPanel.appendChild(label);
-          fieldsPanel.appendChild(input);
+          fieldsPanel.append(label, input);
           fieldInputs.push({ def: def, input: input, initial: input.value });
         });
       }
 
-      document.body.appendChild(actionsDiv);
-      document.body.appendChild(counter);
-      if (fieldsPanel) document.body.appendChild(fieldsPanel);
+      document.body.append(actionsDiv, counter);
+      if (fieldsPanel) document.body.append(fieldsPanel);
 
       // ---------------------------------------------------------------------
       // Positioning. Fixed viewport coordinates, recomputed whenever anything
@@ -4427,13 +4422,16 @@
         });
       };
 
+      const session = new AbortController();
+      const active = { signal: session.signal };
+
       reposition();
 
       window.addEventListener('scroll', scheduleReposition, true);
-      window.addEventListener('resize', scheduleReposition);
+      window.addEventListener('resize', scheduleReposition, active);
       if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', scheduleReposition);
-        window.visualViewport.addEventListener('scroll', scheduleReposition);
+        window.visualViewport.addEventListener('resize', scheduleReposition, active);
+        window.visualViewport.addEventListener('scroll', scheduleReposition, active);
       }
 
       let resizeObserver = null;
@@ -4441,9 +4439,6 @@
         resizeObserver = new ResizeObserver(scheduleReposition);
         resizeObserver.observe(element);
       }
-
-      // A web font landing mid-edit reflows the element under the toolbar.
-      Rules.whenFontsReady(window).then(scheduleReposition);
 
       // ---------------------------------------------------------------------
       // Content
@@ -4480,10 +4475,13 @@
       Rules.whenFontsReady(window).then(function() {
         maxChars = self.calculateMaxChars(element);
         updateCounter();
+        scheduleReposition();
       });
 
-      element.addEventListener('input', updateCounter);
-      element.addEventListener('input', scheduleReposition);
+      element.addEventListener('input', function() {
+        updateCounter();
+        scheduleReposition();
+      }, active);
       updateCounter();
 
       // preventScroll: focusing an element inside a scroll container otherwise
@@ -4505,34 +4503,15 @@
       // ---------------------------------------------------------------------
       // Lifecycle
       // ---------------------------------------------------------------------
-      let isCleaningUp = false;
-      let unloadGuard = null;
+      let isSaving = false;
 
       const cleanup = function() {
-        if (isCleaningUp) return;
-        isCleaningUp = true;
-
-        if (unloadGuard) {
-          window.removeEventListener('beforeunload', unloadGuard);
-          unloadGuard = null;
-        }
-
         window.removeEventListener('scroll', scheduleReposition, true);
-        window.removeEventListener('resize', scheduleReposition);
-        if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', scheduleReposition);
-          window.visualViewport.removeEventListener('scroll', scheduleReposition);
-        }
         if (resizeObserver) resizeObserver.disconnect();
         if (frame) cancelAnimationFrame(frame);
-        document.removeEventListener('mousedown', outsideClickHandler);
-
-        element.removeAttribute('contenteditable');
-        element.removeAttribute('spellcheck');
-        element.removeAttribute('role');
-        element.removeAttribute('aria-multiline');
-        element.removeAttribute('data-rcf-editing');
-        element.removeAttribute('data-rcf-edit-session');
+        ['contenteditable', 'spellcheck', 'role', 'aria-multiline', 'data-rcf-editing', 'data-rcf-edit-session'].forEach(function(attr) {
+          element.removeAttribute(attr);
+        });
         element.classList.remove('rcf-editing');
 
         // Verbatim restore — puts back exactly the inline styles the page had,
@@ -4540,16 +4519,16 @@
         if (originalStyleAttr === null) element.removeAttribute('style');
         else element.setAttribute('style', originalStyleAttr);
 
-        [actionsDiv, counter, fieldsPanel].forEach(function(node) {
-          if (node && node.parentNode) node.parentNode.removeChild(node);
-        });
+        actionsDiv.remove();
+        counter.remove();
+        if (fieldsPanel) fieldsPanel.remove();
 
-        const dynamicStyle = document.getElementById(editSessionId + '-styles');
-        if (dynamicStyle) dynamicStyle.remove();
+        selectionStyle.remove();
+        session.abort();
 
-        teardown.forEach(function(fn) {
+        for (const fn of teardown) {
           try { fn(); } catch (e) { console.warn('ReCopyFast: edit teardown failed', e); }
-        });
+        }
       };
 
       const fieldsDirty = function() {
@@ -4563,18 +4542,27 @@
        * confirmation is the only thing that can interrupt a navigation, and it
        * only fires if a handler is registered while the work is actually dirty.
        */
-      unloadGuard = function(event) {
-        if (isCleaningUp) return undefined;
+      window.addEventListener('beforeunload', function(event) {
         if (sanitizeContent() === originalText && !fieldsDirty()) return undefined;
         event.preventDefault();
         // Legacy browsers require returnValue to be set for the prompt to show.
         event.returnValue = '';
         return '';
+      }, active);
+
+      const freeze = function(value) {
+        isSaving = value;
+        element.setAttribute('contenteditable', !value);
+        for (const f of fieldInputs) f.input.readOnly = value;
+        aiBtn.disabled = value;
       };
-      window.addEventListener('beforeunload', unloadGuard);
 
       const save = async function() {
-        if (self.isMutationLocked) return;
+        // Save can be reached from three independent inputs: the toolbar,
+        // Enter, and an outside mousedown. Publish begins with that mousedown,
+        // so a second PUT from this closure can otherwise land after Publish
+        // cleared staging and silently resurrect the draft it just published.
+        if (self.isMutationLocked || isSaving) return;
         const newContent = sanitizeContent();
         const textChanged = newContent !== originalText;
 
@@ -4598,10 +4586,11 @@
         }
 
         const values = {};
-        fieldInputs.forEach(function(f) {
+        for (const f of fieldInputs) {
           if (f.input.value !== f.initial) values[f.def.key] = f.input.value.trim();
-        });
+        }
 
+        freeze(true);
         try {
           await self.persistContentUpdate(
             elementId,
@@ -4610,6 +4599,7 @@
           );
         } catch (error) {
           if (self.isMutationLocked) return;
+          freeze(false);
           alert(error.message || 'Save failed.');
           return;
         }
@@ -4618,10 +4608,13 @@
           element.textContent = newContent;
           elementData.originalContent = newContent;
         }
-        fieldInputs.forEach(function(f) {
+        for (const f of fieldInputs) {
           if (f.input.value !== f.initial) f.def.set(element, values[f.def.key]);
-        });
+        }
 
+        // Cleanup closes the session, but the request lock still resets first:
+        // later refactors must not turn successful completion into a sticky lock.
+        isSaving = false;
         cleanup();
 
         element.classList.add('rcf-updated');
@@ -4629,7 +4622,7 @@
       };
 
       const cancel = function() {
-        if (self.isMutationLocked) return;
+        if (self.isMutationLocked || isSaving) return;
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
@@ -4637,16 +4630,16 @@
         cleanup();
       };
 
-      saveBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); save(); };
-      cancelBtn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); cancel(); };
-      aiBtn.onclick = function(e) {
+      saveBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); save(); }, active);
+      cancelBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); cancel(); }, active);
+      aiBtn.addEventListener('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
         self.showAISuggestions({
           get value() { return sanitizeContent(); },
           set value(v) { element.textContent = v; updateCounter(); scheduleReposition(); }
         }, elementId);
-      };
+      }, active);
 
       // Enter saves only where a newline would be meaningless. Multi-line is
       // anything that already contains one, preserves whitespace, or renders
@@ -4656,31 +4649,29 @@
                           floor.preservesWhitespace ||
                           floor.minHeight > lineHeight * 2;
 
-      element.addEventListener('keydown', function(e) {
+      const keydownHandler = function(e) {
         if (e.key === 'Escape') {
           e.preventDefault();
           cancel();
-        } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-          e.preventDefault();
-          save();
-        } else if (e.key === 'Enter' && !e.shiftKey && !isMultiline) {
+        } else if (e.key === 'Enter' &&
+                   (e.currentTarget !== element || e.metaKey || e.ctrlKey || (!e.shiftKey && !isMultiline))) {
           e.preventDefault();
           save();
         }
-      });
+      };
+      element.addEventListener('keydown', keydownHandler, active);
 
-      element.addEventListener('paste', function(e) {
+      const pasteHandler = function(e) {
+        if (isSaving) return;
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
         document.execCommand('insertText', false, text);
         updateCounter();
-      });
+      };
+      element.addEventListener('paste', pasteHandler, active);
 
       fieldInputs.forEach(function(f) {
-        f.input.addEventListener('keydown', function(e) {
-          if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-          else if (e.key === 'Enter') { e.preventDefault(); save(); }
-        });
+        f.input.addEventListener('keydown', keydownHandler, active);
       });
 
       const outsideClickHandler = function(e) {
@@ -4694,7 +4685,7 @@
       };
 
       setTimeout(function() {
-        document.addEventListener('mousedown', outsideClickHandler);
+        document.addEventListener('mousedown', outsideClickHandler, active);
       }, 100);
     }
 
