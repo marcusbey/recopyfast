@@ -1404,3 +1404,24 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 - [x] Targeted tests and required repository gates pass; draft PR only, independent review pending.
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
+
+
+## Story s37-comparison-pages — Agency comparison pages
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Marketing SEO/GTM, extending
+the PRD comparison intent and ADR 020 at the explicitly requested `/compare` URLs.
+
+- [x] `/compare` and `/compare/webflow-editor`, `/compare/duda`, `/compare/tinacms`,
+  `/compare/cloudcannon` render original, fair, dated content on the Marketing surface.
+- [x] Each competitor page leads with a short answer, includes a comparison table,
+  both products' best-fit scenarios, visible FAQ and matching FAQPage JSON-LD,
+  official pricing/docs citations marked “as of 2026-09”, and `/signup` + `/try` CTAs.
+- [x] Only repo-verified ReCopyFast capabilities; accurate Agency $49/month for 10 sites
+  and conditional Founding lifetime $299 editorial snapshot, with current pricing link.
+- [x] Unique canonical metadata/OG, sitemap entries, related-page links and landing footer discovery.
+- [x] Render, structured-data and sitemap tests pass; no audit guards weakened, migrations,
+  dependencies, customer claims or Playwright count changes.
+- [ ] Required local gates pass; one focused commit, pushed branch and draft PR only.
+
+Research: `docs/research/s37-comparison-pages.md`. Plan: `docs/plans/s37-comparison-pages.md`.
+Independent review is pending; no merge/deploy authority.
