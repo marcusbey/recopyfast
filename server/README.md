@@ -379,7 +379,7 @@ than a skip. Before a service-role client is created, the shared guard also veri
 HTTP origins and ports and rejects the known production project reference. The core flow applies
 the same rule under `RUN_RECOPYFAST_CORE_E2E=1`.
 
-CI executes the complete inventory: **39 passed, 0 failed, 0 skipped, 0 flaky**. A custom reporter
+CI executes the complete inventory: **44 passed, 0 failed, 0 skipped, 0 flaky**. A custom reporter
 turns any missing, skipped or flaky case into a non-zero job and uploads only a credential-free
 summary. Traces, screenshots and videos are disabled in CI because the fixture URLs contain
 short-lived editor credentials.

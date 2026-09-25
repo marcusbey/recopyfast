@@ -50,6 +50,30 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/try/rcf-try.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            // Bookmarklets save this exact URL. A one-year immutable response
+            // pinned early preview defects in every already-saved bookmark, so
+            // the permanent URL must revalidate just like the production embed.
+            value: "public, max-age=0, must-revalidate",
+          },
+          {
+            key: "Access-Control-Allow-Origin",
+            value: "*",
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff",
+          },
+        ],
+      },
+      {
         // Apply to all routes
         source: '/(.*)',
         headers: [

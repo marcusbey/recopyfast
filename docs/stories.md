@@ -1219,6 +1219,32 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+## s32-try-on-any-site — Try any live site without an account
+
+Operator-approved GTM story (2026-09-24). Complexity: 3. UI: yes.
+
+As an agency owner or founder filming an outbound demo, I can activate a bookmarklet
+on a live page, edit text and preview images locally, and discover the trial without
+registering, installing the production widget, or persisting changes.
+
+Acceptance: separate dependency-free `public/try/rcf-try.js` at most 8 KB gzipped;
+headings, paragraphs, list items, buttons, links and images. Every link navigates
+on a plain click; Alt+click (Option+click on macOS) edits a link's text;
+hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit
+and "Alt+click a link to edit it" hint. While editing, a plain click on the edited
+element's enclosing link stays on the page;
+complete cleanup and idempotence; no API, analytics, or content upload; plain-text
+writes. /try includes a stable-URL draggable bookmarklet, browser instructions,
+live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.
+Static script delivery must bypass auth and include JS MIME, cache, wildcard CORS,
+and nosniff. Unit, page, and local-fixture Playwright coverage are required; update
+the exact browser inventory from 39 to 44 after pre-share regression coverage.
+No production embed changes or SQL.
+
+Research: `docs/research/s32-try-on-any-site.md`.
+Design: `docs/designs/s32-try-on-any-site.md`.
+Plan: `docs/plans/s32-try-on-any-site.md`.
+
 ## Story s28-billing-correctness — monthly allowances and one open checkout
 
 As a subscriber, I receive the monthly credits my plan grants even when billed annually, and opening Checkout twice cannot create two subscriptions.

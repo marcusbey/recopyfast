@@ -59,7 +59,10 @@ async function isUnentitled(
  * rather than a file list, so the next asset type added there does not have to
  * be rediscovered in production. robots.txt and sitemap.xml are the same trade
  * at lower volume: no session is possible, and indexability should not depend
- * on auth uptime.
+ * on auth uptime. `/try` is the public cold-start path used in outbound demos,
+ * and its exact cross-origin runtime path has the same no-session property as
+ * the production embed. Keeping both exact avoids turning sibling `/try/*`
+ * routes into an accidental auth bypass.
  *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
@@ -69,6 +72,8 @@ async function isUnentitled(
 function isSessionlessPath(pathname: string): boolean {
   return (
     pathname.startsWith("/embed/") ||
+    pathname === "/try" ||
+    pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
   );
@@ -270,7 +275,8 @@ export const config = {
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
-     * `embed/`, robots.txt and sitemap.xml are deliberately NOT excluded here.
+     * `embed/`, `/try`, its exact runtime asset, robots.txt and sitemap.xml are
+     * deliberately NOT excluded here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so

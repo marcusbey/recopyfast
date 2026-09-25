@@ -101,7 +101,10 @@ const EMBED_ASSETS = [
 /** Crawler fetches. Same shape of caller: no session is possible. */
 const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml"];
 
-const SESSIONLESS_PATHS = [...EMBED_ASSETS, ...CRAWLER_ASSETS];
+/** The public landing page and its one exact cross-origin preview runtime. */
+const TRY_ASSETS = ["/try", "/try/rcf-try.js"];
+
+const SESSIONLESS_PATHS = [...EMBED_ASSETS, ...CRAWLER_ASSETS, ...TRY_ASSETS];
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -154,6 +157,13 @@ describe("a request that cannot carry a session", () => {
 
     expect(asMock(createServerClient)).toHaveBeenCalled();
     expect(getUser).toHaveBeenCalled();
+  });
+
+  it("does not broaden the try bypass to sibling paths", async () => {
+    await run("/try/not-the-runtime.js");
+
+    expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+    expect(getUser).toHaveBeenCalledTimes(1);
   });
 
   it.each(SESSIONLESS_PATHS)(
