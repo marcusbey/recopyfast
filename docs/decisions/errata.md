@@ -106,3 +106,11 @@ safe because an older deployed application could call it during a rolling deploy
 two-argument function was harmless, but it was not a deployed call-site compatibility measure.
 The final s34 migration removes the unused replacement rather than preserving a false historical
 claim. Applied migrations remain unchanged.
+
+
+## s38 branch ADR numbering after PR #32 integration (2026-09-25)
+
+PR #32 reached main with billing ADR 031 while s38 was being verified. Before merging s38,
+its branch-only column-privilege ADR moved from 031 to 033, and its follow-up portability/
+least-privilege ADR moved from 033 to 034. Only numbers and references changed; decisions
+are preserved. The immutable uncommitted s38 review refers to its historical 031 filename.

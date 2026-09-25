@@ -58,17 +58,18 @@ async function checkDatabase(): Promise<ServiceCheck> {
   try {
     const supabase = await createClient();
 
-    // Simple query to check database connectivity
-    const { error } = await supabase
-      .from("sites")
-      .select("id")
-      .limit(1)
-      .single();
+    // This endpoint is intentionally anonymous for uptime monitors. It used to
+    // probe `sites`, which made the health signal depend on tenant-table ACLs:
+    // once s38 removed anon's table grant, a healthy database was reported as
+    // down. `plans` is the deliberate public catalogue (migration
+    // 20260802000000 grants anon SELECT and RLS exposes active rows), so an
+    // explicit one-column read checks PostgREST and Postgres without weakening
+    // the credential boundary or depending on any tenant having data.
+    const { error } = await supabase.from("plans").select("id").limit(1);
 
     const latency = Date.now() - start;
 
-    if (error && error.code !== "PGRST116") {
-      // PGRST116 = no rows returned (which is fine)
+    if (error) {
       throw error;
     }
 
