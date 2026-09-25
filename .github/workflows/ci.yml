@@ -14,6 +14,24 @@ jobs:
     name: Lint, Test & Build
     runs-on: ubuntu-latest
 
+    services:
+      # The s38 privilege suite replays every real migration against this
+      # disposable PostgreSQL 14 database. It is separate from the E2E Supabase
+      # stack and has no hosted credentials or network-reachable endpoint.
+      postgres-s38:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: recopyfast_s38_ci
+        ports:
+          - 55438:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d recopyfast_s38_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     env:
       # ── Supabase (dummy build-time values) ────────────────────────────────
       # These are intentionally placeholder values so `next build` can complete
@@ -119,6 +137,15 @@ jobs:
       # cascade this suite used to hit on CI runners.
       - name: Test (Jest – CI mode, blocking)
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
+
+      # A normal Jest run deliberately gates real-Postgres suites when no
+      # matching database is present. This dedicated step sets a required-db
+      # contract through the runner, so connectivity or migration failures are
+      # red rather than a passing "not verified" placeholder.
+      - name: Test database column privileges (PostgreSQL 14, blocking)
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:55438/recopyfast_s38_ci"
+        run: node scripts/run-db-invariants.mjs
 
       - name: Test Stripe catalogue tooling (Node, blocking)
         run: node --test scripts/__tests__/sync-stripe-catalogue.test.mjs

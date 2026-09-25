@@ -1404,3 +1404,17 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 - [x] Targeted tests and required repository gates pass; draft PR only, independent review pending.
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
+
+
+## Story s38-hide-site-api-key — Remove collaborator access to signing secrets
+
+Security priority; complexity 4. Exact implementation and draft-PR delivery authorized by the user on 2026-09-25. No production actions or automatic key rotation.
+
+- [x] Forward migration `20260925120000_sites_api_key_column_grants.sql` removes table-level access and grants authenticated only reviewed non-secret columns; anon has no sites grant, service_role retains full access; unnecessary site mutation grants are removed.
+- [x] Audit every public table for credential columns and ineffective column revokes; repair exposures in the same migration and document intentional public/user-visible values.
+- [x] Every user-scoped sites read and embedded relation uses explicit safe columns; service-role signing reads retain api_key.
+- [x] Real disposable PostgreSQL proves view-only JWT cannot select api_key, metadata/dashboard reads work, role and column invariants fail on regressions, and future columns require a deliberate grant decision.
+- [x] Research records the exposure window, affected collaborators, and operator-only rotation recommendation; ADR and AGENTS.md prevent column-only revoke recurrence.
+- [x] Local gates and independent review pass; prepare the security fix for the authorized commit, push and draft-PR handoff. Delivery evidence lives in Git/GitHub; no merge/deploy/migration in production.
+
+Research: `docs/research/s38-hide-site-api-key.md`. Plan: `docs/plans/s38-hide-site-api-key.md`.

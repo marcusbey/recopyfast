@@ -60,7 +60,12 @@ interface PgClient {
   ): Promise<QueryResult<R>>;
 }
 
+interface PgPoolClient extends PgClient {
+  release(): void;
+}
+
 interface PgPool extends PgClient {
+  connect(): Promise<PgPoolClient>;
   end(): Promise<void>;
 }
 
@@ -177,6 +182,8 @@ export interface DbSuite {
     text: string,
     values?: unknown[],
   ) => Promise<QueryResult<R>>;
+  /** Pins sequential SET LOCAL / role-switch probes to one connection. */
+  withClient: <T>(run: (client: PgClient) => Promise<T>) => Promise<T>;
   /**
    * Inserts a `sites` row with a collision-proof domain and arranges for it, and
    * everything the FK cascade reaches from it, to be removed after the suite.
@@ -227,6 +234,9 @@ export function describeDb(
   const outcome = probe(target);
 
   if (outcome !== "ok") {
+    if (process.env.RCF_REQUIRE_TEST_DB === "1") {
+      throw new Error(gateNote(target, outcome));
+    }
     describe(suiteName, () => {
       test("[gated] no ReCopyFast database reachable — invariants not checked", () => {
         console.warn(gateNote(target, outcome));
@@ -276,6 +286,18 @@ export function describeDb(
       return rows[0].id;
     };
 
-    defineSuite({ query, createSite });
+    const withClient = async <T>(
+      runWithClient: (client: PgClient) => Promise<T>,
+    ): Promise<T> => {
+      if (!pool) throw new Error("db pool used before beforeAll ran");
+      const client = await pool.connect();
+      try {
+        return await runWithClient(client);
+      } finally {
+        client.release();
+      }
+    };
+
+    defineSuite({ query, withClient, createSite });
   });
 }

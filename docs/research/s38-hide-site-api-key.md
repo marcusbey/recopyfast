@@ -1,0 +1,109 @@
+# Research — s38-hide-site-api-key
+
+Date: 2026-09-25. Scope: local repository and disposable database only. Production privilege observations below were supplied by the operator, not re-queried by this lane.
+
+## Verified premise and exposure window
+
+The operator verified table SELECT and api_key column SELECT for authenticated and anon in production. `20260813120000_hide_sites_api_key.sql` revokes only column SELECT while Supabase table SELECT remains. Privileges are additive: this did not remove access. Treat the interval from deployment of that migration (timestamp label 2026-08-13 12:00; actual deployment time unverified) through operator application of the s38 fix as exposed. Earlier exposure is possible from initial table grants. This is an exposure finding, not evidence of exploitation.
+
+Any authenticated collaborator whose site_permissions row passes sites RLS, including view-only collaborators, could read that site's HMAC secret through PostgREST and mint site tokens. It does not imply access to every tenant. Anon holds the wrong privilege but auth.uid() is null and the current policy returns no site rows.
+
+## Sites schema and caller audit
+
+Current columns: id, domain, name, api_key, created_at, updated_at, status, live_at, last_reported_at, last_mismatch_domain, last_mismatch_at. Only SELECT policies exist for application users; no legitimate anonymous site read or user-scoped direct site mutation was found. Service-role is required for signing and writes.
+
+Exhaustive graph search plus rg across src/ and server/ found no user-scoped sites wildcard or sites(*) join, and no Supabase realtime subscription. Session reads in health, health/ready, AI translate, edit-session creation, staging access, site sharing, content verification and security events already name safe fields. CollaborationPermissions selects the explicit teams relation. Security events embed sites(id, domain); editor-directory embeds sites!inner(id, name, domain).
+
+Service-role reads in site-auth.ts, api/sites, registration, regenerate-snippet and server/index.js intentionally select api_key. editor-request, editor/editors and editor/handoff use safe explicit metadata. Socket.io uses the service client; there is no user-scoped realtime sites payload.
+
+## Sibling-table audit
+
+The only column-level table revoke found in migration history is the ineffective sites api_key revoke. webhooks.secret also has member-readable rows and inherited table SELECT; its secret_prefix is deliberately safe display metadata. api_keys.key_hash is owner-readable and the session API list unnecessarily selects it before stripping it from JSON. Full credential inventory and resulting grant decisions are recorded below after the schema audit.
+
+## Rotation recommendation (operator only)
+
+After applying the migration and verifying effective grants, treat existing site HMAC keys as potentially disclosed to every collaborator who could access the site during the window. Coordinate per-site regeneration with owners and replace all installed snippets. Do not restore an old key as rollback: it revives revoked tokens. ADR 027 means site tokens have no age expiry; changing ACLs does not invalidate copied keys or minted tokens. HTTP checks current keys on each request; existing WebSockets authenticate at handshake, so rotation alone does not disconnect live sockets. Plan an operator-controlled reconnect/revocation operation and verify old-token HTTP and new handshake rejection. No keys were rotated here. Also coordinate replacement of webhook signing secrets that were
+readable to collaborators, including through the old PUT response, and update their receivers
+together. Hash-only fields are not equivalent to disclosed plaintext credentials; the audit
+found no evidence that their hash values can be presented directly as authentication tokens.
+
+## Constraints and verification approach
+
+ADR 001 preserves the inherited stack; ADR 002 requires user reads to retain RLS; ADR 027 controls rotation semantics. No UI changes, dependencies, applied-migration edits or production operations are needed. Use PostgreSQL 14 installed at /usr/local/bin and a disposable loopback cluster with Supabase auth/storage fixture prerequisites plus real migrations. Compare pre-fix failure with post-fix success; retain executable DB regression checks in CI. Repository unit mocks alone cannot prove database privileges.
+
+## Complete secret-like column decisions
+
+| Table / columns | Existing read boundary | Decision |
+|---|---|---|
+| sites.api_key | Every site collaborator, including view | Hide; only signing service needs it |
+| webhooks.secret | Every site collaborator | Hide; show-once API already uses service role |
+| api_keys.key_hash | Owning user | Hide; listing needs only prefix/metadata |
+| editor_device_grants.grant_hash, user_agent_hash, origin_hash | Site admin | Hide unnecessary credential/fingerprint hashes; dashboard needs only site_editor_id |
+| editor_verification_codes.code_hash; editor_handoffs.code_hash | Service-only RLS | No user-visible rows; retain service-only boundary |
+| staging_access.token, verification_code | Site admin | Intentional staging URL/invitation contract; not HMAC minting keys |
+| team_invitations.token | Matching invite email or team manager/owner | Intentional invite/accept contract; acceptance also requires matching signed-in email |
+| edit_sessions.token | Owning user | Intentional widget session credential |
+| content_editing_sessions.session_token | Site collaborators | Opaque lock selector; updates still require owning auth.uid(), not possession of token |
+| domain_verifications.verification_token, verification_value | Authorized site administration | Public DNS/file/meta challenge material |
+| key_prefix, secret_prefix and foreign key *_id fields | Appropriate row-scoped metadata | Display/identity, not credentials |
+
+All migration-defined public tables were scanned for api_key/token/secret/hash columns and column revokes. JSON payloads and third-party managed schemas are not asserted secret-free by a column-name scan. No production catalogue was queried. API keys currently have a pre-existing mismatch between user-scoped mutation routes and SELECT-only RLS; this lane preserves those policies rather than expanding writes.
+
+PostgreSQL's built-in superusers, object owners and pg_read_all_data cannot be denied by a column ACL. The test exempts only postgres, service_role and predefined PostgreSQL infrastructure roles, separately requires approved protected-table owners, and rejects application-role inheritance into privilege-bypass roles. Unexpected owners and new superusers are caught by negative controls. This is a platform boundary, not a grant to application users.
+
+## Source regression evidence
+
+The three API-key projection tests failed against the original GET/POST/PUT selections and
+passed after the explicit projections. Focused run: 3 suites / 16 tests passed; targeted lint
+and complete TypeScript check passed. The source guard scans src/ and server/ for sites
+default/wildcard selects and embedded wildcards, with reviewed service-role signing exceptions.
+webhooks user reads already project safe metadata; WebhookManager signing/show-once reads are
+service-role. API-key rate-limiter hash reads are service-role; security statistics use safe
+metadata. Device-grant authentication reads are service-role and dashboard counts select only
+site_editor_id. A later independent review found a sibling response bypass missed by this initial projection
+audit: WebhookManager.updateWebhook used service-role UPDATE returning *, and authenticated
+PUT serialized secret back to edit/admin collaborators. The final implementation must narrow
+that returning projection and response while preserving secret-on-create and signing reads.
+
+## Real PostgreSQL baseline
+
+The disposable PostgreSQL 14 runner replayed the complete pre-s38 migration chain with
+Supabase-style default table grants. The pre-fix proof reproduced effective anon/authenticated
+SELECT on all six fields being hidden (site key, webhook secret, API hash and three device
+hashes). A real view-only authenticated subject could SELECT sites.api_key. This confirms
+the premise locally without querying production.
+
+## Database repair evidence
+
+Node 20 `node scripts/run-db-invariants.mjs` applied every repository migration to an owned
+PostgreSQL 14 cluster, reapplied s38 for idempotence, and passed all 8 DB tests. Tests cover
+view-only JWT metadata and dashboard joins, hidden/wildcard SELECT rejection, service-role
+access, denied unneeded mutations, role/column catalogues and deliberate privilege/schema
+regressions. The runner stopped the cluster and removed its temporary directory.
+
+CI uses a separate disposable PostgreSQL 14 service to replay this exact full chain with
+minimal auth fixture prerequisites (storage-specific guarded branches remain for Supabase E2E). The existing Supabase E2E lane also receives the
+migration normally. The required-db flag turns connection/schema failures into test failures;
+it cannot report this dedicated gate green merely because the database is absent.
+
+The independent-review ownership correction was verified test-first: 2/11 tests failed with
+the old owner exemption; 11/11 passed after initializing as postgres, removing that exemption,
+and adding unexpected-owner/superuser negative controls. Clean stock Node 20 ran the full
+migration chain and repeated migration; all owned database artifacts were removed.
+
+The webhook bypass is repaired with explicit nonsecret projections (the existing GET list
+and a mutation list retaining pending_event_type/pending_payload), attaching the freshly
+generated secret only on creation, and independently
+removing unexpected secret fields from update results and PUT JSON. Signing/dispatch reads
+remain service-only. Regression tests failed before the repair; webhook suites now pass
+62 tests and combined source-security suites pass 78.
+
+## Operator rollout boundary
+
+Deploy compatible API projections and webhook response filtering first, then promptly apply
+20260925120000_sites_api_key_column_grants.sql and verify effective privileges against the
+actual hosted role catalogue. The old API-key list requests key_hash and would fail if the
+migration arrived before its compatible code. Database denial and the HTTP response fix are
+both required. Coordinate rotation only after closing those paths. A permission regression
+needs an explicit-query forward fix; restoring broad grants or previously disclosed keys is
+not an acceptable rollback. No operator step was performed by this lane.

@@ -297,7 +297,14 @@ export async function PUT(req: NextRequest) {
       webhookId.value,
       updates,
     );
-    return NextResponse.json(updatedWebhook);
+
+    // updateWebhook already asks for named public columns, but it runs with the
+    // service role and therefore can read `secret`. Keep the HTTP boundary
+    // fail-closed if that internal projection ever regresses: creation above is
+    // the only response allowed to carry the plaintext signing key.
+    const publicWebhook = { ...updatedWebhook };
+    delete publicWebhook.secret;
+    return NextResponse.json(publicWebhook);
   } catch (error) {
     console.error("Update webhook error:", error);
     return NextResponse.json(

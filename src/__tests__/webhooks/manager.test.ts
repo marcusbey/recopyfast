@@ -26,6 +26,30 @@ const mockLookup = dns.lookup as unknown as jest.Mock;
 /** A publicly routable address, so the SSRF guard lets the delivery through. */
 const PUBLIC_ADDRESS = [{ address: "93.184.216.34", family: 4 }];
 
+const EXPECTED_MUTATION_COLUMNS = [
+  "id",
+  "site_id",
+  "url",
+  "events",
+  "secret_prefix",
+  "is_active",
+  "last_triggered_at",
+  "failure_count",
+  "max_failures",
+  "coalesce_window_seconds",
+  "pending_dispatch_at",
+  "created_by",
+  "created_at",
+  "updated_at",
+  "pending_event_type",
+  "pending_payload",
+];
+
+function selectedColumns(callIndex = 0): string[] {
+  const selected = calls.select.mock.calls[callIndex][0] as string;
+  return selected.split(",").map((column) => column.trim());
+}
+
 type QueryResult = { data?: unknown; error: unknown };
 
 /**
@@ -196,6 +220,7 @@ describe("WebhookManager", () => {
       });
 
       expect(result.secret).toMatch(/^[0-9a-f]{64}$/);
+      expect(selectedColumns()).toEqual(EXPECTED_MUTATION_COLUMNS);
     });
 
     it("defaults the coalescing window and accepts an explicit one", async () => {
@@ -241,10 +266,12 @@ describe("WebhookManager", () => {
   });
 
   describe("updateWebhook", () => {
-    it("should update a webhook", async () => {
+    it("updates with a named nonsecret projection and scrubs an overbroad row", async () => {
       const mockUpdatedWebhook = {
         id: "webhook-123",
         url: "https://example.com/new-webhook",
+        secret_prefix: "deadbeef",
+        secret: "must-not-leave-the-manager",
       };
       resultsByTable.webhooks = { data: mockUpdatedWebhook, error: null };
 
@@ -256,7 +283,13 @@ describe("WebhookManager", () => {
       expect(calls.update).toHaveBeenCalledWith(
         expect.objectContaining({ url: "https://example.com/new-webhook" }),
       );
-      expect(result).toEqual(mockUpdatedWebhook);
+      expect(selectedColumns()).toEqual(EXPECTED_MUTATION_COLUMNS);
+      expect(result).toEqual({
+        id: "webhook-123",
+        url: "https://example.com/new-webhook",
+        secret_prefix: "deadbeef",
+      });
+      expect(result).not.toHaveProperty("secret");
     });
   });
 
