@@ -171,3 +171,17 @@ All stories remain; PR #32 introduces no sites/api_key read surface; migration o
 content-preserving ADR renumbers were checked. Final conventional merge commit and push run
 the mandatory full-suite and build/coverage hooks with the owned local Supabase stack active.
 Original review remains unmodified and uncommitted. No production action is authorized.
+
+
+The latest-main commit hook passed 248 suites / 3,308 tests (38 existing skips). Its push
+coverage hook twice exposed the inherited founding hold test's cross-clock assumption:
+Mac Date.now before a DB query produced 1812 seconds against a <=1811 expectation, while
+the unchanged focused suite passed 23/23. No retry/timeouts or product behavior changed.
+The test now obtains CEIL(epoch NOW()) in the same SQL statement as reserve, matching the
+column default's transaction clock, and asserts an exact 1810-second hold. It still checks
+that the second reservation returns the same id and expiry. This is a stronger deterministic
+oracle; focused real-Supabase tests pass 23/23. Final hooks re-run after this test-only fix.
+
+Fresh bounded review approves the deterministic oracle: exact shared-clock +1810 matches
+the schema default, idempotency is preserved, and focused normal/coverage-instrumented
+real-Supabase runs both pass 23/23. Max severity: none / Ship allowed: yes.
