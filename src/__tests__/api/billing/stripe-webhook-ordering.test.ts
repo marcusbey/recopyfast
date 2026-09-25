@@ -18,6 +18,7 @@
 const mockConstructEvent = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
 const mockSubscriptionRetrieve = jest.fn();
+const mockReleaseFoundingAgencyCheckout = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
@@ -46,6 +47,12 @@ jest.mock("stripe", () =>
 jest.mock("@/lib/stripe/plans", () => ({
   ...jest.requireActual("@/lib/stripe/plans"),
   findPaidPlanIdByStripePriceId: jest.fn(async () => "pro"),
+}));
+
+jest.mock("@/lib/billing/founding-agency", () => ({
+  completeFoundingAgencyPurchase: jest.fn(),
+  releaseFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockReleaseFoundingAgencyCheckout(...args),
 }));
 
 process.env.STRIPE_SECRET_KEY = "sk_test_fake";
@@ -617,6 +624,43 @@ describe("A-21: Checkout completion ordering", () => {
       stripe_session_id: "cs_expired",
       status: "expired",
     });
+  });
+
+  it("finishes the subscription intent before releasing the same expired session's founding hold", async () => {
+    mockReleaseFoundingAgencyCheckout.mockImplementationOnce(async () => {
+      expect(db.checkout_pending_intents[0]).toMatchObject({
+        stripe_session_id: "cs_combined",
+        status: "expired",
+      });
+      return true;
+    });
+
+    const response = await deliver({
+      id: "evt_expired_combined",
+      type: "checkout.session.expired",
+      data: {
+        object: {
+          id: "cs_combined",
+          mode: "subscription",
+          payment_status: "unpaid",
+          client_reference_id: "user-1",
+          url: null,
+          metadata: {
+            user_id: "user-1",
+            checkout_intent_id: "intent_1",
+            product_id: "lifetime_agency",
+            founding_reservation_id: "reservation-1",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockReleaseFoundingAgencyCheckout).toHaveBeenCalledWith(
+      "reservation-1",
+      "user-1",
+      "cs_combined",
+    );
   });
 
   it("does not let a delayed old expiry release a newer pending intent", async () => {

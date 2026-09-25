@@ -1388,3 +1388,19 @@ blocks a story.
 
 **WordPress plugin.** The PRD's first post-launch investment. Belongs to the launch that
 follows this backlog, not to it.
+
+
+## Story s33-agency-plan — Agency catalogue and founding offer
+
+Approved by the user on 2026-09-24; this scope supersedes the older s13 pricing questions for catalogue/plan plumbing only. Complexity: 4.
+
+Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 websites, unlimited invited editors/translations, A/B testing, AI, 1,000 monthly AI credits, and $4 additional-site pricing. Features: “10 client websites”, “+$4 per additional website”, “Unlimited invited editors”, “Everything in Pro”, “1,000 AI credits / month”, “Priority support + onboarding call”. Founding Agency (lifetime) costs $299 and grants Agency, limited to the first 50 completed purchases.
+
+- [x] Idempotent migration 20260924065000 adds both catalogue rows and race-safe founding capacity.
+- [x] Monthly/yearly/lifetime checkout, webhook grant, entitlement, credits, limits, badges and billing accept Agency.
+- [x] Completed sales remain durably counted; concurrent final-spot checkout cannot oversell. Pricing exposes cached aggregate spots remaining and sold out at 50.
+- [x] Landing shows Agency beside Starter/Pro and a highlighted founding offer below; pricing/landing tests and strict count contract remain valid.
+- [x] Stripe tooling creates/verifies all three prices in TEST mode only; live operator commands documented.
+- [x] Targeted tests and required repository gates pass; draft PR only, independent review pending.
+
+Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.

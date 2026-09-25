@@ -18,10 +18,11 @@ jest.mock("next/navigation", () => ({
  * the server actually resolves, not deleted — the plan-gating and active-state
  * coverage they carried is still wanted.
  */
-const onPlan = (planId: "starter" | "pro"): EntitlementSummary => ({
+const onPlan = (planId: "starter" | "pro" | "agency"): EntitlementSummary => ({
   kind: "plan",
   planId,
-  planName: planId === "pro" ? "Pro" : "Starter",
+  planName:
+    planId === "agency" ? "Agency" : planId === "pro" ? "Pro" : "Starter",
 });
 
 const onCredits: EntitlementSummary = {
@@ -79,6 +80,12 @@ describe("DashboardNavigation", () => {
       // the Teams entry; the scoping stays, because the claim is about what the
       // card says, not about the word appearing somewhere in the sidebar.
       expect(planCard()).toHaveTextContent("Pro");
+    });
+
+    it("should name Agency in the plan badge", () => {
+      render(<DashboardNavigation entitlement={onPlan("agency")} />);
+
+      expect(planCard()).toHaveTextContent("Agency");
     });
 
     it("should say 'No plan' rather than 'Free' for an unentitled account", () => {

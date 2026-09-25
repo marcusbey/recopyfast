@@ -4,18 +4,18 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import {
-  findOneTimeProduct,
   type OneTimeProduct,
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
 /**
- * Lifetime Pro — the one-time purchase that grants a plan permanently.
+ * A one-time purchase that grants a plan permanently.
  *
  * Name, price, description and feature bullets all come from the `plans` table
  * by way of the catalogue the dashboard already ships to the client. Nothing
- * about the product is written here: the landing page advertising "$199" and a
+ * about the product is written here: the landing page advertising one price and a
  * billing page charging something else is exactly the drift the catalogue
  * exists to prevent.
  */
@@ -25,12 +25,12 @@ import { useCheckout } from "./useCheckout";
  *
  * Resolved server-side in src/app/dashboard/billing/page.tsx, because
  * `plan_entitlements` is the only place the answer lives and nothing the client
- * already holds can distinguish "Pro by lifetime grant" from "Pro by monthly
- * subscription" — `effectivePlanId` reads `pro` for both.
+ * already holds can distinguish a lifetime grant from a monthly subscription —
+ * `effectivePlanId` reads the granted plan id for both.
  *
  * `unknown` is a real third state, not a stand-in for `none`. A read that
  * failed must hide the offer rather than show it: a missing upsell costs us a
- * sale we can still make tomorrow, whereas selling someone a second $199 grant
+ * sale we can still make tomorrow, whereas selling someone a second grant
  * for something they already own costs a refund and their trust.
  */
 export type LifetimeGrantStatus =
@@ -53,49 +53,79 @@ export function resolveLifetimeOffer(
   catalogue: PlanCatalogue,
   grant: LifetimeGrantStatus,
 ): OneTimeProduct | null {
-  if (grant.kind === "unknown") {
-    return null;
-  }
+  return resolveLifetimeOffers(catalogue, grant)[0] ?? null;
+}
 
-  const product = findOneTimeProduct(catalogue, "lifetime_pro");
+/** Every permanent-plan product this account may buy, in catalogue order. */
+export function resolveLifetimeOffers(
+  catalogue: PlanCatalogue,
+  grant: LifetimeGrantStatus,
+  currentPlanId?: string | null,
+): readonly OneTimeProduct[] {
+  if (grant.kind === "unknown") {
+    return [];
+  }
 
   // No active row, or a row that grants nothing: there is no permanent plan to
   // sell. `createCheckoutSession` throws on the same condition rather than
   // taking money for an empty promise, so refusing to draw the button keeps the
   // UI and the server telling the same story.
-  if (!product?.grantsPlanId) {
-    return null;
-  }
+  return catalogue.oneTimeProducts.filter((product) => {
+    if (product.id !== "lifetime_pro" && product.id !== "lifetime_agency") {
+      return false;
+    }
+    if (!product.grantsPlanId) {
+      return false;
+    }
+    // Agency already includes Pro. Offering the lower-tier permanent grant to
+    // an Agency subscriber would charge $199 and then downgrade their renewal
+    // when the lifetime completion path stops billing.
+    if (
+      product.id === "lifetime_pro" &&
+      (currentPlanId === "agency" ||
+        (grant.kind === "granted" && grant.planIds.includes("agency")))
+    ) {
+      return false;
+    }
 
-  // Membership, not equality: an account can hold several live grants, and
-  // holding the one this product confers is what disqualifies the offer —
-  // regardless of which was granted most recently.
-  if (
-    grant.kind === "granted" &&
-    grant.planIds.includes(product.grantsPlanId)
-  ) {
-    return null;
-  }
-
-  return product;
+    // Membership, not equality: an account can hold several live grants, and
+    // holding the one this product confers is what disqualifies the offer —
+    // regardless of which was granted most recently.
+    return !(
+      grant.kind === "granted" && grant.planIds.includes(product.grantsPlanId)
+    );
+  });
 }
 
 interface LifetimeOfferCardProps {
   /** Resolved by `resolveLifetimeOffer`; the card never decides for itself. */
   product: OneTimeProduct;
   /**
-   * A recurring subscription is live and will keep charging after this
-   * purchase. Buying lifetime does not cancel it — Stripe has no idea the two
-   * are related — so the card has to say so.
+   * A recurring subscription is live. The purchase completion path stops its
+   * renewal, so the card has to explain that the already-paid period remains.
    */
   hasLiveSubscription: boolean;
+  availability?: FoundingAgencyAvailability | null;
 }
 
 export function LifetimeOfferCard({
   product,
   hasLiveSubscription,
+  availability,
 }: LifetimeOfferCardProps) {
   const { startCheckout, isRedirecting, error } = useCheckout();
+  const isFoundingOffer = product.id === "lifetime_agency";
+  const isAvailabilityUnknown = isFoundingOffer && availability == null;
+  const isSoldOut = isFoundingOffer && availability?.soldOut === true;
+  const isCheckoutDisabled =
+    isRedirecting || isAvailabilityUnknown || isSoldOut;
+  const availabilityMessage = !isFoundingOffer
+    ? null
+    : availability == null
+      ? "Availability temporarily unavailable"
+      : availability.soldOut
+        ? "Sold out"
+        : `${availability.remaining} of ${availability.limit} founding spots left`;
 
   return (
     <Card className="p-6">
@@ -118,6 +148,11 @@ export function LifetimeOfferCard({
           <div className="text-sm text-muted-foreground">
             Charged once. No renewal, no recurring billing.
           </div>
+          {isFoundingOffer && (
+            <div className="mt-2 text-sm font-medium text-primary">
+              {availabilityMessage}
+            </div>
+          )}
         </div>
 
         <ul className="space-y-2">
@@ -152,13 +187,22 @@ export function LifetimeOfferCard({
         )}
 
         <Button
-          onClick={() => startCheckout({ intent: "lifetime" })}
-          disabled={isRedirecting}
+          onClick={() =>
+            startCheckout({
+              intent: "lifetime",
+              ...(isFoundingOffer ? { productId: product.id } : {}),
+            })
+          }
+          disabled={isCheckoutDisabled}
           className="w-full"
         >
-          {isRedirecting
-            ? "Redirecting to Stripe…"
-            : `Buy once — $${product.price}`}
+          {isSoldOut
+            ? "Sold out"
+            : isAvailabilityUnknown
+              ? "Availability unavailable"
+              : isRedirecting
+                ? "Redirecting to Stripe…"
+                : `Buy once — $${product.price}`}
         </Button>
 
         <p className="text-xs text-muted-foreground">

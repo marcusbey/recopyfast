@@ -22,6 +22,7 @@ import {
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
 import { useCheckout } from "./useCheckout";
+import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
 interface UpgradeDialogProps {
   open: boolean;
@@ -35,7 +36,9 @@ interface UpgradeDialogProps {
    * not be offered it. Resolved by `resolveLifetimeOffer` in the dashboard so
    * the dialog and the sidebar card cannot disagree about who may see it.
    */
-  lifetimeOffer: OneTimeProduct | null;
+  lifetimeOffers: readonly OneTimeProduct[];
+  foundingAgencyAvailability: FoundingAgencyAvailability | null;
+  agencyCheckoutEnabled?: boolean;
   onSuccess: () => void;
 }
 
@@ -49,13 +52,19 @@ export function UpgradeDialog({
   onOpenChange,
   currentPlan,
   catalogue,
-  lifetimeOffer,
+  lifetimeOffers,
+  foundingAgencyAvailability,
+  agencyCheckoutEnabled = true,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
   // catalogue for grandfathered accounts cannot be bought.
-  const plans = sellablePlans(catalogue).filter((plan) =>
-    isPaidPlanId(plan.id),
+  const plans = sellablePlans(catalogue).filter(
+    (plan) =>
+      isPaidPlanId(plan.id) && (agencyCheckoutEnabled || plan.id !== "agency"),
+  );
+  const visibleLifetimeOffers = lifetimeOffers.filter(
+    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
   );
   const [selectedPlan, setSelectedPlan] = useState<PaidPlanId>("pro");
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
@@ -205,7 +214,7 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Subscription plan"
-            className="grid grid-cols-1 md:grid-cols-2 gap-6"
+            className="grid grid-cols-1 md:grid-cols-3 gap-6"
           >
             {plans.map((plan) => {
               const isSelected = selectedPlan === plan.id;
@@ -275,8 +284,11 @@ export function UpgradeDialog({
             })}
           </div>
 
-          {lifetimeOffer && (
-            <div className="rounded-lg border border-border bg-surface-1 p-4">
+          {visibleLifetimeOffers.map((lifetimeOffer) => (
+            <div
+              key={lifetimeOffer.id}
+              className="rounded-lg border border-border bg-surface-1 p-4"
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-medium">
@@ -288,17 +300,44 @@ export function UpgradeDialog({
                     {hasSubscription &&
                       " Your current subscription stops renewing once the purchase completes."}
                   </p>
+                  {lifetimeOffer.id === "lifetime_agency" && (
+                    <p className="mt-1 text-sm font-medium text-primary">
+                      {foundingAgencyAvailability == null
+                        ? "Availability temporarily unavailable"
+                        : foundingAgencyAvailability.soldOut
+                          ? "Sold out"
+                          : `${foundingAgencyAvailability.remaining} of ${foundingAgencyAvailability.limit} founding spots left`}
+                    </p>
+                  )}
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => startCheckout({ intent: "lifetime" })}
-                  disabled={isBusy}
+                  onClick={() =>
+                    startCheckout({
+                      intent: "lifetime",
+                      ...(lifetimeOffer.id === "lifetime_agency"
+                        ? { productId: lifetimeOffer.id }
+                        : {}),
+                    })
+                  }
+                  disabled={
+                    isBusy ||
+                    (lifetimeOffer.id === "lifetime_agency" &&
+                      (foundingAgencyAvailability == null ||
+                        foundingAgencyAvailability.soldOut))
+                  }
                 >
-                  Buy once
+                  {lifetimeOffer.id === "lifetime_agency" &&
+                  foundingAgencyAvailability == null
+                    ? "Availability unavailable"
+                    : lifetimeOffer.id === "lifetime_agency" &&
+                        foundingAgencyAvailability?.soldOut
+                      ? "Sold out"
+                      : "Buy once"}
                 </Button>
               </div>
             </div>
-          )}
+          ))}
 
           <div className="text-xs text-muted-foreground space-y-1">
             <p>• Cancel anytime — no long-term contracts</p>

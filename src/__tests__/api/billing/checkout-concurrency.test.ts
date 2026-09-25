@@ -175,6 +175,7 @@ jest.mock("@/lib/supabase/service", () => ({
 }));
 
 const mockCreateCheckoutSession = jest.fn();
+const mockPreflightLifetimeCheckout = jest.fn();
 const mockFindCheckoutSessionForIntent = jest.fn();
 const mockGetCheckoutSessionStatus = jest.fn();
 const mockExpireCheckoutSession = jest.fn();
@@ -182,6 +183,8 @@ const mockExpireCheckoutSession = jest.fn();
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  preflightLifetimeCheckout: (...args: unknown[]) =>
+    mockPreflightLifetimeCheckout(...args),
   findCheckoutSessionForIntent: (...args: unknown[]) =>
     mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: (...args: unknown[]) =>
@@ -211,15 +214,40 @@ jest.mock("@/lib/billing/user-lock", () => {
 });
 
 jest.mock("@/lib/stripe/plans", () => ({
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isAgencyCheckoutEnabled: () =>
+    process.env.AGENCY_CHECKOUT_ENABLED !== "false",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+  isLifetimeProductId: (value: unknown) =>
+    value === "lifetime_pro" || value === "lifetime_agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  getOneTimeProduct: jest.fn(async (productId: string) => ({
+    id: productId,
+    grantsPlanId: productId === "lifetime_agency" ? "agency" : "pro",
+  })),
   resolveStripePriceId: jest.fn(
     async (planId: string, billingPeriod: string) =>
       `price_${planId}_${billingPeriod}`,
   ),
+}));
+
+const mockReserveFoundingAgencySpot = jest.fn();
+const mockBindFoundingAgencyCheckout = jest.fn();
+const mockReleaseFoundingAgencyCheckout = jest.fn();
+const mockReconcileExpiredFoundingAgencyCheckouts = jest.fn();
+
+jest.mock("@/lib/billing/founding-agency", () => ({
+  reserveFoundingAgencySpot: (...args: unknown[]) =>
+    mockReserveFoundingAgencySpot(...args),
+  bindFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockBindFoundingAgencyCheckout(...args),
+  releaseFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockReleaseFoundingAgencyCheckout(...args),
+  reconcileExpiredFoundingAgencyCheckouts: (...args: unknown[]) =>
+    mockReconcileExpiredFoundingAgencyCheckouts(...args),
 }));
 
 import { POST } from "@/app/api/billing/checkout/route";
@@ -266,18 +294,37 @@ describe("A-21: two checkouts started at once", () => {
     failClaim = false;
     blockClaimForSubscription = false;
     mockBypassUserLock = false;
+    process.env.AGENCY_CHECKOUT_ENABLED = "true";
 
     mockGetUser.mockResolvedValue({
       data: { user: { id: USER_ID, email: "buyer@example.com" } },
       error: null,
     });
     mockGetGrantedPlanIds.mockResolvedValue([]);
+    mockReserveFoundingAgencySpot.mockResolvedValue({
+      outcome: "reserved",
+      reservationId: "reservation-1",
+      checkoutExpiresAt: 1_800_000_000,
+    });
+    mockBindFoundingAgencyCheckout.mockResolvedValue(undefined);
+    mockPreflightLifetimeCheckout.mockResolvedValue({
+      productId: "lifetime_agency",
+      productName: "Founding Agency (lifetime)",
+      grantsPlanId: "agency",
+      priceId: "price_lifetime_agency",
+      stripeCustomerId: "cus_agency",
+      successUrl: "https://example.test/success",
+      cancelUrl: "https://example.test/cancel",
+    });
+    mockReleaseFoundingAgencyCheckout.mockResolvedValue(true);
+    mockReconcileExpiredFoundingAgencyCheckouts.mockResolvedValue(0);
     mockFindCheckoutSessionForIntent.mockResolvedValue(null);
     mockGetCheckoutSessionStatus.mockResolvedValue({ status: "open" });
     mockExpireCheckoutSession.mockResolvedValue(undefined);
     mockCreateCheckoutSession.mockImplementation(async () => ({
       sessionId: `cs_${mockCreateCheckoutSession.mock.calls.length}`,
       url: "https://checkout.stripe.com/c/pay/cs_test",
+      expiresAt: 1_800_000_000,
     }));
     // Reads the table the Stripe webhook writes — empty until a payment
     // completes, which is the whole point.
@@ -895,6 +942,223 @@ describe("A-21: two checkouts started at once", () => {
 
     expect(response.status).toBe(409);
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["sold_out", "sold out"],
+    ["capacity_busy", "temporarily held"],
+  ])(
+    "returns a clear %s response before Stripe checkout",
+    async (outcome, message) => {
+      mockReserveFoundingAgencySpot.mockResolvedValue({
+        outcome,
+        reservationId: null,
+        checkoutExpiresAt: null,
+      });
+
+      const response = await post({
+        intent: "lifetime",
+        productId: "lifetime_agency",
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining(message),
+      });
+      expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("binds the founding reservation before returning checkout", async () => {
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateCheckoutSession).toHaveBeenCalledWith(
+      USER_ID,
+      "buyer@example.com",
+      expect.objectContaining({
+        productId: "lifetime_agency",
+        reservationId: "reservation-1",
+        checkoutExpiresAt: 1_800_000_000,
+      }),
+      undefined,
+    );
+    expect(mockBindFoundingAgencyCheckout).toHaveBeenCalledWith(
+      "reservation-1",
+      USER_ID,
+      expect.any(String),
+      1_800_000_000,
+    );
+    expect(
+      mockPreflightLifetimeCheckout.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockReserveFoundingAgencySpot.mock.invocationCallOrder[0]);
+    expect(
+      mockReconcileExpiredFoundingAgencyCheckouts.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockReserveFoundingAgencySpot.mock.invocationCallOrder[0]);
+  });
+
+  it("explains that a refunded founding purchase does not reopen a limited spot", async () => {
+    mockReserveFoundingAgencySpot.mockResolvedValue({
+      outcome: "refunded",
+      reservationId: null,
+      checkoutExpiresAt: null,
+    });
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringMatching(/refunded.*not reopened/i),
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("does not reserve capacity when founding checkout preflight fails", async () => {
+    mockPreflightLifetimeCheckout.mockRejectedValue(
+      new Error("No Stripe price configured for Founding Agency"),
+    );
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["StripeInvalidRequestError", "resource_missing"],
+    ["StripeAuthenticationError", undefined],
+    ["StripePermissionError", undefined],
+  ])(
+    "releases an unbound founding hold after %s rejects session creation",
+    async (type, code) => {
+      mockCreateCheckoutSession.mockRejectedValueOnce({
+        type,
+        code,
+        message: "Stripe rejected the request before creating a session",
+      });
+
+      const response = await post({
+        intent: "lifetime",
+        productId: "lifetime_agency",
+      });
+
+      expect(response.status).toBe(500);
+      expect(mockReleaseFoundingAgencyCheckout).toHaveBeenCalledWith(
+        "reservation-1",
+        USER_ID,
+        null,
+      );
+    },
+  );
+
+  it.each([
+    ["StripeConnectionError", undefined],
+    ["StripeAPIError", undefined],
+    ["StripeRateLimitError", undefined],
+    ["StripeIdempotencyError", undefined],
+    ["StripeInvalidRequestError", "idempotency_key_in_use"],
+  ])(
+    "retains a founding hold when session creation fails with %s/%s",
+    async (type, code) => {
+      mockCreateCheckoutSession.mockRejectedValueOnce({
+        type,
+        code,
+        message: "Stripe outcome may be uncertain",
+      });
+
+      const response = await post({
+        intent: "lifetime",
+        productId: "lifetime_agency",
+      });
+
+      expect(response.status).toBe(500);
+      expect(mockReleaseFoundingAgencyCheckout).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps Lifetime Pro from cancelling an Agency subscription", async () => {
+    mockGetUserSubscription.mockResolvedValueOnce({ plan_id: "agency" });
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_pro",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Agency subscription"),
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when Lifetime Pro eligibility cannot read the live subscription", async () => {
+    mockGetUserSubscription.mockRejectedValueOnce(
+      new Error("Failed to read current subscription: database unavailable"),
+    );
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_pro",
+    });
+
+    expect(response.status).toBe(500);
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps an Agency lifetime owner from buying Lifetime Pro for no benefit", async () => {
+    mockGetGrantedPlanIds.mockResolvedValue(["agency"]);
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_pro",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Agency lifetime"),
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { intent: "subscription", planId: "agency" },
+    { intent: "lifetime", productId: "lifetime_agency" },
+  ])(
+    "withdraws new Agency checkout when the operator switch is off",
+    async (body) => {
+      process.env.AGENCY_CHECKOUT_ENABLED = "false";
+
+      const response = await post(body);
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("temporarily unavailable"),
+      });
+      expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+      expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps Lifetime Pro available when Agency checkout is withdrawn", async () => {
+    process.env.AGENCY_CHECKOUT_ENABLED = "false";
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_pro",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an unauthenticated caller before creating anything", async () => {

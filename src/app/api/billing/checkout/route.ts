@@ -6,13 +6,16 @@ import {
   expireCheckoutSession,
   findCheckoutSessionForIntent,
   getCheckoutSessionStatus,
+  preflightLifetimeCheckout,
   type CheckoutIntent,
 } from "@/lib/stripe/checkout";
 import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
-  getLifetimeGrantPlanId,
+  getOneTimeProduct,
+  isAgencyCheckoutEnabled,
   isBillingPeriod,
+  isLifetimeProductId,
   isPaidPlanId,
   resolveStripePriceId,
 } from "@/lib/stripe/plans";
@@ -27,6 +30,12 @@ import {
   SUBSCRIPTION_CHECKOUT_TTL_MS,
 } from "@/lib/billing/checkout-reservation";
 import { withUserLock } from "@/lib/billing/user-lock";
+import {
+  bindFoundingAgencyCheckout,
+  reconcileExpiredFoundingAgencyCheckouts,
+  releaseFoundingAgencyCheckout,
+  reserveFoundingAgencySpot,
+} from "@/lib/billing/founding-agency";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 
 /**
@@ -41,6 +50,7 @@ interface CheckoutRequestBody {
   intent?: unknown;
   planId?: unknown;
   billingPeriod?: unknown;
+  productId?: unknown;
   quantity?: unknown;
 }
 
@@ -54,6 +64,17 @@ function isStripeIdempotencyConflict(error: unknown): boolean {
   return (
     candidate.type === "StripeIdempotencyError" ||
     candidate.code === "idempotency_key_in_use"
+  );
+}
+
+function isDefinitiveStripeCreateFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const type = (error as { type?: unknown }).type;
+  return (
+    !isStripeIdempotencyConflict(error) &&
+    (type === "StripeInvalidRequestError" ||
+      type === "StripeAuthenticationError" ||
+      type === "StripePermissionError")
   );
 }
 
@@ -90,8 +111,13 @@ async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
       return { ok: true, intent: { type: "credits", quantity } };
     }
 
-    case "lifetime":
-      return { ok: true, intent: { type: "lifetime" } };
+    case "lifetime": {
+      const productId = body.productId ?? "lifetime_pro";
+      if (!isLifetimeProductId(productId)) {
+        return { ok: false, error: "Invalid lifetime product ID" };
+      }
+      return { ok: true, intent: { type: "lifetime", productId } };
+    }
 
     case "payment_method":
       return { ok: true, intent: { type: "payment_method" } };
@@ -125,6 +151,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
+    if (
+      !isAgencyCheckoutEnabled() &&
+      ((parsed.intent.type === "subscription" &&
+        parsed.intent.planId === "agency") ||
+        (parsed.intent.type === "lifetime" &&
+          parsed.intent.productId === "lifetime_agency"))
+    ) {
+      return NextResponse.json(
+        { error: "Agency checkout is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+
+    const existingSubscription =
+      parsed.intent.type === "subscription" ||
+      (parsed.intent.type === "lifetime" &&
+        (parsed.intent.productId ?? "lifetime_pro") === "lifetime_pro")
+        ? await getUserSubscription(user.id)
+        : null;
+
     // A customer who already pays us changes plans through
     // PUT /api/billing/subscription (proration), not a second Checkout.
     //
@@ -132,7 +178,6 @@ export async function POST(req: NextRequest) {
     // overlapping POSTs both pass it. The lock serialises this isolate; the
     // reservation row (unique on user_id) serialises across isolates.
     if (parsed.intent.type === "subscription") {
-      const existingSubscription = await getUserSubscription(user.id);
       if (existingSubscription) {
         return NextResponse.json(
           {
@@ -427,7 +472,9 @@ export async function POST(req: NextRequest) {
     // trusting the dialog not to offer it; this is the same rule applied to the
     // more expensive product.
     if (parsed.intent.type === "lifetime") {
-      const grantedPlanId = await getLifetimeGrantPlanId();
+      const productId = parsed.intent.productId ?? "lifetime_pro";
+      const product = await getOneTimeProduct(productId);
+      const grantedPlanId = product.grantsPlanId;
       // The GRANT, not the effective plan. Asking `getEffectivePlanId` here
       // refused every Pro monthly subscriber — it falls back to a live
       // subscription when there is no grant, so a subscriber resolved to `pro`
@@ -437,6 +484,29 @@ export async function POST(req: NextRequest) {
       // subscription afterwards) all assume they can reach it.
       const heldGrants = await getGrantedPlanIds(user.id);
 
+      if (
+        productId === "lifetime_pro" &&
+        existingSubscription?.plan_id === "agency"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Lifetime Pro cannot replace an active Agency subscription. Keep Agency or contact support.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (productId === "lifetime_pro" && heldGrants.includes("agency")) {
+        return NextResponse.json(
+          {
+            error:
+              "You already have Agency lifetime access, which includes Lifetime Pro benefits. There is nothing further to buy.",
+          },
+          { status: 409 },
+        );
+      }
+
       if (grantedPlanId !== null && heldGrants.includes(grantedPlanId)) {
         return NextResponse.json(
           {
@@ -445,6 +515,114 @@ export async function POST(req: NextRequest) {
           },
           { status: 409 },
         );
+      }
+
+      if (productId === "lifetime_agency") {
+        const buyerName =
+          typeof user.user_metadata?.name === "string"
+            ? user.user_metadata.name
+            : undefined;
+
+        // Missing price ids, origin configuration and customer-creation
+        // failures are all known before a capacity row exists. After this
+        // point transport/API errors are uncertain Stripe outcomes; definitive
+        // request rejection releases immediately, while ambiguous outcomes are
+        // recovered by idempotency or provider reconciliation at expiry.
+        const prepared = await preflightLifetimeCheckout(
+          user.id,
+          user.email!,
+          productId,
+          buyerName,
+        );
+
+        await reconcileExpiredFoundingAgencyCheckouts();
+        const reservation = await reserveFoundingAgencySpot(user.id);
+
+        if (reservation.outcome === "owned") {
+          return NextResponse.json(
+            {
+              error:
+                "You already have lifetime Agency access. There is nothing further to buy.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "refunded") {
+          return NextResponse.json(
+            {
+              error:
+                "Your Founding Agency purchase was refunded or revoked. Limited founding spots are not reopened after a refund; contact support if this looks wrong.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "sold_out") {
+          return NextResponse.json(
+            {
+              error: "All 50 Founding Agency lifetime spots are sold out.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "capacity_busy") {
+          return NextResponse.json(
+            {
+              error:
+                "The remaining Founding Agency spots are temporarily held in checkout. Please try again shortly.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome !== "reserved") {
+          throw new Error("Unexpected Founding Agency reservation outcome");
+        }
+
+        let session;
+        try {
+          session = await createCheckoutSession(
+            user.id,
+            user.email!,
+            {
+              ...parsed.intent,
+              reservationId: reservation.reservationId,
+              checkoutExpiresAt: reservation.checkoutExpiresAt,
+              prepared,
+            },
+            buyerName,
+          );
+        } catch (error: unknown) {
+          // Invalid-request, authentication and permission errors reject the
+          // request before Stripe creates a Checkout Session, so the unbound
+          // hold can be released here. Connection, API, rate-limit and
+          // idempotency errors can race a remote create and retain the hold for
+          // recovery by the same key or by provider reconciliation at expiry.
+          if (isDefinitiveStripeCreateFailure(error)) {
+            await releaseFoundingAgencyCheckout(
+              reservation.reservationId,
+              user.id,
+              null,
+            );
+          }
+          throw error;
+        }
+
+        // A successful Stripe create with a failed bind is returned as 500.
+        // The next request reuses both the database reservation and Stripe
+        // idempotency key, recovers that same session, and retries this bind.
+        // Releasing here would be unsafe: a customer may already be paying in
+        // the remotely-created session while another buyer takes the spot.
+        await bindFoundingAgencyCheckout(
+          reservation.reservationId,
+          user.id,
+          session.sessionId,
+          session.expiresAt ?? reservation.checkoutExpiresAt,
+        );
+
+        return NextResponse.json(session);
       }
     }
 

@@ -318,6 +318,8 @@ jest.mock("@/lib/api/rate-limit", () => ({
 // are pinned by plan-seed.test.ts; what matters here is that a trial resolves
 // to the SAME Pro row a subscriber gets, with no trial-specific plan anywhere.
 jest.mock("@/lib/stripe/plans", () => ({
+  isAgencyCheckoutEnabled: () =>
+    process.env.AGENCY_CHECKOUT_ENABLED !== "false",
   findPlanById: jest.fn(async (planId: string) =>
     planId === "pro"
       ? {
@@ -340,11 +342,18 @@ jest.mock("@/lib/stripe/plans", () => ({
         }
       : null,
   ),
-  isPaidPlanId: (value: unknown) => value === "starter" || value === "pro",
+  isPaidPlanId: (value: unknown) =>
+    value === "starter" || value === "pro" || value === "agency",
+  isLifetimeProductId: (value: unknown) =>
+    value === "lifetime_pro" || value === "lifetime_agency",
   isBillingPeriod: (value: unknown) =>
     value === "monthly" || value === "yearly",
   getCreditPackConfig: jest.fn(async () => ({ maxPacksPerPurchase: 10 })),
   getLifetimeGrantPlanId: jest.fn(async () => "pro"),
+  getOneTimeProduct: jest.fn(async () => ({
+    id: "lifetime_pro",
+    grantsPlanId: "pro",
+  })),
   getPaidPlan: jest.fn(),
   resolveStripePriceId: jest.fn(async () => "price_pro_monthly"),
 }));
@@ -356,6 +365,7 @@ const mockExpireCheckoutSession = jest.fn();
 jest.mock("@/lib/stripe/checkout", () => ({
   createCheckoutSession: (...args: unknown[]) =>
     mockCreateCheckoutSession(...args),
+  preflightLifetimeCheckout: jest.fn(),
   findCheckoutSessionForIntent: (...args: unknown[]) =>
     mockFindCheckoutSessionForIntent(...args),
   getCheckoutSessionStatus: jest.fn(),

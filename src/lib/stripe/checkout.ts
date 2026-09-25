@@ -6,6 +6,7 @@ import {
   resolveOneTimePriceId,
   resolveStripePriceId,
   type BillingPeriod,
+  type OneTimeProductId,
   type PaidPlanId,
 } from "./plans";
 import { createOrGetCustomer } from "./customer";
@@ -27,12 +28,20 @@ import { resolveDeploymentOrigin } from "@/lib/deployment/origin";
 export type CheckoutIntent =
   | { type: "subscription"; planId: PaidPlanId; billingPeriod: BillingPeriod }
   | { type: "credits"; quantity: number }
-  | { type: "lifetime" }
+  | {
+      type: "lifetime";
+      productId?: Extract<OneTimeProductId, "lifetime_pro" | "lifetime_agency">;
+      reservationId?: string;
+      checkoutExpiresAt?: number;
+      prepared?: PreparedLifetimeCheckout;
+    }
   | { type: "payment_method" };
 
 export interface CheckoutSessionResult {
   sessionId: string;
   url: string;
+  /** Stripe's authoritative session deadline, in Unix seconds. */
+  expiresAt?: number;
 }
 
 export interface CheckoutSessionCreationOptions {
@@ -120,6 +129,21 @@ export interface CheckoutSessionStatus {
   paymentMethodId: string | null;
 }
 
+type LifetimeProductId = Extract<
+  OneTimeProductId,
+  "lifetime_pro" | "lifetime_agency"
+>;
+
+export interface PreparedLifetimeCheckout {
+  productId: LifetimeProductId;
+  productName: string;
+  grantsPlanId: string;
+  priceId: string;
+  stripeCustomerId: string;
+  successUrl: string;
+  cancelUrl: string;
+}
+
 /**
  * Absolute origin used to build Checkout return URLs.
  *
@@ -163,6 +187,45 @@ function buildReturnUrls(): { successUrl: string; cancelUrl: string } {
 }
 
 /**
+ * Resolve every deterministic/external prerequisite before scarce founding
+ * capacity is reserved. A failure here proves no Checkout Session exists, so
+ * the route can answer without leaking a spot. Once the reservation is taken,
+ * only the idempotent sessions.create call remains uncertain. Definitive
+ * request rejection can release immediately; ambiguous outcomes retain their
+ * spot until idempotent recovery or expiry reconciliation proves the result.
+ */
+export async function preflightLifetimeCheckout(
+  userId: string,
+  email: string,
+  productId: LifetimeProductId,
+  name?: string,
+): Promise<PreparedLifetimeCheckout> {
+  const product = await getOneTimeProduct(productId);
+  if (!product.grantsPlanId) {
+    throw new Error(
+      `${product.name} is on sale but grants no plan. Set ` +
+        `plans."${productId}".grants_plan_id.`,
+    );
+  }
+
+  const { successUrl, cancelUrl } = buildReturnUrls();
+  const [priceId, customer] = await Promise.all([
+    resolveOneTimePriceId(productId),
+    createOrGetCustomer(userId, email, name),
+  ]);
+
+  return {
+    productId,
+    productName: product.name,
+    grantsPlanId: product.grantsPlanId,
+    priceId,
+    stripeCustomerId: customer.stripeCustomer.id,
+    successUrl,
+    cancelUrl,
+  };
+}
+
+/**
  * Create a Checkout Session for the given intent.
  *
  * Every session carries `client_reference_id = userId` so the status endpoint
@@ -178,11 +241,15 @@ export async function createCheckoutSession(
 ): Promise<CheckoutSessionResult> {
   // Ensures a billing_customers row exists before any webhook needs to resolve
   // the Stripe customer back to a user.
-  const { stripeCustomer } = await createOrGetCustomer(userId, email, name);
-  const { successUrl, cancelUrl } = buildReturnUrls();
+  const preparedLifetime =
+    intent.type === "lifetime" ? intent.prepared : undefined;
+  const stripeCustomerId =
+    preparedLifetime?.stripeCustomerId ??
+    (await createOrGetCustomer(userId, email, name)).stripeCustomer.id;
+  const { successUrl, cancelUrl } = preparedLifetime ?? buildReturnUrls();
 
   const baseParams = {
-    customer: stripeCustomer.id,
+    customer: stripeCustomerId,
     client_reference_id: userId,
     success_url: successUrl,
     cancel_url: cancelUrl,
@@ -271,14 +338,43 @@ export async function createCheckoutSession(
     }
 
     case "lifetime": {
-      const product = await getOneTimeProduct("lifetime_pro");
+      const productId = intent.productId ?? "lifetime_pro";
+      if (preparedLifetime && preparedLifetime.productId !== productId) {
+        throw new Error("Prepared lifetime checkout does not match product ID");
+      }
+      const product = preparedLifetime
+        ? {
+            name: preparedLifetime.productName,
+            grantsPlanId: preparedLifetime.grantsPlanId,
+          }
+        : await getOneTimeProduct(productId);
+      const isFoundingAgency = productId === "lifetime_agency";
+
+      if (
+        isFoundingAgency &&
+        (!intent.reservationId || !intent.checkoutExpiresAt)
+      ) {
+        throw new Error(
+          "Founding Agency checkout requires a durable capacity reservation.",
+        );
+      }
 
       if (!product.grantsPlanId) {
         throw new Error(
-          "Lifetime Pro is on sale but grants no plan. Set " +
-            'plans."lifetime_pro".grants_plan_id.',
+          `${product.name} is on sale but grants no plan. Set ` +
+            `plans."${productId}".grants_plan_id.`,
         );
       }
+
+      const lifetimeMetadata = {
+        user_id: userId,
+        product_id: productId,
+        grants_plan_id: product.grantsPlanId,
+        type: "lifetime_purchase",
+        ...(intent.reservationId
+          ? { founding_reservation_id: intent.reservationId }
+          : {}),
+      };
 
       // A configured Stripe Price, not price_data: a lifetime purchase is a
       // catalogue SKU that has to reconcile against the same product in
@@ -286,28 +382,29 @@ export async function createCheckoutSession(
       params = {
         ...baseParams,
         mode: "payment",
+        // Stripe permits 30 minutes to 24 hours. Matching the shortest window
+        // keeps scarce founding capacity moving while checkout.session.expired
+        // remains the only evidence safe enough to release a bound spot.
+        ...(isFoundingAgency ? { expires_at: intent.checkoutExpiresAt } : {}),
         line_items: [
-          { price: await resolveOneTimePriceId("lifetime_pro"), quantity: 1 },
+          {
+            price:
+              preparedLifetime?.priceId ??
+              (await resolveOneTimePriceId(productId)),
+            quantity: 1,
+          },
         ],
         allow_promotion_codes: true,
         // handlePaymentIntentSucceeded reads this to write the permanent grant.
         payment_intent_data: {
-          metadata: {
-            user_id: userId,
-            grants_plan_id: product.grantsPlanId,
-            type: "lifetime_purchase",
-          },
+          metadata: lifetimeMetadata,
         },
         // `grants_plan_id` is repeated at session level because
         // checkout.session.completed is the second path to the same grant and
         // sees only this object. While it was omitted here, that path had
         // nothing to read and granted a hardcoded "pro" — whichever of the two
         // events Stripe delivered first silently decided what $199 bought.
-        metadata: {
-          user_id: userId,
-          grants_plan_id: product.grantsPlanId,
-          type: "lifetime_purchase",
-        },
+        metadata: lifetimeMetadata,
       };
       break;
     }
@@ -324,18 +421,30 @@ export async function createCheckoutSession(
     }
   }
 
-  const session = await stripe.checkout.sessions.create(
-    params,
-    options.pendingIntentId
-      ? { idempotencyKey: `subscription-checkout:${options.pendingIntentId}` }
-      : undefined,
-  );
+  // Both durable checkout records become Stripe idempotency keys. A retry can
+  // therefore recover the same remotely-created session after a lost response
+  // without creating a second payable Checkout.
+  const idempotencyKey =
+    intent.type === "lifetime" && intent.reservationId
+      ? `founding-agency-${intent.reservationId}`
+      : options.pendingIntentId
+        ? `subscription-checkout:${options.pendingIntentId}`
+        : undefined;
+  const session = idempotencyKey
+    ? await stripe.checkout.sessions.create(params, { idempotencyKey })
+    : await stripe.checkout.sessions.create(params);
 
   if (!session.url) {
     throw new Error("Stripe did not return a Checkout URL");
   }
 
-  return { sessionId: session.id, url: session.url };
+  return {
+    sessionId: session.id,
+    url: session.url,
+    ...(typeof session.expires_at === "number"
+      ? { expiresAt: session.expires_at }
+      : {}),
+  };
 }
 
 /**

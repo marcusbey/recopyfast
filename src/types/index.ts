@@ -1,6 +1,6 @@
 // Collaboration Types
 export type TeamRole = "viewer" | "editor" | "manager" | "owner";
-export type BillingPlan = "free" | "starter" | "pro";
+export type BillingPlan = "free" | "starter" | "pro" | "agency";
 export type NotificationType =
   | "invitation"
   | "permission_change"

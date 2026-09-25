@@ -5,8 +5,9 @@
  * The landing page is served by the main Next.js app at the root URL.
  * Pricing section is at #pricing with Monthly/Yearly toggle.
  * The catalogue is DB-driven (see /api/pricing): Starter ($9/mo, $7.5/mo
- * yearly), Pro ($19/mo, $15.75/mo yearly), plus the one-time Lifetime Pro
- * ($199) card. There is no Enterprise plan.
+ * yearly), Pro ($19/mo, $15.75/mo yearly), Agency ($49/mo, $40.83/mo yearly,
+ * $490 charged annually), plus Lifetime Pro ($199) and the additional
+ * Founding Agency ($299) offer.
  */
 
 import { test, expect } from "@playwright/test";
@@ -35,10 +36,8 @@ test.describe("Landing Page", () => {
     await expect(ctaButton.first()).toBeVisible({ timeout: 15000 });
   });
 
-  // E2E-012: Pricing shows the catalogue: Starter $9, Pro $19, Lifetime Pro $199
-  test("E2E-012: Pricing shows 3 plans with correct prices", async ({
-    page,
-  }) => {
+  // E2E-012: Preserve Lifetime Pro and add the separately highlighted founding offer.
+  test("E2E-012: Pricing shows both lifetime offers", async ({ page }) => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
@@ -61,14 +60,24 @@ test.describe("Landing Page", () => {
       pricing.locator("h3").filter({ hasText: /^Pro$/ }),
     ).toBeVisible();
     await expect(
+      pricing.locator("h3").filter({ hasText: /^Agency$/ }),
+    ).toBeVisible();
+    await expect(
       pricing.locator("h3").filter({ hasText: /^Lifetime Pro$/ }),
+    ).toBeVisible();
+    await expect(
+      pricing
+        .locator("h3")
+        .filter({ hasText: /^Founding Agency \(lifetime\)$/ }),
     ).toBeVisible();
 
     // Check prices visible
     const pricingText = await pricing.textContent();
     expect(pricingText).toContain("$9");
     expect(pricingText).toContain("$19");
+    expect(pricingText).toContain("$49");
     expect(pricingText).toContain("$199");
+    expect(pricingText).toContain("$299");
   });
 
   // E2E-013: Yearly toggle shows discounted prices
@@ -94,11 +103,15 @@ test.describe("Landing Page", () => {
     await yearlyButton.click();
     await page.waitForTimeout(1000);
 
-    // Verify yearly prices appear (catalogue: Starter $7.5/mo, Pro $15.75/mo)
+    // Verify yearly prices and Agency's exact annual charge appear.
     await expect(pricing.getByText("$7.5", { exact: true })).toBeVisible({
       timeout: 5000,
     });
     await expect(pricing.getByText("$15.75", { exact: true })).toBeVisible();
+    await expect(pricing.getByText("$40.83", { exact: true })).toBeVisible();
+    await expect(
+      pricing.getByText("$490 charged annually", { exact: true }),
+    ).toBeVisible();
   });
 
   // E2E-014: Monthly toggle restores original prices
@@ -129,6 +142,7 @@ test.describe("Landing Page", () => {
     const pricingText = await pricing.textContent();
     expect(pricingText).toContain("$9");
     expect(pricingText).toContain("$19");
+    expect(pricingText).toContain("$49");
   });
 
   // E2E-015: Pro shows "Most popular" badge

@@ -30,6 +30,7 @@ import {
 describe("/api/billing/subscription", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env.AGENCY_CHECKOUT_ENABLED = "true";
   });
 
   afterEach(() => {
@@ -118,6 +119,38 @@ describe("/api/billing/subscription", () => {
         billingPeriod: "yearly",
       });
     });
+
+    it("withdraws an Agency upgrade when the Agency checkout switch is off", async () => {
+      process.env.AGENCY_CHECKOUT_ENABLED = "false";
+
+      const response = await PUT(putRequest({ planId: "agency" }));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        error: "Agency checkout is temporarily unavailable.",
+      });
+      expect(updateSubscription).not.toHaveBeenCalled();
+    });
+
+    it.each(["starter", "pro"] as const)(
+      "keeps %s plan changes available when Agency checkout is withdrawn",
+      async (planId) => {
+        process.env.AGENCY_CHECKOUT_ENABLED = "false";
+        (updateSubscription as jest.Mock).mockResolvedValue({
+          subscription: { id: "sub-123", plan_id: planId },
+          requiresAction: false,
+          hostedInvoiceUrl: null,
+        });
+
+        const response = await PUT(putRequest({ planId }));
+
+        expect(response.status).toBe(200);
+        expect(updateSubscription).toHaveBeenCalledWith("test-user-id", {
+          planId,
+          billingPeriod: "monthly",
+        });
+      },
+    );
 
     it("should surface a required 3DS action to the caller", async () => {
       (updateSubscription as jest.Mock).mockResolvedValue({

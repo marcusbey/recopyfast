@@ -1,0 +1,26 @@
+{
+  "plans": [
+    {
+      "id": "agency",
+      "kind": "subscription",
+      "name": "Agency",
+      "description": "10 client websites, unlimited invited editors, Agency support",
+      "price_monthly": "49.00",
+      "price_yearly_monthly_equivalent": "40.83",
+      "price_yearly_total": "490.00",
+      "grants_plan_id": null,
+      "is_active": true
+    },
+    {
+      "id": "lifetime_agency",
+      "kind": "one_time",
+      "name": "Founding Agency (lifetime)",
+      "description": "Pay once for permanent Agency access; limited to the first 50 completed sales",
+      "price_monthly": "299.00",
+      "price_yearly_monthly_equivalent": null,
+      "price_yearly_total": null,
+      "grants_plan_id": "agency",
+      "is_active": true
+    }
+  ]
+}
