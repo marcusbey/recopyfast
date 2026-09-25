@@ -1,25 +1,7 @@
 import type { MetadataRoute } from "next";
 import { createClient } from "@/lib/supabase/server";
-
-/**
- * Canonical origin used to build absolute SEO URLs.
- *
- * Resolution order: the explicitly configured app URL, then Vercel's stable
- * production domain, then the per-deployment URL, then the dev fallback.
- * Vercel exposes its URL vars as bare hostnames, but this project's `.env`
- * sets `VERCEL_URL` with a scheme, so both shapes are accepted.
- */
-function resolveSiteUrl(): string {
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL ||
-    "http://localhost:3000";
-
-  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-
-  return withScheme.replace(/\/+$/, "");
-}
+import { comparisonList } from "@/lib/compare/comparisons";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 type StaticRoute = {
   path: string;
@@ -35,6 +17,15 @@ const STATIC_ROUTES: readonly StaticRoute[] = [
   { path: "/", changeFrequency: "weekly", priority: 1 },
   { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
   { path: "/try", changeFrequency: "monthly", priority: 0.9 },
+  { path: "/compare", changeFrequency: "monthly", priority: 0.8 },
+  ...comparisonList.map(
+    (comparison) =>
+      ({
+        path: `/compare/${comparison.slug}`,
+        changeFrequency: "monthly",
+        priority: 0.7,
+      }) as const,
+  ),
   { path: "/blog", changeFrequency: "daily", priority: 0.7 },
   { path: "/login", changeFrequency: "yearly", priority: 0.3 },
   { path: "/signup", changeFrequency: "yearly", priority: 0.5 },

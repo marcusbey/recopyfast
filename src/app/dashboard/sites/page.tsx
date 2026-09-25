@@ -311,6 +311,7 @@ export default function SitesPage() {
         </div>
         <SiteDetailView
           site={selectedSite}
+          userId={user?.id}
           onClose={() => setSelectedSiteId(null)}
         />
       </div>

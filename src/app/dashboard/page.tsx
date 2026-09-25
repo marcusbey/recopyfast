@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SiteRegistrationModal } from "@/components/dashboard/SiteRegistrationModal";
 import { TrialStatusBadge } from "@/components/dashboard/TrialStatusBadge";
+import { ActivationChecklist } from "@/components/dashboard/ActivationChecklist";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -40,6 +41,8 @@ interface DashboardSite {
   created_at: string;
   updated_at: string;
   status?: SiteStatus;
+  embedScript?: string;
+  siteToken?: string;
   stats?: {
     edits_count?: number;
     content_elements_count?: number;
@@ -187,6 +190,28 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      {sitesState === "ready" && user && (
+        <section aria-label="Activation checklists" className="space-y-4">
+          {sites
+            .filter(
+              (site): site is DashboardSite & { embedScript: string } =>
+                typeof site.embedScript === "string" &&
+                site.embedScript.length > 0 &&
+                typeof site.siteToken === "string",
+            )
+            .map((site) => (
+              <ActivationChecklist
+                key={`${user.id}:${site.id}`}
+                siteId={site.id}
+                siteName={site.name}
+                domain={site.domain}
+                embedScript={site.embedScript}
+                userId={user.id}
+              />
+            ))}
+        </section>
+      )}
 
       {/* Asymmetric by design. One number leads — how many sites are actually
           live — and the rest are subordinate to it. The previous four equal

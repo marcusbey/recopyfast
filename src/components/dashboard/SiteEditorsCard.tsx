@@ -52,6 +52,9 @@ import type { EditorPermission } from "@/lib/auth/editor-access";
 interface SiteEditorsCardProps {
   siteId: string;
   siteName: string;
+  onEditorChange?: () => void;
+  inviteFormAutoFocus?: boolean;
+  inviteDefaultPermissions?: readonly EditorPermission[];
 }
 
 type LoadState =
@@ -153,7 +156,13 @@ function editorHubHref(hubUrl: string): string | null {
   }
 }
 
-export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
+export function SiteEditorsCard({
+  siteId,
+  siteName,
+  onEditorChange,
+  inviteFormAutoFocus = false,
+  inviteDefaultPermissions,
+}: SiteEditorsCardProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
   const [actionFailure, setActionFailure] = useState<ActionFailure | null>(
@@ -247,6 +256,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
           action: "invite",
         });
         await loadEditors();
+        onEditorChange?.();
         return true;
       } catch (error) {
         console.error("Failed to add site editor:", error);
@@ -254,7 +264,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
         return false;
       }
     },
-    [siteId, loadEditors],
+    [siteId, loadEditors, onEditorChange],
   );
 
   const openRevokeConfirm = (editor: SiteEditorSummary) => {
@@ -346,6 +356,7 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
       });
       setRevokeTarget(null);
       await loadEditors();
+      onEditorChange?.();
     } catch (error) {
       console.error("Failed to revoke site editor:", error);
       setRevokeError(NETWORK_ERROR);
@@ -506,7 +517,11 @@ export function SiteEditorsCard({ siteId, siteName }: SiteEditorsCardProps) {
               </div>
             )}
 
-            <InviteEditorForm onInvite={handleInvite} />
+            <InviteEditorForm
+              onInvite={handleInvite}
+              autoFocus={inviteFormAutoFocus}
+              initialPermissions={inviteDefaultPermissions}
+            />
           </>
         )}
       </CardContent>

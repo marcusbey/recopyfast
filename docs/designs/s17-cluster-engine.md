@@ -1,5 +1,10 @@
 # Design — Story s17-cluster-engine
 
+> Route update (s37, 2026-09-25): `/compare` and `/compare/*` replace the
+> `/alternatives/*` routes in this historical design. Reuse the s37 cluster; do not
+> publish duplicate comparison URLs. See `s37-comparison-pages.md` for the current
+> delivered scope and layout; unimplemented s17 criteria remain backlog work.
+
 > Surface decision (binding for this document — see rationale below): **marketing**, not app.
 > `/alternatives/<competitor>` (and, by the same reasoning, `/cms-for`, `/for`, `/agencies` when
 > `s18`/`s19` land) render on the legacy `sky-*` / `slate-*` marketing palette used by `/`, `/demo`,

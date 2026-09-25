@@ -246,6 +246,19 @@ test.describe("share edit publish flow", () => {
     }
 
     await expect(heading).toBeVisible();
+    // The banner and data-rcf-id appear before init finishes hydration,
+    // connection setup and edit-listener installation. Clicking on either
+    // earlier signal lost the only click and left no inline toolbar in the
+    // local repeat run.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window.ReCopyFast as unknown as { isInitialized?: boolean })
+              ?.isInitialized === true,
+        ),
+      )
+      .toBe(true);
     await heading.click();
     await expect(page.locator(".rcf-actions-inline")).toBeVisible();
 

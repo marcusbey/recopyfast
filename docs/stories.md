@@ -1007,6 +1007,13 @@ None.
 
 ## Story s17-cluster-engine — comparison pages that rank
 
+Route update (s37, 2026-09-25): reuse `/compare` and `/compare/*`; the former
+`/alternatives/*` plan is superseded. s37 delivers four comparisons, not all of
+this story's engine, discovery and performance acceptance criteria. See
+[ADR 032](./decisions/032-comparison-routes-supersede-alternatives.md): s17 owns
+the dynamic route migration, shared SoftwareApplication schema and Lighthouse
+gate for `/compare` and all comparison detail URLs.
+
 **As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that** I
 can tell in one screen whether this fits my site.
 
@@ -1014,7 +1021,7 @@ can tell in one screen whether this fits my site.
 3 — content-driven routes with structured data and generated sitemap entries.
 
 ### Acceptance criteria
-- [ ] `/alternatives/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
+- [ ] `/compare/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
 - [ ] Each page states what the competitor does better, not only what we do better.
 - [ ] Each page carries `SoftwareApplication`, `FAQPage` and `BreadcrumbList` JSON-LD that validates.
 - [ ] Every generated page appears in `sitemap.ts` automatically — the sitemap is never hand-maintained.
@@ -1420,3 +1427,64 @@ Operator-prevalidated scope, 2026-09-25. Complexity: 4. Follow-ups: s33 n3/n4/n5
 - [x] Fix mode: fresh targeted/DB and final gate evidence, review unchanged and uncommitted, push existing draft PR #32.
 
 Research: `docs/research/s34-checkout-hardening.md`. Plan: `docs/plans/s34-checkout-hardening.md`.
+
+## Story s36-deflake-share-edit-publish — deterministic save and publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 2. An invited editor or edit-session
+holder can save and publish without a late duplicate save restoring staging content.
+
+- Establish the root cause from CI logs, source and deterministic regression tests.
+- Fix the product if duplicate writes are possible; preserve every existing E2E assertion.
+- No retries, timeout increases, skips, weakened guards or new dependencies.
+- Saving works when `AbortSignal.timeout` is absent, keeps the 15-second deadline
+  where the helper exists, and never replaces the staging mode badge with
+  transient save status.
+- Lifecycle regressions boot a fresh widget per test so each guard's mutation
+  count is independently meaningful.
+- Prove at least 20 consecutive local passes with the disposable stack, or three green
+  PR E2E jobs if the local stack cannot run. Keep the strict 44-test contract.
+- Run required gates; open a draft PR only, with independent review pending.
+
+Research: `docs/research/s36-deflake-share-edit-publish.md`.
+Plan: `docs/plans/s36-deflake-share-edit-publish.md`.
+
+## Story s35-activation-checklist — First client publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-activation-checklist`.
+
+- [x] Overview and site detail show a three-step per-site checklist from durable install verification, an active invited editor with Publish permission, and any site publish record.
+- [x] Each incomplete step has one primary action: copy snippet, open invite form, open edit mode.
+- [x] All complete becomes one Live state; dismissal persists per user/site. Loading and read errors never invent progress.
+- [x] Site Token copy explains public HTML visibility, requesting-page origin checks and explicit regeneration/revocation per ADR 027.
+- [x] Component states/actions/dismissal and authenticated RLS data derivation are tested; required gates pass (3,145 tests passed, 97 pages built; details in plan).
+- [x] Existing draft PR #33 stays draft; original independent review is preserved, fix verification is recorded in the plan. No deployment or remote database changes.
+
+Research: `docs/research/s35-activation-checklist.md`. Design: `docs/designs/s35-activation-checklist.md`. Plan: `docs/plans/s35-activation-checklist.md`. Embed allocation: 0 bytes.
+
+Delivery: original implementation `e361c35` is pushed in draft PR #33. The independent review allows ship and records four majors; the operator authorized the fix scope on 2026-09-25. Current fix verification and deferred batching are recorded in the plan. No PR merge or deployment is authorized.
+
+
+## Story s37-comparison-pages — Agency comparison pages
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Marketing SEO/GTM, extending
+the PRD comparison intent and ADR 020 at the explicitly requested `/compare` URLs.
+
+- [x] `/compare` and `/compare/webflow-editor`, `/compare/duda`, `/compare/tinacms`,
+  `/compare/cloudcannon` render original, fair, dated content on the Marketing surface.
+- [x] Each competitor page leads with a short answer, includes a comparison table,
+  both products' best-fit scenarios, visible FAQ and matching FAQPage JSON-LD,
+  official pricing/docs citations marked “as of 2026-09”, and `/signup` + `/try` CTAs.
+- [x] Repo-verified ReCopyFast capabilities and live catalogue offers honoring the Agency
+  switch and Founding availability; dated snapshots apply only to competitor facts.
+- [x] Unique canonical metadata/OG, sitemap entries, related-page links and landing footer discovery.
+- [x] Render, structured-data and sitemap tests pass; no audit guards weakened, migrations,
+  dependencies, customer claims or Playwright count changes.
+- [x] Required local gates pass; focused fix commit for the existing draft PR #34.
+  Delivery stays draft; independent review and release are separate gates.
+
+Research: `docs/research/s37-comparison-pages.md`. Plan: `docs/plans/s37-comparison-pages.md`.
+Initial delivery: `121c9c4`, draft PR #34. Independent review blocked it (C1, M1, M2
+and nine minors); fix `ba25a30` addressed those blockers. The independent
+re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
+mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
+JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.

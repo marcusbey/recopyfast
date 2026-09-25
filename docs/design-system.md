@@ -54,14 +54,14 @@ border-tone-<name>-border`. Every status treatment in the product resolves to on
 a status reads identically whether drawn as a dot, a bar or a badge.
 
 **Marketing exception (documented, keep):** landing, demo, privacy and terms — plus the SEO
-cluster routes `/alternatives/*`, `/cms-for/*`, `/for/*` and `/agencies/*` per
+cluster routes `/compare` and `/compare/*`, `/cms-for/*`, `/for/*` and `/agencies/*` per
 [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md) — sit on the WebGL sky and use
 the legacy `--sky-*` / `--slate-*` palette. Accent moments there use teal or `sky` — never
 emerald, purple, or a second saturated hue.
 
 > ### ✅ Resolved: the SEO cluster pages are Marketing
 >
-> `s17` / `s18` / `s19` (`/alternatives`, `/cms-for`, `/for`, `/agencies`) render on the
+> `s17` / `s18` / `s19` (`/compare`, `/cms-for`, `/for`, `/agencies`) render on the
 > **Marketing** surface — `--sky-*` / `--slate-*`, pinned light, no app tokens.
 > [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md), decided 2026-08-17.
 >
