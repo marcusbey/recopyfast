@@ -9,8 +9,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const WIDGET_SOURCE = readFileSync(
-  path.join(process.cwd(), "public", "embed", "recopyfast.src.js"),
+  process.env.RCF_WIDGET_SOURCE ||
+    path.join(process.cwd(), "public", "embed", "recopyfast.src.js"),
   "utf8",
+).replace(
+  "let isSaving = false;",
+  "let isSaving = false; window.__rcfIsSaving = function() { return isSaving; };",
 );
 
 const SITE_ID = "site-save-lifecycle";
@@ -23,6 +27,25 @@ const STORAGE_KEY = `rcf_editor_grant:${SITE_ID}`;
 interface WidgetInstance {
   elements: Map<string, { originalContent: string }>;
   observer?: MutationObserver;
+  stagingAccess?: {
+    email: string;
+    permissions: string[];
+    expiresAt: string;
+  };
+  showStagingBanner(): void;
+  showAISuggestions(...args: unknown[]): void;
+  startTextEdit(
+    element: HTMLElement,
+    options?: {
+      fields?: Array<{
+        key: string;
+        label: string;
+        get(element: HTMLElement): string;
+        set(element: HTMLElement, value: string): void;
+      }>;
+      payload?(values: Record<string, string>): Record<string, string>;
+    },
+  ): void;
   startInlineEdit(element: HTMLElement): void;
 }
 
@@ -32,7 +55,7 @@ interface PutResponse {
   json(): Promise<unknown>;
 }
 
-type PutHandler = () => Promise<PutResponse>;
+type PutHandler = (signal?: AbortSignal) => Promise<PutResponse>;
 
 const ok = (body: unknown = { success: true }): PutResponse => ({
   ok: true,
@@ -78,7 +101,7 @@ async function boot() {
   const fetchMock = jest.fn(
     async (
       url: string,
-      options?: { method?: string },
+      options?: { method?: string; signal?: AbortSignal },
     ): Promise<PutResponse> => {
       if (url.includes("editor/validate-grant")) {
         return ok({
@@ -92,7 +115,7 @@ async function boot() {
       if (url.includes("/staging/content/") && options?.method === "PUT") {
         putCount += 1;
         hasStaging = true;
-        return putHandler();
+        return putHandler(options.signal);
       }
       if (url.includes("/staging/content/")) return ok({ content: [] });
       if (url.includes("/content-map")) return ok({ success: true });
@@ -116,12 +139,25 @@ function beginEdit(content: string) {
   headline.textContent = content;
 }
 
+function typeIfEditable(content: string) {
+  if (headline.getAttribute("contenteditable") === "true") {
+    headline.textContent = content;
+    headline.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  }
+}
+
 function saveButton(): HTMLButtonElement {
   return document.querySelector(".rcf-btn-save") as HTMLButtonElement;
 }
 
 function cancelButton(): HTMLButtonElement {
   return document.querySelector(".rcf-btn-cancel") as HTMLButtonElement;
+}
+
+function isSaving(): boolean {
+  return (
+    window as unknown as { __rcfIsSaving: () => boolean }
+  ).__rcfIsSaving();
 }
 
 function publishButton(): HTMLButtonElement {
@@ -132,6 +168,14 @@ function publishButton(): HTMLButtonElement {
 
 describe("inline editor save lifecycle", () => {
   beforeAll(async () => {
+    jest.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("Timed out", "TimeoutError")),
+        milliseconds,
+      );
+      return controller.signal;
+    });
     document.head.innerHTML = "";
     document.body.innerHTML =
       '<h1 id="headline">Original copy</h1><p id="outside">Outside</p>';
@@ -172,7 +216,12 @@ describe("inline editor save lifecycle", () => {
     jest.restoreAllMocks();
   });
 
-  it("coalesces Save, Enter and an outside Publish mousedown while one PUT is pending", async () => {
+  it("freezes a pending save, resets in-flight state on success, and keeps a later save", async () => {
+    const execCommand = jest.fn();
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
     let finishPut!: (response: PutResponse) => void;
     const pendingPut = new Promise<PutResponse>((resolve) => {
       finishPut = resolve;
@@ -182,6 +231,21 @@ describe("inline editor save lifecycle", () => {
     beginEdit("One pending draft");
     jest.advanceTimersByTime(100);
     saveButton().click();
+    expect(headline.getAttribute("contenteditable")).toBe("false");
+    expect(isSaving()).toBe(true);
+    expect(
+      document.querySelector(".rcf-editor-banner-status")?.textContent,
+    ).toBe("Saving…");
+
+    typeIfEditable("One pending draft plus lost typing");
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", {
+      value: { getData: () => "lost paste" },
+    });
+    headline.dispatchEvent(paste);
+    expect(execCommand).not.toHaveBeenCalled();
+    headline.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(headline.getAttribute("data-rcf-editing")).toBe("true");
     headline.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true }),
     );
@@ -195,7 +259,80 @@ describe("inline editor save lifecycle", () => {
     finishPut(ok());
     await settle();
     expect(requestsWhilePending).toBe(1);
+    expect(isSaving()).toBe(false);
+    expect(window.alert).not.toHaveBeenCalled();
     expect(headline.hasAttribute("contenteditable")).toBe(false);
+    expect(headline.textContent).toBe("One pending draft");
+
+    beginEdit("One pending draft, then a second edit");
+    saveButton().click();
+    await settle();
+
+    expect(putCount).toBe(2);
+    expect(headline.textContent).toBe("One pending draft, then a second edit");
+  });
+
+  it("freezes scalar fields and AI mutation while saving, then restores them after failure", async () => {
+    let failPut!: (error: Error) => void;
+    putHandler = () =>
+      new Promise<PutResponse>((_resolve, reject) => {
+        failPut = reject;
+      });
+    headline.setAttribute("data-target", "first");
+    instance.startTextEdit(headline, {
+      fields: [
+        {
+          key: "target",
+          label: "Target",
+          get: (element) => element.getAttribute("data-target") || "",
+          set: (element, value) => element.setAttribute("data-target", value),
+        },
+      ],
+      payload: (values) => values,
+    });
+    headline.textContent = "Pending field draft";
+    const input = document.querySelector(
+      ".rcf-field-panel input",
+    ) as HTMLInputElement;
+    input.value = "second";
+
+    saveButton().click();
+
+    expect(input.readOnly).toBe(true);
+    expect(
+      (document.querySelector(".rcf-btn-ai") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    (document.querySelector(".rcf-btn-ai") as HTMLButtonElement).click();
+    expect(headline.textContent).toBe("Pending field draft");
+
+    failPut(new Error("network unavailable"));
+    await settle();
+
+    expect(input.readOnly).toBe(false);
+    expect(
+      (document.querySelector(".rcf-btn-ai") as HTMLButtonElement).disabled,
+    ).toBe(false);
+    cancelButton().click();
+  });
+
+  it("times out a stalled response body and restores editing", async () => {
+    putHandler = async (signal) => ({
+      ok: true,
+      status: 200,
+      json: () =>
+        new Promise<unknown>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason));
+        }),
+    });
+
+    beginEdit("Timeout draft");
+    saveButton().click();
+    await settle();
+    jest.advanceTimersByTime(15_000);
+    await settle();
+
+    expect(window.alert).toHaveBeenCalledWith("Save timed out.");
+    expect(headline.hasAttribute("contenteditable")).toBe(true);
   });
 
   it("cancels outside-listener installation when save cleanup wins the 100ms race", async () => {
@@ -216,6 +353,7 @@ describe("inline editor save lifecycle", () => {
 
     expect(putCount).toBe(1);
     expect(hasStaging).toBe(false);
+    expect(headline.hasAttribute("contenteditable")).toBe(false);
   });
 
   it("removes keyboard and paste handlers from a completed edit session", async () => {
@@ -274,7 +412,7 @@ describe("inline editor save lifecycle", () => {
     expect(headline.textContent).toBe("Original copy");
   });
 
-  it("allows a legitimate new edit after a completed session", async () => {
+  it("allows a legitimate later edit after a successful save", async () => {
     beginEdit("First draft");
     saveButton().click();
     await settle();
@@ -307,5 +445,112 @@ describe("inline editor save lifecycle", () => {
     expect(putCount).toBe(2);
     expect(headline.textContent).toBe("Retryable draft");
     expect(headline.hasAttribute("contenteditable")).toBe(false);
+  });
+
+  it("blocks a detached Save callback after its session closes", async () => {
+    beginEdit("Discard this draft");
+    const staleSave = saveButton();
+    cancelButton().click();
+    headline.textContent = "Changed after cleanup";
+
+    staleSave.click();
+    await settle();
+
+    expect(putCount).toBe(0);
+  });
+
+  it("contains blank toolbar clicks without opening AI suggestions", () => {
+    beginEdit("Toolbar draft");
+    const aiSpy = jest.spyOn(instance, "showAISuggestions");
+    const hostClick = jest.fn();
+    document.body.addEventListener("click", hostClick);
+    const toolbar = document.querySelector(
+      ".rcf-actions-inline",
+    ) as HTMLElement;
+    const click = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+
+    toolbar.dispatchEvent(click);
+
+    expect(aiSpy).not.toHaveBeenCalled();
+    expect(hostClick).toHaveBeenCalledTimes(1);
+    hostClick.mockClear();
+
+    const cancelClick = new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+    });
+    cancelButton().dispatchEvent(cancelClick);
+
+    expect(cancelClick.defaultPrevented).toBe(true);
+    expect(hostClick).not.toHaveBeenCalled();
+    document.body.removeEventListener("click", hostClick);
+    aiSpy.mockRestore();
+  });
+
+  it("detaches field and toolbar entry points when their session closes", async () => {
+    headline.setAttribute("data-target", "first");
+    instance.startTextEdit(headline, {
+      fields: [
+        {
+          key: "target",
+          label: "Target",
+          get: (element) => element.getAttribute("data-target") || "",
+          set: (element, value) => element.setAttribute("data-target", value),
+        },
+      ],
+      payload: (values) => values,
+    });
+    const input = document.querySelector(
+      ".rcf-field-panel input",
+    ) as HTMLInputElement;
+    const staleSave = saveButton();
+    const staleCancel = cancelButton();
+    const staleAi = document.querySelector(".rcf-btn-ai") as HTMLButtonElement;
+    const aiSpy = jest.spyOn(instance, "showAISuggestions");
+
+    staleCancel.click();
+    headline.textContent = "Changed after cleanup";
+    input.value = "second";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    staleSave.click();
+    staleCancel.click();
+    staleAi.click();
+    await settle();
+
+    expect(putCount).toBe(0);
+    expect(headline.textContent).toBe("Changed after cleanup");
+    expect(headline.getAttribute("data-target")).toBe("first");
+    expect(aiSpy).not.toHaveBeenCalled();
+    aiSpy.mockRestore();
+  });
+
+  it("shows the pending save state in the staging-session banner", async () => {
+    document.querySelector("#rcf-editor-banner")?.remove();
+    instance.stagingAccess = {
+      email: "editor@example.com",
+      permissions: ["edit", "publish"],
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    };
+    instance.showStagingBanner();
+    let finishPut!: (response: PutResponse) => void;
+    putHandler = () =>
+      new Promise<PutResponse>((resolve) => {
+        finishPut = resolve;
+      });
+
+    beginEdit("Staging banner draft");
+    saveButton().click();
+
+    expect(
+      document.querySelector("#rcf-staging-banner .rcf-editor-banner-status")
+        ?.textContent,
+    ).toBe("Saving…");
+
+    finishPut(ok());
+    await settle();
   });
 });

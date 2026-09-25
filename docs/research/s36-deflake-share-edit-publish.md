@@ -83,7 +83,11 @@ services are unused by the share spec; the real Postgres/PostgREST/Auth/Kong,
 Next production app, Redis and application Socket.io service remain required.
 No health-check bypass and no test timeout change.
 
-## Gate evidence
+## Superseded gate evidence (pre-review; invalidated)
+
+The review proved these embed numbers used Homebrew Node's different zlib and
+therefore do not establish a passing size gate. The remaining commands record
+the earlier run only; fresh official-Node evidence is required after the fix.
 
 Commands ran with environment reconstructed from `.github/workflows/ci.yml`,
 with inherited service credentials stripped. Build/E2E used only the local
@@ -102,7 +106,6 @@ Supabase keys returned by the pinned CLI and CI's test Stripe placeholders.
 
 No failing markers flipped, migrations added, dependencies changed, test
 timeouts/retries adjusted or guards removed. Final local browser evidence is recorded below.
-
 
 ## Additional local readiness failure
 
@@ -129,7 +132,6 @@ passes (1 failed / 35 not run); the final acceptance run starts fresh with both
 changes. `npx tsc --noEmit --pretty false` passed after the spec edit, and
 Prettier passed for both changed test files.
 
-
 ## Repetition fixture isolation
 
 The fresh run with both fixes reached **18 passed**, then stopped before editor
@@ -151,20 +153,41 @@ not shipped code and not a change to the CI contract.
 Reproduction reporter (`/tmp/s36-repeat-isolation.cjs`):
 
 ```js
-const { execFileSync } = require('node:child_process');
+const { execFileSync } = require("node:child_process");
 function resetLocalSubmitBudget() {
-  const keys = execFileSync('docker', [
-    'exec', 'recopyfast-s36-redis', 'redis-cli', '--scan', '--pattern',
-    'rate_limit:ip:::ffff:127.0.0.1:editor/submit-code:ip:*',
-  ], { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-  if (keys.length) execFileSync('docker', [
-    'exec', 'recopyfast-s36-redis', 'redis-cli', 'UNLINK', ...keys,
-  ]);
+  const keys = execFileSync(
+    "docker",
+    [
+      "exec",
+      "recopyfast-s36-redis",
+      "redis-cli",
+      "--scan",
+      "--pattern",
+      "rate_limit:ip:::ffff:127.0.0.1:editor/submit-code:ip:*",
+    ],
+    { encoding: "utf8" },
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  if (keys.length)
+    execFileSync("docker", [
+      "exec",
+      "recopyfast-s36-redis",
+      "redis-cli",
+      "UNLINK",
+      ...keys,
+    ]);
 }
 module.exports = class LocalRepeatIsolation {
-  onBegin() { resetLocalSubmitBudget(); }
+  onBegin() {
+    resetLocalSubmitBudget();
+  }
   onTestEnd(test) {
-    if (test.title === 'edit-session token edits staging content and publishes live')
+    if (
+      test.title ===
+      "edit-session token edits staging content and publishes live"
+    )
       resetLocalSubmitBudget();
   }
 };
@@ -187,3 +210,87 @@ Git hook duplicate runs are suppressed for this commit/push only after the
 explicit required gates above passed, honoring the operator's single full-gate
 instruction on a heavily loaded host. No hook or repository configuration is
 modified. Independent review remains pending; no merge or deployment is performed.
+
+## Blocked-review correction (2026-09-25)
+
+The independent review invalidated the Homebrew-zlib size evidence and exposed a
+second lifecycle loss window. Official Node 20.15.1 measures reviewed `dc0379a` at 46,723 B
+bundle / 33,952 B widget, over both immutable ceilings. The accepted correction is
+to freeze the editable element and scalar fields during a bounded save, surface
+`Saving…` in either editor banner, restore interaction on recoverable failure, and
+replace redundant cleanup guards with one session generation/token. Targeted tests
+must make each retained guard mutation-sensitive, including an explicit successful
+in-flight reset, before the source is changed.
+
+## Fix-run evidence
+
+The final source freezes text, scalar inputs and AI actions while a save is
+pending. Both banners expose `Saving…`. The request and response-body read share
+a 15-second timeout; recoverable failures restore editing, while terminal
+401/403 responses retain the read-only recovery state. Success explicitly resets
+the request lock before closing the editor. A later editing session can save
+newer text. Session-owned listeners share an abort signal, including deferred
+outside-click registration and detached field/toolbar controls.
+
+The initially added freeze/timeout regressions failed on the reviewed source.
+The final real-widget lifecycle suite passes **12/12** on official Node 20.15.1.
+The success-reset assertion observes the closure through test-only source
+instrumentation; no debugging API is shipped. Existing assertions remain.
+
+Each neutralization used a separate temporary source file selected by
+`RCF_WIDGET_SOURCE`; the shipping source was not mutated. All twelve probes
+exited 1. Red-test counts:
+
+| Neutralized protection | Failed tests |
+| --- | ---: |
+| Pending Save guard | 1 |
+| Pending Cancel/Escape guard | 1 |
+| Pending paste guard | 10 (includes cascading failures) |
+| Success reset | 1 |
+| Recoverable-failure reset | 8 (includes cascading failures) |
+| Outside-listener signal | 2 |
+| Element keydown signal | 1 |
+| Paste-listener signal | 2 |
+| Scalar-field keydown signal | 1 |
+| Save-button signal | 2 |
+| Cancel-button signal | 1 |
+| AI-button signal | 1 |
+
+The three toolbar probes were rerun against the final callback wrappers:
+respectively **2/10**, **1/11**, and **1/11** failed/passed tests. The unmodified
+control is **12 passed**. No failing markers were flipped and no migration,
+dependency, E2E assertion, retry setting or test timeout was changed.
+
+Official-Node freshness and size command:
+
+```sh
+~/.asdf/installs/nodejs/20.15.1/bin/node scripts/build-embed.mjs --check
+```
+
+Result: fresh; **46,629 / 46,681 B bundle**, **33,858 / 33,865 B widget**,
+**13,141 B transport**. Widget reduction from the reviewed source: **94 B**.
+The byte ceilings are unchanged. Node is **v20.15.1**, zlib
+**1.3.0.1-motley-7d77fb7**. Earlier Homebrew measurements above are superseded.
+
+Local gates use only the `ci` job's exact placeholder environment from
+`.github/workflows/ci.yml`, with inherited service credentials removed and the
+official Node directory first in PATH. No production service was contacted.
+
+- `npm run precommit -- -- --runInBand`: passed; lint **0 errors / 39 inherited
+  warnings**, type-check passed; **234 passed / 2 skipped suites**, **3,102 passed /
+  38 inherited skipped tests**, zero failures.
+- `npm run audit:prod`: passed, **0 vulnerabilities**.
+- `npm run build`: passed with official Node and CI placeholders.
+- `npm run format:check`: passed.
+- `npm run type-check:build`: passed.
+
+The final read-only diff review found no blocking regression. The staging mode
+badge doubles as the save-status slot. All in-repository `persistContentUpdate`
+callers await completion without consuming its former resolved result object.
+Git hooks' duplicate full runs are suppressed only for this already-validated
+commit/push invocation, honoring the requested single full gate under host load;
+no hook or persistent git setting is modified.
+
+PR #31 remains the stability-evidence record for the three post-push CI E2E runs.
+The independent review file is deliberately preserved unmodified and uncommitted;
+its original blocked verdict is not rewritten by this fix run.
