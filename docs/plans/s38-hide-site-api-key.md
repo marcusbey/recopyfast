@@ -185,3 +185,29 @@ oracle; focused real-Supabase tests pass 23/23. Final hooks re-run after this te
 Fresh bounded review approves the deterministic oracle: exact shared-clock +1810 matches
 the schema default, idempotency is preserved, and focused normal/coverage-instrumented
 real-Supabase runs both pass 23/23. Max severity: none / Ship allowed: yes.
+
+
+### Final gate isolation and resource contract
+
+Under extreme host load (over 480 load average on 10 CPUs), coverage timed out in health
+and WebSocket suites; both passed unchanged on focused rerun (53/53). Local Jest defaults
+now match the existing CI contract: two workers and a 512 MB idle-worker limit. Independent
+review confirms no changed assertions, retries, timeouts, skips, discovery or coverage floors.
+
+A subsequent full run also observed founding fixtures disappear during execution. A separate
+Claude s38 mutation-review process was observed locally, so sharing the default Supabase
+stack is unsuitable for an isolated final gate. Add a fail-closed, optional
+RCF_TEST_SUPABASE_CONFIG for the DB harness and PostgREST port guard, retaining the normal
+repo configuration by default. Run this lane on an owned Supabase stack with a unique project
+and unused ports; do not stop or alter the shared stack while another review may use it.
+This changes test-environment selection only and keeps the separate scratch-DB opt-in lane
+unchanged. Explicit missing/invalid override files must fail rather than use shared ports.
+
+
+Isolated final gate: dedicated Supabase stack on API 55431 / DB 55432 passes 40/40 DB
+tests; full coverage passes 248 suites / 3,308 tests with 38 existing skips and no failures.
+Coverage: statements 58.15%, branches 51.56%, functions 54.68%, lines 58.71%; every existing
+floor remains enforced. Independent review approves the fail-closed config and configured
+loopback HTTP guard with no findings. Default repo ports and CI behavior are unchanged.
+The shared stack is retained for the concurrent reviewer; this lane removes its isolated
+stack and generated build/coverage output after the final mandatory hooks.

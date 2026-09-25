@@ -19,7 +19,11 @@
  * https://github.com/supabase/postgres/blob/develop/migrations/db/init-scripts/00000000000000-initial-schema.sql#L37-L60
  */
 
-import { describeDb, type QueryResult } from "./db-harness";
+import {
+  describeDb,
+  readConfiguredApiPort,
+  type QueryResult,
+} from "./db-harness";
 
 type Query = <R = Record<string, unknown>>(
   text: string,
@@ -141,13 +145,14 @@ const POSTGREST_ANON_KEY = process.env.RCF_TEST_POSTGREST_ANON_KEY;
 
 if (POSTGREST_BASE_URL) {
   const target = new URL(POSTGREST_BASE_URL);
+  const expectedApiPort = String(readConfiguredApiPort());
   const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(
     target.hostname,
   );
   if (
     target.protocol !== "http:" ||
     !isLoopback ||
-    target.port !== "54321" ||
+    target.port !== expectedApiPort ||
     target.pathname !== "/"
   ) {
     throw new Error(
