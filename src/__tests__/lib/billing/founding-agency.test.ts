@@ -33,6 +33,11 @@ describe("founding Agency capacity RPCs", () => {
     fromMock.mockReset();
     retrieveSessionMock.mockReset();
     listSessionsMock.mockReset();
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it("returns only completed-sale availability to public callers", async () => {
@@ -200,7 +205,8 @@ describe("founding Agency capacity RPCs", () => {
     },
   );
 
-  it("releases an expired unbound hold only after Stripe history proves no session exists", async () => {
+  it("retains an unresolved unbound hold during grace and searches Stripe history with clock skew", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:40:00.000Z") });
     const reservationQuery = {
       select: jest.fn(),
       eq: jest.fn(),
@@ -216,6 +222,59 @@ describe("founding Agency capacity RPCs", () => {
           id: "reservation-unbound",
           user_id: "user-1",
           stripe_checkout_session_id: null,
+          checkout_expires_at: Math.floor(Date.now() / 1000) - 599,
+          created_at: "2026-09-24T00:10:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    const customerQuery = {
+      select: jest.fn(),
+      eq: jest.fn(),
+      maybeSingle: jest.fn(),
+    };
+    customerQuery.select.mockReturnValue(customerQuery);
+    customerQuery.eq.mockReturnValue(customerQuery);
+    customerQuery.maybeSingle.mockResolvedValue({
+      data: { stripe_customer_id: "cus_1" },
+      error: null,
+    });
+    fromMock.mockImplementation((table: string) =>
+      table === "billing_customers" ? customerQuery : reservationQuery,
+    );
+    listSessionsMock.mockResolvedValue({ data: [], has_more: false });
+
+    await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(0);
+    expect(listSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customer: "cus_1",
+        created: {
+          gte: Math.floor(Date.parse("2026-09-24T00:10:00.000Z") / 1000) - 300,
+        },
+      }),
+    );
+    expect(rpcMock).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  it("releases and flags an unresolved unbound hold after grace", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:40:00.000Z") });
+    const reservationQuery = {
+      select: jest.fn(),
+      eq: jest.fn(),
+      lte: jest.fn(),
+      limit: jest.fn(),
+    };
+    reservationQuery.select.mockReturnValue(reservationQuery);
+    reservationQuery.eq.mockReturnValue(reservationQuery);
+    reservationQuery.lte.mockReturnValue(reservationQuery);
+    reservationQuery.limit.mockResolvedValue({
+      data: [
+        {
+          id: "reservation-unbound",
+          user_id: "user-1",
+          stripe_checkout_session_id: null,
+          checkout_expires_at: Math.floor(Date.now() / 1000) - 601,
           created_at: "2026-09-24T00:00:00.000Z",
         },
       ],
@@ -239,15 +298,189 @@ describe("founding Agency capacity RPCs", () => {
     rpcMock.mockResolvedValue({ data: true, error: null });
 
     await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(1);
-    expect(listSessionsMock).toHaveBeenCalledWith(
-      expect.objectContaining({ customer: "cus_1" }),
+    expect(rpcMock).toHaveBeenCalledWith(
+      "release_unresolved_founding_agency_checkout",
+      {
+        p_reservation_id: "reservation-unbound",
+        p_reconciliation_reason: "stripe_history_no_session",
+      },
     );
+    jest.useRealTimers();
+  });
+
+  it("releases an overdue provider-error row, continues, and releases a healthy expired row", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:40:00.000Z") });
+    const query = {
+      select: jest.fn(),
+      eq: jest.fn(),
+      lte: jest.fn(),
+      limit: jest.fn(),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.lte.mockReturnValue(query);
+    query.limit.mockResolvedValue({
+      data: [
+        {
+          id: "reservation-error",
+          user_id: "user-1",
+          stripe_checkout_session_id: "cs_error",
+          checkout_expires_at: Math.floor(Date.now() / 1000) - 601,
+          created_at: "2026-09-24T00:00:00.000Z",
+        },
+        {
+          id: "reservation-expired",
+          user_id: "user-2",
+          stripe_checkout_session_id: "cs_expired",
+          checkout_expires_at: Math.floor(Date.now() / 1000) - 30,
+          created_at: "2026-09-24T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    fromMock.mockReturnValue(query);
+    retrieveSessionMock
+      .mockRejectedValueOnce(new Error("request failed\nsecret detail"))
+      .mockResolvedValueOnce({
+        id: "cs_expired",
+        status: "expired",
+        payment_status: "unpaid",
+      });
+    rpcMock.mockResolvedValue({ data: true, error: null });
+    const warn = jest.spyOn(console, "warn");
+
+    await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(2);
+    expect(rpcMock).toHaveBeenNthCalledWith(
+      1,
+      "release_unresolved_founding_agency_checkout",
+      {
+        p_reservation_id: "reservation-error",
+        p_reconciliation_reason: "stripe_session_lookup_failed",
+      },
+    );
+    expect(rpcMock).toHaveBeenNthCalledWith(
+      2,
+      "release_founding_agency_checkout",
+      expect.objectContaining({ p_reservation_id: "reservation-expired" }),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("reservation-error"),
+    );
+    expect(warn.mock.calls.flat().join(" ")).not.toContain("secret detail");
+    jest.useRealTimers();
+  });
+
+  it("keeps a known paid session beyond grace", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:40:00.000Z") });
+    const query = {
+      select: jest.fn(),
+      eq: jest.fn(),
+      lte: jest.fn(),
+      limit: jest.fn(),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.lte.mockReturnValue(query);
+    query.limit.mockResolvedValue({
+      data: [
+        {
+          id: "reservation-paid",
+          user_id: "user-1",
+          stripe_checkout_session_id: "cs_paid",
+          checkout_expires_at: Math.floor(Date.now() / 1000) - 601,
+          created_at: "2026-09-24T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    fromMock.mockReturnValue(query);
+    retrieveSessionMock.mockResolvedValue({
+      id: "cs_paid",
+      status: "complete",
+      payment_status: "paid",
+    });
+
+    await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(0);
+    expect(rpcMock).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  it("keeps an open session until its provider expiry plus grace, then flags it without blocking later rows", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:40:00.000Z") });
+    const now = Math.floor(Date.now() / 1000);
+    const query = {
+      select: jest.fn(),
+      eq: jest.fn(),
+      lte: jest.fn(),
+      limit: jest.fn(),
+    };
+    query.select.mockReturnValue(query);
+    query.eq.mockReturnValue(query);
+    query.lte.mockReturnValue(query);
+    query.limit.mockResolvedValue({
+      data: [
+        {
+          id: "reservation-open",
+          user_id: "user-1",
+          stripe_checkout_session_id: "cs_open",
+          checkout_expires_at: now - 601,
+          created_at: "2026-09-24T00:00:00.000Z",
+        },
+        {
+          id: "reservation-expired",
+          user_id: "user-2",
+          stripe_checkout_session_id: "cs_expired",
+          checkout_expires_at: now - 30,
+          created_at: "2026-09-24T00:00:00.000Z",
+        },
+      ],
+      error: null,
+    });
+    fromMock.mockReturnValue(query);
+    retrieveSessionMock
+      .mockResolvedValueOnce({
+        id: "cs_open",
+        status: "open",
+        payment_status: "unpaid",
+        expires_at: now + 60,
+      })
+      .mockResolvedValueOnce({
+        id: "cs_expired",
+        status: "expired",
+        payment_status: "unpaid",
+      });
+    rpcMock.mockResolvedValue({ data: true, error: null });
+
+    await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(1);
+    expect(rpcMock).toHaveBeenCalledTimes(1);
     expect(rpcMock).toHaveBeenCalledWith(
       "release_founding_agency_checkout",
-      expect.objectContaining({
-        p_reservation_id: "reservation-unbound",
-        p_stripe_checkout_session_id: null,
-      }),
+      expect.objectContaining({ p_reservation_id: "reservation-expired" }),
     );
+
+    jest.setSystemTime(new Date((now + 661) * 1000));
+    rpcMock.mockClear();
+    retrieveSessionMock
+      .mockResolvedValueOnce({
+        id: "cs_open",
+        status: "open",
+        payment_status: "unpaid",
+        expires_at: now + 60,
+      })
+      .mockResolvedValueOnce({
+        id: "cs_expired",
+        status: "expired",
+        payment_status: "unpaid",
+      });
+
+    await expect(reconcileExpiredFoundingAgencyCheckouts()).resolves.toBe(2);
+    expect(rpcMock).toHaveBeenCalledWith(
+      "release_unresolved_founding_agency_checkout",
+      {
+        p_reservation_id: "reservation-open",
+        p_reconciliation_reason: "stripe_session_state_unresolved",
+      },
+    );
+    jest.useRealTimers();
   });
 });

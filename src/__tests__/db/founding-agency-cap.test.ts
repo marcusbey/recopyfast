@@ -34,6 +34,7 @@ describeDb("Founding Agency capacity", ({ query }) => {
       complete_rpc: string | null;
       availability_rpc: string | null;
       subscription_claim_rpc: string | null;
+      unresolved_release_rpc: string | null;
     }>(`
       SELECT to_regclass('public.founding_agency_reservations')::text AS reservations,
              to_regprocedure('public.reserve_founding_agency_spot(uuid)')::text AS reserve_rpc,
@@ -44,7 +45,10 @@ describeDb("Founding Agency capacity", ({ query }) => {
              to_regprocedure('public.get_founding_agency_availability()')::text AS availability_rpc,
              to_regprocedure(
                'public.claim_subscription_checkout_intent(uuid,timestamp with time zone,text,text,text)'
-             )::text AS subscription_claim_rpc
+             )::text AS subscription_claim_rpc,
+             to_regprocedure(
+               'public.release_unresolved_founding_agency_checkout(uuid,text)'
+             )::text AS unresolved_release_rpc
     `);
 
     // RCF_TEST_DB_URL only proves CI reached a ReCopyFast database. This suite
@@ -76,6 +80,18 @@ describeDb("Founding Agency capacity", ({ query }) => {
   }
 
   async function cleanup(): Promise<void> {
+    await query(
+      `DELETE FROM checkout_pending_intents
+       WHERE user_id IN (
+         SELECT id FROM auth.users WHERE email LIKE 'dbtest-founding-%'
+       )`,
+    );
+    await query(
+      `DELETE FROM billing_subscriptions
+       WHERE user_id IN (
+         SELECT id FROM auth.users WHERE email LIKE 'dbtest-founding-%'
+       )`,
+    );
     await query(
       `DELETE FROM founding_agency_reservations
        WHERE stripe_payment_intent_id LIKE $1
@@ -535,6 +551,161 @@ describeDb("Founding Agency capacity", ({ query }) => {
     expect(released.rows[0].released).toBe(true);
   });
 
+  test("only an overdue unresolved hold is atomically released and flagged", async () => {
+    await seedCompletedSales(49);
+    const heldUser = await createUser("unresolved-held");
+    const waitingUser = await createUser("unresolved-waiting");
+    const reserved = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [heldUser],
+    );
+    const reservationId = reserved.rows[0].reservation_id;
+
+    await query(
+      `UPDATE founding_agency_reservations
+       SET checkout_expires_at = FLOOR(EXTRACT(EPOCH FROM NOW()))::BIGINT - 300
+       WHERE id = $1`,
+      [reservationId],
+    );
+    const insideGrace = await query<{ released: boolean }>(
+      "SELECT release_unresolved_founding_agency_checkout($1, $2) AS released",
+      [reservationId, "stripe_session_lookup_failed"],
+    );
+    expect(insideGrace.rows[0].released).toBe(false);
+
+    await query(
+      `UPDATE founding_agency_reservations
+       SET checkout_expires_at = FLOOR(EXTRACT(EPOCH FROM NOW()))::BIGINT - 601
+       WHERE id = $1`,
+      [reservationId],
+    );
+    const afterGrace = await query<{ released: boolean }>(
+      "SELECT release_unresolved_founding_agency_checkout($1, $2) AS released",
+      [reservationId, "stripe_session_lookup_failed"],
+    );
+    const flagged = await query<{
+      status: string;
+      reconciliation_reason: string | null;
+      reconciliation_required_at: string | null;
+    }>(
+      `SELECT status, reconciliation_reason, reconciliation_required_at
+       FROM founding_agency_reservations WHERE id = $1`,
+      [reservationId],
+    );
+    const successor = await query<{ outcome: string }>(
+      "SELECT outcome FROM reserve_founding_agency_spot($1)",
+      [waitingUser],
+    );
+
+    expect(afterGrace.rows[0].released).toBe(true);
+    expect(flagged.rows[0]).toMatchObject({
+      status: "released",
+      reconciliation_reason: "stripe_session_lookup_failed",
+      reconciliation_required_at: expect.anything(),
+    });
+    expect(successor.rows[0].outcome).toBe("reserved");
+  });
+
+  test("a late paid completion grants a released hold even beyond the ordinary cap", async () => {
+    await seedCompletedSales(49);
+    const lateUser = await createUser("late-paid");
+    const replacementUser = await createUser("replacement-sale");
+    const late = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [lateUser],
+    );
+    await query(
+      `UPDATE founding_agency_reservations
+       SET checkout_expires_at = FLOOR(EXTRACT(EPOCH FROM NOW()))::BIGINT - 601
+       WHERE id = $1`,
+      [late.rows[0].reservation_id],
+    );
+    await query("SELECT release_unresolved_founding_agency_checkout($1, $2)", [
+      late.rows[0].reservation_id,
+      "stripe_history_no_session",
+    ]);
+    const replacement = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [replacementUser],
+    );
+    await query("SELECT complete_founding_agency_purchase($1, $2, $3)", [
+      replacement.rows[0].reservation_id,
+      replacementUser,
+      `${marker}-replacement-payment`,
+    ]);
+
+    const first = await query<{ result: string }>(
+      "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+      [late.rows[0].reservation_id, lateUser, `${marker}-late-payment`],
+    );
+    const retry = await query<{ result: string }>(
+      "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+      [late.rows[0].reservation_id, lateUser, `${marker}-late-payment`],
+    );
+    const count = await query<{ completed: number }>(
+      `SELECT COUNT(*)::INTEGER AS completed
+       FROM founding_agency_reservations WHERE status = 'completed'`,
+    );
+    const lateGrant = await query<{
+      grants: number;
+      reconciliation_required_at: string | null;
+      reconciliation_reason: string | null;
+    }>(
+      `SELECT COUNT(entitlement.id)::INTEGER AS grants,
+              reservation.reconciliation_required_at,
+              reservation.reconciliation_reason
+       FROM founding_agency_reservations reservation
+       LEFT JOIN plan_entitlements entitlement
+         ON entitlement.user_id = reservation.user_id
+        AND entitlement.plan_id = 'agency'
+        AND entitlement.stripe_payment_intent_id = $3
+       WHERE reservation.id = $1 AND reservation.user_id = $2
+       GROUP BY reservation.reconciliation_required_at,
+                reservation.reconciliation_reason`,
+      [late.rows[0].reservation_id, lateUser, `${marker}-late-payment`],
+    );
+
+    expect(first.rows[0].result).toBe("granted");
+    expect(retry.rows[0].result).toBe("duplicate");
+    expect(count.rows[0].completed).toBe(51);
+    expect(lateGrant.rows[0]).toMatchObject({
+      grants: 1,
+      reconciliation_required_at: expect.anything(),
+      reconciliation_reason: "stripe_history_no_session",
+    });
+  });
+
+  test.each(["incomplete", "unpaid", "paused"])(
+    "claim refuses a %s subscription even when a pending intent already exists",
+    async (status) => {
+      const userId = await createUser(`recoverable-${status}`);
+      const expiresAt = new Date(Date.now() + 31 * 60_000);
+      await query(
+        "SELECT * FROM claim_subscription_checkout_intent($1, $2, $3, $4, $5)",
+        [userId, expiresAt, "price_pro_monthly", "pro", "monthly"],
+      );
+      await query(
+        `INSERT INTO billing_subscriptions(
+           user_id, stripe_subscription_id, plan, status
+         ) VALUES ($1, $2, 'pro', $3)`,
+        [userId, `${marker}-${status}`, status],
+      );
+
+      await expect(
+        query(
+          "SELECT * FROM claim_subscription_checkout_intent($1, $2, $3, $4, $5)",
+          [userId, expiresAt, "price_pro_monthly", "pro", "monthly"],
+        ),
+      ).rejects.toMatchObject({ code: "P0001" });
+      await expect(
+        query("SELECT * FROM claim_subscription_checkout_intent($1, $2)", [
+          userId,
+          expiresAt,
+        ]),
+      ).rejects.toMatchObject({ code: "P0001" });
+    },
+  );
+
   test("a refunded founding buyer is not reported as an active owner", async () => {
     const userId = await createUser("refunded");
     const reserved = await query<{ reservation_id: string }>(
@@ -598,6 +769,31 @@ describeDb("Founding Agency capacity", ({ query }) => {
           [userId, expiresAt, "price_invalid", planId, period],
         ),
       ).rejects.toMatchObject({ code: "22023" });
+    }
+
+    const priceGuardClient = new Client({
+      connectionString: resolveDbTarget().connectionString,
+    });
+    await priceGuardClient.connect();
+    try {
+      await priceGuardClient.query("BEGIN");
+      await priceGuardClient.query(
+        "UPDATE plans SET price_monthly = 0 WHERE id = 'agency'",
+      );
+      const freeAgencyUser = randomUUID();
+      await priceGuardClient.query(
+        "INSERT INTO auth.users(id, email) VALUES ($1, $2)",
+        [freeAgencyUser, `${marker}-active-zero-price@example.invalid`],
+      );
+      await expect(
+        priceGuardClient.query(
+          "SELECT * FROM claim_subscription_checkout_intent($1, $2, $3, $4, $5)",
+          [freeAgencyUser, expiresAt, "price_zero", "agency", "monthly"],
+        ),
+      ).rejects.toMatchObject({ code: "22023" });
+    } finally {
+      await priceGuardClient.query("ROLLBACK");
+      await priceGuardClient.end();
     }
 
     try {
@@ -668,12 +864,13 @@ describeDb("Founding Agency capacity", ({ query }) => {
           'bind_founding_agency_checkout',
           'release_founding_agency_checkout',
           'complete_founding_agency_purchase',
-          'get_founding_agency_availability'
+          'get_founding_agency_availability',
+          'release_unresolved_founding_agency_checkout'
         )
       ORDER BY identity
     `);
 
-    expect(rows).toHaveLength(6);
+    expect(rows).toHaveLength(7);
     for (const row of rows) {
       expect(row).toMatchObject({
         anon: false,

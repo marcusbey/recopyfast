@@ -1404,3 +1404,16 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 - [x] Targeted tests and required repository gates pass; draft PR only, independent review pending.
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
+
+## Story s34-checkout-hardening — Bounded holds and subscription checkout safety
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 4. Follow-ups: s33 n3/n4/n5/n7/n8/m5 and s28 N2. Protect the live $299 / 50 founding offer and Agency subscriptions without production actions.
+
+- [x] Unresolved expired founding holds stop consuming capacity after expiry + ten minutes, with service-role-queryable reconciliation flags and sanitized logs; Stripe history includes explicit skew margin.
+- [x] Paid late completion of a released hold grants Agency idempotently even if completed sales reach 51; ordinary claims remain serialized and capped, one active hold per account.
+- [x] Checkout POST has independent IP and user limits; limiter failures deny capacity-changing checkout.
+- [x] Incomplete/unpaid/paused subscriptions cannot produce a second live subscription: replacement requires confirmed terminal Stripe cancellation, preserving existing entitlement rules.
+- [x] Isolate the positive-price SQL guard, reuse the Agency switch, repair stale explanatory comments and record getUserSubscription's fail-closed contract.
+- [x] Focused regressions and full gates pass; migration remains unapplied remotely; draft PR only with independent review pending.
+
+Research: `docs/research/s34-checkout-hardening.md`. Plan: `docs/plans/s34-checkout-hardening.md`.

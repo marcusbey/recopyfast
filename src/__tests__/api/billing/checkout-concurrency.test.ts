@@ -31,6 +31,11 @@ let blockClaimForSubscription = false;
 let mockBypassUserLock = false;
 
 const mockGetUser = jest.fn();
+const mockEnforceRateLimit = jest.fn();
+
+jest.mock("@/lib/api/rate-limit", () => ({
+  enforceRateLimit: (...args: unknown[]) => mockEnforceRateLimit(...args),
+}));
 
 /**
  * Cookie-scoped client. `from()` is a working in-memory store rather than a
@@ -194,9 +199,12 @@ jest.mock("@/lib/stripe/checkout", () => ({
 }));
 
 const mockGetUserSubscription = jest.fn();
+const mockCancelRecoverableSubscriptionsForCheckout = jest.fn();
 
 jest.mock("@/lib/stripe/subscription", () => ({
   getUserSubscription: (...args: unknown[]) => mockGetUserSubscription(...args),
+  cancelRecoverableSubscriptionsForCheckout: (...args: unknown[]) =>
+    mockCancelRecoverableSubscriptionsForCheckout(...args),
 }));
 
 const mockGetGrantedPlanIds = jest.fn();
@@ -254,6 +262,7 @@ import { POST } from "@/app/api/billing/checkout/route";
 
 interface CheckoutResponse {
   status: number;
+  headers: Headers;
   json: () => Promise<Record<string, unknown>>;
 }
 
@@ -295,6 +304,8 @@ describe("A-21: two checkouts started at once", () => {
     blockClaimForSubscription = false;
     mockBypassUserLock = false;
     process.env.AGENCY_CHECKOUT_ENABLED = "true";
+    mockEnforceRateLimit.mockResolvedValue(null);
+    mockCancelRecoverableSubscriptionsForCheckout.mockResolvedValue(undefined);
 
     mockGetUser.mockResolvedValue({
       data: { user: { id: USER_ID, email: "buyer@example.com" } },
@@ -918,7 +929,7 @@ describe("A-21: two checkouts started at once", () => {
   });
 
   it.each(["incomplete", "paused", "unpaid"])(
-    "allows a new checkout for a %s row that does not grant entitlement",
+    "cancels a recoverable %s obligation before creating a new checkout",
     async (status) => {
       db.billing_subscriptions = [
         { id: "row_1", user_id: USER_ID, plan: "pro", status },
@@ -927,9 +938,94 @@ describe("A-21: two checkouts started at once", () => {
       const response = await post({ intent: "subscription", planId: "pro" });
 
       expect(response.status).toBe(200);
+      expect(
+        mockCancelRecoverableSubscriptionsForCheckout,
+      ).toHaveBeenCalledWith(expect.anything(), USER_ID);
+      expect(
+        mockCancelRecoverableSubscriptionsForCheckout.mock
+          .invocationCallOrder[0],
+      ).toBeLessThan(mockCreateCheckoutSession.mock.invocationCallOrder[0]);
       expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("fails closed before claiming an intent when recoverable cancellation is not confirmed", async () => {
+    db.billing_subscriptions = [
+      {
+        id: "row_1",
+        user_id: USER_ID,
+        plan: "pro",
+        status: "incomplete",
+      },
+    ];
+    mockCancelRecoverableSubscriptionsForCheckout.mockRejectedValueOnce(
+      new Error("provider state is not terminal"),
+    );
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(500);
+    expect(mockIntentClient.rpc).not.toHaveBeenCalledWith(
+      "claim_subscription_checkout_intent",
+      expect.anything(),
+    );
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits by IP before authentication and by user before provider work", async () => {
+    const ipLimited = {
+      status: 503,
+      headers: new Headers({ "Retry-After": "60" }),
+      json: async () => ({ error: "Too many requests" }),
+    } as never;
+    mockEnforceRateLimit.mockResolvedValueOnce(ipLimited);
+
+    const first = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(first.status).toBe(503);
+    expect(first.headers.get("Retry-After")).toBe("60");
+    expect(mockGetUser).not.toHaveBeenCalled();
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+
+    jest.clearAllMocks();
+    mockGetUser.mockResolvedValue({
+      data: { user: { id: USER_ID, email: "buyer@example.com" } },
+      error: null,
+    });
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(ipLimited);
+
+    const second = await post({ intent: "subscription", planId: "pro" });
+
+    expect(second.status).toBe(503);
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({
+        limit: "CHECKOUT_IP",
+        endpoint: "billing/checkout:ip",
+        identifierType: "ip",
+        onStoreFailure: "deny",
+      }),
+    );
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        limit: "CHECKOUT_USER",
+        endpoint: "billing/checkout:user",
+        identifier: USER_ID,
+        identifierType: "user",
+        onStoreFailure: "deny",
+      }),
+    );
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
 
   /**
    * Fix-stable, and the contrast the finding draws: the more expensive product

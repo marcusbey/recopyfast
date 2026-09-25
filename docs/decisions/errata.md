@@ -78,3 +78,19 @@ purpose was fixing stale cites**. Nothing about the pin changed.
 **Says:** trial conversion uses `claimSubscriptionReservation` / `withUserLock` in the subscription checkout branch.
 
 **Correction.** s28 replaces the removed `claimSubscriptionReservation` with `claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. `withUserLock` remains around the subscription branch. [ADR 028](./028-durable-subscription-checkout-intents.md) records the structural protocol change; the trial-grant decision and conversion-inside-the-lock constraint remain unchanged.
+
+## ADRs 028/029/019 — s34 supersession pointer
+
+[ADR 031](./031-checkout-hold-expiry-and-recoverable-subscriptions.md) records the decision
+changes for bounded unresolved founding holds, paid late completion and terminal cancellation
+before replacing recoverable subscriptions. It also explicitly records the s33 fail-closed
+`getUserSubscription` behavior omitted from ADR 029's supersession scope. This entry is only
+a pointer; the changed policy and rationale live in ADR 031.
+
+## Founding bind wrapper — historical deployment citation
+
+The comment above the three-argument `bind_founding_agency_checkout` wrapper in applied
+`20260924065000_agency_plan_and_founding_capacity.sql` incorrectly says previously deployed code
+called it. The earlier `040000` version was an unpublished draft. The wrapper preserves that
+function identity, but its presence is not evidence of a prior deployment. Applied migration
+history remains unchanged; the four-argument form carries the provider expiry.

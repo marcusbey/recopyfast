@@ -150,14 +150,21 @@ provider expiry and may shorten, never lengthen, that hold. Definitive create fa
 same request. A failed response whose Stripe outcome is uncertain must not free a potentially
 paid session merely to make a retry look successful.
 
-When another founding checkout runs, the clock selects expired holds for provider reconciliation.
+With s34 installed, another founding checkout selects expired holds for reconciliation.
 Bound sessions are retrieved directly; unbound holds are searched by reservation metadata in
-Stripe session history, including lost-create-response recovery. Only confirmed expired/unpaid
-sessions, or holds with no provider session after a complete successful search, are released.
-The reserve RPC never frees capacity merely because a deadline passed. Completed or
-paid sessions retain capacity until their success delivery is reconciled; provider outages fail
-closed. This recovery does not require an expiry webhook or a new cron. Availability display
-can lag cache expiry; checkout remains authoritative.
+Stripe history beginning five minutes before the reservation creation timestamp. Confirmed
+expired/unpaid sessions release normally. Missing sessions and unresolved provider errors retain
+the hold until its expiry plus ten minutes, then release atomically with an operator
+reconciliation flag and a bounded warning. One provider failure no longer rejects every buyer;
+database read/write failures still fail closed. Known paid/completed sessions retain capacity.
+
+A paid late completion grants Agency even if the hold was already released. Ordinary claims
+remain capped at 50 completed-plus-held spots, but this paid exception can make completed sales
+51 or higher; the ledger keeps the actual count and the public remaining count never goes
+negative. Never refuse the grant to restore the numerical cap. Refunds and disputes still do
+not free completed sales. See [ADR 031](../decisions/031-checkout-hold-expiry-and-recoverable-subscriptions.md).
+This request-driven recovery needs no cron; the availability display can lag its cache while
+checkout remains authoritative.
 
 For an operator recovery, first inspect the reservation and matching session using the protected
 production DB service profile and Stripe's authenticated CLI. IDs below are operator-supplied,
@@ -185,6 +192,46 @@ expiring and confirming an unpaid recovered session), release with the correspon
 id; use SQL `NULL` only when there truly is no session. Re-check capacity and retry checkout.
 Never decrement completed sales for a refund or dispute: the buyer loses entitlement, the
 historical founding spot stays consumed (ADR 029).
+
+### s34 reconciliation queue and rollout
+
+The operator applies `20260925100000_checkout_hardening.sql` before deploying the s34
+application. It adds service-only recovery, expands subscription claim guards, and allows
+idempotent paid completion of a released founding hold. Do not modify or replay old migrations
+to undo this behavior. The migration is not applied remotely by the story's tests.
+
+Use a service-role query to inspect the queue after a warning or as part of routine billing
+reconciliation. Browser/anonymous roles have no access to the reservation ledger:
+
+```sql
+SELECT id, status, stripe_checkout_session_id, stripe_payment_intent_id,
+       checkout_expires_at, released_at, completed_at,
+       reconciliation_required_at, reconciliation_reason
+FROM public.founding_agency_reservations
+WHERE reconciliation_required_at IS NOT NULL
+ORDER BY reconciliation_required_at, id;
+```
+
+Reasons are bounded codes, not raw provider errors. A flag is intentionally retained when a
+late webhook grants access. Confirm the matching Stripe session/payment and billing-event
+processing before recording any operational resolution. Do not delete completed reservations,
+revoke a valid grant, or manually reduce the sold count to restore 50. A flagged released row is
+not proof that no payment exists.
+
+For subscription replacement, s34 cancels owned incomplete/unpaid/paused obligations and
+requires confirmed terminal Stripe status plus successful local persistence before starting
+another checkout. Provider ambiguity blocks creation. A subscription that recovered to
+active/trialing/past_due goes to the existing management path. Cancellation requests do not
+invoice immediately or prorate; Stripe's default cancellation also stops automatic collection
+of finalized customer invoices. Review those existing invoices when reconciling a replacement;
+this release neither collects nor voids them.
+
+Rollback keeps the forward schema, expanded claim guard and late-completion grant function.
+Disable new Agency sales with `AGENCY_CHECKOUT_ENABLED=false` if needed, retain paid access and
+webhook processing, and repair forward. Rolling back to a completion function that rejects
+released holds can strand paid customers; rolling back the claim guard reopens duplicate
+subscription risk. These are instructions for a separately authorized operator, not commands
+performed during local validation.
 
 ## Environments
 

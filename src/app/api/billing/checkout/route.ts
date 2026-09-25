@@ -9,7 +9,10 @@ import {
   preflightLifetimeCheckout,
   type CheckoutIntent,
 } from "@/lib/stripe/checkout";
-import { getUserSubscription } from "@/lib/stripe/subscription";
+import {
+  cancelRecoverableSubscriptionsForCheckout,
+  getUserSubscription,
+} from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
   getOneTimeProduct,
@@ -37,6 +40,7 @@ import {
   reserveFoundingAgencySpot,
 } from "@/lib/billing/founding-agency";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 /**
  * Stripe Checkout entry point.
@@ -134,6 +138,18 @@ async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
  */
 export async function POST(req: NextRequest) {
   try {
+    const ipLimited = await enforceRateLimit(req, {
+      limit: "CHECKOUT_IP",
+      endpoint: "billing/checkout:ip",
+      identifierType: "ip",
+      // Checkout creates provider obligations and Founding Agency holds. A
+      // limiter outage must not turn either money boundary into an unlimited
+      // unauthenticated path.
+      onStoreFailure: "deny",
+      message: "Too many checkout attempts. Please try again later.",
+    });
+    if (ipLimited) return ipLimited;
+
     const supabase = await createClient();
 
     const {
@@ -143,6 +159,18 @@ export async function POST(req: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const userLimited = await enforceRateLimit(req, {
+      limit: "CHECKOUT_USER",
+      endpoint: "billing/checkout:user",
+      identifier: user.id,
+      identifierType: "user",
+      // The user bucket independently bounds a signed-in attacker sharing an
+      // IP with legitimate buyers; the same money-boundary policy fails closed.
+      onStoreFailure: "deny",
+      message: "Too many checkout attempts. Please try again later.",
+    });
+    if (userLimited) return userLimited;
 
     const body = (await req.json()) as CheckoutRequestBody;
     const parsed = await parseIntent(body);
@@ -198,6 +226,12 @@ export async function POST(req: NextRequest) {
       };
 
       const locked = await withUserLock(user.id, async () => {
+        // These rows do not grant entitlement, but Stripe may still recover
+        // them into payable subscriptions. Cancel and confirm every owned
+        // obligation before claiming a replacement intent; the database RPC
+        // repeats this guard under the cross-isolate advisory lock.
+        await cancelRecoverableSubscriptionsForCheckout(supabase, user.id);
+
         // Read the table directly so a concurrent test can still barrier on
         // getUserSubscription (called once per request, above) while this
         // isolate still notices a webhook that landed after that read.

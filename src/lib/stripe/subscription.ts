@@ -15,6 +15,15 @@ import type { Subscription } from "@/types/billing";
  * `getUserSubscription` selects on.
  */
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+const RECOVERABLE_CHECKOUT_STATUSES = [
+  "incomplete",
+  "unpaid",
+  "paused",
+] as const;
+const TERMINAL_REPLACEMENT_STATUSES = [
+  "canceled",
+  "incomplete_expired",
+] as const;
 
 /**
  * Shape actually stored in `billing_subscriptions`. The migration names two
@@ -59,6 +68,129 @@ interface SubscriptionRow {
  */
 function createSubscriptionWriteClient() {
   return createServiceRoleClient();
+}
+
+type UserScopedBillingClient = Pick<
+  Awaited<ReturnType<typeof createClient>>,
+  "from"
+>;
+
+interface RecoverableSubscriptionRow {
+  id: string;
+  user_id: string;
+  stripe_subscription_id: string;
+  status: string;
+}
+
+/**
+ * Remove every owned Stripe obligation that could recover beside a replacement.
+ *
+ * These statuses confer no entitlement, but Stripe can still move them back
+ * into a payable state. Immediate cancellation intentionally abandons their
+ * automatic invoice collection. The replacement Checkout is allowed only
+ * after Stripe confirms a terminal state and that result is durably scoped to
+ * the same local row and user. Any provider ambiguity is re-read once; a live
+ * result or a local read/write failure fails the sale closed.
+ */
+export async function cancelRecoverableSubscriptionsForCheckout(
+  supabase: UserScopedBillingClient,
+  userId: string,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from("billing_subscriptions")
+    .select("id, user_id, stripe_subscription_id, status")
+    .eq("user_id", userId)
+    .in("status", RECOVERABLE_CHECKOUT_STATUSES);
+
+  if (error) {
+    throw new Error(
+      `Failed to read recoverable subscriptions: ${error.message}`,
+    );
+  }
+
+  for (const row of (data ?? []) as RecoverableSubscriptionRow[]) {
+    if (!row.stripe_subscription_id) {
+      throw new Error("Recoverable subscription has no Stripe subscription id");
+    }
+
+    let providerSubscription = await stripe.subscriptions.retrieve(
+      row.stripe_subscription_id,
+    );
+    if (providerSubscription.id !== row.stripe_subscription_id) {
+      throw new Error(
+        `Stripe returned an unexpected subscription for ${row.stripe_subscription_id}`,
+      );
+    }
+
+    if (
+      !TERMINAL_REPLACEMENT_STATUSES.includes(
+        providerSubscription.status as (typeof TERMINAL_REPLACEMENT_STATUSES)[number],
+      )
+    ) {
+      if (
+        !RECOVERABLE_CHECKOUT_STATUSES.includes(
+          providerSubscription.status as (typeof RECOVERABLE_CHECKOUT_STATUSES)[number],
+        )
+      ) {
+        throw new Error(
+          `Stripe subscription ${row.stripe_subscription_id} is not terminal or recoverable`,
+        );
+      }
+
+      try {
+        providerSubscription = await stripe.subscriptions.cancel(
+          row.stripe_subscription_id,
+        );
+      } catch {
+        // The cancel request may have reached Stripe even when its response did
+        // not. One authoritative read distinguishes that success from a live
+        // obligation; provider errors still escape and block replacement.
+        providerSubscription = await stripe.subscriptions.retrieve(
+          row.stripe_subscription_id,
+        );
+      }
+    }
+
+    if (providerSubscription.id !== row.stripe_subscription_id) {
+      throw new Error(
+        `Stripe returned an unexpected subscription for ${row.stripe_subscription_id}`,
+      );
+    }
+
+    if (
+      !TERMINAL_REPLACEMENT_STATUSES.includes(
+        providerSubscription.status as (typeof TERMINAL_REPLACEMENT_STATUSES)[number],
+      )
+    ) {
+      throw new Error(
+        `Stripe subscription ${row.stripe_subscription_id} is not terminal after cancellation`,
+      );
+    }
+
+    const { data: updated, error: writeError } =
+      await createSubscriptionWriteClient()
+        .from("billing_subscriptions")
+        .update({
+          status: providerSubscription.status,
+          cancel_at: providerSubscription.cancel_at
+            ? new Date(providerSubscription.cancel_at * 1000).toISOString()
+            : null,
+          canceled_at: providerSubscription.canceled_at
+            ? new Date(providerSubscription.canceled_at * 1000).toISOString()
+            : null,
+        })
+        .eq("id", row.id)
+        .eq("user_id", userId)
+        .eq("stripe_subscription_id", row.stripe_subscription_id)
+        .select("id")
+        .single<{ id: string }>();
+
+    if (writeError || !updated) {
+      throw new Error(
+        `Failed to persist canceled subscription: ${writeError?.message ?? "unknown error"}`,
+      );
+    }
+  }
 }
 
 function toSubscription(row: SubscriptionRow): Subscription {

@@ -441,10 +441,10 @@ async function retrieveCurrentSubscription(
  * DIFFERENT plan, which `createCheckoutSession` never produces but a manual
  * dashboard edit can. It can no longer name a plan the prices do not.
  *
- * Throws when nothing matches. The subscription-plan foreign key admits only
- * catalogue rows, so a guess is either a plan the customer is not paying for
- * or a constraint failure that discards the event; a 500 is retried until the
- * catalogue and the subscription agree.
+ * Throws when nothing matches. The `billing_subscriptions.plan` CHECK admits
+ * only `starter`, `pro`, or `agency`, so a guess is either a plan the customer
+ * is not paying for or a constraint failure that discards the event; a 500 is
+ * retried until the catalogue and the subscription agree.
  */
 async function resolveSubscriptionPlan(
   subscription: StripeSubscriptionWithPeriod,

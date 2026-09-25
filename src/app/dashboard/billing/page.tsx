@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
+import { isAgencyCheckoutEnabled } from "@/lib/stripe/plans";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
 import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
 import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
@@ -67,7 +68,7 @@ async function BillingDashboardSection() {
     <BillingDashboard
       lifetimeGrant={lifetimeGrant}
       foundingAgencyAvailability={foundingAgencyAvailability}
-      agencyCheckoutEnabled={process.env.AGENCY_CHECKOUT_ENABLED !== "false"}
+      agencyCheckoutEnabled={isAgencyCheckoutEnabled()}
     />
   );
 }
