@@ -40,6 +40,78 @@ export type CheckoutIntent =
 export interface CheckoutSessionResult {
   sessionId: string;
   url: string;
+  /** Stripe's authoritative session deadline, in Unix seconds. */
+  expiresAt?: number;
+}
+
+export interface CheckoutSessionCreationOptions {
+  pendingIntentId?: string;
+  expiresAt?: string;
+  priceId?: string;
+}
+
+export interface PendingCheckoutSession {
+  sessionId: string;
+  url: string | null;
+  status: Stripe.Checkout.Session.Status | null;
+}
+
+/**
+ * Expire an open Checkout Session before replacing its reserved choice.
+ * Stripe can win the race between our status read and this write; only a
+ * follow-up read that proves the session is already expired makes that error
+ * safe to suppress. Network errors and completed sessions remain fail closed.
+ */
+export async function expireCheckoutSession(sessionId: string): Promise<void> {
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+  } catch (error) {
+    const current = await stripe.checkout.sessions.retrieve(sessionId);
+    if (current.status !== "expired") throw error;
+  }
+}
+
+/** Recover a Checkout Session when its response or our attach write was lost. */
+export async function findCheckoutSessionForIntent(
+  userId: string,
+  email: string,
+  pendingIntentId: string,
+  name?: string,
+  createdAfter?: string,
+): Promise<PendingCheckoutSession | null> {
+  const { stripeCustomer } = await createOrGetCustomer(userId, email, name);
+  let startingAfter: string | undefined;
+  do {
+    const sessions = await stripe.checkout.sessions.list({
+      customer: stripeCustomer.id,
+      limit: 100,
+      ...(createdAfter
+        ? { created: { gte: Math.floor(Date.parse(createdAfter) / 1000) } }
+        : {}),
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+    const session = sessions.data.find(
+      (candidate) =>
+        candidate.metadata?.checkout_intent_id === pendingIntentId &&
+        candidate.client_reference_id === userId,
+    );
+    if (session) {
+      return {
+        sessionId: session.id,
+        url: session.url,
+        status: session.status,
+      };
+    }
+    if (!sessions.has_more) return null;
+    startingAfter = sessions.data.at(-1)?.id;
+    if (!startingAfter) {
+      throw new Error(
+        "Stripe returned an empty Checkout page with has_more=true",
+      );
+    }
+  } while (startingAfter);
+
+  return null;
 }
 
 export interface CheckoutSessionStatus {
@@ -118,8 +190,9 @@ function buildReturnUrls(): { successUrl: string; cancelUrl: string } {
  * Resolve every deterministic/external prerequisite before scarce founding
  * capacity is reserved. A failure here proves no Checkout Session exists, so
  * the route can answer without leaking a spot. Once the reservation is taken,
- * only the idempotent sessions.create call remains uncertain and its spot is
- * retained until Stripe signs a completed or expired event.
+ * only the idempotent sessions.create call remains uncertain. Definitive
+ * request rejection can release immediately; ambiguous outcomes retain their
+ * spot until idempotent recovery or expiry reconciliation proves the result.
  */
 export async function preflightLifetimeCheckout(
   userId: string,
@@ -164,6 +237,7 @@ export async function createCheckoutSession(
   email: string,
   intent: CheckoutIntent,
   name?: string,
+  options: CheckoutSessionCreationOptions = {},
 ): Promise<CheckoutSessionResult> {
   // Ensures a billing_customers row exists before any webhook needs to resolve
   // the Stripe customer back to a user.
@@ -185,19 +259,29 @@ export async function createCheckoutSession(
 
   switch (intent.type) {
     case "subscription": {
+      const pendingIntentMetadata: Record<string, string> =
+        options.pendingIntentId
+          ? { checkout_intent_id: options.pendingIntentId }
+          : {};
       params = {
         ...baseParams,
         mode: "subscription",
         line_items: [
           {
-            price: await resolveStripePriceId(
-              intent.planId,
-              intent.billingPeriod,
-            ),
+            price:
+              options.priceId ??
+              (await resolveStripePriceId(intent.planId, intent.billingPeriod)),
             quantity: 1,
           },
         ],
         allow_promotion_codes: true,
+        ...(options.expiresAt
+          ? {
+              expires_at: Math.floor(
+                new Date(options.expiresAt).getTime() / 1000,
+              ),
+            }
+          : {}),
         // Read by handleSubscriptionCreated / handleSubscriptionUpdated in the
         // Stripe webhook to attribute the subscription and record the plan.
         subscription_data: {
@@ -205,9 +289,14 @@ export async function createCheckoutSession(
             user_id: userId,
             plan_id: intent.planId,
             billing_period: intent.billingPeriod,
+            ...pendingIntentMetadata,
           },
         },
-        metadata: { user_id: userId, plan_id: intent.planId },
+        metadata: {
+          user_id: userId,
+          plan_id: intent.planId,
+          ...pendingIntentMetadata,
+        },
       };
       break;
     }
@@ -332,23 +421,30 @@ export async function createCheckoutSession(
     }
   }
 
-  // Reusing the database reservation id as Stripe's idempotency key makes an
-  // uncertain network timeout recoverable: the next request receives the same
-  // reservation and Stripe returns the same session instead of creating a
-  // second payable checkout. The reservation is intentionally not released on
-  // an exception because the remote session may already exist.
-  const session =
+  // Both durable checkout records become Stripe idempotency keys. A retry can
+  // therefore recover the same remotely-created session after a lost response
+  // without creating a second payable Checkout.
+  const idempotencyKey =
     intent.type === "lifetime" && intent.reservationId
-      ? await stripe.checkout.sessions.create(params, {
-          idempotencyKey: `founding-agency-${intent.reservationId}`,
-        })
-      : await stripe.checkout.sessions.create(params);
+      ? `founding-agency-${intent.reservationId}`
+      : options.pendingIntentId
+        ? `subscription-checkout:${options.pendingIntentId}`
+        : undefined;
+  const session = idempotencyKey
+    ? await stripe.checkout.sessions.create(params, { idempotencyKey })
+    : await stripe.checkout.sessions.create(params);
 
   if (!session.url) {
     throw new Error("Stripe did not return a Checkout URL");
   }
 
-  return { sessionId: session.id, url: session.url };
+  return {
+    sessionId: session.id,
+    url: session.url,
+    ...(typeof session.expires_at === "number"
+      ? { expiresAt: session.expires_at }
+      : {}),
+  };
 }
 
 /**

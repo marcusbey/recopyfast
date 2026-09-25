@@ -10,6 +10,8 @@ jest.mock("@/lib/stripe/plans", () => ({
   getPlanCatalogue: mockGetPlanCatalogue,
   resolveOneTimePriceId: jest.fn(async () => "price_one_time"),
   resolveStripePriceId: jest.fn(async () => "price_subscription"),
+  isAgencyCheckoutEnabled: () =>
+    process.env.AGENCY_CHECKOUT_ENABLED !== "false",
   isPaidPlanId: (value: unknown) =>
     value === "starter" || value === "pro" || value === "agency",
 }));
@@ -73,10 +75,24 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.AGENCY_CHECKOUT_ENABLED;
   jest.restoreAllMocks();
 });
 
 describe("GET /api/pricing Agency payload", () => {
+  it("hides Agency sales surfaces when the checkout kill switch is disabled", async () => {
+    process.env.AGENCY_CHECKOUT_ENABLED = "false";
+
+    const { GET } = await import("@/app/api/pricing/route");
+    const body = await (
+      await GET(new Request("http://localhost/api/pricing"))
+    ).json();
+
+    expect(body.plans).toEqual([]);
+    expect(body.oneTimeProducts).toEqual([]);
+    expect(body.foundingAgencyAvailability).toBeNull();
+  });
+
   it("returns exact annual pricing and the cached aggregate availability", async () => {
     const { GET } = await import("@/app/api/pricing/route");
     const response = await GET(new Request("http://localhost/api/pricing"));

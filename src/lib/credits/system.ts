@@ -2,7 +2,10 @@ import { randomUUID } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
-import { readTrialGrant } from "@/lib/billing/effective-plan";
+import {
+  LIVE_SUBSCRIPTION_STATUSES,
+  readTrialGrant,
+} from "@/lib/billing/effective-plan";
 import { readPurchasedCreditBalance, spendableFilter } from "./spendable";
 import type { CreditTransaction, CreditWallet } from "@/types/billing";
 
@@ -127,13 +130,28 @@ export async function getUserCreditBalance(
 
   // NOTE: `plan` is the column name on billing_subscriptions, not `plan_id`.
   // Only the period boundary is needed here; the plan itself came from above.
+  // Keep this status vocabulary shared with entitlement resolution. A
+  // trialing or past-due customer still has the plan and its credits there, so
+  // dropping either status here would reset their allowance against a
+  // different calendar and could under- or over-serve the same entitlement.
+  //
+  // There can briefly be more than one live row while Stripe lifecycle events
+  // settle. Entitlement resolution already treats the newest row as canonical;
+  // using `maybeSingle()` without the same ordering made the billing dashboard
+  // throw PGRST116, or made credits follow a different subscription than the
+  // plan. Keep these reads deliberately identical.
   const subscription = assertRead(
     await supabase
       .from("billing_subscriptions")
-      .select("current_period_start")
+      .select("current_period_start, current_period_end")
       .eq("user_id", userId)
-      .eq("status", "active")
-      .maybeSingle<{ current_period_start: string }>(),
+      .in("status", [...LIVE_SUBSCRIPTION_STATUSES])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{
+        current_period_start: string;
+        current_period_end: string | null;
+      }>(),
     "billing_subscriptions read",
   );
 
@@ -158,8 +176,14 @@ export async function getUserCreditBalance(
   const trial = await readTrialGrant(supabase, userId);
 
   const startOfPeriod =
-    subscription?.current_period_start ||
-    (trial?.isActive ? trial.grantedAt : startOfCurrentMonth());
+    (subscription?.current_period_start
+      ? spansMoreThanOneCalendarMonth(
+          subscription.current_period_start,
+          subscription.current_period_end,
+        )
+        ? startOfCurrentAllowanceWindow(subscription.current_period_start)
+        : subscription.current_period_start
+      : null) || (trial?.isActive ? trial.grantedAt : startOfCurrentMonth());
 
   const usage = assertRead(
     await supabase
@@ -195,6 +219,93 @@ function startOfCurrentMonth(): string {
   start.setDate(1);
   start.setHours(0, 0, 0, 0);
   return start.toISOString();
+}
+
+/**
+ * Monthly subscriptions already carry the exact allowance window Stripe chose.
+ * Re-stepping a clamped start such as Feb 28 in a Feb 28 -> Mar 31 period would
+ * invent a Mar 28 reset and hand out a second allowance before renewal. Only a
+ * multi-month billing term needs the catalogue's monthly allowance subdivided.
+ */
+function spansMoreThanOneCalendarMonth(
+  periodStart: string,
+  periodEnd: string | null,
+): boolean {
+  if (!periodEnd) return false;
+
+  const start = new Date(periodStart);
+  const end = new Date(periodEnd);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return false;
+  }
+
+  const calendarMonthSpan =
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth());
+
+  return calendarMonthSpan > 1;
+}
+
+/**
+ * Find the monthly allowance window inside a subscription's billing term.
+ *
+ * Annual Stripe periods keep `current_period_start` fixed for a year, while
+ * the catalogue promises a monthly credit allowance. Advancing the previously
+ * clamped date would turn Jan 31 into Feb 28 and then Mar 28, permanently
+ * moving the customer's reset earlier. Every candidate is therefore derived
+ * from the original UTC anchor: Jan 31 becomes Feb 28/29 and then Mar 31 again.
+ * UTC also keeps the preserved time-of-day independent of local DST changes.
+ */
+export function startOfCurrentAllowanceWindow(
+  periodStart: string,
+  now: Date = new Date(),
+): string {
+  const anchor = new Date(periodStart);
+  if (Number.isNaN(anchor.getTime()) || Number.isNaN(now.getTime())) {
+    return periodStart;
+  }
+
+  const anchorYear = anchor.getUTCFullYear();
+  const anchorMonth = anchor.getUTCMonth();
+  const anchorDay = anchor.getUTCDate();
+
+  const candidateForOffset = (offset: number): Date => {
+    const absoluteMonth = anchorYear * 12 + anchorMonth + offset;
+    const targetYear = Math.floor(absoluteMonth / 12);
+    const targetMonth = ((absoluteMonth % 12) + 12) % 12;
+    const lastDayOfTargetMonth = new Date(
+      Date.UTC(targetYear, targetMonth + 1, 0),
+    ).getUTCDate();
+
+    return new Date(
+      Date.UTC(
+        targetYear,
+        targetMonth,
+        Math.min(anchorDay, lastDayOfTargetMonth),
+        anchor.getUTCHours(),
+        anchor.getUTCMinutes(),
+        anchor.getUTCSeconds(),
+        anchor.getUTCMilliseconds(),
+      ),
+    );
+  };
+
+  let monthOffset = Math.max(
+    0,
+    (now.getUTCFullYear() - anchorYear) * 12 +
+      (now.getUTCMonth() - anchorMonth),
+  );
+  let candidate = candidateForOffset(monthOffset);
+
+  // The matching calendar month may not have reached the anchored day and
+  // timestamp yet. The previous window remains current until that instant;
+  // `gte` in the caller makes the exact boundary inclusive.
+  if (candidate.getTime() > now.getTime() && monthOffset > 0) {
+    monthOffset -= 1;
+    candidate = candidateForOffset(monthOffset);
+  }
+
+  return candidate.toISOString();
 }
 
 /**

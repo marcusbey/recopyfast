@@ -71,3 +71,10 @@ number was wrong twice within one day, and the second time it went stale **insid
 purpose was fixing stale cites**. Nothing about the pin changed.
 
 `auto_stop_machines = false` and the one-machine decision are both unchanged and still correct.
+
+
+## ADR 014 — checkout reservation symbol superseded
+
+**Says:** trial conversion uses `claimSubscriptionReservation` / `withUserLock` in the subscription checkout branch.
+
+**Correction.** s28 replaces the removed `claimSubscriptionReservation` with `claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. `withUserLock` remains around the subscription branch. [ADR 028](./028-durable-subscription-checkout-intents.md) records the structural protocol change; the trial-grant decision and conversion-inside-the-lock constraint remain unchanged.

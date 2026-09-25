@@ -88,16 +88,27 @@ CREATE TABLE IF NOT EXISTS public.founding_agency_reservations (
   stripe_checkout_session_id TEXT UNIQUE,
   stripe_payment_intent_id TEXT UNIQUE,
   -- Frozen into Stripe Checkout params and reused byte-for-byte with the
-  -- reservation idempotency key. A retry after Stripe forgets the key sees a
-  -- past timestamp and fails instead of creating a fresh payable session.
+  -- reservation idempotency key. Stripe's shortest Checkout Session is 30
+  -- minutes. Ten seconds of transit allowance stops request latency from
+  -- turning that minimum into 29:59 by the time Stripe receives the create;
+  -- bind_founding_agency_checkout then narrows this to Stripe's returned
+  -- expires_at so the database hold and payable window end together.
   checkout_expires_at BIGINT NOT NULL DEFAULT (
-    FLOOR(EXTRACT(EPOCH FROM NOW()))::BIGINT + 31 * 60
+    CEIL(EXTRACT(EPOCH FROM NOW()))::BIGINT + 30 * 60 + 10
   ),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   released_at TIMESTAMPTZ
 );
+
+-- CREATE TABLE IF NOT EXISTS does not update a default in a developer database
+-- that briefly received the unpublished 040000 draft. Reset it explicitly so
+-- replaying this migration repairs that local-only state as well.
+ALTER TABLE public.founding_agency_reservations
+  ALTER COLUMN checkout_expires_at SET DEFAULT (
+    CEIL(EXTRACT(EPOCH FROM NOW()))::BIGINT + 30 * 60 + 10
+  );
 
 CREATE UNIQUE INDEX IF NOT EXISTS founding_agency_one_live_reservation_per_user
   ON public.founding_agency_reservations(user_id, product_id)
@@ -136,8 +147,24 @@ BEGIN
     WHERE user_id = p_user_id
       AND plan_id = 'agency'
       AND stripe_payment_intent_id IS NOT NULL
+      AND revoked_at IS NULL
   ) THEN
     RETURN QUERY SELECT NULL::UUID, 'owned'::TEXT, NULL::BIGINT;
+    RETURN;
+  END IF;
+
+  -- A refund revokes access but deliberately does not turn one of the first 50
+  -- completed sales back into inventory. Returning a distinct result prevents
+  -- the API from claiming that this buyer still owns active Agency access or
+  -- taking a second payment for a spot already consumed by their first sale.
+  IF EXISTS (
+    SELECT 1
+    FROM public.founding_agency_reservations
+    WHERE user_id = p_user_id
+      AND product_id = 'lifetime_agency'
+      AND status = 'completed'
+  ) THEN
+    RETURN QUERY SELECT NULL::UUID, 'refunded'::TEXT, NULL::BIGINT;
     RETURN;
   END IF;
 
@@ -185,7 +212,8 @@ $$;
 CREATE OR REPLACE FUNCTION public.bind_founding_agency_checkout(
   p_reservation_id UUID,
   p_user_id UUID,
-  p_stripe_checkout_session_id TEXT
+  p_stripe_checkout_session_id TEXT,
+  p_stripe_checkout_expires_at BIGINT
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
@@ -195,18 +223,56 @@ AS $$
 DECLARE
   v_updated INTEGER;
 BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('founding_agency_capacity', 0));
   UPDATE public.founding_agency_reservations
   SET stripe_checkout_session_id = p_stripe_checkout_session_id,
+      checkout_expires_at = CASE
+        WHEN p_stripe_checkout_expires_at IS NULL THEN checkout_expires_at
+        ELSE LEAST(checkout_expires_at, p_stripe_checkout_expires_at)
+      END,
       updated_at = NOW()
   WHERE id = p_reservation_id
-    AND user_id = p_user_id
+    AND user_id IS NOT DISTINCT FROM p_user_id
     AND product_id = 'lifetime_agency'
     AND status = 'reserved'
+    AND p_stripe_checkout_session_id IS NOT NULL
+    AND btrim(p_stripe_checkout_session_id) <> ''
+    AND (
+      (
+        p_stripe_checkout_expires_at IS NULL
+        AND checkout_expires_at > FLOOR(EXTRACT(EPOCH FROM NOW()))::BIGINT
+      )
+      OR (
+        p_stripe_checkout_expires_at IS NOT NULL
+        AND p_stripe_checkout_expires_at <= checkout_expires_at
+      )
+    )
     AND (stripe_checkout_session_id IS NULL
          OR stripe_checkout_session_id = p_stripe_checkout_session_id);
   GET DIAGNOSTICS v_updated = ROW_COUNT;
   RETURN v_updated = 1;
 END;
+$$;
+
+-- Migration-first deploy compatibility: the previously deployed code calls
+-- the three-argument function. Keep that identity as a wrapper while new code
+-- supplies Stripe's authoritative expires_at through the four-argument form.
+CREATE OR REPLACE FUNCTION public.bind_founding_agency_checkout(
+  p_reservation_id UUID,
+  p_user_id UUID,
+  p_stripe_checkout_session_id TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT public.bind_founding_agency_checkout(
+    p_reservation_id,
+    p_user_id,
+    p_stripe_checkout_session_id,
+    NULL::BIGINT
+  );
 $$;
 
 CREATE OR REPLACE FUNCTION public.release_founding_agency_checkout(
@@ -232,10 +298,12 @@ BEGIN
       released_at = NOW(),
       updated_at = NOW()
   WHERE id = p_reservation_id
-    AND user_id = p_user_id
+    AND user_id IS NOT DISTINCT FROM p_user_id
     AND status = 'reserved'
-    AND (stripe_checkout_session_id IS NULL
-         OR stripe_checkout_session_id = p_stripe_checkout_session_id);
+    AND (
+      stripe_checkout_session_id IS NULL
+      OR stripe_checkout_session_id = p_stripe_checkout_session_id
+    );
   GET DIAGNOSTICS v_updated = ROW_COUNT;
   RETURN v_updated = 1;
 END;
@@ -317,14 +385,17 @@ $$;
 
 REVOKE ALL ON FUNCTION public.reserve_founding_agency_spot(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT, BIGINT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.release_founding_agency_checkout(UUID, UUID, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.complete_founding_agency_purchase(UUID, UUID, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.get_founding_agency_availability() FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.reserve_founding_agency_spot(UUID) TO service_role;
 GRANT EXECUTE ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT) TO service_role;
+GRANT EXECUTE ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT, BIGINT) TO service_role;
 REVOKE ALL ON FUNCTION public.reserve_founding_agency_spot(UUID) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT) FROM anon, authenticated;
+REVOKE ALL ON FUNCTION public.bind_founding_agency_checkout(UUID, UUID, TEXT, BIGINT) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.release_founding_agency_checkout(UUID, UUID, TEXT) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.complete_founding_agency_purchase(UUID, UUID, TEXT) FROM anon, authenticated;
 REVOKE ALL ON FUNCTION public.get_founding_agency_availability() FROM anon, authenticated;

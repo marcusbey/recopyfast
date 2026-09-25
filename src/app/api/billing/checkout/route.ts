@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   createCheckoutSession,
+  expireCheckoutSession,
+  findCheckoutSessionForIntent,
   getCheckoutSessionStatus,
   preflightLifetimeCheckout,
   type CheckoutIntent,
@@ -10,17 +13,30 @@ import { getUserSubscription } from "@/lib/stripe/subscription";
 import {
   getCreditPackConfig,
   getOneTimeProduct,
+  isAgencyCheckoutEnabled,
   isBillingPeriod,
   isLifetimeProductId,
   isPaidPlanId,
+  resolveStripePriceId,
 } from "@/lib/stripe/plans";
 import { getGrantedPlanIds } from "@/lib/billing/entitlements";
-import { claimSubscriptionReservation } from "@/lib/billing/checkout-reservation";
+import {
+  attachCheckoutSession,
+  claimSubscriptionCheckoutIntent,
+  ExistingSubscriptionBlocksCheckoutError,
+  expireUnattachedSubscriptionCheckoutIntent,
+  finishSubscriptionCheckoutIntent,
+  STRIPE_CHECKOUT_MIN_EXPIRY_MS,
+  SUBSCRIPTION_CHECKOUT_TTL_MS,
+} from "@/lib/billing/checkout-reservation";
 import { withUserLock } from "@/lib/billing/user-lock";
 import {
   bindFoundingAgencyCheckout,
+  reconcileExpiredFoundingAgencyCheckouts,
+  releaseFoundingAgencyCheckout,
   reserveFoundingAgencySpot,
 } from "@/lib/billing/founding-agency";
+import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 
 /**
  * Stripe Checkout entry point.
@@ -41,6 +57,26 @@ interface CheckoutRequestBody {
 type ParsedIntent =
   | { ok: true; intent: CheckoutIntent }
   | { ok: false; error: string };
+
+function isStripeIdempotencyConflict(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { type?: unknown; code?: unknown };
+  return (
+    candidate.type === "StripeIdempotencyError" ||
+    candidate.code === "idempotency_key_in_use"
+  );
+}
+
+function isDefinitiveStripeCreateFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const type = (error as { type?: unknown }).type;
+  return (
+    !isStripeIdempotencyConflict(error) &&
+    (type === "StripeInvalidRequestError" ||
+      type === "StripeAuthenticationError" ||
+      type === "StripePermissionError")
+  );
+}
 
 async function parseIntent(body: CheckoutRequestBody): Promise<ParsedIntent> {
   switch (body.intent) {
@@ -115,6 +151,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
     }
 
+    if (
+      !isAgencyCheckoutEnabled() &&
+      ((parsed.intent.type === "subscription" &&
+        parsed.intent.planId === "agency") ||
+        (parsed.intent.type === "lifetime" &&
+          parsed.intent.productId === "lifetime_agency"))
+    ) {
+      return NextResponse.json(
+        { error: "Agency checkout is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+
+    const existingSubscription =
+      parsed.intent.type === "subscription" ||
+      (parsed.intent.type === "lifetime" &&
+        (parsed.intent.productId ?? "lifetime_pro") === "lifetime_pro")
+        ? await getUserSubscription(user.id)
+        : null;
+
     // A customer who already pays us changes plans through
     // PUT /api/billing/subscription (proration), not a second Checkout.
     //
@@ -122,7 +178,6 @@ export async function POST(req: NextRequest) {
     // overlapping POSTs both pass it. The lock serialises this isolate; the
     // reservation row (unique on user_id) serialises across isolates.
     if (parsed.intent.type === "subscription") {
-      const existingSubscription = await getUserSubscription(user.id);
       if (existingSubscription) {
         return NextResponse.json(
           {
@@ -133,42 +188,271 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      const requestedChoice = {
+        stripePriceId: await resolveStripePriceId(
+          parsed.intent.planId,
+          parsed.intent.billingPeriod,
+        ),
+        planId: parsed.intent.planId,
+        billingPeriod: parsed.intent.billingPeriod,
+      };
+
       const locked = await withUserLock(user.id, async () => {
         // Read the table directly so a concurrent test can still barrier on
         // getUserSubscription (called once per request, above) while this
         // isolate still notices a webhook that landed after that read.
-        const { data: liveRow } = await supabase
+        const { data: liveRow, error: liveRowError } = await supabase
           .from("billing_subscriptions")
           .select("id")
           .eq("user_id", user.id)
-          .in("status", ["active", "trialing", "past_due"])
+          .in("status", LIVE_SUBSCRIPTION_STATUSES)
           .maybeSingle();
+        if (liveRowError) {
+          throw new Error(
+            `Failed to verify existing subscription: ${liveRowError.message}`,
+          );
+        }
         if (liveRow) {
           return { kind: "conflict" as const, alreadySubscribed: true };
         }
 
-        const claimed = await claimSubscriptionReservation(supabase, user.id);
-        if (!claimed) {
-          return { kind: "conflict" as const, alreadySubscribed: false };
+        const intentClient = createServiceRoleClient();
+
+        // One retry is enough: an expired known session is released, then the
+        // second claim creates (or observes) the successor. The partial UNIQUE
+        // index remains the cross-isolate arbiter between those two steps.
+        let hasReplacedDifferentChoice = false;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          let pending;
+          try {
+            pending = await claimSubscriptionCheckoutIntent(
+              intentClient,
+              user.id,
+              requestedChoice,
+            );
+          } catch (error: unknown) {
+            if (error instanceof ExistingSubscriptionBlocksCheckoutError) {
+              return { kind: "conflict" as const, alreadySubscribed: true };
+            }
+            throw error;
+          }
+
+          const isIdenticalChoice =
+            pending.stripePriceId === requestedChoice.stripePriceId &&
+            pending.planId === requestedChoice.planId &&
+            pending.billingPeriod === requestedChoice.billingPeriod;
+
+          if (pending.checkoutUrl && pending.stripeSessionId) {
+            const current = await getCheckoutSessionStatus(
+              user.id,
+              pending.stripeSessionId,
+            );
+            if (current.status === "open") {
+              if (!isIdenticalChoice) {
+                if (hasReplacedDifferentChoice) {
+                  return {
+                    kind: "conflict" as const,
+                    alreadySubscribed: false,
+                    retryAt: pending.expiresAt,
+                  };
+                }
+                await expireCheckoutSession(pending.stripeSessionId);
+                await finishSubscriptionCheckoutIntent(
+                  intentClient,
+                  pending.id,
+                  pending.stripeSessionId,
+                  "expired",
+                );
+                hasReplacedDifferentChoice = true;
+                continue;
+              }
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                session: {
+                  sessionId: pending.stripeSessionId,
+                  url: pending.checkoutUrl,
+                },
+              };
+            }
+            if (current.status !== "expired") {
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                isCompleted: current.status === "complete",
+              };
+            }
+
+            await finishSubscriptionCheckoutIntent(
+              intentClient,
+              pending.id,
+              pending.stripeSessionId,
+              "expired",
+            );
+            if (!isIdenticalChoice) hasReplacedDifferentChoice = true;
+            continue;
+          }
+
+          const recovered = pending.isNew
+            ? null
+            : await findCheckoutSessionForIntent(
+                user.id,
+                user.email!,
+                pending.id,
+                typeof user.user_metadata?.name === "string"
+                  ? user.user_metadata.name
+                  : undefined,
+                new Date(
+                  Date.parse(pending.expiresAt) - SUBSCRIPTION_CHECKOUT_TTL_MS,
+                ).toISOString(),
+              );
+          if (recovered) {
+            await attachCheckoutSession(intentClient, pending.id, user.id, {
+              sessionId: recovered.sessionId,
+              url: recovered.url,
+            });
+            if (recovered.status === "expired") {
+              await finishSubscriptionCheckoutIntent(
+                intentClient,
+                pending.id,
+                recovered.sessionId,
+                "expired",
+              );
+              if (!isIdenticalChoice) hasReplacedDifferentChoice = true;
+              continue;
+            }
+            if (recovered.status === "open" && !isIdenticalChoice) {
+              if (hasReplacedDifferentChoice) {
+                return {
+                  kind: "conflict" as const,
+                  alreadySubscribed: false,
+                  retryAt: pending.expiresAt,
+                };
+              }
+              await expireCheckoutSession(recovered.sessionId);
+              await finishSubscriptionCheckoutIntent(
+                intentClient,
+                pending.id,
+                recovered.sessionId,
+                "expired",
+              );
+              hasReplacedDifferentChoice = true;
+              continue;
+            }
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              isCompleted: recovered.status === "complete",
+              ...(recovered.url
+                ? {
+                    session: {
+                      sessionId: recovered.sessionId,
+                      url: recovered.url,
+                    },
+                  }
+                : {}),
+            };
+          }
+
+          if (new Date(pending.expiresAt).getTime() <= Date.now()) {
+            await expireUnattachedSubscriptionCheckoutIntent(
+              intentClient,
+              pending.id,
+              user.id,
+            );
+            continue;
+          }
+
+          // With no provider session to inspect, changing any part of the
+          // immutable choice would reuse the old Stripe idempotency key with
+          // different parameters. Stripe may already have accepted the old
+          // request, so neither replacing nor releasing it is safe before the
+          // reservation expires.
+          if (!isIdenticalChoice) {
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              retryAt: pending.expiresAt,
+            };
+          }
+
+          // A reused unattached intent means a prior Stripe result was
+          // ambiguous. Once less than Stripe's 30-minute expiry floor remains,
+          // resending the immutable idempotent request would be rejected for
+          // its old expires_at. Changing that value or key could create a
+          // second payable session, so keep the intent closed until provider
+          // recovery finds the original or the fixed deadline passes.
+          if (
+            !pending.isNew &&
+            new Date(pending.expiresAt).getTime() - Date.now() <
+              STRIPE_CHECKOUT_MIN_EXPIRY_MS
+          ) {
+            return {
+              kind: "conflict" as const,
+              alreadySubscribed: false,
+              retryAt: pending.expiresAt,
+            };
+          }
+
+          // A provider error is ambiguous: Stripe may have accepted the
+          // request. Nothing below releases the intent on error; the next
+          // request searches Stripe by metadata before creating again.
+          let session;
+          try {
+            session = await createCheckoutSession(
+              user.id,
+              user.email!,
+              parsed.intent,
+              typeof user.user_metadata?.name === "string"
+                ? user.user_metadata.name
+                : undefined,
+              {
+                pendingIntentId: pending.id,
+                expiresAt: pending.expiresAt,
+                priceId: requestedChoice.stripePriceId,
+              },
+            );
+          } catch (error: unknown) {
+            if (isStripeIdempotencyConflict(error)) {
+              return {
+                kind: "conflict" as const,
+                alreadySubscribed: false,
+                isCreating: true,
+              };
+            }
+            throw error;
+          }
+          await attachCheckoutSession(
+            intentClient,
+            pending.id,
+            user.id,
+            session,
+          );
+          return { kind: "ok" as const, session };
         }
 
-        const session = await createCheckoutSession(
-          user.id,
-          user.email!,
-          parsed.intent,
-          typeof user.user_metadata?.name === "string"
-            ? user.user_metadata.name
-            : undefined,
-        );
-        return { kind: "ok" as const, session };
+        return { kind: "conflict" as const, alreadySubscribed: false };
       });
 
       if (locked.kind === "conflict") {
+        const isCompleted =
+          "isCompleted" in locked && locked.isCompleted === true;
+        const isCreating = "isCreating" in locked && locked.isCreating === true;
+        const retryAt = "retryAt" in locked ? locked.retryAt : undefined;
+        const session = "session" in locked ? locked.session : undefined;
         return NextResponse.json(
           {
             error: locked.alreadySubscribed
               ? "You already have a subscription. Use the upgrade flow to change plans."
-              : "You already have a checkout in progress. Finish or wait for it to expire.",
+              : isCompleted
+                ? "Your checkout completed, but your subscription is still being reconciled. Refresh shortly, or contact support if access does not appear."
+                : isCreating
+                  ? "A checkout is already being created. Please try again in a moment."
+                  : retryAt
+                    ? "Checkout recovery is still in progress. Try again after the current checkout expires."
+                    : "You already have a checkout in progress. Finish or wait for it to expire.",
+            ...(retryAt ? { retryAt } : {}),
+            ...(session ? session : {}),
           },
           { status: 409 },
         );
@@ -200,6 +484,29 @@ export async function POST(req: NextRequest) {
       // subscription afterwards) all assume they can reach it.
       const heldGrants = await getGrantedPlanIds(user.id);
 
+      if (
+        productId === "lifetime_pro" &&
+        existingSubscription?.plan_id === "agency"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Lifetime Pro cannot replace an active Agency subscription. Keep Agency or contact support.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (productId === "lifetime_pro" && heldGrants.includes("agency")) {
+        return NextResponse.json(
+          {
+            error:
+              "You already have Agency lifetime access, which includes Lifetime Pro benefits. There is nothing further to buy.",
+          },
+          { status: 409 },
+        );
+      }
+
       if (grantedPlanId !== null && heldGrants.includes(grantedPlanId)) {
         return NextResponse.json(
           {
@@ -218,8 +525,9 @@ export async function POST(req: NextRequest) {
 
         // Missing price ids, origin configuration and customer-creation
         // failures are all known before a capacity row exists. After this
-        // point a create error is an uncertain Stripe outcome and the durable
-        // reservation must stay held for idempotent recovery.
+        // point transport/API errors are uncertain Stripe outcomes; definitive
+        // request rejection releases immediately, while ambiguous outcomes are
+        // recovered by idempotency or provider reconciliation at expiry.
         const prepared = await preflightLifetimeCheckout(
           user.id,
           user.email!,
@@ -227,6 +535,7 @@ export async function POST(req: NextRequest) {
           buyerName,
         );
 
+        await reconcileExpiredFoundingAgencyCheckouts();
         const reservation = await reserveFoundingAgencySpot(user.id);
 
         if (reservation.outcome === "owned") {
@@ -234,6 +543,16 @@ export async function POST(req: NextRequest) {
             {
               error:
                 "You already have lifetime Agency access. There is nothing further to buy.",
+            },
+            { status: 409 },
+          );
+        }
+
+        if (reservation.outcome === "refunded") {
+          return NextResponse.json(
+            {
+              error:
+                "Your Founding Agency purchase was refunded or revoked. Limited founding spots are not reopened after a refund; contact support if this looks wrong.",
             },
             { status: 409 },
           );
@@ -262,17 +581,34 @@ export async function POST(req: NextRequest) {
           throw new Error("Unexpected Founding Agency reservation outcome");
         }
 
-        const session = await createCheckoutSession(
-          user.id,
-          user.email!,
-          {
-            ...parsed.intent,
-            reservationId: reservation.reservationId,
-            checkoutExpiresAt: reservation.checkoutExpiresAt,
-            prepared,
-          },
-          buyerName,
-        );
+        let session;
+        try {
+          session = await createCheckoutSession(
+            user.id,
+            user.email!,
+            {
+              ...parsed.intent,
+              reservationId: reservation.reservationId,
+              checkoutExpiresAt: reservation.checkoutExpiresAt,
+              prepared,
+            },
+            buyerName,
+          );
+        } catch (error: unknown) {
+          // Invalid-request, authentication and permission errors reject the
+          // request before Stripe creates a Checkout Session, so the unbound
+          // hold can be released here. Connection, API, rate-limit and
+          // idempotency errors can race a remote create and retain the hold for
+          // recovery by the same key or by provider reconciliation at expiry.
+          if (isDefinitiveStripeCreateFailure(error)) {
+            await releaseFoundingAgencyCheckout(
+              reservation.reservationId,
+              user.id,
+              null,
+            );
+          }
+          throw error;
+        }
 
         // A successful Stripe create with a failed bind is returned as 500.
         // The next request reuses both the database reservation and Stripe
@@ -283,6 +619,7 @@ export async function POST(req: NextRequest) {
           reservation.reservationId,
           user.id,
           session.sessionId,
+          session.expiresAt ?? reservation.checkoutExpiresAt,
         );
 
         return NextResponse.json(session);

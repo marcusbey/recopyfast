@@ -1,14 +1,10 @@
 /**
- * A-25 — site tokens expire at 90 days, and the failure is unreadable and
- * unactionable when they do.
+ * A-25 / operator decision D3 — site tokens do not expire by age. Rotation of
+ * the site's api_key is the explicit revocation boundary.
  *
- * `verifySiteTokenSignature` enforces a 90-day maximum age
- * (src/lib/security/site-auth.ts:53,71). `buildSiteToken` is called only when
- * the dashboard renders a fresh snippet (sites/register/route.ts:158,
- * sites/route.ts:98) — nothing rotates the static string already pasted into
- * the customer's HTML, and the widget has no refresh path. So every install
- * stops working on a timer, and the dashboard keeps showing a freshly minted,
- * perfectly valid snippet, so the owner has no way to notice.
+ * A genuine old token must keep working until an owner rotates the key. A token
+ * signed by the previous key is then refused with a stable code the widget can
+ * turn into an actionable warning.
  *
  * Two things then hide the failure from everyone who could act on it:
  *
@@ -21,13 +17,12 @@
  *    site owner sees a generic network error for what is really "your token
  *    expired".
  *
- * 2. THE SERVER DOES NOT SAY WHAT WENT WRONG. An expired-but-genuine token and
- *    a forged one produce the identical string "Invalid site token", so even a
- *    reader of the raw response cannot tell "reinstall your snippet" from
- *    "somebody is probing you".
+ * 2. THE SERVER DOES NOT SUPPLY A MACHINE-READABLE REASON. The widget needs a
+ *    stable code for a refused site token so it can name key rotation as the
+ *    recovery path without putting any replacement credential in the response.
  *
- * Nothing here mocks `site-auth`: the real HMAC, the real age check and the
- * real route are what answer. Only the database is stubbed.
+ * Nothing here mocks `site-auth`: the real HMAC and route answer. Only the
+ * database is stubbed.
  */
 
 import crypto from "crypto";
@@ -53,6 +48,7 @@ import { NextRequest } from "next/server";
 
 const SITE_ID = "site-123";
 const API_KEY = "site-api-key-shhh";
+const ROTATED_API_KEY = "rotated-site-api-key";
 const REGISTERED_DOMAIN = "example.com";
 const WIDGET_ORIGIN = `https://${REGISTERED_DOMAIN}`;
 
@@ -154,6 +150,10 @@ describe("/api/content/[siteId] authorization failures", () => {
 
     serviceClient.from.mockReturnValue(serviceClient);
     serviceClient.select.mockReturnValue(serviceClient);
+    // `clearAllMocks` preserves queued `mockReturnValueOnce` implementations.
+    // A failed content-read assertion must not leak its unused query steps into
+    // the next test and turn an independent token check into a cascade failure.
+    serviceClient.eq.mockReset();
     serviceClient.eq.mockReturnValue(serviceClient);
     serviceClient.single.mockResolvedValue({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },
@@ -168,16 +168,21 @@ describe("/api/content/[siteId] authorization failures", () => {
   describe("the browser must be able to read the refusal", () => {
     const methods = ["GET", "POST", "PUT"] as const;
 
-    // GUARD for the three marked groups below. `test.failing` passes on ANY
-    // throw — a handler that stopped exporting, a mock that no longer matches,
-    // a typo in a header name — so each needs an unmarked sibling driving the
-    // identical request through the identical handler and asserting only that
-    // it ran and refused. What it refuses *with* is the marked assertion.
+    // GUARD for the three groups below: each handler reaches the real auth path
+    // and refuses a token signed with a key that is no longer current.
     it.each(methods)(
-      "%s refuses an expired token and answers",
+      "%s refuses a token signed before key rotation and answers",
       async (method) => {
+        serviceClient.single.mockResolvedValue({
+          data: {
+            id: SITE_ID,
+            domain: REGISTERED_DOMAIN,
+            api_key: ROTATED_API_KEY,
+          },
+          error: null,
+        });
         const response = await handlers[method](
-          widgetRequest(method, tokenIssuedDaysAgo(91)),
+          widgetRequest(method, tokenIssuedDaysAgo(1)),
         );
 
         expect(response.status).toBe(401);
@@ -194,11 +199,19 @@ describe("/api/content/[siteId] authorization failures", () => {
       },
     );
 
-    test.failing.each(methods)(
-      "%s sends CORS headers on a 401 for an expired token",
+    test.each(methods)(
+      "%s sends CORS headers on a 401 for a token revoked by key rotation",
       async (method) => {
+        serviceClient.single.mockResolvedValue({
+          data: {
+            id: SITE_ID,
+            domain: REGISTERED_DOMAIN,
+            api_key: ROTATED_API_KEY,
+          },
+          error: null,
+        });
         const response = await handlers[method](
-          widgetRequest(method, tokenIssuedDaysAgo(91)),
+          widgetRequest(method, tokenIssuedDaysAgo(1)),
         );
 
         expect(response.status).toBe(401);
@@ -211,7 +224,7 @@ describe("/api/content/[siteId] authorization failures", () => {
       },
     );
 
-    test.failing.each(methods)(
+    test.each(methods)(
       "%s sends CORS headers on a 401 for a missing token",
       async (method) => {
         const response = await handlers[method](widgetRequest(method, null));
@@ -220,6 +233,10 @@ describe("/api/content/[siteId] authorization failures", () => {
         expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
           WIDGET_ORIGIN,
         );
+        expect(await response.json()).toEqual({
+          error: "Missing site token",
+          code: "site_token_missing",
+        });
       },
     );
 
@@ -234,19 +251,75 @@ describe("/api/content/[siteId] authorization failures", () => {
       expect(response.headers.get("Vary")).toBe("Origin");
     });
 
-    test.failing.each(methods)(
+    test.each(methods)(
       "%s sends a Vary: Origin on an authorization failure",
       async (method) => {
         // The success path sets it (route.ts:38). A cacheable refusal without
         // it is a cross-origin cache poisoning primitive on a response that is
         // already origin-dependent.
         const response = await handlers[method](
-          widgetRequest(method, tokenIssuedDaysAgo(91)),
+          widgetRequest(method, forgedToken()),
         );
 
         expect(response.headers.get("Vary")).toBe("Origin");
       },
     );
+
+    it.each(methods)(
+      "%s never grants CORS to a wrong origin",
+      async (method) => {
+        const response = await handlers[method](
+          widgetRequest(method, forgedToken(), "https://attacker.example"),
+        );
+
+        expect(response.status).toBe(401);
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+        expect(response.headers.get("Vary")).toBe("Origin");
+      },
+    );
+
+    it.each(methods)(
+      "%s never grants CORS when origin and referer are missing",
+      async (method) => {
+        const request = widgetRequest(method, forgedToken());
+        request.headers.delete("origin");
+
+        const response = await handlers[method](request);
+
+        expect(response.status).toBe(401);
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+        expect(response.headers.get("Vary")).toBe("Origin");
+      },
+    );
+
+    it("does not grant CORS or expose database detail for an unknown site", async () => {
+      serviceClient.single.mockResolvedValue({
+        data: null,
+        error: { message: "relation sites is unavailable" },
+      });
+
+      const response = await handlers.GET(widgetRequest("GET", forgedToken()));
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(await response.json()).toEqual({
+        error: "Site not found",
+        code: "site_not_found",
+      });
+    });
+
+    it("does not reflect an unexpected authorization exception", async () => {
+      serviceClient.single.mockResolvedValue({
+        data: { id: SITE_ID, domain: "", api_key: API_KEY },
+        error: null,
+      });
+
+      const response = await handlers.GET(widgetRequest("GET", forgedToken()));
+
+      expect(response.status).toBe(401);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(await response.json()).toEqual({ error: "Unauthorized" });
+    });
 
     // The control. Everything the route considers a success does carry the
     // header, so the failures above are about the refusal path specifically and
@@ -263,18 +336,8 @@ describe("/api/content/[siteId] authorization failures", () => {
     });
   });
 
-  describe("a 91-day-old token must surface an actionable state", () => {
-    it("is refused, which is the behaviour the age check is for", async () => {
-      // Not the defect. The expiry itself is correct; what follows from it is
-      // not.
-      const response = await handlers.GET(
-        widgetRequest("GET", tokenIssuedDaysAgo(91)),
-      );
-
-      expect(response.status).toBe(401);
-    });
-
-    it("accepts an 89-day-old token, pinning the boundary", async () => {
+  describe("site tokens remain valid until the api_key rotates", () => {
+    function allowOneContentRead() {
       serviceClient.eq
         .mockReturnValueOnce(serviceClient)
         .mockReturnValueOnce(serviceClient)
@@ -285,6 +348,20 @@ describe("/api/content/[siteId] authorization failures", () => {
             error: null,
           }) as unknown as typeof serviceClient,
         );
+    }
+
+    it("accepts a 91-day-old genuine token and answers", async () => {
+      allowOneContentRead();
+
+      const response = await handlers.GET(
+        widgetRequest("GET", tokenIssuedDaysAgo(91)),
+      );
+
+      expect(response.status).toBe(200);
+    });
+
+    it("accepts an 89-day-old token, retaining the former boundary guard", async () => {
+      allowOneContentRead();
 
       const response = await handlers.GET(
         widgetRequest("GET", tokenIssuedDaysAgo(89)),
@@ -293,74 +370,67 @@ describe("/api/content/[siteId] authorization failures", () => {
       expect(response.status).toBe(200);
     });
 
-    // GUARD for the three marked tests below: both tokens reach the handler,
-    // both are refused, and both answer with a readable JSON body carrying an
-    // `error`. That is everything the marked assertions depend on except the
-    // one thing they assert.
-    it("refuses both an expired and a forged token with a JSON error", async () => {
-      const expired = await handlers.GET(
+    it("answers for an old genuine token and refuses a forged token with JSON", async () => {
+      allowOneContentRead();
+
+      const genuine = await handlers.GET(
         widgetRequest("GET", tokenIssuedDaysAgo(91)),
       );
       const forged = await handlers.GET(widgetRequest("GET", forgedToken()));
 
-      expect(expired.status).toBe(401);
+      expect(genuine.status).toBe(200);
       expect(forged.status).toBe(401);
-      expect(typeof (await expired.json()).error).toBe("string");
       expect(typeof (await forged.json()).error).toBe("string");
     });
 
-    test.failing(
-      "distinguishes an expired token from a forged one",
-      async () => {
-        // One is "your install aged out, paste the new snippet"; the other is
-        // "someone is probing your site". They are the same 401 with the same
-        // string today, so neither the widget nor an operator reading logs can
-        // tell which happened.
-        const expired = await handlers.GET(
-          widgetRequest("GET", tokenIssuedDaysAgo(91)),
-        );
-        const forged = await handlers.GET(widgetRequest("GET", forgedToken()));
+    it("distinguishes an old genuine token from a forged one by accepting only genuine", async () => {
+      allowOneContentRead();
 
-        expect(await expired.json()).not.toEqual(await forged.json());
-      },
-    );
+      const genuine = await handlers.GET(
+        widgetRequest("GET", tokenIssuedDaysAgo(91)),
+      );
+      const forged = await handlers.GET(widgetRequest("GET", forgedToken()));
 
-    test.failing(
-      "says the token expired, in words a site owner can act on",
-      async () => {
-        const response = await handlers.GET(
-          widgetRequest("GET", tokenIssuedDaysAgo(91)),
-        );
-        const body = await response.json();
+      expect(genuine.status).toBe(200);
+      expect(forged.status).toBe(401);
+    });
 
-        expect(String(body.error)).toMatch(/expir/i);
-      },
-    );
+    it("says a rotated token is invalid with a stable actionable code", async () => {
+      serviceClient.single.mockResolvedValue({
+        data: {
+          id: SITE_ID,
+          domain: REGISTERED_DOMAIN,
+          api_key: ROTATED_API_KEY,
+        },
+        error: null,
+      });
 
-    test.failing(
-      "a token that has aged out is still recognised as genuinely ours",
-      async () => {
-        // The widget cannot self-heal without this. An expired token still
-        // carries a valid HMAC over a site id we issued, so the server is able
-        // to answer "re-mint this" — but the refusal collapses that into the
-        // same verdict as a random string, so there is nothing for a refresh
-        // path to key off and none exists.
-        const response = await handlers.GET(
-          widgetRequest("GET", tokenIssuedDaysAgo(91)),
-        );
-        const body = await response.json();
+      const response = await handlers.GET(
+        widgetRequest("GET", tokenIssuedDaysAgo(365)),
+      );
 
-        expect(body).toHaveProperty("code");
-      },
-    );
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({
+        error: "Invalid site token",
+        code: "site_token_invalid",
+      });
+    });
+
+    it("recognises a multi-year genuine token as ours", async () => {
+      allowOneContentRead();
+
+      const response = await handlers.GET(
+        widgetRequest("GET", tokenIssuedDaysAgo(365 * 3)),
+      );
+
+      expect(response.status).toBe(200);
+    });
   });
 
-  describe("the installed snippet is never rotated", () => {
-    it("mints a token dated now, so the dashboard always looks healthy", () => {
-      // `buildSiteToken` stamps `Date.now()` (site-auth.ts:43). Every dashboard
-      // render therefore shows a token that will pass for another 90 days,
-      // regardless of how old the one on the customer's page is — which is why
-      // the owner cannot see the expiry coming.
+  describe("new snippets still carry an issuance timestamp", () => {
+    it("mints a token dated now without making age a validity boundary", () => {
+      // The timestamp remains part of the signed token shape and future-date
+      // guard. D3 removes only the maximum age; it does not rewrite the format.
       const issuedAt = Number(buildSiteToken(SITE_ID, API_KEY).split(".")[1]);
       const now = Math.floor(Date.now() / 1000);
 

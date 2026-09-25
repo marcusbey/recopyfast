@@ -326,7 +326,7 @@ export async function getUserSubscription(
 ): Promise<Subscription | null> {
   const supabase = await createClient();
 
-  const { data: subscription } = await supabase
+  const { data: subscription, error } = await supabase
     .from("billing_subscriptions")
     .select("*")
     .eq("user_id", userId)
@@ -334,6 +334,13 @@ export async function getUserSubscription(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle<SubscriptionRow>();
+
+  // Checkout uses this read as a money guard. Treating a database failure as
+  // “no subscription” let a customer with Agency buy Lifetime Pro, after which
+  // the lifetime webhook could cancel the higher-tier recurring plan.
+  if (error) {
+    throw new Error(`Failed to read current subscription: ${error.message}`);
+  }
 
   return subscription ? toSubscription(subscription) : null;
 }
@@ -367,7 +374,7 @@ export async function checkFeatureAccess(
     case "unlimited_websites":
       return plan.limits.websites === -1;
     case "collaborators":
-      return plan.limits.collaborators > 0;
+      return plan.limits.collaborators !== 0;
     case "translations":
       return plan.limits.translations !== 0;
     default:

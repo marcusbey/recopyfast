@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { SiteDetailView } from "../SiteDetailView";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 import type { Site } from "@/types";
@@ -205,6 +211,256 @@ describe("SiteDetailView", () => {
         "test-site-token-123",
       );
     });
+  });
+
+  it("explains the HTTP and existing WebSocket revocation timing", async () => {
+    render(<SiteDetailView site={mockSite} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /regenerate snippet/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/old snippets stop working for new requests/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /existing live editing connections may continue until they reconnect/i,
+      ),
+    ).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalledWith(
+      expect.stringContaining("regenerate-snippet"),
+      expect.anything(),
+    );
+  });
+
+  it("replaces every displayed credential and copies the regenerated values", async () => {
+    const newToken = "new-site-token-456";
+    const newScript =
+      '<script src="http://localhost:3000/embed/recopyfast.js" data-site-token="new-site-token-456"></script>';
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("/regenerate-snippet")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            siteToken: newToken,
+            embedScript: newScript,
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/api/domains/verify")
+            ? { verifications: [], canManage: true }
+            : {},
+      } as Response;
+    });
+    Object.assign(navigator, {
+      clipboard: { writeText: jest.fn().mockResolvedValue(undefined) },
+    });
+
+    render(<SiteDetailView site={mockSite} />);
+    fireEvent.click(screen.getByRole("button", { name: /copy embed script/i }));
+    expect(await screen.findByText("Copied!")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /regenerate now/i }),
+    );
+
+    expect(await screen.findByText(newToken)).toBeInTheDocument();
+    expect(screen.getAllByText(newScript).length).toBeGreaterThan(0);
+    expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
+    expect(screen.queryByText(mockSite.embedScript!)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /copy embed script/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /copy embed script/i }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(newScript);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /copy site token/i }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(newToken);
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /view install snippet/i }),
+    );
+    expect(screen.getAllByText(newScript).length).toBeGreaterThan(1);
+  });
+
+  it("keeps a same-site rotation through stale props and clears it when the selected site changes", async () => {
+    const newToken = "rotated-token";
+    const newScript = '<script data-site-token="rotated-token"></script>';
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/regenerate-snippet")
+            ? { ok: true, siteToken: newToken, embedScript: newScript }
+            : url.includes("/api/domains/verify")
+              ? { verifications: [], canManage: true }
+              : {},
+      } as Response;
+    });
+
+    const { rerender } = render(<SiteDetailView site={mockSite} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /regenerate now/i }),
+    );
+    expect(await screen.findByText(newToken)).toBeInTheDocument();
+
+    rerender(<SiteDetailView site={{ ...mockSite }} />);
+    expect(screen.getByText(newToken)).toBeInTheDocument();
+    expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
+
+    rerender(
+      <SiteDetailView
+        site={{
+          ...mockSite,
+          id: "viewer-site",
+          name: "Viewer site",
+          domain: "viewer.example.com",
+          siteToken: undefined,
+          embedScript: undefined,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(newToken)).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /regenerate snippet/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("immediately clears same-site credentials after permission loss and ignores a late rotation", async () => {
+    let resolveRegeneration!: (response: Response) => void;
+    const pendingRegeneration = new Promise<Response>((resolve) => {
+      resolveRegeneration = resolve;
+    });
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("/regenerate-snippet")) return pendingRegeneration;
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/api/domains/verify")
+            ? { verifications: [], canManage: true }
+            : {},
+      } as Response;
+    });
+
+    const { rerender } = render(<SiteDetailView site={mockSite} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /regenerate now/i }),
+    );
+
+    rerender(
+      <SiteDetailView
+        site={{ ...mockSite, siteToken: undefined, embedScript: undefined }}
+      />,
+    );
+
+    expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /regenerate snippet/i }),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveRegeneration({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          siteToken: "late-rotated-token",
+          embedScript: '<script data-site-token="late-rotated-token"></script>',
+        }),
+      } as Response);
+      await pendingRegeneration;
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("late-rotated-token")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /regenerate snippet/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps the current credentials visible when regeneration fails", async () => {
+    const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : String(input);
+      if (url.includes("/regenerate-snippet")) {
+        return {
+          ok: false,
+          status: 500,
+          json: async () => ({ error: "Failed to regenerate snippet" }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          url.includes("/api/domains/verify")
+            ? { verifications: [], canManage: true }
+            : {},
+      } as Response;
+    });
+
+    render(<SiteDetailView site={mockSite} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /regenerate now/i }),
+    );
+
+    expect(
+      await screen.findByText(/failed to regenerate snippet/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(mockSite.siteToken!)).toBeInTheDocument();
+    expect(screen.getAllByText(mockSite.embedScript!).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("does not offer regeneration without install credentials", () => {
+    const siteWithoutCredentials = { ...mockSite };
+    delete siteWithoutCredentials.siteToken;
+    delete siteWithoutCredentials.embedScript;
+
+    render(<SiteDetailView site={siteWithoutCredentials} />);
+
+    expect(
+      screen.queryByRole("button", { name: /regenerate snippet/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render site token section when token is missing", () => {

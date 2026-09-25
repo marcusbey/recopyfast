@@ -49,6 +49,7 @@ describe("Agency Checkout sessions", () => {
     mockCreateSession.mockResolvedValue({
       id: "cs_agency",
       url: "https://checkout.stripe.test/cs_agency",
+      expires_at: 1_800_000_000,
     });
     mockResolveStripePriceId.mockImplementation(
       async (_planId: string, period: string) => `price_agency_${period}`,
@@ -156,6 +157,26 @@ describe("Agency Checkout sessions", () => {
     expect(mockCreateSession.mock.calls[1]).toEqual(
       mockCreateSession.mock.calls[0],
     );
+    jest.useRealTimers();
+  });
+
+  it("keeps the frozen deadline valid after two seconds of checkout preparation", async () => {
+    jest.useFakeTimers({ now: new Date("2026-09-24T00:00:00Z") });
+    const checkoutExpiresAt = Math.ceil(Date.now() / 1000) + 1_810;
+    jest.advanceTimersByTime(2_000);
+
+    const result = await createCheckoutSession("user-1", "buyer@example.com", {
+      type: "lifetime",
+      productId: "lifetime_agency",
+      reservationId: "reservation-transit",
+      checkoutExpiresAt,
+    });
+
+    expect(mockCreateSession).toHaveBeenCalledWith(
+      expect.objectContaining({ expires_at: checkoutExpiresAt }),
+      { idempotencyKey: "founding-agency-reservation-transit" },
+    );
+    expect(result.expiresAt).toBe(1_800_000_000);
     jest.useRealTimers();
   });
 

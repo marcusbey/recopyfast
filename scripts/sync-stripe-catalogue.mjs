@@ -347,15 +347,85 @@ export function validateCreationRow(row) {
 }
 
 export function creationIdempotencyKey(mode, planId, period, amount) {
+  // Stripe retains idempotency results for roughly 24 hours. This key closes
+  // the short concurrent-retry race; price lookup keys and catalogue metadata
+  // below are what prevent duplicates on a later operator rerun.
   return `recopyfast-${mode}-${planId}-${period}-${amount}-price`;
 }
 
-async function createPrices(secretKey, row, mode, apply) {
+/** Persistent identity used after Stripe's 24-hour idempotency retention. */
+export function priceLookupKey(mode, planId, period, amount) {
+  return `recopyfast-${mode}-${planId}-${period}-${amount}`;
+}
+
+async function listAll(requestStripe, secretKey, endpoint) {
+  const rows = [];
+  let startingAfter = null;
+
+  for (;;) {
+    const page = await requestStripe(
+      secretKey,
+      `${endpoint}${startingAfter ? `&starting_after=${encodeURIComponent(startingAfter)}` : ""}`,
+    );
+    rows.push(...(page.data ?? []));
+    if (!page.has_more) return rows;
+    const last = rows.at(-1)?.id;
+    if (!last) {
+      throw new Error(`Stripe pagination for ${endpoint} had no cursor.`);
+    }
+    startingAfter = last;
+  }
+}
+
+function productIdOf(price) {
+  return typeof price.product === "string" ? price.product : price.product?.id;
+}
+
+function priceMismatch(price, expected, mode, productId) {
+  const mismatches = [];
+  if (price.livemode !== (mode === "live")) mismatches.push("mode");
+  if (!price.active) mismatches.push("active state");
+  if (price.unit_amount !== expected.amount) mismatches.push("amount");
+  if (price.currency !== expected.currency) mismatches.push("currency");
+  if ((price.recurring?.interval ?? null) !== expected.recurringInterval) {
+    mismatches.push("recurring interval");
+  }
+  if (expected.recurringInterval && price.recurring?.interval_count !== 1) {
+    mismatches.push("recurring interval count");
+  }
+  if (productIdOf(price) !== productId) mismatches.push("product identity");
+  return mismatches;
+}
+
+async function readCatalogueProducts(requestStripe, secretKey, catalogueId) {
+  const products = await listAll(
+    requestStripe,
+    secretKey,
+    "products?limit=100",
+  );
+  return products.filter(
+    (product) => product.metadata?.catalogue_id === catalogueId,
+  );
+}
+
+/**
+ * Creates or recovers Stripe prices without relying on idempotency retention.
+ * `requestStripe` is injectable so tests prove the write boundary without any
+ * account or network access.
+ */
+export async function createPrices({
+  secretKey,
+  row,
+  mode,
+  apply,
+  requestStripe = stripe,
+  log = console.log,
+}) {
   validateCreationRow(row);
   const specs = creationSpecsFor(row, mode);
-  console.log(`  ${apply ? "Creating" : "Would create"} ${row.id}:`);
+  log(`  ${apply ? "Creating or recovering" : "Would create"} ${row.id}:`);
   for (const spec of specs) {
-    console.log(
+    log(
       `    ${spec.period} $${(Number(spec.price.unit_amount) / 100).toFixed(2)} → ${spec.envName}`,
     );
   }
@@ -363,24 +433,145 @@ async function createPrices(secretKey, row, mode, apply) {
 
   const expected = expectationsFor(row, specs[0].period);
   const creationVersion = specs.map((spec) => spec.price.unit_amount).join("-");
-  const product = await stripe(
-    secretKey,
-    "products",
-    {
-      name: expected.name,
-      description: expected.description,
-      "metadata[catalogue_id]": row.id,
-    },
-    `recopyfast-${mode}-${row.id}-${creationVersion}-product`,
-  );
+  const recovered = new Map();
+  let product = null;
+
   for (const spec of specs) {
-    const price = await stripe(
-      secretKey,
-      "prices",
-      { ...spec.price, product: product.id },
-      creationIdempotencyKey(mode, row.id, spec.period, spec.price.unit_amount),
+    const periodExpected = expectationsFor(row, spec.period);
+    const lookupKey = priceLookupKey(
+      mode,
+      row.id,
+      spec.period,
+      periodExpected.amount,
     );
-    console.log(`    ${spec.envName}=${price.id}`);
+    const candidates = await listAll(
+      requestStripe,
+      secretKey,
+      `prices?lookup_keys%5B%5D=${encodeURIComponent(lookupKey)}&limit=100`,
+    );
+    if (candidates.length > 1) {
+      throw new Error(
+        `Stripe lookup key ${lookupKey} is ambiguous (${candidates.length} prices).`,
+      );
+    }
+    if (candidates.length === 0) continue;
+
+    const candidate = candidates[0];
+    const candidateProductId = productIdOf(candidate);
+    if (!candidateProductId) {
+      throw new Error(
+        `Stripe lookup key ${lookupKey} has no product identity.`,
+      );
+    }
+    const candidateProduct = await requestStripe(
+      secretKey,
+      `products/${candidateProductId}`,
+    );
+    if (candidateProduct.metadata?.catalogue_id !== row.id) {
+      throw new Error(
+        `Stripe lookup key ${lookupKey} points at product ${candidateProductId}, which is not catalogue row ${row.id}.`,
+      );
+    }
+    const mismatches = priceMismatch(
+      candidate,
+      periodExpected,
+      mode,
+      candidateProductId,
+    );
+    if (mismatches.length > 0) {
+      throw new Error(
+        `Stripe lookup key ${lookupKey} has mismatched ${mismatches.join(", ")}. Refusing to create a duplicate.`,
+      );
+    }
+    if (product && product.id !== candidateProduct.id) {
+      throw new Error(
+        `${row.id} lookup keys point at different Stripe products (${product.id}, ${candidateProduct.id}).`,
+      );
+    }
+    product = candidateProduct;
+    recovered.set(spec.period, candidate);
+  }
+
+  if (!product) {
+    const products = await readCatalogueProducts(
+      requestStripe,
+      secretKey,
+      row.id,
+    );
+    if (products.length > 1) {
+      throw new Error(
+        `Stripe has ${products.length} products with catalogue_id=${row.id}; refusing an ambiguous recovery.`,
+      );
+    }
+    product = products[0] ?? null;
+  }
+
+  if (product && recovered.size < specs.length) {
+    const legacyPrices = await listAll(
+      requestStripe,
+      secretKey,
+      `prices?product=${encodeURIComponent(product.id)}&limit=100`,
+    );
+    for (const spec of specs) {
+      if (recovered.has(spec.period)) continue;
+      const periodExpected = expectationsFor(row, spec.period);
+      const matches = legacyPrices.filter(
+        (candidate) =>
+          priceMismatch(candidate, periodExpected, mode, product.id).length ===
+          0,
+      );
+      if (matches.length > 1) {
+        throw new Error(
+          `${row.id} ${spec.period} has ${matches.length} matching legacy prices; refusing an ambiguous recovery.`,
+        );
+      }
+      if (matches.length === 1) recovered.set(spec.period, matches[0]);
+    }
+  }
+
+  if (!product) {
+    product = await requestStripe(
+      secretKey,
+      "products",
+      {
+        name: expected.name,
+        description: expected.description,
+        "metadata[catalogue_id]": row.id,
+      },
+      `recopyfast-${mode}-${row.id}-${creationVersion}-product`,
+    );
+  }
+
+  for (const spec of specs) {
+    let price = recovered.get(spec.period);
+    if (!price) {
+      const periodExpected = expectationsFor(row, spec.period);
+      const lookupKey = priceLookupKey(
+        mode,
+        row.id,
+        spec.period,
+        periodExpected.amount,
+      );
+      price = await requestStripe(
+        secretKey,
+        "prices",
+        {
+          ...spec.price,
+          product: product.id,
+          lookup_key: lookupKey,
+          "metadata[catalogue_id]": row.id,
+          "metadata[catalogue_period]": spec.period,
+          "metadata[catalogue_mode]": mode,
+        },
+        creationIdempotencyKey(
+          mode,
+          row.id,
+          spec.period,
+          spec.price.unit_amount,
+        ),
+      );
+    }
+    log(`    ${spec.envName}=${price.id}`);
   }
 }
 
@@ -427,7 +618,7 @@ async function main() {
       );
       continue;
     }
-    await createPrices(secretKey, row, mode, apply);
+    await createPrices({ secretKey, row, mode, apply });
   }
 
   const verificationEntries = Object.entries(PRICE_ENV).filter(

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import {
   LifetimeOfferCard,
   resolveLifetimeOffer,
+  resolveLifetimeOffers,
   type LifetimeGrantStatus,
 } from "../LifetimeOfferCard";
 import type { OneTimeProduct, PlanCatalogue } from "@/lib/stripe/plan-types";
@@ -61,12 +62,39 @@ describe("resolveLifetimeOffer — who may be sold a permanent grant", () => {
     expect(resolveLifetimeOffer(CATALOGUE, grant)).toEqual(LIFETIME_PRO);
   });
 
-  it("prefers the founding Agency offer when both lifetime products exist", () => {
+  it("offers Lifetime Pro and the founding Agency offer together", () => {
     expect(
-      resolveLifetimeOffer(catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]), {
+      resolveLifetimeOffers(catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]), {
         kind: "none",
       }),
-    ).toEqual(LIFETIME_AGENCY);
+    ).toEqual([LIFETIME_PRO, LIFETIME_AGENCY]);
+  });
+
+  it("keeps Lifetime Pro available when the founding offer is sold out", () => {
+    expect(
+      resolveLifetimeOffers(catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]), {
+        kind: "none",
+      }).find((product) => product.id === "lifetime_pro"),
+    ).toEqual(LIFETIME_PRO);
+  });
+
+  it("does not offer lower-tier Lifetime Pro to an Agency subscriber", () => {
+    expect(
+      resolveLifetimeOffers(
+        catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]),
+        { kind: "none" },
+        "agency",
+      ),
+    ).toEqual([LIFETIME_AGENCY]);
+  });
+
+  it("offers no lifetime product to an account that already owns Agency forever", () => {
+    expect(
+      resolveLifetimeOffers(catalogueWith([LIFETIME_PRO, LIFETIME_AGENCY]), {
+        kind: "granted",
+        planIds: ["agency"],
+      }),
+    ).toEqual([]);
   });
 
   it("withholds it from someone whose grant already confers that plan", () => {
@@ -258,6 +286,30 @@ describe("LifetimeOfferCard", () => {
 
     expect(
       await screen.findByText("Lifetime Pro is not on sale"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the checkout retry time in the billing error surface", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "Checkout recovery is still in progress.",
+        retryAt: "2099-01-02T15:47:00",
+        url: null,
+      }),
+    });
+    render(
+      <LifetimeOfferCard product={LIFETIME_PRO} hasLiveSubscription={false} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /buy once/i }));
+
+    expect(
+      await screen.findByText(
+        "Checkout recovery is still in progress. You can start a new checkout at 15:47.",
+      ),
     ).toBeInTheDocument();
   });
 

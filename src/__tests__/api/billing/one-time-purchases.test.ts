@@ -260,6 +260,30 @@ describe("payment_intent.succeeded", () => {
       );
     });
 
+    it("does not let a late Lifetime Pro payment cancel a newer Agency subscription", async () => {
+      liveSubscriptionsMock.mockResolvedValue({
+        data: [{ stripe_subscription_id: "sub_agency", plan: "agency" }],
+        error: null,
+      });
+
+      const response = await deliver(
+        paymentIntentEvent({
+          type: "lifetime_purchase",
+          user_id: "user-1",
+          product_id: "lifetime_pro",
+          grants_plan_id: "pro",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(grantPlanEntitlement).toHaveBeenCalledWith(
+        "user-1",
+        "pro",
+        "pi_test",
+      );
+      expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    });
+
     it("refuses a lifetime payment that says nothing about what it grants", async () => {
       const response = await deliver(
         paymentIntentEvent({

@@ -36,8 +36,9 @@ interface UpgradeDialogProps {
    * not be offered it. Resolved by `resolveLifetimeOffer` in the dashboard so
    * the dialog and the sidebar card cannot disagree about who may see it.
    */
-  lifetimeOffer: OneTimeProduct | null;
+  lifetimeOffers: readonly OneTimeProduct[];
   foundingAgencyAvailability: FoundingAgencyAvailability | null;
+  agencyCheckoutEnabled?: boolean;
   onSuccess: () => void;
 }
 
@@ -51,14 +52,19 @@ export function UpgradeDialog({
   onOpenChange,
   currentPlan,
   catalogue,
-  lifetimeOffer,
+  lifetimeOffers,
   foundingAgencyAvailability,
+  agencyCheckoutEnabled = true,
   onSuccess,
 }: UpgradeDialogProps) {
   // Only paid plans are ever selectable, so a `free` row still sitting in the
   // catalogue for grandfathered accounts cannot be bought.
-  const plans = sellablePlans(catalogue).filter((plan) =>
-    isPaidPlanId(plan.id),
+  const plans = sellablePlans(catalogue).filter(
+    (plan) =>
+      isPaidPlanId(plan.id) && (agencyCheckoutEnabled || plan.id !== "agency"),
+  );
+  const visibleLifetimeOffers = lifetimeOffers.filter(
+    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
   );
   const [selectedPlan, setSelectedPlan] = useState<PaidPlanId>("pro");
   const [billingPeriod, setBillingPeriod] = useState<BillingPeriod>("monthly");
@@ -278,8 +284,11 @@ export function UpgradeDialog({
             })}
           </div>
 
-          {lifetimeOffer && (
-            <div className="rounded-lg border border-border bg-surface-1 p-4">
+          {visibleLifetimeOffers.map((lifetimeOffer) => (
+            <div
+              key={lifetimeOffer.id}
+              className="rounded-lg border border-border bg-surface-1 p-4"
+            >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="font-medium">
@@ -328,7 +337,7 @@ export function UpgradeDialog({
                 </Button>
               </div>
             </div>
-          )}
+          ))}
 
           <div className="text-xs text-muted-foreground space-y-1">
             <p>• Cancel anytime — no long-term contracts</p>

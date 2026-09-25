@@ -4,7 +4,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import {
-  findOneTimeProduct,
   type OneTimeProduct,
   type PlanCatalogue,
 } from "@/lib/stripe/plan-types";
@@ -54,33 +53,48 @@ export function resolveLifetimeOffer(
   catalogue: PlanCatalogue,
   grant: LifetimeGrantStatus,
 ): OneTimeProduct | null {
-  if (grant.kind === "unknown") {
-    return null;
-  }
+  return resolveLifetimeOffers(catalogue, grant)[0] ?? null;
+}
 
-  const product =
-    findOneTimeProduct(catalogue, "lifetime_agency") ??
-    findOneTimeProduct(catalogue, "lifetime_pro");
+/** Every permanent-plan product this account may buy, in catalogue order. */
+export function resolveLifetimeOffers(
+  catalogue: PlanCatalogue,
+  grant: LifetimeGrantStatus,
+  currentPlanId?: string | null,
+): readonly OneTimeProduct[] {
+  if (grant.kind === "unknown") {
+    return [];
+  }
 
   // No active row, or a row that grants nothing: there is no permanent plan to
   // sell. `createCheckoutSession` throws on the same condition rather than
   // taking money for an empty promise, so refusing to draw the button keeps the
   // UI and the server telling the same story.
-  if (!product?.grantsPlanId) {
-    return null;
-  }
+  return catalogue.oneTimeProducts.filter((product) => {
+    if (product.id !== "lifetime_pro" && product.id !== "lifetime_agency") {
+      return false;
+    }
+    if (!product.grantsPlanId) {
+      return false;
+    }
+    // Agency already includes Pro. Offering the lower-tier permanent grant to
+    // an Agency subscriber would charge $199 and then downgrade their renewal
+    // when the lifetime completion path stops billing.
+    if (
+      product.id === "lifetime_pro" &&
+      (currentPlanId === "agency" ||
+        (grant.kind === "granted" && grant.planIds.includes("agency")))
+    ) {
+      return false;
+    }
 
-  // Membership, not equality: an account can hold several live grants, and
-  // holding the one this product confers is what disqualifies the offer —
-  // regardless of which was granted most recently.
-  if (
-    grant.kind === "granted" &&
-    grant.planIds.includes(product.grantsPlanId)
-  ) {
-    return null;
-  }
-
-  return product;
+    // Membership, not equality: an account can hold several live grants, and
+    // holding the one this product confers is what disqualifies the offer —
+    // regardless of which was granted most recently.
+    return !(
+      grant.kind === "granted" && grant.planIds.includes(product.grantsPlanId)
+    );
+  });
 }
 
 interface LifetimeOfferCardProps {

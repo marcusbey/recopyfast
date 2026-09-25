@@ -103,6 +103,9 @@ export default function Pricing() {
   const foundingAgency = pricing?.oneTimeProducts.find(
     (product) => product.id === "lifetime_agency",
   );
+  const lifetimePro = pricing?.oneTimeProducts.find(
+    (product) => product.id === "lifetime_pro",
+  );
 
   return (
     <section
@@ -280,70 +283,115 @@ export default function Pricing() {
           </div>
         )}
 
-        {pricing && foundingAgency && (
-          <motion.div
-            initial={{ opacity: 0, y: 40 }}
-            animate={isInView ? { opacity: 1, y: 0 } : {}}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className="mt-8 rounded-3xl border-2 border-teal-500 bg-gradient-to-br from-teal-50 to-sky-50 p-8 shadow-xl shadow-teal-500/10"
-          >
-            <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
-              <div>
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
-                  <InfinityIcon className="h-6 w-6 text-teal-700" />
+        {pricing && (lifetimePro || foundingAgency) && (
+          <div className="mt-8 grid gap-6 lg:grid-cols-2">
+            {lifetimePro && (
+              <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={isInView ? { opacity: 1, y: 0 } : {}}
+                transition={{ duration: 0.6, delay: 0.25 }}
+                className="rounded-3xl border border-sky-200 bg-white p-8"
+              >
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-50">
+                  <InfinityIcon className="h-6 w-6 text-sky-700" />
                 </div>
                 <h3 className="mb-2 text-2xl font-semibold text-slate-900">
-                  {foundingAgency.name}
+                  {lifetimePro.name}
                 </h3>
                 <p className="text-sm text-slate-600">
-                  {foundingAgency.description}
+                  {lifetimePro.description}
                 </p>
-                <ul className="mt-6 grid gap-3 sm:grid-cols-2">
-                  {foundingAgency.features.map((feature) => (
+                <ul className="mt-6 space-y-3">
+                  {lifetimePro.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-3">
-                      <Check className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" />
+                      <Check className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
                       <span className="text-sm text-slate-700">{feature}</span>
                     </li>
                   ))}
                 </ul>
-              </div>
-
-              <div className="min-w-56 text-center md:text-right">
-                <div className="flex items-baseline justify-center gap-1 md:justify-end">
-                  <span className="text-5xl font-bold text-slate-900">
-                    ${foundingAgency.price}
+                <div className="mt-6 flex items-baseline gap-1">
+                  <span className="text-4xl font-bold text-slate-900">
+                    ${lifetimePro.price}
                   </span>
                   <span className="text-slate-600">once</span>
                 </div>
-                <p className="mt-1 text-sm font-medium text-teal-800">
-                  {pricing.foundingAgencyAvailability == null
-                    ? "Availability temporarily unavailable"
-                    : pricing.foundingAgencyAvailability.soldOut
-                      ? "Sold out"
-                      : `${pricing.foundingAgencyAvailability.remaining} of ${pricing.foundingAgencyAvailability.limit} founding spots left`}
-                </p>
-                {pricing.foundingAgencyAvailability != null &&
-                !pricing.foundingAgencyAvailability.soldOut ? (
-                  <Link
-                    href="/dashboard/billing"
-                    className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
-                  >
-                    Buy founding access
-                  </Link>
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    className="mt-5 w-full rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-500"
-                  >
-                    {pricing.foundingAgencyAvailability?.soldOut
-                      ? "Sold out"
-                      : "Availability unavailable"}
-                  </button>
-                )}
-              </div>
-            </div>
-          </motion.div>
+                <Link
+                  href="/dashboard/billing"
+                  className="pressable mt-5 block rounded-xl bg-sky-600 px-6 py-3 text-center font-semibold text-white hover:bg-sky-700"
+                >
+                  Buy Lifetime Pro
+                </Link>
+              </motion.div>
+            )}
+
+            {foundingAgency && (
+              <motion.div
+                initial={{ opacity: 0, y: 40 }}
+                animate={isInView ? { opacity: 1, y: 0 } : {}}
+                transition={{ duration: 0.6, delay: 0.3 }}
+                className="rounded-3xl border-2 border-teal-500 bg-gradient-to-br from-teal-50 to-sky-50 p-8 shadow-xl shadow-teal-500/10"
+              >
+                <div className="grid items-center gap-8 md:grid-cols-[1fr_auto]">
+                  <div>
+                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
+                      <InfinityIcon className="h-6 w-6 text-teal-700" />
+                    </div>
+                    <h3 className="mb-2 text-2xl font-semibold text-slate-900">
+                      {foundingAgency.name}
+                    </h3>
+                    <p className="text-sm text-slate-600">
+                      {foundingAgency.description}
+                    </p>
+                    <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+                      {foundingAgency.features.map((feature) => (
+                        <li key={feature} className="flex items-start gap-3">
+                          <Check className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" />
+                          <span className="text-sm text-slate-700">
+                            {feature}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="min-w-56 text-center md:text-right">
+                    <div className="flex items-baseline justify-center gap-1 md:justify-end">
+                      <span className="text-5xl font-bold text-slate-900">
+                        ${foundingAgency.price}
+                      </span>
+                      <span className="text-slate-600">once</span>
+                    </div>
+                    <p className="mt-1 text-sm font-medium text-teal-800">
+                      {pricing.foundingAgencyAvailability == null
+                        ? "Availability temporarily unavailable"
+                        : pricing.foundingAgencyAvailability.soldOut
+                          ? "Sold out"
+                          : `${pricing.foundingAgencyAvailability.remaining} of ${pricing.foundingAgencyAvailability.limit} founding spots left`}
+                    </p>
+                    {pricing.foundingAgencyAvailability != null &&
+                    !pricing.foundingAgencyAvailability.soldOut ? (
+                      <Link
+                        href="/dashboard/billing"
+                        className="pressable mt-5 block rounded-xl bg-teal-700 px-6 py-3 font-semibold text-white hover:bg-teal-800"
+                      >
+                        Buy founding access
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled
+                        className="mt-5 w-full rounded-xl bg-slate-200 px-6 py-3 font-semibold text-slate-500"
+                      >
+                        {pricing.foundingAgencyAvailability?.soldOut
+                          ? "Sold out"
+                          : "Availability unavailable"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </div>
         )}
 
         {/* Trust indicators */}

@@ -37,6 +37,7 @@ import {
   resolveOneTimePriceId,
   resolveStripePriceId,
   findSubscriptionPlan,
+  filterPlanRowsForLoaderVersion,
   sellablePlans,
 } from "@/lib/stripe/plans";
 
@@ -322,6 +323,62 @@ describe("plan catalogue loader", () => {
   });
 
   describe("validation", () => {
+    it("keeps the legacy catalogue working when optional Agency rows are absent", async () => {
+      respondWith(
+        FULL_SEED.filter(
+          (row) => row.id !== "agency" && row.id !== "lifetime_agency",
+        ),
+      );
+
+      await expect(getPlanCatalogue()).resolves.toEqual(
+        expect.objectContaining({
+          subscriptions: expect.not.arrayContaining([
+            expect.objectContaining({ id: "agency" }),
+          ]),
+          oneTimeProducts: expect.arrayContaining([
+            expect.objectContaining({ id: "lifetime_pro" }),
+          ]),
+        }),
+      );
+    });
+
+    it("ignores unknown active rows and logs each row once", async () => {
+      const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+      const futureRow = planRow({ id: "enterprise_2030" });
+      respondWith([...FULL_SEED, futureRow]);
+
+      await expect(getPlanCatalogue()).resolves.toBeDefined();
+      clearPlanCatalogueCache();
+      await expect(getPlanCatalogue()).resolves.toBeDefined();
+
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Ignoring unknown active plans row "enterprise_2030"',
+        ),
+      );
+      warning.mockRestore();
+    });
+
+    it("defines the exact pre-Agency loader compatibility boundary", () => {
+      const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+      const compatibleRows = filterPlanRowsForLoaderVersion(
+        FULL_SEED,
+        "v1-pre-agency",
+      );
+
+      expect(compatibleRows.map((row) => row.id)).toEqual([
+        "free",
+        "starter",
+        "pro",
+        "credits",
+        "lifetime_pro",
+      ]);
+      expect(warning).toHaveBeenCalledTimes(2);
+      warning.mockRestore();
+    });
+
     it("refuses a catalogue missing a plan the type system promises exists", async () => {
       respondWith([FREE_ROW, STARTER_ROW, CREDITS_ROW, LIFETIME_ROW]);
 

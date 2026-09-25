@@ -30,6 +30,10 @@ import {
   completeFoundingAgencyPurchase,
   releaseFoundingAgencyCheckout,
 } from "@/lib/billing/founding-agency";
+import {
+  attachCheckoutSession,
+  finishSubscriptionCheckoutIntent,
+} from "@/lib/billing/checkout-reservation";
 
 // The Stripe SDK types for the 2025-07-30.basil API version (what
 // STRIPE_CONFIG.API_VERSION pins) removed current_period_start /
@@ -246,11 +250,11 @@ export async function POST(req: NextRequest) {
         break;
 
       case "checkout.session.completed":
-        await handleCheckoutSessionCompleted(event.data.object);
+        await handleCheckoutSessionCompleted(event.data.object, supabase);
         break;
 
       case "checkout.session.expired":
-        await handleCheckoutSessionExpired(event.data.object);
+        await handleCheckoutSessionExpired(event.data.object, supabase);
         break;
 
       case "charge.refunded":
@@ -437,10 +441,10 @@ async function retrieveCurrentSubscription(
  * DIFFERENT plan, which `createCheckoutSession` never produces but a manual
  * dashboard edit can. It can no longer name a plan the prices do not.
  *
- * Throws when nothing matches. `billing_subscriptions_plan_valid` admits only
- * 'starter' and 'pro', so a guess is either a plan the customer is not paying
- * for or a 23514 that discards the event; a 500 is retried until the catalogue
- * and the subscription agree.
+ * Throws when nothing matches. The subscription-plan foreign key admits only
+ * catalogue rows, so a guess is either a plan the customer is not paying for
+ * or a constraint failure that discards the event; a 500 is retried until the
+ * catalogue and the subscription agree.
  */
 async function resolveSubscriptionPlan(
   subscription: StripeSubscriptionWithPeriod,
@@ -743,7 +747,7 @@ async function requireBillingCustomer(
 }
 
 /**
- * Grant Lifetime Pro from a completed payment.
+ * Grant the catalogue plan named by a completed lifetime payment.
  *
  * Reached from both `payment_intent.succeeded` and
  * `checkout.session.completed`, because which of the two arrives (and in which
@@ -765,10 +769,9 @@ async function grantLifetime(
     );
   }
 
-  // The grant is permanent and worth $199, so the plan it names has to be one
-  // this app actually sells. `plan_entitlements.plan_id` is a foreign key, but
-  // it would happily accept any plan in the catalogue, including one that is no
-  // longer on sale.
+  // The grant is permanent, so the plan it names has to be one this app
+  // actually sells. `plan_entitlements.plan_id` is a foreign key, but it would
+  // happily accept any plan in the catalogue, including one no longer on sale.
   if (!isPaidPlanId(grantsPlanId)) {
     throw new Error(
       `payment ${paymentIntentId} names "${grantsPlanId}" as the plan it ` +
@@ -805,7 +808,7 @@ async function grantLifetime(
     return;
   }
 
-  await stopBillingForLifetimeOwner(userId, paymentIntentId);
+  await stopBillingForLifetimeOwner(userId, paymentIntentId, grantsPlanId);
 }
 
 /**
@@ -830,15 +833,18 @@ async function grantLifetime(
 async function stopBillingForLifetimeOwner(
   userId: string,
   paymentIntentId: string,
+  grantsPlanId: string,
 ): Promise<void> {
   try {
     const supabase = createServiceRoleClient();
     const { data: subscriptions } = await supabase
       .from("billing_subscriptions")
-      .select("stripe_subscription_id")
+      .select("stripe_subscription_id, plan")
       .eq("user_id", userId)
       .in("status", LIVE_SUBSCRIPTION_STATUSES)
-      .returns<Array<{ stripe_subscription_id: string | null }>>();
+      .returns<
+        Array<{ stripe_subscription_id: string | null; plan?: string | null }>
+      >();
 
     // Guarded per subscription, not around the loop. With one `try` outside,
     // a transient Stripe error on the first row jumped straight to the catch
@@ -848,6 +854,13 @@ async function stopBillingForLifetimeOwner(
     // cancellation is independent, so one failing must not decide the rest.
     for (const subscription of subscriptions ?? []) {
       if (!subscription.stripe_subscription_id) continue;
+
+      // A customer can open Lifetime Pro Checkout and upgrade to Agency before
+      // paying. The route-time eligibility check cannot see that future state.
+      // Cancelling Agency here would turn a late $199 payment into a downgrade;
+      // keep the higher recurring plan and leave the now-redundant Pro grant in
+      // place for support/refund handling.
+      if (grantsPlanId === "pro" && subscription.plan === "agency") continue;
 
       try {
         await stripe.subscriptions.update(subscription.stripe_subscription_id, {
@@ -881,8 +894,7 @@ async function stopBillingForLifetimeOwner(
 }
 
 /**
- * Handle a successful one-off payment: a credit top-up or a Lifetime Pro
- * purchase.
+ * Handle a successful one-off payment: a credit top-up or a lifetime purchase.
  *
  * Both entitlements are granted ONLY here (or from checkout.session.completed),
  * never on the client and never optimistically from the Checkout return URL —
@@ -955,16 +967,58 @@ async function handlePaymentIntentSucceeded(
  */
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
+  supabase: ServiceClient,
 ) {
-  // `unpaid` sessions complete for invoice-style flows where money has not
-  // moved yet. Granting on those would hand out product for an unpaid invoice.
-  if (session.payment_status === "unpaid") {
-    return;
-  }
-
   const metadata = session.metadata ?? {};
   const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
   const paymentIntentId = idOf(session.payment_intent);
+
+  const pendingIntentId = metadata.checkout_intent_id;
+  if (pendingIntentId && userId) {
+    const attached = await attachCheckoutSession(
+      supabase,
+      pendingIntentId,
+      userId,
+      { sessionId: session.id, url: session.url },
+      { ignoreMissingIntent: true },
+    );
+    // An intent can disappear with its auth user or be safely released before
+    // a delayed Stripe event arrives. Retrying those events for days cannot
+    // recreate the authoritative row, and reconciling a subscription for a
+    // missing user can poison every retry. A session mismatch still throws;
+    // only the migration's typed P0002 "not found" result reaches this no-op.
+    if (!attached) return;
+  }
+
+  if (pendingIntentId && session.mode === "subscription") {
+    const subscriptionId = idOf(session.subscription);
+    if (!subscriptionId) {
+      throw new Error(
+        `completed subscription Checkout Session ${session.id} has no subscription`,
+      );
+    }
+
+    // Stripe does not guarantee event order. Persist the subscription (even
+    // when it is still `incomplete`) before releasing the intent, otherwise a
+    // second checkout can slip in before customer.subscription.created lands.
+    await handleSubscriptionCreated(
+      { id: subscriptionId } as StripeSubscriptionWithPeriod,
+      supabase,
+    );
+    await finishSubscriptionCheckoutIntent(
+      supabase,
+      pendingIntentId,
+      session.id,
+      "completed",
+    );
+  }
+
+  // `unpaid` one-off sessions complete for invoice-style flows where money has
+  // not moved yet. Subscription completion is handled above because its row is
+  // the blocking obligation, even while Stripe still calls it `incomplete`.
+  if (session.payment_status === "unpaid") {
+    return;
+  }
 
   if (!userId || !paymentIntentId || metadata.type !== "lifetime_purchase") {
     return;
@@ -988,19 +1042,37 @@ async function handleCheckoutSessionCompleted(
   );
 }
 
-/**
- * Release a founding spot only from Stripe's signed proof that its Checkout
- * Session can no longer complete. The reservation id lives in session metadata
- * even when the create response timed out or the follow-up database bind
- * failed, so this also safely recovers those uncertain remote outcomes.
- */
 async function handleCheckoutSessionExpired(
   session: Stripe.Checkout.Session,
+  supabase: ServiceClient,
 ): Promise<void> {
   const metadata = session.metadata ?? {};
+  const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
+
+  // Claim the durable subscription intent before performing its terminal
+  // effect. Delayed and duplicate Stripe events may arrive after the user or
+  // intent was deleted; the typed missing-row outcome is the only safe no-op.
+  const pendingIntentId = metadata.checkout_intent_id;
+  if (pendingIntentId && userId) {
+    const attached = await attachCheckoutSession(
+      supabase,
+      pendingIntentId,
+      userId,
+      { sessionId: session.id, url: session.url },
+      { ignoreMissingIntent: true },
+    );
+    if (attached) {
+      await finishSubscriptionCheckoutIntent(
+        supabase,
+        pendingIntentId,
+        session.id,
+        "expired",
+      );
+    }
+  }
+
   if (metadata.product_id !== "lifetime_agency") return;
 
-  const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
   const reservationId = metadata.founding_reservation_id;
   if (!userId || !reservationId) {
     throw new Error(
@@ -1012,7 +1084,7 @@ async function handleCheckoutSessionExpired(
 }
 
 /**
- * What Lifetime Pro confers, for a session that does not say.
+ * What the legacy lifetime product confers, for a session that does not say.
  *
  * Only sessions minted before `grants_plan_id` was written at session level can
  * reach this. The payment has already been captured, so refusing outright would

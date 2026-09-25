@@ -5,7 +5,11 @@ import {
   cancelSubscription,
   getUserSubscription,
 } from "@/lib/stripe/subscription";
-import { isBillingPeriod, isPaidPlanId } from "@/lib/stripe/plans";
+import {
+  isAgencyCheckoutEnabled,
+  isBillingPeriod,
+  isPaidPlanId,
+} from "@/lib/stripe/plans";
 
 /**
  * GET /api/billing/subscription
@@ -77,6 +81,13 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json(
         { error: "Invalid billing period" },
         { status: 400 },
+      );
+    }
+
+    if (planId === "agency" && !isAgencyCheckoutEnabled()) {
+      return NextResponse.json(
+        { error: "Agency checkout is temporarily unavailable." },
+        { status: 503 },
       );
     }
 

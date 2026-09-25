@@ -15,7 +15,7 @@ import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
 import { TrialStatusCard } from "./TrialStatusCard";
 import {
   LifetimeOfferCard,
-  resolveLifetimeOffer,
+  resolveLifetimeOffers,
   type LifetimeGrantStatus,
 } from "./LifetimeOfferCard";
 import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
@@ -30,11 +30,13 @@ interface BillingDashboardProps {
    */
   lifetimeGrant: LifetimeGrantStatus;
   foundingAgencyAvailability: FoundingAgencyAvailability | null;
+  agencyCheckoutEnabled?: boolean;
 }
 
 export function BillingDashboard({
   lifetimeGrant,
   foundingAgencyAvailability,
+  agencyCheckoutEnabled = true,
 }: BillingDashboardProps) {
   const router = useRouter();
   const [dashboardData, setDashboardData] =
@@ -131,9 +133,12 @@ export function BillingDashboard({
   // Lifetime Pro is a way *in* for an account with no plan and a way *out* of a
   // subscription for one that has one, so it is resolved before the unentitled
   // branch below and offered in both.
-  const lifetimeOffer = resolveLifetimeOffer(
+  const lifetimeOffers = resolveLifetimeOffers(
     dashboardData.catalogue,
     lifetimeGrant,
+    currentPlan,
+  ).filter(
+    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
   );
   // `subscription` only ever holds a live row (see getUserSubscription), so its
   // presence is exactly "something is still billing this card every month".
@@ -176,23 +181,24 @@ export function BillingDashboard({
 
         <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
 
-        {lifetimeOffer && (
-          <div className="mx-auto mt-6 max-w-lg">
+        {lifetimeOffers.map((product) => (
+          <div key={product.id} className="mx-auto mt-6 max-w-lg">
             <LifetimeOfferCard
-              product={lifetimeOffer}
+              product={product}
               hasLiveSubscription={hasLiveSubscription}
               availability={foundingAgencyAvailability}
             />
           </div>
-        )}
+        ))}
 
         <UpgradeDialog
           open={showUpgradeDialog}
           onOpenChange={setShowUpgradeDialog}
           currentPlan={null}
           catalogue={dashboardData.catalogue}
-          lifetimeOffer={lifetimeOffer}
+          lifetimeOffers={lifetimeOffers}
           foundingAgencyAvailability={foundingAgencyAvailability}
+          agencyCheckoutEnabled={agencyCheckoutEnabled}
           onSuccess={handleSubscriptionUpdate}
         />
       </div>
@@ -263,13 +269,14 @@ export function BillingDashboard({
             creditPack={dashboardData.catalogue.creditPack}
           />
           <UsageCard currentUsage={dashboardData.currentUsage} plan={plan} />
-          {lifetimeOffer && (
+          {lifetimeOffers.map((product) => (
             <LifetimeOfferCard
-              product={lifetimeOffer}
+              key={product.id}
+              product={product}
               hasLiveSubscription={hasLiveSubscription}
               availability={foundingAgencyAvailability}
             />
-          )}
+          ))}
         </div>
       </div>
 
@@ -278,8 +285,9 @@ export function BillingDashboard({
         onOpenChange={setShowUpgradeDialog}
         currentPlan={currentPlan}
         catalogue={dashboardData.catalogue}
-        lifetimeOffer={lifetimeOffer}
+        lifetimeOffers={lifetimeOffers}
         foundingAgencyAvailability={foundingAgencyAvailability}
+        agencyCheckoutEnabled={agencyCheckoutEnabled}
         onSuccess={handleSubscriptionUpdate}
       />
     </div>

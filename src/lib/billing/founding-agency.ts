@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/service";
+import { stripe } from "@/lib/stripe/config";
 
 export const FOUNDING_AGENCY_LIMIT = 50 as const;
 
@@ -11,7 +12,7 @@ export interface FoundingAgencyAvailability {
 export type FoundingAgencyReservation =
   | { outcome: "reserved"; reservationId: string; checkoutExpiresAt: number }
   | {
-      outcome: "sold_out" | "capacity_busy" | "owned";
+      outcome: "sold_out" | "capacity_busy" | "owned" | "refunded";
       reservationId: null;
       checkoutExpiresAt: null;
     };
@@ -24,8 +25,15 @@ interface AvailabilityRow {
 
 interface ReservationRow {
   reservation_id: string | null;
-  outcome: "reserved" | "sold_out" | "capacity_busy" | "owned";
+  outcome: "reserved" | "sold_out" | "capacity_busy" | "owned" | "refunded";
   checkout_expires_at: number | null;
+}
+
+interface ExpiredBoundReservationRow {
+  id: string;
+  user_id: string | null;
+  stripe_checkout_session_id: string | null;
+  created_at: string;
 }
 
 function rpcError(operation: string, message: string): Error {
@@ -78,7 +86,8 @@ export async function reserveFoundingAgencySpot(
   if (
     row.outcome === "sold_out" ||
     row.outcome === "capacity_busy" ||
-    row.outcome === "owned"
+    row.outcome === "owned" ||
+    row.outcome === "refunded"
   ) {
     return {
       outcome: row.outcome,
@@ -89,16 +98,114 @@ export async function reserveFoundingAgencySpot(
   throw rpcError("reserve", "the capacity RPC returned an invalid result");
 }
 
+/**
+ * Reconcile clock-expired holds before another capacity claim.
+ *
+ * A missing local session id does not prove Stripe rejected the request: the
+ * create response or bind write may have been lost. Provider history is
+ * therefore checked for unbound rows too. A delayed paid/completed session
+ * keeps its capacity after the deadline; only provider-confirmed expiry or an
+ * exhaustive no-session result releases it. Any Stripe/read failure throws and
+ * fails the new reservation closed.
+ */
+export async function reconcileExpiredFoundingAgencyCheckouts(): Promise<number> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("founding_agency_reservations")
+    .select("id, user_id, stripe_checkout_session_id, created_at")
+    .eq("product_id", "lifetime_agency")
+    .eq("status", "reserved")
+    .lte("checkout_expires_at", Math.floor(Date.now() / 1000))
+    .limit(FOUNDING_AGENCY_LIMIT);
+
+  if (error) throw rpcError("reconcile", error.message);
+
+  let released = 0;
+  for (const row of (data ?? []) as ExpiredBoundReservationRow[]) {
+    let session;
+    if (row.stripe_checkout_session_id) {
+      session = await stripe.checkout.sessions.retrieve(
+        row.stripe_checkout_session_id,
+      );
+    } else {
+      let stripeCustomerId: string | undefined;
+      if (row.user_id) {
+        const { data: customer, error: customerError } = await supabase
+          .from("billing_customers")
+          .select("stripe_customer_id")
+          .eq("user_id", row.user_id)
+          .maybeSingle<{ stripe_customer_id: string }>();
+        if (customerError) throw rpcError("reconcile", customerError.message);
+        stripeCustomerId = customer?.stripe_customer_id;
+      }
+
+      let startingAfter: string | undefined;
+      do {
+        const sessions = await stripe.checkout.sessions.list({
+          ...(stripeCustomerId ? { customer: stripeCustomerId } : {}),
+          created: { gte: Math.floor(Date.parse(row.created_at) / 1000) },
+          limit: 100,
+          ...(startingAfter ? { starting_after: startingAfter } : {}),
+        });
+        session = sessions.data.find(
+          (candidate) =>
+            candidate.metadata?.founding_reservation_id === row.id &&
+            (!row.user_id || candidate.client_reference_id === row.user_id),
+        );
+        if (session || !sessions.has_more) break;
+        startingAfter = sessions.data.at(-1)?.id;
+        if (!startingAfter) {
+          throw rpcError(
+            "reconcile",
+            "Stripe returned an empty Checkout page with has_more=true",
+          );
+        }
+      } while (startingAfter);
+
+      if (!session) {
+        if (await releaseFoundingAgencyCheckout(row.id, row.user_id, null)) {
+          released += 1;
+        }
+        continue;
+      }
+
+      if (typeof session.expires_at !== "number") {
+        throw rpcError(
+          "reconcile",
+          `Stripe session ${session.id} has no expiry`,
+        );
+      }
+      await bindFoundingAgencyCheckout(
+        row.id,
+        row.user_id,
+        session.id,
+        session.expires_at,
+      );
+    }
+    if (session.status !== "expired" || session.payment_status !== "unpaid") {
+      continue;
+    }
+    if (await releaseFoundingAgencyCheckout(row.id, row.user_id, session.id)) {
+      released += 1;
+    }
+  }
+  return released;
+}
+
 export async function bindFoundingAgencyCheckout(
   reservationId: string,
-  userId: string,
+  userId: string | null,
   stripeCheckoutSessionId: string,
+  stripeCheckoutExpiresAt?: number,
 ): Promise<void> {
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase.rpc("bind_founding_agency_checkout", {
     p_reservation_id: reservationId,
     p_user_id: userId,
     p_stripe_checkout_session_id: stripeCheckoutSessionId,
+    ...(stripeCheckoutExpiresAt === undefined
+      ? {}
+      : { p_stripe_checkout_expires_at: stripeCheckoutExpiresAt }),
   });
 
   if (error) throw rpcError("bind", error.message);
@@ -109,8 +216,8 @@ export async function bindFoundingAgencyCheckout(
 
 export async function releaseFoundingAgencyCheckout(
   reservationId: string,
-  userId: string,
-  stripeCheckoutSessionId: string,
+  userId: string | null,
+  stripeCheckoutSessionId: string | null,
 ): Promise<boolean> {
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase.rpc(

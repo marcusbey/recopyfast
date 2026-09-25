@@ -6,7 +6,8 @@
  * Pricing section is at #pricing with Monthly/Yearly toggle.
  * The catalogue is DB-driven (see /api/pricing): Starter ($9/mo, $7.5/mo
  * yearly), Pro ($19/mo, $15.75/mo yearly), Agency ($49/mo, $40.83/mo yearly,
- * $490 charged annually), plus the one-time Founding Agency ($299) offer.
+ * $490 charged annually), plus Lifetime Pro ($199) and the additional
+ * Founding Agency ($299) offer.
  */
 
 import { test, expect } from "@playwright/test";
@@ -35,10 +36,8 @@ test.describe("Landing Page", () => {
     await expect(ctaButton.first()).toBeVisible({ timeout: 15000 });
   });
 
-  // E2E-012: Three subscriptions plus the separately highlighted founding offer.
-  test("E2E-012: Pricing shows Agency and the founding offer", async ({
-    page,
-  }) => {
+  // E2E-012: Preserve Lifetime Pro and add the separately highlighted founding offer.
+  test("E2E-012: Pricing shows both lifetime offers", async ({ page }) => {
     // Use "load" to ensure React has hydrated
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
 
@@ -64,6 +63,9 @@ test.describe("Landing Page", () => {
       pricing.locator("h3").filter({ hasText: /^Agency$/ }),
     ).toBeVisible();
     await expect(
+      pricing.locator("h3").filter({ hasText: /^Lifetime Pro$/ }),
+    ).toBeVisible();
+    await expect(
       pricing
         .locator("h3")
         .filter({ hasText: /^Founding Agency \(lifetime\)$/ }),
@@ -74,6 +76,7 @@ test.describe("Landing Page", () => {
     expect(pricingText).toContain("$9");
     expect(pricingText).toContain("$19");
     expect(pricingText).toContain("$49");
+    expect(pricingText).toContain("$199");
     expect(pricingText).toContain("$299");
   });
 

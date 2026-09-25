@@ -1,0 +1,118 @@
+diff --git a/src/__tests__/lib/stripe/plans.test.ts b/src/__tests__/lib/stripe/plans.test.ts
+index e24e400..0c19dbd 100644
+--- a/src/__tests__/lib/stripe/plans.test.ts
++++ b/src/__tests__/lib/stripe/plans.test.ts
+@@ -142,6 +142,27 @@ const LIFETIME_ROW = planRow({
+   sort_order: 40,
+ });
+
++const AGENCY_ROW = planRow({
++  id: "agency",
++  name: "Agency",
++  price_monthly: "49.00",
++  price_yearly_monthly_equivalent: "40.83",
++  sort_order: 25,
++});
++
++const LIFETIME_AGENCY_ROW = planRow({
++  id: "lifetime_agency",
++  kind: "one_time",
++  name: "Founding Agency (lifetime)",
++  price_monthly: "299.00",
++  price_yearly_monthly_equivalent: null,
++  limits: {},
++  features: ["Everything in Agency"],
++  additional_site_price: null,
++  grants_plan_id: "agency",
++  sort_order: 45,
++});
++
+ const FULL_SEED = [FREE_ROW, STARTER_ROW, planRow(), CREDITS_ROW, LIFETIME_ROW];
+
+ function respondWith(rows: unknown[]) {
+@@ -259,6 +280,25 @@ describe("plan catalogue loader", () => {
+   });
+
+   describe("validation", () => {
++    it("keeps the pre-Agency catalogue working after Agency rows are added", async () => {
++      const warning = jest.spyOn(console, "warn").mockImplementation(() => {});
++      respondWith([...FULL_SEED, AGENCY_ROW, LIFETIME_AGENCY_ROW]);
++
++      const catalogue = await getPlanCatalogue();
++
++      expect(catalogue.subscriptions.map((plan) => plan.id)).toEqual([
++        "free",
++        "starter",
++        "pro",
++      ]);
++      expect(catalogue.oneTimeProducts.map((product) => product.id)).toEqual([
++        "credits",
++        "lifetime_pro",
++      ]);
++      expect(warning).toHaveBeenCalledTimes(2);
++      warning.mockRestore();
++    });
++
+     it("refuses a catalogue missing a plan the type system promises exists", async () => {
+       respondWith([FREE_ROW, STARTER_ROW, CREDITS_ROW, LIFETIME_ROW]);
+
+diff --git a/src/lib/stripe/plans.ts b/src/lib/stripe/plans.ts
+index ed68d71..b8db5f0 100644
+--- a/src/lib/stripe/plans.ts
++++ b/src/lib/stripe/plans.ts
+@@ -260,6 +260,29 @@ function toOneTimeProduct(row: PlanRow): OneTimeProduct {
+  */
+ let priceIdOverrides: Map<string, PlanRow> = new Map();
+
++/**
++ * A catalogue migration may add rows before every application instance has
++ * restarted. Ignore ids this loader generation cannot sell while continuing
++ * to parse every known row strictly, so malformed existing prices still fail.
++ */
++const KNOWN_CATALOGUE_IDS = new Set([
++  "free",
++  "starter",
++  "pro",
++  "credits",
++  "lifetime_pro",
++]);
++const warnedUnknownCatalogueRows = new Set<string>();
++
++function isKnownCatalogueRow(row: PlanRow): boolean {
++  if (KNOWN_CATALOGUE_IDS.has(row.id)) return true;
++  if (!warnedUnknownCatalogueRows.has(row.id)) {
++    warnedUnknownCatalogueRows.add(row.id);
++    console.warn(`Ignoring unknown active plans row "${row.id}" (${row.kind}).`);
++  }
++  return false;
++}
++
+ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
+   const supabase = createServiceRoleClient();
+
+@@ -280,10 +303,11 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
+     );
+   }
+
+-  const subscriptions = data
++  const knownRows = data.filter(isKnownCatalogueRow);
++  const subscriptions = knownRows
+     .filter((row) => row.kind === "subscription")
+     .map(toSubscriptionPlan);
+-  const oneTimeProducts = data
++  const oneTimeProducts = knownRows
+     .filter((row) => row.kind === "one_time")
+     .map(toOneTimeProduct);
+
+@@ -298,9 +322,9 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
+     );
+   }
+
+-  priceIdOverrides = new Map(data.map((row) => [row.id, row]));
++  priceIdOverrides = new Map(knownRows.map((row) => [row.id, row]));
+
+-  const creditsRow = data.find((row) => row.id === "credits");
++  const creditsRow = knownRows.find((row) => row.id === "credits");
+   if (!creditsRow) {
+     throw new Error('The plans table has no active "credits" product row');
+   }

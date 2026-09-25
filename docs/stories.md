@@ -1219,6 +1219,91 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+## Story s28-billing-correctness — monthly allowances and one open checkout
+
+As a subscriber, I receive the monthly credits my plan grants even when billed annually, and opening Checkout twice cannot create two subscriptions.
+
+Scope: audit A-19 and A-21 / migration M-5 in `docs/archive/goal-audit-closeout.md`. Complexity: 3.
+
+Acceptance criteria:
+- Compute the current monthly allowance window from the subscription anchor, with deterministic UTC month-end clamping and no accumulated drift.
+- Use the existing live-subscription entitlement statuses (active, trialing, past_due); preserve the separate one-time trial-grant allowance and purchased credits.
+- Reserve one pending subscription intent per user in Postgres before Stripe creation, with a partial unique index. Persist the requested price, plan and interval; reuse the session URL only for the same choice. A changed choice expires the old session before releasing the intent and creating the newly requested checkout.
+- Align bounded intent/session expiry, safely handle concurrent claims and ambiguous provider failures, and release only the matching intent on completed/expired webhooks without duplicate side effects.
+- Add a forward-only idempotent migration with RLS and service-role grants; do not apply it.
+- Keep all audit guards, flip the remaining scoped failing markers, run local gates with CI placeholders, then push a draft PR only.
+
+Operator prevalidated this scope in the current task. No UI design is needed. Independent review is pending; no merge or deployment is authorized.
+
+Re-review fix mode 2 adds the 409 retry-time sentence, an ordering-sensitive allowance regression, and corrected webhook/research documentation. N2 (recoverable incomplete/unpaid/paused subscriptions becoming parallel live subscriptions) is explicitly deferred to the follow-up in the plan; the one-pending-intent invariant does not close that pre-existing window.
+
+Research: `docs/research/s28-billing-correctness.md`.
+Plan: `docs/plans/s28-billing-correctness.md`.
+
+## Story s29-editor-invite-and-token-lifetime — deliver invitations and keep installs alive
+
+As a site owner, I can invite an editor by email and revoke installation credentials deliberately,
+so collaborators find the editor hub and installed widgets do not stop after 90 days.
+
+Complexity: **4**. Operator-prevalidated scope and D3, 2026-09-24.
+
+- Send one best-effort Resend invitation on new enrolment/restoration, never on an active duplicate.
+  Include inviter, site name/domain, plain-language permissions, token-free hub CTA and code sign-in instructions.
+- Return `invitationEmailSent`; show emailed or manual-link/copy-link notice. Active rows offer
+  admin-guarded resend, limited per recipient across invite/restore/resend (3/hour) and per owner
+  using the existing limiter.
+- Remove only the site-token age cap; preserve HMAC, shape, future-time and origin checks.
+- Provide admin-only snippet regeneration with an explicit old-snippet invalidation warning.
+- Return readable structured auth errors with CORS only to the permitted origin; preserve authored
+  content on refusal. No widget warning or source-byte increase (fix-run decision C1).
+- Flip A-25 markers, preserving their intent under D3; pass local gates and open a draft PR.
+
+Research: `docs/research/s29-editor-invite-and-token-lifetime.md`.
+Plan: `docs/plans/s29-editor-invite-and-token-lifetime.md`.
+
+## Story s31-magic-link-landing — land confirmed magic links in the app
+
+As a user opening a magic link, I land on my requested app page after confirmation,
+without an authentication error for a session that was already established.
+
+Complexity: **1**. Production hotfix, no UI or architecture change. Scope and decisions
+pre-validated by the operator in the 2026-09-24 task instruction.
+
+- Confirm unwraps same-origin `/auth/` redirect destinations to their sanitized `next`,
+  defaulting to `/dashboard`; the canonical-origin restriction stays intact.
+- Callback without a code accepts a user verified through `auth.getUser()` and lands on
+  sanitized `next`. Explicit auth errors, failed exchanges and missing sessions still error.
+- Route tests cover absolute callback URLs, nested destinations, apex/www, cross-origin
+  and open-redirect guards, error precedence and unchanged trial behavior.
+- Required local gates pass before a focused commit and draft PR. Independent review
+  remains pending; no merge, ready transition, deployment, template/config or SQL changes.
+
+Research: `docs/research/s31-magic-link-landing.md`.
+Plan: `docs/plans/s31-magic-link-landing.md`.
+
+## Story s25-stripe-test-entitlement-e2e — prove payment provisions access
+
+As the operator, I need a completed Stripe test Checkout to travel through a genuine signed
+webhook into a durable entitlement so paid access is demonstrated rather than inferred.
+
+Complexity: **4**. Real test-mode provider, ephemeral data stack, authenticated Checkout,
+webhook causality/idempotency and exact cleanup. Depends on `s24-executed-playwright-ci`.
+
+- [ ] A confirmed disposable user with no trial/paid entitlement creates Checkout through the
+  real authenticated application route for one known test-mode subscription SKU.
+- [ ] Stripe-hosted Checkout completes with a Stripe test payment method and genuine signed events
+  reach the real webhook handler; no synthetic database entitlement is inserted.
+- [ ] Checkout reconciles paid, the expected customer/subscription and processed event IDs persist,
+  and `/api/billing/entitlement` returns the purchased plan.
+- [ ] Replaying the same event is idempotent and creates no duplicate effect.
+- [ ] Cleanup cancels/deletes only captured test provider objects and captured ephemeral DB/Auth
+  rows, and proves no residue. Secrets/payment data never enter source, artifacts or logs.
+- [ ] Evidence says test mode. A live charge remains a separate human action requiring exact SKU,
+  period, maximum total, payer and cancel/refund decision.
+
+Research: `docs/research/s25-stripe-test-entitlement-e2e.md`.
+Plan: `docs/plans/s25-stripe-test-entitlement-e2e.md`.
+
 ## Not stories, deliberately
 
 Recorded so a future agent does not mistake these for missing work. **Each "built" claim
@@ -1268,7 +1353,7 @@ Approved by the user on 2026-09-24; this scope supersedes the older s13 pricing 
 
 Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 websites, unlimited invited editors/translations, A/B testing, AI, 1,000 monthly AI credits, and $4 additional-site pricing. Features: “10 client websites”, “+$4 per additional website”, “Unlimited invited editors”, “Everything in Pro”, “1,000 AI credits / month”, “Priority support + onboarding call”. Founding Agency (lifetime) costs $299 and grants Agency, limited to the first 50 completed purchases.
 
-- [x] Idempotent migration 20260924040000 adds both catalogue rows and race-safe founding capacity.
+- [x] Idempotent migration 20260924060000 adds both catalogue rows and race-safe founding capacity.
 - [x] Monthly/yearly/lifetime checkout, webhook grant, entitlement, credits, limits, badges and billing accept Agency.
 - [x] Completed sales remain durably counted; concurrent final-spot checkout cannot oversell. Pricing exposes cached aggregate spots remaining and sold out at 50.
 - [x] Landing shows Agency beside Starter/Pro and a highlighted founding offer below; pricing/landing tests and strict count contract remain valid.

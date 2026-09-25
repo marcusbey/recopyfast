@@ -27,38 +27,164 @@ fallback catalogue: a database or Stripe failure must not silently sell stale te
 The catalogue sync tool can create the two recurring Agency prices and the one-time Founding
 Agency price. Creation is deliberately separate from verification: Stripe price amounts are
 immutable, and the newly returned ids must first be installed in the matching environment.
-Creation uses stable mode/plan/amount idempotency keys, so retrying the same interrupted command
-recovers the same products and prices instead of multiplying catalogue entries.
+Creation checks persistent price lookup keys and catalogue product/price metadata before creating
+anything. Reused prices must match the active mode, currency, amount and billing interval.
+Stable idempotency keys additionally protect short retries; Stripe may prune them after 24 hours,
+so they are **not** a permanent deduplication mechanism. Run one catalogue-creation operator at a
+time. An inactive or mismatched existing price is a blocker for review, not an instruction to
+silently create another price.
 
-For test mode, export the active `plans` rows from a disposable local Supabase instance to a
-reviewed JSON file (either an array or `{ "plans": [...] }`). The tool refuses to read a remote
-Supabase endpoint in test mode unless `--catalogue` is supplied, and it refuses any secret key
-whose prefix is not `sk_test_`:
+For test mode, use the committed reviewed export (or export active rows from disposable local
+Supabase). Test mode refuses remote Supabase reads without a local catalogue file:
 
 ```bash
-node scripts/sync-stripe-catalogue.mjs --mode=test --catalogue=/absolute/path/plans.json --create=agency,lifetime_agency
-npm run sync:stripe -- --catalogue=/absolute/path/plans.json --create=agency,lifetime_agency
-npm run check:stripe -- --catalogue=/absolute/path/plans.json --only=agency,lifetime_agency
+node scripts/sync-stripe-catalogue.mjs --mode=test --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --create=agency,lifetime_agency
+npm run sync:stripe -- --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --create=agency,lifetime_agency
+npm run check:stripe -- --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --only=agency,lifetime_agency
 ```
 
-The first command is a no-write preview. The second creates exactly three Stripe test prices and
-prints the environment-variable assignments for `STRIPE_AGENCY_PRICE_ID`,
-`STRIPE_AGENCY_YEARLY_PRICE_ID` and `STRIPE_LIFETIME_AGENCY_PRICE_ID`. Install those ids in the
-test environment before running the final verification command.
+The first command previews; the second creates or reuses three prices and prints their price-id
+environment assignments. Install the ids in the corresponding environment before verification.
+No test or migration in this story uses production credentials.
 
-At ship, an authorized operator runs the corresponding live sequence. These are the exact live
-commands; do not run them before the catalogue migration is applied and reviewed:
+## s33 live cutover — compatibility preparation, then migration first
+
+These commands are **operator-only**, after review and merge authorization. None was run by the
+implementation agent. Production already has `20260924020000` and `20260924050000`.
+The unpublished `040000` has been re-dated; the final files are:
+
+- `20260924060000_agency_plan_and_founding_capacity.sql`
+- `20260924070000_subscription_plan_choice_from_catalogue.sql`
+
+Do not use `--include-all`; `060000` and `070000` follow the applied migrations. Do not edit or
+replay applied `020000`/`050000` to change their behavior.
+
+1. **Prepare compatibility before the feature cutover.** Unpatched `300548a` throws on unknown
+   active rows and is not a safe migration/rollback target. Backport the bounded compatibility
+   patch from `docs/operations/patches/s33-catalogue-compat.patch` onto the current main release,
+   run its tests and normal gates, and deploy it through the normal reviewed release process.
+   Record that deployment as the pre-sale rollback baseline. This prerequisite does not expose
+   Agency or change existing prices/limits. Never claim the original old binary is compatible.
+2. **Prepare live prices from the reviewed local catalogue**, before changing the live DB. This
+   keeps price creation/env installation outside the feature cutover window. In an authorized
+   shell with the live Stripe key already securely installed, run exactly:
 
 ```bash
-node scripts/sync-stripe-catalogue.mjs --mode=live --create=agency,lifetime_agency
-npm run sync:stripe:live -- --create=agency,lifetime_agency
+node scripts/sync-stripe-catalogue.mjs --mode=live --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --create=agency,lifetime_agency
+npm run sync:stripe:live -- --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --create=agency,lifetime_agency
+```
+
+3. In the operator's production-linked Vercel checkout, install the returned ids interactively
+   (price ids are non-secret; never paste the Stripe API key). For variables that already exist,
+   use `vercel env update` instead of `add`:
+
+```bash
+vercel env add STRIPE_AGENCY_PRICE_ID_LIVE production
+vercel env add STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE production
+vercel env add STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE production
+vercel env add AGENCY_CHECKOUT_ENABLED production
+```
+
+   Set the last value to `true`. Install the returned `STRIPE_AGENCY_PRICE_ID_LIVE`, `STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE`, and
+   `STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE` in production's protected environment. Preserve
+   Lifetime Pro's existing live price variable. Verify the prepared prices without DB reads:
+
+```bash
+npm run check:stripe:live -- --catalogue=scripts/__tests__/fixtures/agency-catalogue.json --only=agency,lifetime_agency
+```
+
+4. **Migration first, then feature application release.** From the reviewed release checkout,
+   with the operator's Supabase CLI explicitly linked to the intended production project:
+
+```bash
+supabase migration list --linked
+supabase db push --linked --dry-run
+supabase db push --linked
+```
+
+   The dry run must list only reviewed pending migrations, including `060000` then `070000`.
+   Stop if the project identity or migration list differs. Verify the schema/catalogue, then
+   promote the reviewed s33 deployment with the live price ids installed and
+   `AGENCY_CHECKOUT_ENABLED=true`. This is the feature release's migration-first order; the
+   compatibility preparation above is mandatory. Confirm the Stripe endpoint has all 14 events
+   below, including `checkout.session.expired`.
+
+```bash
 npm run check:stripe:live
 ```
 
-The live creation command requires `STRIPE_SECRET_KEY_LIVE` with an `sk_live_` prefix. Install its
-printed ids as `STRIPE_AGENCY_PRICE_ID_LIVE`, `STRIPE_AGENCY_YEARLY_PRICE_ID_LIVE` and
-`STRIPE_LIFETIME_AGENCY_PRICE_ID_LIVE`, then run the read-only live check. Never copy test ids into
-live variables or infer successful verification from creation alone.
+5. Verify pricing contains Starter, Pro, Agency, Lifetime Pro and Founding Agency; annual Agency
+   bills exactly $490. Confirm existing account limits and a separate test-mode founding
+   purchase/expiry/refund cycle. A mocked test, a price creation response, and production
+   promotion are distinct pieces of evidence.
+
+### Safe rollback
+
+Before any Agency sale, the recorded compatibility baseline can serve the expanded DB safely:
+it ignores unsupported rows and preserves Starter/Pro/Lifetime Pro. After any Agency sale,
+**retain the Agency-capable application and both migrations**. Set
+`AGENCY_CHECKOUT_ENABLED=false` in the production deployment environment and redeploy that same
+reviewed release. This stops new Agency subscription and founding checkout and hides their
+purchase offers while preserving paid Agency limits, renewals, refunds and webhook processing.
+Lifetime Pro remains available to eligible buyers. Do not deactivate the Agency plan row,
+delete reservations, revert the schema, or roll back to a binary that cannot recognize Agency.
+Exact rollback commands, from the correctly production-linked checkout at the reviewed s33
+commit (`VERIFIED_S33_DEPLOYMENT_URL` must identify that release, not a preview with test env):
+
+```bash
+printf '%s' false | vercel env update AGENCY_CHECKOUT_ENABLED production
+vercel redeploy "$VERIFIED_S33_DEPLOYMENT_URL" --target production
+```
+
+Confirm the new deployment is ready and is serving the intended source commit and updated
+variable. Re-enable with `true` and redeploy only after the corrected release and price
+verification pass. Existing open Checkout Sessions remain valid until their expiry; if sales
+must stop immediately, inspect and expire unpaid Agency sessions individually in Stripe,
+never paid sessions.
+
+### Founding hold recovery without an expiry webhook
+
+Checkout reserves one hold per account. The fixed session deadline uses Stripe's 30-minute
+minimum plus a 10-second transport allowance (not the old 31-minute hold). Binding records the
+provider expiry and may shorten, never lengthen, that hold. Definitive create failures release the unbound hold in the
+same request. A failed response whose Stripe outcome is uncertain must not free a potentially
+paid session merely to make a retry look successful.
+
+When another founding checkout runs, the clock selects expired holds for provider reconciliation.
+Bound sessions are retrieved directly; unbound holds are searched by reservation metadata in
+Stripe session history, including lost-create-response recovery. Only confirmed expired/unpaid
+sessions, or holds with no provider session after a complete successful search, are released.
+The reserve RPC never frees capacity merely because a deadline passed. Completed or
+paid sessions retain capacity until their success delivery is reconciled; provider outages fail
+closed. This recovery does not require an expiry webhook or a new cron. Availability display
+can lag cache expiry; checkout remains authoritative.
+
+For an operator recovery, first inspect the reservation and matching session using the protected
+production DB service profile and Stripe's authenticated CLI. IDs below are operator-supplied,
+not credentials; never copy secret keys into command arguments:
+
+```bash
+PGSERVICE=recopyfast-production psql -X -v ON_ERROR_STOP=1 -c "SELECT id, user_id, status, stripe_checkout_session_id, checkout_expires_at FROM public.founding_agency_reservations WHERE status = 'reserved' AND checkout_expires_at <= EXTRACT(EPOCH FROM NOW());"
+stripe checkout sessions retrieve "$SESSION_ID" --live
+```
+
+For an open unpaid session, explicitly expire it and re-retrieve its terminal status before
+release. Never release a complete/paid session: replay/reconcile its success event instead.
+
+```bash
+stripe checkout sessions expire "$SESSION_ID" --live
+stripe checkout sessions retrieve "$SESSION_ID" --live
+PGSERVICE=recopyfast-production psql -X -v ON_ERROR_STOP=1 -v reservation_id="$RESERVATION_ID" -v user_id="$USER_ID" -v session_id="$SESSION_ID" <<'SQL'
+SELECT public.release_founding_agency_checkout(:'reservation_id'::uuid, :'user_id'::uuid, :'session_id');
+SQL
+```
+
+For an unbound hold, inspect Stripe request/session history by `founding_reservation_id` metadata
+and the reservation's idempotency key. Only after confirming no session/payment exists (or
+expiring and confirming an unpaid recovered session), release with the corresponding session
+id; use SQL `NULL` only when there truly is no session. Re-check capacity and retry checkout.
+Never decrement completed sales for a refund or dispute: the buyer loses entitlement, the
+historical founding spot stays consumed (ADR 029).
 
 ## Environments
 
@@ -97,6 +223,35 @@ Subscribe the endpoint to exactly these 14 event types, matching the switch in
 12. `payment_intent.payment_failed`
 13. `customer.created`
 14. `customer.updated`
+
+The operator must subscribe to `checkout.session.expired` during cutover. This event releases
+both the matching s28 checkout intent and the s33 founding reservation; webhook event claiming
+still precedes either effect. Verify the live subscription: changing this runbook does not
+change Stripe. Time-based reservation recovery also handles missed expiry deliveries.
+
+
+The exact event-update command is below. Resolve `STRIPE_WEBHOOK_ENDPOINT_ID` from the existing
+canonical live endpoint first; this updates its event selection and does not create an endpoint
+or rotate its signing secret:
+
+```bash
+stripe webhook_endpoints update "$STRIPE_WEBHOOK_ENDPOINT_ID" --live \
+  -d 'enabled_events[]=customer.subscription.created' \
+  -d 'enabled_events[]=customer.subscription.updated' \
+  -d 'enabled_events[]=customer.subscription.deleted' \
+  -d 'enabled_events[]=invoice.payment_succeeded' \
+  -d 'enabled_events[]=invoice.payment_failed' \
+  -d 'enabled_events[]=payment_intent.succeeded' \
+  -d 'enabled_events[]=checkout.session.completed' \
+  -d 'enabled_events[]=checkout.session.expired' \
+  -d 'enabled_events[]=charge.refunded' \
+  -d 'enabled_events[]=charge.dispute.created' \
+  -d 'enabled_events[]=charge.dispute.closed' \
+  -d 'enabled_events[]=payment_intent.payment_failed' \
+  -d 'enabled_events[]=customer.created' \
+  -d 'enabled_events[]=customer.updated'
+stripe webhook_endpoints retrieve "$STRIPE_WEBHOOK_ENDPOINT_ID" --live
+```
 
 The production endpoint's write-only secret is the value of
 `STRIPE_WEBHOOK_SECRET_LIVE`. `STRIPE_WEBHOOK_SECRET` is the separate test-mode secret. Stripe's

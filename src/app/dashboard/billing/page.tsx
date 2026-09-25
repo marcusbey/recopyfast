@@ -67,6 +67,7 @@ async function BillingDashboardSection() {
     <BillingDashboard
       lifetimeGrant={lifetimeGrant}
       foundingAgencyAvailability={foundingAgencyAvailability}
+      agencyCheckoutEnabled={process.env.AGENCY_CHECKOUT_ENABLED !== "false"}
     />
   );
 }

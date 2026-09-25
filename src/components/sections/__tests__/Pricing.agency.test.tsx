@@ -51,6 +51,15 @@ const foundingProduct = {
   grantsPlanId: "agency",
 };
 
+const lifetimeProProduct = {
+  id: "lifetime_pro",
+  name: "Lifetime Pro",
+  description: "One payment for permanent Pro access",
+  price: 199,
+  features: ["Everything in Pro", "Up to 5 websites"],
+  grantsPlanId: "pro",
+};
+
 function pricingResponse(
   availability: { remaining: number; limit: 50; soldOut: boolean } | null = {
     remaining: 17,
@@ -60,7 +69,7 @@ function pricingResponse(
 ) {
   return {
     plans,
-    oneTimeProducts: [foundingProduct],
+    oneTimeProducts: [lifetimeProProduct, foundingProduct],
     foundingAgencyAvailability: availability,
   };
 }
@@ -77,7 +86,7 @@ afterEach(() => {
 });
 
 describe("Agency pricing", () => {
-  it("renders Agency as the third subscription and the founding offer below it", async () => {
+  it("keeps Lifetime Pro and adds the founding offer below the subscriptions", async () => {
     render(<Pricing />);
 
     expect(
@@ -88,6 +97,10 @@ describe("Agency pricing", () => {
       screen.getByRole("heading", { name: "Founding Agency (lifetime)" }),
     ).toBeInTheDocument();
     expect(screen.getByText("$299")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Lifetime Pro" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("$199")).toBeInTheDocument();
     expect(
       screen.getByText("17 of 50 founding spots left"),
     ).toBeInTheDocument();
@@ -116,6 +129,9 @@ describe("Agency pricing", () => {
 
     expect(await screen.findAllByText("Sold out")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Sold out" })).toBeDisabled();
+    expect(
+      screen.getByRole("link", { name: /buy lifetime pro/i }),
+    ).toBeInTheDocument();
   });
 
   it("does not invent remaining spots when availability could not be read", async () => {

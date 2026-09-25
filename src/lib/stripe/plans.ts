@@ -38,6 +38,70 @@ export * from "./plan-types";
  */
 const CATALOGUE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Catalogue rows understood by each deployed loader generation.
+ *
+ * The database can gain rows before every application instance has restarted.
+ * Keeping the pre-Agency boundary explicit lets the compatibility deployment
+ * prove that old code ignores the new rows instead of taking pricing, checkout
+ * and every feature gate down during the migration window.
+ */
+const CATALOGUE_LOADER_KNOWN_IDS = {
+  "v1-pre-agency": new Set([
+    "free",
+    "starter",
+    "pro",
+    "credits",
+    "lifetime_pro",
+  ]),
+  "v2-agency": new Set([
+    "free",
+    "starter",
+    "pro",
+    "agency",
+    "credits",
+    "lifetime_pro",
+    "lifetime_agency",
+  ]),
+} as const;
+
+export type CatalogueLoaderVersion = keyof typeof CATALOGUE_LOADER_KNOWN_IDS;
+
+const warnedUnknownCatalogueRows = new Set<string>();
+
+/**
+ * Unknown active rows are a forward-compatibility event, not catalogue
+ * corruption. The s33 rollout adds Agency rows before all code is promoted;
+ * the previous throw turned that safe migration order into a site-wide billing
+ * outage. Known rows remain strictly parsed below, so malformed prices or
+ * limits still fail closed.
+ */
+export function filterPlanRowsForLoaderVersion<
+  T extends { id: string; kind: string },
+>(rows: readonly T[], version: CatalogueLoaderVersion): T[] {
+  const knownIds = CATALOGUE_LOADER_KNOWN_IDS[version];
+
+  return rows.filter((row) => {
+    if (knownIds.has(row.id)) {
+      return true;
+    }
+
+    const warningKey = `${version}:${row.kind}:${row.id}`;
+    if (!warnedUnknownCatalogueRows.has(warningKey)) {
+      warnedUnknownCatalogueRows.add(warningKey);
+      console.warn(
+        `Ignoring unknown active plans row "${row.id}" (${row.kind}) in catalogue loader ${version}.`,
+      );
+    }
+    return false;
+  });
+}
+
+/** Defaults on; setting exactly `false` withdraws only the Agency sales UI. */
+export function isAgencyCheckoutEnabled(): boolean {
+  return process.env.AGENCY_CHECKOUT_ENABLED !== "false";
+}
+
 interface CachedCatalogue {
   catalogue: PlanCatalogue;
   loadedAt: number;
@@ -311,10 +375,11 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
     );
   }
 
-  const subscriptions = data
+  const knownRows = filterPlanRowsForLoaderVersion(data, "v2-agency");
+  const subscriptions = knownRows
     .filter((row) => row.kind === "subscription")
     .map(toSubscriptionPlan);
-  const oneTimeProducts = data
+  const oneTimeProducts = knownRows
     .filter((row) => row.kind === "one_time")
     .map(toOneTimeProduct);
 
@@ -322,16 +387,18 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
   // seed that no longer contains one of them has to fail loudly here rather
   // than at the moment a customer clicks Upgrade.
   const seededIds = new Set(subscriptions.map((plan) => plan.id));
-  const missing = PAID_PLAN_IDS.filter((id) => !seededIds.has(id));
+  const missing = PAID_PLAN_IDS.filter(
+    (id) => id !== "agency" && !seededIds.has(id),
+  );
   if (missing.length > 0) {
     throw new Error(
       `The plans table is missing active row(s): ${missing.join(", ")}`,
     );
   }
 
-  priceIdOverrides = new Map(data.map((row) => [row.id, row]));
+  priceIdOverrides = new Map(knownRows.map((row) => [row.id, row]));
 
-  const creditsRow = data.find((row) => row.id === "credits");
+  const creditsRow = knownRows.find((row) => row.id === "credits");
   if (!creditsRow) {
     throw new Error('The plans table has no active "credits" product row');
   }

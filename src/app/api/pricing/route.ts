@@ -3,6 +3,7 @@ import { stripe } from "@/lib/stripe/config";
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import {
   getPlanCatalogue,
+  isAgencyCheckoutEnabled,
   resolveOneTimePriceId,
   resolveStripePriceId,
   isPaidPlanId,
@@ -179,11 +180,14 @@ function toPlanPayload(
 
 async function buildPricingResponse(): Promise<PricingResponse> {
   const catalogue = await getPlanCatalogue();
+  const agencyCheckoutEnabled = isAgencyCheckoutEnabled();
   let foundingAgencyAvailability: PricingResponse["foundingAgencyAvailability"] =
     null;
 
   try {
-    foundingAgencyAvailability = await getFoundingAgencyAvailability();
+    if (agencyCheckoutEnabled) {
+      foundingAgencyAvailability = await getFoundingAgencyAvailability();
+    }
   } catch (error) {
     // The catalogue is still useful when the aggregate read fails, but the
     // response must carry an explicit unknown state. A fabricated remaining
@@ -193,12 +197,16 @@ async function buildPricingResponse(): Promise<PricingResponse> {
 
   // The free plan is the absence of a subscription, not something to sell.
   const sellablePlans = catalogue.subscriptions.filter(
-    (plan) => plan.id !== "free",
+    (plan) =>
+      plan.id !== "free" && (agencyCheckoutEnabled || plan.id !== "agency"),
+  );
+  const sellableProducts = catalogue.oneTimeProducts.filter(
+    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
   );
 
   const planAmounts = await Promise.all(sellablePlans.map(readStripeAmounts));
   const productAmounts = await Promise.all(
-    catalogue.oneTimeProducts.map(readStripeOneTimeAmount),
+    sellableProducts.map(readStripeOneTimeAmount),
   );
 
   const sawStripePrice =
@@ -209,7 +217,7 @@ async function buildPricingResponse(): Promise<PricingResponse> {
     plans: sellablePlans.map((plan, index) =>
       toPlanPayload(plan, planAmounts[index]),
     ),
-    oneTimeProducts: catalogue.oneTimeProducts.map((product, index) => ({
+    oneTimeProducts: sellableProducts.map((product, index) => ({
       id: product.id,
       name: product.name,
       description: product.description,
