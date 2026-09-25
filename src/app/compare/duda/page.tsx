@@ -8,7 +8,7 @@ import { loadComparisonPricing } from "@/lib/compare/comparison-pricing";
 const comparison = comparisons.duda;
 
 export const metadata = createComparisonMetadata(comparison);
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function DudaComparisonPage() {
   const pricing = await loadComparisonPricing();

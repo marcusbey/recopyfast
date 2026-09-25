@@ -27,6 +27,20 @@ jest.mock("@/lib/sites/embed-script", () => {
   const actual = jest.requireActual("@/lib/sites/embed-script");
   return { ...actual, buildEmbedScript: jest.fn(actual.buildEmbedScript) };
 });
+jest.mock("../ActivationChecklist", () => ({
+  ActivationChecklist: (props: {
+    siteId: string;
+    embedScript: string;
+    userId: string;
+  }) => (
+    <div
+      data-testid="activation-checklist"
+      data-site-id={props.siteId}
+      data-user-id={props.userId}
+      data-snippet={props.embedScript}
+    />
+  ),
+}));
 
 const mockBuildEmbedScript = buildEmbedScript as jest.MockedFunction<
   typeof buildEmbedScript
@@ -191,6 +205,40 @@ describe("SiteDetailView", () => {
 
     expect(screen.getByText("Site Token")).toBeInTheDocument();
     expect(screen.getByText("test-site-token-123")).toBeInTheDocument();
+    expect(
+      screen.getByText(/visible in your page's HTML by design/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Site Token").parentElement).toHaveTextContent(
+      /requesting page's origin/i,
+    );
+    expect(
+      screen.getByText(/Regenerate snippet revokes old snippets/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/never expose it publicly/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows activation only to an admin with current install credentials", () => {
+    render(<SiteDetailView site={mockSite} userId="user-1" />);
+
+    const checklist = screen.getByTestId("activation-checklist");
+    expect(checklist).toHaveAttribute("data-site-id", mockSite.id);
+    expect(checklist).toHaveAttribute("data-user-id", "user-1");
+    expect(checklist).toHaveAttribute("data-snippet", mockSite.embedScript);
+  });
+
+  it("hides activation from a non-admin without install credentials", () => {
+    render(
+      <SiteDetailView
+        site={{ ...mockSite, siteToken: undefined, embedScript: undefined }}
+        userId="user-1"
+      />,
+    );
+
+    expect(
+      screen.queryByTestId("activation-checklist"),
+    ).not.toBeInTheDocument();
   });
 
   it("copies site token to clipboard", async () => {
@@ -268,7 +316,7 @@ describe("SiteDetailView", () => {
       clipboard: { writeText: jest.fn().mockResolvedValue(undefined) },
     });
 
-    render(<SiteDetailView site={mockSite} />);
+    render(<SiteDetailView site={mockSite} userId="user-1" />);
     fireEvent.click(screen.getByRole("button", { name: /copy embed script/i }));
     expect(await screen.findByText("Copied!")).toBeInTheDocument();
     fireEvent.click(
@@ -280,6 +328,10 @@ describe("SiteDetailView", () => {
 
     expect(await screen.findByText(newToken)).toBeInTheDocument();
     expect(screen.getAllByText(newScript).length).toBeGreaterThan(0);
+    expect(screen.getByTestId("activation-checklist")).toHaveAttribute(
+      "data-snippet",
+      newScript,
+    );
     expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
     expect(screen.queryByText(mockSite.embedScript!)).not.toBeInTheDocument();
     expect(

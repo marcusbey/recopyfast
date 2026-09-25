@@ -1009,7 +1009,10 @@ None.
 
 Route update (s37, 2026-09-25): reuse `/compare` and `/compare/*`; the former
 `/alternatives/*` plan is superseded. s37 delivers four comparisons, not all of
-this story's engine, discovery and performance acceptance criteria.
+this story's engine, discovery and performance acceptance criteria. See
+[ADR 032](./decisions/032-comparison-routes-supersede-alternatives.md): s17 owns
+the dynamic route migration, shared SoftwareApplication schema and Lighthouse
+gate for `/compare` and all comparison detail URLs.
 
 **As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that** I
 can tell in one screen whether this fits my site.
@@ -1410,6 +1413,22 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
 
 
+## Story s35-activation-checklist — First client publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-activation-checklist`.
+
+- [x] Overview and site detail show a three-step per-site checklist from durable install verification, an active invited editor with Publish permission, and any site publish record.
+- [x] Each incomplete step has one primary action: copy snippet, open invite form, open edit mode.
+- [x] All complete becomes one Live state; dismissal persists per user/site. Loading and read errors never invent progress.
+- [x] Site Token copy explains public HTML visibility, requesting-page origin checks and explicit regeneration/revocation per ADR 027.
+- [x] Component states/actions/dismissal and authenticated RLS data derivation are tested; required gates pass (3,145 tests passed, 97 pages built; details in plan).
+- [x] Existing draft PR #33 stays draft; original independent review is preserved, fix verification is recorded in the plan. No deployment or remote database changes.
+
+Research: `docs/research/s35-activation-checklist.md`. Design: `docs/designs/s35-activation-checklist.md`. Plan: `docs/plans/s35-activation-checklist.md`. Embed allocation: 0 bytes.
+
+Delivery: original implementation `e361c35` is pushed in draft PR #33. The independent review allows ship and records four majors; the operator authorized the fix scope on 2026-09-25. Current fix verification and deferred batching are recorded in the plan. No PR merge or deployment is authorized.
+
+
 ## Story s37-comparison-pages — Agency comparison pages
 
 Operator-prevalidated scope, 2026-09-25. Complexity: 3. Marketing SEO/GTM, extending
@@ -1430,5 +1449,7 @@ the PRD comparison intent and ADR 020 at the explicitly requested `/compare` URL
 
 Research: `docs/research/s37-comparison-pages.md`. Plan: `docs/plans/s37-comparison-pages.md`.
 Initial delivery: `121c9c4`, draft PR #34. Independent review blocked it (C1, M1, M2
-and nine minors); the operator authorized fix mode. Fresh review remains required
-after fixes; no merge/deploy authority.
+and nine minors); fix `ba25a30` addressed those blockers. The independent
+re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
+mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
+JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.

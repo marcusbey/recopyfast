@@ -181,7 +181,7 @@ The comparisons explicitly credit competitors' served-HTML delivery and disclose
 ReCopyFast's browser-after-load behavior, original HTML without JavaScript and
 for non-rendering crawlers, and source updates for SEO-critical copy.
 
-## Fix-mode verification — 2026-09-25
+## First fix-mode verification — 2026-09-25 (historical, ba25a30)
 
 Commands use `/tmp/recopyfast-s37-fix-ci.py`, which reads only the main CI job's
 placeholder environment and uses official Node 20.15.1. No production environment
@@ -222,6 +222,99 @@ changing test timeouts. No audit markers flipped and no migrations were added.
 - `git diff --check`: passed. Independent review SHA-256 remains
   `79765b7cf06c91609487cfaed4d194af4136c3e212bf34973fe02834108812dc`.
 
-All C1/M1/M2 and m1-m9 fixes are implemented. The independent blocked review is
-preserved unmodified and uncommitted; a fresh review verdict remains required.
+At that delivery, all C1/M1/M2 and m1-m9 fixes were implemented. The then-blocked
+review was preserved for its owner; the subsequent re-review and narrow fix
+mode 2 below supersede that historical verdict status.
 The operator authorizes this fix commit/push to the existing draft PR, not release.
+
+
+## Narrow fix mode 2 — N1 and n1–n7 (2026-09-25)
+
+The supplied re-review is ship-allowed with one major documentation correction
+and seven minor fixes. It remains unmodified and uncommitted, with SHA-256
+`a21878a0bc17782402e64a3ff5d3d9f2460181eb62b2713441c362c69c12dd0f`.
+
+### Decision and scope evidence
+
+Initial fetched origin/main was `c3b2b28`. The final pre-commit fetch found
+`cbfb922` (s35/#33); it is merged into the fix commit, preserving every story
+entry from both branches. All local gates are rerun on the combined tree. Inventoried `docs/decisions` on every local
+and fetched remote branch: s34 owns ADR 031; 032 is unused. ADR 020 is restored
+byte-for-byte from origin/main; ADRs 012/013 are not edited. New ADR 032 records
+`/compare` supersession, s17 dynamic-route migration and Lighthouse scope, and
+explicit deferral of SoftwareApplication JSON-LD to s17. PRD Technical SEO and
+s17's schema acceptance criterion remain outstanding.
+
+### Official claims rechecked
+
+Read-only official-source research on 2026-09-25 (DeepAPI credentials absent;
+official-site web fetch fallback):
+
+- [Duda Manage Clients](https://support.duda.co/hc/en-us/articles/26519392519575-Manage-Clients):
+  “Available on Team plans and higher.” and “There is no limit to how many clients
+  you can create.” The [pricing table](https://www.duda.co/pricing) has no client
+  accounts allowance for Basic. Unlimited client accounts therefore apply only
+  to plans that include client management, not all Duda plans or unlimited sites.
+- [Tina developer editing documentation](https://tina.io/tinadocs/docs/using-tinacms/usage-developers):
+  “In production mode (with TinaCloud), changes are committed directly to your Git
+  repository.” Local mode writes local files instead.
+- [Tina Editorial Workflow](https://tina.io/docs/tinacloud/editorial-workflow):
+  protected-branch editing uses a separate branch and draft pull request, then
+  merges to the protected branch; approval is not the default save path.
+- [Tina separate content repository guide](https://tina.io/docs/guides/separate-content-repo):
+  a content-change webhook can trigger a site rebuild. Thus updated served HTML
+  depends on the site's build/deploy configuration; this is a conditional
+  implementation consequence, not a universal TinaCMS delivery guarantee.
+
+### Runtime and pricing boundary
+
+Comparison detail pages use five-minute revalidation instead of per-request
+rendering and availability RPCs. They read database `plans.price_monthly` and
+Founding availability. The landing `/#pricing` component reads `/api/pricing`,
+which overlays available live Stripe `unit_amount` values on the database
+catalogue. The existing operator catalogue verification runbook owns drift
+checks; this task makes no live Stripe call. Cached availability may lag by
+five minutes; checkout remains the enforcement point.
+
+### Verification
+
+- Targeted TDD red: missing revalidate exports, Duda/Tina exact row mismatches,
+  missing index disclosure and missing shared canonical resolver failed as expected.
+- Targeted green: 4 suites / 28 tests passed (comparison pages, discovery, pricing,
+  and shared site URL). All 24 competitor row claims are literal-pinned independently
+  of the production registry; disclosure assertions cover both index choice paragraphs,
+  detail competitor-choice blocks and Integration boundaries. Rendered table cells
+  also pin every exact claim after the bounded review improvement.
+- Mutation proof: changing a Webflow competitor row produced 1 failure / 17 passes;
+  removing the index platform disclosure produced 1 failure / 17 passes. Both were
+  restored and the final focused run passed.
+- The shared canonical resolver keeps the original layout/robots/sitemap precedence;
+  its 3 tests pin explicit app URL, stable Vercel URL, deployment URL and fallback.
+  The index selects Best at, Installation and Delivery by row label, not position.
+- Independent read-only docs review: passed, no blockers. No reviewer verdict was
+  written or changed by this fix lane.
+
+Final local gates, all with the exact CI main-job placeholders and Node 20.15.1:
+
+- Lint: passed, 0 errors / 39 inherited warnings.
+- Both `type-check` and `type-check:build`: passed.
+- `format:check`: passed across src.
+- Full Jest with coverage: 241 suites passed / 2 skipped; 3,173 tests passed /
+  38 skipped / 0 failed (3,211 total). Coverage: statements 57.02%, branches
+  50.51%, functions 53.52%, lines 57.49%; all ratchets pass.
+- Rendered-row test strengthening after review: focused comparison suite 18/18
+  passed; all six rendered rows per competitor now assert exact literal claims.
+- Build: passed. All four details prerender with 300-second revalidation; checked
+  `.next/prerender-manifest.json` rather than relying only on source exports.
+- Embed check using official Node: fresh, bundle 46,601 / 46,681 B; widget
+  33,837 / 33,865 B; transport 13,141 B. No generated embed diff.
+- `npm audit --omit=dev`: 0 vulnerabilities.
+- Local built-server smoke: all five URLs 200, unknown comparison 404, updated
+  Duda/Tina wording and original-HTML disclosures present. Each detail response
+  emits `s-maxage=300`; index remains static. Only localhost:3137 was contacted.
+- Independent source/test re-review: passed after pinning rendered cells.
+  `git diff --check` and review checksum verification pass.
+
+No production operation is authorized or performed. The review remains the only
+intentionally uncommitted file after delivery; SoftwareApplication is explicitly
+deferred to s17, not claimed implemented.

@@ -6,6 +6,7 @@ import Footer from "@/components/layout/Footer";
 import {
   comparisonList,
   COMPETITOR_FACTS_CHECKED_AS_OF,
+  getComparisonRow,
 } from "@/lib/compare/comparisons";
 
 const DESCRIPTION =
@@ -157,28 +158,37 @@ export default function CompareIndexPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {comparisonList.map((comparison) => (
-                    <tr
-                      key={comparison.slug}
-                      className="border-t border-sky-100 align-top"
-                    >
-                      <th
-                        className="px-6 py-5 text-sm font-semibold text-slate-900"
-                        scope="row"
+                  {comparisonList.map((comparison) => {
+                    const bestAt = getComparisonRow(comparison, "Best at");
+                    const installation = getComparisonRow(
+                      comparison,
+                      "Installation",
+                    );
+                    const delivery = getComparisonRow(
+                      comparison,
+                      "How published edits reach visitors",
+                    );
+
+                    return (
+                      <tr
+                        key={comparison.slug}
+                        className="border-t border-sky-100 align-top"
                       >
-                        {comparison.competitor}
-                      </th>
-                      <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                        {comparison.rows[0].competitor}
-                      </td>
-                      <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                        {comparison.rows[1].competitor} Published edits are
-                        served in the page&apos;s HTML, which remains available
-                        to visitors without JavaScript and crawlers that do not
-                        render it.
-                      </td>
-                    </tr>
-                  ))}
+                        <th
+                          className="px-6 py-5 text-sm font-semibold text-slate-900"
+                          scope="row"
+                        >
+                          {comparison.competitor}
+                        </th>
+                        <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
+                          {bestAt.competitor}
+                        </td>
+                        <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
+                          {installation.competitor} {delivery.competitor}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   <tr className="border-t border-sky-100 align-top">
                     <th
                       className="px-6 py-5 text-sm font-semibold text-slate-900"
@@ -213,12 +223,12 @@ export default function CompareIndexPage() {
                 Choose a full platform when you need its wider system: visual
                 layout and hosting from Webflow or Duda, structured Git content
                 from TinaCMS, or a Git-based visual CMS and repository sync from
-                CloudCannon. Choose these platforms when published edits must be
-                served in the page&apos;s HTML. ReCopyFast applies published
-                edits in the visitor&apos;s browser after the page loads, so
-                no-JavaScript visitors and crawlers that do not render
-                JavaScript see the original HTML; put SEO-critical copy in the
-                site&apos;s source as well.
+                CloudCannon. For Git-backed tools, whether an edit appears in
+                served HTML depends on the site&apos;s build and deployment.
+                ReCopyFast applies published edits in the visitor&apos;s browser
+                after the page loads, so no-JavaScript visitors and crawlers
+                that do not render JavaScript see the original HTML; put
+                SEO-critical copy in the site&apos;s source as well.
               </p>
             </article>
             <article className="min-w-0 rounded-2xl border border-sky-200 bg-sky-50 p-7 sm:p-9">

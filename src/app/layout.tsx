@@ -6,6 +6,7 @@ import {
 } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 /**
  * Instrument Sans carries the UI. It is a grotesque with more character than
@@ -36,26 +37,6 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
   variable: "--font-jetbrains-mono",
 });
-
-/**
- * Canonical origin used to build absolute SEO URLs.
- *
- * Resolution order: the explicitly configured app URL, then Vercel's stable
- * production domain, then the per-deployment URL, then the dev fallback.
- * Vercel exposes its URL vars as bare hostnames, but this project's `.env`
- * sets `VERCEL_URL` with a scheme, so both shapes are accepted.
- */
-function resolveSiteUrl(): string {
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL ||
-    "http://localhost:3000";
-
-  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-
-  return withScheme.replace(/\/+$/, "");
-}
 
 const SITE_NAME = "ReCopyFast";
 const SITE_TITLE = "ReCopyFast - Universal CMS Layer";

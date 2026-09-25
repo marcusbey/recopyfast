@@ -52,21 +52,44 @@ uncommitted independent review byte-for-byte; it remains the reviewer's property
 - [x] F4. Strengthen editor-access, live-price and exact FAQ answer regression tests;
       derive sitemap entries from comparisonList; fix titles, BreadcrumbList,
       aria-current and signup UTM attribution (m3, m4, m7, m9).
-- [x] F5. Align PRD, ADR 020, design notes and status records with /compare routes and
+- [x] F5. Align PRD, ADR route decision, design notes and status records with /compare routes and
       actual draft delivery; supersede stale blocker statements (m5, m6).
 - [x] F6. Run required gates with CI placeholders and official Node embed checks;
       commit fix(s37), push, update existing draft PR #34, preserve review (leader).
 
 ## Verification status
 
-The original verification history is superseded by this fix run's results.
+Initial implementation `121c9c4` and first fix `ba25a30` are on draft PR #34.
+The independent re-review allows shipping with N1 and n1–n7 requested before
+merge; narrow fix mode 2 below addresses those items. Its local gates pass:
+241 Jest suites / 3,173 tests passed (2 suites / 38 tests skipped), lint 0 errors /
+39 inherited warnings, both type-checks, format, build, Node 20 embed check and
+zero-vulnerability production dependency audit. Four detail routes now prerender
+with 300-second revalidation, also verified in local HTTP cache headers.
+The latest focused render suite passes 18/18 after pinning all rendered cells.
+Exact evidence is in the research record. Delivery stays draft, with the supplied
+review unmodified and uncommitted and no production operation authorized.
 
-Initial implementation was committed as `121c9c4` and pushed to draft PR #34.
-The previous statement that no delivery occurred was stale; the research record
-now separates the initial failed local run from the reviewer's subsequent green
-run. Fix-mode gates pass: lint/type-check, 236 passing Jest suites / 3,111 passing tests
-(2 suites / 38 tests skipped), format, build, official-Node embed and zero-vulnerability
-production audit. Browser evidence covers 15 route/viewport renders. The focused
-fix commit is prepared for the existing draft PR #34; no production operation is
-authorized. The independent review stays blocked and untouched until its owner
-reassesses the new commit. Exact evidence is in the research record.
+## Prevalidated narrow fix mode 2 — 2026-09-25
+
+The operator explicitly authorized N1 and n1–n7 in this run. The review remains
+unmodified and uncommitted. No production operation is authorized.
+
+- [x] G1. Restore accepted ADR 020 from main and add next unused ADR 032,
+      superseding only the comparison route references in ADRs 012/013/020.
+      Record s17's dynamic-route migration and Lighthouse scope inheritance.
+- [x] G2. Test-first: scope Duda unlimited clients to Team and higher, with the
+      official source quotation recorded in research; correct TinaCMS Git-save,
+      optional Editorial Workflow and site-dependent HTML delivery wording.
+- [x] G3. Pin every competitor table row independently of production data and
+      all disclosure blocks, including the index platform-choice paragraph.
+- [x] G4. Use revalidate = 300 on all four detail pages; document the distinct
+      comparison database prices and landing Stripe-enriched pricing feed.
+- [x] G5. Defer SoftwareApplication JSON-LD to s17's shared schema builders,
+      explicitly retaining PRD 329 as outstanding work; no invented fields.
+- [x] G6. Reuse the existing site-origin helper; select index rows by key.
+- [x] G7. Run CI-placeholder local gates; verify the review checksum; commit
+      fix(s37), push and retain draft PR #34. Preserve all story entries if main moves.
+
+The leader owns docs, final gates and delivery. The delegated executor owns only
+product code and tests and reports red/green evidence before leader verification.

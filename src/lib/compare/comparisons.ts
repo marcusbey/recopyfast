@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { resolveSiteUrl } from "@/lib/seo/site-url";
 
 export type ComparisonSlug =
   | "webflow-editor"
@@ -181,7 +182,7 @@ export const comparisons = {
       {
         label: "Client access",
         competitor:
-          "Client accounts are unlimited. Agencies assign them to sites and set per-site permissions on Team plans and higher.",
+          "On Team plans and higher, client accounts are unlimited; agencies assign them to sites with per-site permissions.",
         recopyfast: sharedRecopyFastRows.editorAccess,
       },
       {
@@ -199,7 +200,7 @@ export const comparisons = {
       {
         label: "Pricing model",
         competitor:
-          "Client accounts are unlimited. Platform subscriptions include site allowances, with additional published sites priced separately.",
+          "Team plans and higher include unlimited client accounts. Platform subscriptions include site allowances, with additional published sites priced separately.",
         recopyfast: livePricingRow,
       },
     ],
@@ -250,7 +251,7 @@ export const comparisons = {
       "You want content in Git with developer-defined schemas and version history.",
       "A React-oriented visual editing integration fits the site's architecture.",
       "Developers own the content model and editorial workflow configuration.",
-      servedHtmlAdvantage("TinaCMS"),
+      "Choose TinaCMS when its Git commits feed a site build and deployment that serves updated HTML. TinaCMS is headless, so delivery depends on that site setup. ReCopyFast applies published edits in the visitor's browser after the page loads, so visitors without JavaScript and crawlers that do not render JavaScript see the original HTML; put SEO-critical copy in the site's source as well.",
     ],
     recopyfastFit: [
       "You do not want to migrate existing page copy into a new content model.",
@@ -279,13 +280,13 @@ export const comparisons = {
       {
         label: "Publishing",
         competitor:
-          "Saves commit to Git; Editorial Workflow can introduce review and approval steps.",
+          "In TinaCloud production, saves commit directly to Git, or through Editorial Workflow when it is enabled.",
         recopyfast: sharedRecopyFastRows.publishing,
       },
       {
         label: "How published edits reach visitors",
         competitor:
-          "TinaCMS writes approved content to Git so the site can rebuild it and published edits are served in the page's HTML, an advantage when JavaScript is unavailable or a crawler does not render it.",
+          "In TinaCloud production, saves commit directly to Git, or through Editorial Workflow when it is enabled. Whether edits appear in served HTML depends on the site's build and deployment; statically built or server-rendered sites can serve the updated content after that workflow completes.",
         recopyfast: sharedRecopyFastRows.delivery,
       },
       {
@@ -319,6 +320,18 @@ export const comparisons = {
       {
         label: "TinaCMS editor usage documentation",
         href: "https://tina.io/tinadocs/docs/using-tinacms/usage-editors",
+      },
+      {
+        label: "TinaCMS developer usage documentation",
+        href: "https://tina.io/tinadocs/docs/using-tinacms/usage-developers",
+      },
+      {
+        label: "TinaCMS Editorial Workflow documentation",
+        href: "https://tina.io/docs/tinacloud/editorial-workflow",
+      },
+      {
+        label: "TinaCMS separate content repository guide",
+        href: "https://tina.io/docs/guides/separate-content-repo",
       },
       { label: "TinaCMS pricing", href: "https://tina.io/pricing" },
     ],
@@ -421,14 +434,21 @@ export const comparisons = {
 
 export const comparisonList = Object.values(comparisons);
 
+export function getComparisonRow(
+  comparison: Comparison,
+  label: string,
+): ComparisonRow {
+  const row = comparison.rows.find((candidate) => candidate.label === label);
+  if (!row) {
+    throw new Error(
+      `Comparison ${comparison.slug} is missing the required "${label}" row`,
+    );
+  }
+  return row;
+}
+
 export function comparisonSiteUrl(path: string): string {
-  const raw =
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-    process.env.VERCEL_URL ||
-    "http://localhost:3000";
-  const origin = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-  return `${origin.replace(/\/+$/, "")}${path}`;
+  return `${resolveSiteUrl()}${path}`;
 }
 
 export function createComparisonMetadata(comparison: Comparison): Metadata {

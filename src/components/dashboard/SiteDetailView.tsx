@@ -40,6 +40,7 @@ import { WebhooksPanel } from "./WebhooksPanel";
 import { BulkOperations } from "./BulkOperations";
 import { ShareButton } from "./ShareButton";
 import { SiteEditorsCard } from "./SiteEditorsCard";
+import { ActivationChecklist } from "./ActivationChecklist";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 
 export type { SiteStatus };
@@ -63,6 +64,7 @@ interface SiteWithDetails extends Site {
 interface SiteDetailViewProps {
   site: SiteWithDetails;
   onClose?: () => void;
+  userId?: string;
 }
 
 interface StatTileProps {
@@ -96,7 +98,7 @@ function StatTile({ label, value, icon: Icon }: StatTileProps) {
   );
 }
 
-export function SiteDetailView({ site }: SiteDetailViewProps) {
+export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
   const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
@@ -299,6 +301,17 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
         </CardContent>
       </Card>
 
+      {userId && displayedCredentials.siteToken && (
+        <ActivationChecklist
+          key={`${userId}:${site.id}`}
+          siteId={site.id}
+          siteName={site.name}
+          domain={site.domain}
+          embedScript={embedScript}
+          userId={userId}
+        />
+      )}
+
       {/* Quick Stats */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile
@@ -389,8 +402,11 @@ export function SiteDetailView({ site }: SiteDetailViewProps) {
           <CardHeader>
             <CardTitle>Site Token</CardTitle>
             <CardDescription>
-              Use this token for API requests (keep it secure and never expose
-              it publicly)
+              This token identifies your site to ReCopyFast. It is visible in
+              your page&apos;s HTML by design. ReCopyFast checks it against the
+              requesting page&apos;s origin and accepts browser requests only
+              when it matches your registered domain. Regenerate snippet revokes
+              old snippets; replace the snippet on your site afterward.
             </CardDescription>
           </CardHeader>
           <CardContent>

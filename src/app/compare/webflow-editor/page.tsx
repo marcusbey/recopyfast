@@ -8,7 +8,7 @@ import { loadComparisonPricing } from "@/lib/compare/comparison-pricing";
 const comparison = comparisons["webflow-editor"];
 
 export const metadata = createComparisonMetadata(comparison);
-export const dynamic = "force-dynamic";
+export const revalidate = 300;
 
 export default async function WebflowEditorComparisonPage() {
   const pricing = await loadComparisonPricing();
