@@ -32,7 +32,7 @@ month-end clamping. The M5 mutation now goes red. What remains comes from the ne
 | m5 | Late retry → 500 | **Mitigated, still open (deferred)** | `route.ts:271-281` returns 409 with `retryAt`; R9 gives 1 red. The lock-out, up to about 30 min, is unchanged by design (ADR 028). |
 | m6 | `isNew` unused; unbounded pagination | **Fixed** | `route.ts:214-226` skips recovery on a fresh claim. `src/lib/stripe/checkout.ts:63-65` sets a `created.gte` bound (`SessionListParams.created` exists in the SDK types). R8, R15 and R16 give 1, 1 and 2 red. |
 | m7 | TTL rationale removed | **Fixed** | `src/lib/billing/checkout-reservation.ts:3-9` |
-| m8 | No ADR | **Fixed** | `docs/decisions/028-durable-subscription-checkout-intents.md`, plus the ADR 014 pointer in `docs/decisions/errata.md`. The number 028 is clear of s27's 027. |
+| m8 | No ADR | **Fixed** | `docs/decisions/028-durable-subscription-checkout-intents.md`, plus the ADR 014 pointer in `docs/decisions/errata.md`. The number 028 is clear of s27's ADR 030 (originally 027). |
 | m9 | Misleading "in progress" message after a paid session | **Fixed** | `route.ts:197-203, 320-335`. R18 and R19 give 1 and 3 red. |
 
 ## Verification performed

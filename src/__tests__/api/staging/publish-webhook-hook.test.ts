@@ -88,15 +88,22 @@ const mockRecord = webhookManager.recordQualifyingEvent as jest.Mock;
 
 const SITE_ID = "11111111-1111-4111-8111-111111111111";
 const PUBLISHED_ROWS = [
-  { element_id: "hero-title", content: "New headline" },
-  { element_id: "cta", content: "Buy now" },
+  { element_id: "hero-title", content: "New headline", attributes: {} },
+  {
+    element_id: "cta",
+    content: "Buy now",
+    attributes: { href: "/checkout", alt: "Buy now" },
+  },
 ];
 
-function publishRequest() {
+function publishRequest(pagePath?: string) {
   return new NextRequest("https://www.recopyfa.st/api/staging/publish", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ siteId: SITE_ID }),
+    body: JSON.stringify({
+      siteId: SITE_ID,
+      ...(pagePath ? { page_path: pagePath } : {}),
+    }),
   });
 }
 
@@ -132,6 +139,15 @@ describe("POST /api/staging/publish — webhook hook", () => {
       eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
       payload: { elements: PUBLISHED_ROWS },
     });
+  });
+
+  it("keeps publish site-wide when the editor supplies its current page", async () => {
+    await POST(publishRequest("/pricing"));
+
+    expect(mockRpc).toHaveBeenCalledWith(
+      "publish_staging_content_with_attributes_atomic",
+      expect.not.objectContaining({ p_page_path: expect.anything() }),
+    );
   });
 
   it("does not wait for the webhook work before answering the publisher", async () => {

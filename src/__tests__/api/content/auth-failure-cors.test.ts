@@ -60,6 +60,8 @@ type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
 };
@@ -68,6 +70,8 @@ const serviceClient: MockServiceClient = {
   from: jest.fn(() => serviceClient),
   select: jest.fn(() => serviceClient),
   eq: jest.fn(() => serviceClient),
+  order: jest.fn(() => serviceClient),
+  range: jest.fn(),
   single: jest.fn(() =>
     Promise.resolve({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },
@@ -155,6 +159,8 @@ describe("/api/content/[siteId] authorization failures", () => {
     // the next test and turn an independent token check into a cascade failure.
     serviceClient.eq.mockReset();
     serviceClient.eq.mockReturnValue(serviceClient);
+    serviceClient.order.mockReturnValue(serviceClient);
+    serviceClient.range.mockResolvedValue({ data: [], error: null });
     serviceClient.single.mockResolvedValue({
       data: { id: SITE_ID, domain: REGISTERED_DOMAIN, api_key: API_KEY },
       error: null,
@@ -338,21 +344,11 @@ describe("/api/content/[siteId] authorization failures", () => {
 
   describe("site tokens remain valid until the api_key rotates", () => {
     function allowOneContentRead() {
-      serviceClient.eq
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(serviceClient)
-        .mockReturnValueOnce(
-          Promise.resolve({
-            data: [],
-            error: null,
-          }) as unknown as typeof serviceClient,
-        );
+      serviceClient.range.mockResolvedValueOnce({ data: [], error: null });
     }
 
     it("accepts a 91-day-old genuine token and answers", async () => {
       allowOneContentRead();
-
       const response = await handlers.GET(
         widgetRequest("GET", tokenIssuedDaysAgo(91)),
       );

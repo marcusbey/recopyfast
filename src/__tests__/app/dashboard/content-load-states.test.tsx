@@ -32,7 +32,7 @@ const EMPTY_STATE =
   "Register a site and add content elements to see them here.";
 const ERROR_STATE = "Failed to load content";
 
-function contentRow(index: number) {
+function contentRow(index: number, pagePath: string | null = null) {
   const content = `Element number ${index}`;
   return {
     id: `${SITE.id}-el-${index}`,
@@ -44,6 +44,7 @@ function contentRow(index: number) {
     published_content: content,
     language: "en",
     variant: "default",
+    page_path: pagePath,
     metadata: { type: "text" },
     updated_at: "2026-08-01T10:00:00.000Z",
   };
@@ -164,5 +165,26 @@ describe("Content page pagination after the list shrinks", () => {
       expect(screen.getByText("Element number 1")).toBeInTheDocument(),
     );
     expect(screen.queryByText("No content found")).toBeNull();
+  });
+});
+
+describe("Content page provenance", () => {
+  it("shows the normalized page path and labels shared elements as All pages", async () => {
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.startsWith("/api/sites")) {
+        return jsonResponse({ sites: [SITE] });
+      }
+      if (url.startsWith(`/api/content/${SITE.id}`)) {
+        return jsonResponse([contentRow(1, "/pricing"), contentRow(2, null)]);
+      }
+      throw new Error(`unexpected request: ${url}`);
+    }) as unknown as typeof fetch;
+
+    render(<ContentPage />);
+
+    expect(await screen.findByText("/pricing")).toBeInTheDocument();
+    expect(screen.getByText("All pages")).toBeInTheDocument();
   });
 });

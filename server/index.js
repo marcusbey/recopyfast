@@ -403,6 +403,17 @@ function createRealtimeServer(options = {}) {
 
       try {
         const { elementId, content, language = 'en', variant = 'default', token: messageToken } = data;
+        // Attribute absence has semantic weight. A missing href/alt means the
+        // author never supplied it; turning that into an empty string changes
+        // the customer's DOM. Keep explicit empty strings (intentional clears)
+        // while omitting keys the persisted HTTP update did not carry.
+        const attributes = {};
+        if (typeof data.href === 'string') {
+          attributes.href = data.href;
+        }
+        if (typeof data.alt === 'string') {
+          attributes.alt = data.alt;
+        }
 
         if (socket.data.siteToken && socket.data.siteToken !== messageToken) {
           socket.emit('auth-error', { error: 'Invalid site token' });
@@ -464,6 +475,7 @@ function createRealtimeServer(options = {}) {
             content: sanitizedContent,
             language,
             variant,
+            ...attributes,
             isStaging: true,
             updatedBy: socket.data.stagingEmail
           });
@@ -473,7 +485,8 @@ function createRealtimeServer(options = {}) {
             elementId,
             content: sanitizedContent,
             language,
-            variant
+            variant,
+            ...attributes
           });
         }
 
@@ -481,6 +494,7 @@ function createRealtimeServer(options = {}) {
         socket.to(`dashboard:${siteId}`).emit('content-updated', {
           elementId,
           content: sanitizedContent,
+          ...attributes,
           updatedBy: socket.id,
           timestamp: now,
           isStaging: isStagingSocket

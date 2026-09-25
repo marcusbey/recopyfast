@@ -867,6 +867,108 @@ describe("the socket is broadcast-only", () => {
     expect(db.writes).toEqual([]);
   });
 
+  it("forwards persisted href and alt changes through the real staging and dashboard rooms", async () => {
+    const editor = await connectEditor();
+    const listener = await connectEditor();
+    const dashboard = await connectDashboard();
+    const stagingReceived: Array<Record<string, unknown>> = [];
+    const dashboardReceived: Array<Record<string, unknown>> = [];
+    listener.on("content-update", (payload) => stagingReceived.push(payload));
+    dashboard.on("content-updated", (payload) =>
+      dashboardReceived.push(payload),
+    );
+
+    editor.emit("content-update", {
+      elementId: "hero-link",
+      content: "Explore",
+      href: "/pricing",
+      alt: "Pricing illustration",
+      persisted: true,
+      token: SITE_TOKEN,
+    });
+
+    await waitFor(
+      () => stagingReceived.length === 1 && dashboardReceived.length === 1,
+      "the attribute update to reach both realtime consumers",
+    );
+
+    expect(stagingReceived[0]).toMatchObject({
+      elementId: "hero-link",
+      content: "Explore",
+      href: "/pricing",
+      alt: "Pricing illustration",
+    });
+    expect(dashboardReceived[0]).toMatchObject({
+      elementId: "hero-link",
+      content: "Explore",
+      href: "/pricing",
+      alt: "Pricing illustration",
+    });
+  });
+
+  it("does not synthesize href or alt when the persisted update omitted them", async () => {
+    const editor = await connectEditor();
+    const listener = await connectEditor();
+    const received: Array<Record<string, unknown>> = [];
+    listener.on("content-update", (payload) => received.push(payload));
+
+    editor.emit("content-update", {
+      elementId: "headline",
+      content: "Text only",
+      persisted: true,
+      token: SITE_TOKEN,
+    });
+
+    await waitFor(() => received.length === 1, "the text-only update");
+
+    expect(received[0]).not.toHaveProperty("href");
+    expect(received[0]).not.toHaveProperty("alt");
+  });
+
+  it("preserves explicit empty-string attribute clears", async () => {
+    const editor = await connectEditor();
+    const listener = await connectEditor();
+    const received: Array<Record<string, unknown>> = [];
+    listener.on("content-update", (payload) => received.push(payload));
+
+    editor.emit("content-update", {
+      elementId: "hero-link",
+      content: "Explore",
+      href: "",
+      alt: "",
+      persisted: true,
+      token: SITE_TOKEN,
+    });
+
+    await waitFor(() => received.length === 1, "the explicit attribute clear");
+
+    expect(received[0]).toMatchObject({ href: "", alt: "" });
+  });
+
+  it("omits non-string href and alt values from realtime fan-out", async () => {
+    const editor = await connectEditor();
+    const listener = await connectEditor();
+    const received: Array<Record<string, unknown>> = [];
+    listener.on("content-update", (payload) => received.push(payload));
+
+    editor.emit("content-update", {
+      elementId: "hero-link",
+      content: "Explore",
+      href: { url: "/pricing" },
+      alt: 42,
+      persisted: true,
+      token: SITE_TOKEN,
+    });
+
+    await waitFor(
+      () => received.length === 1,
+      "the malformed attribute update",
+    );
+
+    expect(received[0]).not.toHaveProperty("href");
+    expect(received[0]).not.toHaveProperty("alt");
+  });
+
   it.each([
     [
       "bulk-update",

@@ -1219,6 +1219,49 @@ Complexity: **2**. Non-UI patch maintenance on the existing Express 4 line and i
 Research: `docs/research/s23-websocket-dependency-security.md`.
 Plan: `docs/plans/s23-websocket-dependency-security.md`.
 
+## s27-launch-content-integrity — page identity and durable link/image attributes
+
+As a customer installing ReCopyFast on multiple pages, every edit must land on its intended element and survive publishing, a fresh visitor load, and restoration.
+
+Complexity: **4**. One rebuilt embed artifact for A-14 and A-26; no new dependencies.
+
+- Computed stable IDs incorporate normalized case-sensitive pathname, ignoring query/hash and trailing slash except root; explicit `data-rcf-id` remains shared across pages.
+- Preserve all existing identity guards. D2 accepted by operator: re-key on discovery, no backfill or legacy fallback; zero real customers, QA rows may be orphaned.
+- Validate trimmed, bounded href/alt; allow only http/https/mailto/tel and relative/root/fragment references. Changing href to unsafe or unknown schemes receives 400; discovery omits unsupported attributes while retaining the element.
+- Retain attributes in metadata across staging, publish, history, fresh public hydration and version restore; drafts remain private until publish.
+- Persist nullable page_path for computed identities; author IDs remain All pages. Filter public hydration and staging editor reads by page plus shared rows, with deterministic pagination. Publish remains site-wide; its full-site preview counts changes on the current page and other pages. Show Page in the dashboard content list.
+- Preserve absent attributes through capture/restore/publish; detect changes by value. Discovery keeps elements whose authored attributes are unsupported; strict validation applies when a user changes href.
+- Save staging plus history atomically; realtime and webhooks carry attribute changes. SPA client-side routing is a known pre-existing limitation deferred to a follow-up.
+- Preserve embed ceilings; all requested gates pass; draft PR only, pending independent review.
+
+Research: `docs/research/s27-launch-content-integrity.md`. Plan: `docs/plans/s27-launch-content-integrity.md`.
+
+## s32-try-on-any-site — Try any live site without an account
+
+Operator-approved GTM story (2026-09-24). Complexity: 3. UI: yes.
+
+As an agency owner or founder filming an outbound demo, I can activate a bookmarklet
+on a live page, edit text and preview images locally, and discover the trial without
+registering, installing the production widget, or persisting changes.
+
+Acceptance: separate dependency-free `public/try/rcf-try.js` at most 8 KB gzipped;
+headings, paragraphs, list items, buttons, links and images. Every link navigates
+on a plain click; Alt+click (Option+click on macOS) edits a link's text;
+hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit
+and "Alt+click a link to edit it" hint. While editing, a plain click on the edited
+element's enclosing link stays on the page;
+complete cleanup and idempotence; no API, analytics, or content upload; plain-text
+writes. /try includes a stable-URL draggable bookmarklet, browser instructions,
+live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.
+Static script delivery must bypass auth and include JS MIME, cache, wildcard CORS,
+and nosniff. Unit, page, and local-fixture Playwright coverage are required; update
+the exact browser inventory from 39 to 44 after pre-share regression coverage.
+No production embed changes or SQL.
+
+Research: `docs/research/s32-try-on-any-site.md`.
+Design: `docs/designs/s32-try-on-any-site.md`.
+Plan: `docs/plans/s32-try-on-any-site.md`.
+
 ## Story s28-billing-correctness — monthly allowances and one open checkout
 
 As a subscriber, I receive the monthly credits my plan grants even when billed annually, and opening Checkout twice cannot create two subscriptions.

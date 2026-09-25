@@ -14,6 +14,9 @@ import {
   validateElementId,
 } from "@/lib/security/discovered-text";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { validateContentAttributePatch } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 interface ContentElementRow {
   site_id: string;
@@ -24,7 +27,8 @@ interface ContentElementRow {
   published_content: string;
   language: string;
   variant: string;
-  metadata: { type?: string };
+  page_path: string | null;
+  metadata: Record<string, unknown>;
 }
 
 /** One element that could not be stored, and why. */
@@ -127,6 +131,40 @@ function buildDiscoveryRows(
       continue;
     }
 
+    const reported = data as Record<string, unknown>;
+    const attributes: Record<string, string> = {};
+
+    let pagePath: string | null = null;
+    if (reported.page_path !== undefined && reported.page_path !== null) {
+      const path = normalizePagePath(reported.page_path);
+      if (!path.ok) {
+        skipped.push({ elementId: id.value, reason: path.error });
+        continue;
+      }
+      pagePath = path.value;
+    }
+
+    // Discovery reports what the author already put on the page. A disallowed
+    // destination still must not become a published href, but dropping the
+    // entire element made its safe text impossible to edit. Validate each
+    // optional attribute independently and omit only the offending value.
+    if (reported.href !== undefined) {
+      const href = validateContentAttributePatch({ href: reported.href });
+      if (href.ok && href.value.href !== undefined) {
+        attributes.href = href.value.href;
+      }
+    }
+    if (reported.alt !== undefined && reported.alt !== null) {
+      const normalizedAlt =
+        typeof reported.alt === "string"
+          ? reported.alt.replace(/\s+/g, " ").trim()
+          : reported.alt;
+      const alt = validateContentAttributePatch({ alt: normalizedAlt });
+      if (alt.ok && alt.value.alt !== undefined) {
+        attributes.alt = alt.value.alt;
+      }
+    }
+
     rows.push({
       site_id: siteId,
       element_id: id.value,
@@ -136,7 +174,11 @@ function buildDiscoveryRows(
       published_content: element.value.content,
       language: "en",
       variant: "default",
-      metadata: element.value.type ? { type: element.value.type } : {},
+      page_path: pagePath,
+      metadata: {
+        ...(element.value.type ? { type: element.value.type } : {}),
+        ...attributes,
+      },
     });
   }
 
@@ -326,16 +368,42 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath !== null && !normalizedPagePath.ok) {
+      return withCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        allowedOrigin,
+      );
+    }
+    const pagePath =
+      normalizedPagePath === null ? null : normalizedPagePath.value;
 
-    // Fetch content elements - use published_content for live sites
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, published_content, original_content, language, variant, metadata, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    // A scoped page read includes author-declared ids (page_path IS NULL),
+    // while an omitted path keeps old widgets working. Both paths paginate:
+    // once ids became page-scoped, an all-site unbounded read crossed the
+    // PostgREST 1,000-row cap on ordinary multi-page sites.
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        let query = supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching content:", error);
@@ -347,11 +415,27 @@ export async function GET(
 
     // Transform: use published_content as current_content for backward compatibility
     // Fall back to original_content if published_content is null (for existing data)
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      current_content:
-        element.published_content ?? element.original_content ?? "",
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      // Draft attributes share the metadata JSONB column with published ones,
+      // but they are private to staging until the atomic publish promotes them.
+      // Removing the nested patch here prevents a public visitor from learning
+      // or applying a destination that an editor has not published yet.
+      const metadata =
+        typeof element.metadata === "object" &&
+        element.metadata !== null &&
+        !Array.isArray(element.metadata)
+          ? (element.metadata as Record<string, unknown>)
+          : {};
+      const publishedMetadata = { ...metadata };
+      delete publishedMetadata.staging_attributes;
+
+      return {
+        ...element,
+        metadata: publishedMetadata,
+        current_content:
+          element.published_content ?? element.original_content ?? "",
+      };
+    });
 
     // The one ongoing "this site is still running our script" signal.
     //

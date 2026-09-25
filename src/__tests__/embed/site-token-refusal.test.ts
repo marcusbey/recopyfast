@@ -54,13 +54,18 @@ function loadHydrateStoredContent(
     "RECOPYFAST_API",
     "SITE_ID",
     "SITE_TOKEN",
+    "contentReadEndpoint",
     "fetch",
     "console",
     `return { ${block} }.hydrateStoredContent;`,
-  )("https://recopyfast.test/api", "site-123", "revoked-token", fetch, {
-    warn,
-    log: jest.fn(),
-  }) as FakeWidget["hydrateStoredContent"];
+  )(
+    "https://recopyfast.test/api",
+    "site-123",
+    "revoked-token",
+    () => "https://recopyfast.test/api/content/site-123?page_path=%2F",
+    fetch,
+    { warn, log: jest.fn() },
+  ) as FakeWidget["hydrateStoredContent"];
 }
 
 function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {

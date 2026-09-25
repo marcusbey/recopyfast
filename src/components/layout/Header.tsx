@@ -119,6 +119,16 @@ export function Header() {
                 Demo
               </Link>
               <Link
+                href="/try"
+                className={`text-sm font-medium transition-colors ${
+                  isScrolled
+                    ? "text-slate-600 hover:text-slate-900"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Try your site
+              </Link>
+              <Link
                 href="/blog"
                 className={`text-sm font-medium transition-colors ${
                   isScrolled
@@ -203,6 +213,13 @@ export function Header() {
                   onClick={() => setMobileMenuOpen(false)}
                 >
                   Demo
+                </Link>
+                <Link
+                  href="/try"
+                  className="text-slate-600 hover:text-slate-900 text-sm font-medium"
+                  onClick={() => setMobileMenuOpen(false)}
+                >
+                  Try your site
                 </Link>
                 <Link
                   href="/blog"

@@ -111,6 +111,10 @@ describe("Header", () => {
       "href",
       "/blog",
     );
+    expect(screen.getByRole("link", { name: "Try your site" })).toHaveAttribute(
+      "href",
+      "/try",
+    );
   });
 
   it("shows loading skeleton when auth is loading", () => {
@@ -260,6 +264,28 @@ describe("Header", () => {
     expect(nav).toHaveClass("hidden", "md:flex");
   });
 
+  it("includes Try your site in the mobile menu", async () => {
+    const user = userEvent.setup();
+    (useAuth as jest.Mock).mockReturnValue({
+      user: null,
+      loading: false,
+      signIn: jest.fn(),
+      signUp: jest.fn(),
+      signOut: jest.fn(),
+      refreshSession: jest.fn(),
+    });
+
+    render(<Header />);
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+
+    expect(screen.getAllByRole("link", { name: "Try your site" })).toHaveLength(
+      2,
+    );
+    for (const link of screen.getAllByRole("link", { name: "Try your site" })) {
+      expect(link).toHaveAttribute("href", "/try");
+    }
+  });
+
   it("supports keyboard navigation", async () => {
     const user = userEvent.setup();
     (useAuth as jest.Mock).mockReturnValue({
@@ -276,7 +302,13 @@ describe("Header", () => {
     await user.tab();
     expect(screen.getByRole("link", { name: /ReCopyFast/i })).toHaveFocus();
 
-    for (const name of ["Features", "Pricing", "Demo", "Blog"]) {
+    for (const name of [
+      "Features",
+      "Pricing",
+      "Demo",
+      "Try your site",
+      "Blog",
+    ]) {
       await user.tab();
       expect(screen.getByRole("link", { name })).toHaveFocus();
     }

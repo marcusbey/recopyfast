@@ -96,16 +96,21 @@ const contentWrites: Record<string, unknown>[] = [];
 
 const makeBuilder = (table: string) => {
   const filters: Record<string, unknown> = {};
-  const settled = {
-    data: table === "content_elements" ? SOURCE_ROWS : null,
+  let rangeStart = 0;
+  let rangeEnd = 499;
+  const settled = () => ({
+    data:
+      table === "content_elements"
+        ? SOURCE_ROWS.slice(rangeStart, rangeEnd + 1)
+        : null,
     error: null,
-  };
+  });
 
   const builder: Record<string, unknown> = {
     then: (
       resolve: (value: unknown) => unknown,
       reject?: (reason: unknown) => unknown,
-    ) => Promise.resolve(settled).then(resolve, reject),
+    ) => Promise.resolve(settled()).then(resolve, reject),
     eq: jest.fn((column: string, value: unknown) => {
       filters[column] = value;
       return builder;
@@ -137,6 +142,11 @@ const makeBuilder = (table: string) => {
       return builder;
     }),
     update: jest.fn(() => builder),
+    range: jest.fn((start: number, end: number) => {
+      rangeStart = start;
+      rangeEnd = Math.min(end, start + 499);
+      return builder;
+    }),
   };
   for (const method of ["select", "in", "gte", "order", "limit"]) {
     builder[method] = jest.fn(() => builder);

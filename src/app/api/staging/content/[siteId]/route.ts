@@ -14,6 +14,29 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { validateContentAttributePatch } from "@/lib/api/validation";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stagedMetadata(value: unknown) {
+  const metadata = jsonObject(value);
+  const stagingAttributes = jsonObject(metadata.staging_attributes);
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
+  };
+}
 
 export async function GET(
   request: NextRequest,
@@ -61,16 +84,37 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
 
-    // Fetch content elements with staging content
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, metadata, staging_updated_at, staging_updated_by, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      (scope) => {
+        let query = supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, staging_content, published_content, original_content, language, variant, page_path, metadata, staging_updated_at, staging_updated_by, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant);
+
+        if (scope.kind === "page") {
+          query = query.eq("page_path", scope.pagePath);
+        } else if (scope.kind === "shared") {
+          query = query.is("page_path", null);
+        }
+        return query;
+      },
+      pagePath,
+    );
 
     if (error) {
       console.error("Error fetching staging content:", error);
@@ -84,15 +128,22 @@ export async function GET(
     }
 
     // Transform content: use staging_content if available, otherwise published_content
-    const transformedContent = (contentElements || []).map((element) => ({
-      ...element,
-      // For display, use staging_content if it exists, otherwise published_content
-      current_content: element.staging_content ?? element.published_content,
-      // Include flags for UI
-      has_staging_changes:
-        element.staging_content !== null &&
-        element.staging_content !== element.published_content,
-    }));
+    const transformedContent = (contentElements || []).map((element) => {
+      const projection = stagedMetadata(element.metadata);
+
+      return {
+        ...element,
+        metadata: projection.metadata,
+        // For display, use staging_content if it exists, otherwise published_content
+        current_content: element.staging_content ?? element.published_content,
+        // Attribute-only edits must remain visible and publishable even when the
+        // editor did not change the element's text in the same save.
+        has_staging_changes:
+          projection.hasAttributeChanges ||
+          (element.staging_content !== null &&
+            element.staging_content !== element.published_content),
+      };
+    });
 
     return withPublicCors(
       NextResponse.json({
@@ -125,6 +176,14 @@ export async function PUT(
       typeof requestBody.language === "string" ? requestBody.language : "en";
     const variant =
       typeof requestBody.variant === "string" ? requestBody.variant : "default";
+    const attributePatch = validateContentAttributePatch(requestBody);
+
+    if (!attributePatch.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: attributePatch.error }, { status: 400 }),
+        request,
+      );
+    }
 
     // The site's own owner is signed in and holds a `site_permissions` row; they
     // carry no editor token and never can, so validating tokens alone refused
@@ -224,41 +283,25 @@ export async function PUT(
     const sanitizedContent = sanitizeIncomingContent(String(content));
     const supabase = createServiceRoleClient();
 
-    // Get current element for history
-    const { data: currentElement } = await supabase
-      .from("content_elements")
-      .select("id, staging_content")
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant)
-      .single();
+    // The draft and its audit entry are one database operation. This used to
+    // update content_elements first and insert staging_history second; a failed
+    // insert therefore returned 500 after the draft had already committed.
+    const { data: savedRows, error: saveError } = await supabase.rpc(
+      "save_staging_content_atomic",
+      {
+        p_site_id: siteId,
+        p_element_id: elementId,
+        p_language: language,
+        p_variant: variant,
+        p_staging_content: sanitizedContent,
+        p_attribute_patch: attributePatch.value,
+        p_staging_access_id: access.stagingAccessId || null,
+        p_user_email: access.email || access.userId || access.kind,
+      },
+    );
 
-    if (!currentElement) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: "Content element not found" },
-          { status: 404 },
-        ),
-        request,
-      );
-    }
-
-    // Update staging content
-    const { error: updateError } = await supabase
-      .from("content_elements")
-      .update({
-        staging_content: sanitizedContent,
-        staging_updated_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("site_id", siteId)
-      .eq("element_id", elementId)
-      .eq("language", language)
-      .eq("variant", variant);
-
-    if (updateError) {
-      console.error("Error updating staging content:", updateError);
+    if (saveError) {
+      console.error("Error saving staging content atomically:", saveError);
       return withPublicCors(
         NextResponse.json(
           { error: "Failed to update staging content" },
@@ -268,23 +311,25 @@ export async function PUT(
       );
     }
 
-    // Record in staging history
-    await supabase.from("staging_history").insert({
-      content_element_id: currentElement.id,
-      // Null for a first-party edit: the owner's change is not attributable to
-      // any staging invite, and pointing it at one would misattribute the edit.
-      staging_access_id: access.stagingAccessId || null,
-      previous_content: currentElement.staging_content,
-      new_content: sanitizedContent,
-      user_email: access.email || access.userId || access.kind,
-      action: currentElement.staging_content ? "update" : "create",
-    });
+    const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+    if (!saved) {
+      return withPublicCors(
+        NextResponse.json(
+          { error: "Content element not found" },
+          { status: 404 },
+        ),
+        request,
+      );
+    }
 
     return withPublicCors(
       NextResponse.json({
         success: true,
         elementId,
-        updatedAt: new Date().toISOString(),
+        updatedAt:
+          typeof saved.updated_at === "string"
+            ? saved.updated_at
+            : new Date().toISOString(),
       }),
       request,
     );

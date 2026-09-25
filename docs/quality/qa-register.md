@@ -691,7 +691,7 @@ site. Both verified directly, not just by reading.
   explaining why: a real customer page never carries the attribute
   (`e2e/share-edit-publish.spec.ts`). s24 removed the skip path entirely: GitHub
   starts a disposable local Supabase/Redis/Socket.IO/Next stack, explicitly opts
-  into both mutating suites, and requires an exact 39 passed / 0 failed / 0
+  into both mutating suites, and requires an exact 44 passed / 0 failed / 0
   skipped / 0 flaky report. Missing opt-in or any non-loopback target fails
   before a service-role client is created.
 

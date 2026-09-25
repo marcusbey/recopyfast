@@ -31,6 +31,7 @@ export interface ContentElement {
   publishedContent?: string;
   language: string;
   variant: string;
+  pagePath?: string | null;
   metadata?: {
     type?: string;
   };
@@ -143,6 +144,15 @@ export function ContentElementCard({
                 <span className="flex items-center gap-1">
                   <Globe className="h-3 w-3 shrink-0" aria-hidden="true" />
                   {element.siteDomain}
+                </span>
+                <span className="flex min-w-0 items-center gap-1">
+                  <span>Page</span>
+                  <span
+                    className="truncate font-mono"
+                    title={element.pagePath ?? "All pages"}
+                  >
+                    {element.pagePath ?? "All pages"}
+                  </span>
                 </span>
                 <span className="truncate font-mono" title={element.selector}>
                   {element.selector}

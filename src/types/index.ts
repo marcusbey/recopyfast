@@ -37,6 +37,7 @@ export interface ContentElement {
   current_content: string;
   language: string;
   variant: string;
+  page_path?: string | null;
   metadata?: ContentElementMetadata;
   created_at: string;
   updated_at: string;
