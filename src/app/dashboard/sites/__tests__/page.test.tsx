@@ -37,8 +37,10 @@ jest.mock("@/components/dashboard/SiteCard", () => ({
 }));
 
 jest.mock("@/components/dashboard/SiteDetailView", () => ({
-  SiteDetailView: ({ site }: any) => (
-    <div data-testid="site-detail-view">{site.name}</div>
+  SiteDetailView: ({ site, userId }: any) => (
+    <div data-testid="site-detail-view" data-user-id={userId}>
+      {site.name}
+    </div>
   ),
 }));
 
@@ -372,6 +374,10 @@ describe("SitesPage", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("site-detail-view")).toBeInTheDocument();
+      expect(screen.getByTestId("site-detail-view")).toHaveAttribute(
+        "data-user-id",
+        "test-user-id",
+      );
     });
 
     // Click back button
