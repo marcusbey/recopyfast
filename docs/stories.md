@@ -1007,6 +1007,10 @@ None.
 
 ## Story s17-cluster-engine — comparison pages that rank
 
+Route update (s37, 2026-09-25): reuse `/compare` and `/compare/*`; the former
+`/alternatives/*` plan is superseded. s37 delivers four comparisons, not all of
+this story's engine, discovery and performance acceptance criteria.
+
 **As a** person searching "TinaCMS alternative" **I want** an honest comparison **so that** I
 can tell in one screen whether this fits my site.
 
@@ -1014,7 +1018,7 @@ can tell in one screen whether this fits my site.
 3 — content-driven routes with structured data and generated sitemap entries.
 
 ### Acceptance criteria
-- [ ] `/alternatives/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
+- [ ] `/compare/<competitor>` renders from structured content for at least tinacms, cloudcannon, contentful, storyblok and decap-cms.
 - [ ] Each page states what the competitor does better, not only what we do better.
 - [ ] Each page carries `SoftwareApplication`, `FAQPage` and `BreadcrumbList` JSON-LD that validates.
 - [ ] Every generated page appears in `sitemap.ts` automatically — the sitemap is never hand-maintained.
@@ -1416,12 +1420,15 @@ the PRD comparison intent and ADR 020 at the explicitly requested `/compare` URL
 - [x] Each competitor page leads with a short answer, includes a comparison table,
   both products' best-fit scenarios, visible FAQ and matching FAQPage JSON-LD,
   official pricing/docs citations marked “as of 2026-09”, and `/signup` + `/try` CTAs.
-- [x] Only repo-verified ReCopyFast capabilities; accurate Agency $49/month for 10 sites
-  and conditional Founding lifetime $299 editorial snapshot, with current pricing link.
+- [x] Repo-verified ReCopyFast capabilities and live catalogue offers honoring the Agency
+  switch and Founding availability; dated snapshots apply only to competitor facts.
 - [x] Unique canonical metadata/OG, sitemap entries, related-page links and landing footer discovery.
 - [x] Render, structured-data and sitemap tests pass; no audit guards weakened, migrations,
   dependencies, customer claims or Playwright count changes.
-- [ ] Required local gates pass; one focused commit, pushed branch and draft PR only.
+- [x] Required local gates pass; focused fix commit for the existing draft PR #34.
+  Delivery stays draft; independent review and release are separate gates.
 
 Research: `docs/research/s37-comparison-pages.md`. Plan: `docs/plans/s37-comparison-pages.md`.
-Independent review is pending; no merge/deploy authority.
+Initial delivery: `121c9c4`, draft PR #34. Independent review blocked it (C1, M1, M2
+and nine minors); the operator authorized fix mode. Fresh review remains required
+after fixes; no merge/deploy authority.

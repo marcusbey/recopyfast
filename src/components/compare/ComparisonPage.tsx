@@ -2,10 +2,17 @@ import Link from "next/link";
 import { ArrowRight, CheckCircle2, ExternalLink } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
-import { comparisonList, type Comparison } from "@/lib/compare/comparisons";
+import type { ComparisonPricing } from "@/lib/compare/comparison-pricing";
+import {
+  comparisonList,
+  comparisonSiteUrl,
+  COMPETITOR_FACTS_CHECKED_AS_OF,
+  type Comparison,
+} from "@/lib/compare/comparisons";
 
 type ComparisonPageProps = {
   comparison: Comparison;
+  pricing: ComparisonPricing;
 };
 
 function faqSchema(comparison: Comparison) {
@@ -21,6 +28,58 @@ function faqSchema(comparison: Comparison) {
       },
     })),
   };
+}
+
+function breadcrumbSchema(comparison: Comparison) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Comparisons",
+        item: comparisonSiteUrl("/compare"),
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: comparison.competitor,
+        item: comparisonSiteUrl(`/compare/${comparison.slug}`),
+      },
+    ],
+  };
+}
+
+function formatUsd(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function pricingCopy(pricing: ComparisonPricing): string {
+  if (pricing.status === "disabled") {
+    return "Agency checkout is currently unavailable.";
+  }
+  if (pricing.status === "unavailable") {
+    return "Agency pricing is temporarily unavailable.";
+  }
+
+  const agency = `Agency is ${formatUsd(pricing.agency.monthlyPrice)}/month for ${pricing.agency.websites} sites.`;
+  if (!pricing.founding) {
+    return agency;
+  }
+  if (pricing.founding.availability?.soldOut) {
+    return `${agency} Founding Agency is sold out.`;
+  }
+  if (!pricing.founding.availability) {
+    return `${agency} Founding Agency availability is temporarily unavailable.`;
+  }
+
+  return `${agency} Founding Agency is ${formatUsd(pricing.founding.price)} lifetime; ${pricing.founding.availability.remaining} of ${pricing.founding.availability.limit} founding spots remain.`;
 }
 
 function BestFitList({ items }: { items: readonly string[] }) {
@@ -39,8 +98,10 @@ function BestFitList({ items }: { items: readonly string[] }) {
   );
 }
 
-export function ComparisonPage({ comparison }: ComparisonPageProps) {
+export function ComparisonPage({ comparison, pricing }: ComparisonPageProps) {
   const schema = faqSchema(comparison);
+  const breadcrumbs = breadcrumbSchema(comparison);
+  const currentPricing = pricingCopy(pricing);
 
   return (
     <div data-theme="light" className="min-h-screen bg-slate-50">
@@ -55,7 +116,7 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
               <span aria-hidden="true" className="mx-2">
                 /
               </span>
-              <span>{comparison.competitor}</span>
+              <span aria-current="page">{comparison.competitor}</span>
             </nav>
             <p className="mt-8 text-sm font-semibold uppercase tracking-[0.16em] text-sky-700">
               Website editing comparison
@@ -67,8 +128,9 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
               {comparison.shortAnswer}
             </p>
             <p className="mt-5 text-sm text-slate-500">
-              Product information checked as of 2026-09. Official sources are
-              linked below.
+              Competitor product information checked as of{" "}
+              {COMPETITOR_FACTS_CHECKED_AS_OF}. Official sources are linked
+              below.
             </p>
           </div>
         </section>
@@ -126,7 +188,9 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
                         {row.competitor}
                       </td>
                       <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                        {row.recopyfast}
+                        {typeof row.recopyfast === "string"
+                          ? row.recopyfast
+                          : currentPricing}
                       </td>
                     </tr>
                   ))}
@@ -166,7 +230,10 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
               integration is a script, but installation requires permission to
               add a script and a compatible Content Security Policy (CSP). It
               edits existing authored copy; it does not build pages or migrate a
-              site.
+              site. Published edits are applied in the visitor&apos;s browser
+              after the page loads. Visitors without JavaScript, and crawlers
+              that do not render JavaScript, see the original HTML copy, so put
+              SEO-critical copy in the site&apos;s source as well.
             </p>
           </div>
         </section>
@@ -177,9 +244,7 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
               Pricing context
             </h2>
             <p className="mt-5 max-w-3xl text-lg leading-relaxed text-slate-600">
-              As of 2026-09, ReCopyFast Agency is $49/month for 10 sites.
-              Founding Agency is $299 lifetime while spots remain. Prices
-              checked September 2026; see{" "}
+              {currentPricing} See{" "}
               <Link
                 className="font-semibold text-sky-700 hover:text-sky-800"
                 href="/#pricing"
@@ -214,6 +279,12 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
                 __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
               }}
             />
+            <script
+              type="application/ld+json"
+              dangerouslySetInnerHTML={{
+                __html: JSON.stringify(breadcrumbs).replace(/</g, "\\u003c"),
+              }}
+            />
           </div>
         </section>
 
@@ -223,7 +294,7 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
               Official sources
             </h2>
             <p className="mt-3 text-sm text-slate-500">
-              Checked as of 2026-09.
+              Competitor facts checked as of {COMPETITOR_FACTS_CHECKED_AS_OF}.
             </p>
             <ul aria-label="Official sources" className="mt-5 space-y-3">
               {comparison.sources.map((source) => (
@@ -250,7 +321,7 @@ export function ComparisonPage({ comparison }: ComparisonPageProps) {
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link
-                href="/signup"
+                href={`/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${comparison.slug}`}
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast

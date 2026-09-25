@@ -9,7 +9,7 @@ export type ComparisonSlug =
 type ComparisonRow = {
   label: string;
   competitor: string;
-  recopyfast: string;
+  recopyfast: string | { kind: "live-pricing" };
 };
 
 type FaqItem = {
@@ -43,9 +43,23 @@ const sharedRecopyFastRows = {
     "Invited clients request a six-digit email code and do not create a ReCopyFast account.",
   publishing:
     "Editors save drafts, then a permitted editor explicitly publishes them.",
-  pricing:
-    "Agency is $49/month for 10 sites. Founding Agency is $299 lifetime while spots remain.",
+  delivery:
+    "Published edits are applied in the visitor's browser after the page loads. Visitors without JavaScript, and crawlers that do not render JavaScript, see the original HTML copy. Put SEO-critical copy in the site's source as well.",
 } as const;
+
+const livePricingRow = { kind: "live-pricing" } as const;
+
+/**
+ * This date applies only to competitor facts checked against their public
+ * documentation. ReCopyFast prices and offer availability come from the live
+ * catalogue at request time, because the first s37 draft incorrectly let an
+ * editorial snapshot outlive checkout and the Agency kill switch.
+ */
+export const COMPETITOR_FACTS_CHECKED_AS_OF = "2026-09";
+
+function servedHtmlAdvantage(competitor: string): string {
+  return `Choose ${competitor} when published edits must be served in the page's HTML. ReCopyFast applies published edits in the visitor's browser after the page loads, so visitors without JavaScript and crawlers that do not render JavaScript see the original HTML; put SEO-critical copy in the site's source as well.`;
+}
 
 export const comparisons = {
   "webflow-editor": {
@@ -60,11 +74,12 @@ export const comparisons = {
       "You want visual site building, CMS, and hosting in one Webflow workflow.",
       "Your team needs to change layout and design, not only existing page copy.",
       "The site is already in Webflow or you are prepared to build it there.",
+      servedHtmlAdvantage("Webflow"),
     ],
     recopyfastFit: [
       "The existing site should stay on its current stack and hosting.",
       "Clients should enter with a six-digit email code instead of creating a product account.",
-      "You want copy edits to move from draft to an explicit publish step.",
+      "You want invited clients to edit without a Webflow seat or account.",
     ],
     rows: [
       {
@@ -86,14 +101,20 @@ export const comparisons = {
       {
         label: "Publishing",
         competitor:
-          "Content editing and publishing access are controlled by Webflow permissions.",
+          "Content editors can save drafts and publish to staging or production when Webflow permissions allow it.",
         recopyfast: sharedRecopyFastRows.publishing,
+      },
+      {
+        label: "How published edits reach visitors",
+        competitor:
+          "Webflow publishes edits so they are served in the page's HTML, an advantage when JavaScript is unavailable or a crawler does not render it.",
+        recopyfast: sharedRecopyFastRows.delivery,
       },
       {
         label: "Pricing model",
         competitor:
           "Site plans and Workspace or seat plans depend on the Webflow setup.",
-        recopyfast: sharedRecopyFastRows.pricing,
+        recopyfast: livePricingRow,
       },
     ],
     integrationNote:
@@ -139,11 +160,12 @@ export const comparisons = {
       "Your agency wants to build and manage client sites in one visual platform.",
       "Clients or teammates need layout, design, preview, and publishing tools.",
       "Granular client permissions and plan-dependent white-label options matter to your workflow.",
+      servedHtmlAdvantage("Duda"),
     ],
     recopyfastFit: [
       "You manage existing sites across different frameworks or CMS products.",
       "Clients only need a focused copy workflow, not a full site builder.",
-      "You prefer per-site capacity to client seats for this editing layer.",
+      "You need focused copy editing for sites that remain on their current hosting rather than rebuilding them in Duda.",
     ],
     rows: [
       {
@@ -159,7 +181,7 @@ export const comparisons = {
       {
         label: "Client access",
         competitor:
-          "Agencies create per-site client accounts and configure permissions.",
+          "Client accounts are unlimited. Agencies assign them to sites and set per-site permissions on Team plans and higher.",
         recopyfast: sharedRecopyFastRows.editorAccess,
       },
       {
@@ -169,10 +191,16 @@ export const comparisons = {
         recopyfast: sharedRecopyFastRows.publishing,
       },
       {
+        label: "How published edits reach visitors",
+        competitor:
+          "Duda publishes edits so they are served in the page's HTML, an advantage when JavaScript is unavailable or a crawler does not render it.",
+        recopyfast: sharedRecopyFastRows.delivery,
+      },
+      {
         label: "Pricing model",
         competitor:
-          "Platform subscriptions include site allowances, with additional sites priced separately.",
-        recopyfast: sharedRecopyFastRows.pricing,
+          "Client accounts are unlimited. Platform subscriptions include site allowances, with additional published sites priced separately.",
+        recopyfast: livePricingRow,
       },
     ],
     integrationNote:
@@ -186,7 +214,7 @@ export const comparisons = {
       {
         question: "How do Duda clients get access?",
         answer:
-          "Duda documents per-site client accounts with invitations, passwords, and agency-configured permissions.",
+          "Duda documents unlimited client accounts that agencies assign to sites with per-site permissions on Team plans and higher. Clients accept invitations and set passwords.",
       },
       {
         question: "Can ReCopyFast work across different site stacks?",
@@ -222,6 +250,7 @@ export const comparisons = {
       "You want content in Git with developer-defined schemas and version history.",
       "A React-oriented visual editing integration fits the site's architecture.",
       "Developers own the content model and editorial workflow configuration.",
+      servedHtmlAdvantage("TinaCMS"),
     ],
     recopyfastFit: [
       "You do not want to migrate existing page copy into a new content model.",
@@ -254,10 +283,16 @@ export const comparisons = {
         recopyfast: sharedRecopyFastRows.publishing,
       },
       {
+        label: "How published edits reach visitors",
+        competitor:
+          "TinaCMS writes approved content to Git so the site can rebuild it and published edits are served in the page's HTML, an advantage when JavaScript is unavailable or a crawler does not render it.",
+        recopyfast: sharedRecopyFastRows.delivery,
+      },
+      {
         label: "Pricing model",
         competitor:
           "TinaCloud plans vary by project, user allowance, and workflow features.",
-        recopyfast: sharedRecopyFastRows.pricing,
+        recopyfast: livePricingRow,
       },
     ],
     integrationNote:
@@ -300,6 +335,7 @@ export const comparisons = {
       "Your agency has a Git and static-site workflow that should remain the content source of truth.",
       "Editors need visual editing tied to repository sync and configured site builds.",
       "Client Sharing or full user accounts fit the permissions and attribution you need.",
+      servedHtmlAdvantage("CloudCannon"),
     ],
     recopyfastFit: [
       "You want the same focused editing layer across sites that do not share a Git CMS setup.",
@@ -331,10 +367,16 @@ export const comparisons = {
         recopyfast: sharedRecopyFastRows.publishing,
       },
       {
+        label: "How published edits reach visitors",
+        competitor:
+          "CloudCannon syncs published content through the repository and build workflow so edits are served in the page's HTML, an advantage when JavaScript is unavailable or a crawler does not render it.",
+        recopyfast: sharedRecopyFastRows.delivery,
+      },
+      {
         label: "Pricing model",
         competitor:
           "Plans bundle user allowances; extra users or site shares may vary by plan, and Standard lists unlimited sites.",
-        recopyfast: sharedRecopyFastRows.pricing,
+        recopyfast: livePricingRow,
       },
     ],
     integrationNote:
@@ -379,12 +421,22 @@ export const comparisons = {
 
 export const comparisonList = Object.values(comparisons);
 
+export function comparisonSiteUrl(path: string): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL ||
+    "http://localhost:3000";
+  const origin = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return `${origin.replace(/\/+$/, "")}${path}`;
+}
+
 export function createComparisonMetadata(comparison: Comparison): Metadata {
   const canonical = `/compare/${comparison.slug}`;
-  const title = `${comparison.title} | ReCopyFast`;
+  const title = comparison.title;
 
   return {
-    title: comparison.title,
+    title: { absolute: comparison.title },
     description: comparison.description,
     alternates: { canonical },
     openGraph: {

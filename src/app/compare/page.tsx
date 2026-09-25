@@ -3,7 +3,10 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
-import { comparisonList } from "@/lib/compare/comparisons";
+import {
+  comparisonList,
+  COMPETITOR_FACTS_CHECKED_AS_OF,
+} from "@/lib/compare/comparisons";
 
 const DESCRIPTION =
   "Compare ReCopyFast with Webflow, Duda, TinaCMS, and CloudCannon by workflow, client access, publishing, integration, and pricing model.";
@@ -55,8 +58,7 @@ const indexFaqs = [
   },
   {
     question: "How current are these comparisons?",
-    answer:
-      "Product information was checked against official public pricing and documentation in September 2026. Each detailed comparison links its sources.",
+    answer: `Competitor product information was checked against official public pricing and documentation as of ${COMPETITOR_FACTS_CHECKED_AS_OF}. ReCopyFast offer details are read from its live catalogue on each detailed page. Each comparison links its sources.`,
   },
 ] as const;
 
@@ -90,8 +92,9 @@ export default function CompareIndexPage() {
               copy editing to an existing site without migration.
             </p>
             <p className="mt-5 text-sm text-slate-500">
-              Product information checked as of 2026-09. Official sources are
-              linked from each detailed comparison.
+              Competitor product information checked as of{" "}
+              {COMPETITOR_FACTS_CHECKED_AS_OF}. Official sources are linked from
+              each detailed comparison.
             </p>
           </div>
         </section>
@@ -169,7 +172,10 @@ export default function CompareIndexPage() {
                         {comparison.rows[0].competitor}
                       </td>
                       <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                        {comparison.rows[1].competitor}
+                        {comparison.rows[1].competitor} Published edits are
+                        served in the page&apos;s HTML, which remains available
+                        to visitors without JavaScript and crawlers that do not
+                        render it.
                       </td>
                     </tr>
                   ))}
@@ -184,8 +190,11 @@ export default function CompareIndexPage() {
                       Focused copy editing for an existing site.
                     </td>
                     <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                      Add one script, subject to script access and a compatible
-                      Content Security Policy.
+                      Add one script. Published edits are applied in the
+                      visitor&apos;s browser after the page loads; visitors
+                      without JavaScript and crawlers that do not render
+                      JavaScript see the original HTML. Put SEO-critical copy in
+                      the site&apos;s source as well.
                     </td>
                   </tr>
                 </tbody>
@@ -204,7 +213,12 @@ export default function CompareIndexPage() {
                 Choose a full platform when you need its wider system: visual
                 layout and hosting from Webflow or Duda, structured Git content
                 from TinaCMS, or a Git-based visual CMS and repository sync from
-                CloudCannon.
+                CloudCannon. Choose these platforms when published edits must be
+                served in the page&apos;s HTML. ReCopyFast applies published
+                edits in the visitor&apos;s browser after the page loads, so
+                no-JavaScript visitors and crawlers that do not render
+                JavaScript see the original HTML; put SEO-critical copy in the
+                site&apos;s source as well.
               </p>
             </article>
             <article className="min-w-0 rounded-2xl border border-sky-200 bg-sky-50 p-7 sm:p-9">
@@ -214,7 +228,10 @@ export default function CompareIndexPage() {
               <p className="mt-5 leading-relaxed text-slate-700">
                 Choose ReCopyFast when the site already exists, should stay on
                 its current stack, and clients need an account-free email-code
-                path to draft and publish copy.
+                path to draft and publish copy. Its published edits are applied
+                in the visitor&apos;s browser after load; visitors without
+                JavaScript and crawlers that do not render it see the original
+                HTML, so keep SEO-critical copy in the site&apos;s source too.
               </p>
             </article>
           </div>
@@ -253,7 +270,7 @@ export default function CompareIndexPage() {
             </h2>
             <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link
-                href="/signup"
+                href="/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index"
                 className="pressable inline-flex items-center gap-2 rounded-full bg-slate-900 px-7 py-3.5 font-semibold text-white hover:bg-slate-800"
               >
                 Start with ReCopyFast

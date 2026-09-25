@@ -104,3 +104,11 @@ surface `not-found.tsx` / `error.tsx` — the only ones in the app are App-surfa
 `/for/<slug>` produces a surface switch mid-navigation. This ADR does not close that; it is a
 generic gap affecting every route on the Marketing surface, and it needs its own story rather than
 a per-route patch inside `s19`.
+
+## Route clarification — s37, 2026-09-25
+
+The operator selected `/compare` and `/compare/*` as the canonical comparison
+cluster, replacing the planned `/alternatives/*` spelling above. This extends the
+Marketing exception to s37 without changing the surface decision or its historical
+rationale. s17 must reuse these comparison URLs instead of publishing duplicates.
+The PRD, design system and s37 design record use the current route names.

@@ -12,6 +12,18 @@ import TinaCmsPage, {
 import CloudCannonPage, {
   metadata as cloudCannonMetadata,
 } from "@/app/compare/cloudcannon/page";
+import { ComparisonPage } from "@/components/compare/ComparisonPage";
+import { comparisons } from "@/lib/compare/comparisons";
+import {
+  loadComparisonPricing,
+  type ComparisonPricing,
+} from "@/lib/compare/comparison-pricing";
+
+jest.mock("@/lib/compare/comparison-pricing", () => ({
+  loadComparisonPricing: jest.fn(),
+}));
+
+const mockLoadComparisonPricing = jest.mocked(loadComparisonPricing);
 
 jest.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
@@ -76,19 +88,38 @@ function expectMetadata(
   });
 }
 
-function expectFaqJsonLdMatchesVisibleFaq() {
-  const script = document.querySelector('script[type="application/ld+json"]');
-  expect(script).not.toBeNull();
+const availablePricing: ComparisonPricing = {
+  status: "available",
+  agency: { monthlyPrice: 73, websites: 14 },
+  founding: {
+    price: 411,
+    availability: { remaining: 9, limit: 50, soldOut: false },
+  },
+};
 
-  const schema = JSON.parse(script?.textContent ?? "null") as {
-    "@context": string;
-    "@type": string;
-    mainEntity: Array<{
-      "@type": string;
-      name: string;
-      acceptedAnswer: { "@type": string; text: string };
-    }>;
-  };
+function expectFaqJsonLdMatchesVisibleFaq() {
+  const scripts = Array.from(
+    document.querySelectorAll('script[type="application/ld+json"]'),
+  );
+  const schemas = scripts.map((script) =>
+    JSON.parse(script.textContent ?? "null"),
+  );
+  const schema = schemas.find((item) => item?.["@type"] === "FAQPage") as
+    | {
+        "@context": string;
+        "@type": string;
+        mainEntity: Array<{
+          "@type": string;
+          name: string;
+          acceptedAnswer: { "@type": string; text: string };
+        }>;
+      }
+    | undefined;
+
+  expect(schema).toBeDefined();
+  if (!schema) {
+    throw new Error("FAQPage schema was not rendered");
+  }
 
   expect(schema).toMatchObject({
     "@context": "https://schema.org",
@@ -99,13 +130,22 @@ function expectFaqJsonLdMatchesVisibleFaq() {
   for (const item of schema.mainEntity) {
     expect(item["@type"]).toBe("Question");
     expect(item.acceptedAnswer["@type"]).toBe("Answer");
-    expect(screen.getByText(item.name)).toBeInTheDocument();
-    expect(screen.getByText(item.acceptedAnswer.text)).toBeInTheDocument();
+    expect(item.acceptedAnswer.text).not.toBe(item.name);
+    const question = screen.getByText(item.name);
+    const pair = question.closest("div");
+    expect(pair).not.toBeNull();
+    expect(
+      within(pair as HTMLElement).getByText(item.acceptedAnswer.text),
+    ).toBeInTheDocument();
   }
 }
 
 describe("comparison marketing pages", () => {
-  it("renders a comparison index with every supported alternative", () => {
+  beforeEach(() => {
+    mockLoadComparisonPricing.mockResolvedValue(availablePricing);
+  });
+
+  it("renders a comparison index with every supported alternative", async () => {
     render(<CompareIndexPage />);
 
     expect(
@@ -120,6 +160,11 @@ describe("comparison marketing pages", () => {
     expect(
       screen.getByRole("table", { name: /website editing options/i }),
     ).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("table", { name: /website editing options/i }),
+      ).getAllByText(/served in the page's HTML/i),
+    ).toHaveLength(routes.length);
     expect(
       screen.getByRole("heading", { name: /when to choose a platform/i }),
     ).toBeInTheDocument();
@@ -138,7 +183,10 @@ describe("comparison marketing pages", () => {
 
     expect(
       screen.getByRole("link", { name: /start with recopyfast/i }),
-    ).toHaveAttribute("href", "/signup");
+    ).toHaveAttribute(
+      "href",
+      "/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_index",
+    );
     expect(
       screen.getByRole("link", { name: /try it on a site/i }),
     ).toHaveAttribute("href", "/try");
@@ -150,8 +198,8 @@ describe("comparison marketing pages", () => {
 
   it.each(routes)(
     "renders the dated, fair $name comparison with valid matching FAQ schema",
-    ({ slug, name, Page, metadata, shortAnswer, competitorFit }) => {
-      render(<Page />);
+    async ({ slug, name, Page, metadata, shortAnswer, competitorFit }) => {
+      render(await Page());
 
       expect(
         screen.getByRole("heading", {
@@ -185,12 +233,48 @@ describe("comparison marketing pages", () => {
         within(table).getAllByRole("rowheader").length,
       ).toBeGreaterThanOrEqual(4);
 
+      const editorAccessRow = within(table)
+        .getByRole("rowheader", {
+          name: /(?:Client|Editor) access/,
+        })
+        .closest("tr");
+      expect(editorAccessRow).not.toBeNull();
       expect(
-        screen.getAllByText(/\$49\/month for 10 sites/i).length,
-      ).toBeGreaterThanOrEqual(1);
+        within(editorAccessRow as HTMLElement).getByText(
+          "Invited clients request a six-digit email code and do not create a ReCopyFast account.",
+        ),
+      ).toBeInTheDocument();
+
+      const deliveryRow = within(table)
+        .getByRole("rowheader", {
+          name: "How published edits reach visitors",
+        })
+        .closest("tr");
+      expect(deliveryRow).not.toBeNull();
       expect(
-        screen.getAllByText(/\$299 lifetime/i).length,
-      ).toBeGreaterThanOrEqual(1);
+        within(deliveryRow as HTMLElement).getByText(
+          /served in the page's HTML/i,
+        ),
+      ).toBeInTheDocument();
+      const pricingRow = within(table)
+        .getByRole("rowheader", { name: "Pricing model" })
+        .closest("tr");
+      expect(pricingRow).not.toBeNull();
+      expect(
+        within(pricingRow as HTMLElement).getByText(
+          /Agency is \$73\/month for 14 sites.*Founding Agency is \$411 lifetime.*9 of 50/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(deliveryRow as HTMLElement).getByText(
+          /after the page loads.*without JavaScript.*crawlers.*original HTML.*SEO-critical/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /choose .* when published edits must be served in the page's HTML/i,
+        ),
+      ).toBeInTheDocument();
       expect(
         screen.getByText(
           /requires permission to add a script and a compatible Content Security Policy/i,
@@ -201,7 +285,10 @@ describe("comparison marketing pages", () => {
       ).toHaveAttribute("href", "/#pricing");
       expect(
         screen.getByRole("link", { name: /start with ReCopyFast/i }),
-      ).toHaveAttribute("href", "/signup");
+      ).toHaveAttribute(
+        "href",
+        `/signup?utm_source=comparison&utm_medium=page&utm_campaign=compare_${slug}`,
+      );
       expect(
         screen.getByRole("link", { name: /try ReCopyFast/i }),
       ).toHaveAttribute("href", "/try");
@@ -210,11 +297,15 @@ describe("comparison marketing pages", () => {
         name: /related comparisons/i,
       });
       for (const sibling of routes) {
-        expect(
-          within(related).getByRole("link", {
-            name: new RegExp(sibling.name, "i"),
-          }),
-        ).toHaveAttribute("href", `/compare/${sibling.slug}`);
+        const link = within(related).getByRole("link", {
+          name: new RegExp(sibling.name, "i"),
+        });
+        expect(link).toHaveAttribute("href", `/compare/${sibling.slug}`);
+        if (sibling.slug === slug) {
+          expect(link).toHaveAttribute("aria-current", "page");
+        } else {
+          expect(link).not.toHaveAttribute("aria-current");
+        }
       }
 
       const officialSources = screen.getByRole("list", {
@@ -230,12 +321,41 @@ describe("comparison marketing pages", () => {
       }
 
       expectFaqJsonLdMatchesVisibleFaq();
+      const schemas = Array.from(
+        document.querySelectorAll('script[type="application/ld+json"]'),
+      ).map((script) => JSON.parse(script.textContent ?? "null"));
+      expect(schemas).toEqual(
+        expect.arrayContaining([
+          {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              {
+                "@type": "ListItem",
+                position: 1,
+                name: "Comparisons",
+                item: "http://localhost:3000/compare",
+              },
+              {
+                "@type": "ListItem",
+                position: 2,
+                name,
+                item: `http://localhost:3000/compare/${slug}`,
+              },
+            ],
+          },
+        ]),
+      );
+      expect(screen.getByText(name, { selector: "span" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
       expectMetadata(metadata, slug);
     },
   );
 
-  it("documents the current Webflow content-editor account flow and legacy Editor retirement", () => {
-    render(<WebflowEditorPage />);
+  it("documents the current Webflow content-editor account flow and legacy Editor retirement", async () => {
+    render(await WebflowEditorPage());
 
     expect(
       screen.getByText(/legacy Webflow Editor retired on August 4, 2026/i),
@@ -247,8 +367,8 @@ describe("comparison marketing pages", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
-  it("credits CloudCannon client sharing as a no-account option", () => {
-    render(<CloudCannonPage />);
+  it("credits CloudCannon client sharing as a no-account option", async () => {
+    render(await CloudCannonPage());
 
     expect(
       screen.getByText(
@@ -257,6 +377,68 @@ describe("comparison marketing pages", () => {
     ).toBeInTheDocument();
   });
 
+  it("states Duda's unlimited client-account and per-site billing model accurately", async () => {
+    render(await DudaPage());
+
+    expect(
+      screen.getByText(
+        /client accounts are unlimited.*assign them to sites.*per-site permissions.*Team plans? and higher/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/additional published sites.*priced separately/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/per-site capacity to client seats/i)).toBeNull();
+  });
+
+  it.each([
+    [
+      "available catalogue",
+      availablePricing,
+      /Agency is \$73\/month for 14 sites.*Founding Agency is \$411 lifetime.*9 of 50/i,
+    ],
+    [
+      "sold-out founding offer",
+      {
+        ...availablePricing,
+        founding: {
+          price: 411,
+          availability: { remaining: 0, limit: 50, soldOut: true },
+        },
+      },
+      /Agency is \$73\/month for 14 sites.*Founding Agency is sold out/i,
+    ],
+    [
+      "unknown founding availability",
+      {
+        ...availablePricing,
+        founding: { price: 411, availability: null },
+      },
+      /Agency is \$73\/month for 14 sites.*Founding Agency availability is temporarily unavailable/i,
+    ],
+    [
+      "disabled checkout",
+      { status: "disabled" },
+      /Agency checkout is currently unavailable/i,
+    ],
+    [
+      "unavailable catalogue",
+      { status: "unavailable" },
+      /Agency pricing is temporarily unavailable/i,
+    ],
+  ] satisfies Array<[string, ComparisonPricing, RegExp]>)(
+    "renders $0 without a hardcoded offer",
+    (_label, pricing, expected) => {
+      render(
+        <ComparisonPage comparison={comparisons.duda} pricing={pricing} />,
+      );
+
+      expect(screen.getAllByText(expected).length).toBeGreaterThanOrEqual(1);
+      expect(screen.queryByText(/\$49\/month for 10 sites/i)).toBeNull();
+      expect(screen.queryByText(/\$299 lifetime/i)).toBeNull();
+    },
+  );
+
   it("publishes unique canonical and social titles for every comparison route", () => {
     const metadata = routes.map((route) => route.metadata);
     const titles = metadata.map((item) => item.openGraph?.title);
@@ -264,5 +446,16 @@ describe("comparison marketing pages", () => {
 
     expect(new Set(titles).size).toBe(routes.length);
     expect(new Set(canonicals).size).toBe(routes.length);
+    for (const route of routes) {
+      expect(route.metadata.title).toEqual({
+        absolute: expect.stringMatching(/^ReCopyFast vs /),
+      });
+      expect(route.metadata.openGraph?.title).toBe(
+        (route.metadata.title as { absolute: string }).absolute,
+      );
+      expect(route.metadata.twitter?.title).toBe(
+        (route.metadata.title as { absolute: string }).absolute,
+      );
+    }
   });
 });

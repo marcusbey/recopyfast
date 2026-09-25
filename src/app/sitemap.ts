@@ -1,5 +1,6 @@
 import type { MetadataRoute } from "next";
 import { createClient } from "@/lib/supabase/server";
+import { comparisonList } from "@/lib/compare/comparisons";
 
 /**
  * Canonical origin used to build absolute SEO URLs.
@@ -36,18 +37,14 @@ const STATIC_ROUTES: readonly StaticRoute[] = [
   { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
   { path: "/try", changeFrequency: "monthly", priority: 0.9 },
   { path: "/compare", changeFrequency: "monthly", priority: 0.8 },
-  {
-    path: "/compare/webflow-editor",
-    changeFrequency: "monthly",
-    priority: 0.7,
-  },
-  { path: "/compare/duda", changeFrequency: "monthly", priority: 0.7 },
-  { path: "/compare/tinacms", changeFrequency: "monthly", priority: 0.7 },
-  {
-    path: "/compare/cloudcannon",
-    changeFrequency: "monthly",
-    priority: 0.7,
-  },
+  ...comparisonList.map(
+    (comparison) =>
+      ({
+        path: `/compare/${comparison.slug}`,
+        changeFrequency: "monthly",
+        priority: 0.7,
+      }) as const,
+  ),
   { path: "/blog", changeFrequency: "daily", priority: 0.7 },
   { path: "/login", changeFrequency: "yearly", priority: 0.3 },
   { path: "/signup", changeFrequency: "yearly", priority: 0.5 },

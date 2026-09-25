@@ -291,7 +291,7 @@ SEO is not downstream of the product here — the product's reach *is* the SEO t
 |---|---|---|
 | Problem-aware | "edit website without developer", "let client update their own website", "change website text myself" | Home + `/for/<vertical>` |
 | Solution-aware | "inline CMS for existing website", "add CMS to existing site", "CMS without rebuilding site" | Product pages |
-| Comparison | "TinaCMS alternative", "CloudCannon alternative", "Contentful vs", "Decap CMS alternative" | `/alternatives/<competitor>` |
+| Comparison | "TinaCMS alternative", "CloudCannon alternative", "Contentful vs", "Decap CMS alternative" | `/compare/<competitor>` |
 | Stack-specific | "CMS for Astro", "let client edit Next.js site", "WordPress alternative for static site" | `/cms-for/<stack>` |
 | Agency | "stop doing free client website updates", "client content updates agency" | `/agencies/*` |
 
@@ -301,8 +301,9 @@ Four clusters, each with a **non-thin differentiator** — a page that only swap
 gets deindexed under the Helpful Content system. The differentiator is always a real,
 tested install recipe or a real dataset.
 
-1. **`/alternatives/<competitor>`** — tinacms, cloudcannon, contentful, storyblok,
-   decap-cms, prismic, builder-io, sanity, webflow-editor, siteleaf.
+1. **`/compare` and `/compare/<competitor>`** — s37 delivers webflow-editor, duda,
+   tinacms and cloudcannon. Further competitors remain backlog scope. These canonical
+   URLs replace the formerly planned `/alternatives/*`; do not create duplicate pages.
    Differentiator: honest comparison table including where *they* win, plus a migration
    note. Comparison pages that admit weakness get cited by LLMs; pure marketing does not.
 2. **`/cms-for/<stack>`** — wordpress, shopify, webflow, squarespace, framer, next-js,
@@ -449,7 +450,7 @@ at `validated: no`:
    the system as it stands — `resolveEntitlement`, `canCreateWebsite`, `getUserSubscription`
    and `resolveSiteOwnerId` are untouched, and `s13` stays a catalogue-and-quota story.
    Unblocks `s13`, and `s20` which inherited it.
-10. **SEO cluster surface.** → **Marketing.** `/alternatives`, `/cms-for`, `/for` and
+10. **SEO cluster surface.** → **Marketing.** `/compare`, `/cms-for`, `/for` and
     `/agencies` render on the `--sky-*` / `--slate-*` palette, pinned light, so they can
     reuse `Pricing` / `Benefits` / `HowItWorks` / `FinalCTA`.
     [ADR 020](./decisions/020-seo-clusters-on-marketing-surface.md). Unblocks `s17`, `s18`

@@ -3,11 +3,14 @@ import {
   comparisons,
   createComparisonMetadata,
 } from "@/lib/compare/comparisons";
+import { loadComparisonPricing } from "@/lib/compare/comparison-pricing";
 
 const comparison = comparisons.tinacms;
 
 export const metadata = createComparisonMetadata(comparison);
+export const dynamic = "force-dynamic";
 
-export default function TinaCmsComparisonPage() {
-  return <ComparisonPage comparison={comparison} />;
+export default async function TinaCmsComparisonPage() {
+  const pricing = await loadComparisonPricing();
+  return <ComparisonPage comparison={comparison} pricing={pricing} />;
 }

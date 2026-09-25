@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import Footer from "@/components/layout/Footer";
 import sitemap from "@/app/sitemap";
 import { createClient } from "@/lib/supabase/server";
+import { comparisonList } from "@/lib/compare/comparisons";
 
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(),
@@ -27,6 +28,11 @@ describe("comparison page discovery", () => {
 
     const entries = await sitemap();
     const urls = entries.map((entry) => new URL(entry.url).pathname);
+    const comparisonUrls = urls.filter((url) => url.startsWith("/compare/"));
+
+    expect(comparisonUrls).toEqual(
+      comparisonList.map((comparison) => `/compare/${comparison.slug}`),
+    );
 
     expect(urls).toEqual(
       expect.arrayContaining([

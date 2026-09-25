@@ -24,8 +24,8 @@ The PRD has historical competitor claims: do not repeat them without current sou
 - `supabase/migrations/20260924065000_agency_plan_and_founding_capacity.sql`:
   Agency $49/month, 10 websites; Founding Agency one-time $299 granting Agency,
   limited capacity. `src/lib/stripe/plans.ts` loads real catalogue, and
-  `src/components/sections/Pricing.tsx` renders pricing/availability. Comparison prices
-  are a dated editorial snapshot only, never a billing catalogue fallback or availability count.
+  `src/components/sections/Pricing.tsx` renders pricing/availability. The initial
+  implementation used an editorial price snapshot; review M2 rejected that choice. Fix mode reads live catalogue/availability and respects the Agency switch.
 - ReCopyFast edits an existing site; do not claim page building, layout creation,
   hosting, source repository writes or migration automation.
 
@@ -74,7 +74,8 @@ to avoid mismatching billing periods, seats, site plans and feature packages.
 - https://support.duda.co/hc/en-us/articles/26519221644439-Editor-Overview
   — visual canvas, layout/design, preview and Publish/Republish.
 - https://support.duda.co/hc/en-us/articles/26519392519575-Manage-Clients
-  — per-site client accounts and permissions, invitation and password setup.
+  — client accounts assigned to sites with per-site permissions (Team and higher),
+  invitation and password setup. Accounts are unlimited; Duda bills additional sites.
 - https://www.duda.co/features/client-permissions — granular content/design/publish controls.
 - Stronger for agencies building and managing sites in one visual builder, with
   client management and plan-dependent white-label options.
@@ -120,7 +121,7 @@ change. No product decisions pending. Independent review remains outside this la
 - Changed source and test files pass Prettier and targeted ESLint. The leader owns
   the full precommit/build/audit gates and browser verification.
 
-## Final verification — 2026-09-25
+## Initial verification history — 2026-09-25 (superseded by fix run)
 
 All commands used the CI main-job placeholders through `/tmp/recopyfast-s37-ci.py`
 (Node 22.22.0), without production env files.
@@ -145,18 +146,82 @@ Screenshots are local ignored artifacts under `output/playwright/s37/`. The pref
 Chrome wrapper failed a pageId tool-argument compatibility check; Playwright CLI
 provided the real-browser fallback without changing committed E2E tests.
 
-### Delivery blocker
+### Initial local blocker and subsequent delivery
 
-The unchanged `src/__tests__/db/function-grants.test.ts:209` fails on
+The initial run of unchanged `src/__tests__/db/function-grants.test.ts:209` failed on
 `update_translation_coverage(uuid) -> authenticated` in the auto-detected local
 Supabase database. This same inherited finding is documented at
 `docs/reviews/s33-agency-plan.md:133`. The test, DB harness and migrations are
 unchanged from c3b2b28. No remote database was contacted or migrated.
 
-The user explicitly requires a green precommit before push. That gate is NOT green,
-so no commit, push or draft PR has been attempted. Fixing grants is outside this
-marketing-only, no-migrations lane; an explicit gate exception or separate DB repair
-is required for delivery. Independent review remains pending.
+Those results describe the initial local attempt, not current delivery state.
+Commit `121c9c4` was subsequently pushed as draft PR #34. The independent review
+records a fresh full Jest pass (235 suites, 3,101 tests; 2 suites/38 tests skipped).
+This record does not infer a historical gate exception. The 2026-09-25 operator
+request starts a new fix run with all required gates rerun before push; the original
+review remains unmodified and uncommitted, with its blocked verdict intact.
 
 Marker flips: none. Migrations: none. Dependencies/embed: unchanged. Playwright pinned
 count: unchanged at 44. No customer claims, logos, testimonials or usage numbers added.
+
+## Fix-mode source verification — 2026-09-25
+
+Re-fetched Duda's official pricing, Editor Overview, Manage Clients and client
+permissions pages listed above. The reviewer was correct: unlimited client
+accounts are not a seat-based charge; additional published sites are billed per
+site. Client accounts are assigned to sites, with per-site permissions (Team and
+higher). The visual-builder, layout/design, preview/publish, hosted-site and
+plan-dependent white-label claims remain supported. The false pricing contrast
+is replaced with the existing-hosting versus Duda-builder distinction. No Duda
+numeric price is copied into editorial content.
+
+Webflow's cited documentation already establishes draft state and separately
+permissioned publishing; draft-then-publish is removed as a differentiator.
+The comparisons explicitly credit competitors' served-HTML delivery and disclose
+ReCopyFast's browser-after-load behavior, original HTML without JavaScript and
+for non-rendering crawlers, and source updates for SEO-critical copy.
+
+## Fix-mode verification — 2026-09-25
+
+Commands use `/tmp/recopyfast-s37-fix-ci.py`, which reads only the main CI job's
+placeholder environment and uses official Node 20.15.1. No production environment
+files, remote migrations, live Stripe or hosted database credentials were used.
+
+- Initial focused red: 11 tests failed and 6 passed across 3 suites.
+- Focused green: 3 suites, 21 tests passed.
+- Mutation proof: reversing editor access caused 4 failures; hardcoding an incorrect
+  table price caused 7; using FAQ questions as answers caused 4. Each mutation was
+  restored before the final green run.
+- `npm run precommit -- -- --runInBand --coverage --silent --no-cache`: passed;
+  lint 0 errors / 39 inherited warnings, full type-check passed, Jest 236 suites
+  passed / 2 skipped, 3,111 tests passed / 38 skipped / 0 failed (3,149 total).
+  Coverage: statements 55.89%, branches 49.43%, functions 52.02%, lines 56.35%;
+  all ratchets passed.
+- `npm run format:check`: passed across src.
+- `~/.asdf/installs/nodejs/20.15.1/bin/node scripts/build-embed.mjs --check`:
+  fresh; bundle 46,601 / 46,681 B, widget 33,837 / 33,865 B, transport 13,141 B.
+- `npm run audit:prod`: 0 vulnerabilities.
+
+The initial full-gate attempt stopped at 9 JSX lint errors, which were fixed.
+An intermediate type-check and a Jest run hit ENOSPC, not an assertion failure.
+Only this worktree's generated Next/Jest/coverage caches were cleared; the final
+standard type-check and full gate above passed without disabling checks or
+changing test timeouts. No audit markers flipped and no migrations were added.
+
+- `npm run build`: passed under official Node 20.15.1; `/compare` is static and
+  all four detail pages are dynamic. Prebuild produced identical embed bytes.
+- Local production-browser smoke with `AGENCY_CHECKOUT_ENABLED=false`: all five
+  routes at 1440, 390 and 320px returned 200 (15 renders), without document overflow.
+  Every detail page disclosed unavailable Agency checkout; FAQ answers matched
+  their visible paired descriptions, BreadcrumbList and titles were correct, and
+  signup CTAs carried comparison UTM tags. Unknown slug returned 404; sitemap
+  contained all five URLs. Desktop Duda and mobile CloudCannon screenshots were
+  visually inspected in ignored `output/playwright/s37-fix/`.
+- Preferred Chrome wrapper failed with an undefined `pageId`; Playwright CLI
+  supplied the browser evidence. No committed Playwright tests or count changed.
+- `git diff --check`: passed. Independent review SHA-256 remains
+  `79765b7cf06c91609487cfaed4d194af4136c3e212bf34973fe02834108812dc`.
+
+All C1/M1/M2 and m1-m9 fixes are implemented. The independent blocked review is
+preserved unmodified and uncommitted; a fresh review verdict remains required.
+The operator authorizes this fix commit/push to the existing draft PR, not release.
