@@ -36,6 +36,7 @@ interface RawContentElement {
   staging_content?: string;
   language: string;
   variant: string;
+  page_path?: string | null;
   metadata?: {
     type?: string;
   };
@@ -195,6 +196,7 @@ export default function ContentPage() {
       publishedContent: item.published_content,
       language: item.language,
       variant: item.variant,
+      pagePath: item.page_path ?? null,
       metadata: item.metadata,
       lastModified: item.updated_at || item.published_at || "",
     }));

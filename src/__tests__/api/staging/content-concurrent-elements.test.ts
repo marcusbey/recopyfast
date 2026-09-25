@@ -105,102 +105,39 @@ class FakeDb {
 
 const db = new FakeDb();
 
-type Filters = Array<[string, unknown]>;
-
-function matches(row: ContentElementRow, filters: Filters): boolean {
-  return filters.every(
-    ([column, value]) =>
-      (row as unknown as Record<string, unknown>)[column] === value,
-  );
-}
-
-interface FakeQueryBuilder {
-  select(): FakeQueryBuilder;
-  eq(column: string, value: unknown): FakeQueryBuilder;
-  update(payload: Record<string, unknown>): FakeQueryBuilder;
-  insert(payload: Record<string, unknown>): FakeQueryBuilder;
-  single(): Promise<{
-    data: { id: string; staging_content: string | null } | null;
-  }>;
-  then(
-    onFulfilled: (value: { data: null; error: null }) => unknown,
-    onRejected: (reason: unknown) => unknown,
-  ): Promise<unknown>;
-}
-
 function makeServiceClient() {
   return {
-    from(table: string) {
-      const filters: Filters = [];
-      const state: {
-        op: "select" | "update" | "insert";
-        payload: Record<string, unknown> | null;
-      } = { op: "select", payload: null };
+    async rpc(name: string, args: Record<string, unknown>) {
+      expect(name).toBe("save_staging_content_atomic");
+      await db.waitAtBarrier();
+      const found = db.elements.find(
+        (row) =>
+          row.site_id === args.p_site_id &&
+          row.element_id === args.p_element_id &&
+          row.language === args.p_language &&
+          row.variant === args.p_variant,
+      );
+      if (!found) return { data: [], error: null };
 
-      const builder: FakeQueryBuilder = {
-        select() {
-          return builder;
+      const previousContent = found.staging_content;
+      const now = new Date().toISOString();
+      found.staging_content = String(args.p_staging_content);
+      found.staging_updated_at = now;
+      found.updated_at = now;
+      db.history = [
+        ...db.history,
+        {
+          content_element_id: found.id,
+          previous_content: previousContent,
+          new_content: String(args.p_staging_content),
+          user_email: String(args.p_user_email),
+          action: previousContent === null ? "create" : "update",
         },
-        eq(column: string, value: unknown) {
-          filters.push([column, value]);
-          return builder;
-        },
-        update(payload: Record<string, unknown>) {
-          state.op = "update";
-          state.payload = payload;
-          return builder;
-        },
-        insert(payload: Record<string, unknown>) {
-          state.op = "insert";
-          state.payload = payload;
-          return builder;
-        },
-        async single() {
-          await db.waitAtBarrier();
-          const found = db.elements.find((row) => matches(row, filters));
-          if (!found) return { data: null };
-          return {
-            data: { id: found.id, staging_content: found.staging_content },
-          };
-        },
-        then(onFulfilled, onRejected) {
-          const run = async (): Promise<{ data: null; error: null }> => {
-            if (state.op === "update" && table === "content_elements") {
-              // Immutable replace, and scoped by the SAME filters the route
-              // supplied. Drop the element_id predicate in the route and both
-              // rows get written here, which is precisely the failure AC 7 is
-              // about.
-              db.elements = db.elements.map((row) =>
-                matches(row, filters)
-                  ? {
-                      ...row,
-                      staging_content: String(state.payload!.staging_content),
-                      staging_updated_at: String(
-                        state.payload!.staging_updated_at,
-                      ),
-                      updated_at: String(state.payload!.updated_at),
-                    }
-                  : row,
-              );
-              return { data: null, error: null };
-            }
-
-            if (state.op === "insert" && table === "staging_history") {
-              db.history = [
-                ...db.history,
-                state.payload as unknown as StagingHistoryRow,
-              ];
-              return { data: null, error: null };
-            }
-
-            return { data: null, error: null };
-          };
-
-          return run().then(onFulfilled, onRejected);
-        },
+      ];
+      return {
+        data: [{ content_element_id: found.id, updated_at: now }],
+        error: null,
       };
-
-      return builder;
     },
   };
 }

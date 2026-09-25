@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { BulkExportPayload } from "@/types";
 import { encodeCSVRow } from "@/lib/bulk/csv";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
 interface ExportedContentElement {
   id: string;
@@ -67,29 +68,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build query with filters
-    let query = supabase
-      .from("content_elements")
-      .select("*")
-      .eq("site_id", site_id);
+    const { data: contentElements, error } = await fetchPageScopedRows(() => {
+      let query = supabase
+        .from("content_elements")
+        .select("*")
+        .eq("site_id", site_id);
 
-    if (filters?.language) {
-      query = query.eq("language", filters.language);
-    }
+      if (filters?.language) {
+        query = query.eq("language", filters.language);
+      }
 
-    if (filters?.variant) {
-      query = query.eq("variant", filters.variant);
-    }
+      if (filters?.variant) {
+        query = query.eq("variant", filters.variant);
+      }
 
-    if (filters?.element_ids && filters.element_ids.length > 0) {
-      query = query.in("element_id", filters.element_ids);
-    }
+      if (filters?.element_ids && filters.element_ids.length > 0) {
+        query = query.in("element_id", filters.element_ids);
+      }
 
-    if (filters?.updated_since) {
-      query = query.gte("updated_at", filters.updated_since);
-    }
+      if (filters?.updated_since) {
+        query = query.gte("updated_at", filters.updated_since);
+      }
 
-    const { data: contentElements, error } = await query;
+      return query;
+    }, null);
 
     if (error) {
       throw error;

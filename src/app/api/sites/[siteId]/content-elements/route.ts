@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteReadAccess } from "@/lib/security/ingest-auth";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
 /**
  * Content elements for signed-in dashboard users.
@@ -32,14 +33,18 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const variant = searchParams.get("variant") || "default";
 
     const supabase = createServiceRoleClient();
-    const { data: contentElements, error } = await supabase
-      .from("content_elements")
-      .select(
-        "id, site_id, element_id, selector, published_content, original_content, language, variant, metadata, published_at",
-      )
-      .eq("site_id", siteId)
-      .eq("language", language)
-      .eq("variant", variant);
+    const { data: contentElements, error } = await fetchPageScopedRows(
+      () =>
+        supabase
+          .from("content_elements")
+          .select(
+            "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+          )
+          .eq("site_id", siteId)
+          .eq("language", language)
+          .eq("variant", variant),
+      null,
+    );
 
     if (error) {
       console.error("Error fetching content elements:", error);

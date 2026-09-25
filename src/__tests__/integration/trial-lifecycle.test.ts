@@ -104,6 +104,7 @@ function createFakeClient() {
   const from = (table: string) => {
     const predicates: Array<(row: Row) => boolean> = [];
     let sort: { column: string; ascending: boolean } | null = null;
+    let offset = 0;
     let cap: number | null = null;
     let mode: "select" | "insert" | "upsert" | "update" = "select";
     let payload: Row = {};
@@ -122,7 +123,9 @@ function createFakeClient() {
             (ascending ? 1 : -1),
         );
       }
-      return cap === null ? rows : rows.slice(0, cap);
+      return cap === null
+        ? rows.slice(offset)
+        : rows.slice(offset, offset + cap);
     };
 
     const run = (): Result => {
@@ -202,6 +205,11 @@ function createFakeClient() {
       },
       limit: (count: number) => {
         cap = count;
+        return builder;
+      },
+      range: (from: number, to: number) => {
+        offset = from;
+        cap = to - from + 1;
         return builder;
       },
       insert: (values: Row) => {

@@ -14,11 +14,36 @@ import {
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 type PublishRpcRow = {
   element_id: string;
   content: string | null;
+  attributes: Record<string, string>;
 };
+
+function stagedMetadata(value: unknown) {
+  const metadata =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const stagingAttributes =
+    typeof metadata.staging_attributes === "object" &&
+    metadata.staging_attributes !== null &&
+    !Array.isArray(metadata.staging_attributes)
+      ? (metadata.staging_attributes as Record<string, unknown>)
+      : {};
+  const publishedMetadata = { ...metadata };
+  delete publishedMetadata.staging_attributes;
+
+  return {
+    metadata: { ...publishedMetadata, ...stagingAttributes },
+    hasAttributeChanges: Object.entries(stagingAttributes).some(
+      ([key, value]) => publishedMetadata[key] !== value,
+    ),
+  };
+}
 
 function extractElementIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) {
@@ -130,8 +155,14 @@ export async function POST(request: NextRequest) {
 
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();
+
+    // Publish has always been a site-wide operator action. Page identity scopes
+    // what the editor reads and labels the confirmation counts below; it must
+    // not scope this mutation. Restore stages every page, and the s27 scoped
+    // RPC call once left a restored site half-live when Publish was clicked
+    // from only one of those pages.
     const { data, error } = await serviceClient.rpc(
-      "publish_staging_content_atomic",
+      "publish_staging_content_with_attributes_atomic",
       {
         p_site_id: siteId,
         p_element_ids: elementIds,
@@ -203,6 +234,16 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const siteId = request.nextUrl.searchParams.get("siteId");
+    const requestedPagePath = request.nextUrl.searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
 
     if (!siteId) {
       return withPublicCors(
@@ -249,13 +290,17 @@ export async function GET(request: NextRequest) {
     }
 
     const serviceClient = createServiceRoleClient();
-    const { data: elementsWithChanges, error: fetchError } = await serviceClient
-      .from("content_elements")
-      .select(
-        "id, element_id, selector, staging_content, published_content, staging_updated_at, metadata",
-      )
-      .eq("site_id", siteId)
-      .not("staging_content", "is", null);
+    const { data: elementsWithChanges, error: fetchError } =
+      await fetchPageScopedRows(
+        () =>
+          serviceClient
+            .from("content_elements")
+            .select(
+              "id, element_id, selector, staging_content, published_content, staging_updated_at, page_path, metadata",
+            )
+            .eq("site_id", siteId),
+        null,
+      );
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);
@@ -268,22 +313,44 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const changedElements = (elementsWithChanges || [])
-      .filter((el) => el.staging_content !== el.published_content)
-      .map((el) => ({
-        id: el.id,
-        elementId: el.element_id,
-        selector: el.selector,
-        stagingContent: el.staging_content,
-        publishedContent: el.published_content,
-        stagingUpdatedAt: el.staging_updated_at,
-        metadata: el.metadata,
-      }));
+    const changedRows = (elementsWithChanges || []).flatMap((el) => {
+      const projection = stagedMetadata(el.metadata);
+      const hasTextChanges =
+        el.staging_content !== null &&
+        el.staging_content !== el.published_content;
+      if (!projection.hasAttributeChanges && !hasTextChanges) {
+        return [];
+      }
+
+      return [
+        {
+          pagePath: el.page_path,
+          element: {
+            id: el.id,
+            elementId: el.element_id,
+            selector: el.selector,
+            stagingContent: el.staging_content,
+            publishedContent: el.published_content,
+            stagingUpdatedAt: el.staging_updated_at,
+            metadata: projection.metadata,
+          },
+        },
+      ];
+    });
+    const currentPageChanges =
+      pagePath === null
+        ? changedRows.length
+        : changedRows.filter(
+            (row) => row.pagePath === null || row.pagePath === pagePath,
+          ).length;
+    const changedElements = changedRows.map((row) => row.element);
 
     return withPublicCors(
       NextResponse.json({
         success: true,
         pendingChanges: changedElements.length,
+        currentPageChanges,
+        otherPageChanges: changedElements.length - currentPageChanges,
         elements: changedElements,
         canPublish,
       }),

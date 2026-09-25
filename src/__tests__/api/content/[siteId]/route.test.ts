@@ -40,6 +40,8 @@ type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  order: jest.Mock;
+  range: jest.Mock;
   single: jest.Mock;
   upsert: jest.Mock;
   update: jest.Mock;
@@ -51,6 +53,8 @@ const mockServiceClient: MockServiceClient = {
   from: jest.fn(() => mockServiceClient),
   select: jest.fn(() => mockServiceClient),
   eq: jest.fn(() => mockServiceClient),
+  order: jest.fn(() => mockServiceClient),
+  range: jest.fn(),
   single: jest.fn(),
   upsert: jest.fn(),
   update: jest.fn(() => mockServiceClient),
@@ -84,6 +88,8 @@ describe("/api/content/[siteId]", () => {
     mockServiceClient.from.mockReturnValue(mockServiceClient);
     mockServiceClient.select.mockReturnValue(mockServiceClient);
     mockServiceClient.eq.mockImplementation(() => mockServiceClient);
+    mockServiceClient.order.mockImplementation(() => mockServiceClient);
+    mockServiceClient.range.mockResolvedValue({ data: [], error: null });
     mockServiceClient.single.mockResolvedValue({
       data: { id: "site-123" },
       error: null,
@@ -108,12 +114,10 @@ describe("/api/content/[siteId]", () => {
     ];
 
     it("should fetch content elements with default parameters", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -135,12 +139,10 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should fetch content elements with custom language and variant", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       const request = new NextRequest(
         "http://localhost/api/content/site-123?language=es&variant=mobile",
@@ -166,12 +168,10 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should return empty array when no content found", async () => {
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() => mockServiceClient)
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: null, error: null }),
-        );
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: null,
+        error: null,
+      });
 
       const request = new NextRequest("http://localhost/api/content/site-123", {
         headers: {
@@ -187,6 +187,39 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual([]);
+    });
+
+    it("returns published attributes without leaking staged attribute drafts", async () => {
+      const row = {
+        ...mockContentElements[0],
+        metadata: {
+          type: "a",
+          href: "/published",
+          analytics_key: "keep-me",
+          staging_attributes: { href: "/draft", alt: "Draft alt" },
+        },
+      };
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: [row],
+        error: null,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+      const [element] = await response.json();
+
+      expect(element.metadata).toEqual({
+        type: "a",
+        href: "/published",
+        analytics_key: "keep-me",
+      });
     });
 
     it("should return 401 when authorization fails", async () => {
@@ -224,12 +257,10 @@ describe("/api/content/[siteId]", () => {
         site: { id: "site-123", domain: "example.com", api_key: "api-key" },
         allowedOrigin: null,
       });
-      mockServiceClient.eq
-        .mockImplementationOnce(() => mockServiceClient) // site_id
-        .mockImplementationOnce(() => mockServiceClient) // language
-        .mockImplementationOnce(() =>
-          Promise.resolve({ data: mockContentElements, error: null }),
-        ); // variant
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
 
       // No Authorization header, no Origin header, no ?token= — the dashboard
       // never sends these; only the session cookie authorizes this request.
@@ -262,12 +293,10 @@ describe("/api/content/[siteId]", () => {
      */
     describe("liveness", () => {
       const queueContentQuery = () => {
-        mockServiceClient.eq
-          .mockImplementationOnce(() => mockServiceClient) // site_id
-          .mockImplementationOnce(() => mockServiceClient) // language
-          .mockImplementationOnce(() =>
-            Promise.resolve({ data: mockContentElements, error: null }),
-          ); // variant
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: mockContentElements,
+          error: null,
+        });
       };
 
       it("records a report when the widget's own token authorized the read", async () => {
@@ -379,6 +408,144 @@ describe("/api/content/[siteId]", () => {
       );
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
         "https://example.com",
+      );
+    });
+
+    it("validates widget-normalized page paths without decoding them again", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          "header-1": {
+            selector: "h1",
+            content: "Welcome",
+            type: "text",
+            page_path: "/index.html",
+          },
+          "header-2": {
+            selector: "h2",
+            content: "Reserved",
+            type: "text",
+            page_path: "/pricing%3Flegacy",
+          },
+          "header-3": {
+            selector: "h3",
+            content: "Literal percent",
+            type: "text",
+            page_path: "/%",
+          },
+          "header-4": {
+            selector: "h4",
+            content: "Encoded space text",
+            type: "text",
+            page_path: "/%20",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            element_id: "header-1",
+            page_path: "/index.html",
+          }),
+          expect.objectContaining({
+            element_id: "header-2",
+            page_path: "/pricing%3Flegacy",
+          }),
+          expect.objectContaining({
+            element_id: "header-3",
+            page_path: "/%",
+          }),
+          expect.objectContaining({
+            element_id: "header-4",
+            page_path: "/%20",
+          }),
+        ]),
+        expect.any(Object),
+      );
+    });
+
+    it.each([
+      ["a non-string path", 42],
+      ["a path over 1,024 characters", `/${"a".repeat(1024)}`],
+      ["a path over 1,024 UTF-8 bytes", `/${"é".repeat(512)}`],
+      ["an actual control character", "/pricing\n"],
+      ["a non-path string", "pricing"],
+      ["a raw query delimiter", "/pricing?plan=pro"],
+      ["a raw fragment delimiter", "/pricing#faq"],
+    ])("skips only the element with %s", async (_label, pagePath) => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          invalid: {
+            selector: "h1",
+            content: "Invalid",
+            type: "text",
+            page_path: pagePath,
+          },
+          valid: {
+            selector: "p",
+            content: "Valid",
+            type: "text",
+            page_path: "/about/",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.skippedCount).toBe(1);
+      expect(body.skipped).toEqual([
+        expect.objectContaining({ elementId: "invalid" }),
+      ]);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            element_id: "valid",
+            page_path: "/about/",
+          }),
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it("retains NULL for author-declared shared elements", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          shared: { selector: "nav", content: "Shared", type: "text" },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ element_id: "shared", page_path: null })],
+        expect.any(Object),
       );
     });
 
