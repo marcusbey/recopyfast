@@ -1488,3 +1488,31 @@ and nine minors); fix `ba25a30` addressed those blockers. The independent
 re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
 mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
 JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.
+
+## Story s39-editor-back-to-sites — get back to all my sites
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s39-editor-back-to-sites`. An invited editor who edits more than one site, and is
+done with one, can get back to the list of every site they may edit without re-entering a code.
+
+- [x] The in-page editor bar (grant editors only) shows an **All sites** control that returns
+  to `recopyfast.com/edit`. The existing unsaved-changes guard still fires on the way out.
+  Owners and edit-session holders are unchanged.
+- [x] `/edit` checks for a live hub session on load (`GET /api/editor/sites`, today unused):
+  valid → the site list renders directly with the signed-in address and "Use a different
+  address"; 401 → the email step. Loading never flashes the email form, and a failed read
+  is an error state, never an empty list.
+- [x] The hub session lives 7 days when "Remember this browser" is ticked at code entry,
+  30 minutes otherwise. `submit-code` hub mode honours `rememberDevice`; every hub use still
+  re-reads `site_editors`, so removing an editor stays immediate.
+- [x] "Remember this browser" on `/edit` defaults to unticked, matching the in-page modal.
+- [x] "Use a different address" from a live session clears the hub cookie server-side.
+- [x] Embed allocation paid in-branch: CSS comments leave the shipped template strings
+  (measured −446 gz), the control is added, and the byte gate ratchets down to the new
+  measurement with both deltas itemised.
+- [ ] Jest covers the hub mount states, cookie lifetime, sign-out and the bar control. The
+  Playwright count stays 44 (contract); the journey site → All sites → list → second site is
+  proven live in production after deploy.
+- [ ] Required gates pass; independent review before merge.
+
+Research: `docs/research/s39-editor-back-to-sites.md`. Plan: `docs/plans/s39-editor-back-to-sites.md`.

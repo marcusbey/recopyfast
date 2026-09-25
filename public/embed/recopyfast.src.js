@@ -1278,6 +1278,12 @@
       if (!document.querySelector('#rcf-editor-banner-styles')) {
         const style = document.createElement('style');
         style.id = 'rcf-editor-banner-styles';
+        // CSS notes live out here, not in the literal: a comment inside the
+        // string ships as bytes on every customer page (s39 moved them out).
+        //   .rcf-editor-banner-mark — Brand mark: flat teal tile, no gradient
+        //     (design-system.md).
+        //   .rcf-editor-banner-email — Truncating is a layout decision; losing
+        //     the address is not — the full value stays in the title attribute.
         style.textContent = `
           #rcf-editor-banner, #rcf-editor-banner * { box-sizing: border-box; }
           #rcf-editor-banner {
@@ -1298,7 +1304,6 @@
             font-size: 13px;
             line-height: 1.4;
           }
-          /* Brand mark: flat teal tile, no gradient (design-system.md). */
           #rcf-editor-banner .rcf-editor-banner-mark {
             flex: none;
             display: inline-flex;
@@ -1320,8 +1325,6 @@
           #rcf-editor-banner .rcf-editor-banner-email {
             font-weight: 600;
             color: hsl(174 48% 68%);
-            /* Truncating is a layout decision; losing the address is not —
-               the full value stays in the title attribute. */
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1396,6 +1399,26 @@
       status.className = 'rcf-editor-banner-status';
       status.setAttribute('role', 'status');
       banner.appendChild(status);
+
+      // s39: the bar had no way back to the list. An editor invited to several
+      // sites, done with this one, could only hide the bar — reaching the next
+      // site meant retyping recopyfast.com/edit and waiting for a new code.
+      // The hub now resumes a live session, so this is one click. A <button>,
+      // not an <a>, to inherit the dismiss styling already hardened against
+      // host CSS. try/catch because a throw here lands in the host page's
+      // window (non-negotiable #4). The unsaved-edit beforeunload guard still
+      // fires on the way out.
+      const allSites = document.createElement('button');
+      allSites.type = 'button';
+      allSites.className = 'rcf-editor-banner-dismiss';
+      allSites.textContent = 'All sites';
+      allSites.setAttribute('aria-label', 'Back to all your sites');
+      allSites.onclick = function() {
+        try {
+          window.location.href = new URL('/edit', RECOPYFAST_API).toString();
+        } catch (e) {}
+      };
+      banner.appendChild(allSites);
 
       const permissions = this.editorAuth.permissions || [];
       if (permissions.indexOf('publish') !== -1 || permissions.indexOf('admin') !== -1) {
@@ -2004,6 +2027,11 @@
       if (!document.querySelector('#rcf-banner-styles')) {
         const style = document.createElement('style');
         style.id = 'rcf-banner-styles';
+        // CSS notes live out here, not in the literal: a comment inside the
+        // string ships as bytes on every customer page (s39 moved them out).
+        //   @media (max-width: 1000px / 840px …) — Metadata sheds from least to
+        //     most important as the bar narrows, so the actions on the right
+        //     are never pushed off-screen.
         style.textContent = `
           #rcf-staging-banner, #rcf-staging-banner * {
             box-sizing: border-box;
@@ -2148,8 +2176,6 @@
             background: hsl(174 52% 65%);
             border-color: hsl(174 52% 65%);
           }
-          /* Metadata sheds from least to most important as the bar narrows,
-             so the actions on the right are never pushed off-screen. */
           @media (max-width: 1000px) {
             .rcf-banner-meta-expiry,
             .rcf-banner-divider-expiry { display: none; }
@@ -3824,6 +3850,23 @@
        * flat, like the icon tile, using the surface token hsl(200 18% 10%).
        */
       const style = document.createElement('style');
+      // The rule above, applied to the notes that used to sit inside the CSS
+      // (s39 moved them out; wording kept):
+      //   .rcf-editing:focus — The outline colour is set inline per element
+      //     from the backdrop.
+      //   .rcf-actions-inline — Inline edit toolbar — fixed, floats above the
+      //     edited element.
+      //   .rcf-char-counter-inline — Character counter for in-place editing.
+      //   .rcf-field-panel — Extra scalar fields (a link's href) for the
+      //     in-place renderer. Fixed to the viewport and parented to <body>, so
+      //     the edited element is never wrapped or reparented to host them.
+      //   .rcf-animation-indicator — Animation indicator — fixed to the
+      //     viewport, never a child of the edited element (its label used to
+      //     leak into the saved content).
+      //   .rcf-form-popover — Form popover.
+      //   @keyframes rcf-hintFadeIn — Container hint animation.
+      //   @keyframes rcf-modal-in — Modal animation.
+      //   .rcf-modal img — Image editor specific.
       style.textContent = `
         .rcf-hovering {
           cursor: pointer !important;
@@ -3855,12 +3898,10 @@
         }
         .rcf-editing:focus,
         .rcf-editing:focus-visible {
-          /* The outline colour is set inline per element from the backdrop. */
           outline-style: solid !important;
           outline-width: 2px !important;
           outline-offset: 2px !important;
         }
-        /* Inline edit toolbar — fixed, floats above the edited element */
         .rcf-actions-inline {
           position: fixed;
           display: flex;
@@ -3895,7 +3936,6 @@
         .rcf-actions-inline button:active {
           transform: scale(0.98);
         }
-        /* Character counter for in-place editing */
         .rcf-char-counter-inline {
           position: fixed;
           font-size: 11px;
@@ -3977,11 +4017,6 @@
           50% { box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.3); }
           100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
         }
-        /*
-         * Extra scalar fields (a link's href) for the in-place renderer. Fixed
-         * to the viewport and parented to <body>, so the edited element is never
-         * wrapped or reparented to host them.
-         */
         .rcf-field-panel {
           position: fixed;
           z-index: 10000;
@@ -4015,8 +4050,6 @@
         .rcf-field-panel input:focus {
           border-color: rgba(59, 130, 246, 0.6);
         }
-        /* Animation indicator — fixed to the viewport, never a child of the
-           edited element (its label used to leak into the saved content). */
         .rcf-animation-indicator {
           position: fixed;
           transform: translateX(-50%);
@@ -4031,12 +4064,10 @@
           font-family: ui-sans-serif, system-ui, sans-serif;
           white-space: nowrap;
         }
-        /* Form popover */
         .rcf-form-popover input:focus {
           border-color: rgba(59, 130, 246, 0.5);
           background: rgba(255, 255, 255, 0.08);
         }
-        /* Container hint animation */
         @keyframes rcf-hintFadeIn {
           from { opacity: 0; transform: translateX(-50%) translateY(8px); }
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -4044,12 +4075,10 @@
         .rcf-container-hint {
           animation: rcf-hintFadeIn 0.3s ease forwards;
         }
-        /* Modal animation */
         @keyframes rcf-modal-in {
           from { opacity: 0; transform: scale(0.95); }
           to { opacity: 1; transform: scale(1); }
         }
-        /* Image editor specific */
         .rcf-modal img {
           transition: opacity 0.2s ease;
         }
