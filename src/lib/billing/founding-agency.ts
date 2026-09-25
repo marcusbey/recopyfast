@@ -1,5 +1,6 @@
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { stripe } from "@/lib/stripe/config";
+import type Stripe from "stripe";
 
 export const FOUNDING_AGENCY_LIMIT = 50 as const;
 export const FOUNDING_AGENCY_RECONCILIATION_GRACE_SECONDS = 10 * 60;
@@ -9,6 +10,11 @@ export interface FoundingAgencyAvailability {
   remaining: number;
   soldOut: boolean;
   limit: typeof FOUNDING_AGENCY_LIMIT;
+}
+
+export interface OpenFoundingAgencyCheckout {
+  sessionId: string;
+  url: string;
 }
 
 export type FoundingAgencyReservation =
@@ -66,6 +72,99 @@ export async function getFoundingAgencyAvailability(): Promise<FoundingAgencyAva
     soldOut: row.sold_out,
     limit: FOUNDING_AGENCY_LIMIT,
   };
+}
+
+/**
+ * Return only a provider-confirmed resumable Checkout Session.
+ *
+ * The local reservation alone is insufficient: another isolate may observe a
+ * newly inserted but still-unbound hold, and a bound session may have become
+ * complete or expired since the database write. Checkout uses this read before
+ * the new-session quota, so only an open Stripe session with the same account
+ * identity and a usable URL bypasses that bucket.
+ */
+export async function getOpenFoundingAgencyCheckout(
+  userId: string,
+): Promise<OpenFoundingAgencyCheckout | null> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("founding_agency_reservations")
+    .select("id, stripe_checkout_session_id, created_at")
+    .eq("user_id", userId)
+    .eq("product_id", "lifetime_agency")
+    .eq("status", "reserved")
+    .maybeSingle<{
+      id: string;
+      stripe_checkout_session_id: string | null;
+      created_at: string;
+    }>();
+
+  if (error) throw rpcError("resume", error.message);
+  if (!data) return null;
+
+  let session: Stripe.Checkout.Session | undefined;
+  if (data.stripe_checkout_session_id) {
+    session = await stripe.checkout.sessions.retrieve(
+      data.stripe_checkout_session_id,
+    );
+  } else {
+    const { data: customer, error: customerError } = await supabase
+      .from("billing_customers")
+      .select("stripe_customer_id")
+      .eq("user_id", userId)
+      .maybeSingle<{ stripe_customer_id: string }>();
+    if (customerError) throw rpcError("resume", customerError.message);
+
+    let startingAfter: string | undefined;
+    do {
+      const sessions = await stripe.checkout.sessions.list({
+        ...(customer?.stripe_customer_id
+          ? { customer: customer.stripe_customer_id }
+          : {}),
+        created: {
+          gte:
+            Math.floor(Date.parse(data.created_at) / 1000) -
+            STRIPE_HISTORY_CLOCK_SKEW_SECONDS,
+        },
+        limit: 100,
+        ...(startingAfter ? { starting_after: startingAfter } : {}),
+      });
+      session = sessions.data.find(
+        (candidate) =>
+          candidate.client_reference_id === userId &&
+          candidate.metadata?.user_id === userId &&
+          candidate.metadata?.product_id === "lifetime_agency" &&
+          candidate.metadata?.founding_reservation_id === data.id &&
+          candidate.status === "open" &&
+          typeof candidate.url === "string" &&
+          candidate.url.length > 0,
+      );
+      if (session || !sessions.has_more) break;
+      startingAfter = sessions.data.at(-1)?.id;
+      if (!startingAfter) break;
+    } while (startingAfter);
+
+    if (!session) return null;
+    await bindFoundingAgencyCheckout(
+      data.id,
+      userId,
+      session.id,
+      session.expires_at,
+    );
+  }
+
+  if (
+    (data.stripe_checkout_session_id &&
+      session.id !== data.stripe_checkout_session_id) ||
+    session.status !== "open" ||
+    session.client_reference_id !== userId ||
+    typeof session.url !== "string" ||
+    session.url.length === 0
+  ) {
+    return null;
+  }
+
+  return { sessionId: session.id, url: session.url };
 }
 
 export async function reserveFoundingAgencySpot(
@@ -303,7 +402,16 @@ export async function completeFoundingAgencyPurchase(
   reservationId: string,
   userId: string,
   stripePaymentIntentId: string,
-): Promise<{ granted: boolean; duplicate: boolean }> {
+): Promise<
+  | { granted: true; duplicate: false }
+  | { granted: false; duplicate: true }
+  | {
+      granted: false;
+      duplicate: false;
+      refundRequired: true;
+    }
+  | { granted: false; duplicate: false; refunded: true }
+> {
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase.rpc(
     "complete_founding_agency_purchase",
@@ -317,5 +425,67 @@ export async function completeFoundingAgencyPurchase(
   if (error) throw rpcError("complete", error.message);
   if (data === "granted") return { granted: true, duplicate: false };
   if (data === "duplicate") return { granted: false, duplicate: true };
+  if (data === "refunded") {
+    return { granted: false, duplicate: false, refunded: true };
+  }
+  if (data === "refund_required") {
+    return {
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    };
+  }
   throw rpcError("complete", "the completion RPC returned an invalid result");
+}
+
+export async function bindFoundingAgencyDuplicateRefundSession(
+  reservationId: string,
+  userId: string,
+  stripePaymentIntentId: string,
+  stripeCheckoutSessionId: string,
+): Promise<void> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase.rpc(
+    "bind_founding_agency_duplicate_refund_session",
+    {
+      p_reservation_id: reservationId,
+      p_user_id: userId,
+      p_stripe_payment_intent_id: stripePaymentIntentId,
+      p_stripe_checkout_session_id: stripeCheckoutSessionId,
+    },
+  );
+
+  if (error) throw rpcError("bind duplicate refund session for", error.message);
+  if (data !== true) {
+    throw rpcError(
+      "bind duplicate refund session for",
+      "the reservation no longer matches the duplicate payment",
+    );
+  }
+}
+
+export async function markFoundingAgencyDuplicateRefunded(
+  reservationId: string,
+  userId: string,
+  stripePaymentIntentId: string,
+  stripeRefundId: string,
+): Promise<void> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase.rpc(
+    "mark_founding_agency_duplicate_refunded",
+    {
+      p_reservation_id: reservationId,
+      p_user_id: userId,
+      p_stripe_payment_intent_id: stripePaymentIntentId,
+      p_stripe_refund_id: stripeRefundId,
+    },
+  );
+
+  if (error) throw rpcError("record duplicate refund for", error.message);
+  if (data !== true) {
+    throw rpcError(
+      "record duplicate refund for",
+      "the reservation no longer matches the duplicate payment",
+    );
+  }
 }

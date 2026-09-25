@@ -27,7 +27,9 @@ import {
 } from "@/lib/billing/credit-revocations";
 import { LIVE_SUBSCRIPTION_STATUSES } from "@/lib/billing/effective-plan";
 import {
+  bindFoundingAgencyDuplicateRefundSession,
   completeFoundingAgencyPurchase,
+  markFoundingAgencyDuplicateRefunded,
   releaseFoundingAgencyCheckout,
 } from "@/lib/billing/founding-agency";
 import {
@@ -255,6 +257,10 @@ export async function POST(req: NextRequest) {
 
       case "checkout.session.expired":
         await handleCheckoutSessionExpired(event.data.object, supabase);
+        break;
+
+      case "checkout.session.async_payment_failed":
+        await handleCheckoutSessionAsyncPaymentFailed(event.data.object);
         break;
 
       case "charge.refunded":
@@ -761,6 +767,7 @@ async function grantLifetime(
   paymentIntentId: string,
   productId?: string,
   foundingReservationId?: string,
+  checkoutSessionId?: string,
 ): Promise<void> {
   if (!grantsPlanId) {
     throw new Error(
@@ -779,7 +786,14 @@ async function grantLifetime(
     );
   }
 
-  let result: { granted: boolean; duplicate: boolean };
+  let result:
+    | { granted: boolean; duplicate: boolean }
+    | {
+        granted: false;
+        duplicate: false;
+        refundRequired: true;
+      }
+    | { granted: false; duplicate: false; refunded: true };
   if (productId === "lifetime_agency") {
     if (grantsPlanId !== "agency") {
       throw new Error(
@@ -805,6 +819,100 @@ async function grantLifetime(
   if (result.duplicate) {
     console.log(`Lifetime entitlement for ${paymentIntentId} already granted.`);
     // Already handled on the first delivery, including the cancellation below.
+    return;
+  }
+
+  if ("refunded" in result && result.refunded) {
+    console.log(
+      `Payment ${paymentIntentId} was already refunded as this account's ` +
+        `second Founding Agency lifetime purchase.`,
+    );
+    return;
+  }
+
+  if ("refundRequired" in result && result.refundRequired) {
+    if (!foundingReservationId) {
+      throw new Error(
+        `duplicate Founding Agency payment ${paymentIntentId} has no reservation id`,
+      );
+    }
+
+    let refundSessionId = checkoutSessionId;
+    if (!refundSessionId) {
+      const sessions = await stripe.checkout.sessions.list({
+        payment_intent: paymentIntentId,
+        limit: 100,
+      });
+      const matches = sessions.data.filter(
+        (candidate) =>
+          idOf(candidate.payment_intent) === paymentIntentId &&
+          candidate.client_reference_id === userId &&
+          candidate.metadata?.user_id === userId &&
+          candidate.metadata?.product_id === "lifetime_agency" &&
+          candidate.metadata?.founding_reservation_id === foundingReservationId,
+      );
+      if (matches.length !== 1) {
+        throw new Error(
+          `duplicate Founding Agency payment ${paymentIntentId} resolves to ` +
+            `${matches.length} matching Checkout Sessions`,
+        );
+      }
+      refundSessionId = matches[0].id;
+    }
+
+    await bindFoundingAgencyDuplicateRefundSession(
+      foundingReservationId,
+      userId,
+      paymentIntentId,
+      refundSessionId,
+    );
+
+    // Stripe idempotency keys have a finite retention window. First reconcile
+    // by durable metadata so a database failure after a successful refund does
+    // not attempt a second refund days later under an expired provider key.
+    const existingRefunds = await stripe.refunds.list({
+      payment_intent: paymentIntentId,
+      limit: 100,
+    });
+    const existingRefund = existingRefunds.data.find(
+      (candidate) =>
+        candidate.metadata?.founding_reservation_id === foundingReservationId,
+    );
+
+    let refund = existingRefund;
+    if (!refund || refund.status === "failed" || refund.status === "canceled") {
+      const baseKey = `founding-agency-duplicate-refund-${refundSessionId}`;
+      refund = await stripe.refunds.create(
+        {
+          payment_intent: paymentIntentId,
+          metadata: {
+            reason_code: "duplicate_founding_lifetime",
+            founding_reservation_id: foundingReservationId,
+          },
+        },
+        {
+          idempotencyKey: refund ? `${baseKey}-after-${refund.id}` : baseKey,
+        },
+      );
+    }
+
+    if (refund.status !== "succeeded") {
+      throw new Error(
+        `refund ${refund.id} for duplicate Founding Agency payment ` +
+          `${paymentIntentId} is ${refund.status ?? "in an unknown state"}`,
+      );
+    }
+
+    await markFoundingAgencyDuplicateRefunded(
+      foundingReservationId,
+      userId,
+      paymentIntentId,
+      refund.id,
+    );
+    console.log(
+      `Payment ${paymentIntentId} refunded because this account already holds ` +
+        `a Founding Agency lifetime purchase; no second entitlement was granted.`,
+    );
     return;
   }
 
@@ -1039,6 +1147,7 @@ async function handleCheckoutSessionCompleted(
     paymentIntentId,
     metadata.product_id,
     metadata.founding_reservation_id,
+    session.id,
   );
 }
 
@@ -1077,6 +1186,29 @@ async function handleCheckoutSessionExpired(
   if (!userId || !reservationId) {
     throw new Error(
       `expired Founding Agency Checkout ${session.id} has no user or reservation id`,
+    );
+  }
+
+  await releaseFoundingAgencyCheckout(reservationId, userId, session.id);
+}
+
+/**
+ * Release scarce capacity after Stripe confirms an asynchronous one-off
+ * payment failed. A Checkout Session can already be `complete` while a delayed
+ * bank payment is still pending, so expiry reconciliation cannot recover this
+ * hold. The signed terminal event is the authoritative release signal.
+ */
+async function handleCheckoutSessionAsyncPaymentFailed(
+  session: Stripe.Checkout.Session,
+): Promise<void> {
+  const metadata = session.metadata ?? {};
+  if (metadata.product_id !== "lifetime_agency") return;
+
+  const userId = metadata.user_id ?? session.client_reference_id ?? undefined;
+  const reservationId = metadata.founding_reservation_id;
+  if (!userId || !reservationId) {
+    throw new Error(
+      `failed Founding Agency Checkout ${session.id} has no user or reservation id`,
     );
   }
 

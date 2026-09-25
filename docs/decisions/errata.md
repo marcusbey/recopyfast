@@ -82,10 +82,11 @@ purpose was fixing stale cites**. Nothing about the pin changed.
 ## ADRs 028/029/019 — s34 supersession pointer
 
 [ADR 031](./031-checkout-hold-expiry-and-recoverable-subscriptions.md) records the decision
-changes for bounded unresolved founding holds, paid late completion and terminal cancellation
-before replacing recoverable subscriptions. It also explicitly records the s33 fail-closed
-`getUserSubscription` behavior omitted from ADR 029's supersession scope. This entry is only
-a pointer; the changed policy and rationale live in ADR 031.
+changes for bounded unresolved founding holds, paid late completion, duplicate-account refunds
+and invoice/portal recovery that blocks replacement subscriptions without cancelling them. It
+also explicitly records the s33 fail-closed `getUserSubscription` behavior omitted from ADR
+029's supersession scope. This entry is only a pointer; the changed policy and rationale live in
+ADR 031.
 
 ## Founding bind wrapper — historical deployment citation
 
@@ -94,3 +95,14 @@ The comment above the three-argument `bind_founding_agency_checkout` wrapper in 
 called it. The earlier `040000` version was an unpublished draft. The wrapper preserves that
 function identity, but its presence is not evidence of a prior deployment. Applied migration
 history remains unchanged; the four-argument form carries the provider expiry.
+
+## s34 checkout claim overload — inaccurate rolling-deploy justification
+
+The comment above the two-argument `claim_subscription_checkout_intent(UUID, TIMESTAMPTZ)`
+overload in the unpublished `20260925100000_checkout_hardening.sql` draft said it had to remain
+safe because an older deployed application could call it during a rolling deploy. Deployed
+`main` already called only the five-argument catalogue-choice overload through
+`claimSubscriptionCheckoutIntent` in `src/lib/billing/checkout-reservation.ts`. Hardening the
+two-argument function was harmless, but it was not a deployed call-site compatibility measure.
+The final s34 migration removes the unused replacement rather than preserving a false historical
+claim. Applied migrations remain unchanged.

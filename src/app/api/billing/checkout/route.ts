@@ -10,7 +10,7 @@ import {
   type CheckoutIntent,
 } from "@/lib/stripe/checkout";
 import {
-  cancelRecoverableSubscriptionsForCheckout,
+  getRecoverableSubscriptionCheckout,
   getUserSubscription,
 } from "@/lib/stripe/subscription";
 import {
@@ -35,6 +35,7 @@ import {
 import { withUserLock } from "@/lib/billing/user-lock";
 import {
   bindFoundingAgencyCheckout,
+  getOpenFoundingAgencyCheckout,
   reconcileExpiredFoundingAgencyCheckouts,
   releaseFoundingAgencyCheckout,
   reserveFoundingAgencySpot,
@@ -142,10 +143,12 @@ export async function POST(req: NextRequest) {
       limit: "CHECKOUT_IP",
       endpoint: "billing/checkout:ip",
       identifierType: "ip",
-      // Checkout creates provider obligations and Founding Agency holds. A
-      // limiter outage must not turn either money boundary into an unlimited
-      // unauthenticated path.
-      onStoreFailure: "deny",
+      // This coarse bucket is the unauthenticated flood guard. It fails open
+      // because the request body has not been trusted yet, so it cannot know
+      // whether this is the one checkout type (Founding Agency) whose capacity
+      // hold must stop when Redis is unavailable. The intent-aware user bucket
+      // below makes that fail-closed decision before the hold is reserved.
+      onStoreFailure: "allow",
       message: "Too many checkout attempts. Please try again later.",
     });
     if (ipLimited) return ipLimited;
@@ -159,18 +162,6 @@ export async function POST(req: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-
-    const userLimited = await enforceRateLimit(req, {
-      limit: "CHECKOUT_USER",
-      endpoint: "billing/checkout:user",
-      identifier: user.id,
-      identifierType: "user",
-      // The user bucket independently bounds a signed-in attacker sharing an
-      // IP with legitimate buyers; the same money-boundary policy fails closed.
-      onStoreFailure: "deny",
-      message: "Too many checkout attempts. Please try again later.",
-    });
-    if (userLimited) return userLimited;
 
     const body = (await req.json()) as CheckoutRequestBody;
     const parsed = await parseIntent(body);
@@ -206,16 +197,6 @@ export async function POST(req: NextRequest) {
     // overlapping POSTs both pass it. The lock serialises this isolate; the
     // reservation row (unique on user_id) serialises across isolates.
     if (parsed.intent.type === "subscription") {
-      if (existingSubscription) {
-        return NextResponse.json(
-          {
-            error:
-              "You already have a subscription. Use the upgrade flow to change plans.",
-          },
-          { status: 409 },
-        );
-      }
-
       const requestedChoice = {
         stripePriceId: await resolveStripePriceId(
           parsed.intent.planId,
@@ -226,11 +207,21 @@ export async function POST(req: NextRequest) {
       };
 
       const locked = await withUserLock(user.id, async () => {
-        // These rows do not grant entitlement, but Stripe may still recover
-        // them into payable subscriptions. Cancel and confirm every owned
-        // obligation before claiming a replacement intent; the database RPC
-        // repeats this guard under the cross-isolate advisory lock.
-        await cancelRecoverableSubscriptionsForCheckout(supabase, user.id);
+        // These rows can recover into payable subscriptions, including after
+        // a bank-debit payment spends days in `processing`. Checkout therefore
+        // sends the customer back to the current obligation and never cancels
+        // it as a side effect of asking to buy another subscription.
+        const recovery = await getRecoverableSubscriptionCheckout(
+          supabase,
+          user.id,
+        );
+        if (recovery) {
+          return { kind: "recovery" as const, recovery };
+        }
+
+        if (existingSubscription) {
+          return { kind: "conflict" as const, alreadySubscribed: true };
+        }
 
         // Read the table directly so a concurrent test can still barrier on
         // getUserSubscription (called once per request, above) while this
@@ -428,6 +419,25 @@ export async function POST(req: NextRequest) {
             };
           }
 
+          const limited = await enforceRateLimit(req, {
+            limit: "CHECKOUT_USER",
+            endpoint: "billing/checkout:new-session",
+            identifier: user.id,
+            identifierType: "user",
+            // Ordinary subscription checkout remains available during a
+            // Redis outage. Stripe/database idempotency still prevents a
+            // second obligation; the outage is logged by enforceRateLimit.
+            onStoreFailure: "allow",
+            message: "Too many checkout attempts. Please try again later.",
+          });
+          if (limited) {
+            // The fresh reservation is not scarce capacity and cannot be
+            // expired until its durable deadline. Leaving it unattached lets
+            // an allowed retry reuse the same Stripe idempotency key without
+            // racing another isolate into a second session.
+            return { kind: "limited" as const, response: limited };
+          }
+
           // A provider error is ambiguous: Stripe may have accepted the
           // request. Nothing below releases the intent on error; the next
           // request searches Stripe by metadata before creating again.
@@ -467,6 +477,56 @@ export async function POST(req: NextRequest) {
 
         return { kind: "conflict" as const, alreadySubscribed: false };
       });
+
+      if (locked.kind === "limited") {
+        return locked.response;
+      }
+
+      if (locked.kind === "recovery") {
+        switch (locked.recovery.kind) {
+          case "processing":
+            return NextResponse.json(
+              {
+                error:
+                  "A payment is still processing on your current subscription. We'll email you when it clears.",
+              },
+              { status: 409 },
+            );
+          case "resume":
+            return NextResponse.json(
+              {
+                error:
+                  "Your current subscription needs attention before you can start another checkout.",
+                resumeUrl: locked.recovery.resumeUrl,
+              },
+              { status: 409 },
+            );
+          case "paused_without_portal":
+            return NextResponse.json(
+              {
+                error:
+                  "Your subscription is paused. Contact support to resume it before starting another checkout.",
+              },
+              { status: 409 },
+            );
+          case "unavailable":
+            return NextResponse.json(
+              {
+                error:
+                  "Your current subscription needs attention before another checkout can start. Contact support if no payment link is available.",
+              },
+              { status: 409 },
+            );
+          case "already_subscribed":
+            return NextResponse.json(
+              {
+                error:
+                  "You already have a subscription. Use the upgrade flow to change plans.",
+              },
+              { status: 409 },
+            );
+        }
+      }
 
       if (locked.kind === "conflict") {
         const isCompleted =
@@ -557,11 +617,26 @@ export async function POST(req: NextRequest) {
             ? user.user_metadata.name
             : undefined;
 
-        // Missing price ids, origin configuration and customer-creation
-        // failures are all known before a capacity row exists. After this
-        // point transport/API errors are uncertain Stripe outcomes; definitive
-        // request rejection releases immediately, while ambiguous outcomes are
-        // recovered by idempotency or provider reconciliation at expiry.
+        const openCheckout = await getOpenFoundingAgencyCheckout(user.id);
+        if (openCheckout) {
+          return NextResponse.json(openCheckout);
+        }
+
+        const limited = await enforceRateLimit(req, {
+          limit: "CHECKOUT_USER",
+          endpoint: "billing/checkout:new-session",
+          identifier: user.id,
+          identifierType: "user",
+          // Founding is the sole fail-closed checkout because an unmetered
+          // request can consume one of the scarce capacity holds.
+          onStoreFailure: "deny",
+          message: "Too many checkout attempts. Please try again later.",
+        });
+        if (limited) return limited;
+
+        // Configuration and customer failures are known before scarce
+        // capacity is reserved. The user quota has already admitted this as a
+        // new-session attempt, and an existing open session returned above.
         const prepared = await preflightLifetimeCheckout(
           user.id,
           user.email!,
@@ -659,6 +734,18 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(session);
       }
     }
+
+    const limited = await enforceRateLimit(req, {
+      limit: "CHECKOUT_USER",
+      endpoint: "billing/checkout:new-session",
+      identifier: user.id,
+      identifierType: "user",
+      // Credits, payment methods and Lifetime Pro have durable provider-side
+      // idempotency and no scarce hold, so a Redis outage is logged and allowed.
+      onStoreFailure: "allow",
+      message: "Too many checkout attempts. Please try again later.",
+    });
+    if (limited) return limited;
 
     const session = await createCheckoutSession(
       user.id,

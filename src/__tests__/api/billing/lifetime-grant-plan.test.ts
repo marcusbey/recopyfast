@@ -22,14 +22,22 @@
  */
 
 const mockConstructEvent = jest.fn();
+const mockHeaders = jest.fn();
 const mockSubscriptionUpdate = jest.fn();
+const mockRefundCreate = jest.fn();
+const mockRefundList = jest.fn();
+const mockCheckoutSessionList = jest.fn();
 const mockCompleteFoundingAgencyPurchase = jest.fn();
+const mockBindFoundingAgencyDuplicateRefundSession = jest.fn();
+const mockMarkFoundingAgencyDuplicateRefunded = jest.fn();
 const mockReleaseFoundingAgencyCheckout = jest.fn();
 
 jest.mock("stripe", () =>
   jest.fn().mockImplementation(() => ({
     webhooks: { constructEvent: mockConstructEvent },
     subscriptions: { update: mockSubscriptionUpdate },
+    refunds: { create: mockRefundCreate, list: mockRefundList },
+    checkout: { sessions: { list: mockCheckoutSessionList } },
   })),
 );
 
@@ -37,7 +45,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_fake";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_fake";
 
 jest.mock("next/headers", () => ({
-  headers: jest.fn(async () => new Headers({ "stripe-signature": "sig_test" })),
+  headers: (...args: unknown[]) => mockHeaders(...args),
 }));
 
 type Row = Record<string, unknown>;
@@ -166,8 +174,12 @@ jest.mock("@/lib/supabase/server", () => ({
 }));
 
 jest.mock("@/lib/billing/founding-agency", () => ({
+  bindFoundingAgencyDuplicateRefundSession: (...args: unknown[]) =>
+    mockBindFoundingAgencyDuplicateRefundSession(...args),
   completeFoundingAgencyPurchase: (...args: unknown[]) =>
     mockCompleteFoundingAgencyPurchase(...args),
+  markFoundingAgencyDuplicateRefunded: (...args: unknown[]) =>
+    mockMarkFoundingAgencyDuplicateRefunded(...args),
   releaseFoundingAgencyCheckout: (...args: unknown[]) =>
     mockReleaseFoundingAgencyCheckout(...args),
 }));
@@ -251,12 +263,37 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     jest.clearAllMocks();
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "error").mockImplementation(() => {});
+    mockHeaders.mockResolvedValue(
+      new Headers({ "stripe-signature": "sig_test" }),
+    );
     lifetimeGrantPlanId = "starter";
     mockCompleteFoundingAgencyPurchase.mockResolvedValue({
       granted: true,
       duplicate: false,
     });
     mockReleaseFoundingAgencyCheckout.mockResolvedValue(true);
+    mockRefundList.mockResolvedValue({ data: [] });
+    mockCheckoutSessionList.mockResolvedValue({
+      data: [
+        {
+          id: "cs_1",
+          payment_intent: PAYMENT_INTENT,
+          client_reference_id: USER_ID,
+          metadata: {
+            user_id: USER_ID,
+            product_id: "lifetime_agency",
+            founding_reservation_id: "reservation-2",
+          },
+        },
+      ],
+    });
+    mockRefundCreate.mockResolvedValue({
+      id: "re_duplicate",
+      status: "succeeded",
+      metadata: { founding_reservation_id: "reservation-2" },
+    });
+    mockMarkFoundingAgencyDuplicateRefunded.mockResolvedValue(undefined);
+    mockBindFoundingAgencyDuplicateRefundSession.mockResolvedValue(undefined);
     db = {
       billing_events: [],
       billing_subscriptions: [],
@@ -448,6 +485,190 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
     );
   });
 
+  it("refunds a second Founding Agency payment with a session-stable key", async () => {
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    });
+    const metadata = {
+      user_id: USER_ID,
+      type: "lifetime_purchase",
+      product_id: "lifetime_agency",
+      grants_plan_id: "agency",
+      founding_reservation_id: "reservation-2",
+    };
+
+    const first = await deliver(
+      paymentIntentEvent("evt_duplicate_pi", metadata),
+    );
+    const second = await deliver(
+      checkoutSessionEvent("evt_duplicate_session", metadata),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mockRefundCreate).toHaveBeenCalledTimes(2);
+    expect(mockRefundCreate).toHaveBeenNthCalledWith(
+      1,
+      {
+        payment_intent: PAYMENT_INTENT,
+        metadata: {
+          reason_code: "duplicate_founding_lifetime",
+          founding_reservation_id: "reservation-2",
+        },
+      },
+      {
+        idempotencyKey: "founding-agency-duplicate-refund-cs_1",
+      },
+    );
+    expect(mockRefundCreate).toHaveBeenNthCalledWith(
+      2,
+      {
+        payment_intent: PAYMENT_INTENT,
+        metadata: {
+          reason_code: "duplicate_founding_lifetime",
+          founding_reservation_id: "reservation-2",
+        },
+      },
+      {
+        idempotencyKey: "founding-agency-duplicate-refund-cs_1",
+      },
+    );
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockMarkFoundingAgencyDuplicateRefunded).toHaveBeenCalledTimes(2);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringMatching(/refunded.*already holds.*Founding Agency/i),
+    );
+  });
+
+  it("retries a duplicate-account refund after Stripe rejects the first attempt", async () => {
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    });
+    mockRefundCreate
+      .mockRejectedValueOnce(new Error("temporary Stripe failure"))
+      .mockResolvedValueOnce({ id: "re_duplicate", status: "succeeded" });
+    const event = paymentIntentEvent("evt_duplicate_retry", {
+      user_id: USER_ID,
+      type: "lifetime_purchase",
+      product_id: "lifetime_agency",
+      grants_plan_id: "agency",
+      founding_reservation_id: "reservation-2",
+    });
+
+    const first = await deliver(event);
+    const retry = await deliver(event);
+
+    expect(first.status).toBe(500);
+    expect(retry.status).toBe(200);
+    expect(mockRefundCreate).toHaveBeenCalledTimes(2);
+    expect(mockRefundCreate.mock.calls[0]?.[1]).toEqual(
+      mockRefundCreate.mock.calls[1]?.[1],
+    );
+  });
+
+  it("records an existing successful refund without creating another after a delayed retry", async () => {
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    });
+    mockRefundList.mockResolvedValue({
+      data: [
+        {
+          id: "re_existing",
+          status: "succeeded",
+          metadata: { founding_reservation_id: "reservation-2" },
+        },
+      ],
+    });
+
+    const response = await deliver(
+      paymentIntentEvent("evt_duplicate_reconcile", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+        product_id: "lifetime_agency",
+        grants_plan_id: "agency",
+        founding_reservation_id: "reservation-2",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefundCreate).not.toHaveBeenCalled();
+    expect(mockMarkFoundingAgencyDuplicateRefunded).toHaveBeenCalledWith(
+      "reservation-2",
+      USER_ID,
+      PAYMENT_INTENT,
+      "re_existing",
+    );
+  });
+
+  it("keeps an existing pending refund retryable without creating another", async () => {
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    });
+    mockRefundList.mockResolvedValue({
+      data: [
+        {
+          id: "re_pending",
+          status: "pending",
+          metadata: { founding_reservation_id: "reservation-2" },
+        },
+      ],
+    });
+
+    const response = await deliver(
+      paymentIntentEvent("evt_duplicate_pending", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+        product_id: "lifetime_agency",
+        grants_plan_id: "agency",
+        founding_reservation_id: "reservation-2",
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(mockRefundCreate).not.toHaveBeenCalled();
+    expect(mockMarkFoundingAgencyDuplicateRefunded).not.toHaveBeenCalled();
+  });
+
+  it("uses a stable follow-up key after a failed refund", async () => {
+    mockCompleteFoundingAgencyPurchase.mockResolvedValue({
+      granted: false,
+      duplicate: false,
+      refundRequired: true,
+    });
+    mockRefundList.mockResolvedValue({
+      data: [
+        {
+          id: "re_failed",
+          status: "failed",
+          metadata: { founding_reservation_id: "reservation-2" },
+        },
+      ],
+    });
+
+    const response = await deliver(
+      paymentIntentEvent("evt_duplicate_failed", {
+        user_id: USER_ID,
+        type: "lifetime_purchase",
+        product_id: "lifetime_agency",
+        grants_plan_id: "agency",
+        founding_reservation_id: "reservation-2",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefundCreate).toHaveBeenCalledWith(expect.any(Object), {
+      idempotencyKey: "founding-agency-duplicate-refund-cs_1-after-re_failed",
+    });
+  });
+
   it("fails closed when Founding Agency metadata names another grant", async () => {
     const response = await deliver(
       paymentIntentEvent("evt_founding_mismatch", {
@@ -487,6 +708,31 @@ describe("A-22: which plan a completed lifetime checkout grants", () => {
       "reservation-1",
       USER_ID,
       "cs_expired",
+    );
+  });
+
+  it("releases a Founding Agency hold when its asynchronous payment fails", async () => {
+    const response = await deliver({
+      id: "evt_founding_async_failed",
+      type: "checkout.session.async_payment_failed",
+      data: {
+        object: {
+          id: "cs_async_failed",
+          client_reference_id: USER_ID,
+          metadata: {
+            user_id: USER_ID,
+            product_id: "lifetime_agency",
+            founding_reservation_id: "reservation-1",
+          },
+        },
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockReleaseFoundingAgencyCheckout).toHaveBeenCalledWith(
+      "reservation-1",
+      USER_ID,
+      "cs_async_failed",
     );
   });
 });

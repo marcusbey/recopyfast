@@ -35,6 +35,8 @@ describeDb("Founding Agency capacity", ({ query }) => {
       availability_rpc: string | null;
       subscription_claim_rpc: string | null;
       unresolved_release_rpc: string | null;
+      duplicate_refund_rpc: string | null;
+      duplicate_refund_bind_rpc: string | null;
     }>(`
       SELECT to_regclass('public.founding_agency_reservations')::text AS reservations,
              to_regprocedure('public.reserve_founding_agency_spot(uuid)')::text AS reserve_rpc,
@@ -48,7 +50,13 @@ describeDb("Founding Agency capacity", ({ query }) => {
              )::text AS subscription_claim_rpc,
              to_regprocedure(
                'public.release_unresolved_founding_agency_checkout(uuid,text)'
-             )::text AS unresolved_release_rpc
+             )::text AS unresolved_release_rpc,
+             to_regprocedure(
+               'public.mark_founding_agency_duplicate_refunded(uuid,uuid,text,text)'
+             )::text AS duplicate_refund_rpc,
+             to_regprocedure(
+               'public.bind_founding_agency_duplicate_refund_session(uuid,uuid,text,text)'
+             )::text AS duplicate_refund_bind_rpc
     `);
 
     // RCF_TEST_DB_URL only proves CI reached a ReCopyFast database. This suite
@@ -122,6 +130,16 @@ describeDb("Founding Agency capacity", ({ query }) => {
     );
 
     expect(rows[0].outcome).toBe("reserved");
+  });
+
+  test("removes the unused two-argument subscription claim overload", async () => {
+    const { rows } = await query<{ legacy_claim: string | null }>(
+      `SELECT to_regprocedure(
+         'public.claim_subscription_checkout_intent(uuid,timestamp with time zone)'
+       )::text AS legacy_claim`,
+    );
+
+    expect(rows[0].legacy_claim).toBeNull();
   });
 
   test("50 completed sales refuse checkout as sold out", async () => {
@@ -675,6 +693,152 @@ describeDb("Founding Agency capacity", ({ query }) => {
     });
   });
 
+  test("two paid founding reservations for one account atomically grant one and refund one", async () => {
+    const userId = await createUser("duplicate-account");
+    const first = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [userId],
+    );
+    await query("SELECT release_founding_agency_checkout($1, $2, $3)", [
+      first.rows[0].reservation_id,
+      userId,
+      `${marker}-session-first`,
+    ]);
+    const second = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [userId],
+    );
+    await query("SELECT bind_founding_agency_checkout($1, $2, $3)", [
+      second.rows[0].reservation_id,
+      userId,
+      `${marker}-session-second`,
+    ]);
+
+    const attempts = [
+      {
+        reservationId: first.rows[0].reservation_id,
+        paymentIntentId: `${marker}-payment-first`,
+      },
+      {
+        reservationId: second.rows[0].reservation_id,
+        paymentIntentId: `${marker}-payment-second`,
+      },
+    ];
+    const outcomes = await Promise.all(
+      attempts.map(async (attempt) => ({
+        ...attempt,
+        response: await query<{ result: string }>(
+          "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+          [attempt.reservationId, userId, attempt.paymentIntentId],
+        ),
+      })),
+    );
+    const refundAttempt = outcomes.find(
+      ({ response }) => response.rows[0].result === "refund_required",
+    );
+    expect(refundAttempt).toBeDefined();
+    const retry = await query<{ result: string }>(
+      "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+      [refundAttempt!.reservationId, userId, refundAttempt!.paymentIntentId],
+    );
+    const marked = await query<{ marked: boolean }>(
+      `SELECT mark_founding_agency_duplicate_refunded($1, $2, $3, $4)
+         AS marked`,
+      [
+        refundAttempt!.reservationId,
+        userId,
+        refundAttempt!.paymentIntentId,
+        `${marker}-refund`,
+      ],
+    );
+    const afterRefund = await query<{ result: string }>(
+      "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+      [refundAttempt!.reservationId, userId, refundAttempt!.paymentIntentId],
+    );
+    const durable = await query<{
+      completed: number;
+      released: number;
+      entitlements: number;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'completed')::INTEGER AS completed,
+         COUNT(*) FILTER (
+           WHERE status = 'released' AND stripe_payment_intent_id IS NOT NULL
+         )::INTEGER AS released,
+         (
+           SELECT COUNT(*)::INTEGER FROM plan_entitlements
+           WHERE user_id = $1 AND plan_id = 'agency' AND revoked_at IS NULL
+         ) AS entitlements
+       FROM founding_agency_reservations
+       WHERE user_id = $1 AND product_id = 'lifetime_agency'`,
+      [userId],
+    );
+
+    expect(
+      outcomes.map(({ response }) => response.rows[0].result).sort(),
+    ).toEqual(["granted", "refund_required"]);
+    expect(retry.rows[0].result).toBe("refund_required");
+    expect(marked.rows[0].marked).toBe(true);
+    expect(afterRefund.rows[0].result).toBe("refunded");
+    expect(durable.rows[0]).toEqual({
+      completed: 1,
+      released: 1,
+      entitlements: 1,
+    });
+  });
+
+  test("a paid duplicate with a lost bind remains refundable by its verified session", async () => {
+    const userId = await createUser("duplicate-lost-bind");
+    const first = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [userId],
+    );
+    await query("SELECT release_founding_agency_checkout($1, $2, $3)", [
+      first.rows[0].reservation_id,
+      userId,
+      `${marker}-original-session`,
+    ]);
+    const second = await query<{ reservation_id: string }>(
+      "SELECT reservation_id FROM reserve_founding_agency_spot($1)",
+      [userId],
+    );
+    await query("SELECT complete_founding_agency_purchase($1, $2, $3)", [
+      first.rows[0].reservation_id,
+      userId,
+      `${marker}-original-payment`,
+    ]);
+
+    const duplicate = await query<{ result: string }>(
+      "SELECT complete_founding_agency_purchase($1, $2, $3) AS result",
+      [second.rows[0].reservation_id, userId, `${marker}-duplicate-payment`],
+    );
+    const bound = await query<{ bound: boolean }>(
+      `SELECT bind_founding_agency_duplicate_refund_session($1, $2, $3, $4)
+         AS bound`,
+      [
+        second.rows[0].reservation_id,
+        userId,
+        `${marker}-duplicate-payment`,
+        `${marker}-recovered-session`,
+      ],
+    );
+    const row = await query<{
+      status: string;
+      stripe_checkout_session_id: string | null;
+    }>(
+      `SELECT status, stripe_checkout_session_id
+       FROM founding_agency_reservations WHERE id = $1`,
+      [second.rows[0].reservation_id],
+    );
+
+    expect(duplicate.rows[0].result).toBe("refund_required");
+    expect(bound.rows[0].bound).toBe(true);
+    expect(row.rows[0]).toEqual({
+      status: "released",
+      stripe_checkout_session_id: `${marker}-recovered-session`,
+    });
+  });
+
   test.each(["incomplete", "unpaid", "paused"])(
     "claim refuses a %s subscription even when a pending intent already exists",
     async (status) => {
@@ -696,12 +860,6 @@ describeDb("Founding Agency capacity", ({ query }) => {
           "SELECT * FROM claim_subscription_checkout_intent($1, $2, $3, $4, $5)",
           [userId, expiresAt, "price_pro_monthly", "pro", "monthly"],
         ),
-      ).rejects.toMatchObject({ code: "P0001" });
-      await expect(
-        query("SELECT * FROM claim_subscription_checkout_intent($1, $2)", [
-          userId,
-          expiresAt,
-        ]),
       ).rejects.toMatchObject({ code: "P0001" });
     },
   );
@@ -865,12 +1023,14 @@ describeDb("Founding Agency capacity", ({ query }) => {
           'release_founding_agency_checkout',
           'complete_founding_agency_purchase',
           'get_founding_agency_availability',
-          'release_unresolved_founding_agency_checkout'
+          'release_unresolved_founding_agency_checkout',
+          'mark_founding_agency_duplicate_refunded',
+          'bind_founding_agency_duplicate_refund_session'
         )
       ORDER BY identity
     `);
 
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(9);
     for (const row of rows) {
       expect(row).toMatchObject({
         anon: false,

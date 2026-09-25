@@ -9,11 +9,11 @@ Branch feature/s34-checkout-hardening at c3b2b28. No live Stripe, production dat
 
 ## Decisions
 
-Choose **cancel before replacement** for incomplete/unpaid/paused subscriptions. They do not confer entitlement, but may recover into a second obligation. Confirm every owned recoverable subscription is terminal at Stripe before a new Checkout can be created; on cancellation ambiguity, re-read and accept only canceled/incomplete_expired. Provider/read/write failures fail closed. Never reinterpret an active/trialing/past_due provider result as safe to replace. Persist confirmed cancellation with user and provider-id scoping; preserve the durable-intent, cross-isolate claim and trial-conversion guards. Portal-only recovery is rejected because paused/incomplete recovery depends on provider product configuration and the user explicitly permits cancellation. Do not change LIVE_SUBSCRIPTION_STATUSES; create a separate checkout blocking status contract. The claim RPC must refuse recoverable DB rows as a final transactional guard, including when a pending intent exists.
+Operator fix-mode decision (2026-09-25) supersedes the initial cancellation policy: NEVER cancel an existing subscription from checkout. For incomplete/past_due/unpaid/paused retrieve authoritative Stripe subscription and latest invoice payments. Processing returns 409 with the approved processing message; other incomplete/past_due/unpaid states return 409 plus hosted invoice resumeUrl, paused uses configured billing portal or clear recovery message. Recovered active/trialing returns the normal 409 upgrade message. Preserve transactional nonterminal claim guards and prevent replacement subscriptions. UI follows resumeUrl.
 
 Founding: use ten-minute grace after stored session expires_at, plus a five-minute lower-bound clock-skew allowance for Stripe history. Catch provider-specific per-row failures, continue processing other rows, retain unresolved rows within grace, and atomically release/flag overdue unresolved holds using a service-only RPC and the same capacity lock. Persist reconciliation timestamp/reason (bounded reason codes) and sanitized warning; keep historical flag even after late payment. Database failures remain fail-closed. Known paid/completed sessions are not released as unresolved. Completion accepts a released hold and grants atomically/idempotently without a capacity recheck: ordinary claims cannot exceed 50 committed+held slots, but an already-paid late completion can yield 51 (or multiple delayed paid exceptions); customers are never refused. Preserve refund/account deletion durability.
 
-## Tasks
+## Initial implementation tasks (historical; fix-mode decisions below supersede T3/T4)
 
 - [x] T1 Add red regressions for per-row unresolved recovery, expiry+grace boundary, missing session/API failure/skew, continued healthy claims and history bound. Add DB tests for timed release, operator flags, one active hold, capacity races and late paid completion/idempotency. Preserve all guards; no scoped failing markers currently exist.
 - [x] T2 Add idempotent migration `20260925100000_checkout_hardening.sql`: reconciliation fields/RPC, released-to-completed grant, and nonterminal subscription claim guard (all overloads). Explicit REVOKE PUBLIC/anon/authenticated and GRANT service_role per 20260805190000. Never edit old migrations. Implement reconciliation changes and late-webhook coverage.
@@ -48,7 +48,7 @@ owned port-55434 database validation above, whose cluster has been stopped. No p
 credentials or remote database endpoint were used.
 
 
-## Final local gates — 2026-09-25
+## Initial implementation local gates — 2026-09-25 (before fix mode)
 
 Node 24.14.0. The temporary command runner clears inherited provider/deployment variables
 and reads the exact main CI job placeholder environment from `.github/workflows/ci.yml`.
@@ -79,3 +79,73 @@ unchanged. Independent review, operator migration and any release remain outstan
 mocked/provider-state and vanilla PostgreSQL evidence do not establish live Stripe delivery.
 Required gates were run explicitly; redundant shared git-hook reruns are suppressed per command
 at commit/push to honor the requested heavy-load policy, without changing the hooks themselves.
+
+## Operator-prevalidated fix-mode tasks — 2026-09-25
+
+The user explicitly validated these decisions; existing T1–T6 evidence above is historical. Review file is externally owned: leave it byte-identical and uncommitted.
+
+- [x] F1 M1/m5: replace checkout cancellation with invoice/portal recovery, test processing across recoverable statuses and recovered-active 409, remove unused cancel helper/tests, update ADR 031 and migration-comment erratum without editing prior migrations.
+- [x] F2 m2: atomically enforce one founding lifetime per account, return duplicate-account outcome without cap increment/grant, refund duplicate Stripe payment idempotently per session with safe retry semantics, log; new idempotent migration in assigned 20260925100000–199999 range, DB and webhook regressions.
+- [x] F3 m3: separate new-session buckets (10/user/15min); confirmed existing open-session resumes consume no session quota; an unattached intent alone does not bypass admission. Only FOUNDING holds deny Redis store failure, ordinary subscription/credit checkout allow with logging; UI formats 429 retry time as Try again at HH:MM. Preserve before-auth flood protection with an independent bucket. Founding admission precedes any new hold, and quota rejection never invokes the expired-only subscription cleanup RPC on a fresh intent.
+- [x] F4 m1/m4: handle checkout.session.async_payment_failed to release founding hold; document operator endpoint subscription, resetAllMocks hygiene, valid expiry fixture.
+- [x] F5: targeted red→green proof, disposable DB migration/reapply/ACL checks, independent read-only review, final precommit/build/official-Node20 embed/audit gates; commit fix(s34), push existing draft PR #32, no merge/deploy.
+
+## Resumed fix-mode verification — 2026-09-25
+
+- `origin/main` was refreshed and remains `c3b2b28`, the story's merge base. No integration merge was needed.
+- The externally owned review remains unmodified and unstaged; its SHA-256 is `b9f6ae16be9b11cf9f3675938ce9f6c9cf8aacbb2f6e073dafc1892f9f7a13a1`.
+- Checkout/UI TDD: the new expectations initially produced 52 failures; a terminal-state follow-up produced one additional red regression. Final focused checkout, subscription recovery and checkout-hook suites pass 88/88; three related trial/subscription regressions pass 16/16.
+- Independent checkout verification reran the 88 tests. Neutralizing the processing-payment predicate caused four failures; restoring the exact file bytes passed all 17 recovery tests.
+- A dedicated PostgreSQL 14 instance at loopback port 55435 received all 60 baseline migrations through `20260925100000`. Vanilla PostgreSQL uses minimal local auth shims; this is SQL evidence, not Supabase/PostgREST or live provider evidence.
+- `npm audit --omit=dev` reports zero vulnerabilities. The official Node 20.15.1 embed check passes with bundle 46,601 / 46,681 B, widget 33,837 / 33,865 B and transport 13,141 B; no package or embed changes are part of this fix.
+
+- Founding/webhook TDD produced six focused JS failures before implementation; the baseline SQL run failed against the missing forward RPCs. Final focused JS verification passes four suites / 124 tests. The new migration applied and reapplied successfully, and the founding DB suite passes 23/23.
+- Independent direct SQL inspection confirms all nine founding function signatures are SECURITY DEFINER with a fixed search path, deny EXECUTE to anon/authenticated, and grant it to service_role. The unused two-argument subscription claim overload is absent. Existing migrations remain byte-identical.
+- Integration hardening: admission no longer treats an unattached intent as proof of a resumable session; fresh quota-denied subscription intents are retained instead of sent to the expired-only cleanup RPC. Founding checks and recovers provider-confirmed open sessions before quota and hold creation. Duplicate refunds use the exact verified Checkout Session, survive lost bind/write acknowledgements, reuse pending refunds, and persist confirmed success.
+
+Final application gates and independent review results follow.
+
+The first full Jest invocation passed 3,143 tests but its temporary runner incorrectly set
+`RCF_TEST_DB_URL` to a closed loopback port. Three unrelated suites interpret any explicit URL
+as an instruction to run database assertions and failed with connection refused. The runner
+was corrected to leave that variable absent, matching the main CI job. The sandbox still denies
+the unrelated shared port 54322; the owned port-55435 founding proof is separate. Jest was rerun
+without changing tests, assertions, retry settings or timeouts. The four preceding application
+gates had already passed and were not repeated.
+
+### Final resumed gates
+
+All commands use Node 20.15.1 and the exact main CI placeholder environment. No real provider
+credentials, remote database URL or deployment configuration enter the runner.
+
+| Gate | Result |
+| --- | --- |
+| `npm run lint` | Passed; 0 errors, 39 inherited warnings. |
+| `npm run type-check` | Passed. |
+| `npm run type-check:build` | Passed. |
+| `npm run format:check` | Passed across all source files. |
+| `npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB --coverage` | Passed; 235 suites, 3,143 tests; 2 suites / 38 tests skipped by existing gates. No failures. Coverage: 55.92% statements, 49.99% branches, 51.63% functions, 56.45% lines; all ratchets passed. |
+| `npm run build` | Passed; optimized production build, TypeScript and prerendering; embed diff remains empty. |
+| `~/.asdf/installs/nodejs/20.15.1/bin/node scripts/build-embed.mjs --check` | Passed; fresh, bundle 46,601 / 46,681 B and widget 33,837 / 33,865 B. |
+| `npm audit --omit=dev` | Passed; zero vulnerabilities. |
+| Dedicated founding PostgreSQL suite | 23/23 passed, independently repeated by the reviewer. |
+| Forward migration apply/reapply and ACL inspection | Passed; nine founding function signatures are service-only; legacy two-argument claim removed. |
+| `git diff --check` | Passed. |
+
+The main CI-style suite deliberately does not claim its database-gated skips as SQL evidence;
+the owned PostgreSQL run above supplies that evidence for this story. Stripe, Redis outage
+behavior and redirects are covered with mocks; real provider delivery and a rendered browser
+checkout are not claimed. Supabase/PostgREST and production remain untested and untouched.
+
+Independent fix review: **APPROVE**, max severity **none**, zero open findings. The reviewer
+independently ran 88 checkout/UI tests, 42 founding/webhook tests and all 23 SQL tests, checked
+all 12 changed TypeScript files with zero diagnostics, and verified the processing guard's four
+mutation failures and exact restoration. Its one stale research sentence was corrected before
+commit. The externally owned verdict was neither rewritten nor staged.
+
+Delivery is one `fix(s34)` commit to the existing feature branch and draft PR #32. A second
+fetch confirmed main is still `c3b2b28`. Explicit gates above replace redundant hook reruns for
+this commit/push only, as in the original plan; hook files and all test/coverage thresholds are
+unchanged. The disposable cluster was stopped/deleted, and `.next` plus coverage were removed.
+The operator still owns migration application, the live endpoint event subscription and any
+merge/release.

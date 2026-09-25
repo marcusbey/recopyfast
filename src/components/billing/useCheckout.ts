@@ -50,6 +50,20 @@ function formatRetrySentence(retryAt: unknown): string | null {
   return `You can start a new checkout at ${retryTime}.`;
 }
 
+function getRateLimitRetryAt(response: Response): string | null {
+  const resetEpoch = Number(response.headers.get("X-RateLimit-Reset"));
+  if (Number.isFinite(resetEpoch) && resetEpoch > 0) {
+    return new Date(resetEpoch * 1000).toISOString();
+  }
+
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return new Date(Date.now() + retryAfter * 1000).toISOString();
+  }
+
+  return null;
+}
+
 export function useCheckout(): UseCheckoutResult {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,27 +90,41 @@ export function useCheckout(): UseCheckoutResult {
       // that one response as a resumable handoff: the customer may have used
       // Stripe's cancel link, and discarding the URL here previously trapped
       // them on the billing page until the hour-long intent expired.
+      const redirectUrl =
+        typeof data?.resumeUrl === "string" && data.resumeUrl.length > 0
+          ? data.resumeUrl
+          : data?.url;
       const canResumeOpenCheckout =
         response.status === 409 &&
-        typeof data?.url === "string" &&
-        data.url.length > 0;
+        typeof redirectUrl === "string" &&
+        redirectUrl.length > 0;
 
       if (!response.ok && !canResumeOpenCheckout) {
         const responseError = data?.error || "Failed to start checkout";
-        const retrySentence =
-          response.status === 409 ? formatRetrySentence(data?.retryAt) : null;
+        const retrySentence = formatRetrySentence(
+          response.status === 429
+            ? getRateLimitRetryAt(response)
+            : data?.retryAt,
+        );
+        const retryMessage =
+          response.status === 429
+            ? retrySentence?.replace(
+                "You can start a new checkout",
+                "Try again",
+              )
+            : retrySentence;
 
         throw new Error(
-          retrySentence ? `${responseError} ${retrySentence}` : responseError,
+          retryMessage ? `${responseError} ${retryMessage}` : responseError,
         );
       }
 
-      if (!data?.url) {
+      if (!redirectUrl) {
         throw new Error("Stripe did not return a checkout page");
       }
 
       // Full navigation, not router.push — Checkout is hosted on Stripe.
-      window.location.assign(data.url);
+      window.location.assign(redirectUrl);
     } catch (err: unknown) {
       inFlight.current = false;
       setIsRedirecting(false);
