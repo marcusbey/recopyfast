@@ -21,6 +21,10 @@ describe("useSiteActivation", () => {
     });
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("loads progress and reports non-ok responses as errors", async () => {
     const fetchMock = jest
       .fn()
@@ -40,7 +44,7 @@ describe("useSiteActivation", () => {
     );
     await waitFor(() => expect(result.current.data?.installed).toBe(true));
 
-    await act(async () => result.current.refresh());
+    await act(async () => result.current.refetch());
 
     expect(result.current.error).toMatch(/could not load activation/i);
     expect(result.current.data).toBeNull();
@@ -142,7 +146,10 @@ describe("useSiteActivation", () => {
     );
     await waitFor(() => expect(result.current.data).not.toBeNull());
 
-    void result.current.refresh();
+    let refetchPromise!: Promise<void>;
+    act(() => {
+      refetchPromise = result.current.refetch();
+    });
     await act(async () => result.current.dismiss());
     await act(async () => {
       resolveRefresh(
@@ -153,12 +160,14 @@ describe("useSiteActivation", () => {
           dismissed: false,
         }),
       );
+      await refetchPromise;
     });
 
     expect(result.current.data?.dismissed).toBe(true);
   });
 
-  it("refreshes an incomplete visible checklist when focus returns", async () => {
+  it("polls an incomplete visible checklist every 60 seconds", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
     const fetchMock = jest.fn().mockResolvedValue(
       response({
         installed: false,
@@ -173,8 +182,169 @@ describe("useSiteActivation", () => {
     );
     await waitFor(() => expect(result.current.data).not.toBeNull());
 
-    act(() => window.dispatchEvent(new Event("focus")));
+    const pollCall = setIntervalSpy.mock.calls.find(
+      ([, delay]) => delay === 60_000,
+    );
+    expect(pollCall).toBeDefined();
+    act(() => (pollCall?.[0] as () => void)());
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("stops polling when progress becomes complete", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    const clearIntervalSpy = jest.spyOn(window, "clearInterval");
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce(
+        response({
+          installed: false,
+          invited: true,
+          published: true,
+          dismissed: false,
+        }),
+      )
+      .mockResolvedValueOnce(
+        response({
+          installed: true,
+          invited: true,
+          published: true,
+          dismissed: false,
+        }),
+      );
+    global.fetch = fetchMock as typeof fetch;
+    const { result } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    const pollCallIndex = setIntervalSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 60_000,
+    );
+    expect(pollCallIndex).toBeGreaterThanOrEqual(0);
+    const poll = setIntervalSpy.mock.calls[pollCallIndex]?.[0] as () => void;
+    const intervalId = setIntervalSpy.mock.results[pollCallIndex]?.value;
+
+    act(() => poll());
+
+    await waitFor(() => expect(result.current.data?.installed).toBe(true));
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
+    expect(
+      setIntervalSpy.mock.calls.filter(([, delay]) => delay === 60_000),
+    ).toHaveLength(1);
+  });
+
+  it("does not start a polling interval while initially hidden", async () => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    global.fetch = jest.fn().mockResolvedValue(
+      response({
+        installed: false,
+        invited: false,
+        published: false,
+        dismissed: false,
+      }),
+    ) as typeof fetch;
+    const { result } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(
+      setIntervalSpy.mock.calls.some(([, delay]) => delay === 60_000),
+    ).toBe(false);
+  });
+
+  it("stops polling while hidden and refetches once when the tab returns", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    const clearIntervalSpy = jest.spyOn(window, "clearInterval");
+    const fetchMock = jest.fn().mockResolvedValue(
+      response({
+        installed: false,
+        invited: false,
+        published: false,
+        dismissed: false,
+      }),
+    );
+    global.fetch = fetchMock as typeof fetch;
+    const { result } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    const pollCallIndex = setIntervalSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 60_000,
+    );
+    expect(pollCallIndex).toBeGreaterThanOrEqual(0);
+    const intervalId = setIntervalSpy.mock.results[pollCallIndex]?.value;
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "visible",
+    });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(
+      setIntervalSpy.mock.calls.filter(([, delay]) => delay === 60_000),
+    ).toHaveLength(2);
+  });
+
+  it("does not start polling dismissed progress", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    global.fetch = jest.fn().mockResolvedValue(
+      response({
+        installed: false,
+        invited: false,
+        published: false,
+        dismissed: true,
+      }),
+    ) as typeof fetch;
+    const { result } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+
+    await waitFor(() => expect(result.current.data?.dismissed).toBe(true));
+    expect(
+      setIntervalSpy.mock.calls.some(([, delay]) => delay === 60_000),
+    ).toBe(false);
+  });
+
+  it("clears polling when unmounted", async () => {
+    const setIntervalSpy = jest.spyOn(window, "setInterval");
+    const clearIntervalSpy = jest.spyOn(window, "clearInterval");
+    global.fetch = jest.fn().mockResolvedValue(
+      response({
+        installed: false,
+        invited: false,
+        published: false,
+        dismissed: false,
+      }),
+    ) as typeof fetch;
+    const { result, unmount } = renderHook(() =>
+      useSiteActivation({ siteId: SITE_A, userId: "user-a" }),
+    );
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    const pollCallIndex = setIntervalSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 60_000,
+    );
+    expect(pollCallIndex).toBeGreaterThanOrEqual(0);
+    const intervalId = setIntervalSpy.mock.results[pollCallIndex]?.value;
+
+    unmount();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalId);
   });
 });

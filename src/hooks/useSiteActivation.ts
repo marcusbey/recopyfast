@@ -14,7 +14,7 @@ interface UseSiteActivationOptions {
   userId: string;
 }
 
-const REFRESH_INTERVAL_MS = 15_000;
+const REFRESH_INTERVAL_MS = 60_000;
 
 function isProgress(value: unknown): value is SiteActivationProgress {
   if (!value || typeof value !== "object") return false;
@@ -40,7 +40,7 @@ export function useSiteActivation({
   const requestRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refetch = useCallback(async () => {
     const requestIdentity = `${userId}:${siteId}`;
     const requestNumber = ++requestRef.current;
     abortRef.current?.abort();
@@ -95,9 +95,9 @@ export function useSiteActivation({
     setError(null);
     setDismissError(null);
     setDismissing(false);
-    void refresh();
+    void refetch();
     return () => abortRef.current?.abort();
-  }, [identity, refresh]);
+  }, [identity, refetch]);
 
   const visibleData = dataIdentityRef.current === identity ? data : null;
   const incomplete =
@@ -107,22 +107,43 @@ export function useSiteActivation({
   useEffect(() => {
     if (!incomplete || visibleData?.dismissed) return;
 
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void refresh();
+    let intervalId: number | null = null;
+
+    const stopPolling = () => {
+      if (intervalId === null) return;
+      window.clearInterval(intervalId);
+      intervalId = null;
     };
-    const interval = window.setInterval(
-      refreshWhenVisible,
-      REFRESH_INTERVAL_MS,
-    );
-    window.addEventListener("focus", refreshWhenVisible);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    const startPolling = () => {
+      if (document.visibilityState !== "visible" || intervalId !== null) return;
+      intervalId = window.setInterval(() => {
+        void refetch();
+      }, REFRESH_INTERVAL_MS);
+    };
+
+    // Returning to a tab commonly emits both visibilitychange and focus. The
+    // previous listeners handled both and issued duplicate GETs for every site.
+    // Visibility alone covers the transition, and restarting the timer here
+    // gives the foreground refresh a full interval before the next poll.
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") {
+        stopPolling();
+        return;
+      }
+
+      startPolling();
+      void refetch();
+    };
+
+    startPolling();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("focus", refreshWhenVisible);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [visibleData?.dismissed, incomplete, refresh]);
+  }, [visibleData?.dismissed, incomplete, refetch]);
 
   const dismiss = useCallback(async () => {
     const requestIdentity = `${userId}:${siteId}`;
@@ -168,7 +189,7 @@ export function useSiteActivation({
     data: visibleData,
     loading,
     error,
-    refresh,
+    refetch,
     dismiss,
     dismissing,
     dismissError,

@@ -1,29 +1,35 @@
 import { NextRequest } from "next/server";
 import { GET, POST } from "../route";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 jest.mock("@/lib/supabase/server", () => ({ createClient: jest.fn() }));
-jest.mock("@/lib/supabase/service", () => ({
-  createServiceRoleClient: jest.fn(),
-}));
 jest.mock("@/lib/api/rate-limit", () => ({
   enforceRateLimit: jest.fn(),
-  getClientIp: jest.fn(() => "203.0.113.20"),
 }));
 
 const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OTHER_SITE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
+interface FakeQueryResult {
+  data: unknown;
+  error: unknown;
+}
+
+interface FakeQuery {
+  select(columns: string): FakeQuery;
+  eq(column: string, value: unknown): FakeQuery;
+  is(column: string, value: unknown): FakeQuery;
+  overlaps(column: string, values: readonly unknown[]): FakeQuery;
+  limit(count: number): Promise<FakeQueryResult>;
+  maybeSingle(): Promise<FakeQueryResult>;
+  single(): Promise<FakeQueryResult>;
+}
+
 const mockCreateClient = createClient as jest.MockedFunction<
   typeof createClient
 >;
-const mockCreateServiceRoleClient =
-  createServiceRoleClient as jest.MockedFunction<
-    typeof createServiceRoleClient
-  >;
 const mockEnforceRateLimit = enforceRateLimit as jest.MockedFunction<
   typeof enforceRateLimit
 >;
@@ -45,17 +51,153 @@ function context(siteId = SITE_ID) {
 
 function authClient(options?: {
   user?: { id: string; user_metadata?: Record<string, unknown> } | null;
-  permission?: string | null;
+  permissionRows?: Array<{
+    site_id: string;
+    user_id: string;
+    permission: string;
+  }>;
   permissionError?: unknown;
   updateError?: unknown;
+  siteRows?: Array<{
+    id: string;
+    status: string;
+    live_at?: string | null;
+  }>;
+  siteError?: unknown;
+  editorRows?: Array<{
+    id: string;
+    site_id: string;
+    permissions: string[];
+    revoked_at: string | null;
+  }> | null;
+  editorError?: unknown;
+  publishRows?: Array<{
+    content_element_id: string;
+    action: string;
+    content_elements: { site_id: string };
+  }> | null;
+  publishError?: unknown;
 }) {
-  const maybeSingle = jest.fn().mockResolvedValue({
-    data: options?.permission ? { permission: options.permission } : null,
-    error: options?.permissionError ?? null,
-  });
-  const eqUser = jest.fn(() => ({ maybeSingle }));
-  const eqSite = jest.fn(() => ({ eq: eqUser }));
-  const select = jest.fn(() => ({ eq: eqSite }));
+  const permissionRows = options?.permissionRows ?? [
+    { site_id: SITE_ID, user_id: USER_ID, permission: "admin" },
+  ];
+  const siteRows = options?.siteRows ?? [
+    { id: SITE_ID, status: "live", live_at: new Date().toISOString() },
+  ];
+  const editorRows =
+    options && "editorRows" in options
+      ? options.editorRows
+      : [
+          {
+            id: "editor-1",
+            site_id: SITE_ID,
+            permissions: ["publish"],
+            revoked_at: null,
+          },
+        ];
+  const publishRows =
+    options && "publishRows" in options
+      ? options.publishRows
+      : [
+          {
+            content_element_id: "element-1",
+            action: "publish",
+            content_elements: { site_id: SITE_ID },
+          },
+        ];
+
+  const queryFor = (table: string) => {
+    const filters: Array<[string, unknown]> = [];
+    const overlapFilters: Array<[string, readonly unknown[]]> = [];
+    const selected = jest.fn();
+    const eq: FakeQuery["eq"] = jest.fn((column: string, value: unknown) => {
+      filters.push([column, value]);
+      return query;
+    });
+    const is: FakeQuery["is"] = jest.fn((column: string, value: unknown) => {
+      filters.push([column, value]);
+      return query;
+    });
+    const overlaps: FakeQuery["overlaps"] = jest.fn(
+      (column: string, values: readonly unknown[]) => {
+        overlapFilters.push([column, values]);
+        return query;
+      },
+    );
+    const matches = (row: Record<string, unknown>) =>
+      filters.every(([column, expected]) => {
+        const actual = column
+          .split(".")
+          .reduce<unknown>(
+            (value, key) =>
+              typeof value === "object" && value !== null
+                ? (value as Record<string, unknown>)[key]
+                : undefined,
+            row,
+          );
+        return actual === expected;
+      }) &&
+      overlapFilters.every(([column, expected]) => {
+        const actual = row[column];
+        return (
+          Array.isArray(actual) &&
+          actual.some((value) => expected.includes(value))
+        );
+      });
+    const rows = () => {
+      if (table === "site_permissions") return permissionRows;
+      if (table === "sites") return siteRows;
+      if (table === "site_editors") return editorRows;
+      if (table === "staging_history") return publishRows;
+      throw new Error(`Unexpected table ${table}`);
+    };
+    const error = () => {
+      if (table === "site_permissions") return options?.permissionError ?? null;
+      if (table === "sites") return options?.siteError ?? null;
+      if (table === "site_editors") return options?.editorError ?? null;
+      return options?.publishError ?? null;
+    };
+    const result = () => {
+      const tableRows = rows();
+      return {
+        data: Array.isArray(tableRows)
+          ? tableRows.filter((row) => matches(row))
+          : tableRows,
+        error: error(),
+      };
+    };
+    const query: FakeQuery = {
+      select: jest.fn((columns: string): FakeQuery => {
+        selected(columns);
+        return query;
+      }),
+      eq,
+      is,
+      overlaps,
+      limit: jest.fn(async () => result()),
+      maybeSingle: jest.fn(async () => {
+        const resolved = result();
+        return {
+          data: Array.isArray(resolved.data)
+            ? (resolved.data[0] ?? null)
+            : null,
+          error: resolved.error,
+        };
+      }),
+      single: jest.fn(async () => {
+        const resolved = result();
+        return {
+          data: Array.isArray(resolved.data)
+            ? (resolved.data[0] ?? null)
+            : null,
+          error: resolved.error,
+        };
+      }),
+    };
+    return { query, filters, overlapFilters, selected };
+  };
+
+  const queries = new Map<string, ReturnType<typeof queryFor>>();
   const updateUser = jest.fn().mockResolvedValue({
     data: { user: options?.user ?? null },
     error: options?.updateError ?? null,
@@ -74,59 +216,13 @@ function authClient(options?: {
       }),
       updateUser,
     },
-    from: jest.fn(() => ({ select })),
-    permissionQuery: { eqSite, eqUser },
-    updateUser,
-  };
-}
-
-function existenceResult(data: unknown, error: unknown = null) {
-  const limit = jest.fn().mockResolvedValue({ data, error });
-  const is = jest.fn(() => ({ limit }));
-  const secondEq = jest.fn(() => ({ limit, is }));
-  const firstEq = jest.fn(() => ({ eq: secondEq, is, limit }));
-  const select = jest.fn(() => ({ eq: firstEq, limit }));
-  return { select, firstEq, secondEq, is, limit };
-}
-
-function serviceClient(options?: {
-  site?: { status: string; last_reported_at: string | null } | null;
-  siteError?: unknown;
-  editors?: unknown[] | null;
-  editorError?: unknown;
-  publishes?: unknown[] | null;
-  publishError?: unknown;
-}) {
-  const siteSingle = jest.fn().mockResolvedValue({
-    data:
-      options?.site === undefined
-        ? { status: "live", last_reported_at: new Date().toISOString() }
-        : options.site,
-    error: options?.siteError ?? null,
-  });
-  const siteEq = jest.fn(() => ({ single: siteSingle }));
-  const siteSelect = jest.fn(() => ({ eq: siteEq }));
-  const editor = existenceResult(
-    options && "editors" in options ? options.editors : [{ id: "editor-1" }],
-    options?.editorError,
-  );
-  const publish = existenceResult(
-    options && "publishes" in options
-      ? options.publishes
-      : [{ content_element_id: "element-1" }],
-    options?.publishError,
-  );
-
-  return {
     from: jest.fn((table: string) => {
-      if (table === "sites") return { select: siteSelect };
-      if (table === "site_editors") return { select: editor.select };
-      if (table === "staging_history") return { select: publish.select };
-      throw new Error(`Unexpected table ${table}`);
+      const tableQuery = queryFor(table);
+      queries.set(table, tableQuery);
+      return tableQuery.query;
     }),
-    site: { siteSelect, siteEq, siteSingle },
-    editor,
-    publish,
+    queries,
+    updateUser,
   };
 }
 
@@ -136,7 +232,9 @@ describe("site activation route", () => {
     mockEnforceRateLimit.mockResolvedValue(null);
   });
 
-  it("rate limits before authentication and fails closed", async () => {
+  it("rate limits the authenticated user and site before permission or data reads", async () => {
+    const client = authClient();
+    mockCreateClient.mockResolvedValue(client as never);
     mockEnforceRateLimit.mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "limited" }), {
         status: 429,
@@ -146,113 +244,219 @@ describe("site activation route", () => {
     const response = await GET(request(), context());
 
     expect(response.status).toBe(429);
-    expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(client.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(client.from).not.toHaveBeenCalled();
     expect(mockEnforceRateLimit).toHaveBeenCalledWith(
       expect.any(NextRequest),
-      expect.objectContaining({ onStoreFailure: "deny" }),
+      expect.objectContaining({
+        identifier: `${USER_ID}:${SITE_ID}`,
+        identifierType: "user",
+        onStoreFailure: "deny",
+      }),
     );
   });
 
-  it.each([
-    ["invalid site id", null, "not-a-uuid", 400],
-    ["missing auth", null, SITE_ID, 401],
-    ["non-admin", "view", SITE_ID, 403],
-    ["foreign site", null, OTHER_SITE_ID, 403],
-  ])("rejects %s", async (_label, permission, siteId, status) => {
+  it("rejects an invalid site id", async () => {
+    const response = await GET(request(), context("not-a-uuid"));
+
+    expect(response.status).toBe(400);
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing session", async () => {
+    mockCreateClient.mockResolvedValue(
+      authClient({ user: null, permissionRows: [] }) as never,
+    );
+
+    const response = await GET(request(), context());
+
+    expect(response.status).toBe(401);
+    expect(mockEnforceRateLimit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-admin", async () => {
     mockCreateClient.mockResolvedValue(
       authClient({
-        user: _label === "missing auth" ? null : { id: USER_ID },
-        permission,
+        permissionRows: [
+          { site_id: SITE_ID, user_id: USER_ID, permission: "view" },
+        ],
       }) as never,
     );
 
-    const response = await GET(request(), context(siteId));
+    const response = await GET(request(), context());
 
-    expect(response.status).toBe(status);
-    expect(mockCreateServiceRoleClient).not.toHaveBeenCalled();
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects a foreign site with a filter-aware permission lookup", async () => {
+    const client = authClient({
+      permissionRows: [
+        { site_id: OTHER_SITE_ID, user_id: USER_ID, permission: "admin" },
+      ],
+    });
+    mockCreateClient.mockResolvedValue(client as never);
+
+    const response = await GET(request(), context());
+
+    expect(response.status).toBe(403);
+    expect(client.queries.get("site_permissions")?.filters).toEqual([
+      ["site_id", SITE_ID],
+      ["user_id", USER_ID],
+    ]);
   });
 
   it.each([
     ["awaiting-install", null, false],
+    ["awaiting-install", undefined, false],
     ["live", new Date().toISOString(), true],
-    ["live", "2020-01-01T00:00:00.000Z", false],
+    ["live", "2020-01-01T00:00:00.000Z", true],
+    ["awaiting-install", "2020-01-01T00:00:00.000Z", true],
   ])(
-    "derives install state from %s status and last report",
-    async (status, lastReportedAt, installed) => {
-      mockCreateClient.mockResolvedValue(
-        authClient({ permission: "admin" }) as never,
-      );
-      mockCreateServiceRoleClient.mockReturnValue(
-        serviceClient({
-          site: { status, last_reported_at: lastReportedAt },
-        }) as never,
-      );
+    "keeps the install milestone for %s with live_at %s",
+    async (status, liveAt, installed) => {
+      const client = authClient({
+        siteRows: [{ id: SITE_ID, status, live_at: liveAt }],
+      });
+      mockCreateClient.mockResolvedValue(client as never);
 
       const response = await GET(request(), context());
       const body = await response.json();
 
       expect(response.status).toBe(200);
       expect(body.installed).toBe(installed);
+      expect(client.queries.get("sites")?.selected).toHaveBeenCalledWith(
+        "status, live_at",
+      );
+      expect(client.queries.get("sites")?.filters).toEqual([["id", SITE_ID]]);
     },
   );
 
-  it("counts only active editors and site-scoped publish records", async () => {
-    const auth = authClient({
-      permission: "admin",
+  it("counts only active editors whose normalized permissions include publish", async () => {
+    const client = authClient({
       user: {
         id: USER_ID,
         user_metadata: { [`activation_dismissed_${SITE_ID}`]: true },
       },
+      editorRows: [
+        {
+          id: "view-editor",
+          site_id: SITE_ID,
+          permissions: ["edit"],
+          revoked_at: null,
+        },
+        {
+          id: "revoked-publisher",
+          site_id: SITE_ID,
+          permissions: ["publish"],
+          revoked_at: "2026-09-24T00:00:00.000Z",
+        },
+        {
+          id: "admin-editor",
+          site_id: SITE_ID,
+          permissions: ["admin"],
+          revoked_at: null,
+        },
+        {
+          id: "other-site-publisher",
+          site_id: OTHER_SITE_ID,
+          permissions: ["publish"],
+          revoked_at: null,
+        },
+      ],
+      publishRows: [],
     });
-    const service = serviceClient({ editors: [], publishes: [] });
-    mockCreateClient.mockResolvedValue(auth as never);
-    mockCreateServiceRoleClient.mockReturnValue(service as never);
+    mockCreateClient.mockResolvedValue(client as never);
 
     const response = await GET(request(), context());
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       installed: true,
-      invited: false,
+      invited: true,
       published: false,
       dismissed: true,
     });
-    expect(service.editor.is).toHaveBeenCalledWith("revoked_at", null);
-    expect(service.editor.firstEq).toHaveBeenCalledWith("site_id", SITE_ID);
-    expect(service.publish.select).toHaveBeenCalledWith(
+    expect(client.queries.get("site_editors")?.selected).toHaveBeenCalledWith(
+      "id",
+    );
+    expect(client.queries.get("site_editors")?.filters).toEqual([
+      ["site_id", SITE_ID],
+      ["revoked_at", null],
+    ]);
+    expect(client.queries.get("site_editors")?.overlapFilters).toEqual([
+      ["permissions", ["publish", "admin"]],
+    ]);
+    expect(
+      client.queries.get("staging_history")?.selected,
+    ).toHaveBeenCalledWith(
       "content_element_id, content_elements!inner(site_id)",
     );
-    expect(service.publish.firstEq).toHaveBeenCalledWith("action", "publish");
-    expect(service.publish.secondEq).toHaveBeenCalledWith(
-      "content_elements.site_id",
-      SITE_ID,
-    );
+    expect(client.queries.get("staging_history")?.filters).toEqual([
+      ["action", "publish"],
+      ["content_elements.site_id", SITE_ID],
+    ]);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("returns true only when active editor and publish evidence exist", async () => {
+  it("does not count an active editor without publish permission", async () => {
     mockCreateClient.mockResolvedValue(
-      authClient({ permission: "admin" }) as never,
+      authClient({
+        editorRows: [
+          {
+            id: "editor-1",
+            site_id: SITE_ID,
+            permissions: ["edit"],
+            revoked_at: null,
+          },
+        ],
+      }) as never,
     );
-    mockCreateServiceRoleClient.mockReturnValue(serviceClient() as never);
 
     const response = await GET(request(), context());
 
-    expect(await response.json()).toEqual({
-      installed: true,
-      invited: true,
-      published: true,
-      dismissed: false,
+    expect((await response.json()).invited).toBe(false);
+  });
+
+  it("scopes the site read to the requested id", async () => {
+    const client = authClient({
+      siteRows: [
+        { id: SITE_ID, status: "awaiting-install", live_at: null },
+        {
+          id: OTHER_SITE_ID,
+          status: "live",
+          live_at: "2026-09-24T00:00:00.000Z",
+        },
+      ],
     });
+    mockCreateClient.mockResolvedValue(client as never);
+
+    const response = await GET(request(), context());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).installed).toBe(false);
+    expect(client.queries.get("sites")?.filters).toEqual([["id", SITE_ID]]);
+  });
+
+  it("ignores a dismissal stored for another site", async () => {
+    mockCreateClient.mockResolvedValue(
+      authClient({
+        user: {
+          id: USER_ID,
+          user_metadata: {
+            [`activation_dismissed_${OTHER_SITE_ID}`]: true,
+          },
+        },
+      }) as never,
+    );
+
+    const response = await GET(request(), context());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).dismissed).toBe(false);
   });
 
   it("treats a missing site row as an error", async () => {
-    mockCreateClient.mockResolvedValue(
-      authClient({ permission: "admin" }) as never,
-    );
-    mockCreateServiceRoleClient.mockReturnValue(
-      serviceClient({ site: null }) as never,
-    );
+    mockCreateClient.mockResolvedValue(authClient({ siteRows: [] }) as never);
 
     const response = await GET(request(), context());
 
@@ -263,12 +467,9 @@ describe("site activation route", () => {
     "treats a null %s result as unknown rather than incomplete",
     async (read) => {
       mockCreateClient.mockResolvedValue(
-        authClient({ permission: "admin" }) as never,
-      );
-      mockCreateServiceRoleClient.mockReturnValue(
-        serviceClient({
-          ...(read === "editor" ? { editors: null as never } : {}),
-          ...(read === "publish" ? { publishes: null as never } : {}),
+        authClient({
+          ...(read === "editor" ? { editorRows: null } : {}),
+          ...(read === "publish" ? { publishRows: null } : {}),
         }) as never,
       );
 
@@ -282,10 +483,7 @@ describe("site activation route", () => {
     "returns an error rather than fabricated progress when the %s read fails",
     async (read) => {
       mockCreateClient.mockResolvedValue(
-        authClient({ permission: "admin" }) as never,
-      );
-      mockCreateServiceRoleClient.mockReturnValue(
-        serviceClient({
+        authClient({
           ...(read === "site" ? { siteError: { message: "boom" } } : {}),
           ...(read === "editor" ? { editorError: { message: "boom" } } : {}),
           ...(read === "publish" ? { publishError: { message: "boom" } } : {}),
@@ -303,7 +501,6 @@ describe("site activation route", () => {
 
   it("dismisses only this site for the signed-in user and preserves other metadata", async () => {
     const client = authClient({
-      permission: "admin",
       user: {
         id: USER_ID,
         user_metadata: { theme: "dark", activation_dismissed_other: true },
@@ -329,7 +526,7 @@ describe("site activation route", () => {
   });
 
   it("does not save dismissal for a non-admin or another site", async () => {
-    const client = authClient({ permission: null });
+    const client = authClient({ permissionRows: [] });
     mockCreateClient.mockResolvedValue(client as never);
 
     const response = await POST(request("POST"), context(OTHER_SITE_ID));
@@ -340,7 +537,6 @@ describe("site activation route", () => {
 
   it("returns non-success when dismissal persistence fails", async () => {
     const client = authClient({
-      permission: "admin",
       updateError: { message: "write failed" },
     });
     mockCreateClient.mockResolvedValue(client as never);

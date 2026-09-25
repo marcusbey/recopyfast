@@ -10,14 +10,19 @@ jest.mock("../SiteEditorsCard", () => ({
   SiteEditorsCard: ({
     onEditorChange,
     inviteFormAutoFocus,
+    inviteDefaultPermissions,
   }: {
     onEditorChange?: () => void;
     inviteFormAutoFocus?: boolean;
+    inviteDefaultPermissions?: string[];
   }) => {
     const React = jest.requireActual<typeof import("react")>("react");
     const [noticeVisible, setNoticeVisible] = React.useState(false);
     return (
-      <div data-auto-focus={String(inviteFormAutoFocus)}>
+      <div
+        data-auto-focus={String(inviteFormAutoFocus)}
+        data-default-permissions={inviteDefaultPermissions?.join(",")}
+      >
         <button
           onClick={() => {
             setNoticeVisible(true);
@@ -25,6 +30,9 @@ jest.mock("../SiteEditorsCard", () => ({
           }}
         >
           Complete invitation
+        </button>
+        <button onClick={() => onEditorChange?.()}>
+          Revoke publish editor
         </button>
         {noticeVisible && (
           <p>No invitation email was sent. Copy the editor hub link.</p>
@@ -37,7 +45,7 @@ jest.mock("../SiteEditorsCard", () => ({
 const mockUseSiteActivation = useSiteActivation as jest.MockedFunction<
   typeof useSiteActivation
 >;
-const refresh = jest.fn();
+const refetch = jest.fn();
 const dismiss = jest.fn();
 const writeText = jest.fn();
 const popup = {
@@ -57,7 +65,7 @@ function activation(overrides: Record<string, unknown> = {}) {
     },
     loading: false,
     error: null,
-    refresh,
+    refetch,
     dismiss,
     dismissing: false,
     dismissError: null,
@@ -113,9 +121,16 @@ describe("ActivationChecklist", () => {
     );
 
     renderChecklist();
-    await user.click(screen.getByRole("button", { name: /try again/i }));
+    await user.click(
+      screen.getByRole("button", {
+        name: "Try activation again for Client Site",
+      }),
+    );
 
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText(/Could not load activation progress for Client Site/i),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Install detected")).not.toBeInTheDocument();
   });
 
@@ -124,22 +139,26 @@ describe("ActivationChecklist", () => {
 
     expect(screen.getByText("Install detected")).toBeInTheDocument();
     expect(screen.getAllByText("Invite a client")).toHaveLength(2);
-    expect(screen.getByText("First published edit")).toBeInTheDocument();
+    expect(screen.getByText("An edit published")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Copy snippet" }),
+      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Invite a client" }),
+      screen.getByRole("button", { name: "Invite a client to Client Site" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Get Client Site publishing" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Not yet")).toHaveLength(3);
   });
 
   it.each([
-    ["installed", "Copy snippet"],
-    ["invited", "Invite a client"],
-    ["published", "Open site in edit mode"],
+    ["installed", "Copy snippet for Client Site"],
+    ["invited", "Invite a client to Client Site"],
+    ["published", "Open Client Site in edit mode"],
   ])("removes the %s action after real progress completes", (fact, action) => {
     mockUseSiteActivation.mockReturnValue(
       activation({
@@ -176,6 +195,11 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Activation for Client Site" }),
+    ).toHaveTextContent(
+      "Site installed, an active invited editor has Publish permission, and an edit has been published.",
+    );
     expect(screen.queryByText("Install detected")).not.toBeInTheDocument();
   });
 
@@ -204,19 +228,25 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: /dismiss checklist/i }),
+      screen.getByRole("button", {
+        name: "Dismiss activation checklist for Client Site",
+      }),
     );
 
     expect(
       await screen.findByText("Could not save dismissal"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Get your client publishing")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Get Client Site publishing" }),
+    ).toBeInTheDocument();
   });
 
   it("copies only the emitted snippet and reports clipboard failure inline", async () => {
     renderChecklist();
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy snippet" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
+    );
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         '<script data-site-id="site"></script>',
@@ -225,27 +255,138 @@ describe("ActivationChecklist", () => {
     expect(await screen.findByText("Snippet copied")).toBeInTheDocument();
 
     writeText.mockRejectedValueOnce(new Error("denied"));
-    fireEvent.click(screen.getByRole("button", { name: "Copy snippet" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
+    );
     expect(await screen.findByText(/could not copy/i)).toBeInTheDocument();
   });
 
-  it("keeps delivery feedback visible and refreshes after a successful invite", async () => {
+  it("keeps delivery feedback visible when the invite completes activation", async () => {
     const user = userEvent.setup();
-    renderChecklist();
+    mockUseSiteActivation.mockReturnValue(
+      activation({
+        data: {
+          installed: true,
+          invited: false,
+          published: true,
+          dismissed: false,
+        },
+      }),
+    );
+    const view = renderChecklist();
+    refetch
+      .mockImplementationOnce(async () => {
+        mockUseSiteActivation.mockReturnValue(
+          activation({
+            data: {
+              installed: true,
+              invited: true,
+              published: true,
+              dismissed: false,
+            },
+          }),
+        );
+        view.rerender(
+          <ActivationChecklist
+            siteId={SITE_ID}
+            siteName="Client Site"
+            domain="client.example.com"
+            embedScript='<script data-site-id="site"></script>'
+            userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          />,
+        );
+      })
+      .mockImplementationOnce(async () => {
+        mockUseSiteActivation.mockReturnValue(
+          activation({
+            data: {
+              installed: true,
+              invited: false,
+              published: true,
+              dismissed: false,
+            },
+          }),
+        );
+        view.rerender(
+          <ActivationChecklist
+            siteId={SITE_ID}
+            siteName="Client Site"
+            domain="client.example.com"
+            embedScript='<script data-site-id="site"></script>'
+            userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+          />,
+        );
+      });
 
-    await user.click(screen.getByRole("button", { name: "Invite a client" }));
+    await user.click(
+      screen.getByRole("button", { name: "Invite a client to Client Site" }),
+    );
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(
       screen.getByRole("dialog").querySelector('[data-auto-focus="true"]'),
+    ).not.toBeNull();
+    expect(
+      screen
+        .getByRole("dialog")
+        .querySelector('[data-default-permissions="view,edit,publish"]'),
     ).not.toBeNull();
     await user.click(
       screen.getByRole("button", { name: "Complete invitation" }),
     );
 
-    expect(refresh).toHaveBeenCalled();
+    expect(refetch).toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(
       screen.getByText(/No invitation email was sent/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Revoke publish editor" }),
+    );
+    expect(screen.queryByText("Live")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /close/i }));
+    expect(
+      screen.getByRole("heading", { name: "Get Client Site publishing" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Activation for Client Site" }),
+    ).toHaveFocus();
+  });
+
+  it("keeps the invite dialog and fallback notice visible through a refresh error", async () => {
+    const user = userEvent.setup();
+    const view = renderChecklist();
+    refetch.mockImplementationOnce(async () => {
+      mockUseSiteActivation.mockReturnValue(
+        activation({ data: null, error: "Background refresh failed" }),
+      );
+      view.rerender(
+        <ActivationChecklist
+          siteId={SITE_ID}
+          siteName="Client Site"
+          domain="client.example.com"
+          embedScript='<script data-site-id="site"></script>'
+          userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        />,
+      );
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Invite a client to Client Site" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Complete invitation" }),
+    );
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No invitation email was sent/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Could not load activation progress for Client Site/i),
     ).toBeInTheDocument();
   });
 
@@ -260,7 +401,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     );
 
     expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
@@ -283,7 +424,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     );
 
     expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
@@ -310,7 +451,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     );
 
     expect(await screen.findByText(/valid edit link/i)).toBeInTheDocument();
@@ -327,12 +468,12 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     );
 
     expect(await screen.findByText(/allow popups/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open site in edit mode" }),
+      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
     ).toBeInTheDocument();
   });
 });

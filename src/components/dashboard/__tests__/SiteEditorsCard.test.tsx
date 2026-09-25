@@ -393,6 +393,38 @@ describe("SiteEditorsCard", () => {
     ).toEqual(["view", "edit", "publish"]);
   });
 
+  it("preselects Publish only when the caller requests the activation default", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, editor: { email: grace.email }, hubUrl: "" }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
+
+    render(
+      <SiteEditorsCard
+        siteId={SITE_ID}
+        siteName={SITE_NAME}
+        inviteDefaultPermissions={["view", "edit", "publish"]}
+      />,
+    );
+    await screen.findByText("No editors yet");
+
+    expect(screen.getByRole("button", { name: "Publish" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.type(screen.getByLabelText(/editor email/i), grace.email);
+    await user.click(screen.getByRole("button", { name: /add editor/i }));
+
+    await waitFor(() => expect(callsWithMethod("POST")).toHaveLength(1));
+    const [, postInit] = callsWithMethod("POST")[0];
+    expect(
+      JSON.parse((postInit as RequestInit).body as string).permissions,
+    ).toEqual(["view", "edit", "publish"]);
+  });
+
   it("keeps the typed address when the invite is rejected", async () => {
     const user = userEvent.setup();
     fetchMock
@@ -524,6 +556,7 @@ describe("SiteEditorsCard", () => {
 
   it("warns how many devices a removal signs out before removing anyone", async () => {
     const user = userEvent.setup();
+    const onEditorChange = jest.fn();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, grantsRevoked: 2 }))
@@ -540,7 +573,13 @@ describe("SiteEditorsCard", () => {
         }),
       );
 
-    renderCard();
+    render(
+      <SiteEditorsCard
+        siteId={SITE_ID}
+        siteName={SITE_NAME}
+        onEditorChange={onEditorChange}
+      />,
+    );
     await screen.findByText(ada.email);
 
     await user.click(
@@ -581,6 +620,7 @@ describe("SiteEditorsCard", () => {
     expect(
       screen.queryByRole("button", { name: `Remove ${ada.email}` }),
     ).not.toBeInTheDocument();
+    expect(onEditorChange).toHaveBeenCalledTimes(1);
   });
 
   it("says so plainly when the removed editor had no devices signed in", async () => {
@@ -638,11 +678,18 @@ describe("SiteEditorsCard", () => {
 
   it("reports a failed removal inside the confirmation and keeps the editor", async () => {
     const user = userEvent.setup();
+    const onEditorChange = jest.fn();
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }))
       .mockResolvedValueOnce(jsonResponse({ error: "server_error" }, 500));
 
-    renderCard();
+    render(
+      <SiteEditorsCard
+        siteId={SITE_ID}
+        siteName={SITE_NAME}
+        onEditorChange={onEditorChange}
+      />,
+    );
     await screen.findByText(ada.email);
 
     await user.click(
@@ -660,6 +707,7 @@ describe("SiteEditorsCard", () => {
     // a successful one.
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText(ada.email)).toBeInTheDocument();
+    expect(onEditorChange).not.toHaveBeenCalled();
   });
 
   it("explains that a non-admin cannot manage editors, and offers no form", async () => {

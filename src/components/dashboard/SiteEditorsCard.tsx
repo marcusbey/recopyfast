@@ -54,6 +54,7 @@ interface SiteEditorsCardProps {
   siteName: string;
   onEditorChange?: () => void;
   inviteFormAutoFocus?: boolean;
+  inviteDefaultPermissions?: readonly EditorPermission[];
 }
 
 type LoadState =
@@ -160,6 +161,7 @@ export function SiteEditorsCard({
   siteName,
   onEditorChange,
   inviteFormAutoFocus = false,
+  inviteDefaultPermissions,
 }: SiteEditorsCardProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -354,6 +356,7 @@ export function SiteEditorsCard({
       });
       setRevokeTarget(null);
       await loadEditors();
+      onEditorChange?.();
     } catch (error) {
       console.error("Failed to revoke site editor:", error);
       setRevokeError(NETWORK_ERROR);
@@ -517,6 +520,7 @@ export function SiteEditorsCard({
             <InviteEditorForm
               onInvite={handleInvite}
               autoFocus={inviteFormAutoFocus}
+              initialPermissions={inviteDefaultPermissions}
             />
           </>
         )}

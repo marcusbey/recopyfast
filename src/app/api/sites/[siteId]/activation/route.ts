@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { requireUuid } from "@/lib/api/validation";
-import { resolveEffectiveSiteStatus } from "@/lib/sites/site-status";
 import { createClient } from "@/lib/supabase/server";
-import { createServiceRoleClient } from "@/lib/supabase/service";
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
@@ -24,17 +22,6 @@ async function authorizeAdmin(
   request: NextRequest,
   context: RouteContext,
 ): Promise<AuthorizedRequest | NextResponse> {
-  // This route reaches authentication and then service-role site reads. Shed
-  // anonymous floods before either lookup, and fail closed because guessing an
-  // incomplete checklist is worse than asking the owner to retry it.
-  const limited = await enforceRateLimit(request, {
-    limit: "IP_GENERAL",
-    endpoint: "sites/activation:ip",
-    identifier: getClientIp(request),
-    onStoreFailure: "deny",
-  });
-  if (limited) return limited;
-
   const { siteId: rawSiteId } = await context.params;
   const siteIdResult = requireUuid({ siteId: rawSiteId }, "siteId");
   if (!siteIdResult.ok) {
@@ -59,6 +46,22 @@ async function authorizeAdmin(
 
   const siteId = siteIdResult.value;
   const userId = userIdResult.value;
+
+  // The first implementation used a shared-IP bucket before authentication.
+  // That made every visible checklist card in an agency office spend from the
+  // same counter. The activation facts are cheap RLS reads, so isolate each
+  // authenticated user's polling budget for each site. Keep this before the admin
+  // lookup and every data read, and fail closed so a missing Redis store cannot
+  // silently turn an authenticated polling endpoint into an unmetered path.
+  const limited = await enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "sites/activation:user-site",
+    identifier: `${userId}:${siteId}`,
+    identifierType: "user",
+    onStoreFailure: "deny",
+  });
+  if (limited) return limited;
+
   const { data: permission, error: permissionError } = await supabase
     .from("site_permissions")
     .select("permission")
@@ -81,25 +84,32 @@ export async function GET(request: NextRequest, context: RouteContext) {
     const authorization = await authorizeAdmin(request, context);
     if (!("siteId" in authorization)) return authorization;
 
-    const { siteId, user } = authorization;
-    const service = createServiceRoleClient();
+    const { siteId, user, supabase } = authorization;
 
     // These are three independent facts. Keeping them as bounded existence
     // reads makes the response cheap without allowing one missing/erroring fact
-    // to collapse into a false value that looks like trustworthy progress.
+    // to collapse into a false value that looks like trustworthy progress. All
+    // reads stay on the signed-in user's client: the service-role version hid
+    // an RLS regression and turned a missing site filter into an IDOR. The
+    // explicit column lists also avoid `sites.api_key`, whose SELECT grant is
+    // intentionally revoked from authenticated users.
     const [siteResult, editorResult, publishResult] = await Promise.all([
-      service
+      supabase
         .from("sites")
-        .select("status, last_reported_at")
+        .select("status, live_at")
         .eq("id", siteId)
         .single(),
-      service
+      supabase
         .from("site_editors")
         .select("id")
         .eq("site_id", siteId)
         .is("revoked_at", null)
+        // normalizePermissions grants publish to both explicit publishers and
+        // admins. Filter for both before limiting; taking the first active
+        // editor and normalizing afterward can miss a later publisher.
+        .overlaps("permissions", ["publish", "admin"])
         .limit(1),
-      service
+      supabase
         .from("staging_history")
         .select("content_element_id, content_elements!inner(site_id)")
         .eq("action", "publish")
@@ -128,7 +138,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     return NextResponse.json(
       {
-        installed: resolveEffectiveSiteStatus(siteResult.data) === "live",
+        // `last_reported_at` drives the advisory stale badge elsewhere. The
+        // checklist is a one-way milestone: once the persisted state machine
+        // has ever recorded a live status/time, 14 quiet days must not tell the
+        // owner to reinstall a script that was already verified.
+        installed:
+          siteResult.data.status === "live" ||
+          typeof siteResult.data.live_at === "string",
         invited: editorResult.data.length > 0,
         published: publishResult.data.length > 0,
         dismissed: user.user_metadata?.[dismissalKey(siteId)] === true,

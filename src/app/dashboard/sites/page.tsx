@@ -310,7 +310,6 @@ export default function SitesPage() {
           </Button>
         </div>
         <SiteDetailView
-          key={`${user?.id ?? "anonymous"}:${selectedSite.id}`}
           site={selectedSite}
           userId={user?.id}
           onClose={() => setSelectedSiteId(null)}

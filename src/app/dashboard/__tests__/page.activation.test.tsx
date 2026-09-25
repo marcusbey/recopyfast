@@ -62,8 +62,10 @@ describe("dashboard activation integration", () => {
       "site-6",
     );
     expect(
-      screen.queryByTestId("activation-checklist-site-7"),
-    ).not.toBeInTheDocument();
+      screen
+        .getAllByTestId("activation-checklist")
+        .map((checklist) => checklist.getAttribute("data-site-id")),
+    ).not.toContain("site-7");
     expect(screen.getAllByTestId("activation-checklist")[0]).toHaveAttribute(
       "data-user-id",
       "user-1",

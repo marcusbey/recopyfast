@@ -403,9 +403,10 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
             <CardTitle>Site Token</CardTitle>
             <CardDescription>
               This token identifies your site to ReCopyFast. It is visible in
-              your page&apos;s HTML by design. Only your registered domain can
-              use it. Regenerate snippet revokes old snippets; replace the
-              snippet on your site afterward.
+              your page&apos;s HTML by design. ReCopyFast checks it against the
+              requesting page&apos;s origin and accepts browser requests only
+              when it matches your registered domain. Regenerate snippet revokes
+              old snippets; replace the snippet on your site afterward.
             </CardDescription>
           </CardHeader>
           <CardContent>
