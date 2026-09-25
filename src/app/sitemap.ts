@@ -34,6 +34,7 @@ type StaticRoute = {
 const STATIC_ROUTES: readonly StaticRoute[] = [
   { path: "/", changeFrequency: "weekly", priority: 1 },
   { path: "/demo", changeFrequency: "monthly", priority: 0.8 },
+  { path: "/try", changeFrequency: "monthly", priority: 0.9 },
   { path: "/blog", changeFrequency: "daily", priority: 0.7 },
   { path: "/login", changeFrequency: "yearly", priority: 0.3 },
   { path: "/signup", changeFrequency: "yearly", priority: 0.5 },
