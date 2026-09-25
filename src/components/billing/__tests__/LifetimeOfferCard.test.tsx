@@ -188,6 +188,30 @@ describe("LifetimeOfferCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the checkout retry time in the billing error surface", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "Checkout recovery is still in progress.",
+        retryAt: "2099-01-02T15:47:00",
+        url: null,
+      }),
+    });
+    render(
+      <LifetimeOfferCard product={LIFETIME_PRO} hasLiveSubscription={false} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /buy once/i }));
+
+    expect(
+      await screen.findByText(
+        "Checkout recovery is still in progress. You can start a new checkout at 15:47.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("says nothing about subscriptions when there is none to keep paying for", () => {
     render(
       <LifetimeOfferCard product={LIFETIME_PRO} hasLiveSubscription={false} />,
