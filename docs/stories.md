@@ -1425,3 +1425,18 @@ holder can save and publish without a late duplicate save restoring staging cont
 
 Research: `docs/research/s36-deflake-share-edit-publish.md`.
 Plan: `docs/plans/s36-deflake-share-edit-publish.md`.
+
+## Story s35-activation-checklist — First client publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-activation-checklist`.
+
+- [x] Overview and site detail show a three-step per-site checklist from durable install verification, an active invited editor with Publish permission, and any site publish record.
+- [x] Each incomplete step has one primary action: copy snippet, open invite form, open edit mode.
+- [x] All complete becomes one Live state; dismissal persists per user/site. Loading and read errors never invent progress.
+- [x] Site Token copy explains public HTML visibility, requesting-page origin checks and explicit regeneration/revocation per ADR 027.
+- [x] Component states/actions/dismissal and authenticated RLS data derivation are tested; required gates pass (3,145 tests passed, 97 pages built; details in plan).
+- [x] Existing draft PR #33 stays draft; original independent review is preserved, fix verification is recorded in the plan. No deployment or remote database changes.
+
+Research: `docs/research/s35-activation-checklist.md`. Design: `docs/designs/s35-activation-checklist.md`. Plan: `docs/plans/s35-activation-checklist.md`. Embed allocation: 0 bytes.
+
+Delivery: original implementation `e361c35` is pushed in draft PR #33. The independent review allows ship and records four majors; the operator authorized the fix scope on 2026-09-25. Current fix verification and deferred batching are recorded in the plan. No PR merge or deployment is authorized.
