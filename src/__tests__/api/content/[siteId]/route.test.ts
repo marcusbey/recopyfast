@@ -411,6 +411,144 @@ describe("/api/content/[siteId]", () => {
       );
     });
 
+    it("validates widget-normalized page paths without decoding them again", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          "header-1": {
+            selector: "h1",
+            content: "Welcome",
+            type: "text",
+            page_path: "/index.html",
+          },
+          "header-2": {
+            selector: "h2",
+            content: "Reserved",
+            type: "text",
+            page_path: "/pricing%3Flegacy",
+          },
+          "header-3": {
+            selector: "h3",
+            content: "Literal percent",
+            type: "text",
+            page_path: "/%",
+          },
+          "header-4": {
+            selector: "h4",
+            content: "Encoded space text",
+            type: "text",
+            page_path: "/%20",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            element_id: "header-1",
+            page_path: "/index.html",
+          }),
+          expect.objectContaining({
+            element_id: "header-2",
+            page_path: "/pricing%3Flegacy",
+          }),
+          expect.objectContaining({
+            element_id: "header-3",
+            page_path: "/%",
+          }),
+          expect.objectContaining({
+            element_id: "header-4",
+            page_path: "/%20",
+          }),
+        ]),
+        expect.any(Object),
+      );
+    });
+
+    it.each([
+      ["a non-string path", 42],
+      ["a path over 1,024 characters", `/${"a".repeat(1024)}`],
+      ["a path over 1,024 UTF-8 bytes", `/${"é".repeat(512)}`],
+      ["an actual control character", "/pricing\n"],
+      ["a non-path string", "pricing"],
+      ["a raw query delimiter", "/pricing?plan=pro"],
+      ["a raw fragment delimiter", "/pricing#faq"],
+    ])("skips only the element with %s", async (_label, pagePath) => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          invalid: {
+            selector: "h1",
+            content: "Invalid",
+            type: "text",
+            page_path: pagePath,
+          },
+          valid: {
+            selector: "p",
+            content: "Valid",
+            type: "text",
+            page_path: "/about/",
+          },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.skippedCount).toBe(1);
+      expect(body.skipped).toEqual([
+        expect.objectContaining({ elementId: "invalid" }),
+      ]);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            element_id: "valid",
+            page_path: "/about/",
+          }),
+        ],
+        expect.any(Object),
+      );
+    });
+
+    it("retains NULL for author-declared shared elements", async () => {
+      const request = new NextRequest("http://localhost/api/content/site-123", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer token",
+          Origin: "https://example.com",
+        },
+        body: JSON.stringify({
+          shared: { selector: "nav", content: "Shared", type: "text" },
+        }),
+      });
+
+      const response = await POST(request, {
+        params: Promise.resolve({ siteId: "site-123" }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.upsert).toHaveBeenCalledWith(
+        [expect.objectContaining({ element_id: "shared", page_path: null })],
+        expect.any(Object),
+      );
+    });
+
     it("should return 404 when site not found", async () => {
       mockServiceClient.single.mockResolvedValueOnce({
         data: null,

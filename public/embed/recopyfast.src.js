@@ -801,7 +801,7 @@
 
   function contentReadEndpoint(staged, token) {
     return RECOPYFAST_API + (staged ? '/staging' : '') + '/content/' + SITE_ID +
-      (token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(normalizedPagePath());
+      (staged && token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(normalizedPagePath());
   }
 
   /**
@@ -2296,64 +2296,19 @@
       const overlay = this.createOverlay();
       const modal = document.createElement('div');
       modal.className = 'rcf-modal';
-
-      const iconContainer = document.createElement('div');
-      iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
-
-      const icon = document.createElement('div');
-      icon.className = 'rcf-modal-icon';
-      icon.style.background = 'linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(5, 150, 105, 0.2) 100%)';
-      icon.style.border = '1px solid rgba(16, 185, 129, 0.3)';
-      icon.textContent = '🚀';
-
-      const title = document.createElement('h2');
-      title.className = 'rcf-modal-title';
-      title.textContent = 'Publish Changes';
-
-      const subtitle = document.createElement('p');
-      subtitle.className = 'rcf-modal-subtitle';
-      subtitle.textContent = 'This will make your staging changes live on the website.';
-
-      iconContainer.appendChild(icon);
-      iconContainer.appendChild(title);
-      iconContainer.appendChild(subtitle);
-
-      const statusEl = document.createElement('div');
-      statusEl.id = 'rcf-publish-status';
-      statusEl.style.cssText = 'margin-bottom: 24px; padding: 16px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 10px;';
-      const statusText = document.createElement('p');
-      statusText.style.cssText = 'margin: 0; color: #94a3b8; text-align: center; font-size: 14px;';
-      statusText.textContent = 'Loading pending changes...';
-      statusEl.appendChild(statusText);
-
-      const buttonsContainer = document.createElement('div');
-      buttonsContainer.style.cssText = 'display: flex; gap: 12px;';
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'rcf-modal-btn rcf-modal-btn-ghost';
-      cancelBtn.style.flex = '1';
-      cancelBtn.innerHTML = '<span>Cancel</span>';
-
-      const confirmBtn = document.createElement('button');
-      confirmBtn.className = 'rcf-modal-btn rcf-modal-btn-success';
-      confirmBtn.style.flex = '1';
-      confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
-
-      buttonsContainer.appendChild(cancelBtn);
-      buttonsContainer.appendChild(confirmBtn);
-
-      modal.appendChild(iconContainer);
-      modal.appendChild(statusEl);
-      modal.appendChild(buttonsContainer);
+      modal.style.textAlign = 'center';
+      modal.innerHTML = '<h2 class="rcf-modal-title">Publish Changes Live?</h2>' +
+        '<div id="rcf-publish-status" style="margin-bottom:24px"><p>Counting changes...</p></div>' +
+        '<div style="display:flex;gap:12px"><button class="rcf-modal-btn rcf-modal-btn-ghost">Cancel</button>' +
+        '<button class="rcf-modal-btn rcf-modal-btn-success">Publish Now</button></div>';
+      const statusText = modal.querySelector('#rcf-publish-status p');
+      const cancelBtn = modal.querySelector('.rcf-modal-btn-ghost');
+      const confirmBtn = modal.querySelector('.rcf-modal-btn-success');
 
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
 
-      const close = function() {
-        if (document.body.contains(overlay)) {
-          document.body.removeChild(overlay);
-        }
-      };
+      const close = function() { overlay.remove(); };
 
       cancelBtn.onclick = close;
       overlay.onclick = function(e) { if (e.target === overlay) close(); };
@@ -2382,17 +2337,20 @@
         const result = await response.json();
 
         if (result.success && result.pendingChanges === 0) {
-          statusText.textContent = '✅ No pending changes to publish.';
+          statusText.textContent = '✅ No pending changes.';
           // Stays disabled: there is genuinely nothing to publish.
         } else {
           if (result.success) {
-            statusText.textContent = '📝 ' + result.pendingChanges + ' element(s) with changes';
+            statusText.textContent = result.currentPageChanges == null
+              ? result.pendingChanges + ' site changes'
+              : result.currentPageChanges + ' changes on this page, ' +
+                result.otherPageChanges + ' on other pages';
           }
           confirmBtn.disabled = false;
           confirmBtn.style.opacity = '';
         }
       } catch (error) {
-        statusText.textContent = 'Failed to load pending changes.';
+        statusText.textContent = 'Could not count changes.';
         statusText.style.color = '#ef4444';
         // Re-enabled deliberately. Failing to *preview* the pending changes
         // does not mean there are none, and the publish request is authorised
@@ -2405,15 +2363,14 @@
       confirmBtn.onclick = async function() {
         if (self.isMutationLocked) return;
         confirmBtn.disabled = true;
-        confirmBtn.innerHTML = '<span>Publishing...</span>';
+        confirmBtn.textContent = 'Publishing...';
 
         try {
           const response = await fetch(RECOPYFAST_API + '/staging/publish', {
             method: 'POST',
             headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
             body: JSON.stringify(Object.assign({
-              siteId: SITE_ID,
-              page_path: normalizedPagePath()
+              siteId: SITE_ID
             }, self.editorTokenBody()))
           });
 
@@ -2421,21 +2378,21 @@
           const result = await response.json();
 
           if (result.success) {
-            statusText.textContent = '✅ Published ' + result.published + ' change(s) successfully!';
+            statusText.textContent = '✅ Published ' + result.published + ' changes.';
             statusText.style.color = '#10b981';
-            confirmBtn.innerHTML = '<span>✓ Done!</span>';
+            confirmBtn.textContent = '✓ Done!';
             setTimeout(close, 2000);
           } else {
             statusText.textContent = result.error || 'Failed to publish changes.';
             statusText.style.color = '#f87171';
             confirmBtn.disabled = false;
-            confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+            confirmBtn.textContent = 'Publish Now';
           }
         } catch (error) {
           statusText.textContent = 'Network error. Please try again.';
           statusText.style.color = '#f87171';
           confirmBtn.disabled = false;
-          confirmBtn.innerHTML = '<span>🚀</span><span>Publish Now</span>';
+          confirmBtn.textContent = 'Publish Now';
         }
       };
     }
@@ -3694,12 +3651,15 @@
           headers: Object.assign({ 'Authorization': 'Bearer ' + SITE_TOKEN }, this.editorAuthHeaders())
         });
 
-        if (!response.ok) throw response.status;
+        if (!response.ok) {
+          console.warn('ReCopyFast: could not load saved content (HTTP ' + response.status + '); showing the page as authored.');
+          return;
+        }
 
         const body = await response.json();
         rows = staged ? (body && body.content) : body;
       } catch (error) {
-        console.warn('ReCopyFast: load failed', error);
+        console.warn('ReCopyFast: saved content unavailable; showing authored page.', error);
         return;
       }
 
@@ -4989,15 +4949,15 @@
 
       saveBtn.onclick = async function() {
         const newSrc = urlInput.value.trim();
-        if (!newSrc || /^data:/i.test(newSrc)) {
-          alert('Use an image URL (data: unsupported).');
-          return;
-        }
 
         // A data URI would be stored verbatim in the content row and again in
         // content_history on every subsequent edit — a 2 MB photo becomes ~2.7 MB
         // of base64 per revision. Uploads go through /api/upload/image and come
         // back as a URL; anything else here is a bug or a hand-pasted blob.
+        if (!newSrc || /^data:/i.test(newSrc)) {
+          alert(newSrc ? 'Data URLs unsupported.' : 'Enter or upload an image.');
+          return;
+        }
         const newAlt = isImg ? altInput.value.trim() : null;
         const imagePatch = {
           contentType: 'image',

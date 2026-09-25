@@ -1229,7 +1229,7 @@ Complexity: **4**. One rebuilt embed artifact for A-14 and A-26; no new dependen
 - Preserve all existing identity guards. D2 accepted by operator: re-key on discovery, no backfill or legacy fallback; zero real customers, QA rows may be orphaned.
 - Validate trimmed, bounded href/alt; allow only http/https/mailto/tel and relative/root/fragment references. Changing href to unsafe or unknown schemes receives 400; discovery omits unsupported attributes while retaining the element.
 - Retain attributes in metadata across staging, publish, history, fresh public hydration and version restore; drafts remain private until publish.
-- Persist nullable page_path for computed identities; author IDs remain All pages. Filter public/staging/preview reads by page plus shared rows, with deterministic pagination. Show Page in the dashboard content list.
+- Persist nullable page_path for computed identities; author IDs remain All pages. Filter public hydration and staging editor reads by page plus shared rows, with deterministic pagination. Publish remains site-wide; its full-site preview counts changes on the current page and other pages. Show Page in the dashboard content list.
 - Preserve absent attributes through capture/restore/publish; detect changes by value. Discovery keeps elements whose authored attributes are unsupported; strict validation applies when a user changes href.
 - Save staging plus history atomically; realtime and webhooks carry attribute changes. SPA client-side routing is a known pre-existing limitation deferred to a follow-up.
 - Preserve embed ceilings; all requested gates pass; draft PR only, pending independent review.

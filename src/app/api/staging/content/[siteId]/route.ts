@@ -16,6 +16,7 @@ import { sanitizeIncomingContent } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 function jsonObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -83,7 +84,16 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
-    const pagePath = searchParams.get("page_path");
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
 
     const { data: contentElements, error } = await fetchPageScopedRows(
       (scope) => {

@@ -26,7 +26,16 @@ interface PgPool {
     text: string,
     values?: unknown[],
   ): Promise<QueryResult<R>>;
+  connect(): Promise<PgClient>;
   end(): Promise<void>;
+}
+
+interface PgClient {
+  query<R = Record<string, unknown>>(
+    text: string,
+    values?: unknown[],
+  ): Promise<QueryResult<R>>;
+  release(): void;
 }
 
 interface PgPoolConstructor {
@@ -367,6 +376,7 @@ const TEST_TIMEOUT_MS = 60_000;
 const MIGRATIONS = [
   "supabase/migrations/20260924010000_content_attributes_lifecycle.sql",
   "supabase/migrations/20260924030000_content_page_path.sql",
+  "supabase/migrations/20260924060000_restore_site_wide_publish.sql",
 ].map((migration) => path.join(process.cwd(), migration));
 
 function validateScratchTarget(connectionString: string): URL {
@@ -746,18 +756,59 @@ if (!DB_URL) {
       });
     });
 
-    test("concurrent atomic saves serialize into a truthful history chain", async () => {
+    test("concurrent atomic saves block on the row and serialize into a truthful history chain", async () => {
       const { siteId, rowId } = await seedElement({ type: "p" });
-      const save = (content: string) =>
-        query(
+      const first = await db.connect();
+      const second = await db.connect();
+
+      try {
+        await first.query("BEGIN");
+        await second.query("BEGIN");
+        const { rows: secondBackend } = await second.query<{ pid: number }>(
+          "SELECT pg_backend_pid() AS pid",
+        );
+
+        await first.query(
           `SELECT * FROM save_staging_content_atomic(
             $1, 'rcf-nav-link', 'en', 'default', $2,
             '{}'::jsonb, NULL, $3
           )`,
-          [siteId, content, `${content}@example.com`],
+          [siteId, "Version B", "b@example.com"],
         );
 
-      await Promise.all([save("Version B"), save("Version C")]);
+        const secondSave = second.query(
+          `SELECT * FROM save_staging_content_atomic(
+            $1, 'rcf-nav-link', 'en', 'default', $2,
+            '{}'::jsonb, NULL, $3
+          )`,
+          [siteId, "Version C", "c@example.com"],
+        );
+
+        await expect(
+          (async () => {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const { rows } = await query<{ wait_event_type: string | null }>(
+                "SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1",
+                [secondBackend[0].pid],
+              );
+              if (rows[0]?.wait_event_type === "Lock") return true;
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+            return false;
+          })(),
+        ).resolves.toBe(true);
+
+        await first.query("COMMIT");
+        await secondSave;
+        await second.query("COMMIT");
+      } catch (error) {
+        await first.query("ROLLBACK").catch(() => undefined);
+        await second.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      } finally {
+        first.release();
+        second.release();
+      }
 
       const { rows } = await query<{
         previous_content: string | null;
@@ -777,6 +828,47 @@ if (!DB_URL) {
       );
       expect(initial).toBeDefined();
       expect(chained?.previous_content).toBe(initial?.new_content);
+    });
+
+    test("save removes equal-value attribute drafts instead of persisting false changes", async () => {
+      const { siteId, rowId } = await seedElement({
+        type: "a",
+        href: "/same",
+      });
+
+      await query(
+        `SELECT * FROM save_staging_content_atomic(
+          $1, 'rcf-nav-link', 'en', 'default', 'Documentation',
+          '{"href":"/same"}'::jsonb, NULL, 'db-test@example.com'
+        )`,
+        [siteId],
+      );
+
+      const { rows } = await query<{ metadata: Record<string, unknown> }>(
+        "SELECT metadata FROM content_elements WHERE id = $1",
+        [rowId],
+      );
+      expect(rows[0].metadata).toEqual({ type: "a", href: "/same" });
+    });
+
+    test("publish ignores an equal-value staged attribute", async () => {
+      const { siteId, rowId } = await seedElement({
+        type: "a",
+        href: "/same",
+        staging_attributes: { href: "/same" },
+      });
+
+      const published = await query(
+        "SELECT * FROM publish_staging_content_with_attributes_atomic($1, NULL, NULL, 'db-test@example.com', NULL)",
+        [siteId],
+      );
+      const { rows: history } = await query(
+        "SELECT id FROM staging_history WHERE content_element_id = $1",
+        [rowId],
+      );
+
+      expect(published.rows).toHaveLength(0);
+      expect(history).toHaveLength(0);
     });
 
     test("guard: the actual pre-s27 RPC drops an attribute-only publish", () => {
@@ -1110,36 +1202,63 @@ if (!DB_URL) {
       ]);
     });
 
-    test("page-scoped publish changes exactly the scoped preview rows", async () => {
+    test("restore followed by Publish from /a makes every page live", async () => {
       const { rows: sites } = await query<{ id: string }>(
-        "INSERT INTO sites (domain, name) VALUES ($1, 'scoped publish') RETURNING id",
-        [`s27-scope-${Date.now()}.invalid`],
+        "INSERT INTO sites (domain, name) VALUES ($1, 'site-wide publish') RETURNING id",
+        [`s27-site-wide-${Date.now()}.invalid`],
       );
       const siteId = sites[0].id;
       await query(
         `INSERT INTO content_elements
            (site_id, element_id, selector, original_content, current_content,
-            published_content, staging_content, page_path, metadata)
+            published_content, page_path, metadata)
          VALUES
-           ($1, 'pricing-row', 'p', 'Pricing', 'Pricing', 'Pricing', 'Pricing draft', '/pricing', '{"type":"p"}'),
-           ($1, 'about-row', 'p', 'About', 'About', 'About', 'About draft', '/about', '{"type":"p"}'),
-           ($1, 'shared-row', 'nav', 'Shared', 'Shared', 'Shared', 'Shared draft', NULL, '{"type":"nav"}')`,
+           ($1, 'page-a-copy', 'p', 'Older A', 'Older A', 'Older A', '/a', '{"type":"p"}'),
+           ($1, 'page-b-image', 'img', '/old.png', '/old.png', '/old.png', '/b', '{"type":"img","alt":"Older alt"}')`,
         [siteId],
       );
+      const olderVersionId = await snapshot(siteId, "older /a and /b");
+      await query(
+        `UPDATE content_elements
+            SET staging_content = CASE element_id
+                  WHEN 'page-a-copy' THEN 'Newer A'
+                  ELSE '/new.png'
+                END,
+                metadata = CASE element_id
+                  WHEN 'page-b-image' THEN jsonb_set(metadata, '{staging_attributes}', '{"alt":"Newer alt"}'::jsonb)
+                  ELSE metadata
+                END
+          WHERE site_id = $1`,
+        [siteId],
+      );
+      const initialPublish = await query<{ element_id: string }>(
+        "SELECT * FROM publish_staging_content_with_attributes_atomic($1, NULL, NULL, 'db-test@example.com', '/a')",
+        [siteId],
+      );
+      expect(initialPublish.rows.map((row) => row.element_id).sort()).toEqual([
+        "page-a-copy",
+        "page-b-image",
+      ]);
+      await query("SELECT restore_content_version($1, 'db-test@example.com')", [
+        olderVersionId,
+      ]);
 
       const previewResponse = await getPublishPreview(
         new NextRequest(
-          `https://owner.example.com/api/staging/publish?siteId=${siteId}&page_path=%2Fpricing`,
+          `https://owner.example.com/api/staging/publish?siteId=${siteId}&page_path=%2Fa`,
         ),
       );
       const preview = (await previewResponse.json()) as {
+        pendingChanges: number;
+        currentPageChanges: number;
+        otherPageChanges: number;
         elements: Array<{ elementId: string }>;
       };
       const publishResponse = await publishStagingContent(
         new NextRequest("https://owner.example.com/api/staging/publish", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ siteId, page_path: "/pricing" }),
+          body: JSON.stringify({ siteId, page_path: "/a" }),
         }),
       );
       const published = (await publishResponse.json()) as {
@@ -1157,27 +1276,27 @@ if (!DB_URL) {
 
       expect(previewResponse.status).toBe(200);
       expect(publishResponse.status).toBe(200);
+      expect(preview).toMatchObject({
+        pendingChanges: 2,
+        currentPageChanges: 1,
+        otherPageChanges: 1,
+      });
       expect(preview.elements.map((row) => row.elementId).sort()).toEqual([
-        "pricing-row",
-        "shared-row",
+        "page-a-copy",
+        "page-b-image",
       ]);
       expect(published.elements.map((row) => row.element_id).sort()).toEqual(
         preview.elements.map((row) => row.elementId).sort(),
       );
       expect(rows).toEqual([
         {
-          element_id: "about-row",
-          published_content: "About",
-          staging_content: "About draft",
-        },
-        {
-          element_id: "pricing-row",
-          published_content: "Pricing draft",
+          element_id: "page-a-copy",
+          published_content: "Older A",
           staging_content: null,
         },
         {
-          element_id: "shared-row",
-          published_content: "Shared draft",
+          element_id: "page-b-image",
+          published_content: "/old.png",
           staging_content: null,
         },
       ]);

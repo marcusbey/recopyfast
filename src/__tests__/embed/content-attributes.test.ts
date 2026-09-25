@@ -503,4 +503,62 @@ describe("embed content attributes", () => {
     expect(JSON.parse(save!.body!)).not.toHaveProperty("alt");
     expect(image.hasAttribute("alt")).toBe(false);
   });
+
+  it("points an empty image URL to the upload control", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/pricing?rcf_staging=1&rcf_token=test_attributes",
+    );
+    document.body.innerHTML = '<img src="/hero.jpg">';
+    await boot(() => [], []);
+
+    const widget = (
+      window as unknown as {
+        ReCopyFast: { openImageEditor(element: Element): void };
+      }
+    ).ReCopyFast;
+    widget.openImageEditor(document.querySelector("img")!);
+    const urlInput = document.querySelector<HTMLInputElement>(
+      '.rcf-modal input[type="url"]',
+    )!;
+    urlInput.value = "";
+    (
+      document.querySelector(".rcf-modal-btn-success") as HTMLButtonElement
+    ).click();
+
+    expect(window.alert).toHaveBeenCalledWith("Enter or upload an image.");
+  });
+
+  it("explains that a data URI must use the upload control", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/pricing?rcf_staging=1&rcf_token=test_attributes",
+    );
+    document.body.innerHTML = '<img src="/hero.jpg">';
+    await boot(() => [], []);
+
+    const widget = (
+      window as unknown as {
+        ReCopyFast: { openImageEditor(element: Element): void };
+      }
+    ).ReCopyFast;
+    widget.openImageEditor(document.querySelector("img")!);
+    const urlInput = document.querySelector<HTMLInputElement>(
+      '.rcf-modal input[type="url"]',
+    )!;
+    urlInput.value = "data:image/png;base64,AAAA";
+    (
+      document.querySelector(".rcf-modal-btn-success") as HTMLButtonElement
+    ).click();
+
+    expect(window.alert).toHaveBeenCalledWith("Data URLs unsupported.");
+  });
+
+  it("keeps the data-URI storage rationale above its rejection", () => {
+    expect(
+      WIDGET_SOURCE.indexOf("A data URI would be stored verbatim"),
+    ).toBeLessThan(WIDGET_SOURCE.indexOf("/^data:/i.test(newSrc)"));
+  });
 });

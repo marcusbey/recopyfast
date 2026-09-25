@@ -48,8 +48,11 @@ const makeBuilder = (result: QueryResult) => {
     single: jest.fn(() =>
       Promise.resolve({ data: null, count: null, error: null, ...result }),
     ),
+    maybeSingle: jest.fn(() =>
+      Promise.resolve({ data: null, count: null, error: null, ...result }),
+    ),
   };
-  for (const method of ["select", "eq", "in", "order", "limit"]) {
+  for (const method of ["select", "eq", "in", "order", "range", "limit"]) {
     builder[method] = jest.fn(() => builder);
   }
   return builder;
@@ -107,8 +110,11 @@ describe("GET /api/sites", () => {
     lastActivity = null as { created_at: string } | null,
   } = {}) => {
     queryQueue.push({ count: elementsCount });
-    queryQueue.push({ data: elementIds.map((id) => ({ id })) });
+    queryQueue.push({
+      data: elementIds.map((id) => ({ id, element_id: `element-${id}` })),
+    });
     if (elementIds.length > 0) {
+      queryQueue.push({ data: [] });
       queryQueue.push({ count: editsCount });
       queryQueue.push({ data: lastActivity });
     }
@@ -235,6 +241,44 @@ describe("GET /api/sites", () => {
       edits_count: 10,
       views: 0,
       last_activity: "2024-01-15T00:00:00Z",
+    });
+  });
+
+  it("pages through every element id before calculating history statistics", async () => {
+    queryQueue.push({ data: mockPermissions });
+    queryQueue.push({ data: mockSites });
+    queryQueue.push({ count: 1002 });
+
+    const elementRows = Array.from({ length: 1002 }, (_unused, index) => ({
+      id: `row-${String(index).padStart(4, "0")}`,
+      element_id: `element-${String(index).padStart(4, "0")}`,
+    }));
+    queryQueue.push({ data: elementRows.slice(0, 500) });
+    queryQueue.push({ data: elementRows.slice(500, 1000) });
+    queryQueue.push({ data: elementRows.slice(1000) });
+    queryQueue.push({ data: [] });
+    for (let batch = 0; batch < 6; batch += 1) {
+      queryQueue.push({ count: batch === 5 ? 2 : 200 });
+      queryQueue.push({
+        data: {
+          created_at:
+            batch === 3
+              ? "2026-09-24T00:00:00Z"
+              : `2026-09-${String(10 + batch).padStart(2, "0")}T00:00:00Z`,
+        },
+      });
+    }
+
+    const response = await GET(
+      new NextRequest("http://localhost:3000/api/sites"),
+    );
+    const data = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(data.sites[0].stats).toMatchObject({
+      content_elements_count: 1002,
+      edits_count: 1002,
+      last_activity: "2026-09-24T00:00:00Z",
     });
   });
 

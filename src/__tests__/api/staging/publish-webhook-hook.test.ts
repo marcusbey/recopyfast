@@ -141,12 +141,12 @@ describe("POST /api/staging/publish — webhook hook", () => {
     });
   });
 
-  it("passes the preview page scope into the atomic publish", async () => {
+  it("keeps publish site-wide when the editor supplies its current page", async () => {
     await POST(publishRequest("/pricing"));
 
     expect(mockRpc).toHaveBeenCalledWith(
       "publish_staging_content_with_attributes_atomic",
-      expect.objectContaining({ p_page_path: "/pricing" }),
+      expect.not.objectContaining({ p_page_path: expect.anything() }),
     );
   });
 

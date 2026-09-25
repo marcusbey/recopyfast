@@ -88,8 +88,47 @@ All commands used the exact main CI job placeholders from `.github/workflows/ci.
 
 Limits: the SQL fixture exercises the real forward migrations on a minimal schema, not the complete Supabase migration chain. No real-browser end-to-end, production deployment, remote migration, merge or ready transition is claimed. Existing DB-gated cases and unrelated expected-failure audit findings remain. Apply the new migration before deploying app code that calls the new RPCs; rollback app code first, keep additive database objects. M2 is explicitly deferred above. The reviewer-owned blocked verdict awaits its owner's reassessment.
 
-## Publish confirmation alignment
+## Fix mode 2 — operator validated 2026-09-24
 
-Integration review found that a page-filtered preview could still confirm a site-wide publish because the widget POST carried only siteId. Extend the new attribute-aware publish RPC with an optional page path and apply the same page-or-NULL scope inside its transaction; send that path from widget confirmation. Pathless legacy callers and the existing publish RPC remain site-wide. Verified two pages plus shared rows in real SQL, preview/POST path parity in the widget, then reran gates. This closes a regression introduced by the requested scoped preview; it does not add SPA navigation tracking.
+The operator reverses the author-added page-scoped publish amendment: Publish is site-wide. Public hydration and staging editor reads remain page-scoped. The publish preview reads the entire site and reports current-page/shared versus other-page counts; its page_path is count context only. One Publish after restore makes all pages live.
 
-Independent read-only fix review: 35 files reviewed, 0 open findings; focused 9 suites / 173 tests plus incremental scoped-publish 3 suites / 16 tests passed. The reviewer-owned verdict file was neither overwritten nor staged.
+- [x] N1: restore site-wide Publish and full-site preview with per-page count breakdown; reproduce published edits on /a and /b, restore older version, then Publish from /a and verify both pages live.
+- [x] N2: validate and normalize discovery page_path, cap at 1024 and reject control characters; invalid path skips only its element.
+- [x] N3: paginate until EMPTY, advance by actual returned row count, stable total ordering; cap-500 regression and parallel page/shared reads.
+- [x] N4: tests must fail under removal of pagination, save FOR UPDATE, publish/save equal-value filters and preview/staging GET value comparisons. Prove SQL locking with deterministic overlapping sessions.
+- [x] N5: reuse pagination for bulk export, site content-elements and /api/sites element fetch, preserving filters and output.
+- [x] N7: data-URI why-comment above check; distinct empty-image message; public reads do not gain editor tokens. Preserve Node 20/24 byte ceilings with useful headroom.
+- [x] N6 and delivery: PR body lists both 20260924010000 and 20260924030000 as required operator-applied pre-deploy migrations and forward correction 20260924060000. Required gates, fix(s27) commit, push existing PR #24 and leave draft.
+
+The review file is owned by the independent reviewer, remains byte-identical and uncommitted (SHA-256 de2958b56f7859e3f109a908335f51b35ee7cbd32f9a65017ed51292c12b2499). Existing unrelated guards and expected-failure markers remain intact. No production operations. The leader owns documentation, final gates, commit and PR; implementation agents own bounded source/test slices.
+
+Independent backend review caught a non-idempotent second decode of widget-normalized paths: browser `/%25` becomes `/%`, while `/%2520` becomes `/%20`. The server must validate these canonical values without another URI decode. Regression coverage checks discovery/public/staging/preview parity for both; actual control characters remain rejected per element. This corrects the N2 implementation without adding widget bytes.
+
+## Fix mode 2 regression evidence
+
+- Pager neutralization (single capped read): **4/4 dedicated pagination tests red**, restored green. The query doubles enforce max_rows=500 even when range is absent.
+- SQL/TS guard neutralizations: **1 red each** for removed save FOR UPDATE, save equal-value filter, publish equal-value comparison, staging GET value comparison, and preview value comparison. Reintroducing SQL page scoping produces **1 red**. Every temporary mutation was restored.
+- Real owned PostgreSQL 16 lifecycle: **18/18 tests passed**, repeated independently. Includes exact two-page restore/publish, no-op restore, absence, explicit clears, grants, replay, rollback and deterministic overlapping save/history chain. Cluster stopped and verified inactive.
+- Widget: **12 suites / 151 tests passed**; initial new tests showed **6 failures** before the changes.
+- Pagination/discovery/bulk/sites: **13 suites / 222 passed / 2 existing skipped tests** before final canonical-path additions; final path-focused **2 suites / 48 tests passed**, repeated independently.
+- Independent backend review found and verified repairs to double URI decoding and double index/slash folding. Final bounded backend review has no unresolved finding; read-only cross-review of the widget found no blocker. Reviewer-owned document remained untouched.
+- The first combined full-suite/build attempt encountered timeouts in five unchanged suites and was stopped for the N2 repair. All five then passed sequentially: **128/128 tests**. No timeout, guard, skip or assertion was changed to accommodate host contention. Final gates run sequentially below.
+
+The next full run exposed two additional pre-existing `/api/sites` mocks that returned an awaited `eq()` result and lacked the ordered/ranged chain. Only those test doubles were adapted to a thenable empty paged query; every credential/snippet assertion stayed unchanged. Both suites then passed all **9 tests**. The production build subsequently passed before the final full precommit replay.
+
+## Final fix mode 2 gates — 2026-09-24
+
+All commands used the main CI placeholder environment from `.github/workflows/ci.yml` via `/tmp/s27-ci-run.py`; no production env file was copied. Full tests ran serially after a contended run. For the final replay, only this process's macOS background policy was cleared with `taskpolicy -B`; no test timeout, assertion or skip was changed.
+
+- `npm run precommit -- -- --runInBand`: exit 0; lint **0 errors / 39 inherited warnings**; full TypeScript clean; Jest **223 passed / 2 skipped suites**, **2,958 passed / 38 skipped tests**, **2,996 total**, zero failures. Existing and opt-in DB skips remain; SQL ran separately below.
+- `npm run build`: exit 0, optimized production build.
+- `npm run type-check:build`: exit 0.
+- `npm run format:check`: exit 0.
+- `npm run audit:prod`: exit 0, **0 vulnerabilities**.
+- `~/.asdf/installs/nodejs/20.15.1/bin/node scripts/build-embed.mjs --check` and `~/.asdf/installs/nodejs/24.14.0/bin/node scripts/build-embed.mjs --check`: both exit 0, fresh artifact. Both runtimes: **bundle 46,601 / 46,681 B**, **widget 33,837 / 33,865 B**, **transport 13,141 B** (Node zlib level 9). Headroom: **80 B bundle / 28 B widget**; ceilings unchanged.
+- `RCF_TEST_DB_URL=postgresql://marcusbey@127.0.0.1:55437/postgres python3 /tmp/s27-ci-run.py npm test -- --runInBand --testPathPatterns=content-attributes-lifecycle`: **18/18 passed** on owned PostgreSQL 16, independently repeated; scratch server stopped afterward.
+- Neutralization: pagination removal gives **4 red tests**; save `FOR UPDATE`, save equality filter, publish equality comparison, staging GET comparison, and preview comparison each give **1 red**. Reintroducing scoped SQL publish gives **1 red**. All mutants restored.
+- Full widget suite: **12 suites / 151 tests passed**. Final canonical-path suites: **2 suites / 48 tests passed**, independently repeated. Bounded backend and widget cross-reviews have no unresolved findings.
+- `git diff --check`: clean, excluding the untouched reviewer-owned working diff. No new failing/skip markers were added or flipped in fix mode 2; prior story flips remain.
+
+Merge prerequisite: `origin/main` at `300548a` (PRs #23 and #25) merged as `6ffc3d9`, keeping all story entries. Delivery uses the directly verified gates above without rerunning duplicate Git hook jobs on the overloaded host. Review SHA-256 remains `de2958b56f7859e3f109a908335f51b35ee7cbd32f9a65017ed51292c12b2499`; the file is excluded from staging. No PR merge, ready transition, remote migration or deployment is authorized in this delivery.

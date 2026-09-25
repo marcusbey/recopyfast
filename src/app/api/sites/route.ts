@@ -4,6 +4,9 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 import { resolveEffectiveSiteStatus } from "@/lib/sites/site-status";
+import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+
+const HISTORY_ID_BATCH_SIZE = 200;
 
 export async function GET(request: NextRequest) {
   try {
@@ -66,10 +69,19 @@ export async function GET(request: NextRequest) {
 
         // Resolve element IDs for this site as a plain array (subquery objects
         // are not supported by the Supabase JS client v2 `.in()` filter).
-        const { data: elementRows } = await serviceClient
-          .from("content_elements")
-          .select("id")
-          .eq("site_id", site.id);
+        const { data: elementRows, error: elementRowsError } =
+          await fetchPageScopedRows(
+            () =>
+              serviceClient
+                .from("content_elements")
+                .select("id, element_id")
+                .eq("site_id", site.id),
+            null,
+          );
+
+        if (elementRowsError) {
+          throw elementRowsError;
+        }
 
         const elementIds: string[] = (elementRows ?? []).map(
           (r: { id: string }) => r.id,
@@ -78,23 +90,45 @@ export async function GET(request: NextRequest) {
         let editsCount: number | null = 0;
         let lastActivity: { created_at: string } | null = null;
 
-        if (elementIds.length > 0) {
-          // Get edits count from content_history
-          const { count } = await serviceClient
-            .from("content_history")
-            .select("*", { count: "exact", head: true })
-            .in("content_element_id", elementIds);
-          editsCount = count;
+        // `.in()` serializes every UUID into the request URL. Once page-scoped
+        // identity pushed ordinary sites over 1,000 elements, one unbounded
+        // list produced URLs large enough for proxies to reject. Batch the
+        // already-authorized ids and combine exact counts/latest timestamps.
+        for (
+          let offset = 0;
+          offset < elementIds.length;
+          offset += HISTORY_ID_BATCH_SIZE
+        ) {
+          const batch = elementIds.slice(
+            offset,
+            offset + HISTORY_ID_BATCH_SIZE,
+          );
+          const [countResult, activityResult] = await Promise.all([
+            serviceClient
+              .from("content_history")
+              .select("*", { count: "exact", head: true })
+              .in("content_element_id", batch),
+            serviceClient
+              .from("content_history")
+              .select("created_at")
+              .in("content_element_id", batch)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+          ]);
 
-          // Get last activity
-          const { data: activityRow } = await serviceClient
-            .from("content_history")
-            .select("created_at")
-            .in("content_element_id", elementIds)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single();
-          lastActivity = activityRow;
+          if (countResult.error || activityResult.error) {
+            throw countResult.error ?? activityResult.error;
+          }
+
+          editsCount = (editsCount ?? 0) + (countResult.count ?? 0);
+          const activityRow = activityResult.data;
+          if (
+            activityRow &&
+            (!lastActivity || activityRow.created_at > lastActivity.created_at)
+          ) {
+            lastActivity = activityRow;
+          }
         }
 
         const permission = permissions.find((row) => row.site_id === site.id);

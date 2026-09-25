@@ -17,8 +17,9 @@ type QueryBuilder<T> = PromiseLike<QueryResult<T>> & {
 
 async function collectPages<T>(buildQuery: () => QueryBuilder<T>) {
   const rows: T[] = [];
+  let offset = 0;
 
-  for (let offset = 0; ; offset += CONTENT_ELEMENT_PAGE_SIZE) {
+  for (;;) {
     let query = buildQuery();
     query = query.order("element_id", { ascending: true });
     query = query.order("id", { ascending: true });
@@ -28,10 +29,16 @@ async function collectPages<T>(buildQuery: () => QueryBuilder<T>) {
     if (result.error) return { data: null, error: result.error };
 
     const page = result.data ?? [];
-    rows.push(...page);
-    if (page.length < CONTENT_ELEMENT_PAGE_SIZE) {
+    if (page.length === 0) {
       return { data: rows, error: null };
     }
+
+    rows.push(...page);
+    // PostgREST may enforce a server max_rows smaller than the requested
+    // range. Advancing by the request size skips rows after any capped page;
+    // stopping on a short page truncates the result. Only an empty response is
+    // terminal, and the next range begins after the rows actually received.
+    offset += page.length;
   }
 }
 
@@ -49,10 +56,11 @@ export async function fetchPageScopedRows<
     return collectPages(() => buildQuery({ kind: "all" }));
   }
 
-  const page = await collectPages(() => buildQuery({ kind: "page", pagePath }));
+  const [page, shared] = await Promise.all([
+    collectPages(() => buildQuery({ kind: "page", pagePath })),
+    collectPages(() => buildQuery({ kind: "shared" })),
+  ]);
   if (page.error) return page;
-
-  const shared = await collectPages(() => buildQuery({ kind: "shared" }));
   if (shared.error) return shared;
 
   return {

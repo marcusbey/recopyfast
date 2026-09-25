@@ -27,15 +27,24 @@ import { GET as getPublishPreview } from "@/app/api/staging/publish/route";
 
 function queryResult(result: unknown) {
   const builder: Record<string, unknown> = {};
+  let rangeStart = 0;
   builder.select = jest.fn(() => builder);
   builder.eq = jest.fn(() => builder);
+  builder.is = jest.fn(() => builder);
   builder.not = jest.fn(() => builder);
   builder.order = jest.fn(() => builder);
-  builder.range = jest.fn(() => builder);
+  builder.range = jest.fn((start: number) => {
+    rangeStart = start;
+    return builder;
+  });
   builder.then = (
     resolve: (value: unknown) => unknown,
     reject: (reason: unknown) => unknown,
-  ) => Promise.resolve(result).then(resolve, reject);
+  ) =>
+    Promise.resolve(rangeStart === 0 ? result : { data: [], error: null }).then(
+      resolve,
+      reject,
+    );
   return builder;
 }
 
@@ -66,6 +75,18 @@ const cleanRow = {
   element_id: "rcf-clean",
   staging_content: null,
   metadata: { type: "p" },
+};
+
+const equalValueRow = {
+  ...attributeOnlyRow,
+  id: "row-equal",
+  element_id: "rcf-equal",
+  page_path: "/pricing",
+  metadata: {
+    type: "a",
+    href: "/published",
+    staging_attributes: { href: "/published" },
+  },
 };
 
 describe("staged href/alt projections", () => {
@@ -120,5 +141,75 @@ describe("staged href/alt projections", () => {
         analytics_key: "keep-me",
       },
     });
+  });
+
+  it("does not report an equal-value attribute draft in staging GET or publish preview", async () => {
+    mockCreateServiceRoleClient.mockReturnValue({
+      from: jest.fn(() => queryResult({ data: [equalValueRow], error: null })),
+    });
+
+    const stagingResponse = await getStagingContent(
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/content/site-1?page_path=%2Fpricing",
+      ),
+      { params: Promise.resolve({ siteId: "site-1" }) },
+    );
+    const previewResponse = await getPublishPreview(
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
+      ),
+    );
+    const stagingBody = await stagingResponse.json();
+    const previewBody = await previewResponse.json();
+
+    expect(stagingBody.content[0].has_staging_changes).toBe(false);
+    expect(previewBody).toMatchObject({
+      pendingChanges: 0,
+      currentPageChanges: 0,
+      otherPageChanges: 0,
+      elements: [],
+    });
+  });
+
+  it("previews every site draft and separates current/shared from other pages", async () => {
+    const current = {
+      ...attributeOnlyRow,
+      id: "row-current",
+      element_id: "rcf-current",
+      page_path: "/pricing",
+    };
+    const shared = {
+      ...attributeOnlyRow,
+      id: "row-shared",
+      element_id: "rcf-shared",
+      page_path: null,
+    };
+    const other = {
+      ...attributeOnlyRow,
+      id: "row-other",
+      element_id: "rcf-other",
+      page_path: "/about",
+    };
+    mockCreateServiceRoleClient.mockReturnValue({
+      from: jest.fn(() =>
+        queryResult({ data: [current, shared, other], error: null }),
+      ),
+    });
+
+    const response = await getPublishPreview(
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
+      ),
+    );
+    const body = await response.json();
+
+    expect(body).toMatchObject({
+      pendingChanges: 3,
+      currentPageChanges: 2,
+      otherPageChanges: 1,
+    });
+    expect(
+      body.elements.map((row: { elementId: string }) => row.elementId),
+    ).toEqual(["rcf-current", "rcf-shared", "rcf-other"]);
   });
 });

@@ -15,6 +15,7 @@ import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
 import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 type PublishRpcRow = {
   element_id: string;
@@ -169,6 +170,12 @@ export async function POST(request: NextRequest) {
 
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();
+
+    // Publish has always been a site-wide operator action. Page identity scopes
+    // what the editor reads and labels the confirmation counts below; it must
+    // not scope this mutation. Restore stages every page, and the s27 scoped
+    // RPC call once left a restored site half-live when Publish was clicked
+    // from only one of those pages.
     const { data, error } = await serviceClient.rpc(
       "publish_staging_content_with_attributes_atomic",
       {
@@ -176,9 +183,6 @@ export async function POST(request: NextRequest) {
         p_element_ids: elementIds,
         p_published_by: publisherId,
         p_user_email: publisherEmail || "unknown",
-        ...(typeof rawPagePath === "string"
-          ? { p_page_path: rawPagePath }
-          : {}),
       },
     );
 
@@ -245,7 +249,16 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const siteId = request.nextUrl.searchParams.get("siteId");
-    const pagePath = request.nextUrl.searchParams.get("page_path");
+    const requestedPagePath = request.nextUrl.searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath && !normalizedPagePath.ok) {
+      return withPublicCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        request,
+      );
+    }
+    const pagePath = normalizedPagePath?.value ?? null;
 
     if (!siteId) {
       return withPublicCors(
@@ -307,7 +320,7 @@ export async function GET(request: NextRequest) {
           query = query.is("page_path", null);
         }
         return query;
-      }, pagePath);
+      }, null);
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);
@@ -320,7 +333,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const changedElements = (elementsWithChanges || []).flatMap((el) => {
+    const changedRows = (elementsWithChanges || []).flatMap((el) => {
       const projection = stagedMetadata(el.metadata);
       const hasTextChanges =
         el.staging_content !== null &&
@@ -331,21 +344,33 @@ export async function GET(request: NextRequest) {
 
       return [
         {
-          id: el.id,
-          elementId: el.element_id,
-          selector: el.selector,
-          stagingContent: el.staging_content,
-          publishedContent: el.published_content,
-          stagingUpdatedAt: el.staging_updated_at,
-          metadata: projection.metadata,
+          pagePath: el.page_path,
+          element: {
+            id: el.id,
+            elementId: el.element_id,
+            selector: el.selector,
+            stagingContent: el.staging_content,
+            publishedContent: el.published_content,
+            stagingUpdatedAt: el.staging_updated_at,
+            metadata: projection.metadata,
+          },
         },
       ];
     });
+    const currentPageChanges =
+      pagePath === null
+        ? changedRows.length
+        : changedRows.filter(
+            (row) => row.pagePath === null || row.pagePath === pagePath,
+          ).length;
+    const changedElements = changedRows.map((row) => row.element);
 
     return withPublicCors(
       NextResponse.json({
         success: true,
         pendingChanges: changedElements.length,
+        currentPageChanges,
+        otherPageChanges: changedElements.length - currentPageChanges,
         elements: changedElements,
         canPublish,
       }),

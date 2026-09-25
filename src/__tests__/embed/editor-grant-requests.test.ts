@@ -111,7 +111,16 @@ function widget(): WidgetInstance {
 }
 
 /** Boots the widget with a grant already in this browser's storage. */
-async function bootSignedIn(permissions: string[] = ["view", "edit"]) {
+async function bootSignedIn(
+  permissions: string[] = ["view", "edit"],
+  publishResult: Record<string, unknown> = {
+    success: true,
+    pendingChanges: 1,
+    currentPageChanges: 1,
+    otherPageChanges: 0,
+    published: 1,
+  },
+) {
   window.localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({
@@ -132,7 +141,7 @@ async function bootSignedIn(permissions: string[] = ["view", "edit"]) {
       shouldRefresh: false,
     },
     "staging/content": { content: [] },
-    "staging/publish": { success: true, pendingChanges: 1, published: 1 },
+    "staging/publish": publishResult,
   });
 
   runWidget();
@@ -222,9 +231,15 @@ describe("the widget presents a device grant in a header, never a URL", () => {
     );
   });
 
-  it("publishes the same page scope previewed without exposing the grant", async () => {
+  it("uses the page only for preview counts and publishes every site draft", async () => {
     window.history.replaceState(null, "", "/team/%7Emarcus/index.html");
-    const { recorded } = await bootSignedIn(["view", "edit", "publish"]);
+    const { recorded } = await bootSignedIn(["view", "edit", "publish"], {
+      success: true,
+      pendingChanges: 8,
+      currentPageChanges: 3,
+      otherPageChanges: 5,
+      published: 8,
+    });
 
     await widget().showPublishConfirmation();
     await settle();
@@ -237,11 +252,19 @@ describe("the widget presents a device grant in a header, never a URL", () => {
       `${API}/staging/publish?siteId=${SITE_ID}&page_path=%2Fteam%2F~marcus`,
     );
     expect(preview?.body).toBeNull();
+    expect(
+      document.querySelector("#rcf-publish-status")?.textContent,
+    ).toContain("3 changes on this page, 5 on other pages");
 
     const confirm = document.querySelector(
       ".rcf-modal-btn-success",
     ) as HTMLButtonElement | null;
     expect(confirm).not.toBeNull();
+    expect(confirm!.parentElement?.style.display).toBe("flex");
+    expect(confirm!.classList).toContain("rcf-modal-btn-success");
+    expect(
+      confirm!.parentElement?.querySelector(".rcf-modal-btn-ghost"),
+    ).not.toBeNull();
     confirm!.click();
     await settle();
 
@@ -252,11 +275,72 @@ describe("the widget presents a device grant in a header, never a URL", () => {
     expect(publish).toBeDefined();
     expect(publish!.headers[GRANT_HEADER]).toBe(GRANT);
     expect(publish!.url).toBe(`${API}/staging/publish`);
-    expect(publish!.body).toEqual({
-      siteId: SITE_ID,
-      page_path: "/team/~marcus",
-    });
+    expect(publish!.body).toEqual({ siteId: SITE_ID });
     expect(JSON.stringify(publish!.body)).not.toContain(GRANT);
+  });
+
+  it("allows site-wide Publish when only other pages have drafts", async () => {
+    const { recorded } = await bootSignedIn(["view", "edit", "publish"], {
+      success: true,
+      pendingChanges: 5,
+      currentPageChanges: 0,
+      otherPageChanges: 5,
+      published: 5,
+    });
+
+    await widget().showPublishConfirmation();
+    await settle();
+
+    const confirm = document.querySelector(
+      ".rcf-modal-btn-success",
+    ) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    expect(
+      document.querySelector("#rcf-publish-status")?.textContent,
+    ).toContain("0 changes on this page, 5 on other pages");
+
+    confirm.click();
+    await settle();
+
+    const publish = callsTo(recorded, "/staging/publish").find(
+      (call) => call.method === "POST",
+    );
+    expect(publish?.body).toEqual({ siteId: SITE_ID });
+  });
+
+  it("falls back to the site-wide total during a mixed-version rollout", async () => {
+    await bootSignedIn(["view", "edit", "publish"], {
+      success: true,
+      pendingChanges: 4,
+      published: 4,
+    });
+
+    await widget().showPublishConfirmation();
+    await settle();
+
+    expect(
+      document.querySelector("#rcf-publish-status")?.textContent,
+    ).toContain("4 site changes");
+    expect(
+      (document.querySelector(".rcf-modal-btn-success") as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+  });
+
+  it("never sends an orphan rcf_token on a public content read", async () => {
+    window.history.replaceState(null, "", "/pricing?rcf_token=orphan-token");
+    const { recorded } = installFetch({});
+
+    runWidget();
+    await settle();
+
+    const publicRead = callsTo(recorded, `/content/${SITE_ID}`).find(
+      (call) => call.method === "GET",
+    );
+    expect(publicRead?.url).toBe(
+      `${API}/content/${SITE_ID}?page_path=%2Fpricing`,
+    );
+    expect(publicRead?.url).not.toContain("rcf_token");
   });
 
   it("never puts the grant in any URL it builds, on any request of the page load", async () => {

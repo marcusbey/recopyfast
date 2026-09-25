@@ -16,6 +16,7 @@ import {
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
+import { normalizePagePath } from "@/lib/content/page-path";
 
 interface ContentElementRow {
   site_id: string;
@@ -133,6 +134,16 @@ function buildDiscoveryRows(
     const reported = data as Record<string, unknown>;
     const attributes: Record<string, string> = {};
 
+    let pagePath: string | null = null;
+    if (reported.page_path !== undefined && reported.page_path !== null) {
+      const path = normalizePagePath(reported.page_path);
+      if (!path.ok) {
+        skipped.push({ elementId: id.value, reason: path.error });
+        continue;
+      }
+      pagePath = path.value;
+    }
+
     // Discovery reports what the author already put on the page. A disallowed
     // destination still must not become a published href, but dropping the
     // entire element made its safe text impossible to edit. Validate each
@@ -163,8 +174,7 @@ function buildDiscoveryRows(
       published_content: element.value.content,
       language: "en",
       variant: "default",
-      page_path:
-        typeof reported.page_path === "string" ? reported.page_path : null,
+      page_path: pagePath,
       metadata: {
         ...(element.value.type ? { type: element.value.type } : {}),
         ...attributes,
@@ -358,7 +368,17 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const language = searchParams.get("language") || "en";
     const variant = searchParams.get("variant") || "default";
-    const pagePath = searchParams.get("page_path");
+    const requestedPagePath = searchParams.get("page_path");
+    const normalizedPagePath =
+      requestedPagePath === null ? null : normalizePagePath(requestedPagePath);
+    if (normalizedPagePath !== null && !normalizedPagePath.ok) {
+      return withCors(
+        NextResponse.json({ error: normalizedPagePath.error }, { status: 400 }),
+        allowedOrigin,
+      );
+    }
+    const pagePath =
+      normalizedPagePath === null ? null : normalizedPagePath.value;
 
     // A scoped page read includes author-declared ids (page_path IS NULL),
     // while an omitted path keeps old widgets working. Both paths paginate:

@@ -49,14 +49,66 @@ const rows = [
     page_path: "/about",
     metadata: { type: "p" },
   },
+  {
+    id: "literal-percent",
+    site_id: "site-1",
+    element_id: "literal-percent",
+    selector: "p",
+    original_content: "Published",
+    published_content: "Published",
+    staging_content: "Draft",
+    staging_updated_at: "2026-09-24T00:00:00.000Z",
+    staging_updated_by: null,
+    published_at: "2026-09-23T00:00:00.000Z",
+    language: "en",
+    variant: "default",
+    page_path: "/%",
+    metadata: { type: "p" },
+  },
+  {
+    id: "encoded-space",
+    site_id: "site-1",
+    element_id: "encoded-space",
+    selector: "p",
+    original_content: "Published",
+    published_content: "Published",
+    staging_content: "Draft",
+    staging_updated_at: "2026-09-24T00:00:00.000Z",
+    staging_updated_by: null,
+    published_at: "2026-09-23T00:00:00.000Z",
+    language: "en",
+    variant: "default",
+    page_path: "/%20",
+    metadata: { type: "p" },
+  },
+  {
+    id: "canonical-index",
+    site_id: "site-1",
+    element_id: "canonical-index",
+    selector: "p",
+    original_content: "Published",
+    published_content: "Published",
+    staging_content: "Draft",
+    staging_updated_at: "2026-09-24T00:00:00.000Z",
+    staging_updated_by: null,
+    published_at: "2026-09-23T00:00:00.000Z",
+    language: "en",
+    variant: "default",
+    page_path: "/index.html",
+    metadata: { type: "p" },
+  },
 ];
 
 type Row = (typeof rows)[number];
 
 class Query implements PromiseLike<{ data: Row[]; error: null }> {
+  private static readonly SERVER_MAX_ROWS = 500;
   private filtered = rows;
   private start = 0;
-  private end = Number.MAX_SAFE_INTEGER;
+  // The server cap applies even if the client forgets to request a range.
+  // Keeping that behavior in the double makes deleting pagination turn these
+  // guards red instead of accidentally returning the whole fixture.
+  private end = Query.SERVER_MAX_ROWS - 1;
 
   select() {
     return this;
@@ -81,7 +133,11 @@ class Query implements PromiseLike<{ data: Row[]; error: null }> {
 
   range(start: number, end: number) {
     this.start = start;
-    this.end = end;
+    // Production PostgREST may cap a requested 1,000-row range below the
+    // client's requested size. A mock that honours the whole requested range
+    // lets pagination disappear while this suite stays green, which is exactly
+    // how the first page-aware implementation escaped review.
+    this.end = Math.min(end, start + Query.SERVER_MAX_ROWS - 1);
     return this;
   }
 
@@ -150,10 +206,12 @@ describe("page-scoped content reads", () => {
     const content = await response.json();
 
     expect(response.status).toBe(200);
-    expect(content).toHaveLength(1006);
+    expect(content).toHaveLength(1009);
     expect(content.map((row: Row) => row.element_id)).toContain("other-page");
   });
 
+  // These are the exact outputs of the widget's single decodeURI pass for
+  // browser pathnames `/%25` and `/%2520`, respectively.
   it.each([
     ["public", getPublicContent],
     ["staging", getStagingContent],
@@ -180,7 +238,62 @@ describe("page-scoped content reads", () => {
     },
   );
 
-  it("paginates the publish preview for the requested page", async () => {
+  it.each([
+    ["/%", "literal-percent"],
+    ["/%20", "encoded-space"],
+    ["/index.html", "canonical-index"],
+  ])(
+    "keeps the widget-normalized %s scope identical across public and staging reads",
+    async (pagePath, expectedElementId) => {
+      for (const handler of [getPublicContent, getStagingContent]) {
+        const response = await handler(
+          new NextRequest(
+            `https://www.recopyfa.st/api/content/site-1?page_path=${encodeURIComponent(pagePath)}`,
+          ),
+          { params: Promise.resolve({ siteId: "site-1" }) },
+        );
+        const body = await response.json();
+        const content = Array.isArray(body) ? body : body.content;
+        const ids = content.map((row: Row) => row.element_id);
+
+        expect(response.status).toBe(200);
+        expect(ids).toContain(expectedElementId);
+        expect(ids).not.toContain(
+          expectedElementId === "literal-percent"
+            ? "encoded-space"
+            : expectedElementId === "encoded-space"
+              ? "literal-percent"
+              : "encoded-space",
+        );
+      }
+    },
+  );
+
+  it.each([
+    ["/%", "literal-percent"],
+    ["/%20", "encoded-space"],
+    ["/index.html", "canonical-index"],
+  ])(
+    "uses the unchanged widget-normalized %s scope for preview counts",
+    async (pagePath, expectedElementId) => {
+      const response = await getPublishPreview(
+        new NextRequest(
+          `https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=${encodeURIComponent(pagePath)}`,
+        ),
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.pendingChanges).toBe(1009);
+      expect(body.currentPageChanges).toBe(4);
+      expect(body.otherPageChanges).toBe(1005);
+      expect(
+        body.elements.map((row: { elementId: string }) => row.elementId),
+      ).toContain(expectedElementId);
+    },
+  );
+
+  it("paginates the site-wide publish preview and reports the page breakdown", async () => {
     const response = await getPublishPreview(
       new NextRequest(
         "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=%2Fpricing",
@@ -189,10 +302,12 @@ describe("page-scoped content reads", () => {
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.pendingChanges).toBe(1005);
+    expect(body.pendingChanges).toBe(1009);
+    expect(body.currentPageChanges).toBe(1005);
+    expect(body.otherPageChanges).toBe(4);
     expect(
       body.elements.map((row: { elementId: string }) => row.elementId),
-    ).not.toContain("other-page");
+    ).toContain("other-page");
     expect(
       body.elements.map((row: { elementId: string }) => row.elementId),
     ).toEqual(

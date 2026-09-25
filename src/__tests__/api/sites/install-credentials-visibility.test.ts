@@ -52,6 +52,21 @@ const SITE: SiteRow = {
   api_key: "the-hmac-secret",
 };
 
+function emptyStatsQuery() {
+  const result = { data: [], count: 0, error: null };
+  const query: Record<string, unknown> = {
+    then: (
+      resolve: (value: typeof result) => unknown,
+      reject?: (reason: unknown) => unknown,
+    ) => Promise.resolve(result).then(resolve, reject),
+    maybeSingle: jest.fn(async () => ({ data: null, error: null })),
+  };
+  for (const method of ["select", "eq", "in", "order", "range", "limit"]) {
+    query[method] = jest.fn(() => query);
+  }
+  return query;
+}
+
 /** Answers the handful of reads this route makes, by table. */
 function installTables(permission: string) {
   mockFrom.mockImplementation((table: string) => {
@@ -74,17 +89,9 @@ function installTables(permission: string) {
       };
     }
 
-    // content_elements / content_history — counts only, uninteresting here.
-    return {
-      select: () => ({
-        eq: async () => ({ data: [], count: 0, error: null }),
-        in: () => ({
-          order: () => ({
-            limit: () => ({ single: async () => ({ data: null }) }),
-          }),
-        }),
-      }),
-    };
+    // content_elements / content_history — empty, but shaped like the real
+    // ordered pager so the route can request the terminating empty page.
+    return emptyStatsQuery();
   });
 }
 
