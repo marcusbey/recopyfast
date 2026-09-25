@@ -135,8 +135,8 @@ export function TryExperience() {
               the page or your edits.
             </p>
             <p className="mt-3 text-sm leading-relaxed text-slate-500">
-              Links in navigation stay safe by default. Hold Alt while clicking
-              one if you want to edit its label. Exit stops editing. Refresh the
+              Every link navigates on a plain click. Alt+click (Option+click on
+              macOS) a link to edit its text. Exit stops editing. Refresh the
               page to discard your preview changes.
             </p>
           </div>

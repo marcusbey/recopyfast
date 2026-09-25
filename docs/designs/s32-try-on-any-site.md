@@ -17,7 +17,11 @@ turning the marketing navigation into editable content. Include restart/reset.
 
 Preview chrome uses the real widget's compact white floating panel, dark text,
 teal Save action and thin outline. System fonts only on host sites, one namespaced
-style element. Top bar includes the exact preview disclaimer, signup CTA and Exit.
+style element. Top bar includes the exact preview disclaimer, signup CTA, Exit and the hint
+"Alt+click a link to edit it". Every link navigates on a plain click; Alt+click
+(Option+click on macOS) edits a link's text. /try explains the same rule, including
+CTA links and links inside content paragraphs or lists. While an edit is open,
+clicking its enclosing link stays on the page.
 Toolbar: text editing Save/Cancel; image mode local raster file picker, labelled
 data-URL input and Replace image;
 inline validation/status, including "Published (preview)". All controls keyboard

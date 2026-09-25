@@ -108,22 +108,39 @@
         ? eventTarget
         : eventTarget && eventTarget.parentElement;
     if (!target || target.closest("[data-rcf-try-ui]")) return null;
-    // Prefer the containing text block over inline links so editing a sentence
-    // keeps its anchors and emphasis in place. A standalone link remains an
-    // editable target when it is not part of a larger supported text block.
+    // A link always keeps its native plain click. Alt selects its text target,
+    // keeping direct anchors consistent while preserving precise block labels
+    // and their inline formatting inside linked cards.
     var link = target.closest("a");
     if (link && !root.contains(link)) link = null;
-    if (link && altKey) return link;
-    if (link && isNavigationLink(link)) return null;
     var candidate = target.closest("h1,h2,h3,h4,h5,h6,p,li,button,img");
+    if (link && altKey) {
+      // Block labels wrapped by a link keep their precise edit target and
+      // click-point caret. Direct and inline links still edit the anchor.
+      if (candidate && candidate !== link && link.contains(candidate))
+        return candidate;
+      return link;
+    }
+    if (link) return null;
     if (!candidate) candidate = target.closest("a");
     if (!candidate || !root.contains(candidate)) return null;
-    // Navigation menus commonly make the <li> the nearest supported text
-    // block. Treating that wrapper as the edit target swallowed the anchor's
-    // normal click before WordPress, Bootstrap and mega-menu handlers saw it.
-    // Inline anchors inside a real paragraph still select the paragraph; a
-    // direct link or menu-item link requires Alt so navigation stays native.
-    if (link && (candidate === link || candidate.tagName === "LI")) return null;
+    // A no-nav mega menu exposes its <li> padding as the nearest supported
+    // target. Preserve that menu surface when a direct link sits beside a
+    // submenu panel, without disabling ordinary prose list items that happen
+    // to contain an inline link.
+    if (candidate.tagName === "LI") {
+      var hasDirectLink = false;
+      var hasPanel = false;
+      for (
+        var child = candidate.firstElementChild;
+        child;
+        child = child.nextElementSibling
+      ) {
+        if (child.tagName === "A") hasDirectLink = true;
+        else if (child.matches("div,ul,ol,[role='menu']")) hasPanel = true;
+      }
+      if (hasDirectLink && hasPanel) return null;
+    }
     if (onlyEditableContentIsLink(candidate)) return null;
     return candidate;
   }
@@ -160,6 +177,11 @@
     "rcf-try-message",
     "ReCopyFast preview — edits stay in this tab. Nothing is saved to this site.",
   );
+  var linkHint = element(
+    "span",
+    "rcf-try-link-hint",
+    "Alt+click a link to edit it",
+  );
   var signup = element("a", "rcf-try-signup", "Get this on your site →");
   signup.id = "rcf-try-signup";
   signup.href =
@@ -172,6 +194,7 @@
   var topbar = append(
     element("div", "rcf-try-topbar"),
     message,
+    linkHint,
     signup,
     exitButton,
   );
@@ -406,8 +429,15 @@
   }
 
   function onMouseOut(event) {
-    var target = candidateFrom(event.target, event.altKey);
+    var target =
+      event.target.closest && event.target.closest("[data-rcf-try-hover]");
     if (target) restoreAttribute(target, "data-rcf-try-hover");
+  }
+
+  function clearLinkHover() {
+    var hovered = document.querySelectorAll("a[data-rcf-try-hover]");
+    for (var i = 0; i < hovered.length; i += 1)
+      restoreAttribute(hovered[i], "data-rcf-try-hover");
   }
 
   function isBlockContainer(target) {
@@ -426,6 +456,28 @@
 
   function boundedInteractiveAncestorContains(target) {
     if (!active) return false;
+    // A card link can contain block wrappers between the editable heading and
+    // the clickable padding. Compare only the edited element's own nearest
+    // link so this exception cannot grow into a page-wide ancestor walk.
+    var activeLink = null;
+    var linkAncestor = active.element.parentElement;
+    var linkDepth = 0;
+    while (
+      linkAncestor &&
+      linkDepth < 4 &&
+      linkAncestor !== root &&
+      linkAncestor !== document.body &&
+      linkAncestor !== document.documentElement &&
+      root.contains(linkAncestor)
+    ) {
+      if (linkAncestor.tagName === "A") {
+        activeLink = linkAncestor;
+        break;
+      }
+      linkDepth += 1;
+      linkAncestor = linkAncestor.parentElement;
+    }
+    if (activeLink && activeLink.contains(target)) return true;
     var ancestor = active.element.parentElement;
     var depth = 0;
     while (
@@ -617,6 +669,11 @@
     }
   }
 
+  function onKeyUp(event) {
+    onActivationKey(event);
+    if (event.key === "Alt") clearLinkHover();
+  }
+
   function onSubmit(event) {
     if (active && active.element.closest("form") === event.target) {
       event.preventDefault();
@@ -653,19 +710,42 @@
     var nextRoot = resolveRoot();
     if (!nextRoot) return false;
     root = nextRoot;
-    if (active && !active.element.isConnected) cancel();
+    if (active && !active.element.isConnected) {
+      // History restorations clone markup but not node identity. Restore every
+      // clone marked as the active edit from the originals recorded for the
+      // live node; removing contenteditable blindly would corrupt host-owned
+      // editors that were editable before the preview started.
+      var records = ownedAttributes.get(active.element);
+      var restoredEdits = document.querySelectorAll("[data-rcf-try-editing]");
+      for (var i = 0; i < restoredEdits.length; i += 1) {
+        if (records) {
+          records.forEach(function (original, name) {
+            if (original === null) restoredEdits[i].removeAttribute(name);
+            else restoredEdits[i].setAttribute(name, original);
+          });
+        } else {
+          restoredEdits[i].removeAttribute("contenteditable");
+          restoredEdits[i].removeAttribute("spellcheck");
+          restoredEdits[i].removeAttribute("data-rcf-try-editing");
+        }
+      }
+      cancel();
+    }
+    var restoredHovers = document.querySelectorAll("[data-rcf-try-hover]");
+    for (var h = 0; h < restoredHovers.length; h += 1)
+      restoredHovers[h].removeAttribute("data-rcf-try-hover");
     // Turbo and similar routers can restore a cloned body containing our old
     // chrome. Those clones have no live listeners; remove them before the
     // owned nodes are reattached so the page never carries two preview bars.
     var staleUi = document.querySelectorAll("[data-rcf-try-ui='true']");
-    for (var i = 0; i < staleUi.length; i += 1) {
+    for (var j = 0; j < staleUi.length; j += 1) {
       if (
-        staleUi[i] !== style &&
-        staleUi[i] !== topbar &&
-        staleUi[i] !== toolbarNode &&
-        staleUi[i] !== statusNode
+        staleUi[j] !== style &&
+        staleUi[j] !== topbar &&
+        staleUi[j] !== toolbarNode &&
+        staleUi[j] !== statusNode
       )
-        staleUi[i].remove();
+        staleUi[j].remove();
     }
     if (!style.isConnected) document.head.appendChild(style);
     if (!topbar.isConnected) document.body.appendChild(topbar);
@@ -686,7 +766,8 @@
   listen(window, "input", onInput, true);
   listen(window, "keydown", onKeyDown, true);
   listen(window, "keypress", onActivationKey, true);
-  listen(window, "keyup", onActivationKey, true);
+  listen(window, "keyup", onKeyUp, true);
+  listen(window, "blur", clearLinkHover, true);
   listen(window, "submit", onSubmit, true);
   listen(exitButton, "click", exit);
 

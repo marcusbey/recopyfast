@@ -137,7 +137,8 @@ The operator explicitly approved review items 1–11 for this fix run. Preserve
 
 ## Remaining boundaries
 
-The existing independent review allows shipping and remains unchanged and uncommitted.
+The independent review remains unchanged and uncommitted. This pass is limited to
+fixes and a draft PR update; final independent sign-off remains a separate step.
 Full 44-case disposable-stack execution is owned by PR CI; local evidence is the
 preview browser fixture plus the full collected inventory.
 Host CSP may reject the loader origin or inline style; browser-internal pages,
@@ -210,3 +211,64 @@ the new stop boundary with a generic block-level `onclick`, a fifth ancestor, an
 - Review file hash remains **811f2159658e03e8bc45abb451a65a10dde767d23011f1abae986f7e7b1cf2f0**;
   it remains unmodified by this lane and uncommitted. Draft PR #27 is retained.
   Full disposable-stack execution belongs to PR CI; no merge, ready or deployment.
+
+## Fix mode 3 — operator-prevalidated 2026-09-24
+
+The operator approved E1–E6. Preserve the review byte-for-byte and uncommitted
+(SHA-256 `c2480df9660cb2c6367d363a5834571e5416630d0e86961a4b86b85394768b73`).
+
+- [x] E1: every link navigates on a plain click; Alt+click (Option+click on macOS)
+  edits its text. Align story, design, /try copy and preview hint. Pin CTA links,
+  `p > a.button` and content `li > a` in tests.
+- [x] E2: while editing, block navigation through an ancestor link of the edited
+  element using a bounded walk from that element only. Restore and verify the
+  Bootstrap `a > div.card-body > h3` fixture without weakening host-handler guards.
+- [x] E3: releasing Alt or blurring clears link hover outlines.
+- [x] E4: resume cleans cloned editing/hover attributes so Exit leaves no cloned
+  edited element contenteditable. Preserve host-owned attributes.
+- [x] E5: pin the no-nav mega-menu LI guard with a mutation-sensitive test; replace
+  the 25 ms image delay with actual decode/event completion.
+- [x] E6: merge origin/main, preserve all stories, synchronize active Playwright
+  inventory counts and run gates. Commit `fix(s32): ...`, push, retain draft PR #27.
+
+No review verdict changes, dependency additions, new migrations or deployments.
+Earlier verification sections are historical; the evidence below will record this pass.
+
+## Fix mode 3 verification (2026-09-24)
+
+- Merged `origin/main` at `300548a` (PR #25) in `cb79ad1`; retained every
+  story entry. Two billing migrations arrived from main; this fix adds none.
+- Node 24.14.0; commands used a clean environment with exactly the main-job
+  placeholder values parsed from `.github/workflows/ci.yml`. No `.env` copied,
+  production service accessed, migration applied, or dependency added.
+- `npm run precommit -- -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB`:
+  passed; lint **0 errors / 39 inherited warnings**, full typecheck clean, Jest
+  **221 passed suites / 2 skipped suites; 2,922 passed / 38 skipped / 0 failed**.
+- `npm run build`, `npm run type-check:build`, `npm run format:check`: passed.
+  `npx prettier --check public/try/rcf-try.js e2e/try-preview.spec.ts` and
+  `git diff --check`: clean.
+- `node scripts/build-embed.mjs --check`: fresh; bundle **46,604 / 46,681 B**,
+  widget **33,828 / 33,865 B**, transport **13,141 B**. Production embed unchanged.
+  Preview gzip-9 (Node): **7,345 / 8,192 B**.
+- `npm run audit:prod`: **0 vulnerabilities**.
+- `npx jest --runInBand --forceExit src/__tests__/try/rcf-try.test.ts
+  src/__tests__/integration/try-page.test.tsx`: **2 suites / 40 tests passed**.
+- `CI=true npx playwright test e2e/try-preview.spec.ts --retries=0 --workers=1
+  --reporter=line`: **5 passed / 0 failed / 0 skipped / 0 retried**.
+  `CI=true npx playwright test --list --reporter=list`: **44 tests in 10 files**;
+  all active CI/config/reporter/test/documentation pins remain 44.
+- E1 updates the intended gesture for linked headings/inline anchors to Alt;
+  precise caret insertion and inline node/HTML assertions remain. The restored
+  static Bootstrap fixture is `a > div.card-body > h3`, with Alt starting the
+  heading edit and plain clicks on the heading and card body remaining isolated.
+- Disabling either the no-nav LI+submenu rule or the bounded ancestor-link
+  suppression made its respective regression fail; both changes were restored.
+  The LI guard preserves ordinary prose-list editing. The image guard now awaits
+  its actual mocked decode callback rather than a fixed sleep.
+- Fresh-context bounded verification found no remaining functional findings.
+  Failing markers flipped: **none** (none in scope). New migrations: **none**.
+- Review SHA-256 remains
+  `c2480df9660cb2c6367d363a5834571e5416630d0e86961a4b86b85394768b73`;
+  preserved byte-for-byte and left uncommitted.
+- Full disposable-stack 44-case execution is checked in PR CI after push; local
+  Docker context was unavailable. No merge of the PR, ready transition or deployment.

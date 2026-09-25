@@ -47,6 +47,11 @@ describe("Try page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/on mobile, use desktop/i)).toBeInTheDocument();
     expect(screen.getByText(/nothing is saved/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/every link navigates on a plain click/i),
+    ).toHaveTextContent(
+      "Alt+click (Option+click on macOS) a link to edit its text",
+    );
     expect(screen.getByText(/content security policy/i)).toBeInTheDocument();
   });
 

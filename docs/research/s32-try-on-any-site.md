@@ -54,3 +54,15 @@ validate local image decode without a remote request, and reject >5 MiB before r
 The active inventory is currently 43; historical verification counts remain dated
 evidence, while CI/config/reporter/contracts/QA register must match new collection.
 Merged origin/main e43010a (PR #23); story-list conflict retains both s29 and s32.
+
+## Fix mode 3 decisions (2026-09-24)
+
+The operator chose universal normal navigation: every link navigates on a plain
+click, and Alt+click (Option+click on macOS) edits its text. This supersedes the
+original navigation-only wording. The Delta review e889e77 supplies reproductions
+for block-wrapped card links, stale Alt hover and cloned edit attributes. Its
+no-nav mega-menu neutralization and image decode timing failure require explicit
+regression coverage. The review itself is preserved unchanged and uncommitted.
+Merged origin/main `300548a` (PR #25), retaining s28, s29 and s32 story entries.
+The active Playwright inventory remains 44 unless this pass adds a collected case;
+historical counts above describe earlier commits.

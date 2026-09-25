@@ -1228,8 +1228,11 @@ on a live page, edit text and preview images locally, and discover the trial wit
 registering, installing the production widget, or persisting changes.
 
 Acceptance: separate dependency-free `public/try/rcf-try.js` at most 8 KB gzipped;
-headings, paragraphs, list items, buttons, links (navigation requires Alt), images;
-hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit;
+headings, paragraphs, list items, buttons, links and images. Every link navigates
+on a plain click; Alt+click (Option+click on macOS) edits a link's text;
+hover outline, inline Save/Cancel, Published (preview), top disclaimer/CTA/Exit
+and "Alt+click a link to edit it" hint. While editing, a plain click on the edited
+element's enclosing link stays on the page;
 complete cleanup and idempotence; no API, analytics, or content upload; plain-text
 writes. /try includes a stable-URL draggable bookmarklet, browser instructions,
 live sample/fallback, metadata and trial CTA; landing navigation and sitemap link it.

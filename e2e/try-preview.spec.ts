@@ -136,7 +136,7 @@ test("the standalone preview completes its full local flow with only the script 
   await expect(heading).not.toHaveAttribute("contenteditable", /.+/);
 });
 
-test("a first click edits a linked heading at the clicked text without activating the link", async ({
+test("Alt-click edits a linked heading label without activating its anchor", async ({
   page,
 }) => {
   await page.setContent(`
@@ -153,8 +153,8 @@ test("a first click edits a linked heading at the clicked text without activatin
   await injectRuntime(page);
 
   const strong = page.locator("#card-link strong");
-  await strong.click({ position: { x: 20, y: 8 } });
-  await page.keyboard.type("X");
+  await strong.click({ position: { x: 20, y: 8 }, modifiers: ["Alt"] });
+  await page.keyboard.insertText("X");
   await strong.click({ position: { x: 25, y: 8 } });
 
   await expect(page.locator("#card-link h2")).toHaveAttribute(
@@ -192,6 +192,9 @@ test("WordPress, Bootstrap, and mega-menu links navigate normally unless Alt-cli
           </li>
         </ul>
       </nav>
+      <div class="actions"><a id="hero-cta" class="btn" href="#hero-target">Get started</a></div>
+      <p><a id="paragraph-cta" class="button" href="#paragraph-target">Book a call</a></p>
+      <ul><li><a id="content-link" href="#content-target">Works with WordPress and Webflow</a></li></ul>
     </main>
   `);
   await injectRuntime(page);
@@ -206,6 +209,9 @@ test("WordPress, Bootstrap, and mega-menu links navigate normally unless Alt-cli
     ["#wordpress-menu a", "#wordpress-target"],
     [".navbar-nav a", "#bootstrap-target"],
     ["#mega-menu > ul > li > a", "#mega-target"],
+    ["#hero-cta", "#hero-target"],
+    ["#paragraph-cta", "#paragraph-target"],
+    ["#content-link", "#content-target"],
   ] as const) {
     const link = page.locator(selector);
     await link.hover();
@@ -232,9 +238,11 @@ test("editing a heading blocks clicks anywhere in its immediate clickable card a
 }) => {
   await page.setContent(`
     <main style="margin-top:80px">
-      <a id="outer-card" role="button" href="#card-target">
-        <h3>Editable card title</h3>
-        <span id="outer-card-body">Linked card body</span>
+      <a id="outer-card" href="#card-target" style="display:block;padding:24px">
+        <div class="card-body">
+          <h3>Editable card title</h3>
+          <span id="outer-card-body">Linked card body</span>
+        </div>
       </a>
     </main>
     <script>
@@ -244,7 +252,7 @@ test("editing a heading blocks clicks anywhere in its immediate clickable card a
   `);
   await injectRuntime(page);
 
-  await page.locator("#outer-card h3").click();
+  await page.locator("#outer-card h3").click({ modifiers: ["Alt"] });
   await page.locator("#outer-card h3").click();
   await page.locator("#outer-card-body").click();
 

@@ -86,19 +86,21 @@ describe("standalone try-on-any-site runtime", () => {
     );
   });
 
-  test("requires Alt to edit a navigation link", () => {
+  test("requires Alt to edit every link, including CTA and content links", () => {
     document.body.innerHTML = `
       <nav><ul><li id="wordpress"><a href="#wordpress-target">WordPress</a></li></ul></nav>
       <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#bootstrap-target">Bootstrap</a></li></ul>
       <nav><ul><li class="mega"><a href="#mega-target">Mega</a><div class="mega-panel"><p>Panel</p></div></li></ul></nav>
       <nav><a href="#nested-target"><p id="nested-nav-label">Nested label</p></a></nav>
-      <p id="only-paragraph-link"><a href="#paragraph-target">Paragraph link</a></p>
-      <ul><li id="nested-only-link"><span><a href="#nested-only-target">Nested only link</a></span></li></ul>
+      <a id="hero-cta" class="button" href="#hero-target">Get started</a>
+      <p id="only-paragraph-link"><a class="button" href="#paragraph-target">Book a call</a></p>
+      <ul>
+        <li id="nested-only-link"><span><a href="#nested-only-target">Nested only link</a></span></li>
+        <li id="content-direct-link"><a href="#content-target">Content link</a></li>
+      </ul>
     `;
     inject();
-    const links = Array.from(
-      document.querySelectorAll("main a, nav a, .navbar-nav a"),
-    );
+    const links = Array.from(document.querySelectorAll("a"));
 
     for (const link of links) {
       click(link);
@@ -122,6 +124,59 @@ describe("standalone try-on-any-site runtime", () => {
     }
     click(links[0], { altKey: true });
     expect(links[0]).toHaveAttribute("contenteditable", "plaintext-only");
+    click(toolbarButton("Cancel")!);
+    for (const selector of [
+      "#hero-cta",
+      "#only-paragraph-link > a.button",
+      "#content-direct-link > a",
+    ]) {
+      const link = document.querySelector(selector)!;
+      click(link, { altKey: true });
+      expect(link).toHaveAttribute("contenteditable", "plaintext-only");
+      click(toolbarButton("Cancel")!);
+    }
+  });
+
+  test("does not edit a no-nav mega-menu item when its LI padding is clicked", () => {
+    document.body.innerHTML = `
+      <ul class="mega-menu">
+        <li id="products"><a href="#products">Products</a><div class="panel"><p>Browse products</p></div></li>
+        <li id="content-item"><span>Read </span><a href="#guide">the guide</a></li>
+      </ul>
+    `;
+    inject();
+
+    click(document.querySelector("#products")!);
+
+    expect(document.querySelector("#products")).not.toHaveAttribute(
+      "contenteditable",
+    );
+    expect(document.querySelector(".rcf-try-toolbar")).toBeNull();
+
+    click(document.querySelector("#content-item > span")!);
+    expect(document.querySelector("#content-item")).toHaveAttribute(
+      "contenteditable",
+      "plaintext-only",
+    );
+  });
+
+  test("clears an Alt link hover when Alt is released or the window blurs", () => {
+    document.body.innerHTML = `<a href="#work">Work</a>`;
+    inject();
+    const link = document.querySelector("a")!;
+
+    link.dispatchEvent(
+      new MouseEvent("mouseover", { bubbles: true, altKey: true }),
+    );
+    expect(link).toHaveAttribute("data-rcf-try-hover", "true");
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt" }));
+    expect(link).not.toHaveAttribute("data-rcf-try-hover");
+
+    link.dispatchEvent(
+      new MouseEvent("mouseover", { bubbles: true, altKey: true }),
+    );
+    window.dispatchEvent(new Event("blur"));
+    expect(link).not.toHaveAttribute("data-rcf-try-hover");
   });
 
   test("keeps the direct navigation-link guard", () => {
@@ -175,7 +230,7 @@ describe("standalone try-on-any-site runtime", () => {
     const link = paragraph.querySelector("a")!;
     const strong = paragraph.querySelector("strong")!;
 
-    click(strong);
+    click(strong, { altKey: true });
 
     expect(paragraph.querySelector("a")).toBe(link);
     expect(paragraph.querySelector("strong")).toBe(strong);
@@ -183,7 +238,7 @@ describe("standalone try-on-any-site runtime", () => {
     click(toolbarButton("Save")!);
 
     expect(paragraph.innerHTML).toBe(
-      'Make <a href="/work">every <strong>phrase</strong></a> count.',
+      'Make <a href="/work" data-rcf-try-published="true">every <strong>phrase</strong></a> count.',
     );
   });
 
@@ -213,6 +268,26 @@ describe("standalone try-on-any-site runtime", () => {
 
     expect(hostClick).not.toHaveBeenCalled();
     expect(hostKey).not.toHaveBeenCalled();
+    expect(heading).toHaveAttribute("contenteditable", "plaintext-only");
+  });
+
+  test("blocks a restored Bootstrap card link while its nested heading is edited", () => {
+    document.body.innerHTML = `
+      <a id="card" href="#card-target">
+        <div class="card-body"><h3>Editable title</h3></div>
+      </a>
+    `;
+    const card = document.querySelector("#card")!;
+    const heading = document.querySelector("h3")!;
+    const cardBody = document.querySelector(".card-body")!;
+    const hostClick = jest.fn();
+    card.addEventListener("click", hostClick);
+    inject();
+
+    click(heading, { altKey: true });
+    click(cardBody);
+
+    expect(hostClick).not.toHaveBeenCalled();
     expect(heading).toHaveAttribute("contenteditable", "plaintext-only");
   });
 
@@ -435,12 +510,17 @@ describe("standalone try-on-any-site runtime", () => {
     Object.defineProperty(input, "files", { value: [file] });
 
     const OriginalImage = window.Image;
+    let resolveDecode: (() => void) | undefined;
+    const decoded = new Promise<void>((resolve) => {
+      resolveDecode = resolve;
+    });
     class DecodableImage {
       onload: null | (() => void) = null;
       onerror: null | (() => void) = null;
 
       set src(_value: string) {
-        setTimeout(() => this.onload?.(), 0);
+        this.onload?.();
+        resolveDecode?.();
       }
     }
     Object.defineProperty(window, "Image", {
@@ -450,7 +530,7 @@ describe("standalone try-on-any-site runtime", () => {
 
     input.dispatchEvent(new Event("change", { bubbles: true }));
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await decoded;
     expect(image.getAttribute("src")).toMatch(/^data:image\/webp;base64,/);
     expect(image).toHaveAttribute("data-rcf-try-published", "true");
     expect(document.querySelector(".rcf-try-toolbar")).toBeNull();
@@ -712,9 +792,20 @@ describe("standalone try-on-any-site runtime", () => {
     expect(document.querySelector("#rcf-try-topbar")).toBeNull();
   });
 
-  test("resume removes preview UI cloned with a restored body", () => {
-    document.body.innerHTML = `<h1>Original page</h1>`;
+  test("resume removes cloned edit markers while restoring host contenteditable", () => {
+    document.body.innerHTML = `<h1 contenteditable="true">Original page</h1><p>Hover me</p>`;
     const preview = inject()!;
+    const heading = document.querySelector("h1")!;
+    click(heading);
+    document
+      .querySelector("p")!
+      .dispatchEvent(
+        new MouseEvent("mouseover", { bubbles: true, altKey: true }),
+      );
+    expect(document.querySelector("p")).toHaveAttribute(
+      "data-rcf-try-hover",
+      "true",
+    );
     const restored = document.body.cloneNode(true) as HTMLBodyElement;
     document.documentElement.replaceChild(restored, document.body);
 
@@ -724,6 +815,32 @@ describe("standalone try-on-any-site runtime", () => {
     expect(document.querySelector("#rcf-try-topbar")).toBe(restored.lastChild);
     click(document.querySelector("#rcf-try-exit")!);
     expect(document.querySelector("[data-rcf-try-ui]")).toBeNull();
+    expect(document.querySelector("h1")).toHaveAttribute(
+      "contenteditable",
+      "true",
+    );
+    expect(document.querySelector("h1")).not.toHaveAttribute(
+      "data-rcf-try-editing",
+    );
+    expect(document.querySelector("p")).not.toHaveAttribute(
+      "data-rcf-try-hover",
+    );
+  });
+
+  test("Exit removes contenteditable from a restored clone of ordinary copy", () => {
+    document.body.innerHTML = `<h2>Original page</h2>`;
+    const preview = inject()!;
+    click(document.querySelector("h2")!);
+    const restored = document.body.cloneNode(true) as HTMLBodyElement;
+    document.documentElement.replaceChild(restored, document.body);
+
+    expect(preview.resume()).toBe(true);
+    click(document.querySelector("#rcf-try-exit")!);
+
+    expect(document.querySelector("h2")).not.toHaveAttribute("contenteditable");
+    expect(document.querySelector("h2")).not.toHaveAttribute(
+      "data-rcf-try-editing",
+    );
   });
 
   test("leaves ordinary text Space, Enter, undo, and composition to native editing", () => {
@@ -817,6 +934,9 @@ describe("standalone try-on-any-site runtime", () => {
 
     expect(document.querySelector("#rcf-try-topbar")).toHaveTextContent(
       "ReCopyFast preview — edits stay in this tab. Nothing is saved to this site.",
+    );
+    expect(document.querySelector("#rcf-try-topbar")).toHaveTextContent(
+      "Alt+click a link to edit it",
     );
     expect(document.querySelector("#rcf-try-signup")).toHaveAttribute(
       "href",
