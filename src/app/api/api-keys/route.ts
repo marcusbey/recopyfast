@@ -13,6 +13,55 @@ interface ApiKeyUpdates {
   is_active?: boolean;
 }
 
+/**
+ * Safe columns returned by create and update operations.
+ *
+ * `key_hash` is intentionally absent. The database now denies authenticated
+ * callers access to that column, so Supabase's default mutation projection
+ * (`.select()` with no arguments) would ask PostgREST for the hidden hash and
+ * turn an otherwise successful write into "permission denied for column
+ * key_hash". Keep this list explicit: a new database column must not silently
+ * become part of the API response.
+ */
+const API_KEY_RESPONSE_COLUMNS = [
+  "id",
+  "user_id",
+  "site_id",
+  "name",
+  "key_prefix",
+  "scopes",
+  "rate_limit_per_minute",
+  "is_active",
+  "last_used_at",
+  "expires_at",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+/** GET keeps its existing public shape, which never included `user_id`. */
+const API_KEY_LIST_COLUMNS = [
+  "id",
+  "name",
+  "key_prefix",
+  "site_id",
+  "scopes",
+  "rate_limit_per_minute",
+  "is_active",
+  "last_used_at",
+  "expires_at",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+/** Defence in depth if a mock or future data layer returns more than requested. */
+function withoutKeyHash(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+
+  const publicValue = { ...(value as Record<string, unknown>) };
+  delete publicValue.key_hash;
+  return publicValue;
+}
+
 function generateApiKey(): { key: string; hash: string; prefix: string } {
   const key = `rcp_${randomBytes(32).toString("hex")}`;
   const hash = createHash("sha256").update(key).digest("hex");
@@ -84,7 +133,7 @@ export async function POST(request: NextRequest) {
           is_active: true,
         },
       ])
-      .select()
+      .select(API_KEY_RESPONSE_COLUMNS)
       .single();
 
     if (insertError) {
@@ -98,7 +147,7 @@ export async function POST(request: NextRequest) {
     // Return the API key (only show the actual key on creation)
     return NextResponse.json({
       apiKey: {
-        ...apiKey,
+        ...withoutKeyHash(apiKey),
         key, // Only returned on creation — store it securely
       },
       warning: "Store this API key securely. It will not be shown again.",
@@ -155,22 +204,7 @@ export async function GET(request: NextRequest) {
     // Fetch all API keys scoped to this site that belong to the caller
     const { data: apiKeys, error } = await supabase
       .from("api_keys")
-      .select(
-        `
-        id,
-        name,
-        key_prefix,
-        key_hash,
-        site_id,
-        scopes,
-        rate_limit_per_minute,
-        is_active,
-        last_used_at,
-        expires_at,
-        created_at,
-        updated_at
-      `,
-      )
+      .select(API_KEY_LIST_COLUMNS)
       .eq("site_id", sanitizedSiteId)
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
@@ -184,10 +218,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Don't return the full hash — expose only the prefix and a masked indicator
-    const sanitizedApiKeys = (apiKeys ?? []).map(({ key_hash, ...apiKey }) => ({
-      ...apiKey,
-      keyPreview: `${apiKey.key_prefix}...`,
-    }));
+    const sanitizedApiKeys = (apiKeys ?? []).map((apiKey) => {
+      const publicApiKey = withoutKeyHash(apiKey);
+      return {
+        ...publicApiKey,
+        keyPreview: `${publicApiKey.key_prefix}...`,
+      };
+    });
 
     return NextResponse.json({ apiKeys: sanitizedApiKeys });
   } catch (error) {
@@ -263,7 +300,7 @@ export async function PUT(request: NextRequest) {
       .update(updates)
       .eq("id", sanitizedApiKeyId)
       .eq("user_id", user.id)
-      .select()
+      .select(API_KEY_RESPONSE_COLUMNS)
       .single();
 
     if (error) {
@@ -275,7 +312,7 @@ export async function PUT(request: NextRequest) {
     }
 
     return NextResponse.json({
-      apiKey: updatedApiKey,
+      apiKey: withoutKeyHash(updatedApiKey),
       message: "API key updated successfully",
     });
   } catch (error) {

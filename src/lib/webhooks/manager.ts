@@ -60,14 +60,17 @@ const DELIVERY_TIMEOUT_MS = 30_000;
 const RETRY_SWEEP_BATCH_SIZE = 50;
 
 /**
- * Columns the list path may read.
+ * Columns configuration responses may read.
  *
  * `secret` is deliberately absent. `getWebhooks` used to `select("*")`, which
  * re-served the plaintext signing secret on every dashboard load — a secret
  * documented as "shown once at creation" and in fact shown on every page view.
- * Add columns here by name; never restore the wildcard.
+ * The update path later repeated the same mistake with a default `.select()`,
+ * returning the secret to any collaborator allowed to edit the webhook. Create
+ * attaches its freshly generated secret in memory after this safe projection;
+ * list and update never do. Add columns here by name; never restore a wildcard.
  */
-const WEBHOOK_LIST_COLUMNS = [
+const WEBHOOK_LIST_COLUMN_NAMES = [
   "id",
   "site_id",
   "url",
@@ -82,7 +85,30 @@ const WEBHOOK_LIST_COLUMNS = [
   "created_by",
   "created_at",
   "updated_at",
+] as const;
+
+const WEBHOOK_LIST_COLUMNS = WEBHOOK_LIST_COLUMN_NAMES.join(", ");
+
+// Create and update historically returned the two internal pending-state
+// fields as nonsecret metadata. Keep that response contract while still
+// excluding the signing secret from PostgREST's returning projection.
+const WEBHOOK_MUTATION_COLUMNS = [
+  ...WEBHOOK_LIST_COLUMN_NAMES,
+  "pending_event_type",
+  "pending_payload",
 ].join(", ");
+
+/**
+ * A service-role query can read the signing secret even when application roles
+ * cannot. Scrub it at this boundary as well as naming safe columns, so a mock,
+ * PostgREST regression or future query change cannot turn list/update into a
+ * second show-once response.
+ */
+function withoutWebhookSecret(webhook: Webhook): Webhook {
+  const publicWebhook = { ...webhook };
+  delete publicWebhook.secret;
+  return publicWebhook;
+}
 
 export class WebhookManager {
   private _supabase: ReturnType<typeof createServerClient> | null = null;
@@ -148,7 +174,7 @@ export class WebhookManager {
         failure_count: 0,
         max_failures: 5,
       })
-      .select()
+      .select(WEBHOOK_MUTATION_COLUMNS)
       .single();
 
     if (error) {
@@ -158,7 +184,7 @@ export class WebhookManager {
     // The generated secret is attached from here rather than trusted to come
     // back on the inserted row, so the show-once route cannot be silently
     // broken by a change to what the insert selects.
-    return { ...(webhook as Webhook), secret };
+    return { ...withoutWebhookSecret(webhook as Webhook), secret };
   }
 
   /**
@@ -175,14 +201,14 @@ export class WebhookManager {
         updated_at: new Date().toISOString(),
       })
       .eq("id", webhookId)
-      .select()
+      .select(WEBHOOK_MUTATION_COLUMNS)
       .single();
 
     if (error) {
       throw error;
     }
 
-    return webhook;
+    return withoutWebhookSecret(webhook as Webhook);
   }
 
   /**
@@ -218,11 +244,7 @@ export class WebhookManager {
     // Defence in depth against a database — or a future migration — that hands
     // back more than was asked for. The plaintext secret leaves this class
     // through exactly one door: createWebhook's return value.
-    return ((webhooks || []) as unknown as Webhook[]).map((webhook) => {
-      const withoutSecret = { ...webhook };
-      delete withoutSecret.secret;
-      return withoutSecret;
-    });
+    return ((webhooks || []) as unknown as Webhook[]).map(withoutWebhookSecret);
   }
 
   /**

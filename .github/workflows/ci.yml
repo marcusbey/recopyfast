@@ -14,6 +14,24 @@ jobs:
     name: Lint, Test & Build
     runs-on: ubuntu-latest
 
+    services:
+      # The s38 privilege suite replays every real migration against this
+      # disposable PostgreSQL 14 database. It is separate from the E2E Supabase
+      # stack and has no hosted credentials or network-reachable endpoint.
+      postgres-s38:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: recopyfast_s38_ci
+        ports:
+          - 55438:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d recopyfast_s38_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     env:
       # ── Supabase (dummy build-time values) ────────────────────────────────
       # These are intentionally placeholder values so `next build` can complete
@@ -120,6 +138,15 @@ jobs:
       - name: Test (Jest – CI mode, blocking)
         run: npm test -- --ci --maxWorkers=2 --workerIdleMemoryLimit=512MB
 
+      # A normal Jest run deliberately gates real-Postgres suites when no
+      # matching database is present. This dedicated step sets a required-db
+      # contract through the runner, so connectivity or migration failures are
+      # red rather than a passing "not verified" placeholder.
+      - name: Test database column privileges (PostgreSQL 14, blocking)
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:55438/recopyfast_s38_ci"
+        run: node scripts/run-db-invariants.mjs
+
       - name: Test Stripe catalogue tooling (Node, blocking)
         run: node --test scripts/__tests__/sync-stripe-catalogue.test.mjs
 
@@ -219,6 +246,15 @@ jobs:
           printf 'NEXT_PUBLIC_SUPABASE_ANON_KEY=%s\n' "$anon_key" >> "$GITHUB_ENV"
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
           rm -f "$status_file"
+
+      - name: Verify secret-column privileges through PostgreSQL and PostgREST
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          RCF_REQUIRE_TEST_DB: "1"
+          RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"
+        run: |
+          RCF_TEST_POSTGREST_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+            npx jest --runInBand src/__tests__/db/column-privileges.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:

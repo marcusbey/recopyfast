@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
-const CONFIG_TOML = path.join(REPO_ROOT, "supabase", "config.toml");
+const DEFAULT_CONFIG_TOML = path.join(REPO_ROOT, "supabase", "config.toml");
 
 /** `supabase start` publishes the local database with these credentials. */
 const LOCAL_DB_USER = "postgres";
@@ -34,6 +34,7 @@ const LOCAL_DB_PASSWORD = "postgres";
 const LOCAL_DB_NAME = "postgres";
 const LOCAL_DB_HOST = "127.0.0.1";
 const FALLBACK_DB_PORT = 54322;
+const FALLBACK_API_PORT = 54321;
 
 const PROBE_TIMEOUT_MS = 15_000;
 /** Enough connections for the concurrency suite to actually overlap. */
@@ -45,7 +46,10 @@ export interface DbTarget {
   connectionString: string;
   /** Same string with the password removed — safe to print. */
   display: string;
-  source: "RCF_TEST_DB_URL" | "supabase/config.toml";
+  source:
+    | "RCF_TEST_DB_URL"
+    | "RCF_TEST_SUPABASE_CONFIG"
+    | "supabase/config.toml";
 }
 
 export interface QueryResult<R> {
@@ -60,7 +64,12 @@ interface PgClient {
   ): Promise<QueryResult<R>>;
 }
 
+interface PgPoolClient extends PgClient {
+  release(): void;
+}
+
 interface PgPool extends PgClient {
+  connect(): Promise<PgPoolClient>;
   end(): Promise<void>;
 }
 
@@ -74,21 +83,57 @@ interface PgPoolConstructor {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { Pool } = require("pg") as { Pool: PgPoolConstructor };
 
-/** Reads the `port` under `[db]` in supabase/config.toml. */
-function readConfiguredDbPort(): number {
+function configuredSupabasePath(): { path: string; isExplicit: boolean } {
+  const explicit = process.env.RCF_TEST_SUPABASE_CONFIG;
+  return explicit
+    ? { path: explicit, isExplicit: true }
+    : { path: DEFAULT_CONFIG_TOML, isExplicit: false };
+}
+
+function readConfiguredPort(
+  sectionName: "api" | "db",
+  fallback: number,
+): number {
+  const config = configuredSupabasePath();
   try {
-    const toml = readFileSync(CONFIG_TOML, "utf8");
-    // Everything from the `[db]` header up to the next section header, or to
-    // the end of the file when `[db]` is the last section — anchoring only on
-    // `^\[` would silently find nothing there and fall back to a port the
-    // config never asked for. This stops before `[db.pooler]`, whose own `port`
-    // is a different thing.
-    const section = /^\[db\][^\n]*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml);
+    const toml = readFileSync(config.path, "utf8");
+    // Everything from the exact section header up to the next section header.
+    // Matching `[db]` exactly is load-bearing: `[db.pooler]` has a different
+    // port and must never redirect invariant tests to the transaction pooler.
+    const sectionPattern = new RegExp(
+      `^\\[${sectionName}\\][^\\n]*\\n([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`,
+      "m",
+    );
+    const section = sectionPattern.exec(toml);
     const port = section && /^port\s*=\s*(\d+)/m.exec(section[1]);
-    return port ? Number(port[1]) : FALLBACK_DB_PORT;
-  } catch {
-    return FALLBACK_DB_PORT;
+    const parsed = port ? Number(port[1]) : Number.NaN;
+    if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535) {
+      return parsed;
+    }
+    if (config.isExplicit) {
+      throw new Error(
+        `RCF_TEST_SUPABASE_CONFIG has no valid [${sectionName}] port: ${config.path}`,
+      );
+    }
+    return fallback;
+  } catch (error) {
+    if (config.isExplicit) {
+      throw error instanceof Error
+        ? error
+        : new Error(`Could not read RCF_TEST_SUPABASE_CONFIG: ${config.path}`);
+    }
+    return fallback;
   }
+}
+
+/** Reads the database port from the selected local Supabase config. */
+function readConfiguredDbPort(): number {
+  return readConfiguredPort("db", FALLBACK_DB_PORT);
+}
+
+/** Reads the Data API port from the same config used by the DB harness. */
+export function readConfiguredApiPort(): number {
+  return readConfiguredPort("api", FALLBACK_API_PORT);
 }
 
 export function resolveDbTarget(): DbTarget {
@@ -102,10 +147,13 @@ export function resolveDbTarget(): DbTarget {
   }
 
   const port = readConfiguredDbPort();
+  const configOverride = process.env.RCF_TEST_SUPABASE_CONFIG;
   return {
     connectionString: `postgresql://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@${LOCAL_DB_HOST}:${port}/${LOCAL_DB_NAME}`,
     display: `postgresql://${LOCAL_DB_USER}:***@${LOCAL_DB_HOST}:${port}/${LOCAL_DB_NAME}`,
-    source: "supabase/config.toml",
+    source: configOverride
+      ? "RCF_TEST_SUPABASE_CONFIG"
+      : "supabase/config.toml",
   };
 }
 
@@ -177,6 +225,8 @@ export interface DbSuite {
     text: string,
     values?: unknown[],
   ) => Promise<QueryResult<R>>;
+  /** Pins sequential SET LOCAL / role-switch probes to one connection. */
+  withClient: <T>(run: (client: PgClient) => Promise<T>) => Promise<T>;
   /**
    * Inserts a `sites` row with a collision-proof domain and arranges for it, and
    * everything the FK cascade reaches from it, to be removed after the suite.
@@ -227,6 +277,9 @@ export function describeDb(
   const outcome = probe(target);
 
   if (outcome !== "ok") {
+    if (process.env.RCF_REQUIRE_TEST_DB === "1") {
+      throw new Error(gateNote(target, outcome));
+    }
     describe(suiteName, () => {
       test("[gated] no ReCopyFast database reachable — invariants not checked", () => {
         console.warn(gateNote(target, outcome));
@@ -276,6 +329,18 @@ export function describeDb(
       return rows[0].id;
     };
 
-    defineSuite({ query, createSite });
+    const withClient = async <T>(
+      runWithClient: (client: PgClient) => Promise<T>,
+    ): Promise<T> => {
+      if (!pool) throw new Error("db pool used before beforeAll ran");
+      const client = await pool.connect();
+      try {
+        return await runWithClient(client);
+      } finally {
+        client.release();
+      }
+    };
+
+    defineSuite({ query, withClient, createSite });
   });
 }

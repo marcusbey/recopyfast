@@ -459,12 +459,20 @@ describeDb("Founding Agency capacity", ({ query }) => {
 
   test("a hold uses Stripe's 30-minute minimum and one live hold per account", async () => {
     const userId = await createUser("one-hold");
-    const before = Math.floor(Date.now() / 1000);
+    // The push coverage gate twice measured 1812 seconds here because it
+    // compared the Mac's Date.now() with a container database clock across RPC
+    // scheduling. NOW() in this same SQL statement shares the transaction
+    // clock used by the column default, so exact +1810 both removes clock skew
+    // and strengthens the intended 30-minute-plus-transit contract.
     const first = await query<{
       reservation_id: string;
       checkout_expires_at: string;
+      database_epoch_ceil: string;
     }>(
-      "SELECT reservation_id, checkout_expires_at FROM reserve_founding_agency_spot($1)",
+      `SELECT reservation_id,
+              checkout_expires_at,
+              CEIL(EXTRACT(EPOCH FROM NOW()))::BIGINT AS database_epoch_ceil
+       FROM reserve_founding_agency_spot($1)`,
       [userId],
     );
     const second = await query<{
@@ -475,13 +483,14 @@ describeDb("Founding Agency capacity", ({ query }) => {
       [userId],
     );
 
-    expect(second.rows[0]).toEqual(first.rows[0]);
+    expect(second.rows[0]).toEqual({
+      reservation_id: first.rows[0].reservation_id,
+      checkout_expires_at: first.rows[0].checkout_expires_at,
+    });
     expect(
-      Number(first.rows[0].checkout_expires_at) - before,
-    ).toBeGreaterThanOrEqual(1810);
-    expect(
-      Number(first.rows[0].checkout_expires_at) - before,
-    ).toBeLessThanOrEqual(1811);
+      Number(first.rows[0].checkout_expires_at) -
+        Number(first.rows[0].database_epoch_ceil),
+    ).toBe(1810);
 
     const stripeExpiresAt = Number(first.rows[0].checkout_expires_at) - 5;
     const bound = await query<{ bound: boolean }>(

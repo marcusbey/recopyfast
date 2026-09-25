@@ -117,6 +117,14 @@ npm run check:redis
 7. **No hardcoded Stripe prices or fallback catalogue.** `plans` is the source of truth, price
    ids come from env. A previous fallback silently served drifted prices at checkout.
 8. **No secrets in code.** Env vars only; validate presence at startup and fail loudly.
+9. **Never rely on a column REVOKE alone.** PostgreSQL table SELECT overrides a column
+   revoke. The 20260813120000 migration left `sites.api_key` readable to collaborators until
+   the s38 correction. Revoke table-level access (including PUBLIC/inherited grants), clear
+   stale column grants, then grant an explicit reviewed non-secret column list. User-scoped
+   selects and embedded joins must name safe columns; only authorized service-role signing
+   paths may select HMAC secrets. Real database tests must cover effective role privileges
+   and compare granted columns with the current schema so new columns require a decision.
+   See [ADR 033](./docs/decisions/033-column-privileges-require-table-level-revoke.md).
 
 ## API routes
 

@@ -1,30 +1,39 @@
-const nextJest = require('next/jest')
+const nextJest = require("next/jest");
 
 const createJestConfig = nextJest({
   // Provide the path to your Next.js app to load next.config.js and .env files
-  dir: './',
-})
+  dir: "./",
+});
 
 // Add any custom config to be passed to Jest
 const customJestConfig = {
-  setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  testEnvironment: 'jsdom',
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
+  testEnvironment: "jsdom",
+  // CI has long capped Jest at two workers with a 512 MB idle-worker recycle
+  // limit after parallel jsdom suites caused OOM/SIGABRT cascades. Local hooks
+  // still used Jest's CPU-derived default (nine workers on this machine), so a
+  // heavily loaded host could time out otherwise-green health and websocket
+  // suites before a push. Keep CLI, pre-commit and pre-push runs on the same
+  // resource contract as CI; this changes scheduling only, never assertions,
+  // retries, timeouts or coverage thresholds.
+  maxWorkers: 2,
+  workerIdleMemoryLimit: "512MB",
   testEnvironmentOptions: {
-    customExportConditions: [''],
+    customExportConditions: [""],
   },
   testPathIgnorePatterns: [
-    '<rootDir>/.next/',
-    '<rootDir>/node_modules/',
-    '<rootDir>/server/',
+    "<rootDir>/.next/",
+    "<rootDir>/node_modules/",
+    "<rootDir>/server/",
   ],
   moduleNameMapper: {
-    '^@/(.*)$': '<rootDir>/src/$1',
+    "^@/(.*)$": "<rootDir>/src/$1",
   },
   collectCoverageFrom: [
-    'src/**/*.{js,jsx,ts,tsx}',
-    '!src/**/*.d.ts',
-    '!src/app/layout.tsx',
-    '!src/app/globals.css',
+    "src/**/*.{js,jsx,ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/app/layout.tsx",
+    "!src/app/globals.css",
   ],
   // Ratchet, not a target. The global gate was set to 80% while real coverage
   // sat near 22%, so `npm run test:coverage` — and with it the pre-push hook —
@@ -50,8 +59,8 @@ const customJestConfig = {
   // Only *.test.* / *.spec.* are suites. The previous
   // `src/**/__tests__/**/*.{js,jsx,ts,tsx}` pattern also swept up shared
   // helpers (e.g. integration/setup.ts) and failed them as empty suites.
-  testMatch: ['<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}'],
-}
+  testMatch: ["<rootDir>/src/**/*.(test|spec).{js,jsx,ts,tsx}"],
+};
 
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
-module.exports = createJestConfig(customJestConfig)
+module.exports = createJestConfig(customJestConfig);
