@@ -113,6 +113,20 @@ describe("SiteEditorsCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("focuses the invite email when the form mounts after loading", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }));
+
+    render(
+      <SiteEditorsCard
+        siteId={SITE_ID}
+        siteName={SITE_NAME}
+        inviteFormAutoFocus
+      />,
+    );
+
+    expect(await screen.findByLabelText(/editor email/i)).toHaveFocus();
+  });
+
   it("surfaces a failed load and retries it on demand", async () => {
     const user = userEvent.setup();
     fetchMock

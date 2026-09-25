@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils/cn";
 import type { EditorPermission } from "@/lib/auth/editor-access";
 
 interface InviteEditorFormProps {
+  autoFocus?: boolean;
   /**
    * Performs the enrolment. Resolves true when the editor was added, which is
    * the signal for this form to clear itself; false leaves the typed address in
@@ -43,7 +44,10 @@ const PERMISSION_CHOICES: ReadonlyArray<{
 
 const DEFAULT_PERMISSIONS: readonly EditorPermission[] = ["view", "edit"];
 
-export function InviteEditorForm({ onInvite }: InviteEditorFormProps) {
+export function InviteEditorForm({
+  onInvite,
+  autoFocus = false,
+}: InviteEditorFormProps) {
   const emailFieldId = useId();
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<EditorPermission[]>([
@@ -87,6 +91,7 @@ export function InviteEditorForm({ onInvite }: InviteEditorFormProps) {
           id={emailFieldId}
           type="email"
           autoComplete="off"
+          autoFocus={autoFocus}
           placeholder="marketing@clientcompany.com"
           value={email}
           onChange={(event) => setEmail(event.target.value)}

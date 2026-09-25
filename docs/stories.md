@@ -1404,3 +1404,19 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 - [x] Targeted tests and required repository gates pass; draft PR only, independent review pending.
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
+
+
+## Story s35-activation-checklist — First client publish
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 3. Branch `feature/s35-activation-checklist`.
+
+- [x] Overview and site detail show a three-step per-site checklist from real install, active-editor, and publish records.
+- [x] Each incomplete step has one primary action: copy snippet, open invite form, open edit mode.
+- [x] All complete becomes one Live state; dismissal persists per user/site. Loading and read errors never invent progress.
+- [x] Site Token copy explains public HTML visibility, registered-domain use and explicit regeneration/revocation per ADR 027.
+- [ ] Component states/actions/dismissal and authenticated data derivation are tested; required gates pass.
+- [ ] Draft PR only; independent review pending. No deployment or remote database changes.
+
+Research: `docs/research/s35-activation-checklist.md`. Design: `docs/designs/s35-activation-checklist.md`. Plan: `docs/plans/s35-activation-checklist.md`. Embed allocation: 0 bytes.
+
+Delivery blocker: the unchanged local database ACL invariant fails for `update_translation_coverage(uuid)`. Required precommit is red; no commit/push/PR. Details and exact verification counts are in the story plan.
