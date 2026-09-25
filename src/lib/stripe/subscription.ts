@@ -15,6 +15,16 @@ import type { Subscription } from "@/types/billing";
  * `getUserSubscription` selects on.
  */
 const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+const RECOVERABLE_CHECKOUT_STATUSES = [
+  "incomplete",
+  "past_due",
+  "unpaid",
+  "paused",
+] as const;
+const TERMINAL_SUBSCRIPTION_STATUSES = [
+  "canceled",
+  "incomplete_expired",
+] as const;
 
 /**
  * Shape actually stored in `billing_subscriptions`. The migration names two
@@ -59,6 +69,205 @@ interface SubscriptionRow {
  */
 function createSubscriptionWriteClient() {
   return createServiceRoleClient();
+}
+
+type UserScopedBillingClient = Pick<
+  Awaited<ReturnType<typeof createClient>>,
+  "from"
+>;
+
+interface RecoverableSubscriptionRow {
+  id: string;
+  user_id: string;
+  stripe_subscription_id: string;
+  status: string;
+}
+
+export type RecoverableSubscriptionCheckout =
+  | { kind: "processing" }
+  | { kind: "resume"; resumeUrl: string }
+  | { kind: "paused_without_portal" }
+  | { kind: "unavailable" }
+  | { kind: "already_subscribed" }
+  | null;
+
+type ExpandedInvoice = {
+  id: string;
+  hosted_invoice_url?: string | null;
+};
+
+async function invoiceHasProcessingPayment(
+  invoiceId: string,
+): Promise<boolean> {
+  let startingAfter: string | undefined;
+  do {
+    const page = await stripe.invoicePayments.list({
+      invoice: invoiceId,
+      limit: 100,
+      expand: ["data.payment.payment_intent"],
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    for (const invoicePayment of page.data) {
+      const payment = invoicePayment.payment;
+      if (payment.type !== "payment_intent") continue;
+      const candidate = payment.payment_intent;
+      const paymentIntent =
+        typeof candidate === "string"
+          ? await stripe.paymentIntents.retrieve(candidate)
+          : candidate;
+      if (paymentIntent?.status === "processing") return true;
+    }
+
+    if (!page.has_more) return false;
+    startingAfter = page.data.at(-1)?.id;
+  } while (startingAfter);
+
+  // Stripe said there was another page but supplied no cursor. Treat that
+  // provider inconsistency as unsafe rather than assuming no payment exists.
+  throw new Error(`Could not inspect every payment for invoice ${invoiceId}`);
+}
+
+/**
+ * Resolve every owned Stripe obligation that could recover beside a new sale.
+ * Checkout never cancels these obligations: bank-debit payments can remain in
+ * flight for days, and cancellation would turn an ordinary retry into a money
+ * state transition. Terminal provider state is merely synchronized locally;
+ * every nonterminal state returns a recovery outcome that blocks replacement.
+ */
+export async function getRecoverableSubscriptionCheckout(
+  supabase: UserScopedBillingClient,
+  userId: string,
+): Promise<RecoverableSubscriptionCheckout> {
+  const { data, error } = await supabase
+    .from("billing_subscriptions")
+    .select("id, user_id, stripe_subscription_id, status")
+    .eq("user_id", userId)
+    .in("status", RECOVERABLE_CHECKOUT_STATUSES);
+
+  if (error) {
+    throw new Error(
+      `Failed to read recoverable subscriptions: ${error.message}`,
+    );
+  }
+
+  let recovery: Exclude<
+    RecoverableSubscriptionCheckout,
+    | { kind: "processing" }
+    | { kind: "already_subscribed" }
+    | { kind: "unavailable" }
+    | null
+  > | null = null;
+  let hasNonterminalObligation = false;
+
+  for (const row of (data ?? []) as RecoverableSubscriptionRow[]) {
+    if (!row.stripe_subscription_id) {
+      throw new Error("Recoverable subscription has no Stripe subscription id");
+    }
+
+    const providerSubscription = await stripe.subscriptions.retrieve(
+      row.stripe_subscription_id,
+      { expand: ["latest_invoice"] },
+    );
+    if (providerSubscription.id !== row.stripe_subscription_id) {
+      throw new Error(
+        `Stripe returned an unexpected subscription for ${row.stripe_subscription_id}`,
+      );
+    }
+
+    if (["active", "trialing"].includes(providerSubscription.status)) {
+      return { kind: "already_subscribed" };
+    }
+
+    if (
+      TERMINAL_SUBSCRIPTION_STATUSES.includes(
+        providerSubscription.status as (typeof TERMINAL_SUBSCRIPTION_STATUSES)[number],
+      )
+    ) {
+      // The webhook can lag or be missed. Persisting an already-terminal
+      // provider state is safe; checkout never asks Stripe to cancel anything.
+      const { data: updated, error: writeError } =
+        await createSubscriptionWriteClient()
+          .from("billing_subscriptions")
+          .update({ status: providerSubscription.status })
+          .eq("id", row.id)
+          .eq("user_id", userId)
+          .eq("stripe_subscription_id", row.stripe_subscription_id)
+          .select("id")
+          .single<{ id: string }>();
+      if (writeError || !updated) {
+        throw new Error(
+          `Failed to persist terminal subscription: ${writeError?.message ?? "unknown error"}`,
+        );
+      }
+      continue;
+    }
+
+    if (
+      !RECOVERABLE_CHECKOUT_STATUSES.includes(
+        providerSubscription.status as (typeof RECOVERABLE_CHECKOUT_STATUSES)[number],
+      )
+    ) {
+      throw new Error(
+        "Current subscription state could not be recovered safely",
+      );
+    }
+    hasNonterminalObligation = true;
+
+    const latestInvoice =
+      providerSubscription.latest_invoice &&
+      typeof providerSubscription.latest_invoice !== "string"
+        ? (providerSubscription.latest_invoice as ExpandedInvoice)
+        : null;
+    if (
+      latestInvoice &&
+      (await invoiceHasProcessingPayment(latestInvoice.id))
+    ) {
+      return { kind: "processing" };
+    }
+
+    if (providerSubscription.status === "paused") {
+      if (!recovery) {
+        const configuration =
+          process.env.STRIPE_BILLING_PORTAL_CONFIGURATION_ID;
+        const customer =
+          typeof providerSubscription.customer === "string"
+            ? providerSubscription.customer
+            : providerSubscription.customer?.id;
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
+        if (customer && appUrl) {
+          try {
+            const portal = await stripe.billingPortal.sessions.create({
+              customer,
+              return_url: `${appUrl}/dashboard/billing`,
+              ...(configuration ? { configuration } : {}),
+            });
+            recovery = { kind: "resume", resumeUrl: portal.url };
+          } catch (error) {
+            console.error(
+              "Failed to create paused-subscription portal:",
+              error,
+            );
+            recovery = { kind: "paused_without_portal" };
+          }
+        } else {
+          recovery = { kind: "paused_without_portal" };
+        }
+      }
+      continue;
+    }
+
+    if (!recovery && latestInvoice?.hosted_invoice_url) {
+      recovery = {
+        kind: "resume",
+        resumeUrl: latestInvoice.hosted_invoice_url,
+      };
+    }
+  }
+
+  return (
+    recovery ?? (hasNonterminalObligation ? { kind: "unavailable" } : null)
+  );
 }
 
 function toSubscription(row: SubscriptionRow): Subscription {

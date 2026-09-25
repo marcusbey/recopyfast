@@ -1,9 +1,9 @@
-# ADR 033 — Supabase column boundary and least privilege
+# ADR 034 — Supabase column boundary and least privilege
 
 - Status: accepted
 - Date: 2026-09-25
 - Scope: operator-authorized s38 review fixes M2, m4 and m5
-- Supersedes: ADR 031 only for infrastructure-role assertions and sibling mutation/fingerprint scope; its table-revoke and explicit-column decisions stand.
+- Supersedes: ADR 033 only for infrastructure-role assertions and sibling mutation/fingerprint scope; its table-revoke and explicit-column decisions stand.
 
 ## Context
 

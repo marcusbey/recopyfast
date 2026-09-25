@@ -1412,6 +1412,21 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
 
+## Story s34-checkout-hardening — Bounded holds and subscription checkout safety
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 4. Follow-ups: s33 n3/n4/n5/n7/n8/m5 and s28 N2. Protect the live $299 / 50 founding offer and Agency subscriptions without production actions.
+
+- [x] Unresolved expired founding holds stop consuming capacity after expiry + ten minutes, with service-role-queryable reconciliation flags and sanitized logs; Stripe history includes explicit skew margin.
+- [x] Paid late completion of a released hold grants Agency idempotently even if completed sales reach 51; ordinary claims remain serialized and capped, one active hold per account.
+- [x] Fix mode: independent flood/new-session limits; 10 new Checkout Sessions per user per 15 minutes, existing-open-session resumes excluded, founding-only deny on store failure, and 429 retry time shown as `Try again at HH:MM`.
+- [x] Fix mode: checkout never cancels subscriptions; latest-invoice payment processing blocks with the exact approved 409, other incomplete/past_due/unpaid/paused obligations return invoice/portal recovery, and recovered active/trialing state returns the upgrade message.
+- [x] Isolate the positive-price SQL guard, reuse the Agency switch, repair stale explanatory comments and record getUserSubscription's fail-closed contract.
+- [x] Focused regressions and full gates pass; fix review approved with no open findings; migrations remain unapplied remotely and PR #32 stays draft.
+
+- [x] Fix mode: `20260925110000_enforce_one_founding_lifetime_per_account.sql` enforces one founding lifetime per account; duplicate paid completion refunds idempotently per Checkout Session without an extra grant/cap count. `checkout.session.async_payment_failed` releases its hold and is added to the live endpoint runbook.
+- [x] Fix mode: fresh targeted/DB and final gate evidence, review unchanged and uncommitted, push existing draft PR #32.
+
+Research: `docs/research/s34-checkout-hardening.md`. Plan: `docs/plans/s34-checkout-hardening.md`.
 
 ## Story s38-hide-site-api-key — Remove collaborator access to signing secrets
 
@@ -1420,7 +1435,7 @@ Security priority; complexity 4. Exact implementation and draft-PR delivery auth
 - [x] Forward migration `20260925120000_sites_api_key_column_grants.sql` removes table-level access and grants authenticated only reviewed non-secret columns; anon has no sites grant, service_role retains full access; unnecessary site mutation grants are removed.
 - [x] Audit every public table for credential columns and ineffective column revokes; repair exposures in the same migration and document intentional public/user-visible values.
 - [x] Every user-scoped sites read and embedded relation uses explicit safe columns; service-role signing reads retain api_key.
-- [x] Real disposable PostgreSQL proves view-only JWT cannot select api_key, metadata/dashboard reads work, role and column invariants fail on regressions, and future columns require a deliberate grant decision.
+- [x] Real disposable PostgreSQL and Supabase/PostgREST prove view-only JWT cannot select api_key, metadata/dashboard embeds work, role and column invariants fail on regressions, and future columns require a deliberate grant decision. Staging fingerprints are hidden and device hashes cannot be overwritten by site admins.
 - [x] Research records the exposure window, affected collaborators, and operator-only rotation recommendation; ADR and AGENTS.md prevent column-only revoke recurrence.
 - [x] Local gates and independent review pass; prepare the security fix for the authorized commit, push and draft-PR handoff. Delivery evidence lives in Git/GitHub; no merge/deploy/migration in production.
 

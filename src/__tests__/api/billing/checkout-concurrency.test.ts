@@ -31,6 +31,11 @@ let blockClaimForSubscription = false;
 let mockBypassUserLock = false;
 
 const mockGetUser = jest.fn();
+const mockEnforceRateLimit = jest.fn();
+
+jest.mock("@/lib/api/rate-limit", () => ({
+  enforceRateLimit: (...args: unknown[]) => mockEnforceRateLimit(...args),
+}));
 
 /**
  * Cookie-scoped client. `from()` is a working in-memory store rather than a
@@ -194,9 +199,12 @@ jest.mock("@/lib/stripe/checkout", () => ({
 }));
 
 const mockGetUserSubscription = jest.fn();
+const mockGetRecoverableSubscriptionCheckout = jest.fn();
 
 jest.mock("@/lib/stripe/subscription", () => ({
   getUserSubscription: (...args: unknown[]) => mockGetUserSubscription(...args),
+  getRecoverableSubscriptionCheckout: (...args: unknown[]) =>
+    mockGetRecoverableSubscriptionCheckout(...args),
 }));
 
 const mockGetGrantedPlanIds = jest.fn();
@@ -238,6 +246,7 @@ const mockReserveFoundingAgencySpot = jest.fn();
 const mockBindFoundingAgencyCheckout = jest.fn();
 const mockReleaseFoundingAgencyCheckout = jest.fn();
 const mockReconcileExpiredFoundingAgencyCheckouts = jest.fn();
+const mockGetOpenFoundingAgencyCheckout = jest.fn();
 
 jest.mock("@/lib/billing/founding-agency", () => ({
   reserveFoundingAgencySpot: (...args: unknown[]) =>
@@ -246,14 +255,18 @@ jest.mock("@/lib/billing/founding-agency", () => ({
     mockBindFoundingAgencyCheckout(...args),
   releaseFoundingAgencyCheckout: (...args: unknown[]) =>
     mockReleaseFoundingAgencyCheckout(...args),
+  getOpenFoundingAgencyCheckout: (...args: unknown[]) =>
+    mockGetOpenFoundingAgencyCheckout(...args),
   reconcileExpiredFoundingAgencyCheckouts: (...args: unknown[]) =>
     mockReconcileExpiredFoundingAgencyCheckouts(...args),
 }));
 
 import { POST } from "@/app/api/billing/checkout/route";
+import { RATE_LIMIT_CONFIGS } from "@/lib/security/rate-limiter";
 
 interface CheckoutResponse {
   status: number;
+  headers: Headers;
   json: () => Promise<Record<string, unknown>>;
 }
 
@@ -295,6 +308,8 @@ describe("A-21: two checkouts started at once", () => {
     blockClaimForSubscription = false;
     mockBypassUserLock = false;
     process.env.AGENCY_CHECKOUT_ENABLED = "true";
+    mockEnforceRateLimit.mockResolvedValue(null);
+    mockGetRecoverableSubscriptionCheckout.mockResolvedValue(null);
 
     mockGetUser.mockResolvedValue({
       data: { user: { id: USER_ID, email: "buyer@example.com" } },
@@ -318,6 +333,7 @@ describe("A-21: two checkouts started at once", () => {
     });
     mockReleaseFoundingAgencyCheckout.mockResolvedValue(true);
     mockReconcileExpiredFoundingAgencyCheckouts.mockResolvedValue(0);
+    mockGetOpenFoundingAgencyCheckout.mockResolvedValue(null);
     mockFindCheckoutSessionForIntent.mockResolvedValue(null);
     mockGetCheckoutSessionStatus.mockResolvedValue({ status: "open" });
     mockExpireCheckoutSession.mockResolvedValue(undefined);
@@ -917,19 +933,285 @@ describe("A-21: two checkouts started at once", () => {
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
   });
 
-  it.each(["incomplete", "paused", "unpaid"])(
-    "allows a new checkout for a %s row that does not grant entitlement",
+  it.each(["incomplete", "past_due", "unpaid", "paused"])(
+    "blocks a recoverable %s obligation while its latest invoice payment is processing",
     async (status) => {
       db.billing_subscriptions = [
         { id: "row_1", user_id: USER_ID, plan: "pro", status },
       ];
+      mockGetRecoverableSubscriptionCheckout.mockResolvedValueOnce({
+        kind: "processing",
+      });
 
       const response = await post({ intent: "subscription", planId: "pro" });
 
-      expect(response.status).toBe(200);
-      expect(mockCreateCheckoutSession).toHaveBeenCalledTimes(1);
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error:
+          "A payment is still processing on your current subscription. We'll email you when it clears.",
+      });
+      expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
     },
   );
+
+  it("returns the invoice recovery URL instead of creating a replacement subscription", async () => {
+    mockGetRecoverableSubscriptionCheckout.mockResolvedValueOnce({
+      kind: "resume",
+      resumeUrl: "https://invoice.stripe.com/i/in_1",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Your current subscription needs attention before you can start another checkout.",
+      resumeUrl: "https://invoice.stripe.com/i/in_1",
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("returns the upgrade conflict when Stripe recovered the subscription to active", async () => {
+    mockGetRecoverableSubscriptionCheckout.mockResolvedValueOnce({
+      kind: "already_subscribed",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "You already have a subscription. Use the upgrade flow to change plans.",
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("returns a clear recovery message when a paused subscription has no portal", async () => {
+    mockGetRecoverableSubscriptionCheckout.mockResolvedValueOnce({
+      kind: "paused_without_portal",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Your subscription is paused. Contact support to resume it before starting another checkout.",
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("blocks replacement when the current invoice has no recovery URL", async () => {
+    mockGetRecoverableSubscriptionCheckout.mockResolvedValueOnce({
+      kind: "unavailable",
+    });
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Your current subscription needs attention before another checkout can start. Contact support if no payment link is available.",
+    });
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("rate-limits by IP before authentication with a fail-open store policy", async () => {
+    const ipLimited = {
+      status: 503,
+      headers: new Headers({ "Retry-After": "60" }),
+      json: async () => ({ error: "Too many requests" }),
+    } as never;
+    mockEnforceRateLimit.mockResolvedValueOnce(ipLimited);
+
+    const first = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(first.status).toBe(503);
+    expect(first.headers.get("Retry-After")).toBe("60");
+    expect(mockGetUser).not.toHaveBeenCalled();
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({
+        limit: "CHECKOUT_IP",
+        endpoint: "billing/checkout:ip",
+        identifierType: "ip",
+        onStoreFailure: "allow",
+      }),
+    );
+  });
+
+  it("does not charge the new-session quota when resuming an open subscription checkout", async () => {
+    pendingIntent = {
+      id: "intent_open",
+      user_id: USER_ID,
+      stripe_session_id: "cs_open",
+      checkout_url: "https://checkout.stripe.com/c/pay/cs_open",
+      stripe_price_id: "price_pro_monthly",
+      plan_id: "pro",
+      billing_period: "monthly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(409);
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("charges the fail-open user quota immediately before a new subscription session", async () => {
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(200);
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        limit: "CHECKOUT_USER",
+        endpoint: "billing/checkout:new-session",
+        identifier: USER_ID,
+        identifierType: "user",
+        onStoreFailure: "allow",
+      }),
+    );
+    expect(mockEnforceRateLimit.mock.invocationCallOrder[1]).toBeLessThan(
+      mockCreateCheckoutSession.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps a rate-limited subscription intent for an idempotent retry", async () => {
+    const limited = {
+      status: 429,
+      headers: new Headers({ "Retry-After": "60" }),
+      json: async () => ({ error: "Rate limit exceeded" }),
+    } as never;
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(limited);
+
+    const response = await post({ intent: "subscription", planId: "pro" });
+
+    expect(response.status).toBe(429);
+    expect(pendingIntent).toMatchObject({
+      id: "intent_1",
+      stripe_session_id: null,
+    });
+    expect(mockIntentClient.rpc).not.toHaveBeenCalledWith(
+      "expire_unattached_subscription_checkout_intent",
+      expect.anything(),
+    );
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("charges an unattached reused intent because it is not a confirmed open-session resume", async () => {
+    pendingIntent = {
+      id: "intent_ambiguous",
+      user_id: USER_ID,
+      stripe_session_id: null,
+      checkout_url: null,
+      stripe_price_id: "price_pro_monthly",
+      plan_id: "pro",
+      billing_period: "monthly",
+      expires_at: new Date(Date.now() + 45 * 60_000).toISOString(),
+    };
+
+    await post({ intent: "subscription", planId: "pro" });
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ endpoint: "billing/checkout:new-session" }),
+    );
+  });
+
+  it("caps new sessions at 10 per user per 15 minutes", () => {
+    expect(RATE_LIMIT_CONFIGS.CHECKOUT_USER).toEqual({
+      maxRequests: 10,
+      windowMs: 15 * 60 * 1000,
+    });
+  });
+
+  it("uses the fail-open user quota for a credit checkout", async () => {
+    const response = await post({ intent: "credits", quantity: 1 });
+
+    expect(response.status).toBe(200);
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        endpoint: "billing/checkout:new-session",
+        onStoreFailure: "allow",
+      }),
+    );
+  });
+
+  it("uses the sole fail-closed user quota before starting a new founding session", async () => {
+    await post({ intent: "lifetime", productId: "lifetime_agency" });
+
+    expect(mockEnforceRateLimit).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({
+        limit: "CHECKOUT_USER",
+        endpoint: "billing/checkout:new-session",
+        identifier: USER_ID,
+        identifierType: "user",
+        onStoreFailure: "deny",
+      }),
+    );
+    expect(mockEnforceRateLimit.mock.invocationCallOrder[1]).toBeLessThan(
+      mockCreateCheckoutSession.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not charge the new-session quota when resuming a founding checkout", async () => {
+    mockGetOpenFoundingAgencyCheckout.mockResolvedValueOnce({
+      sessionId: "cs_founding_open",
+      url: "https://checkout.stripe.com/c/pay/cs_founding_open",
+    });
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual({
+      sessionId: "cs_founding_open",
+      url: "https://checkout.stripe.com/c/pay/cs_founding_open",
+    });
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("does not reserve a founding hold when the user quota rejects it", async () => {
+    const limited = {
+      status: 429,
+      headers: new Headers({ "Retry-After": "60" }),
+      json: async () => ({ error: "Rate limit exceeded" }),
+    } as never;
+    mockEnforceRateLimit
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(limited);
+
+    const response = await post({
+      intent: "lifetime",
+      productId: "lifetime_agency",
+    });
+
+    expect(response.status).toBe(429);
+    expect(mockReserveFoundingAgencySpot).not.toHaveBeenCalled();
+    expect(mockReleaseFoundingAgencyCheckout).not.toHaveBeenCalled();
+    expect(mockPreflightLifetimeCheckout).not.toHaveBeenCalled();
+    expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
+  });
 
   /**
    * Fix-stable, and the contrast the finding draws: the more expensive product

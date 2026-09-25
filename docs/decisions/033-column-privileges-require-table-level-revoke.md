@@ -1,4 +1,4 @@
-# ADR 031 — Column privileges require table-level revoke
+# ADR 033 — Column privileges require table-level revoke
 
 - Status: accepted
 - Date: 2026-09-25

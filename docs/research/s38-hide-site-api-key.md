@@ -50,7 +50,7 @@ ADR 001 preserves the inherited stack; ADR 002 requires user reads to retain RLS
 
 All migration-defined public tables were scanned for api_key/token/secret/hash columns and column revokes. JSON payloads and third-party managed schemas are not asserted secret-free by a column-name scan. No production catalogue was queried. API keys currently have a pre-existing mismatch between user-scoped mutation routes and SELECT-only RLS; this lane preserves those policies rather than expanding writes.
 
-PostgreSQL superusers, object owners, global readers and Supabase-managed service roles are trusted platform boundaries, not anonymous or authenticated application users. ADR 033 supersedes ADR 031's overly narrow infrastructure-role test policy and sibling-write scope. Hidden-column denial is asserted for anon, authenticated and PUBLIC, including effective inherited grants; infrastructure names are explicitly documented. Superuser-only negative controls are skipped with a reason under Supabase's non-superuser postgres. The ordinary deny/grant/RLS tests must still run on that stack.
+PostgreSQL superusers, object owners, global readers and Supabase-managed service roles are trusted platform boundaries, not anonymous or authenticated application users. ADR 034 supersedes ADR 033's overly narrow infrastructure-role test policy and sibling-write scope. Hidden-column denial is asserted for anon, authenticated and PUBLIC, including effective inherited grants; infrastructure names are explicitly documented. Superuser-only negative controls are skipped with a reason under Supabase's non-superuser postgres. The ordinary deny/grant/RLS tests must still run on that stack.
 
 ## Source regression evidence
 
@@ -125,7 +125,7 @@ No operator step, deployment, production query or rotation was performed by this
 
 ## Review-fix caller audit and health contract
 
-The review-fix tree integrates origin/main at fe98f69, including PRs #31, #33 and #34.
+The review-fix tree initially integrated origin/main at fe98f69 (PRs #31, #33 and #34), then integrated 0b8014f (PR #32) when main advanced during verification. The final merged tree contains all four PRs.
 The new activation endpoint uses the user client and selects `status, live_at`; these remain
 in the sites metadata grant. The source guard also checks embedded sites projections for
 api_key, including service-scoped embeds: service privilege alone does not justify selecting
@@ -166,3 +166,9 @@ update_translation_coverage(uuid), later in ordering than the 20260809120000 loc
 No application caller needs that grant. The unapplied s38 migration restores the earlier
 service-only intent, while the original strict function invariant remains unchanged.
 This is a gate-driven security repair, not a new authenticated RPC contract.
+
+
+After the latest-main integration, a fresh Supabase reset applied checkout migrations
+20260925100000 and 20260925110000 before the s38 migration. The combined column-privilege,
+function-grant and founding-cap suites pass 40/40 on that stack. The full-chain plain
+PostgreSQL runner still passes 13 tests with only the HTTP test skipped.

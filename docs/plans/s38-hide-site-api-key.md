@@ -11,7 +11,7 @@ This implements the user's numbered security specification. No production action
 - [x] T2 Add forward migration 20260925120000_sites_api_key_column_grants.sql. Explicitly revoke sites table SELECT and other table privileges from PUBLIC/anon/authenticated, clear residual column ACLs, grant authenticated exactly all 10 current nonsecret columns. No anon path needs a grant. Preserve service_role full access. Apply equivalent explicit SELECT allowlists hiding webhooks.secret, api_keys.key_hash and editor_device_grants grant_hash/user_agent_hash/origin_hash. Preserve unrelated mutation policies/contracts. Do not dynamically grant unknown future columns.
 - [x] T3 Add DB catalogue invariants comparing effective authenticated column grants to schema minus hidden fields (new columns must fail), checking every non-infrastructure role and application inheritance paths, and negative controls for restored table/PUBLIC/inherited/column grants plus added columns. State PostgreSQL unavoidable trusted-role exceptions explicitly. Run against disposable PostgreSQL with all real migrations; wire blocking execution into existing disposable CI database lane. Stop and remove owned cluster at completion.
 - [x] T4 TDD caller regression guards: audit every src/server sites read including nested joins/realtime; keep current explicit safe user reads and service signing reads. Remove unnecessary api_keys.key_hash SELECT, replace default/wildcard API-key mutation returning selections with explicit nonsecret fields, preserve response contract. Verify sibling hash changes do not break any user-scoped reads.
-- [x] T5 Record ADR 031 column privileges require table-level revoke; add AGENTS.md incident note; keep research inventory/exposure/rotation limits and story status accurate.
+- [x] T5 Record ADR 033 column privileges require table-level revoke; add AGENTS.md incident note; keep research inventory/exposure/rotation limits and story status accurate.
 - [x] T6 Run targeted tests then required local gates with /tmp/recopyfast-s38-ci-env.sh placeholders: lint, both type-checks, format check, full Jest, build, Node 20.15.1 embed check, npm audit --omit=dev. Fresh independent review and fix findings; prepare the conventional single fix(security) commit and requested draft PR. Delivery handoff below is tracked by Git/GitHub.
 
 Ownership: DB executor owns migration, DB test/runner/bootstrap files and CI wiring; source executor owns api-keys route and user-read regression tests. Lead owns research/plan/story/ADR/AGENTS docs, integration, local gates and delivery. Executors do not commit/push until lead integrates verification. Shared code must not be reverted.
@@ -90,7 +90,7 @@ Local integration of origin/main is authorized; production merge/deploy remains 
 - [x] m4 Remove needless sibling mutation privileges and prohibit user updates to device hashes in the unapplied migration.
 - [x] m5 Hide staging access fingerprint hashes, extend inventory and DB tests.
 - [x] m6 Prove dashboard embedded select through real PostgREST with a user JWT.
-- [ ] Run all required gates using CI placeholders, review fixes independently, commit/push and retain draft PR 35.
+- [x] Run the review-fix gates using CI placeholders, obtain independent approval, and prepare commit/push with draft PR 35 retained. The mandatory hooks recheck the final integrated tree; Git/GitHub record delivery.
 
 
 Source review-fix proof: health tests failed twice on the old tenant probes, then the three
@@ -156,3 +156,18 @@ Reviewer independently passed 51 focused source tests, 17 Supabase column/functi
 plain PostgreSQL 13/1 HTTP skip, remote-HTTP refusal control and typecheck. Both review
 findings (nested projection parser and owner invariant) were fixed and rechecked. This
 result is recorded here; the operator's original uncommitted verdict remains unchanged.
+
+
+Latest-main integration: 0b8014f applied cleanly with all story entries retained. S38 ADRs
+are now 033 and 034 (number-only correction, recorded in errata). A fresh local Supabase
+reset applies checkout migrations 100000 and 110000 before s38 120000; column/function/
+founding-cap suites pass 40/40. The latest-chain plain PostgreSQL runner passes 13 tests
+and skips only its HTTP test; owned cluster removed. Production typecheck, zero-vulnerability
+audit and stock Node20 embed freshness/budget checks pass on the final merged tree.
+
+
+Fresh bounded review of the latest-main integration: Max severity: none / Ship allowed: yes.
+All stories remain; PR #32 introduces no sites/api_key read surface; migration ordering and
+content-preserving ADR renumbers were checked. Final conventional merge commit and push run
+the mandatory full-suite and build/coverage hooks with the owned local Supabase stack active.
+Original review remains unmodified and uncommitted. No production action is authorized.

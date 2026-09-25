@@ -124,7 +124,7 @@ npm run check:redis
    selects and embedded joins must name safe columns; only authorized service-role signing
    paths may select HMAC secrets. Real database tests must cover effective role privileges
    and compare granted columns with the current schema so new columns require a decision.
-   See [ADR 031](./docs/decisions/031-column-privileges-require-table-level-revoke.md).
+   See [ADR 033](./docs/decisions/033-column-privileges-require-table-level-revoke.md).
 
 ## API routes
 

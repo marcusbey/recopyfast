@@ -85,7 +85,7 @@ story and travel with its branch.
 | [025](./decisions/025-grant-on-the-content-write-path.md) | The device grant is a principal on the content write path, fail-closed on its origin pin | `s14a` |
 | [026](./decisions/026-one-machine-no-adapter-supersedes-023.md) | One machine, no Redis adapter — supersedes [023](./decisions/023-websocket-only-transport-no-sticky-routing.md) on the deployment shape only | `s07b` |
 
-[ADR 033](./decisions/033-supabase-column-boundary-and-least-privilege.md) supersedes ADR 031's infrastructure-test and sibling-write scope for s38; its column-revoke decision remains in force.
+[ADR 034](./decisions/034-supabase-column-boundary-and-least-privilege.md) supersedes ADR 033's infrastructure-test and sibling-write scope for s38; its column-revoke decision remains in force.
 
 > **Errata.** A wrong *pointer* in an accepted ADR — a line number, path, symbol or count — is
 > corrected in [`decisions/errata.md`](./decisions/errata.md), never by editing the ADR. That keeps

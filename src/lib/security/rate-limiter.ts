@@ -422,6 +422,8 @@ export const RATE_LIMIT_CONFIGS = {
   API_AUTH: { windowMs: 15 * 60 * 1000, maxRequests: 5 }, // 5 requests per 15 minutes
   API_CONTENT: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 requests per minute
   API_UPLOAD: { windowMs: 60 * 1000, maxRequests: 10 }, // 10 requests per minute
+  CHECKOUT_IP: { windowMs: 15 * 60 * 1000, maxRequests: 20 }, // 20 checkout attempts per 15 minutes per IP
+  CHECKOUT_USER: { windowMs: 15 * 60 * 1000, maxRequests: 10 }, // 10 new Checkout Sessions per 15 minutes per user
 
   // User-specific limits
   USER_GENERAL: { windowMs: 60 * 1000, maxRequests: 100 }, // 100 requests per minute
