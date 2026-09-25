@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { getHubSessionEmail } from "@/lib/auth/editor-hub-session";
+import { getHubSession } from "@/lib/auth/editor-hub-session";
 import { findActiveSiteEditor } from "@/lib/auth/editor-directory";
 import { createHandoff } from "@/lib/auth/editor-handoff";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -27,8 +27,8 @@ function buildSiteUrl(domain: string, handoffCode: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const email = await getHubSessionEmail();
-    if (!email) {
+    const session = await getHubSession();
+    if (!session) {
       return NextResponse.json(
         { error: "not_signed_in", message: "Verify your email again." },
         { status: 401 },
@@ -37,7 +37,15 @@ export async function POST(request: NextRequest) {
 
     const body = await readJsonBody(request);
     const siteId = readString(body, "siteId");
-    const rememberDevice = body?.rememberDevice === true;
+    // The session is the source of truth for "Remember" (s39). It used to be
+    // this body field alone, which worked while every hub visit passed the code
+    // step with the checkbox on screen; a resumed hub skips that step, the
+    // page's state is only its unticked default, and every resumed hand-off
+    // minted a 12-hour grant for an editor promised 7 days. The body is still
+    // OR-ed in so a hub tab opened before the deploy — pre-s39 cookie, no flag —
+    // keeps working. It can only add the choice the editor already made at code
+    // entry on that same tab, never remove one the session carries.
+    const rememberDevice = session.remembered || body?.rememberDevice === true;
 
     if (!siteId) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -46,7 +54,7 @@ export async function POST(request: NextRequest) {
     // Re-checked here, not taken from the session. A hub session minted before
     // the owner removed Bob must not still open the door — which is why the hub
     // session can stay stateless.
-    const editor = await findActiveSiteEditor(siteId, email);
+    const editor = await findActiveSiteEditor(siteId, session.email);
     if (!editor) {
       return NextResponse.json(
         { error: "not_authorized", message: "You can't edit that site." },

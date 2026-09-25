@@ -55,8 +55,19 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // never to let a branch through, and it is now pinned at what the merged tree
 // actually earned. A branch that is over is still over. `s06c-embed-shrink` is the
 // story that creates real headroom.
-const SEEDED_MAX_BUNDLE_GZ = 46681;
-const SEEDED_MAX_WIDGET_GZ = 33865;
+//
+// RATCHETED 2026-09-25 (s39), DOWNWARD: 46681 → 46226, 33865 → 33465. Pinned here
+// as well as in build-embed.mjs so a later commit cannot quietly hand the freed
+// bytes back by restoring the old constants.
+//
+//   46681 / 33865  ceilings before s39
+//   46635 / 33860  measured on main at 0b8014f, where s39 branched
+//   −465 / −452    CSS comments moved out of the widget's style template
+//                  strings (they shipped as string bytes; now JS comments)
+//   +56 / +57      the editor bar's "All sites" control
+//   46226 / 33465  measured on feature/s39-editor-back-to-sites
+const SEEDED_MAX_BUNDLE_GZ = 46226;
+const SEEDED_MAX_WIDGET_GZ = 33465;
 
 interface CheckRun {
   status: number;

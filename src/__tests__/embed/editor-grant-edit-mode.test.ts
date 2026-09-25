@@ -39,6 +39,17 @@ const EMAIL = "bob@example.com";
 const EXPIRES_AT = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 const STORAGE_KEY = `rcf_editor_grant:${SITE_ID}`;
 
+/**
+ * Done, by its accessible name. It used to be found as "the" element with the
+ * `rcf-editor-banner-dismiss` class — true until s39 gave "All sites" the same
+ * class (for the same host-hardened button styling). The first match is now
+ * All sites, which navigates away instead of dismissing.
+ */
+const DONE_BUTTON =
+  '#rcf-editor-banner button[aria-label="Dismiss the ReCopyFast editor bar"]';
+const ALL_SITES_BUTTON =
+  '#rcf-editor-banner button[aria-label="Back to all your sites"]';
+
 function installFetch(routes: Record<string, unknown>) {
   const impl = jest.fn(async (url: string) => {
     for (const [fragment, response] of Object.entries(routes)) {
@@ -263,9 +274,7 @@ describe("the editor banner", () => {
   it("dismisses for this page load without signing anyone out", async () => {
     await bootWithGrant(["view", "edit"]);
 
-    const done = document.querySelector(
-      "#rcf-editor-banner .rcf-editor-banner-dismiss",
-    ) as HTMLButtonElement;
+    const done = document.querySelector(DONE_BUTTON) as HTMLButtonElement;
     done.click();
 
     expect(document.querySelector("#rcf-editor-banner")).toBeNull();
@@ -292,9 +301,7 @@ describe("the editor banner", () => {
     );
     expect(window.getComputedStyle(document.body).paddingTop).toBe("50px");
 
-    const done = document.querySelector(
-      "#rcf-editor-banner .rcf-editor-banner-dismiss",
-    ) as HTMLButtonElement;
+    const done = document.querySelector(DONE_BUTTON) as HTMLButtonElement;
     done.click();
 
     expect(document.body.style.paddingTop).toBe("");
@@ -317,9 +324,7 @@ describe("the editor banner", () => {
       "important",
     );
 
-    const done = document.querySelector(
-      "#rcf-editor-banner .rcf-editor-banner-dismiss",
-    ) as HTMLButtonElement;
+    const done = document.querySelector(DONE_BUTTON) as HTMLButtonElement;
     done.click();
 
     expect(document.body.style.paddingTop).toBe("12px");
@@ -335,6 +340,115 @@ describe("the editor banner", () => {
       document.querySelector("#rcf-editor-banner")?.textContent || "";
     expect(text).toContain(EMAIL);
     expect(text).not.toContain("You can edit this page");
+  });
+});
+
+describe("the way back to all sites", () => {
+  /**
+   * s39. An invited editor who can edit several sites, done with this one, had
+   * no way back to the list: the bar offered Done, which only hides it. The
+   * hub at `/edit` now resumes a live session, so the bar links to it.
+   *
+   * Grant editors only, and structurally so: this bar is `showEditorBanner`,
+   * which only runs when a device grant has been verified. Owners and
+   * edit-session holders get a different toolbar and never see it.
+   */
+  beforeEach(() => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = "<h1>Hello world</h1>";
+    document.body.style.paddingTop = "";
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/pricing");
+    delete (window as unknown as Record<string, unknown>).ReCopyFast;
+    delete (window as unknown as Record<string, unknown>).RECOPYFAST_API;
+    delete (window as unknown as Record<string, unknown>).RECOPYFAST_WS;
+    installScriptTag();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    jest.spyOn(console, "log").mockImplementation(() => {});
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it.each([[["view", "edit"]], [["view", "edit", "publish"]], [["view"]]])(
+    "offers one All sites control, before Publish and Done, for permissions %j",
+    async (permissions) => {
+      await bootWithGrant(permissions);
+
+      const controls = document.querySelectorAll(ALL_SITES_BUTTON);
+      expect(controls).toHaveLength(1);
+
+      const allSites = controls[0] as HTMLButtonElement;
+      expect(allSites.textContent).toBe("All sites");
+      expect(allSites.type).toBe("button");
+      // Reuses the bar's host-hardened button styling rather than adding CSS.
+      expect(allSites.className).toBe("rcf-editor-banner-dismiss");
+
+      const buttons = Array.from(
+        document.querySelectorAll("#rcf-editor-banner button"),
+      );
+      const done = document.querySelector(DONE_BUTTON);
+      const publish = document.querySelector(
+        '#rcf-editor-banner button[aria-label="Publish"]',
+      );
+      expect(buttons.indexOf(allSites)).toBeLessThan(buttons.indexOf(done!));
+      if (publish) {
+        expect(buttons.indexOf(allSites)).toBeLessThan(
+          buttons.indexOf(publish),
+        );
+      }
+    },
+  );
+
+  it("goes to /edit on the ReCopyFast origin the widget talks to", async () => {
+    // jsdom implements only same-document (fragment) navigation; any other
+    // assignment to `location.href` is logged as "not implemented" and the URL
+    // stays put. So for this one test the API sits on the page's own origin
+    // (jsdom's `http://localhost`, not the `helloworld.com` of the others), and
+    // the page is parked one fragment away from the expected destination: the
+    // URL can only change if the control navigated to exactly `<api>/edit` —
+    // any other path, query or origin leaves it where it is.
+    const api = `${window.location.origin}/api`;
+    (window as unknown as { RECOPYFAST_API: string }).RECOPYFAST_API = api;
+    await bootWithGrant(["view", "edit"]);
+    window.history.replaceState(null, "", "/edit#before-all-sites");
+
+    (document.querySelector(ALL_SITES_BUTTON) as HTMLButtonElement).click();
+
+    expect(window.location.href).toBe(`${window.location.origin}/edit`);
+    expect(window.location.href).toBe(new URL("/edit", api).toString());
+  });
+
+  it("never throws into the host page, even when the URL cannot be built", async () => {
+    await bootWithGrant(["view", "edit"]);
+    const uncaught = jest.fn();
+    window.addEventListener("error", uncaught);
+    const RealURL = window.URL;
+
+    try {
+      (window as unknown as { URL: unknown }).URL = function BrokenURL() {
+        throw new TypeError("Invalid URL");
+      };
+      (document.querySelector(ALL_SITES_BUTTON) as HTMLButtonElement).click();
+    } finally {
+      window.URL = RealURL;
+      window.removeEventListener("error", uncaught);
+    }
+
+    expect(uncaught).not.toHaveBeenCalled();
+    expect(document.querySelector("#rcf-editor-banner")).not.toBeNull();
+  });
+
+  it("does not exist without a verified grant — there is no bar to put it on", async () => {
+    installFetch({});
+    new Function(WIDGET_SOURCE)();
+    await settle();
+
+    expect(document.querySelector("#rcf-editor-banner")).toBeNull();
+    expect(document.querySelector(ALL_SITES_BUTTON)).toBeNull();
   });
 });
 

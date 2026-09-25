@@ -104,9 +104,16 @@ export async function listSitesForEditor(
     .eq("email", normalizeEmail(email))
     .is("revoked_at", null);
 
+  // Throw, never `[]`. An empty list is a statement — "this address edits
+  // nothing" — and the hub renders it as "No sites yet … ask the site owner".
+  // s39 made /edit read this on every load, so a transient Supabase error
+  // told real editors they had been removed (s39 review M1). Every caller
+  // (sites, submit-code, request-code) already turns a throw into a 500, and a
+  // failed read fails the same way for known and unknown addresses, so
+  // request-code's no-oracle rule holds.
   if (error) {
     console.error("[editor-directory] site list failed:", error.message);
-    return [];
+    throw new Error(`[editor-directory] site list failed: ${error.message}`);
   }
 
   type Row = {

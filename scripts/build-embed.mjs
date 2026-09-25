@@ -107,8 +107,26 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * moved, and only to the newly measured value, with the cause named. If your branch
  * is over, the branch is over. `s06c-embed-shrink` is the story that creates room.
  */
-const MAX_BUNDLE_GZ = 46681;
-const MAX_WIDGET_GZ = 33865;
+/*
+ * RATCHETED DOWN 2026-09-25 (s39-editor-back-to-sites), from 46681 / 33865.
+ *
+ * s39 needed a control in the editor bar with 5 gz bytes of widget headroom, so it
+ * paid for it in the same branch, and the ceiling keeps the difference:
+ *
+ *   46681 / 33865  ceilings before s39
+ *   46635 / 33860  measured on main at 0b8014f, where s39 branched
+ *   −465 / −452    CSS comments out of strings: twelve comments inside the widget's
+ *                  `style.textContent` template literals shipped as string bytes on
+ *                  every customer page; they are JS comments above each literal now
+ *                  (esbuild strips those). No CSS rule changed.
+ *   +56 / +57      All sites control: the editor bar's way back to /edit
+ *   46226 / 33465  measured on the branch — the new ceilings
+ *
+ * build-size-gate.test.ts pins the same pair, so the freed bytes cannot be handed
+ * back by restoring the old constants.
+ */
+const MAX_BUNDLE_GZ = 46226;
+const MAX_WIDGET_GZ = 33465;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
