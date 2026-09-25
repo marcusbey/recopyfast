@@ -115,3 +115,11 @@ pin existing behaviour the task must not break.
 
 Net byte movement: bundle 46,635 → 46,226 (−409), widget 33,860 → 33,465 (−395); ceilings
 46,681 / 33,865 → 46,226 / 33,465.
+
+### Review fix — M1 (2026-09-25)
+
+`listSitesForEditor` returned `[]` on a Supabase error, which `/edit` rendered as "No sites yet".
+It now throws; `sites`, `submit-code` and `request-code` already map a throw to 500 (a read failure
+is address-independent, so request-code stays oracle-free). Red first:
+`src/lib/auth/__tests__/editor-directory-list.test.ts` 1 failed / 1 passed → green; editor suites
+159/159. m1–m4 accepted as minor: m4 is already declared in PR #37's description.
