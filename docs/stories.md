@@ -1412,6 +1412,21 @@ Agency costs $49/month or $490/year (display equivalent $40.83), includes 10 web
 
 Research: `docs/research/s33-agency-plan.md`. Plan: `docs/plans/s33-agency-plan.md`.
 
+## Story s34-checkout-hardening — Bounded holds and subscription checkout safety
+
+Operator-prevalidated scope, 2026-09-25. Complexity: 4. Follow-ups: s33 n3/n4/n5/n7/n8/m5 and s28 N2. Protect the live $299 / 50 founding offer and Agency subscriptions without production actions.
+
+- [x] Unresolved expired founding holds stop consuming capacity after expiry + ten minutes, with service-role-queryable reconciliation flags and sanitized logs; Stripe history includes explicit skew margin.
+- [x] Paid late completion of a released hold grants Agency idempotently even if completed sales reach 51; ordinary claims remain serialized and capped, one active hold per account.
+- [x] Fix mode: independent flood/new-session limits; 10 new Checkout Sessions per user per 15 minutes, existing-open-session resumes excluded, founding-only deny on store failure, and 429 retry time shown as `Try again at HH:MM`.
+- [x] Fix mode: checkout never cancels subscriptions; latest-invoice payment processing blocks with the exact approved 409, other incomplete/past_due/unpaid/paused obligations return invoice/portal recovery, and recovered active/trialing state returns the upgrade message.
+- [x] Isolate the positive-price SQL guard, reuse the Agency switch, repair stale explanatory comments and record getUserSubscription's fail-closed contract.
+- [x] Focused regressions and full gates pass; fix review approved with no open findings; migrations remain unapplied remotely and PR #32 stays draft.
+
+- [x] Fix mode: `20260925110000_enforce_one_founding_lifetime_per_account.sql` enforces one founding lifetime per account; duplicate paid completion refunds idempotently per Checkout Session without an extra grant/cap count. `checkout.session.async_payment_failed` releases its hold and is added to the live endpoint runbook.
+- [x] Fix mode: fresh targeted/DB and final gate evidence, review unchanged and uncommitted, push existing draft PR #32.
+
+Research: `docs/research/s34-checkout-hardening.md`. Plan: `docs/plans/s34-checkout-hardening.md`.
 
 ## Story s36-deflake-share-edit-publish — deterministic save and publish
 
