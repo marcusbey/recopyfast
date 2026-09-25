@@ -60,8 +60,9 @@ the final projection adjustment against the full suite/build again.
 
 ## Final review and delivery handoff
 
-Independent verdict: Max severity: none / Ship allowed: yes. All three review findings are
-resolved. The exact verdict is retained in docs/reviews/s38-hide-site-api-key.md, deliberately
+Historical internal verdict before the operator review: Max severity: none / Ship allowed: yes.
+The current immutable operator review supersedes it: Max severity: major / Ship allowed: yes,
+with M1/M2 and m1–m6 required before merge. That exact verdict is retained in docs/reviews/s38-hide-site-api-key.md, deliberately
 uncommitted and unmodified per the lane instruction.
 
 Final code proof: 11/11 real PostgreSQL tests and 78/78 focused source tests, with independent
@@ -73,3 +74,85 @@ secrets to collaborators”. Mandatory hooks gate the final commit/push. Git and
 record delivery status; neither merge nor production release is authorized. Remove owned
 .next/coverage output after hook completion; the disposable DB runner already removed its
 cluster. Operator rollout and rotation remain explicit follow-up outside this lane.
+
+
+## Authorized review fix cycle — 2026-09-25
+
+The operator explicitly authorized this scope in the current task. The uncommitted review
+remains immutable. Previous verification counts above are historical, not this cycle's gate.
+Local integration of origin/main is authorized; production merge/deploy remains forbidden.
+
+- [x] M1 Integrate origin/main including PRs 31, 33 and 34, preserving all stories; re-audit user-scoped sites reads.
+- [x] M2 Run portable column invariants on plain PostgreSQL and a real supabase start stack; document platform roles; superuser-only negative controls skip clearly on non-superusers.
+- [x] m1 Replace anonymous health sites reads with a cheap permitted probe and test GET/HEAD/readiness behavior.
+- [x] m2 Prove embedded sites api_key projections fail the source guard.
+- [x] m3 Correct exposure since table creation (20250817) and prioritize collaborator-bearing sites for rotation.
+- [x] m4 Remove needless sibling mutation privileges and prohibit user updates to device hashes in the unapplied migration.
+- [x] m5 Hide staging access fingerprint hashes, extend inventory and DB tests.
+- [x] m6 Prove dashboard embedded select through real PostgREST with a user JWT.
+- [ ] Run all required gates using CI placeholders, review fixes independently, commit/push and retain draft PR 35.
+
+
+Source review-fix proof: health tests failed twice on the old tenant probes, then the three
+health suites passed 31 tests. A temporary embedded `sites!inner(id, api_key)` source fixture
+made the confinement guard fail; it was removed. The staging projection regression failed
+before explicit user projections; the combined source run passed 6 suites / 49 tests.
+The merged-tree audit also covered staging callers because the new fingerprint ACL would
+otherwise break their default/wildcard selects. Service-side fingerprint validation remains
+unchanged. Production typecheck and production dependency audit (0 vulnerabilities) passed.
+
+
+DB review-fix proof: the full pre-fix PostgreSQL 14 migration replay failed 4 assertions
+(8 passed / 1 HTTP test skipped), reproducing the old grants. Final plain PostgreSQL 14
+passes 13 tests / 1 PostgREST test skipped; its owned cluster is stopped and removed.
+A full `supabase start` stack with PostgreSQL 15 passes 14/14, including the real authenticated
+PostgREST dashboard embed and anonymous plans probe. The two superuser-only negative-control
+assertion groups explicitly warn and return on Supabase's non-superuser postgres; they run on
+plain PostgreSQL. The migration reapplies cleanly. CI now runs the required suite on both the
+plain PostgreSQL job and the real Supabase/PostgREST E2E stack; CI contract tests pass 6/6.
+
+Independent review repeated the 49 source tests and caught a nested embedded-projection
+parser gap (`sites(id, site_permissions(id), api_key)`). The source executor is adding its
+regression and fix before the final gate; final review confirmation is pending.
+
+
+### Full-stack gate corrections
+
+The first integrated Jest run connected to the real stack and found two inherited failures
+that an absent database had gated away. The immutable security-definer invariant correctly
+rejects `update_translation_coverage(uuid) -> authenticated`: migration 20260818001000
+restored that grant after 20260809120000 had removed it. The function has no caller
+permission check and no application caller. Restore the original service-only ACL in the
+unapplied s38 migration; do not exempt it from the invariant. Separately, the current full
+migration chain already has no site-scoped DELETE policy on site_permissions, so remove the
+stale `test.failing` marker and retain its exact positive assertion.
+
+The initial full command also incorrectly set RCF_TEST_DB_URL globally to port 54322, which
+an unrelated scratch-only lifecycle suite deliberately refuses. Ordinary full runs must
+leave that override unset and let db-harness select the running local stack from config;
+set the required override only for the dedicated DB suite. The embedded-parser failure in
+that run was sampled during its test-first correction and is now fixed (11/11 focused).
+
+- [x] Restore the inherited translation-coverage RPC lockdown and retain the strict invariant.
+- [x] Convert the already-fixed database DELETE policy marker to a normal positive regression.
+- [x] Verify a real protected-table owner invariant and its superuser negative control, as
+  requested by the fresh review; non-superusers report the control skipped explicitly.
+
+
+Post-correction full Jest with running local Supabase: 246 suites passed / 2 skipped,
+3,247 tests passed / 38 skipped / zero failures. Lint (38 inherited warnings, no errors),
+both type checks, format check, production build, required stock Node20 embed check and
+production audit (0 vulnerabilities) passed. Source guard now covers both nesting before
+api_key and nested sites cycles; 12/12 focused tests pass. The real Supabase column/function
+suites pass 17/17 and plain PostgreSQL passes 13 with its HTTP test skipped.
+
+Main advanced from fe98f69 to 0b8014f (PR #32) during verification. Preserve the completed
+merge and security changes, then integrate that newest main as a separate local merge;
+renumber branch-only s38 ADRs to avoid the newly merged billing ADR 031 collision. Re-run
+final gates on the integrated tree. No production merge/deploy is authorized.
+
+Fresh independent fix review against fe98f69: Max severity: none / Ship allowed: yes.
+Reviewer independently passed 51 focused source tests, 17 Supabase column/function tests,
+plain PostgreSQL 13/1 HTTP skip, remote-HTTP refusal control and typecheck. Both review
+findings (nested projection parser and owner invariant) were fixed and rechecked. This
+result is recorded here; the operator's original uncommitted verdict remains unchanged.

@@ -7,13 +7,16 @@
  * deliberately restore each dangerous grant shape to prove the catalogue guard
  * notices it.
  *
- * PostgreSQL superusers, relation owners and the predefined pg_read_all_data
- * family can read regardless of column ACLs. Protected relations must therefore
- * stay owned by the explicitly approved postgres/service_role boundary; owning
- * any one table never exempts an arbitrary role from checks on another. The
- * only application exception is service_role.
- * Predefined pg_* roles are PostgreSQL infrastructure, not login/application
- * principals. No arbitrary future superuser or login role is exempted.
+ * The security boundary asserted here is the Data API's PUBLIC, anon and
+ * authenticated principals. Supabase also installs operational roles with
+ * intentional database-wide access: postgres and supabase_admin administer the
+ * cluster, service_role bypasses RLS for trusted servers, supabase_etl_admin is
+ * the replication/ETL principal, and supabase_read_only_user inherits
+ * pg_read_all_data. Those roles are documented by Supabase and are deliberately
+ * outside this web-principal assertion; treating their expected access as a
+ * leak made this suite fail against a real `supabase start` stack. Sources:
+ * https://supabase.com/docs/guides/database/postgres/roles and
+ * https://github.com/supabase/postgres/blob/develop/migrations/db/init-scripts/00000000000000-initial-schema.sql#L37-L60
  */
 
 import { describeDb, type QueryResult } from "./db-harness";
@@ -79,6 +82,28 @@ const COLUMN_ALLOWLISTS = {
     "last_used_at",
     "created_at",
   ],
+  staging_access: [
+    "id",
+    "site_id",
+    "access_type",
+    "email",
+    "email_verified",
+    "verification_code",
+    "verification_expires_at",
+    "token",
+    "permissions",
+    "label",
+    "created_by",
+    "expires_at",
+    "is_active",
+    "last_used_at",
+    "revoked_at",
+    "revoked_by",
+    "created_at",
+    "updated_at",
+    "verified_ip_prefix",
+    "verified_at",
+  ],
 } as const;
 
 const HIDDEN_COLUMNS = [
@@ -88,14 +113,58 @@ const HIDDEN_COLUMNS = [
   ["editor_device_grants", "grant_hash"],
   ["editor_device_grants", "user_agent_hash"],
   ["editor_device_grants", "origin_hash"],
+  ["staging_access", "verified_user_agent_hash"],
+  ["staging_access", "verified_origin_hash"],
 ] as const;
 
-const INFRASTRUCTURE_ROLE_SQL = `
-  r.rolname IN ('postgres', 'service_role')
-  OR r.rolname LIKE 'pg\\_%' ESCAPE '\\'
-`;
+// Keep this list explicit and reviewable. Supabase documents postgres,
+// service_role, supabase_admin and supabase_etl_admin as elevated platform
+// roles; its initial-schema source gives supabase_read_only_user BYPASSRLS and
+// pg_read_all_data. The web-principal checks deliberately make no hidden-column
+// denial assertion about these managed roles.
+const SUPABASE_MANAGED_PRIVILEGED_ROLES = [
+  "postgres",
+  "service_role",
+  "supabase_admin",
+  "supabase_etl_admin",
+  "supabase_read_only_user",
+] as const;
 
-async function effectiveColumns(query: Query, role: string, table: string) {
+const APPROVED_PROTECTED_TABLE_OWNERS = [
+  "postgres",
+  "service_role",
+  "supabase_admin",
+] as const;
+
+const POSTGREST_BASE_URL = process.env.RCF_TEST_POSTGREST_URL;
+const POSTGREST_ANON_KEY = process.env.RCF_TEST_POSTGREST_ANON_KEY;
+
+if (POSTGREST_BASE_URL) {
+  const target = new URL(POSTGREST_BASE_URL);
+  const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+    target.hostname,
+  );
+  if (
+    target.protocol !== "http:" ||
+    !isLoopback ||
+    target.port !== "54321" ||
+    target.pathname !== "/"
+  ) {
+    throw new Error(
+      `Refusing PostgREST integration target outside this project's local Supabase: ${target.origin}`,
+    );
+  }
+}
+
+const testWithPostgrest =
+  POSTGREST_BASE_URL && POSTGREST_ANON_KEY ? test : test.skip;
+
+async function effectiveColumns(
+  query: Query,
+  role: string,
+  table: string,
+  privilege: "SELECT" | "INSERT" | "UPDATE" | "REFERENCES" = "SELECT",
+) {
   const { rows } = await query<{ column_name: string }>(
     `
       SELECT c.column_name
@@ -106,13 +175,26 @@ async function effectiveColumns(query: Query, role: string, table: string) {
           $1,
           format('%I.%I', c.table_schema, c.table_name),
           c.column_name,
-          'SELECT'
+          $3
         )
       ORDER BY c.ordinal_position
     `,
-    [role, table],
+    [role, table, privilege],
   );
   return rows.map((row) => row.column_name);
+}
+
+async function hasEffectiveTablePrivilege(
+  query: Query,
+  role: string,
+  table: string,
+  privilege: "DELETE" | "TRUNCATE" | "TRIGGER",
+): Promise<boolean> {
+  const { rows } = await query<{ allowed: boolean }>(
+    "SELECT has_table_privilege($1, format('public.%I', $2::text), $3) AS allowed",
+    [role, table, privilege],
+  );
+  return rows[0]?.allowed ?? false;
 }
 
 async function reviewedSchemaColumns(query: Query, table: string) {
@@ -133,25 +215,77 @@ async function reviewedSchemaColumns(query: Query, table: string) {
   return rows.map((row) => row.column_name);
 }
 
-async function hiddenPrivilegeOffenders(query: Query) {
+async function protectedHiddenPrivilegeOffenders(query: Query) {
   const { rows } = await query<{ offender: string }>(`
     WITH hidden(table_name, column_name) AS (
       VALUES ${HIDDEN_COLUMNS.map(
         ([table, column]) => `('${table}', '${column}')`,
       ).join(",\n             ")}
     )
-    SELECT r.rolname || ' -> ' || h.table_name || '.' || h.column_name AS offender
-    FROM pg_roles r
+    SELECT principal.rolname || ' -> ' || h.table_name || '.' || h.column_name AS offender
+    FROM (VALUES ('anon'), ('authenticated')) principal(rolname)
     CROSS JOIN hidden h
-    WHERE NOT (${INFRASTRUCTURE_ROLE_SQL})
-      AND has_column_privilege(
-        r.rolname,
+    WHERE has_column_privilege(
+        principal.rolname,
         format('public.%I', h.table_name),
         h.column_name,
         'SELECT'
       )
+    UNION ALL
+    SELECT 'PUBLIC -> ' || h.table_name || '.' || h.column_name AS offender
+    FROM hidden h
+    WHERE EXISTS (
+      SELECT 1
+      FROM information_schema.table_privileges tp
+      WHERE tp.table_schema = 'public'
+        AND tp.table_name = h.table_name
+        AND tp.grantee = 'PUBLIC'
+        AND tp.privilege_type = 'SELECT'
+    ) OR EXISTS (
+      SELECT 1
+      FROM information_schema.column_privileges cp
+      WHERE cp.table_schema = 'public'
+        AND cp.table_name = h.table_name
+        AND cp.column_name = h.column_name
+        AND cp.grantee = 'PUBLIC'
+        AND cp.privilege_type = 'SELECT'
+    )
     ORDER BY 1
   `);
+  return rows.map((row) => row.offender);
+}
+
+async function isSuperuser(query: Query): Promise<boolean> {
+  const { rows } = await query<{ is_superuser: boolean }>(`
+    SELECT rolsuper AS is_superuser
+    FROM pg_roles
+    WHERE rolname = current_user
+  `);
+  return rows[0]?.is_superuser ?? false;
+}
+
+async function unexpectedProtectedTableOwners(query: Query) {
+  const { rows } = await query<{ offender: string }>(
+    `
+      SELECT c.relname || ' -> ' || pg_get_userbyid(c.relowner) AS offender
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = ANY($1::text[])
+        AND pg_get_userbyid(c.relowner) <> ALL($2::text[])
+      ORDER BY 1
+    `,
+    [
+      [
+        "sites",
+        "webhooks",
+        "api_keys",
+        "editor_device_grants",
+        "staging_access",
+      ],
+      APPROVED_PROTECTED_TABLE_OWNERS,
+    ],
+  );
   return rows.map((row) => row.offender);
 }
 
@@ -168,24 +302,17 @@ describeDb(
       }
     });
 
-    test("every non-infrastructure role is denied every hidden column", async () => {
-      expect(await hiddenPrivilegeOffenders(query)).toEqual([]);
+    test("PUBLIC, anon and authenticated are denied every hidden column", async () => {
+      expect(await protectedHiddenPrivilegeOffenders(query)).toEqual([]);
     });
 
-    test("protected relations are owned only by an approved infrastructure role", async () => {
-      const { rows } = await query<{ offender: string }>(`
-        SELECT c.relname || ' -> ' || pg_get_userbyid(c.relowner) AS offender
-        FROM pg_class c
-        WHERE c.oid IN (
-          'public.sites'::regclass,
-          'public.webhooks'::regclass,
-          'public.api_keys'::regclass,
-          'public.editor_device_grants'::regclass
-        )
-          AND pg_get_userbyid(c.relowner) NOT IN ('postgres', 'service_role')
-        ORDER BY 1
-      `);
-      expect(rows.map((row) => row.offender)).toEqual([]);
+    test("protected tables remain owned by an explicitly reviewed privileged role", async () => {
+      expect(
+        APPROVED_PROTECTED_TABLE_OWNERS.every((owner) =>
+          SUPABASE_MANAGED_PRIVILEGED_ROLES.includes(owner),
+        ),
+      ).toBe(true);
+      expect(await unexpectedProtectedTableOwners(query)).toEqual([]);
     });
 
     test("anon and authenticated cannot inherit a hidden-column reader or a PostgreSQL privilege bypass", async () => {
@@ -230,26 +357,64 @@ describeDb(
       expect(rows.map((row) => row.offender)).toEqual([]);
     });
 
-    test("sites has no residual table or column mutation privilege for PUBLIC, anon or authenticated", async () => {
-      const { rows } = await query<{ offender: string }>(`
-        WITH acl AS (
-          SELECT grantee, privilege_type
-          FROM information_schema.table_privileges
-          WHERE table_schema = 'public' AND table_name = 'sites'
-          UNION ALL
-          SELECT grantee, privilege_type
-          FROM information_schema.column_privileges
-          WHERE table_schema = 'public' AND table_name = 'sites'
-        )
-        SELECT grantee || ' -> ' || privilege_type AS offender
-        FROM acl
-        WHERE grantee IN ('PUBLIC', 'anon', 'authenticated')
+    test("web principals retain only the reviewed mutation columns", async () => {
+      const tables = ["sites", "webhooks", "api_keys", "editor_device_grants"];
+      for (const table of tables) {
+        for (const role of ["anon", "authenticated"]) {
+          expect(await effectiveColumns(query, role, table, "INSERT")).toEqual(
+            [],
+          );
+          expect(
+            await effectiveColumns(query, role, table, "REFERENCES"),
+          ).toEqual([]);
+          for (const privilege of ["DELETE", "TRUNCATE", "TRIGGER"] as const) {
+            expect(
+              await hasEffectiveTablePrivilege(query, role, table, privilege),
+            ).toBe(false);
+          }
+        }
+      }
+
+      for (const table of ["sites", "webhooks", "api_keys"]) {
+        expect(
+          await effectiveColumns(query, "authenticated", table, "UPDATE"),
+        ).toEqual([]);
+        expect(await effectiveColumns(query, "anon", table, "UPDATE")).toEqual(
+          [],
+        );
+      }
+
+      const { rows: publicMutationGrants } = await query<{ grant: string }>(`
+        SELECT table_name || ' -> ' || privilege_type AS grant
+        FROM information_schema.table_privileges
+        WHERE table_schema = 'public'
+          AND table_name IN ('sites', 'webhooks', 'api_keys', 'editor_device_grants')
+          AND grantee = 'PUBLIC'
           AND privilege_type IN (
             'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER', 'REFERENCES'
           )
+        UNION ALL
+        SELECT table_name || '.' || column_name || ' -> ' || privilege_type AS grant
+        FROM information_schema.column_privileges
+        WHERE table_schema = 'public'
+          AND table_name IN ('sites', 'webhooks', 'api_keys', 'editor_device_grants')
+          AND grantee = 'PUBLIC'
+          AND privilege_type IN ('INSERT', 'UPDATE', 'REFERENCES')
         ORDER BY 1
       `);
-      expect(rows.map((row) => row.offender)).toEqual([]);
+      expect(publicMutationGrants.map((row) => row.grant)).toEqual([]);
+
+      expect(
+        await effectiveColumns(
+          query,
+          "authenticated",
+          "editor_device_grants",
+          "UPDATE",
+        ),
+      ).toEqual(["revoked_at", "revoked_reason"]);
+      expect(
+        await effectiveColumns(query, "anon", "editor_device_grants", "UPDATE"),
+      ).toEqual([]);
     });
 
     test("an authenticated view collaborator reads reviewed metadata, sees no other tenant, and cannot read api_key or mutate sites", async () => {
@@ -301,6 +466,102 @@ describeDb(
             ),
           ).rejects.toMatchObject({ code: "42501" });
           await client.query("ROLLBACK TO SAVEPOINT mutation_probe");
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      });
+    });
+
+    testWithPostgrest(
+      "an authenticated dashboard embed reads safe site metadata through the real PostgREST API",
+      async () => {
+        const email = `s38-postgrest-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
+        const password = `S38-${crypto.randomUUID()}-Aa1!`;
+        const signup = await fetch(`${POSTGREST_BASE_URL}/auth/v1/signup`, {
+          method: "POST",
+          headers: {
+            apikey: POSTGREST_ANON_KEY!,
+            Authorization: `Bearer ${POSTGREST_ANON_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email, password }),
+        });
+        const signupBody = (await signup.json()) as {
+          access_token?: string;
+          user?: { id?: string };
+          msg?: string;
+          error_description?: string;
+        };
+        expect(signup.status).toBe(200);
+        expect(signupBody.access_token).toEqual(expect.any(String));
+        expect(signupBody.user?.id).toEqual(expect.any(String));
+
+        const userId = signupBody.user!.id!;
+        const accessToken = signupBody.access_token!;
+        const siteId = await createSite("s38-postgrest-embed");
+        await query(
+          "INSERT INTO site_permissions (site_id, user_id, permission) VALUES ($1, $2, 'view')",
+          [siteId, userId],
+        );
+
+        try {
+          const safeSelect = new URL(
+            `${POSTGREST_BASE_URL}/rest/v1/site_permissions`,
+          );
+          safeSelect.searchParams.set(
+            "select",
+            "permission,sites(id,domain,name,created_at,updated_at,status,live_at,last_reported_at,last_mismatch_domain,last_mismatch_at)",
+          );
+          safeSelect.searchParams.set("user_id", `eq.${userId}`);
+          const safeResponse = await fetch(safeSelect, {
+            headers: {
+              apikey: POSTGREST_ANON_KEY!,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          expect(safeResponse.status).toBe(200);
+          await expect(safeResponse.json()).resolves.toEqual([
+            {
+              permission: "view",
+              sites: expect.objectContaining({ id: siteId }),
+            },
+          ]);
+
+          const hiddenSelect = new URL(
+            `${POSTGREST_BASE_URL}/rest/v1/site_permissions`,
+          );
+          hiddenSelect.searchParams.set(
+            "select",
+            "permission,sites(id,api_key)",
+          );
+          hiddenSelect.searchParams.set("user_id", `eq.${userId}`);
+          const hiddenResponse = await fetch(hiddenSelect, {
+            headers: {
+              apikey: POSTGREST_ANON_KEY!,
+              Authorization: `Bearer ${accessToken}`,
+            },
+          });
+          expect(hiddenResponse.status).toBe(403);
+          await expect(hiddenResponse.json()).resolves.toEqual(
+            expect.objectContaining({ code: "42501" }),
+          );
+        } finally {
+          await query("DELETE FROM auth.users WHERE id = $1", [userId]);
+        }
+      },
+    );
+
+    test("anon can run the public plans health probe without sites access", async () => {
+      await withClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          await client.query("SET LOCAL ROLE anon");
+          await expect(
+            client.query("SELECT id FROM public.plans LIMIT 1"),
+          ).resolves.toMatchObject({ rows: expect.any(Array) });
+          await expect(
+            client.query("SELECT id FROM public.sites LIMIT 1"),
+          ).rejects.toMatchObject({ code: "42501" });
         } finally {
           await client.query("ROLLBACK");
         }
@@ -366,7 +627,7 @@ describeDb(
       for (const probe of probes) {
         await query(probe.apply);
         try {
-          expect(await hiddenPrivilegeOffenders(query)).toContain(
+          expect(await protectedHiddenPrivilegeOffenders(query)).toContain(
             probe.expected,
           );
         } finally {
@@ -375,44 +636,98 @@ describeDb(
       }
     });
 
-    test("negative control: owning one protected table does not exempt a role from another table's hidden-column guard", async () => {
-      const { rows } = await query<{ owner: string }>(`
+    test("negative controls catch stale device-hash UPDATE and sibling TRUNCATE grants", async () => {
+      await query(
+        "GRANT UPDATE (grant_hash) ON public.editor_device_grants TO authenticated",
+      );
+      try {
+        expect(
+          await effectiveColumns(
+            query,
+            "authenticated",
+            "editor_device_grants",
+            "UPDATE",
+          ),
+        ).toContain("grant_hash");
+      } finally {
+        await query(
+          "REVOKE UPDATE (grant_hash) ON public.editor_device_grants FROM authenticated",
+        );
+      }
+
+      await query("GRANT TRUNCATE ON public.webhooks TO authenticated");
+      try {
+        expect(
+          await hasEffectiveTablePrivilege(
+            query,
+            "authenticated",
+            "webhooks",
+            "TRUNCATE",
+          ),
+        ).toBe(true);
+      } finally {
+        await query("REVOKE TRUNCATE ON public.webhooks FROM authenticated");
+      }
+    });
+
+    const superuserTest = test;
+
+    superuserTest(
+      "negative control: owning one protected table does not exempt an application role",
+      async () => {
+        if (!(await isSuperuser(query))) {
+          console.warn(
+            "Skipping owner-transfer negative control: Supabase's postgres login is intentionally not a superuser and cannot ALTER TABLE OWNER.",
+          );
+          return;
+        }
+        const { rows } = await query<{ owner: string }>(`
         SELECT pg_get_userbyid(relowner) AS owner
         FROM pg_class
         WHERE oid = 'public.sites'::regclass
       `);
-      const originalOwner = `"${rows[0].owner.replaceAll('"', '""')}"`;
+        const originalOwner = `"${rows[0].owner.replaceAll('"', '""')}"`;
 
-      await query("CREATE ROLE rcf_s38_unexpected_owner NOLOGIN");
-      try {
-        await query(
-          "ALTER TABLE public.sites OWNER TO rcf_s38_unexpected_owner",
-        );
-        await query(
-          "GRANT SELECT (secret) ON public.webhooks TO rcf_s38_unexpected_owner",
-        );
-        expect(await hiddenPrivilegeOffenders(query)).toContain(
-          "rcf_s38_unexpected_owner -> webhooks.secret",
-        );
-      } finally {
-        await query(`ALTER TABLE public.sites OWNER TO ${originalOwner}`);
-        await query(
-          "REVOKE ALL PRIVILEGES ON public.webhooks FROM rcf_s38_unexpected_owner",
-        );
-        await query("DROP ROLE rcf_s38_unexpected_owner");
-      }
-    });
+        await query("CREATE ROLE rcf_s38_unexpected_owner NOLOGIN");
+        try {
+          await query(
+            "ALTER TABLE public.sites OWNER TO rcf_s38_unexpected_owner",
+          );
+          await query(
+            "GRANT SELECT (secret) ON public.webhooks TO rcf_s38_unexpected_owner",
+          );
+          expect(await unexpectedProtectedTableOwners(query)).toContain(
+            "sites -> rcf_s38_unexpected_owner",
+          );
+        } finally {
+          await query(`ALTER TABLE public.sites OWNER TO ${originalOwner}`);
+          await query(
+            "REVOKE ALL PRIVILEGES ON public.webhooks FROM rcf_s38_unexpected_owner",
+          );
+          await query("DROP ROLE rcf_s38_unexpected_owner");
+        }
+      },
+    );
 
-    test("negative control: an unexpected future superuser is not treated as infrastructure", async () => {
-      await query("CREATE ROLE rcf_s38_unexpected_super SUPERUSER NOLOGIN");
-      try {
-        expect(await hiddenPrivilegeOffenders(query)).toContain(
-          "rcf_s38_unexpected_super -> sites.api_key",
-        );
-      } finally {
-        await query("DROP ROLE rcf_s38_unexpected_super");
-      }
-    });
+    superuserTest(
+      "negative control: an unexpected future superuser can bypass column ACLs",
+      async () => {
+        if (!(await isSuperuser(query))) {
+          console.warn(
+            "Skipping superuser-creation negative control: Supabase's postgres login is intentionally not a superuser and cannot CREATE ROLE SUPERUSER.",
+          );
+          return;
+        }
+        await query("CREATE ROLE rcf_s38_unexpected_super SUPERUSER NOLOGIN");
+        try {
+          expect(
+            await effectiveColumns(query, "rcf_s38_unexpected_super", "sites"),
+          ).toContain("api_key");
+        } finally {
+          await query("DROP ROLE rcf_s38_unexpected_super");
+        }
+      },
+    );
 
     test("negative control: a new column fails the exact authenticated allowlist until reviewed", async () => {
       await query(

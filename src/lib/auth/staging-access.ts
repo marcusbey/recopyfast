@@ -15,6 +15,15 @@ import crypto from "crypto";
 export type StagingPermission = "view" | "edit" | "publish" | "admin";
 export type AccessType = "invite" | "link";
 
+// s38 removed authenticated access to the device fingerprints stored beside a
+// staging invite. A default returning/list projection asks PostgREST for those
+// hidden columns too, so it rejects the whole request even though this manager
+// never consumes them. Keep the two user-scoped reads on the exact public
+// shape that mapToStagingAccess needs; token validation and fingerprint checks
+// below use the service role and retain their full internal projections.
+const STAGING_ACCESS_USER_COLUMNS =
+  "id, site_id, access_type, email, email_verified, token, permissions, label, created_by, expires_at, is_active, last_used_at, created_at";
+
 export interface StagingAccess {
   id: string;
   site_id: string;
@@ -137,7 +146,7 @@ export class StagingAccessManager {
           expires_at: expiresAt.toISOString(),
           is_active: true,
         })
-        .select()
+        .select(STAGING_ACCESS_USER_COLUMNS)
         .single();
 
       if (error) {
@@ -556,7 +565,7 @@ export class StagingAccessManager {
 
       let query = supabase
         .from("staging_access")
-        .select("*")
+        .select(STAGING_ACCESS_USER_COLUMNS)
         .eq("site_id", siteId)
         .order("created_at", { ascending: false });
 

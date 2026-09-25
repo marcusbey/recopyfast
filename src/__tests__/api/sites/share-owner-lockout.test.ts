@@ -554,24 +554,22 @@ async function readDeletePolicies(): Promise<DeletePolicyRow[]> {
 
 describeWithDb("A-4 — the deployed policy set", () => {
   it("can read pg_policies for site_permissions", async () => {
-    // Guard. `test.failing` treats a dead connection, a bad SQL string or a
-    // missing driver as a confirmed defect, so the query has to be shown to
-    // run before its result is allowed to mean anything.
+    // Guard. An empty result from a query that stopped matching would make the
+    // security assertion below pass vacuously, so prove the catalogue read ran
+    // independently before interpreting its result.
     const rows = await readDeletePolicies();
 
     expect(Array.isArray(rows)).toBe(true);
   });
 
-  test.failing(
-    "has no site-scoped DELETE policy on site_permissions",
-    async () => {
-      const rows = await readDeletePolicies();
+  test("has no site-scoped DELETE policy on site_permissions", async () => {
+    const rows = await readDeletePolicies();
 
-      // Branch B returns zero rows and passes. Branch A returns the
-      // `user_has_site_permission(site_id, ARRAY['admin'])` policy and fails,
-      // which settles the question the audit could not.
-      const siteScoped = rows.filter((row) => !/user_id/i.test(row.qual ?? ""));
-      expect(siteScoped.map((row) => row.policyname)).toEqual([]);
-    },
-  );
+    // 20260813140000 replaced the vulnerable site-wide predicate with one
+    // that names the target row's user_id and granted_by. Keep this as an
+    // ordinary positive regression: `test.failing` now reports the fixed full
+    // migration chain as a failure and makes `npm test` red on local Supabase.
+    const siteScoped = rows.filter((row) => !/user_id/i.test(row.qual ?? ""));
+    expect(siteScoped.map((row) => row.policyname)).toEqual([]);
+  });
 });

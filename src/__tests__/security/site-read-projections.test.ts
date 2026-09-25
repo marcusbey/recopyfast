@@ -38,6 +38,38 @@ function directSiteProjections(source: string): string[] {
   return projections;
 }
 
+function embeddedSiteProjections(source: string): string[] {
+  const projections: string[] = [];
+  const pattern = /\bsites(?:![A-Za-z0-9_]+)*\s*\(/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source))) {
+    const openingParenthesis = match.index + match[0].lastIndexOf("(");
+    let depth = 1;
+
+    for (let index = openingParenthesis + 1; index < source.length; index++) {
+      if (source[index] === "(") depth++;
+      if (source[index] !== ")") continue;
+
+      depth--;
+      if (depth !== 0) continue;
+
+      projections.push(source.slice(openingParenthesis + 1, index).trim());
+      break;
+    }
+  }
+  return projections;
+}
+
+function projectionIncludesColumn(projection: string, column: string): boolean {
+  const escapedColumn = column.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const selectedColumn = new RegExp(
+    `^(?:[A-Za-z_][A-Za-z0-9_]*\\s*:\\s*)?${escapedColumn}(?:\\s*::\\s*[A-Za-z_][A-Za-z0-9_]*)?\\s*$`,
+  );
+  return projection
+    .split(",")
+    .some((selected) => selectedColumn.test(selected.trim()));
+}
+
 describe("sites source-read projections", () => {
   const inventory = sourceInventory();
 
@@ -82,6 +114,14 @@ describe("sites source-read projections", () => {
       )
       .sort();
 
+    const embeddedViolations = inventory.flatMap(({ file, source }) =>
+      embeddedSiteProjections(source)
+        .filter((projection) => projectionIncludesColumn(projection, "api_key"))
+        .map(
+          (projection) => `${file}: ${projection.replace(/\s+/g, " ").trim()}`,
+        ),
+    );
+
     expect(actual).toEqual(
       [
         "server/index.js: id, domain, api_key",
@@ -92,6 +132,33 @@ describe("sites source-read projections", () => {
         "src/lib/security/site-auth.ts: id, domain, api_key",
       ].sort(),
     );
+    expect(embeddedViolations).toEqual([]);
+  });
+
+  it.each([
+    ["plain", "site_permissions?select=id,sites(id,domain,api_key)"],
+    ["inner join", "site_permissions?select=id,sites!inner(id, api_key)"],
+    ["aliased inner join", "site:sites!inner(id, domain, api_key, status)"],
+    ["aliased column", "sites(id, secret:api_key)"],
+    ["cast column", "sites(id, api_key::text)"],
+    [
+      "foreign-key inner join",
+      "sites!permission_site_id_fkey!inner(id, api_key)",
+    ],
+    [
+      "nested relationship before the secret",
+      "sites!inner(id, site_permissions(id), api_key)",
+    ],
+    [
+      "nested sites relationship",
+      "sites(id, site_permissions(sites(api_key)))",
+    ],
+  ])("detects api_key in a synthetic %s sites embed", (_label, source) => {
+    expect(
+      embeddedSiteProjections(source).filter((projection) =>
+        projectionIncludesColumn(projection, "api_key"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("retains the service signing projections that validate HTTP and websocket tokens", () => {
