@@ -53,7 +53,7 @@ These commands are **operator-only**, after review and merge authorization. None
 implementation agent. Production already has `20260924020000` and `20260924050000`.
 The unpublished `040000` has been re-dated; the final files are:
 
-- `20260924060000_agency_plan_and_founding_capacity.sql`
+- `20260924065000_agency_plan_and_founding_capacity.sql`
 - `20260924070000_subscription_plan_choice_from_catalogue.sql`
 
 Do not use `--include-all`; `060000` and `070000` follow the applied migrations. Do not edit or
