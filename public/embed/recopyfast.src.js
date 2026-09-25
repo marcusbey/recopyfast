@@ -4506,7 +4506,12 @@
       // Lifecycle
       // ---------------------------------------------------------------------
       let isCleaningUp = false;
+      let isSaving = false;
       let unloadGuard = null;
+      let keydownHandler = null;
+      let pasteHandler = null;
+      const fieldKeydownHandlers = [];
+      let outsideClickTimer = null;
 
       const cleanup = function() {
         if (isCleaningUp) return;
@@ -4515,6 +4520,11 @@
         if (unloadGuard) {
           window.removeEventListener('beforeunload', unloadGuard);
           unloadGuard = null;
+        }
+
+        if (outsideClickTimer !== null) {
+          clearTimeout(outsideClickTimer);
+          outsideClickTimer = null;
         }
 
         window.removeEventListener('scroll', scheduleReposition, true);
@@ -4526,6 +4536,11 @@
         if (resizeObserver) resizeObserver.disconnect();
         if (frame) cancelAnimationFrame(frame);
         document.removeEventListener('mousedown', outsideClickHandler);
+        if (keydownHandler) element.removeEventListener('keydown', keydownHandler);
+        if (pasteHandler) element.removeEventListener('paste', pasteHandler);
+        fieldKeydownHandlers.forEach(function(entry) {
+          entry.input.removeEventListener('keydown', entry.handler);
+        });
 
         element.removeAttribute('contenteditable');
         element.removeAttribute('spellcheck');
@@ -4574,7 +4589,11 @@
       window.addEventListener('beforeunload', unloadGuard);
 
       const save = async function() {
-        if (self.isMutationLocked) return;
+        // Save can be reached from three independent inputs: the toolbar,
+        // Enter, and an outside mousedown. Publish begins with that mousedown,
+        // so a second PUT from this closure can otherwise land after Publish
+        // cleared staging and silently resurrect the draft it just published.
+        if (self.isMutationLocked || isCleaningUp || isSaving) return;
         const newContent = sanitizeContent();
         const textChanged = newContent !== originalText;
 
@@ -4602,6 +4621,7 @@
           if (f.input.value !== f.initial) values[f.def.key] = f.input.value.trim();
         });
 
+        isSaving = true;
         try {
           await self.persistContentUpdate(
             elementId,
@@ -4609,6 +4629,7 @@
             typeof opts.payload === 'function' ? opts.payload(values) : undefined
           );
         } catch (error) {
+          isSaving = false;
           if (self.isMutationLocked) return;
           alert(error.message || 'Save failed.');
           return;
@@ -4629,7 +4650,7 @@
       };
 
       const cancel = function() {
-        if (self.isMutationLocked) return;
+        if (self.isMutationLocked || isCleaningUp || isSaving) return;
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
@@ -4656,7 +4677,7 @@
                           floor.preservesWhitespace ||
                           floor.minHeight > lineHeight * 2;
 
-      element.addEventListener('keydown', function(e) {
+      keydownHandler = function(e) {
         if (e.key === 'Escape') {
           e.preventDefault();
           cancel();
@@ -4667,20 +4688,24 @@
           e.preventDefault();
           save();
         }
-      });
+      };
+      element.addEventListener('keydown', keydownHandler);
 
-      element.addEventListener('paste', function(e) {
+      pasteHandler = function(e) {
         e.preventDefault();
         const text = (e.clipboardData || window.clipboardData).getData('text/plain');
         document.execCommand('insertText', false, text);
         updateCounter();
-      });
+      };
+      element.addEventListener('paste', pasteHandler);
 
       fieldInputs.forEach(function(f) {
-        f.input.addEventListener('keydown', function(e) {
+        const handler = function(e) {
           if (e.key === 'Escape') { e.preventDefault(); cancel(); }
           else if (e.key === 'Enter') { e.preventDefault(); save(); }
-        });
+        };
+        fieldKeydownHandlers.push({ input: f.input, handler: handler });
+        f.input.addEventListener('keydown', handler);
       });
 
       const outsideClickHandler = function(e) {
@@ -4693,7 +4718,8 @@
         save();
       };
 
-      setTimeout(function() {
+      outsideClickTimer = setTimeout(function() {
+        outsideClickTimer = null;
         document.addEventListener('mousedown', outsideClickHandler);
       }, 100);
     }
