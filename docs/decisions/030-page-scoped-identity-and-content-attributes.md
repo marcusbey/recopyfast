@@ -1,4 +1,4 @@
-# ADR 027 — page-scoped computed identity and staged content attributes
+# ADR 030 — page-scoped computed identity and staged content attributes
 
 Date: 2026-09-24. Status: accepted by operator for s27.
 

@@ -61,74 +61,109 @@ export async function GET(request: NextRequest) {
     // Fetch stats for each site
     const sitesWithStats = await Promise.all(
       sites.map(async (site) => {
-        // Get content elements count
-        const { count: elementsCount } = await serviceClient
-          .from("content_elements")
-          .select("*", { count: "exact", head: true })
-          .eq("site_id", site.id);
+        let stats = {
+          content_elements_count: 0,
+          edits_count: 0,
+          views: 0,
+          last_activity: null as string | null,
+        };
 
-        // Resolve element IDs for this site as a plain array (subquery objects
-        // are not supported by the Supabase JS client v2 `.in()` filter).
-        const { data: elementRows, error: elementRowsError } =
-          await fetchPageScopedRows(
-            () =>
-              serviceClient
-                .from("content_elements")
-                .select("id, element_id")
-                .eq("site_id", site.id),
-            null,
-          );
-
-        if (elementRowsError) {
-          throw elementRowsError;
-        }
-
-        const elementIds: string[] = (elementRows ?? []).map(
-          (r: { id: string }) => r.id,
-        );
-
-        let editsCount: number | null = 0;
-        let lastActivity: { created_at: string } | null = null;
-
-        // `.in()` serializes every UUID into the request URL. Once page-scoped
-        // identity pushed ordinary sites over 1,000 elements, one unbounded
-        // list produced URLs large enough for proxies to reject. Batch the
-        // already-authorized ids and combine exact counts/latest timestamps.
-        for (
-          let offset = 0;
-          offset < elementIds.length;
-          offset += HISTORY_ID_BATCH_SIZE
-        ) {
-          const batch = elementIds.slice(
-            offset,
-            offset + HISTORY_ID_BATCH_SIZE,
-          );
-          const [countResult, activityResult] = await Promise.all([
+        try {
+          // These reads describe the same site and do not depend on each other.
+          // Starting them together matters on the dashboard, where repeating a
+          // needless round trip for every site made list latency grow quickly.
+          const [elementsResult, elementRowsResult] = await Promise.all([
             serviceClient
-              .from("content_history")
+              .from("content_elements")
               .select("*", { count: "exact", head: true })
-              .in("content_element_id", batch),
-            serviceClient
-              .from("content_history")
-              .select("created_at")
-              .in("content_element_id", batch)
-              .order("created_at", { ascending: false })
-              .limit(1)
-              .maybeSingle(),
+              .eq("site_id", site.id),
+            // Resolve element IDs as a plain array (subquery objects are not
+            // supported by the Supabase JS client v2 `.in()` filter).
+            fetchPageScopedRows(
+              () =>
+                serviceClient
+                  .from("content_elements")
+                  .select("id, element_id")
+                  .eq("site_id", site.id),
+              null,
+            ),
           ]);
 
-          if (countResult.error || activityResult.error) {
-            throw countResult.error ?? activityResult.error;
+          if (elementsResult.error || elementRowsResult.error) {
+            throw elementsResult.error ?? elementRowsResult.error;
           }
 
-          editsCount = (editsCount ?? 0) + (countResult.count ?? 0);
-          const activityRow = activityResult.data;
-          if (
-            activityRow &&
-            (!lastActivity || activityRow.created_at > lastActivity.created_at)
+          const elementIds: string[] = (elementRowsResult.data ?? []).map(
+            (row: { id: string }) => row.id,
+          );
+          const batches: string[][] = [];
+          for (
+            let offset = 0;
+            offset < elementIds.length;
+            offset += HISTORY_ID_BATCH_SIZE
           ) {
-            lastActivity = activityRow;
+            batches.push(
+              elementIds.slice(offset, offset + HISTORY_ID_BATCH_SIZE),
+            );
           }
+
+          // `.in()` serializes every UUID into the request URL. Once
+          // page-scoped identity pushed ordinary sites over 1,000 elements,
+          // one unbounded list produced URLs large enough for proxies to
+          // reject. Keep the bounded requests, but start every independent
+          // batch together instead of adding one network wait per 200 rows.
+          const historyResults = await Promise.all(
+            batches.map(async (batch) => {
+              const [countResult, activityResult] = await Promise.all([
+                serviceClient
+                  .from("content_history")
+                  .select("*", { count: "exact", head: true })
+                  .in("content_element_id", batch),
+                serviceClient
+                  .from("content_history")
+                  .select("created_at")
+                  .in("content_element_id", batch)
+                  .order("created_at", { ascending: false })
+                  .limit(1)
+                  .maybeSingle(),
+              ]);
+
+              if (countResult.error || activityResult.error) {
+                throw countResult.error ?? activityResult.error;
+              }
+              return {
+                editsCount: countResult.count ?? 0,
+                lastActivity: activityResult.data,
+              };
+            }),
+          );
+
+          const editsCount = historyResults.reduce(
+            (total, result) => total + result.editsCount,
+            0,
+          );
+          const lastActivity = historyResults.reduce<string | null>(
+            (latest, result) =>
+              result.lastActivity?.created_at &&
+              (!latest || result.lastActivity.created_at > latest)
+                ? result.lastActivity.created_at
+                : latest,
+            null,
+          );
+          stats = {
+            content_elements_count: elementsResult.count ?? 0,
+            edits_count: editsCount,
+            views: 0, // TODO: Implement views tracking
+            last_activity: lastActivity,
+          };
+        } catch (statsError) {
+          // A broken aggregate must not hide every healthy site. The original
+          // dashboard contract degraded stats to zero; s27 briefly let one
+          // page/history read reject the route-wide Promise.all and return 500.
+          console.error(
+            `Error fetching stats for site ${site.id}:`,
+            statsError,
+          );
         }
 
         const permission = permissions.find((row) => row.site_id === site.id);
@@ -163,12 +198,7 @@ export async function GET(request: NextRequest) {
           last_reported_at: site.last_reported_at ?? null,
           last_mismatch_domain: site.last_mismatch_domain ?? null,
           last_mismatch_at: site.last_mismatch_at ?? null,
-          stats: {
-            content_elements_count: elementsCount || 0,
-            edits_count: editsCount || 0,
-            views: 0, // TODO: Implement views tracking
-            last_activity: lastActivity?.created_at || null,
-          },
+          stats,
           ...(canInstall ? { siteToken, embedScript } : {}),
         };
       }),

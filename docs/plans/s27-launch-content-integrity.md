@@ -7,7 +7,7 @@ Validated by operator in the user task on 2026-09-24; scope and D2 pre-approved.
 
 ## Decisions
 
-D2: ACCEPT RE-KEYING, NO BACKFILL. Computed IDs will change on next scan. Production has zero real customers per operator; orphaned QA rows are accepted. Explicit author IDs remain page-independent. No compatibility lookup. See ADR 027.
+D2: ACCEPT RE-KEYING, NO BACKFILL. Computed IDs will change on next scan. Production has zero real customers per operator; orphaned QA rows are accepted. Explicit author IDs remain page-independent. No compatibility lookup. See ADR 030.
 
 Keep draft attributes in metadata.staging_attributes; published attributes remain metadata.href/alt. Staging reads overlay, public reads remove staging_attributes. Publish preview includes attribute-only drafts; revert discards pending attributes. Publish promotes atomically, history records prior/new metadata. Snapshot/restore includes href/alt and restores into staging. Omitted attributes preserve values; explicit empty strings clear them. Discovery captures authored attributes. Length caps: href 2048, alt 2000.
 
@@ -132,3 +132,35 @@ All commands used the main CI placeholder environment from `.github/workflows/ci
 - `git diff --check`: clean, excluding the untouched reviewer-owned working diff. No new failing/skip markers were added or flipped in fix mode 2; prior story flips remain.
 
 Merge prerequisite: `origin/main` at `300548a` (PRs #23 and #25) merged as `6ffc3d9`, keeping all story entries. Delivery uses the directly verified gates above without rerunning duplicate Git hook jobs on the overloaded host. Review SHA-256 remains `de2958b56f7859e3f109a908335f51b35ee7cbd32f9a65017ed51292c12b2499`; the file is excluded from staging. No PR merge, ready transition, remote migration or deployment is authorized in this delivery.
+
+## Fix mode 3 — operator validated 2026-09-24
+
+Narrow scope from Delta review 4998607; all other findings remain out of scope. Preserve the independent review unmodified and uncommitted (SHA-256 `8c7e3cd65bee907c81c907fb80fc5dc68e3e8e408f32940a041b2f8533acb007`).
+
+- [x] D1: regression-test per-site stats failures and concurrent queries; retain paginated element reads, log failures, return zero stats only for the affected site.
+- [x] D2: add public, staging and preview invalid-page-path tests; prove each fails when its 400 branch is removed, then restore the branch.
+- [x] D3: rename this story's ADR to 030 and update citations, except the immutable reviewer-owned file.
+- [x] D4: update draft PR #24 with production being past 20260924050000, requiring `supabase db push --include-all` in 010000 → 030000 → 060000 order.
+- [x] D5: remove unreachable preview query branches and ignored POST validation. Retain the SQL parameter if removing it requires a new migration; do not edit or add migrations in that case.
+- [x] Run required local gates under CI placeholders, commit `fix(s27): ...`, push and leave PR #24 draft.
+
+D5 SQL decision: retain `p_page_path` as an ignored compatibility parameter. Removing a PostgreSQL function argument changes its signature; it requires a forward migration to replace/drop the five-argument function, update its delegating wrapper and reapply grants. The operator requested no new migration for this cleanup. Existing migrations remain byte-identical.
+
+Fix mode 3 targeted evidence: sites route **19/19**, page-scoped reads **13/13**, adjacent staging **40/40 across 5 suites** pass. Removing each public/staging/preview invalid-path 400 produces **1 failing test each** (12 unselected tests per targeted mutant); all mutants restored and the 13-test page suite re-passed. No skip/failing marker was added or flipped.
+
+## Final fix mode 3 gates — 2026-09-24
+
+Main PR #27 merged as `58c6ca2` from `origin/main` `3b108ba`; all main story headings remain. Commands run through `/tmp/s27-fix3-ci-run.py`, which reads the main CI placeholder values directly from `.github/workflows/ci.yml` into a clean environment, using Node 20.15.1. No env file was loaded or copied. Only this gate process tree had macOS background throttling cleared.
+
+- `npm run precommit -- -- --runInBand`: exit 0; lint **0 errors / 39 inherited warnings**; full TypeScript clean; Jest **226 passed / 2 skipped suites**, **3,014 passed / 38 skipped tests**, **3,052 total**, **0 failures**.
+- `npm run format:check`: exit 0, all matched source files formatted.
+- `npm run audit:prod`: exit 0, **0 vulnerabilities**.
+- Node 20.15.1 and Node 24.14.0 `node scripts/build-embed.mjs --check`: both fresh, **bundle 46,601 / 46,681 B**, **widget 33,837 / 33,865 B**, **transport 13,141 B**; ceilings unchanged.
+
+No new migrations or marker flips. No SQL lifecycle replay in this pass because SQL is unchanged; the prior 18/18 result remains historical. No browser/remote migration/production verification is claimed. D6/D7 and the deferred M2 are outside this narrow pass.
+
+- `npm run build`: exit 0, optimized production build.
+- `npm run type-check:build`: exit 0.
+- Post-build Node 20/24 embed freshness and gzip checks passed with the same counts above.
+- PR #24 body updated through GitHub REST (the CLI wrapper hit a deprecated Projects GraphQL field); verified draft=true. D4 explicitly states production is past `20260924050000` and requires `supabase db push --include-all` in `010000` → `030000` → `060000` order.
+- Delivery uses the gates run above, without duplicate hook jobs. The independent review remains unstaged and byte-identical at the fix-mode-3 SHA above.

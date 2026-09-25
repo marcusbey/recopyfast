@@ -26,6 +26,11 @@ type QueryResult = {
   error?: unknown;
 };
 
+type QueryOperation = {
+  method: string;
+  args: unknown[];
+};
+
 /**
  * The route issues a fixed sequence of Supabase queries, each terminating on a
  * different chain method (`.eq()`, `.in()`, `.single()`). Rather than stubbing
@@ -34,26 +39,33 @@ type QueryResult = {
  */
 let queryQueue: QueryResult[] = [];
 const fromCalls: string[] = [];
+let queryResolver:
+  | ((
+      table: string,
+      operations: QueryOperation[],
+      queuedResult: QueryResult,
+    ) => Promise<QueryResult>)
+  | null = null;
 
-const makeBuilder = (result: QueryResult) => {
+const makeBuilder = (table: string, result: QueryResult) => {
+  const operations: QueryOperation[] = [];
+  const resolveResult = () =>
+    queryResolver
+      ? queryResolver(table, operations, result)
+      : Promise.resolve({ data: null, count: null, error: null, ...result });
   const builder: Record<string, unknown> = {
     then: (
       resolve: (value: QueryResult) => unknown,
       reject?: (reason: unknown) => unknown,
-    ) =>
-      Promise.resolve({ data: null, count: null, error: null, ...result }).then(
-        resolve,
-        reject,
-      ),
-    single: jest.fn(() =>
-      Promise.resolve({ data: null, count: null, error: null, ...result }),
-    ),
-    maybeSingle: jest.fn(() =>
-      Promise.resolve({ data: null, count: null, error: null, ...result }),
-    ),
+    ) => resolveResult().then(resolve, reject),
+    single: jest.fn(() => resolveResult()),
+    maybeSingle: jest.fn(() => resolveResult()),
   };
   for (const method of ["select", "eq", "in", "order", "range", "limit"]) {
-    builder[method] = jest.fn(() => builder);
+    builder[method] = jest.fn((...args: unknown[]) => {
+      operations.push({ method, args });
+      return builder;
+    });
   }
   return builder;
 };
@@ -61,7 +73,10 @@ const makeBuilder = (result: QueryResult) => {
 const mockServiceClient = {
   from: jest.fn((table: string) => {
     fromCalls.push(table);
-    return makeBuilder(queryQueue.shift() ?? { data: null, error: null });
+    return makeBuilder(
+      table,
+      queryQueue.shift() ?? { data: null, error: null },
+    );
   }),
 };
 
@@ -124,6 +139,7 @@ describe("GET /api/sites", () => {
     jest.clearAllMocks();
     queryQueue = [];
     fromCalls.length = 0;
+    queryResolver = null;
 
     mockSupabaseClient = {
       auth: {
@@ -242,6 +258,198 @@ describe("GET /api/sites", () => {
       views: 0,
       last_activity: "2024-01-15T00:00:00Z",
     });
+  });
+
+  it.each(["element-page", "history-query"] as const)(
+    "keeps the site list, logs the %s failure and zeros only that site's stats",
+    async (failureStage) => {
+      const statsError = { message: "stats unavailable" };
+      const sites = [
+        siteRow(),
+        siteRow({
+          id: "site-2",
+          domain: "second.example.com",
+          api_key: "test-api-key-2",
+        }),
+      ];
+      queryQueue.push({
+        data: [...mockPermissions, { site_id: "site-2", permission: "admin" }],
+      });
+      queryQueue.push({ data: sites });
+      queryResolver = async (table, operations, queuedResult) => {
+        if (table === "site_permissions" || table === "sites") {
+          return queuedResult;
+        }
+        const siteId = operations.find(
+          (operation) =>
+            operation.method === "eq" && operation.args[0] === "site_id",
+        )?.args[1];
+        const isCount = operations.some(
+          (operation) =>
+            operation.method === "select" &&
+            (operation.args[1] as { head?: boolean } | undefined)?.head ===
+              true,
+        );
+        const rangeStart = operations.find(
+          (operation) => operation.method === "range",
+        )?.args[0];
+
+        if (
+          failureStage === "element-page" &&
+          table === "content_elements" &&
+          siteId === "site-1" &&
+          !isCount
+        ) {
+          return { data: null, error: statsError };
+        }
+        if (table === "content_elements" && isCount) {
+          return { count: siteId === "site-2" ? 2 : 1 };
+        }
+        if (table === "content_elements") {
+          if (rangeStart !== 0) return { data: [] };
+          return {
+            data:
+              siteId === "site-2"
+                ? [
+                    { id: "row-2a", element_id: "element-2a" },
+                    { id: "row-2b", element_id: "element-2b" },
+                  ]
+                : [{ id: "row-1", element_id: "element-1" }],
+          };
+        }
+        const historyIds = operations.find(
+          (operation) =>
+            operation.method === "in" &&
+            operation.args[0] === "content_element_id",
+        )?.args[1] as string[] | undefined;
+        if (
+          failureStage === "history-query" &&
+          table === "content_history" &&
+          historyIds?.includes("row-1")
+        ) {
+          return { error: statsError };
+        }
+        if (table === "content_history" && isCount) {
+          return { count: 3 };
+        }
+        if (table === "content_history") {
+          return { data: { created_at: "2026-09-24T12:00:00Z" } };
+        }
+        return { data: null, error: null };
+      };
+      const errorSpy = jest
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      const response = await GET(
+        new NextRequest("http://localhost:3000/api/sites"),
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.sites).toHaveLength(2);
+      expect(data.sites[0].stats).toEqual({
+        content_elements_count: 0,
+        edits_count: 0,
+        views: 0,
+        last_activity: null,
+      });
+      expect(data.sites[1].stats).toEqual({
+        content_elements_count: 2,
+        edits_count: 3,
+        views: 0,
+        last_activity: "2026-09-24T12:00:00Z",
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Error fetching stats for site site-1:",
+        statsError,
+      );
+      errorSpy.mockRestore();
+    },
+  );
+
+  it("starts a site's count and paginated id reads concurrently", async () => {
+    queryQueue.push({ data: mockPermissions });
+    queryQueue.push({ data: mockSites });
+    let releaseCount: (() => void) | undefined;
+    const countBarrier = new Promise<void>((resolve) => {
+      releaseCount = resolve;
+    });
+    queryResolver = async (table, operations, queuedResult) => {
+      if (table === "site_permissions" || table === "sites") {
+        return queuedResult;
+      }
+      const isCount = operations.some(
+        (operation) =>
+          operation.method === "select" &&
+          (operation.args[1] as { head?: boolean } | undefined)?.head === true,
+      );
+      if (table === "content_elements" && isCount) {
+        await countBarrier;
+        return { count: 0 };
+      }
+      if (table === "content_elements") return { data: [] };
+      return { data: null, error: null };
+    };
+
+    const pendingResponse = GET(
+      new NextRequest("http://localhost:3000/api/sites"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const startedElementQueries = fromCalls.filter(
+      (table) => table === "content_elements",
+    ).length;
+    releaseCount?.();
+    await expect(pendingResponse).resolves.toMatchObject({ status: 200 });
+    expect(startedElementQueries).toBe(2);
+  });
+
+  it("starts every history batch concurrently after paginating element ids", async () => {
+    queryQueue.push({ data: mockPermissions });
+    queryQueue.push({ data: mockSites });
+    const elementRows = Array.from({ length: 401 }, (_unused, index) => ({
+      id: `row-${index}`,
+      element_id: `element-${index}`,
+    }));
+    let releaseHistory: (() => void) | undefined;
+    const historyBarrier = new Promise<void>((resolve) => {
+      releaseHistory = resolve;
+    });
+    queryResolver = async (table, operations, queuedResult) => {
+      if (table === "site_permissions" || table === "sites") {
+        return queuedResult;
+      }
+      const isCount = operations.some(
+        (operation) =>
+          operation.method === "select" &&
+          (operation.args[1] as { head?: boolean } | undefined)?.head === true,
+      );
+      const rangeStart = operations.find(
+        (operation) => operation.method === "range",
+      )?.args[0];
+      if (table === "content_elements" && isCount) return { count: 401 };
+      if (table === "content_elements") {
+        return { data: rangeStart === 0 ? elementRows : [] };
+      }
+      if (table === "content_history") {
+        await historyBarrier;
+        return isCount ? { count: 0 } : { data: null };
+      }
+      return { data: null, error: null };
+    };
+
+    const pendingResponse = GET(
+      new NextRequest("http://localhost:3000/api/sites"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const startedHistoryQueries = fromCalls.filter(
+      (table) => table === "content_history",
+    ).length;
+    releaseHistory?.();
+    await expect(pendingResponse).resolves.toMatchObject({ status: 200 });
+    expect(startedHistoryQueries).toBe(6);
   });
 
   it("pages through every element id before calculating history statistics", async () => {

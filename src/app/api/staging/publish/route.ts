@@ -60,25 +60,10 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const siteId = typeof body.siteId === "string" ? body.siteId : "";
-    const rawPagePath = body.page_path;
 
     if (!siteId) {
       return withPublicCors(
         NextResponse.json({ error: "Missing siteId" }, { status: 400 }),
-        request,
-      );
-    }
-
-    if (
-      rawPagePath !== undefined &&
-      rawPagePath !== null &&
-      typeof rawPagePath !== "string"
-    ) {
-      return withPublicCors(
-        NextResponse.json(
-          { error: "page_path must be a string or null" },
-          { status: 400 },
-        ),
         request,
       );
     }
@@ -306,21 +291,16 @@ export async function GET(request: NextRequest) {
 
     const serviceClient = createServiceRoleClient();
     const { data: elementsWithChanges, error: fetchError } =
-      await fetchPageScopedRows((scope) => {
-        let query = serviceClient
-          .from("content_elements")
-          .select(
-            "id, element_id, selector, staging_content, published_content, staging_updated_at, page_path, metadata",
-          )
-          .eq("site_id", siteId);
-
-        if (scope.kind === "page") {
-          query = query.eq("page_path", scope.pagePath);
-        } else if (scope.kind === "shared") {
-          query = query.is("page_path", null);
-        }
-        return query;
-      }, null);
+      await fetchPageScopedRows(
+        () =>
+          serviceClient
+            .from("content_elements")
+            .select(
+              "id, element_id, selector, staging_content, published_content, staging_updated_at, page_path, metadata",
+            )
+            .eq("site_id", siteId),
+        null,
+      );
 
     if (fetchError) {
       console.error("Error fetching staging changes:", fetchError);

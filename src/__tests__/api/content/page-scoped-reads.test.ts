@@ -198,6 +198,36 @@ import { GET as getStagingContent } from "@/app/api/staging/content/[siteId]/rou
 import { GET as getPublishPreview } from "@/app/api/staging/publish/route";
 
 describe("page-scoped content reads", () => {
+  it.each([
+    ["public", getPublicContent],
+    ["staging", getStagingContent],
+  ])("rejects an invalid page_path on the %s read", async (_name, handler) => {
+    const response = await handler(
+      new NextRequest(
+        "https://www.recopyfa.st/api/content/site-1?page_path=relative",
+      ),
+      { params: Promise.resolve({ siteId: "site-1" }) },
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Page path must start with /",
+    });
+  });
+
+  it("rejects an invalid page_path on the publish preview read", async () => {
+    const response = await getPublishPreview(
+      new NextRequest(
+        "https://www.recopyfa.st/api/staging/publish?siteId=site-1&page_path=relative",
+      ),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Page path must start with /",
+    });
+  });
+
   it("paginates a legacy public read when page_path is omitted", async () => {
     const response = await getPublicContent(
       new NextRequest("https://www.recopyfa.st/api/content/site-1"),

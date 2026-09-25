@@ -69,3 +69,9 @@ The independent re-review and operator decision supersede the author-added publi
 Fix mode 2 encoding boundary: `normalizedPagePath()` in the widget owns URI decoding and index/trailing-slash folding. Discovery and reads validate and preserve that canonical string exactly; repeating either transformation can merge scopes or reject valid literal-percent URLs. Regression examples include browser `/%25`, `/%2520`, `/index.html/` and `/index.html/index.html`.
 
 Final fix-mode-2 artifact, measured freshly on Node 20.15.1 and 24.14.0: bundle 46,601 B, widget 33,837 B, transport 13,141 B, with unchanged 46,681/33,865 B ceilings. Offset savings are confined to redundant/decorative publish-modal DOM. Final gates and mutation evidence are recorded in the plan.
+
+## Fix mode 3 findings
+
+Delta review 4998607 identified per-site statistics errors escaping to the whole `/api/sites` response, unguarded read-validation regressions, an ADR number collision, and vestigial publish code. The final pass is limited to D1–D5. The s27 decision is now ADR 030; ADR 027 belongs to site-token lifetime, 028 to s28, and 029 is reserved by s33. The independent s27 review retains its historical citations unchanged.
+
+Per the operator, production migration history is already past `20260924050000`. Apply this story with `supabase db push --include-all`, keeping `20260924010000` → `20260924030000` → `20260924060000` order before app/widget deployment. This instruction is documentation only; no remote command is run.

@@ -106,7 +106,7 @@ Integrated `origin/main` at `a687181` (PR #22 lockfile and PR #26 auth hotfix). 
 
 All Critical/Major findings and m1–m4/m6–m9 are fixed. m5's invalid-expiry 500 is replaced by an explicit bounded 409/retryAt; immediate recovery before the fixed expiry remains deferred for the duplicate-payment safety reason above. The independent review file remains byte-identical (SHA-256 `40d7508d8af3d2399877ada79301b86d2b6987c2b0186739710a6e4ad4985f0b`) and excluded from repair commits. Remote migration application and deployment remain operator actions.
 
-The durable-intent ADR uses 028 because open PR #24 already owns ADR 027 for page-scoped identity/content attributes. Only its identifier and references changed; the decision is unchanged.
+The durable-intent ADR uses 028 because open PR #24 originally used ADR 027 for page-scoped identity/content attributes (now ADR 030). Only its identifier and references changed; the decision is unchanged.
 
 
 ## Re-review fix mode 2 — 2026-09-24

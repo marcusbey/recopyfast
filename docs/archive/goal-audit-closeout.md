@@ -66,7 +66,7 @@ Webhook branch: A-6/A-7/A-8/A-20/A-22 all edit src/app/api/webhooks/stripe/route
 ### Decisions needed (blocker only for their own items)
 
 - [ ] **D1** (A-5): DROP the orphaned wallet functions vs lock to service_role. Recommendation: drop — zero callers, removes replay risk. Check `20260802020000` conversion path first.
-- [x] **D2** (A-14), operator decision 2026-09-24: **ACCEPT RE-KEYING, NO BACKFILL**. Zero real customers; orphaned QA rows accepted. No legacy-id fallback. Explicit author IDs remain shared across pages. See [ADR 027](../decisions/027-page-scoped-identity-and-content-attributes.md) and [s27 plan](../plans/s27-launch-content-integrity.md).
+- [x] **D2** (A-14), operator decision 2026-09-24: **ACCEPT RE-KEYING, NO BACKFILL**. Zero real customers; orphaned QA rows accepted. No legacy-id fallback. Explicit author IDs remain shared across pages. See [ADR 030](../decisions/030-page-scoped-identity-and-content-attributes.md) and [s27 plan](../plans/s27-launch-content-integrity.md).
 - [ ] **D3** (A-25): token rotation — re-mint endpoint the widget calls on `site_token_expired` vs drop age cap + revoke via api_key rotation.
 - [ ] **D4** (P2-6): ratify or reverse any-subdomain origin matching in `editor-request.ts:74` (comment claims deliberate).
 - [ ] **D5** (A-15): legacy snapshot fallback semantics in restore (apply-to-all-languages vs skip + report).
