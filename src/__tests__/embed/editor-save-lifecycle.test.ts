@@ -23,6 +23,10 @@ const ORIGIN = "https://app.recopyfast.test";
 const API = `${ORIGIN}/api`;
 const GRANT = "rcfg1.save-lifecycle";
 const STORAGE_KEY = `rcf_editor_grant:${SITE_ID}`;
+const ABORT_TIMEOUT_DESCRIPTOR = Object.getOwnPropertyDescriptor(
+  AbortSignal,
+  "timeout",
+);
 
 interface WidgetInstance {
   elements: Map<string, { originalContent: string }>;
@@ -167,15 +171,7 @@ function publishButton(): HTMLButtonElement {
 }
 
 describe("inline editor save lifecycle", () => {
-  beforeAll(async () => {
-    jest.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-      const controller = new AbortController();
-      setTimeout(
-        () => controller.abort(new DOMException("Timed out", "TimeoutError")),
-        milliseconds,
-      );
-      return controller.signal;
-    });
+  beforeEach(async () => {
     document.head.innerHTML = "";
     document.body.innerHTML =
       '<h1 id="headline">Original copy</h1><p id="outside">Outside</p>';
@@ -190,9 +186,6 @@ describe("inline editor save lifecycle", () => {
     jest.spyOn(console, "log").mockImplementation(() => {});
     jest.spyOn(console, "warn").mockImplementation(() => {});
     await boot();
-  });
-
-  beforeEach(() => {
     jest.useFakeTimers();
     putCount = 0;
     hasStaging = false;
@@ -210,10 +203,26 @@ describe("inline editor save lifecycle", () => {
     await settle();
     jest.runOnlyPendingTimers();
     jest.useRealTimers();
+    if (ABORT_TIMEOUT_DESCRIPTOR) {
+      Object.defineProperty(AbortSignal, "timeout", ABORT_TIMEOUT_DESCRIPTOR);
+    }
+    jest.restoreAllMocks();
   });
 
-  afterAll(() => {
-    jest.restoreAllMocks();
+  it("saves once when AbortSignal.timeout is unavailable", async () => {
+    delete (
+      AbortSignal as unknown as {
+        timeout?: typeof AbortSignal.timeout;
+      }
+    ).timeout;
+
+    beginEdit("Legacy browser draft");
+    saveButton().click();
+    await settle();
+
+    expect(putCount).toBe(1);
+    expect(headline.textContent).toBe("Legacy browser draft");
+    expect(window.alert).not.toHaveBeenCalled();
   });
 
   it("freezes a pending save, resets in-flight state on success, and keeps a later save", async () => {
@@ -316,6 +325,11 @@ describe("inline editor save lifecycle", () => {
   });
 
   it("times out a stalled response body and restores editing", async () => {
+    jest.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), milliseconds);
+      return controller.signal;
+    });
     putHandler = async (signal) => ({
       ok: true,
       status: 200,
@@ -528,7 +542,7 @@ describe("inline editor save lifecycle", () => {
     aiSpy.mockRestore();
   });
 
-  it("shows the pending save state in the staging-session banner", async () => {
+  it("keeps the staging badge after successful and failed saves", async () => {
     document.querySelector("#rcf-editor-banner")?.remove();
     instance.stagingAccess = {
       email: "editor@example.com",
@@ -545,12 +559,30 @@ describe("inline editor save lifecycle", () => {
     beginEdit("Staging banner draft");
     saveButton().click();
 
+    const badge = document.querySelector(
+      "#rcf-staging-banner .rcf-banner-mode",
+    );
     expect(
       document.querySelector("#rcf-staging-banner .rcf-editor-banner-status")
         ?.textContent,
     ).toBe("Saving…");
+    expect(badge?.textContent).toBe("Staging");
+    expect(badge?.querySelector(".rcf-status-dot")).not.toBeNull();
 
     finishPut(ok());
     await settle();
+
+    expect(badge?.textContent).toBe("Staging");
+    expect(badge?.querySelector(".rcf-status-dot")).not.toBeNull();
+
+    putHandler = async () => {
+      throw new Error("network unavailable");
+    };
+    beginEdit("Failed staging draft");
+    saveButton().click();
+    await settle();
+
+    expect(badge?.textContent).toBe("Staging");
+    expect(badge?.querySelector(".rcf-status-dot")).not.toBeNull();
   });
 });

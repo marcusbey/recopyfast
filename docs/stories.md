@@ -1414,6 +1414,11 @@ holder can save and publish without a late duplicate save restoring staging cont
 - Establish the root cause from CI logs, source and deterministic regression tests.
 - Fix the product if duplicate writes are possible; preserve every existing E2E assertion.
 - No retries, timeout increases, skips, weakened guards or new dependencies.
+- Saving works when `AbortSignal.timeout` is absent, keeps the 15-second deadline
+  where the helper exists, and never replaces the staging mode badge with
+  transient save status.
+- Lifecycle regressions boot a fresh widget per test so each guard's mutation
+  count is independently meaningful.
 - Prove at least 20 consecutive local passes with the disposable stack, or three green
   PR E2E jobs if the local stack cannot run. Keep the strict 44-test contract.
 - Run required gates; open a draft PR only, with independent review pending.

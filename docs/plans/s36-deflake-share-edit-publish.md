@@ -50,3 +50,24 @@ leader. Independent review verdict remains a separate reviewer's responsibility.
       gzipped bytes from the reviewed 33,952-byte measurement, without changing either
       ceiling. Run only the targeted lifecycle and embed budget suites during this fix
       pass; the leader owns the final full gates, commit, push, and PR CI repetitions.
+
+## Ship-allowed fix mode 2
+
+- [x] Replace the unconditional `AbortSignal.timeout` save dependency with a
+      feature-detected fallback signal. Add a regression that removes
+      `AbortSignal.timeout`, still observes one successful PUT, and separately
+      proves the 15-second abort fires where the helper exists.
+- [x] Give the staging banner a dedicated save-status element beside its mode
+      badge. Prove the dot and `Staging` label survive both successful and failed
+      saves.
+- [x] Make every lifecycle test boot a fresh widget instance, then rerun each
+      retained guard mutation through `RCF_WIDGET_SOURCE` and record the honest
+      red counts.
+- [x] Deferred as a byte-budget follow-up: explain that a timed-out save
+      may still have landed and re-read staging for the edited element when the
+      editor cancels after that timeout. The two major fixes leave five gzipped
+      widget bytes, which cannot carry this wording and refetch without weakening
+      a guard or expanding the review-approved scope.
+- [x] Rebuild the generated embed and pass the targeted lifecycle/embed tests
+      plus the official Node 20.15.1 freshness and byte check. The leader owns
+      the final full gates, commit, push, and draft-PR update.

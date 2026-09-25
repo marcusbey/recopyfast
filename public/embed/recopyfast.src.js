@@ -1116,10 +1116,8 @@
      * The banner's save status: "Saving…" while a write is in flight, "Saved"
      * when it lands, blank when it did not.
      *
-     * Text only, and it never claims more than "written". Whether the write
-     * went to staging or straight live is a distinction this audience should
-     * not have to learn — the whole point of an invited editor is that there is
-     * no mode to understand.
+     * Text only, and it never claims more than "written". Staging keeps its
+     * permanent mode badge beside this transient status.
      */
     setEditorSaveStatus(text) {
       // A later in-flight response must not erase the terminal recovery state.
@@ -2190,7 +2188,7 @@
       infoDiv.className = 'rcf-banner-info';
 
       const statusContainer = document.createElement('span');
-      statusContainer.className = 'rcf-banner-mode rcf-editor-banner-status';
+      statusContainer.className = 'rcf-banner-mode';
 
       const statusDot = document.createElement('span');
       statusDot.className = 'rcf-status-dot';
@@ -2199,7 +2197,9 @@
       modeLabel.textContent = 'Staging';
 
       statusContainer.append(statusDot, modeLabel);
-      infoDiv.appendChild(statusContainer);
+      const saveStatus = document.createElement('span');
+      saveStatus.className = 'rcf-editor-banner-status';
+      infoDiv.append(statusContainer, saveStatus);
 
       infoDiv.appendChild(divider('email'));
 
@@ -2910,7 +2910,9 @@
 
       this.setEditorSaveStatus('Saving…');
 
-      const signal = AbortSignal.timeout(15000);
+      // Older supported browsers have AbortController but no timeout helper.
+      // They keep saving without a client deadline instead of losing editing.
+      const signal = AbortSignal.timeout ? AbortSignal.timeout(15000) : new AbortController().signal;
       try {
         const response = await fetch(RECOPYFAST_API + '/staging/content/' + SITE_ID + this.editorTokenQuery(), {
           method: 'PUT',
@@ -2918,7 +2920,7 @@
           body: JSON.stringify(Object.assign({
             elementId: elementId,
             content: content
-          }, this.editorTokenBody(), extra || {})),
+          }, this.editorTokenBody(), extra)),
           signal: signal
         });
         const result = await response.json().catch(function(error) {
@@ -2947,9 +2949,8 @@
         token: SITE_TOKEN,
         stagingMode: this.stagingMode,
         stagingToken: this.stagingToken || '',
-        editToken: this.editSessionToken || '',
-        persisted: true
-      }, extra || {}));
+        editToken: this.editSessionToken || ''
+      }, extra));
 
     }
 

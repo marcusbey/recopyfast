@@ -291,6 +291,50 @@ Git hooks' duplicate full runs are suppressed only for this already-validated
 commit/push invocation, honoring the requested single full gate under host load;
 no hook or persistent git setting is modified.
 
-PR #31 remains the stability-evidence record for the three post-push CI E2E runs.
-The independent review file is deliberately preserved unmodified and uncommitted;
-its original blocked verdict is not rewritten by this fix run.
+## Ship-allowed fix mode 2 (2026-09-25)
+
+The ship-allowed review found two scoped regressions that must be fixed before
+merge. `AbortSignal.timeout(15000)` is called before the save `try`, so a browser
+without that newer static API sends no PUT and leaves the banner stuck on
+`Saving…`. The chosen feature detection keeps the 15-second deadline where the
+helper exists and supplies a plain `AbortController` signal without a client
+deadline on older browsers, so those browsers still save. The staging banner also assigns
+`rcf-editor-banner-status` to its mode badge, so the first save replaces the
+pulsing dot and `Staging` label. Save status needs a sibling status element.
+
+The same pass makes each lifecycle test boot a fresh widget instance so mutation
+red counts describe each guard directly instead of cascading through shared DOM
+and closure state. The timeout message should disclose the ambiguous server
+outcome and Cancel should re-read staging for that element after a timeout if the
+immutable embed ceilings permit it; otherwise the plan records that minor item as
+a follow-up. The reviewer verdict remains unmodified and uncommitted.
+
+The two major regressions are covered by tests that first failed on the reviewed
+source: deleting `AbortSignal.timeout` produced zero PUTs, and the staging badge
+became `Saving…`. The fixed suite boots a new real widget for every test and passes
+13/13. Nineteen separate scratch-source mutations selected through
+`RCF_WIDGET_SOURCE` all remain red with independent boot state: pending save 1,
+pending cancel 1, contenteditable 1, scalar read-only 1, AI disable 1,
+recoverable-failure reset 2, success reset 1, paste guard 1, session abort 6,
+outside listener signal 3, element keydown signal 1, paste signal 2, field
+keydown signal 1, Save signal 2, Cancel signal 1, AI signal 1, timeout 1, legacy
+fallback 1, and dedicated staging status 1. The log is
+`/tmp/s36-fix2-mutations.log`.
+
+Official Node 20.15.1 measures the fresh artifact at **46,635 / 46,681 B bundle,
+33,860 / 33,865 B widget, and 13,141 B transport**. The five-byte widget margin
+is not enough for the minor timeout-ambiguity wording plus cancel refetch, so
+that item is deferred rather than weakening a guard or changing more visible
+copy. The offset removes the realtime `persisted` field that `server/index.js`
+explicitly documents as unread, and redundant `extra || {}` operands that
+`Object.assign` already ignores when undefined.
+
+The leader's final CI-placeholder gate run passed: lint with 0 errors and the 39
+inherited warnings, both type checks, format, production build, and audit with 0
+vulnerabilities. Full Jest passed **234 suites / 2 skipped, 3,103 tests / 38
+skipped, 0 failed**; coverage was 55.43% statements, 49.29% branches, 51.22%
+functions, and 55.91% lines. Logs are under `/tmp/s36-fix2-gates`.
+
+PR #31's three post-push CI E2E runs tested the earlier identical `b126100` tree;
+they do not establish the unpushed fix-mode-2 diff. The independent ship-allowed
+review file is deliberately preserved byte-for-byte, unmodified and uncommitted.
