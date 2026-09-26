@@ -146,8 +146,27 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * measurement is recorded as the ceiling.) build-size-gate.test.ts pins the same
  * pair.
  */
-const MAX_BUNDLE_GZ = 46176;
-const MAX_WIDGET_GZ = 33420;
+/*
+ * RATCHETED DOWN 2026-09-25 (s41-edit-link-multipage), from 46176 / 33420 (s40).
+ *
+ * s41 keeps an edit link alive across page loads (ADR 036) and paid first by
+ * deleting dead code. Measured on its own base (0e1d5bc) it was −288 / −282;
+ * merged over s40 the same changes measure −293 / −298 (gzip context moves):
+ *
+ *   −398 / −394  dead email-capture modal and its `requiresEmail` branch (no
+ *                server path has sent `requiresEmail: true` since 747d210;
+ *                staging-access.device-binding.test.ts pins that)
+ *   −24 / −22    `escapeHtml`: no caller
+ *   +116 / +121  edit-link persistence in sessionStorage, the two 401/403
+ *                clears, Preview Live's `noopener`
+ *   −8 / −11     Preview Live's two no-op searchParams.delete calls
+ *   +26 / +24    editor bar: claim and divider hide at ≤480px (operator T5b)
+ *   45883 / 33122  measured on the merged tree — the new ceilings
+ *
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45883;
+const MAX_WIDGET_GZ = 33122;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

@@ -1605,3 +1605,43 @@ editor — clicks "🪄 AI" and gets suggestions, billed to the site owner. Toda
 - [ ] Required gates pass; independent review before merge.
 
 Research: `docs/research/s40-ai-widget-auth.md`. Plan: `docs/plans/s40-ai-widget-auth.md`.
+
+## Story s41-edit-link-multipage — an edit link keeps working as I click through my site
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s41-edit-link-multipage`. An owner who follows **Edit website**, or anyone who follows a
+**Share Preview Link**, stays in edit mode (and staging mode, for share links) as they move
+between pages of the site. Today the credential lives only in the first page's memory, so every
+later load in the tab (an internal link, a reload, Edit Board's restore reload) boots as a
+visitor. Invited editors on device grants are already unaffected.
+
+- [x] Following an edit or share link persists its credential in **sessionStorage**, keyed
+  `rcf_edit_link:<SITE_ID>`, and never in localStorage (bearer, no origin or device binding, per
+  ADR). Full-page navigations and reloads in the same tab on the same origin boot in edit mode
+  (edit session) or staging mode (share link). The address bar is still stripped on arrival, and
+  no URL the widget builds gains a credential it did not already carry.
+- [x] A new tab opened without the token stays in visitor mode, and this is stated. Preview Live
+  opens with `noopener`, so it shows the visitor view and does not inherit the tab's session.
+- [x] The stored credential is removed when the server refuses it: 401/403 from
+  `/staging/validate`, or a terminal 401/403 on save or publish. It is kept through 5xx and network
+  failures. A token in the URL replaces the stored one; an orphan `rcf_token` without
+  `rcf_staging=1` is never stored. There is no exit control today, and none is added; closing the
+  tab ends the session.
+- [x] The server lifetime is the only lifetime: every load and write is still re-validated, and
+  persistence adds no client-side expiry or bypass.
+- [x] Storage that is blocked, throws or holds garbage never reaches the host page
+  (non-negotiable #4). The widget degrades to visitor mode.
+- [x] The embed allocation is paid in-branch: the dead email-capture modal (unreachable since
+  `747d210`) and the unused `escapeHtml` are removed, and the gate ratchets down to the new
+  measurement with every delta itemised (measured −306 / −295 gz net on s39).
+- [x] An ADR records the sessionStorage decision and its rejected options. jsdom tests cover
+  persist, restore, clear, throw and noopener. The Playwright count stays 44 (contract).
+- [ ] Required gates pass; independent review before merge.
+- [ ] Proven live in production after deploy: owner edit link → click through three pages →
+  still editing → save on page 3 publishes. Share link → click through → staging banner on every
+  page. A new tab is a visitor tab.
+
+Out of scope: SPA client-side routing (hydration and page path on `pushState`), already deferred
+at s27. Tokenless owner link on the dashboard Content page (`rcf_edit`).
+
+Research: `docs/research/s41-edit-link-multipage.md`. Plan: `docs/plans/s41-edit-link-multipage.md`.

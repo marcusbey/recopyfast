@@ -74,8 +74,13 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //                  message (alone, this was over both ceilings)
 //   −71 / −67      the Edit Board's "Auto-translate with AI" control removed
 //   46176 / 33420  measured on feature/s40-ai-widget-auth
-const SEEDED_MAX_BUNDLE_GZ = 46176;
-const SEEDED_MAX_WIDGET_GZ = 33420;
+// RATCHETED 2026-09-25 (s41), DOWNWARD: 46176 → 45883, 33420 → 33122, merged
+// over s40. Dead email-capture modal −398/−394, `escapeHtml` −24/−22, edit-link
+// persistence + 401/403 clears + noopener +116/+121, Preview Live no-op deletes
+// −8/−11, ≤480px editor bar +26/+24 (itemised on s41's own base; the merged
+// tree measures −293/−298 in total).
+const SEEDED_MAX_BUNDLE_GZ = 45883;
+const SEEDED_MAX_WIDGET_GZ = 33122;
 
 interface CheckRun {
   status: number;
