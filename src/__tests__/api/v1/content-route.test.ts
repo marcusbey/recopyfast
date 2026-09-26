@@ -84,11 +84,14 @@ function keyRow(
   };
 }
 
-function seedDatabase(keyOverrides: Record<string, unknown> = {}) {
+function seedDatabase(
+  keyOverrides: Record<string, unknown> = {},
+  otherKeyOverrides: Record<string, unknown> = {},
+) {
   mockDatabase = createSchemaStrictDatabase();
   mockDatabase.seed("api_keys", [
     keyRow("key-fresh", FRESH_KEY, keyOverrides),
-    keyRow("key-other", OTHER_KEY),
+    keyRow("key-other", OTHER_KEY, otherKeyOverrides),
   ]);
   mockDatabase.seed("site_permissions", [
     { id: "perm-1", user_id: ADMIN_ID, site_id: SITE_ID, permission: "admin" },
@@ -233,7 +236,10 @@ describe("/api/v1/content answers a valid key (s44)", () => {
   });
 
   it("meters each key in its own bucket", async () => {
-    seedDatabase({ rate_limit_per_minute: 1 });
+    // Both keys at 1/min (s44 review m1): with the other key at 100, a bucket
+    // shared per site still let it through, so keying the limiter on site_id
+    // instead of the key id went unnoticed.
+    seedDatabase({ rate_limit_per_minute: 1 }, { rate_limit_per_minute: 1 });
 
     await GET(v1Request("GET"));
     const exhausted = await GET(v1Request("GET"));
