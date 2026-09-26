@@ -85,6 +85,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ---- Hub sign-in ----------------------------------------------------
+    //
+    // `rememberDevice` used to be read above and ignored here: the hub cookie
+    // was 30 minutes whatever was ticked, and the flag reached the customer's
+    // site only through the hand-off body. s39 made the hub somewhere an editor
+    // comes back to, and a resumed session never shows the checkbox again — so
+    // the choice is signed into the session now, and the cookie lives as long
+    // as the editor asked it to.
     if (!siteId) {
       const sites = await listSitesForEditor(email);
       const response = withPublicCors(
@@ -92,6 +99,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           mode: "hub",
           email,
+          remembered: rememberDevice,
           sites: sites.map((site) => ({
             siteId: site.siteId,
             name: site.siteName,
@@ -103,8 +111,8 @@ export async function POST(request: NextRequest) {
       );
       response.cookies.set(
         HUB_SESSION_COOKIE,
-        createHubSessionToken(email),
-        hubSessionCookieOptions(),
+        createHubSessionToken(email, rememberDevice),
+        hubSessionCookieOptions(rememberDevice),
       );
       return response;
     }
