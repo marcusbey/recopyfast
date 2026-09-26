@@ -32,6 +32,7 @@ import {
   getPlanDisplayPrice,
   findPaidPlanIdByStripePriceId,
   findPlanById,
+  findPurchasedPlanById,
   isPaidPlanId,
   PAID_PLAN_IDS,
   resolveOneTimePriceId,
@@ -588,6 +589,117 @@ describe("plan catalogue loader", () => {
       await expect(
         findPaidPlanIdByStripePriceId("price_starter_yearly"),
       ).resolves.toBeNull();
+    });
+  });
+
+  /**
+   * s45 — a lifetime product's own `limits` override the plan it grants, for
+   * the accounts that hold that plan through a purchase (ADR 038). The
+   * Founding Agency row carries `{"monthly_credits": 250}` in production after
+   * 20260926120000; Agency itself keeps 1,000.
+   */
+  describe("grant limit overrides", () => {
+    const FOUNDING_250 = {
+      ...LIFETIME_AGENCY_ROW,
+      limits: { monthly_credits: 250 },
+    };
+
+    function seedWith(foundingRow: Record<string, unknown>) {
+      return [
+        FREE_ROW,
+        STARTER_ROW,
+        planRow(),
+        AGENCY_ROW,
+        CREDITS_ROW,
+        LIFETIME_ROW,
+        foundingRow,
+      ];
+    }
+
+    it("reads a lifetime product's limits as overrides of the plan it grants", async () => {
+      respondWith(seedWith(FOUNDING_250));
+
+      expect((await getOneTimeProduct("lifetime_agency")).grantLimits).toEqual({
+        monthlyCredits: 250,
+      });
+      expect((await getOneTimeProduct("lifetime_pro")).grantLimits).toEqual({});
+    });
+
+    it("gives a purchased Agency grant every Agency limit but 250 monthly credits", async () => {
+      respondWith(seedWith(FOUNDING_250));
+
+      expect((await findPurchasedPlanById("agency"))?.limits).toEqual({
+        websites: 10,
+        collaborators: -1,
+        aiFeatures: true,
+        translations: -1,
+        abTesting: true,
+        monthlyCredits: 250,
+      });
+      // The subscription row itself is untouched: Agency subscribers keep 1,000.
+      expect((await findPlanById("agency"))?.limits.monthlyCredits).toBe(1000);
+    });
+
+    it("hands back the catalogue row itself when the purchase overrides nothing", async () => {
+      respondWith(seedWith(FOUNDING_250));
+
+      expect(await findPurchasedPlanById("pro")).toBe(
+        await findPlanById("pro"),
+      );
+      // Before the migration the founding row overrides nothing either.
+      clearPlanCatalogueCache();
+      respondWith(seedWith(LIFETIME_AGENCY_ROW));
+      expect(await findPurchasedPlanById("agency")).toBe(
+        await findPlanById("agency"),
+      );
+    });
+
+    it("answers null for a plan with no active row, like findPlanById", async () => {
+      await expect(findPurchasedPlanById("enterprise")).resolves.toBeNull();
+      await expect(findPurchasedPlanById(null)).resolves.toBeNull();
+    });
+
+    it.each([
+      [
+        "a key that is not a plan limit",
+        { monthly_credit: 250 },
+        /"monthly_credit" on "lifetime_agency" is not a plan limit/,
+      ],
+      [
+        "a mistyped value",
+        { monthly_credits: "250" },
+        /limits\.monthly_credits for "lifetime_agency" is not a number/,
+      ],
+      [
+        "a prototype key",
+        JSON.parse('{"__proto__": {"monthly_credits": 0}}'),
+        /"__proto__" on "lifetime_agency" is not a plan limit/,
+      ],
+    ])(
+      "refuses %s on a granting product rather than guessing the allowance",
+      async (_label, limits, message) => {
+        respondWith(seedWith({ ...LIFETIME_AGENCY_ROW, limits }));
+
+        await expect(getPlanCatalogue()).rejects.toThrow(message);
+      },
+    );
+
+    it("refuses two active products granting the same plan", async () => {
+      // Which product's overrides a purchased grant gets would otherwise be a
+      // first-match guess.
+      respondWith([
+        FREE_ROW,
+        STARTER_ROW,
+        planRow(),
+        AGENCY_ROW,
+        CREDITS_ROW,
+        { ...LIFETIME_ROW, grants_plan_id: "agency" },
+        FOUNDING_250,
+      ]);
+
+      await expect(getPlanCatalogue()).rejects.toThrow(
+        /more than one active one-time product grants "agency"/,
+      );
     });
   });
 

@@ -173,6 +173,7 @@ const availablePricing: ComparisonPricing = {
   agency: { monthlyPrice: 73, websites: 14 },
   founding: {
     price: 411,
+    monthlyCredits: 250,
     availability: { remaining: 9, limit: 50, soldOut: false },
   },
 };
@@ -545,6 +546,7 @@ describe("comparison marketing pages", () => {
         ...availablePricing,
         founding: {
           price: 411,
+          monthlyCredits: 250,
           availability: { remaining: 0, limit: 50, soldOut: true },
         },
       },
@@ -554,7 +556,7 @@ describe("comparison marketing pages", () => {
       "unknown founding availability",
       {
         ...availablePricing,
-        founding: { price: 411, availability: null },
+        founding: { price: 411, monthlyCredits: 250, availability: null },
       },
       /Agency is \$73\/month for 14 sites.*Founding Agency availability is temporarily unavailable/i,
     ],
@@ -580,6 +582,54 @@ describe("comparison marketing pages", () => {
       expect(screen.queryByText(/\$299 lifetime/i)).toBeNull();
     },
   );
+
+  /**
+   * s45 — the offer states what it includes: everything in Agency, with the
+   * founding allowance the catalogue gives it (250 AI credits a month after
+   * migration 20260926120000). The number is catalogue data, never copy.
+   */
+  it("states the founding allowance wherever it presents the offer", () => {
+    render(
+      <ComparisonPage
+        comparison={comparisons.duda}
+        pricing={availablePricing}
+      />,
+    );
+
+    const sentence =
+      "Agency is $73/month for 14 sites. Founding Agency is $411 lifetime: " +
+      "everything in Agency, with 250 AI credits a month; 9 of 50 founding " +
+      "spots remain.";
+    // The "Pricing model" row and the "Pricing context" section.
+    expect(
+      screen.getAllByText((_content, element) =>
+        (element?.textContent ?? "").startsWith(sentence),
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it("takes the founding allowance from the catalogue, not from copy", () => {
+    render(
+      <ComparisonPage
+        comparison={comparisons.duda}
+        pricing={{
+          ...availablePricing,
+          founding: {
+            price: 411,
+            monthlyCredits: 1200,
+            availability: { remaining: 9, limit: 50, soldOut: false },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getAllByText(
+        /Founding Agency is \$411 lifetime: everything in Agency, with 1,200 AI credits a month; 9 of 50/,
+      ).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/250 AI credits/)).toBeNull();
+  });
 
   it("publishes unique canonical and social titles for every comparison route", () => {
     const metadata = routes.map((route) => route.metadata);

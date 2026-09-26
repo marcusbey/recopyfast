@@ -104,6 +104,13 @@ export interface OneTimeProduct {
   features: readonly string[];
   /** Subscription plan this purchase grants permanently, if any. */
   grantsPlanId: SubscriptionPlanId | null;
+  /**
+   * Limits this purchase overrides on the plan it grants, read from the
+   * product row's own `limits` (ADR 038). Absent or empty: the purchase confers
+   * the granted plan exactly. Founding Agency carries `{ monthlyCredits: 250 }`
+   * — everything in Agency, with 250 AI credits a month.
+   */
+  grantLimits?: Readonly<Partial<PlanLimits>>;
   sortOrder: number;
 }
 
@@ -141,6 +148,42 @@ export function findSubscriptionPlan(
     return undefined;
   }
   return catalogue.subscriptions.find((plan) => plan.id === planId);
+}
+
+/**
+ * The plan as an account holding it *through a purchase* gets it: the catalogue
+ * row with the granting product's `grantLimits` laid over its limits.
+ *
+ * s45: a lifetime Founding Agency owner holds `agency` — the plan id the grant
+ * function writes and every Agency check compares against — but with 250
+ * monthly AI credits instead of the subscription's 1,000. Only the limits
+ * differ, so every gate (they all read limits) sees Agency except the credit
+ * allowance. Who counts as holding a plan through a purchase is decided in
+ * `src/lib/billing/effective-plan.ts`, not here.
+ *
+ * Returns the catalogue object itself when the purchase overrides nothing, so
+ * Lifetime Pro — and Founding Agency before migration 20260926120000 — resolve
+ * exactly as before. `loadPlanCatalogue` guarantees at most one active product
+ * grants a given plan, which is what makes `find` an answer rather than a
+ * guess.
+ */
+export function findPlanHeldByPurchase(
+  catalogue: PlanCatalogue,
+  planId: string | null | undefined,
+): SubscriptionPlan | undefined {
+  const plan = findSubscriptionPlan(catalogue, planId);
+  if (!plan) {
+    return undefined;
+  }
+
+  const overrides = catalogue.oneTimeProducts.find(
+    (product) => product.grantsPlanId === plan.id,
+  )?.grantLimits;
+  if (!overrides || Object.keys(overrides).length === 0) {
+    return plan;
+  }
+
+  return { ...plan, limits: { ...plan.limits, ...overrides } };
 }
 
 export function findOneTimeProduct(

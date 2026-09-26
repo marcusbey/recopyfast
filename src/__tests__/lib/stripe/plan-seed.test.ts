@@ -203,3 +203,95 @@ describe("plan constraint and credit collapse migration", () => {
     expect(constraintSql).not.toMatch(/DROP TABLE\s+(IF EXISTS\s+)?tickets/i);
   });
 });
+
+/**
+ * Migration 20260926120000 — s45, the lifetime Founding Agency includes 250 AI
+ * credits a month (operator decision 2026-09-26).
+ *
+ * Read from the migration text for the same reason as the seed above: 250 is a
+ * commercial commitment that lives in the catalogue row and nowhere in the
+ * code, and every way of getting this migration wrong — a new plan row, the
+ * price or `grants_plan_id` touched, the Agency subscription row edited — is
+ * visible in the SQL. See ADR 038 for why it is a limits override on this row
+ * rather than a new plan.
+ */
+describe("lifetime Founding Agency monthly credits migration", () => {
+  const readMigration = () =>
+    readFileSync(
+      join(
+        process.cwd(),
+        "supabase/migrations/20260926120000_lifetime_agency_monthly_credits.sql",
+      ),
+      "utf8",
+    );
+
+  /** Statements only: the header's prose must not satisfy or trip anything. */
+  const statements = () => readMigration().replace(/--.*$/gm, "");
+
+  function assigned(column: string, cast = ""): string {
+    const match = statements().match(
+      new RegExp(`\\b${column} = '([^']*)'${cast.replace(/:/g, "\\:")}`),
+    );
+    expect(match).not.toBeNull();
+    return (match as RegExpMatchArray)[1];
+  }
+
+  it("updates the lifetime_agency row and nothing else", () => {
+    const sql45 = statements();
+
+    expect(sql45.match(/\bUPDATE\b/gi)).toHaveLength(1);
+    expect(sql45).toMatch(
+      /UPDATE public\.plans\s+SET[\s\S]*WHERE id = 'lifetime_agency';/,
+    );
+    // No new catalogue row, so no loader, pricing or count contract moves.
+    expect(sql45).not.toMatch(/INSERT INTO/i);
+    expect(sql45).not.toMatch(/CREATE (OR REPLACE )?FUNCTION/i);
+    expect(sql45).not.toMatch(/\b(ALTER|DROP|DELETE)\b/i);
+    // Agency subscribers keep their 1,000: the subscription row is not named.
+    expect(sql45).not.toContain("'agency'");
+  });
+
+  it("caps the monthly allowance at 250 through the product's own limits", () => {
+    expect(JSON.parse(assigned("limits", "::jsonb"))).toEqual({
+      monthly_credits: 250,
+    });
+  });
+
+  it("states the allowance wherever the offer is presented", () => {
+    expect(JSON.parse(assigned("features", "::jsonb"))).toEqual([
+      "Everything in Agency, with 250 AI credits a month",
+      "One payment, no renewal",
+      "Founding offer limited to 50 completed sales",
+    ]);
+    // The plan dialog and Stripe Checkout show the description, not the bullets.
+    expect(assigned("description")).toBe(
+      "Pay once for permanent Agency access with 250 AI credits a month; " +
+        "limited to the first 50 completed sales",
+    );
+  });
+
+  it("leaves the price, the grant, the Stripe ids and the listing untouched", () => {
+    expect(statements()).not.toMatch(
+      /\b(price_monthly|price_yearly_\w+|grants_plan_id|is_active|sort_order|stripe_\w+|name|kind)\s*=/,
+    );
+  });
+
+  it("leaves the applied founding seed as it was", () => {
+    // Forward-only: 20260924065000 is applied in production, so the change has
+    // to arrive in a new file rather than by editing that one.
+    const seed = readFileSync(
+      join(
+        process.cwd(),
+        "supabase/migrations/20260924065000_agency_plan_and_founding_capacity.sql",
+      ),
+      "utf8",
+    );
+    const row = seed.slice(
+      seed.indexOf("'lifetime_agency', 'one_time'"),
+      seed.indexOf("\n  )", seed.indexOf("'lifetime_agency', 'one_time'")),
+    );
+
+    expect(row).toContain("'{}'::jsonb");
+    expect(row).toContain('["Everything in Agency", "One payment, no renewal"');
+  });
+});
