@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import { SENTRY_TUNNEL_ROUTE } from "./src/lib/monitoring/sentry-tunnel";
 
 const nextConfig: NextConfig = {
   // Enable experimental features for better monitoring
@@ -163,6 +164,13 @@ const sentryWebpackPluginOptions = {
   
   // Hides source maps from generated client bundles
   hideSourceMaps: true,
+
+  // Browser events go to this app's own origin and are rewritten to Sentry's
+  // ingest server-side (s46). Same-origin keeps them inside the CSP's
+  // `connect-src 'self'` and out of reach of ad blockers keyed on sentry.io.
+  // A fixed path, not `true` (random per build): src/middleware.ts has to name
+  // it to let it through without a session lookup.
+  tunnelRoute: SENTRY_TUNNEL_ROUTE,
 };
 
 // Make sure adding Sentry options is the last code to run before exporting

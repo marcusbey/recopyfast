@@ -52,6 +52,7 @@ jest.mock("@supabase/ssr", () => ({
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
 import { config, middleware } from "@/middleware";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
@@ -104,7 +105,19 @@ const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml"];
 /** The public landing page and its one exact cross-origin preview runtime. */
 const TRY_ASSETS = ["/try", "/try/rcf-try.js"];
 
-const SESSIONLESS_PATHS = [...EMBED_ASSETS, ...CRAWLER_ASSETS, ...TRY_ASSETS];
+/**
+ * Sentry's same-origin tunnel (s46). The browser posts error envelopes here and
+ * a rewrite forwards them to Sentry; whether the poster is signed in changes
+ * nothing about forwarding them.
+ */
+const TUNNEL_PATHS = [SENTRY_TUNNEL_ROUTE];
+
+const SESSIONLESS_PATHS = [
+  ...EMBED_ASSETS,
+  ...CRAWLER_ASSETS,
+  ...TRY_ASSETS,
+  ...TUNNEL_PATHS,
+];
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -194,5 +207,46 @@ describe("a request that cannot carry a session", () => {
         page.headers.get(header),
       ]);
     }
+  });
+});
+
+describe("the Sentry tunnel", () => {
+  it("does not broaden the tunnel bypass to sibling paths", async () => {
+    await run(`${SENTRY_TUNNEL_ROUTE}/not-the-tunnel`);
+
+    expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+    expect(getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("carries the same header set an ordinary page gets", async () => {
+    const tunnel = await run(SENTRY_TUNNEL_ROUTE);
+    const page = await run("/pricing");
+
+    for (const header of [
+      "X-Content-Type-Options",
+      "X-Frame-Options",
+      "X-XSS-Protection",
+      "Referrer-Policy",
+      "Permissions-Policy",
+      "Content-Security-Policy",
+    ]) {
+      expect([header, tunnel.headers.get(header)]).toEqual([
+        header,
+        page.headers.get(header),
+      ]);
+    }
+  });
+
+  it("is reachable from a page under its CSP: connect-src allows 'self'", async () => {
+    // The tunnel is a same-origin path, so no Sentry origin has to be added to
+    // connect-src for the browser SDK to deliver — this is what lets s46 ship
+    // without widening the policy.
+    const page = await run("/pricing");
+    const connectSrc = (page.headers.get("Content-Security-Policy") ?? "")
+      .split(";")
+      .map((directive) => directive.trim())
+      .find((directive) => directive.startsWith("connect-src "));
+
+    expect(connectSrc?.split(" ")).toContain("'self'");
   });
 });

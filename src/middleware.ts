@@ -5,6 +5,7 @@ import {
   hasAnyEntitlement,
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
+import { SENTRY_TUNNEL_ROUTE } from "@/lib/monitoring/sentry-tunnel";
 
 // Use Node.js runtime for full API compatibility
 export const runtime = "nodejs";
@@ -64,6 +65,15 @@ async function isUnentitled(
  * the production embed. Keeping both exact avoids turning sibling `/try/*`
  * routes into an accidental auth bypass.
  *
+ * `SENTRY_TUNNEL_ROUTE` (s46) is where the browser posts its Sentry events; a
+ * rewrite added by `withSentryConfig` forwards them to Sentry's ingest *after*
+ * this middleware runs. It is not a protected route, so it was never blocked —
+ * but every error event paid a GoTrue round trip, and a rotated session cookie
+ * could land on Sentry's response. Sentry's docs say to drop the tunnel from the
+ * matcher; this file keeps it matched, for the headers, like every path here.
+ * Exact match: with `trailingSlash` off, `/monitoring/` is redirected before it
+ * gets here, and anything under the path is not the tunnel.
+ *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
  * executable JavaScript loaded cross-origin onto every customer site — the one
@@ -75,7 +85,8 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/try" ||
     pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
-    pathname === "/sitemap.xml"
+    pathname === "/sitemap.xml" ||
+    pathname === SENTRY_TUNNEL_ROUTE
   );
 }
 
@@ -207,8 +218,14 @@ function withSecurityHeaders(response: NextResponse): NextResponse {
 
   // connect-src must allowlist every origin the client opens XHR/fetch/WebSocket to,
   // or the browser silently blocks them. 'self' alone breaks Supabase (REST + wss
-  // realtime), the Socket.io server, and Sentry ingest. Derive the exact origins
-  // from env so we don't widen the policy to a blanket https:/wss:.
+  // realtime) and the Socket.io server. Derive the exact origins from env so we
+  // don't widen the policy to a blanket https:/wss:.
+  //
+  // Sentry does not need an entry of its own: since s46 the browser SDK posts to
+  // the same-origin `SENTRY_TUNNEL_ROUTE`, which 'self' covers. The DSN origin is
+  // still added below for the one case the SDK skips the tunnel — a DSN that is
+  // not a sentry.io SaaS host. It was already here before s46, which is how we
+  // know the CSP was never what kept events from arriving.
   const connectSrc = new Set<string>(["'self'"]);
   const addOrigin = (raw?: string) => {
     if (!raw) return;
@@ -275,8 +292,8 @@ export const config = {
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
-     * `embed/`, `/try`, its exact runtime asset, robots.txt and sitemap.xml are
-     * deliberately NOT excluded here.
+     * `embed/`, `/try`, its exact runtime asset, robots.txt, sitemap.xml and
+     * the Sentry tunnel are deliberately NOT excluded here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so

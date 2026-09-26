@@ -1705,3 +1705,27 @@ except the monthly AI-credit allowance, which is 250 instead of 1,000. Spots sta
 
 Research: `docs/research/s45-lifetime-ai-credits.md`. Plan: `docs/plans/s45-lifetime-ai-credits.md`.
 Embed allocation: 0 bytes.
+
+## Story s46-sentry-wiring — production errors reach Sentry
+
+Operator-prevalidated scope, 2026-09-26 ("add the RecopyFast project to my Sentry"). Complexity:
+2. Branch `feature/s46-sentry-wiring`. With the new project's DSN in Vercel production and a
+fresh build, a live uncaught error on www.recopyfa.st sent zero requests to Sentry and the DSN's
+public key was absent from the homepage JS: the browser SDK was never initialised.
+
+- [x] The browser SDK initialises from `src/instrumentation-client.ts` (the only client entry
+  Next 16's default Turbopack build loads) and exports `onRouterTransitionStart`;
+  `sentry.client.config.ts` is gone. A build with a DSN carries its public key in
+  `.next/static`.
+- [x] Exactly one server instrumentation file, `src/instrumentation.ts`, loaded under both
+  bundlers: `nodejs` → `sentry.server.config`, `edge` → `sentry.edge.config`, only in
+  production with a DSN; it exports `onRequestError = Sentry.captureRequestError`.
+- [x] Browser events go same-origin through `tunnelRoute` `/monitoring`; the middleware lets
+  that exact path through without a GoTrue round trip or redirect, keeps its security headers,
+  and neither the CSP nor the matcher is widened.
+- [x] `enabled` stays production-only, sample rates and Replay masking unchanged, no PII.
+- [x] Required local gates pass, including `npm run build` with a dummy DSN and no
+  `SENTRY_AUTH_TOKEN`; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s46-sentry-wiring.md`. Plan: `docs/plans/s46-sentry-wiring.md`.
+Embed allocation: 0 bytes.
