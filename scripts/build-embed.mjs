@@ -125,8 +125,29 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * build-size-gate.test.ts pins the same pair, so the freed bytes cannot be handed
  * back by restoring the old constants.
  */
-const MAX_BUNDLE_GZ = 46226;
-const MAX_WIDGET_GZ = 33465;
+/*
+ * RATCHETED DOWN 2026-09-25 (s41-edit-link-multipage), from 46226 / 33465.
+ *
+ * s41 keeps an edit link alive across page loads (ADR 036). That costs bytes on
+ * a gate with zero headroom, so the branch paid first, deleting dead code, and
+ * the ceiling keeps the difference:
+ *
+ *   46226 / 33465  ceilings before s41 (= measured on main at 0e1d5bc)
+ *   −398 / −394    dead email-capture modal and its `requiresEmail` branch: no
+ *                  server path has sent `requiresEmail: true` since 747d210;
+ *                  staging-access.device-binding.test.ts pins that
+ *   −24 / −22      `escapeHtml`: no caller
+ *   +116 / +121    edit-link persistence in sessionStorage (+90 / +94), the
+ *                  two 401/403 clears (+27 / +28), Preview Live's `noopener`
+ *                  (−1 / −1, gzip context)
+ *   −8 / −11       Preview Live's two no-op searchParams.delete calls
+ *   +26 / +24      editor bar: claim and divider hide at ≤480px (operator T5b)
+ *   45938 / 33183  measured on the branch — the new ceilings
+ *
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45938;
+const MAX_WIDGET_GZ = 33183;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

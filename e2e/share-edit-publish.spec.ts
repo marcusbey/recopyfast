@@ -295,10 +295,13 @@ test.describe("share edit publish flow", () => {
       .toBe(newText);
     await expect.poll(() => getContentColumn("staging_content")).toBeNull();
 
-    // A plain visitor load: no staging query, no socket broadcast in flight.
-    // The published copy has to arrive purely from the widget fetching it on
-    // init, and it has to land on an element the widget re-identified from
-    // scratch under the exact same id.
+    // A fresh load: no credential in the URL, no socket broadcast in flight.
+    // In this same tab it is not a visitor load: an invited editor's grant is
+    // stored, and since s41 an edit link is restored from the tab's
+    // sessionStorage (ADR 036). Either way the staging read falls back to
+    // published once staging_content is cleared, so the published copy has to
+    // arrive purely from the widget fetching it on init, and it has to land on
+    // an element the widget re-identified from scratch under the exact same id.
     await page.goto(TARGET_URL, { waitUntil: "domcontentloaded" });
     await expect(heading).toHaveAttribute("data-rcf-id", elementId, {
       timeout: 20_000,

@@ -66,8 +66,21 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //                  strings (they shipped as string bytes; now JS comments)
 //   +56 / +57      the editor bar's "All sites" control
 //   46226 / 33465  measured on feature/s39-editor-back-to-sites
-const SEEDED_MAX_BUNDLE_GZ = 46226;
-const SEEDED_MAX_WIDGET_GZ = 33465;
+//
+// RATCHETED 2026-09-25 (s41), DOWNWARD: 46226 → 45938, 33465 → 33183. s41 spent
+// bytes on keeping edit links alive across pages and paid for them in-branch
+// first, so the ceiling keeps the difference:
+//
+//   46226 / 33465  ceilings before s41 (= measured on main at 0e1d5bc)
+//   −398 / −394    dead email-capture modal and its `requiresEmail` branch
+//                  (unreachable since 747d210; staging-access tests pin it)
+//   −24 / −22      `escapeHtml`, no caller
+//   +116 / +121    edit-link persistence + the two 401/403 clears + noopener
+//   −8 / −11       Preview Live's two no-op searchParams.delete calls
+//   +26 / +24      editor bar: claim and divider hide at ≤480px (T5b)
+//   45938 / 33183  measured on feature/s41-edit-link-multipage
+const SEEDED_MAX_BUNDLE_GZ = 45938;
+const SEEDED_MAX_WIDGET_GZ = 33183;
 
 interface CheckRun {
   status: number;
