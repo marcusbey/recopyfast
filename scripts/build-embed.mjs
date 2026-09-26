@@ -125,8 +125,48 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * build-size-gate.test.ts pins the same pair, so the freed bytes cannot be handed
  * back by restoring the old constants.
  */
-const MAX_BUNDLE_GZ = 46226;
-const MAX_WIDGET_GZ = 33465;
+/*
+ * RATCHETED DOWN 2026-09-25 (s40-ai-widget-auth), from 46226 / 33465.
+ *
+ * s40 made the AI modal work for editors, with zero headroom after s39, so it paid
+ * for that in the same branch by deleting an unmetered AI control:
+ *
+ *   46226 / 33465  ceilings before s40 = measured on main at 0e1d5bc (s39 merged)
+ *   +26 / +28      AI fetch carries editor credentials + server message: the
+ *                  `/ai/suggest` request sends `siteId`, `editorAuthHeaders()` and
+ *                  `editorTokenBody()` instead of the site token, and the modal
+ *                  shows the server's refusal sentence. Alone, over both ceilings.
+ *   −71 / −67      Edit Board auto-translate control removed: the "Auto-translate
+ *                  with AI" checkbox made POST /edit-board/languages run one
+ *                  unmetered OpenAI call per element into a column nothing reads.
+ *   46176 / 33420  measured on the branch — the new ceilings
+ *
+ * (At 0b8014f, before s39, the same two changes measured +24/+27 and −77/−69:
+ * gzip deltas move with the surrounding bytes, so only this branch's own
+ * measurement is recorded as the ceiling.) build-size-gate.test.ts pins the same
+ * pair.
+ */
+/*
+ * RATCHETED DOWN 2026-09-25 (s41-edit-link-multipage), from 46176 / 33420 (s40).
+ *
+ * s41 keeps an edit link alive across page loads (ADR 036) and paid first by
+ * deleting dead code. Measured on its own base (0e1d5bc) it was −288 / −282;
+ * merged over s40 the same changes measure −293 / −298 (gzip context moves):
+ *
+ *   −398 / −394  dead email-capture modal and its `requiresEmail` branch (no
+ *                server path has sent `requiresEmail: true` since 747d210;
+ *                staging-access.device-binding.test.ts pins that)
+ *   −24 / −22    `escapeHtml`: no caller
+ *   +116 / +121  edit-link persistence in sessionStorage, the two 401/403
+ *                clears, Preview Live's `noopener`
+ *   −8 / −11     Preview Live's two no-op searchParams.delete calls
+ *   +26 / +24    editor bar: claim and divider hide at ≤480px (operator T5b)
+ *   45883 / 33122  measured on the merged tree — the new ceilings
+ *
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45883;
+const MAX_WIDGET_GZ = 33122;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

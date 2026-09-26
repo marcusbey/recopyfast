@@ -1523,10 +1523,12 @@ done with one, can get back to the list of every site they may edit without re-e
 - [x] Embed allocation paid in-branch: CSS comments leave the shipped template strings
   (measured −446 gz), the control is added, and the byte gate ratchets down to the new
   measurement with both deltas itemised.
-- [ ] Jest covers the hub mount states, cookie lifetime, sign-out and the bar control. The
+- [x] Jest covers the hub mount states, cookie lifetime, sign-out and the bar control. The
   Playwright count stays 44 (contract); the journey site → All sites → list → second site is
   proven live in production after deploy.
-- [ ] Required gates pass; independent review before merge.
+- [x] Required gates pass; independent review before merge.
+
+Live proof 2026-09-25 (`.omx/qa-20260925/live-s39.mjs`): Remember unticked by default; hub cookie 7.00 days, httpOnly/Secure/Lax; aicompoz → All sites → list with no code → cross-device site → All sites → sign-out → reload stays signed out, cookie cleared.
 
 Research: `docs/research/s39-editor-back-to-sites.md`. Plan: `docs/plans/s39-editor-back-to-sites.md`.
 
@@ -1545,6 +1547,8 @@ production, desktop and mobile). Complexity: 2. Branch `feature/s43-launch-polis
   redirect entry. Other locale-dependent call sites are listed in research, not changed.
 - [x] `npm run precommit` and `npm run build` pass; one commit on the branch. No push, PR,
   merge or production action in this run.
+
+Live proof 2026-09-26: `/pricing`, `/PRICING` → 308 `/#pricing`, query kept; `/blog` in fr-FR/Paris, ja-JP/Tokyo, en-US/Los Angeles → no console errors, identical dates.
 
 Research: `docs/research/s43-launch-polish.md`. Plan: `docs/plans/s43-launch-polish.md`.
 Embed allocation: 0 bytes.
@@ -1567,9 +1571,90 @@ only and s38 removed its write privileges, so every create/pause/delete from
   write path and the authenticated denial it replaces.
 - [x] Required local gates pass; one story commit. No push, PR, merge or production action.
 
+Live proof 2026-09-26 (`.omx/qa-20260925/live-s42.mjs`, QA owner): create 200 with plaintext once and no `key_hash`; list 200; pause 200 → key refused 401; delete 200 → list empty, key 401. Found alongside: `/api/v1/content` answers 429 to every request (limiter queries columns `rate_limits` never had) → s44.
+
 Research: `docs/research/s42-api-keys-writes.md`. Plan: `docs/plans/s42-api-keys-writes.md`.
 The settings panel still has no pause/resume control (PUT is API-only); that is UI work for a
 follow-up story.
+
+## Story s40-ai-widget-auth — AI suggestions work in edit mode
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s40-ai-widget-auth`. The person editing a page — the owner in edit mode, or an invited
+editor — clicks "🪄 AI" and gets suggestions, billed to the site owner. Today every attempt fails:
+`/api/ai/suggest` expects a dashboard cookie the widget cannot send.
+
+- [x] `POST /api/ai/suggest` authorises the editor with the existing
+  `validateEditorTokenFromRequest` + `requireEditorPermission(…, "edit")` (device grant in
+  `X-RCF-Editor-Grant`, edit-session or staging token in the body). The public site token alone is
+  refused and nothing is spent. No cookie path and no new auth helper.
+- [x] Spend is charged to the site owner (`admin` row in `site_permissions`, via the existing
+  `resolveSiteOwnerId`), through the service role, never to the caller and never via `sites`.
+  The owner's plan is honoured through the existing `canUseAIFeatures` gate; no plan / no credits
+  fails closed with a clear message, worded for the owner or for an invited editor.
+- [x] Rate limited per IP before authorization and per site after the permission grade, both fail
+  closed. Public CORS on every response (429s included), no cookies; `OPTIONS` 204.
+- [x] Every goal the modal offers is accepted (`engage`, `professional` and `casual` mapped
+  server-side). A missing `OPENAI_API_KEY` refuses before charging and logs loudly; a provider
+  failure refunds the owner and never echoes the provider's message.
+- [x] The widget sends editor credentials (grant header, or token in the body — never in a URL),
+  `siteId`, no site token, and shows the server's message on refusal.
+- [x] "Auto-translate with AI" leaves the Edit Board and `POST /api/edit-board/languages` stops
+  calling the model: it spent unmetered OpenAI per element into `site_languages.translations`,
+  which nothing reads. `/api/ai/translate` has no widget caller and is out of scope.
+- [x] Embed allocation paid in-branch: measured at `0b8014f` as +24 bundle / +27 widget gz for the
+  credentials and message, −77 / −69 for removing auto-translate, net −53 / −48. The gate ratchets
+  down to the new measurement with both deltas itemised (re-measured after the rebase on s39).
+- [x] Jest covers the route through the real editor-access code with real signed grants, the
+  explicit-payer billing path and the widget's requests. The Playwright count stays 44 (contract);
+  owner and invited-editor suggestions are proven live in production after deploy.
+- [x] Required gates pass; independent review before merge.
+
+Live proof 2026-09-26: invited editor (grant) and owner (edit link) each got 200 with suggestions through heading → 🪄 AI → Generate; each charged 1 credit to the site owner (`credit_usage`); site-token-only call → 401.
+
+Research: `docs/research/s40-ai-widget-auth.md`. Plan: `docs/plans/s40-ai-widget-auth.md`.
+
+## Story s41-edit-link-multipage — an edit link keeps working as I click through my site
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s41-edit-link-multipage`. An owner who follows **Edit website**, or anyone who follows a
+**Share Preview Link**, stays in edit mode (and staging mode, for share links) as they move
+between pages of the site. Today the credential lives only in the first page's memory, so every
+later load in the tab (an internal link, a reload, Edit Board's restore reload) boots as a
+visitor. Invited editors on device grants are already unaffected.
+
+- [x] Following an edit or share link persists its credential in **sessionStorage**, keyed
+  `rcf_edit_link:<SITE_ID>`, and never in localStorage (bearer, no origin or device binding, per
+  ADR). Full-page navigations and reloads in the same tab on the same origin boot in edit mode
+  (edit session) or staging mode (share link). The address bar is still stripped on arrival, and
+  no URL the widget builds gains a credential it did not already carry.
+- [x] A new tab opened without the token stays in visitor mode, and this is stated. Preview Live
+  opens with `noopener`, so it shows the visitor view and does not inherit the tab's session.
+- [x] The stored credential is removed when the server refuses it: 401/403 from
+  `/staging/validate`, or a terminal 401/403 on save or publish. It is kept through 5xx and network
+  failures. A token in the URL replaces the stored one; an orphan `rcf_token` without
+  `rcf_staging=1` is never stored. There is no exit control today, and none is added; closing the
+  tab ends the session.
+- [x] The server lifetime is the only lifetime: every load and write is still re-validated, and
+  persistence adds no client-side expiry or bypass.
+- [x] Storage that is blocked, throws or holds garbage never reaches the host page
+  (non-negotiable #4). The widget degrades to visitor mode.
+- [x] The embed allocation is paid in-branch: the dead email-capture modal (unreachable since
+  `747d210`) and the unused `escapeHtml` are removed, and the gate ratchets down to the new
+  measurement with every delta itemised (measured −306 / −295 gz net on s39).
+- [x] An ADR records the sessionStorage decision and its rejected options. jsdom tests cover
+  persist, restore, clear, throw and noopener. The Playwright count stays 44 (contract).
+- [x] Required gates pass; independent review before merge.
+- [ ] Proven live in production after deploy: owner edit link → click through three pages →
+  still editing → save on page 3 publishes. Share link → click through → staging banner on every
+  page. A new tab is a visitor tab.
+
+Out of scope: SPA client-side routing (hydration and page path on `pushState`), already deferred
+at s27. Tokenless owner link on the dashboard Content page (`rcf_edit`).
+
+Live proof 2026-09-26 (partial, `.omx/qa-20260925/live-s41.mjs`): owner edit link → edit mode; reload → still editing; clean-URL navigation → still editing; new tab → visitor; token in sessionStorage only. Open: a three-page save/publish and the share-link walk need a multi-page site with the snippet — both QA sites have one page.
+
+Research: `docs/research/s41-edit-link-multipage.md`. Plan: `docs/plans/s41-edit-link-multipage.md`.
 
 ## Story s44-v1-rate-limiter — the public content API answers requests
 

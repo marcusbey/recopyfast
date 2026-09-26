@@ -1,7 +1,7 @@
 /**
  * Site Languages API
  * GET: List all languages for a site
- * POST: Add a new language (with optional auto-translation)
+ * POST: Add a new language (no translation — see the POST handler)
  * PUT: Update language translations
  * DELETE: Remove a language
  */
@@ -10,7 +10,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { StagingAccessManager } from "@/lib/auth/staging-access";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
-import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
@@ -54,13 +53,13 @@ function meterSite(request: NextRequest, siteId: string) {
 }
 
 /**
- * Adding a language is metered far tighter, and separately, because
- * `autoTranslate` runs one OpenAI call PER content element: a single accepted
- * request is an unbounded-ish bill, not one row. Its own bucket so a burst of
- * ordinary language reads can never consume the budget that caps the spend, and
- * vice versa.
+ * Adding a language is metered far tighter, and separately. It was sized for
+ * `autoTranslate`, which ran one OpenAI call PER content element — a single
+ * accepted request was an unbounded-ish bill, not one row. That branch is gone
+ * (s40, see the POST handler); the bucket stays because it costs nothing and
+ * adding a language is still a once-in-a-while human action.
  *
- * 10/min: adding a language is a once-in-a-while human action.
+ * 10/min.
  */
 function meterTranslation(request: NextRequest, siteId: string) {
   return enforceRateLimit(request, {
@@ -190,12 +189,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // `autoTranslate` is deliberately not read. Every cached copy of the
+    // permanent-URL widget built before s40 still sends `autoTranslate: true`
+    // (the checkbox was on by default), so the field stays tolerated rather than
+    // rejected — and ignored. See the tombstone at the insert below.
     const {
       siteId,
       languageCode,
       languageName,
       isDefault = false,
-      autoTranslate = false,
     } = await request.json();
 
     if (!siteId || !languageCode) {
@@ -271,50 +273,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create translations object if auto-translate is enabled
-    const translations: Record<string, string> = {};
-    let translationCoverage = 0;
-
-    if (autoTranslate) {
-      // Get all content elements
-      const { data: elements } = await supabase
-        .from("content_elements")
-        .select("element_id, staging_content, published_content")
-        .eq("site_id", siteId);
-
-      if (elements && elements.length > 0) {
-        let translatedCount = 0;
-
-        for (const element of elements) {
-          const content = element.staging_content || element.published_content;
-          if (!content) continue;
-
-          try {
-            // Use AI to translate
-            const result = await aiService.translateText({
-              text: content,
-              fromLanguage: "English",
-              toLanguage: finalLanguageName,
-            });
-
-            if (result.success && result.data) {
-              translations[element.element_id] = result.data;
-              translatedCount++;
-            }
-          } catch (translateError) {
-            console.error(
-              `Error translating element ${element.element_id}:`,
-              translateError,
-            );
-          }
-        }
-
-        translationCoverage =
-          elements.length > 0 ? (translatedCount / elements.length) * 100 : 0;
-      }
-    }
-
-    // Create the language
+    // TOMBSTONE (s40): there used to be an `autoTranslate` branch here, driven
+    // by the Edit Board's "Auto-translate with AI" checkbox, on by default. It
+    // read every content element on the site and made ONE OpenAI call PER
+    // ELEMENT — unmetered, charged to nobody, never checked against the owner's
+    // plan — and wrote the results into `site_languages.translations`, a column
+    // that nothing in the product reads (this route is the only code that
+    // touches the table). Real money, spent on every "Add Language" click, for
+    // output no page ever displayed.
+    //
+    // Removed rather than billed: billing it would mean charging customers for
+    // translations they cannot see. Re-adding it needs both halves at once —
+    // owner billing on the path `/api/ai/suggest` uses (editor authorised,
+    // `resolveSiteOwnerId`, `consumeFeatureUsage` with the service client) AND
+    // a reader that actually serves `site_languages.translations` to visitors.
     const { data: language, error } = await supabase
       .from("site_languages")
       .insert({
@@ -322,9 +294,9 @@ export async function POST(request: NextRequest) {
         language_code: languageCode,
         language_name: finalLanguageName,
         is_default: isDefault,
-        translations: autoTranslate ? translations : {},
-        translation_coverage: translationCoverage,
-        last_translated_at: autoTranslate ? new Date().toISOString() : null,
+        translations: {},
+        translation_coverage: 0,
+        last_translated_at: null,
       })
       .select()
       .single();
@@ -344,8 +316,6 @@ export async function POST(request: NextRequest) {
       NextResponse.json({
         success: true,
         language,
-        autoTranslated: autoTranslate,
-        translatedCount: Object.keys(translations).length,
       }),
       origin,
     );

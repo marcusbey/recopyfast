@@ -19,6 +19,7 @@ const API = `${ORIGIN}/api`;
 const GRANT = "rcfg1.the-device-grant";
 const EXPIRES_AT = new Date(Date.now() + 86400000).toISOString();
 const STORAGE_KEY = `rcf_editor_grant:${SITE_ID}`;
+const EDIT_LINK_KEY = `rcf_edit_link:${SITE_ID}`;
 
 type Failure = number | "network";
 
@@ -394,6 +395,40 @@ describe("terminal Save recovery", () => {
       1,
     );
   });
+
+  // s41 keeps an edit link in the tab's sessionStorage (ADR 036). A terminal
+  // refusal is the server's verdict that the credential is dead, so the next
+  // page load must not present it again; an outage is not a verdict.
+  //
+  // Last in this describe on purpose: the 500 and network cases leave owner
+  // widgets that are still unlocked, and jsdom cannot unload them. Their
+  // document-level click handler answers the next test's clicks first, so
+  // placed before the Edit Board test they took that test's Save and left the
+  // new board unlocked.
+  it.each([401, 403] as const)(
+    "a terminal %s save forgets the edit link",
+    async (status) => {
+      await boot(status, true);
+      expect(window.sessionStorage.getItem(EDIT_LINK_KEY)).not.toBeNull();
+
+      await typeAndSave();
+
+      expect(window.sessionStorage.getItem(EDIT_LINK_KEY)).toBeNull();
+    },
+  );
+
+  it.each([500, "network"] as const)(
+    "a %s failure on save keeps the edit link",
+    async (failure) => {
+      await boot(failure, true);
+
+      await typeAndSave();
+
+      expect(
+        JSON.parse(window.sessionStorage.getItem(EDIT_LINK_KEY) as string),
+      ).toEqual([null, "owner-edit-token"]);
+    },
+  );
 });
 
 describe("inline toolbar placement below editor chrome", () => {

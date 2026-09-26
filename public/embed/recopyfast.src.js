@@ -79,18 +79,12 @@
   const SITE_ID = document.currentScript.getAttribute('data-site-id');
   const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
 
-  // Staging mode detection from URL parameters
+  // Staging mode detection from URL parameters. `let`, not `const`: on a load
+  // with no credential in the URL, the edit-link restore below fills them in.
   const urlParams = new URLSearchParams(window.location.search);
-  const STAGING_MODE = urlParams.get('rcf_staging') === '1';
-  const STAGING_TOKEN = urlParams.get('rcf_token');
-  const EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
-  // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
-  // evaluates to the TOKEN STRING when a staging link is opened, and the value
-  // travels into the socket handshake as `stagingMode=<token>`, which the
-  // realtime service compares against the literal 'true' — so every
-  // invite-link editor connected as a NON-staging socket and had their
-  // realtime saves refused with "Live updates must be saved through staging".
-  const EDITOR_MODE = !!((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN);
+  let STAGING_MODE = urlParams.get('rcf_staging') === '1';
+  let STAGING_TOKEN = urlParams.get('rcf_token');
+  let EDIT_SESSION_TOKEN = urlParams.get('rcf_edit_token');
 
   // Immediately strip staging params from the visible URL so they don't persist
   // in browser history, bookmarks, or copy-pasted links.
@@ -104,6 +98,54 @@
     history.replaceState(history.state, '', cleanUrl);
   }
 
+  // An edit link has to survive the next page load (s41, ADR 036).
+  //
+  // TOMBSTONE. The credential used to live in this page's memory only: read
+  // above, stripped, never written down. Every later full-page load in the tab
+  // (an internal link, a reload, Edit Board's restore reload) found a clean URL
+  // and booted a visitor, so the owner's "Edit website" link and every Share
+  // Preview Link stopped working at the first click. Memory-only was the s41
+  // bug; do not "simplify" this back into it.
+  //
+  // sessionStorage, never localStorage. Both tokens are bearer credentials
+  // bound to no origin and no device (an edit session's IP check only logs).
+  // One tab is the most they may outlive their page; localStorage would survive
+  // restarts and hand the next person at a shared computer an editing session.
+  // The server re-validates on every load and every write, so its expiry and
+  // revocation stay the only lifetime: nothing here adds a client-side one.
+  //
+  // The strip above still runs on the URL values first, and nothing is ever
+  // written back into a URL: re-appending the token to links is the A-29 leak
+  // (history, Referer, access logs). Only a URL that itself establishes editor
+  // mode is stored, so an orphan `rcf_token` without `rcf_staging=1` stays out
+  // (editor-grant-requests.test.ts), and a token in the URL always replaces the
+  // stored one. Keyed per SITE_ID so two widgets on one origin never share a
+  // session. Every access sits in try/catch: merely touching sessionStorage
+  // throws when site data is blocked, and a throw here lands in the host page
+  // (non-negotiable #4). Blocked storage or a garbage value degrades to a
+  // visitor load; a dead token meets a 401 and is forgotten (forgetEditLink).
+  const EDIT_LINK_KEY = 'rcf_edit_link:' + SITE_ID;
+  function forgetEditLink() {
+    try { sessionStorage.removeItem(EDIT_LINK_KEY); } catch (e) {}
+  }
+  try {
+    if ((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN) {
+      sessionStorage.setItem(EDIT_LINK_KEY, JSON.stringify([STAGING_MODE ? STAGING_TOKEN : null, EDIT_SESSION_TOKEN]));
+    } else {
+      const kept = JSON.parse(sessionStorage.getItem(EDIT_LINK_KEY));
+      if (kept) { STAGING_TOKEN = kept[0]; STAGING_MODE = !!STAGING_TOKEN; EDIT_SESSION_TOKEN = kept[1]; }
+    }
+  } catch (e) {}
+
+  // Boolean, not `(STAGING_MODE && STAGING_TOKEN) || ...`: that expression
+  // evaluates to the TOKEN STRING when a staging link is opened, and the value
+  // travels into the socket handshake as `stagingMode=<token>`, which the
+  // realtime service compares against the literal 'true' — so every
+  // invite-link editor connected as a NON-staging socket and had their
+  // realtime saves refused with "Live updates must be saved through staging".
+  // Computed after the restore above, so a restored edit link counts.
+  const EDITOR_MODE = !!((STAGING_MODE && STAGING_TOKEN) || EDIT_SESSION_TOKEN);
+
   if (!SITE_ID) {
     console.error('ReCopyFast: No site ID provided');
     return;
@@ -112,13 +154,6 @@
   if (!SITE_TOKEN) {
     console.error('ReCopyFast: No site token provided');
     return;
-  }
-
-  // Helper to safely escape HTML for display
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
   }
 
   // ==========================================
@@ -985,15 +1020,26 @@
         const result = await response.json();
 
         if (!result.valid) {
+          // A stored edit link (ADR 036) was valid on the page that stored it,
+          // so a 401/403 here means it expired or was revoked: forget it, and
+          // the modal below is shown once, not on every page. Any other status
+          // (a 500 has no `valid` key at all) is our outage, not a verdict on
+          // the holder; forgetting on it would sign an editor out mid-session,
+          // the same reasoning as the grant client's validate().
+          if (response.status === 401 || response.status === 403) forgetEditLink();
           this.showStagingError('Invalid or expired staging link.');
           return;
         }
 
-        if (result.requiresEmail) {
-          await this.showEmailCaptureUI();
-          return;
-        }
-
+        // TOMBSTONE. A `requiresEmail` branch here opened an email-capture
+        // modal. No server path has sent `requiresEmail: true` since 747d210
+        // (2026-08-01): a link row without an email is now refused outright
+        // (`valid: false`) rather than letting whoever opened the URL first
+        // name themselves the editor. The modal was unreachable, and s41
+        // deleted it to pay for edit-link persistence. The server side of that
+        // is pinned in staging-access.device-binding.test.ts ("requiresEmail
+        // is never emitted"); do not restore the modal without first making
+        // the server send it again, deliberately.
         if (result.requiresVerification) {
           await this.showVerificationUI(result.email);
           return;
@@ -1136,6 +1182,10 @@
      */
     handleTerminalWriteFailure(error, elementId, content) {
       if (!error || (error.status !== 401 && error.status !== 403)) return false;
+      // The server refused the credential itself, so the tab must not present
+      // it again on the next page load (ADR 036). Past the status filter on
+      // purpose: 5xx and offline stay retryable and keep the edit link.
+      forgetEditLink();
       if (this.isMutationLocked) return true;
 
       this.isMutationLocked = true;
@@ -1284,6 +1334,10 @@
         //     (design-system.md).
         //   .rcf-editor-banner-email — Truncating is a layout decision; losing
         //     the address is not — the full value stays in the title attribute.
+        //   @media (max-width: 480px) — Found live after s39 shipped: at 360px
+        //     the claim wrapped onto four lines and squeezed the address down
+        //     to "r…". On a phone the claim and its divider give way, so the
+        //     address (whose session this is) gets the room.
         style.textContent = `
           #rcf-editor-banner, #rcf-editor-banner * { box-sizing: border-box; }
           #rcf-editor-banner {
@@ -1358,6 +1412,10 @@
           #rcf-editor-banner .rcf-editor-banner-publish:hover {
             background: hsl(174 48% 58%);
           }
+          @media (max-width: 480px) {
+            #rcf-editor-banner .rcf-editor-banner-claim,
+            #rcf-editor-banner .rcf-editor-banner-divider { display: none; }
+          }
         `;
         document.head.appendChild(style);
       }
@@ -1380,6 +1438,7 @@
       // failure the deleted note above was a symptom of.
       if (this.editMode) {
         const claim = document.createElement('span');
+        claim.className = 'rcf-editor-banner-claim';
         claim.textContent = 'You can edit this page';
         banner.appendChild(claim);
 
@@ -1673,124 +1732,6 @@
         emailInput.onkeydown = function(e) { if (e.key === 'Enter') submit(); };
         codeInput.onkeydown = function(e) { if (e.key === 'Enter') submit(); };
         overlay.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
-      });
-    }
-
-    showEmailCaptureUI() {
-      return new Promise((resolve) => {
-        const overlay = this.createOverlay();
-        const modal = document.createElement('div');
-        modal.className = 'rcf-modal';
-
-        // Build modal using DOM methods for security
-        const iconContainer = document.createElement('div');
-        iconContainer.style.cssText = 'text-align: center; margin-bottom: 24px;';
-
-        const icon = document.createElement('div');
-        icon.className = 'rcf-modal-icon';
-        icon.style.background = 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%)';
-        icon.style.border = '1px solid rgba(59, 130, 246, 0.3)';
-        icon.textContent = '🔐';
-
-        const title = document.createElement('h2');
-        title.className = 'rcf-modal-title';
-        title.textContent = 'Staging Access';
-
-        const subtitle = document.createElement('p');
-        subtitle.className = 'rcf-modal-subtitle';
-        subtitle.textContent = 'Enter your email to access the staging environment';
-
-        iconContainer.appendChild(icon);
-        iconContainer.appendChild(title);
-        iconContainer.appendChild(subtitle);
-
-        const formContainer = document.createElement('div');
-        formContainer.style.cssText = 'margin-bottom: 24px;';
-
-        const label = document.createElement('label');
-        label.className = 'rcf-modal-label';
-        label.textContent = 'Email Address';
-
-        const emailInput = document.createElement('input');
-        emailInput.type = 'email';
-        emailInput.id = 'rcf-email-input';
-        emailInput.className = 'rcf-modal-input';
-        emailInput.placeholder = 'your@email.com';
-
-        const errorEl = document.createElement('p');
-        errorEl.id = 'rcf-email-error';
-        errorEl.className = 'rcf-modal-error';
-
-        formContainer.appendChild(label);
-        formContainer.appendChild(emailInput);
-        formContainer.appendChild(errorEl);
-
-        const submitBtn = document.createElement('button');
-        submitBtn.id = 'rcf-email-submit';
-        submitBtn.className = 'rcf-modal-btn rcf-modal-btn-primary';
-        const btnText = document.createElement('span');
-        btnText.textContent = 'Continue';
-        const btnArrow = document.createElement('span');
-        btnArrow.textContent = '→';
-        submitBtn.appendChild(btnText);
-        submitBtn.appendChild(btnArrow);
-
-        modal.appendChild(iconContainer);
-        modal.appendChild(formContainer);
-        modal.appendChild(submitBtn);
-
-        overlay.appendChild(modal);
-        document.body.appendChild(overlay);
-
-        emailInput.focus();
-
-        const submit = async () => {
-          const email = emailInput.value.trim();
-
-          if (!email || !email.includes('@')) {
-            errorEl.textContent = 'Please enter a valid email address';
-            errorEl.style.display = 'block';
-            return;
-          }
-
-          submitBtn.disabled = true;
-          submitBtn.innerHTML = '<span>Sending code...</span>';
-
-          try {
-            const response = await fetch(RECOPYFAST_API + '/staging/verify', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                token: this.stagingToken,
-                email: email,
-                action: 'capture'
-              })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-              document.body.removeChild(overlay);
-              await this.showVerificationUI(email);
-              resolve();
-            } else {
-              errorEl.textContent = result.error || 'Failed to send verification code';
-              errorEl.style.display = 'block';
-              submitBtn.disabled = false;
-              submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
-            }
-          } catch (error) {
-            errorEl.textContent = 'Network error. Please try again.';
-            errorEl.style.display = 'block';
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = '<span>Continue</span><span>→</span>';
-          }
-        };
-
-        submitBtn.onclick = submit;
-        emailInput.onkeydown = function(e) {
-          if (e.key === 'Enter') submit();
-        };
       });
     }
 
@@ -2307,11 +2248,14 @@
 
       document.body.style.paddingTop = (banner.offsetHeight + parseInt(document.body.style.paddingTop || 0)) + 'px';
 
+      // `noopener` is load-bearing since s41 (ADR 036). Per the HTML spec, a
+      // window.open that keeps its opener copies this tab's sessionStorage,
+      // edit link included, so "live" would have opened as another staging
+      // tab. The address bar is already clean (stripped at parse time), which
+      // is why the two searchParams.delete calls that used to sit here, both
+      // no-ops, are gone.
       previewBtn.onclick = function() {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('rcf_staging');
-        url.searchParams.delete('rcf_token');
-        window.open(url.toString(), '_blank');
+        window.open(window.location.href, '_blank', 'noopener');
       };
     }
 
@@ -5392,18 +5336,28 @@
         generateBtn.style.opacity = '0.7';
 
         try {
+          // Editor credentials, not the site token (s40). The site token is
+          // public — it is in this page's source — so it never authorised AI
+          // spend, and sent alone it is refused: the route bills the site
+          // OWNER, and only an editor it can grade may spend on their behalf.
+          // This request used to send only `Bearer SITE_TOKEN`, against a route
+          // that wanted a dashboard cookie this cross-origin fetch can never
+          // carry, so every suggestion failed for everyone.
+          //
+          // The credential rides in `X-RCF-Editor-Grant` (a device grant) or in
+          // the body (an edit-session or staging token) — never in the URL,
+          // where it would land in history, `Referer` and access logs. Do not
+          // swap `editorTokenBody()` for `editorTokenQuery()` here.
           const response = await fetch(RECOPYFAST_API + '/ai/suggest', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + SITE_TOKEN,
-            },
-            body: JSON.stringify({
+            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
+            body: JSON.stringify(Object.assign({
+              siteId: SITE_ID,
               text: currentText,
               context: 'website content',
               goal: goal,
               tone: 'professional'
-            }),
+            }, self.editorTokenBody())),
           });
 
           const data = await response.json();
@@ -5450,7 +5404,7 @@
           } else {
             const errorP = document.createElement('p');
             errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
-            errorP.textContent = 'Failed to generate suggestions. Please try again.';
+            errorP.textContent = data.error || 'Failed to generate suggestions. Please try again.';
             suggestionsList.textContent = '';
             suggestionsList.appendChild(errorP);
           }
@@ -6096,16 +6050,6 @@
         }
       });
 
-      const autoTranslateLabel = document.createElement('label');
-      autoTranslateLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13px; color: #94a3b8;';
-
-      const autoTranslateCheck = document.createElement('input');
-      autoTranslateCheck.type = 'checkbox';
-      autoTranslateCheck.className = 'rcf-eb-checkbox';
-      autoTranslateCheck.checked = true;
-      autoTranslateLabel.appendChild(autoTranslateCheck);
-      autoTranslateLabel.appendChild(document.createTextNode('Auto-translate with AI'));
-
       const addBtn = document.createElement('button');
       addBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
       addBtn.style.marginTop = '10px';
@@ -6125,8 +6069,7 @@
             },
             body: JSON.stringify({
               siteId: SITE_ID,
-              languageCode: select.value,
-              autoTranslate: autoTranslateCheck.checked
+              languageCode: select.value
             })
           });
 
@@ -6139,7 +6082,6 @@
       };
 
       addSection.appendChild(select);
-      addSection.appendChild(autoTranslateLabel);
       addSection.appendChild(addBtn);
       content.appendChild(addSection);
     }

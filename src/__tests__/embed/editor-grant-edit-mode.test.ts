@@ -333,6 +333,37 @@ describe("the editor banner", () => {
     );
   });
 
+  // Found live after s39 shipped: at 360px the claim wrapped onto four lines
+  // and squeezed the address down to "r…", the one thing that says whose
+  // session this is. On a phone the claim and its divider give way.
+  it("hides the claim and its divider on a phone so the address gets the room", async () => {
+    await bootWithGrant(["view", "edit"]);
+
+    const claim = Array.from(
+      document.querySelectorAll("#rcf-editor-banner span"),
+    ).find((span) => span.textContent === "You can edit this page");
+    expect(claim?.classList.contains("rcf-editor-banner-claim")).toBe(true);
+
+    const sheet = (
+      document.querySelector("#rcf-editor-banner-styles") as HTMLStyleElement
+    ).sheet as CSSStyleSheet;
+    const phone = Array.from(sheet.cssRules).find(
+      (rule): rule is CSSMediaRule =>
+        rule instanceof CSSMediaRule &&
+        rule.media.mediaText.replace(/\s/g, "") === "(max-width:480px)",
+    );
+    expect(phone).toBeDefined();
+    const hidden = Array.from(phone!.cssRules).filter(
+      (rule): rule is CSSStyleRule =>
+        rule instanceof CSSStyleRule && rule.style.display === "none",
+    );
+    const selectors = hidden.map((rule) => rule.selectorText).join(",");
+    expect(selectors).toContain("#rcf-editor-banner .rcf-editor-banner-claim");
+    expect(selectors).toContain(
+      "#rcf-editor-banner .rcf-editor-banner-divider",
+    );
+  });
+
   it("does not claim editing when the grant is view-only", async () => {
     await bootWithGrant(["view"]);
 
