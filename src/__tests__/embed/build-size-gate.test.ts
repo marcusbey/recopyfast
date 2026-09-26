@@ -66,8 +66,16 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 //                  strings (they shipped as string bytes; now JS comments)
 //   +56 / +57      the editor bar's "All sites" control
 //   46226 / 33465  measured on feature/s39-editor-back-to-sites
-const SEEDED_MAX_BUNDLE_GZ = 46226;
-const SEEDED_MAX_WIDGET_GZ = 33465;
+//
+// RATCHETED 2026-09-25 (s40), DOWNWARD: 46226 → 46176, 33465 → 33420.
+//
+//   46226 / 33465  measured on main at 0e1d5bc (s39 merged), zero headroom
+//   +26 / +28      the AI modal sends editor credentials + shows the server's
+//                  message (alone, this was over both ceilings)
+//   −71 / −67      the Edit Board's "Auto-translate with AI" control removed
+//   46176 / 33420  measured on feature/s40-ai-widget-auth
+const SEEDED_MAX_BUNDLE_GZ = 46176;
+const SEEDED_MAX_WIDGET_GZ = 33420;
 
 interface CheckRun {
   status: number;

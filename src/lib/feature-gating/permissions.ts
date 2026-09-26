@@ -1,9 +1,11 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   getEffectivePlan,
   hasAnyEntitlement,
 } from "@/lib/billing/entitlements";
+import { resolveEntitlement } from "@/lib/billing/effective-plan";
 import {
   getUserCreditBalance,
   consumeCredits,
@@ -74,6 +76,33 @@ const CREDITS_ARE_NOT_A_PLAN: FeaturePermission = {
 };
 
 type SupabaseLike = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * The payer's entitlement — through the explicit client when one was given.
+ *
+ * `client` is s40's: the widget's AI route has no cookie session, so it
+ * authorises the editor, resolves the site owner, and passes a service-role
+ * client for that owner. See `consumeCredits` in `@/lib/credits/system` for
+ * who may pass one and why it is dangerous. Absent, this is `getEffectivePlan`
+ * exactly as before — and the existing billing suites mock only that, which is
+ * why the cookie path must keep calling it and nothing else.
+ */
+function resolvePayerEntitlement(userId: string, client?: SupabaseClient) {
+  return client ? resolveEntitlement(client, userId) : getEffectivePlan(userId);
+}
+
+/**
+ * `[client]` when an explicit payer client was given, `[]` when not.
+ *
+ * Spread into the calls this module makes to `@/lib/credits/system`, so the
+ * default (cookie) path calls them with exactly the arguments it always has
+ * rather than with a trailing `undefined`. That is not cosmetic: the suites that
+ * pin those calls compare argument lists, and "the cookie path did not move"
+ * is the property s40 promises to keep.
+ */
+function payerClientArg(client?: SupabaseClient): [] | [SupabaseClient] {
+  return client ? [client] : [];
+}
 
 /**
  * How many sites this user owns.
@@ -161,9 +190,17 @@ export async function canCreateWebsite(
  *
  * Throws rather than defaulting, for the same reason the site count does: a
  * lookup that failed must not be read as "nobody owns this, let it through".
+ *
+ * Exported for s40: `POST /api/ai/suggest` charges the widget's AI spend to
+ * this same payer, read with the service role because the editor calling it
+ * has no session and, for a device grant, no account at all. One definition of
+ * "who pays for this site", shared by seats and AI, rather than two that could
+ * disagree. With two `admin` rows the answer is whichever PostgREST returns
+ * first — known, inherited from seat billing, and deliberately not changed
+ * here (s40 research, open question 3).
  */
-async function resolveSiteOwnerId(
-  supabase: SupabaseLike,
+export async function resolveSiteOwnerId(
+  supabase: SupabaseClient,
   siteId: string,
 ): Promise<string | null> {
   const { data, error } = await supabase
@@ -341,18 +378,24 @@ export async function canAddCollaborator(
  * with no plan and a wallet. That inversion is what this ordering removes: the
  * balance decides, and the flag only shapes what we say when the balance is
  * short.
+ *
+ * `client`: an explicit payer's client — see `resolvePayerEntitlement`.
  */
 export async function canUseAIFeatures(
   userId: string,
   creditsRequired: number = CREDIT_COSTS.AI_SUGGESTION,
+  client?: SupabaseClient,
 ): Promise<FeaturePermission> {
-  const entitlement = await getEffectivePlan(userId);
+  const entitlement = await resolvePayerEntitlement(userId, client);
 
   if (!hasAnyEntitlement(entitlement)) {
     return NO_ENTITLEMENT;
   }
 
-  const creditBalance = await getUserCreditBalance(userId);
+  const creditBalance = await getUserCreditBalance(
+    userId,
+    ...payerClientArg(client),
+  );
 
   if (creditBalance.total >= creditsRequired) {
     return { allowed: true };
@@ -382,12 +425,15 @@ export async function canUseAIFeatures(
 }
 
 /**
- * Check if user can use translation features
+ * Check if user can use translation features.
+ *
+ * `client`: an explicit payer's client — see `resolvePayerEntitlement`.
  */
 export async function canUseTranslation(
   userId: string,
+  client?: SupabaseClient,
 ): Promise<FeaturePermission> {
-  const entitlement = await getEffectivePlan(userId);
+  const entitlement = await resolvePayerEntitlement(userId, client);
 
   if (!hasAnyEntitlement(entitlement)) {
     return NO_ENTITLEMENT;
@@ -401,7 +447,10 @@ export async function canUseTranslation(
   if (translationLimit === 0) {
     // Plans with no included translation allowance can still pay per use out
     // of purchased credits.
-    const balance = await getUserCreditBalance(userId);
+    const balance = await getUserCreditBalance(
+      userId,
+      ...payerClientArg(client),
+    );
 
     if (balance.total >= 1) {
       return {
@@ -425,14 +474,21 @@ export async function canUseTranslation(
 }
 
 /**
- * Consume feature usage (for credit-based features)
+ * Consume feature usage (for credit-based features).
+ *
+ * `client` charges an explicit payer — the gate, the spend and the usage row
+ * all go through it. Only a route that has authorised an editor for the site
+ * and resolved the owner with `resolveSiteOwnerId` may pass a service-role
+ * client: it bypasses RLS, so `userId` alone decides whose wallet is spent.
+ * See `consumeCredits` for the incident that made it necessary.
  */
 export async function consumeFeatureUsage(
   userId: string,
   feature: "ai_suggestion" | "translation" | "collaboration",
   metadata?: Record<string, unknown>,
+  client?: SupabaseClient,
 ): Promise<{ success: boolean; error?: string }> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   let creditsRequired = 0;
   if (feature === "ai_suggestion") {
@@ -442,8 +498,8 @@ export async function consumeFeatureUsage(
   }
 
   const permission = await (feature === "ai_suggestion"
-    ? canUseAIFeatures(userId, creditsRequired)
-    : canUseTranslation(userId));
+    ? canUseAIFeatures(userId, creditsRequired, client)
+    : canUseTranslation(userId, client));
 
   if (!permission.allowed) {
     return { success: false, error: permission.reason };
@@ -455,6 +511,7 @@ export async function consumeFeatureUsage(
       creditsRequired,
       feature,
       metadata,
+      ...payerClientArg(client),
     );
 
     if (!result.success) {

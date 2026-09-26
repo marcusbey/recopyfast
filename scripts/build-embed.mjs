@@ -125,8 +125,29 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  * build-size-gate.test.ts pins the same pair, so the freed bytes cannot be handed
  * back by restoring the old constants.
  */
-const MAX_BUNDLE_GZ = 46226;
-const MAX_WIDGET_GZ = 33465;
+/*
+ * RATCHETED DOWN 2026-09-25 (s40-ai-widget-auth), from 46226 / 33465.
+ *
+ * s40 made the AI modal work for editors, with zero headroom after s39, so it paid
+ * for that in the same branch by deleting an unmetered AI control:
+ *
+ *   46226 / 33465  ceilings before s40 = measured on main at 0e1d5bc (s39 merged)
+ *   +26 / +28      AI fetch carries editor credentials + server message: the
+ *                  `/ai/suggest` request sends `siteId`, `editorAuthHeaders()` and
+ *                  `editorTokenBody()` instead of the site token, and the modal
+ *                  shows the server's refusal sentence. Alone, over both ceilings.
+ *   −71 / −67      Edit Board auto-translate control removed: the "Auto-translate
+ *                  with AI" checkbox made POST /edit-board/languages run one
+ *                  unmetered OpenAI call per element into a column nothing reads.
+ *   46176 / 33420  measured on the branch — the new ceilings
+ *
+ * (At 0b8014f, before s39, the same two changes measured +24/+27 and −77/−69:
+ * gzip deltas move with the surrounding bytes, so only this branch's own
+ * measurement is recorded as the ceiling.) build-size-gate.test.ts pins the same
+ * pair.
+ */
+const MAX_BUNDLE_GZ = 46176;
+const MAX_WIDGET_GZ = 33420;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
