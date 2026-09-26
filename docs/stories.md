@@ -1675,4 +1675,6 @@ and queries `rate_limits` by `key`/`timestamp`, none of which exist, so it refus
   with column lists derived from the migrations and anchored to production's.
 - [x] Required local gates pass; one story commit. No push, PR, merge or production action.
 
+Live proof 2026-09-26 (`.omx/qa-20260925/live-s44.mjs`, QA owner): a fresh key's first `GET /api/v1/content` → 200 with 18 items; in one fixed window exactly 100 → 200 then 429 with `X-RateLimit-Limit: 100` (real Redis); deleted key → 401.
+
 Research: `docs/research/s44-v1-rate-limiter.md`. Plan: `docs/plans/s44-v1-rate-limiter.md`.
