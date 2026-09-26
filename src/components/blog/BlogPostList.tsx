@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Calendar, Clock, ArrowRight } from "lucide-react";
+import { formatDate } from "@/lib/utils/format-date";
 
 export interface BlogPost {
   id: number;
@@ -89,7 +90,7 @@ export function BlogPostList({ posts }: BlogPostListProps) {
               <div className="flex items-center space-x-6 mb-6">
                 <div className="flex items-center space-x-2">
                   <Calendar className="h-4 w-4" />
-                  <span>{new Date(post.publishedAt).toLocaleDateString()}</span>
+                  <span>{formatDate(post.publishedAt)}</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Clock className="h-4 w-4" />
@@ -141,7 +142,7 @@ export function BlogPostList({ posts }: BlogPostListProps) {
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-sm text-muted-foreground">
                   <Calendar className="h-3 w-3" />
-                  <span>{new Date(post.publishedAt).toLocaleDateString()}</span>
+                  <span>{formatDate(post.publishedAt)}</span>
                 </div>
                 <Link
                   href={`/blog/${post.slug}`}
