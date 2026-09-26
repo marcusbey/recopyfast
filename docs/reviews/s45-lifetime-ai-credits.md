@@ -40,5 +40,40 @@ Production `lifetime_pro.limits` (orchestrator checked 2026-09-26: `{}`); number
 owners (orchestrator: none real — only QA `pro` grants); migration on a real DB; rendered pages; a
 real purchase vs `creditWallet.included`. Stripe not contacted.
 
-Max severity: critical
-Ship allowed: no
+_Verdict of the first pass: Max severity critical, ship not allowed — superseded below._
+
+## Re-review — 2026-09-26, on 1c97f59
+
+Gates (reviewer, CI placeholder env): type-check pass; lint 0 errors (38 pre-existing warnings);
+Prettier clean; full Jest 272 suites passed / 2 skipped, 3,537 passed / 39 skipped. Build not run.
+
+- **Findings 1 and 2 fixed.** `withAllowanceFloor` (`effective-plan.ts:475-487`) only raises
+  `monthlyCredits`, to the highest live source; plan id and other limits unchanged. Probes on the
+  real resolver + `getUserCreditBalance`: lifetime alone 250; Lifetime Pro + lifetime 500; Pro
+  subscriber mid-period 500 (past-due 500) → 250 after period end; Agency subscriber 1,000; Pro trial
+  + lifetime 250; Pro support comp + lifetime 500; Starter subscriber 250. Comp counts as a floor,
+  trial does not — consistent with ADR 038 and ADR 014.
+- **Finding 3 fixed.** The card reads the server-resolved `creditWallet.included`; "Lifetime access"
+  when a non-trial grant holds the plan and no live subscription bills it (Lifetime Pro no longer
+  shows "$19/month").
+- **Finding 4 fixed.** ADR 038 names 20260924065000 line 61. No migration touched.
+
+Mutations (restored, `git diff --exit-code` clean): floor dropped 5 red · trials counted 2 · comps
+excluded 1 · subscription ignored 2 · card shows plan bullets 3 · lifetime price ignored 2 · card fed
+catalogue allowance 3.
+
+### New findings (minor — follow-ups)
+1. `UpgradeDialog.tsx:245-264` still marks Agency "Current" with "$49/month" and "1,000 AI credits /
+   month" for a lifetime owner.
+2. `SubscriptionCard.tsx:52-54` finds the bullet to restate by matching "1,000 AI credits"; rewording
+   it in `plans` silently brings the false 1,000 back.
+3. Pre-existing: badge "Free" for a lifetime owner with no subscription (`:133`); "Reactivate
+   Subscription" offered on the Pro plan a lifetime buyer is cancelling (`:235`).
+
+### Not verified
+No browser render; production `plans.features` wording; a real purchase vs the wallet; Stripe.
+Human check: as a QA lifetime owner, compare `/dashboard/billing` card and Change-plan dialog with
+the wallet.
+
+Max severity: minor
+Ship allowed: yes
