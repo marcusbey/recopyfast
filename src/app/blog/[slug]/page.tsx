@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { notFound } from "next/navigation";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
+import { formatDate } from "@/lib/utils/format-date";
 
 interface BlogPost {
   id: string;
@@ -72,11 +73,7 @@ export default async function BlogPostPage({
             </Badge>
             <div className="flex items-center text-muted-foreground text-sm">
               <Calendar className="h-4 w-4 mr-2" />
-              {new Date(post.published_at).toLocaleDateString("en-US", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+              {formatDate(post.published_at)}
             </div>
             <div className="flex items-center text-muted-foreground text-sm">
               <Clock className="h-4 w-4 mr-2" />

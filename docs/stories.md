@@ -1501,3 +1501,22 @@ and nine minors); fix `ba25a30` addressed those blockers. The independent
 re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
 mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
 JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.
+
+## Story s43-launch-polish — Public pages load without errors, and /pricing works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit (Playwright against
+production, desktop and mobile). Complexity: 2. Branch `feature/s43-launch-polish`.
+
+- [x] `/blog` hydrates without React error #418 in any visitor locale or time zone: blog dates
+  (list and article) come from one shared formatter, `en-US` / `dateStyle: "medium"` /
+  `timeZone: "UTC"`, identical on server and client and showing the published calendar day.
+- [x] `/pricing` is a permanent (308) redirect to `/#pricing` in `next.config.ts`; middleware
+  never intercepts it and the sitemap does not list it.
+- [x] Formatter unit test passes under `TZ=Pacific/Kiritimati` and `TZ=UTC`; a hydration render
+  test proves BlogPostList output is stable across locale/zone; a config test pins the exact
+  redirect entry. Other locale-dependent call sites are listed in research, not changed.
+- [x] `npm run precommit` and `npm run build` pass; one commit on the branch. No push, PR,
+  merge or production action in this run.
+
+Research: `docs/research/s43-launch-polish.md`. Plan: `docs/plans/s43-launch-polish.md`.
+Embed allocation: 0 bytes.
