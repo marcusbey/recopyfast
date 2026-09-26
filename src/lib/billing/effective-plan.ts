@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { findPlanById } from "@/lib/stripe/plans";
+import { findPlanById, findPurchasedPlanById } from "@/lib/stripe/plans";
 import { PAID_PLAN_IDS, type SubscriptionPlan } from "@/lib/stripe/plan-types";
 import {
   readPurchasedCreditBalance,
@@ -257,9 +257,52 @@ export async function readEffectivePlanId(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<string | null> {
+  return (await readEffectivePlanBasis(supabase, userId))?.planId ?? null;
+}
+
+/**
+ * The plan in force, and whether a purchase is the only thing conferring it.
+ */
+interface EffectivePlanBasis {
+  readonly planId: string;
+  /**
+   * True when every live grant of `planId` was bought — it carries a Stripe
+   * payment intent — and no live subscription bills the same plan.
+   *
+   * s45 (ADR 038): only then do the purchased product's limit overrides apply.
+   * A lifetime Founding Agency owner holds `agency` with 250 monthly AI credits
+   * instead of 1,000; an Agency subscriber, an unpaid support comp, and a buyer
+   * whose Agency subscription is still running out the period they paid for
+   * (the webhook cancels it at period end, and the offer card promises they
+   * keep that period) all hold the full plan.
+   *
+   * "Carries a payment intent" is the database's own definition of owning the
+   * founding lifetime (`reserve_founding_agency_spot`, 20260924065000). Trials
+   * (ADR 014) and comps carry none.
+   */
+  readonly isHeldByPurchaseOnly: boolean;
+}
+
+interface LiveGrant {
+  plan_id: string;
+  stripe_payment_intent_id: string | null;
+}
+
+function isPurchaseOnly(grants: readonly LiveGrant[], planId: string): boolean {
+  const ofPlan = grants.filter((grant) => grant.plan_id === planId);
+  return (
+    ofPlan.length > 0 &&
+    ofPlan.every((grant) => (grant.stripe_payment_intent_id ?? null) !== null)
+  );
+}
+
+async function readEffectivePlanBasis(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<EffectivePlanBasis | null> {
   const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
-    .select("plan_id")
+    .select("plan_id, stripe_payment_intent_id")
     .eq("user_id", userId)
     .is("revoked_at", null)
     // Expiry is a predicate INSIDE the query, never a check on the row after
@@ -276,7 +319,7 @@ export async function readEffectivePlanId(
     // what every pre-trial grant row holds and why none of them need a backfill.
     .or(spendableFilter())
     .order("granted_at", { ascending: false })
-    .returns<Array<{ plan_id: string }>>();
+    .returns<LiveGrant[]>();
 
   // A read failure here must not silently downgrade a paying customer, so it is
   // surfaced rather than swallowed.
@@ -286,8 +329,9 @@ export async function readEffectivePlanId(
     );
   }
 
+  const liveGrants = entitlements ?? [];
   const grantedPlanId =
-    entitlements?.find((entitlement) =>
+    liveGrants.find((entitlement) =>
       isRecognisedPaidPlanId(entitlement.plan_id),
     )?.plan_id ?? null;
 
@@ -295,13 +339,19 @@ export async function readEffectivePlanId(
   // when an older permanent purchase sits under a newer Pro trial/support
   // grant; using only the newest row made that lower grant a silent downgrade.
   // Other grants retain their inherited newest-grant-wins semantics.
-  if (
+  const holdsHighestGrant =
     isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
-    entitlements?.some(
+    liveGrants.some(
       (entitlement) => entitlement.plan_id === HIGHEST_PAID_PLAN_ID,
-    )
-  ) {
-    return HIGHEST_PAID_PLAN_ID;
+    );
+
+  // A grant that confers the full plan answers without the subscription read,
+  // exactly as before s45. Only a purchase-only Agency grant goes on to ask
+  // whether an Agency subscription is still billing — without that read, a
+  // subscriber who buys the lifetime would drop to its 250 credits in the
+  // middle of a period they had already paid 1,000 for.
+  if (holdsHighestGrant && !isPurchaseOnly(liveGrants, HIGHEST_PAID_PLAN_ID)) {
+    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: false };
   }
 
   const { data: subscription, error: subscriptionError } = await supabase
@@ -323,12 +373,23 @@ export async function readEffectivePlanId(
     isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
     subscription?.plan === HIGHEST_PAID_PLAN_ID
   ) {
-    return HIGHEST_PAID_PLAN_ID;
+    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: false };
   }
 
-  if (grantedPlanId) return grantedPlanId;
+  if (holdsHighestGrant) {
+    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: true };
+  }
+
+  if (grantedPlanId) {
+    return {
+      planId: grantedPlanId,
+      isHeldByPurchaseOnly:
+        isPurchaseOnly(liveGrants, grantedPlanId) &&
+        subscription?.plan !== grantedPlanId,
+    };
+  }
   if (!subscription || !isRecognisedPaidPlanId(subscription.plan)) return null;
-  return subscription.plan;
+  return { planId: subscription.plan, isHeldByPurchaseOnly: false };
 }
 
 /**
@@ -340,17 +401,26 @@ export async function readEffectivePlanId(
  * switched off — is not a plan, and falls through to the wallet like any other
  * unsubscribed account: someone holding a dead plan id and 500 credits is a
  * credit holder, not a lost cause.
+ *
+ * A plan held by purchase only resolves through `findPurchasedPlanById`: the
+ * same catalogue row, with the buying product's limit overrides applied
+ * (ADR 038). That is how a lifetime Founding Agency owner gets Agency with 250
+ * monthly AI credits (s45) while keeping `planId: "agency"`, which every Agency
+ * check — nav, offers, checkout eligibility, the founding "owned" test — keys
+ * off. Every gate reads limits, so nothing but the allowance differs.
  */
 export async function resolveEntitlement(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<Entitlement> {
-  const planId = await readEffectivePlanId(supabase, userId);
+  const basis = await readEffectivePlanBasis(supabase, userId);
 
-  if (planId !== null) {
-    const plan = await findPlanById(planId);
+  if (basis !== null) {
+    const plan = basis.isHeldByPurchaseOnly
+      ? await findPurchasedPlanById(basis.planId)
+      : await findPlanById(basis.planId);
     if (plan) {
-      return { kind: "plan", planId, plan };
+      return { kind: "plan", planId: basis.planId, plan };
     }
   }
 

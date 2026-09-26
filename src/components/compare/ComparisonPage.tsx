@@ -60,6 +60,10 @@ function formatUsd(amount: number): string {
   }).format(amount);
 }
 
+function formatCount(count: number): string {
+  return new Intl.NumberFormat("en-US").format(count);
+}
+
 function pricingCopy(pricing: ComparisonPricing): string {
   if (pricing.status === "disabled") {
     return "Agency checkout is currently unavailable.";
@@ -79,7 +83,10 @@ function pricingCopy(pricing: ComparisonPricing): string {
     return `${agency} Founding Agency availability is temporarily unavailable.`;
   }
 
-  return `${agency} Founding Agency is ${formatUsd(pricing.founding.price)} lifetime; ${pricing.founding.availability.remaining} of ${pricing.founding.availability.limit} founding spots remain.`;
+  // s45: wherever the offer is presented it states what it includes. The
+  // allowance is catalogue data (250 after migration 20260926120000), never
+  // copy — the s37 lesson about prices applies to it too.
+  return `${agency} Founding Agency is ${formatUsd(pricing.founding.price)} lifetime: everything in Agency, with ${formatCount(pricing.founding.monthlyCredits)} AI credits a month; ${pricing.founding.availability.remaining} of ${pricing.founding.availability.limit} founding spots remain.`;
 }
 
 function BestFitList({ items }: { items: readonly string[] }) {

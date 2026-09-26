@@ -1,5 +1,6 @@
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import { getPlanCatalogue, isAgencyCheckoutEnabled } from "@/lib/stripe/plans";
+import { findPlanHeldByPurchase } from "@/lib/stripe/plan-types";
 
 export type ComparisonPricing =
   | { status: "disabled" }
@@ -9,6 +10,8 @@ export type ComparisonPricing =
       agency: { monthlyPrice: number; websites: number };
       founding: {
         price: number;
+        /** What a purchase confers each month (s45: 250), from the catalogue. */
+        monthlyCredits: number;
         availability: Awaited<
           ReturnType<typeof getFoundingAgencyAvailability>
         > | null;
@@ -66,7 +69,17 @@ export async function loadComparisonPricing(): Promise<ComparisonPricing> {
         websites: agency.limits.websites,
       },
       founding: foundingProduct
-        ? { price: foundingProduct.price, availability }
+        ? {
+            price: foundingProduct.price,
+            // s45: the offer says what it includes — everything in Agency,
+            // with the allowance a purchase of it actually confers. Resolved
+            // through the same helper the entitlement resolver uses, so this
+            // page cannot promise 1,000 while the account gets 250.
+            monthlyCredits: (
+              findPlanHeldByPurchase(catalogue, agency.id) ?? agency
+            ).limits.monthlyCredits,
+            availability,
+          }
         : null,
     };
   } catch (error) {

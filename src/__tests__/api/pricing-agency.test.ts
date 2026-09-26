@@ -150,4 +150,49 @@ describe("GET /api/pricing Agency payload", () => {
     expect(stale.plans[0].id).toBe("agency");
     expect(stale.foundingAgencyAvailability).toBeNull();
   });
+
+  /**
+   * s45 — 250 monthly AI credits is a limits override on the founding row
+   * itself (ADR 038), not a hidden plan, so the public feed lists exactly the
+   * plans it always did and never publishes the override. The copy that states
+   * the allowance is the row's own description and bullets, passed through.
+   */
+  it("lists no extra plan and passes the founding copy through without its overrides", async () => {
+    const founding = {
+      ...catalogue.oneTimeProducts[0],
+      description:
+        "Pay once for permanent Agency access with 250 AI credits a month; " +
+        "limited to the first 50 completed sales",
+      features: [
+        "Everything in Agency, with 250 AI credits a month",
+        "One payment, no renewal",
+        "Founding offer limited to 50 completed sales",
+      ],
+      grantLimits: { monthlyCredits: 250 },
+    };
+    mockGetPlanCatalogue.mockResolvedValue({
+      ...catalogue,
+      oneTimeProducts: [founding],
+    });
+
+    const { GET } = await import("@/app/api/pricing/route");
+    const body = await (
+      await GET(new Request("http://localhost/api/pricing"))
+    ).json();
+
+    expect(body.plans.map((plan: { id: string }) => plan.id)).toEqual([
+      "agency",
+    ]);
+    expect(body.oneTimeProducts).toEqual([
+      {
+        id: "lifetime_agency",
+        name: "Founding Agency (lifetime)",
+        description: founding.description,
+        price: 299,
+        currency: "usd",
+        features: founding.features,
+        grantsPlanId: "agency",
+      },
+    ]);
+  });
 });

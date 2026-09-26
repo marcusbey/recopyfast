@@ -79,6 +79,34 @@ describe("comparison pricing", () => {
       agency: { monthlyPrice: 73, websites: 14 },
       founding: {
         price: 411,
+        monthlyCredits: 1000,
+        availability: { remaining: 9, limit: 50, soldOut: false },
+      },
+    });
+  });
+
+  /**
+   * s45 — the founding offer's monthly AI credits are what a purchase of it
+   * confers: Agency's allowance with the product's own override laid over it
+   * (250 after migration 20260926120000), read from the catalogue.
+   */
+  it("reads the founding allowance from the product's own override", async () => {
+    mockGetPlanCatalogue.mockResolvedValue({
+      subscriptions: [agency],
+      oneTimeProducts: [{ ...founding, grantLimits: { monthlyCredits: 250 } }],
+      creditPack: {
+        creditsPerPack: 1000,
+        maxPacksPerPurchase: 100,
+        pricePerPack: 10,
+      },
+    });
+
+    await expect(loadComparisonPricing()).resolves.toEqual({
+      status: "available",
+      agency: { monthlyPrice: 73, websites: 14 },
+      founding: {
+        price: 411,
+        monthlyCredits: 250,
         availability: { remaining: 9, limit: 50, soldOut: false },
       },
     });
@@ -102,7 +130,7 @@ describe("comparison pricing", () => {
     await expect(loadComparisonPricing()).resolves.toEqual({
       status: "available",
       agency: { monthlyPrice: 73, websites: 14 },
-      founding: { price: 411, availability: null },
+      founding: { price: 411, monthlyCredits: 1000, availability: null },
     });
   });
 

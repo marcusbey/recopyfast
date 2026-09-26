@@ -1,6 +1,7 @@
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { selectByMode, stripeEnvVar } from "./mode";
 import {
+  findPlanHeldByPurchase,
   isPaidPlanId,
   isSubscriptionPlanId,
   PAID_PLAN_IDS,
@@ -285,6 +286,57 @@ function toPlanLimits(
   };
 }
 
+/**
+ * The plan-limit columns a granting product may override, and the camelCase
+ * field each one lands on. The same six keys `toPlanLimits` reads.
+ */
+const GRANT_LIMIT_KEYS = {
+  websites: { field: "websites", type: "number" },
+  collaborators: { field: "collaborators", type: "number" },
+  ai_features: { field: "aiFeatures", type: "boolean" },
+  translations: { field: "translations", type: "number" },
+  ab_testing: { field: "abTesting", type: "boolean" },
+  monthly_credits: { field: "monthlyCredits", type: "number" },
+} as const satisfies Record<
+  string,
+  { field: keyof PlanLimits; type: "number" | "boolean" }
+>;
+
+/**
+ * A granting product's `limits`, read as overrides of the plan it grants
+ * (ADR 038, s45). Strict for the same reason every other known row is: a key
+ * that is not a plan limit, or a value of the wrong type, is a typo in a money
+ * boundary. Ignoring `monthly_credit: 250` would hand every lifetime Founding
+ * Agency owner Agency's full 1,000 credits with nothing to notice it, so it
+ * fails the load instead.
+ *
+ * `Object.hasOwn`, not `key in`: a JSONB `{"__proto__": …}` arrives from
+ * PostgREST as an own key, and `GRANT_LIMIT_KEYS["__proto__"]` is
+ * Object.prototype — truthy.
+ */
+function toGrantLimits(
+  limits: Record<string, unknown>,
+  productId: string,
+): Partial<PlanLimits> {
+  const overrides: Partial<Record<keyof PlanLimits, number | boolean>> = {};
+
+  for (const key of Object.keys(limits)) {
+    if (!Object.hasOwn(GRANT_LIMIT_KEYS, key)) {
+      throw new Error(
+        `plans.limits."${key}" on "${productId}" is not a plan limit it can override`,
+      );
+    }
+    const { field, type } =
+      GRANT_LIMIT_KEYS[key as keyof typeof GRANT_LIMIT_KEYS];
+    overrides[field] =
+      type === "number"
+        ? requireNumber(limits, key, productId)
+        : requireBoolean(limits, key, productId);
+  }
+
+  return overrides as Partial<PlanLimits>;
+}
+
 function toSubscriptionPlan(row: PlanRow): SubscriptionPlan {
   if (!isSubscriptionPlanId(row.id)) {
     throw new Error(
@@ -345,8 +397,36 @@ function toOneTimeProduct(row: PlanRow): OneTimeProduct {
     price: toNumber(row.price_monthly, `price_monthly (${row.id})`),
     features: toFeatures(row.features, row.id),
     grantsPlanId: row.grants_plan_id,
+    // Only a product that grants a plan has anything to override. The credits
+    // row's `limits` is its pack sizing, read separately below.
+    ...(row.grants_plan_id !== null
+      ? { grantLimits: toGrantLimits(row.limits, row.id) }
+      : {}),
     sortOrder: row.sort_order,
   };
+}
+
+/**
+ * At most one active product may grant a given plan. `findPlanHeldByPurchase`
+ * reads the overrides of THE product granting a plan, and with two of them it
+ * would be answering with whichever the iteration order reached first —
+ * permanently, for every owner. Only reachable by repointing a known row
+ * (unknown ids are filtered out before this), so it fails the load loudly.
+ */
+function assertOneGrantingProductPerPlan(
+  products: readonly OneTimeProduct[],
+): void {
+  const seen = new Set<string>();
+  for (const product of products) {
+    if (product.grantsPlanId === null) continue;
+    if (seen.has(product.grantsPlanId)) {
+      throw new Error(
+        `more than one active one-time product grants "${product.grantsPlanId}"; ` +
+          `a purchased grant could not tell whose limits apply`,
+      );
+    }
+    seen.add(product.grantsPlanId);
+  }
 }
 
 /**
@@ -382,6 +462,7 @@ async function loadPlanCatalogue(): Promise<PlanCatalogue> {
   const oneTimeProducts = knownRows
     .filter((row) => row.kind === "one_time")
     .map(toOneTimeProduct);
+  assertOneGrantingProductPerPlan(oneTimeProducts);
 
   // The PaidPlanId union is what every API boundary validates against, so a
   // seed that no longer contains one of them has to fail loudly here rather
@@ -493,6 +574,18 @@ export async function findPlanById(
   }
   const plans = await getSubscriptionPlans();
   return plans.find((plan) => plan.id === planId) ?? null;
+}
+
+/**
+ * `findPlanById` for an account that holds the plan through a purchase only:
+ * the same row with the granting product's limit overrides applied (ADR 038).
+ * A lifetime Founding Agency owner gets Agency with 250 monthly AI credits;
+ * an Agency subscriber keeps asking `findPlanById` and gets 1,000.
+ */
+export async function findPurchasedPlanById(
+  planId: string | null | undefined,
+): Promise<SubscriptionPlan | null> {
+  return findPlanHeldByPurchase(await getPlanCatalogue(), planId) ?? null;
 }
 
 /**

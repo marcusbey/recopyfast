@@ -1678,3 +1678,27 @@ and queries `rate_limits` by `key`/`timestamp`, none of which exist, so it refus
 Live proof 2026-09-26 (`.omx/qa-20260925/live-s44.mjs`, QA owner): a fresh key's first `GET /api/v1/content` → 200 with 18 items; in one fixed window exactly 100 → 200 then 429 with `X-RateLimit-Limit: 100` (real Redis); deleted key → 401.
 
 Research: `docs/research/s44-v1-rate-limiter.md`. Plan: `docs/plans/s44-v1-rate-limiter.md`.
+
+## Story s45-lifetime-ai-credits — the lifetime Founding Agency includes 250 AI credits a month
+
+Operator-prevalidated scope, 2026-09-26, from the launch-readiness open decision ("limit AI
+credits or seats on the $299 lifetime Founding Agency"). Complexity: 3. Branch
+`feature/s45-lifetime-ai-credits`. A lifetime Founding Agency buyer gets everything Agency has
+except the monthly AI-credit allowance, which is 250 instead of 1,000. Spots stay at 50.
+
+- [x] Entitlement resolution for a lifetime Founding Agency purchase yields every Agency limit
+  and 250 monthly AI credits; purchased credit packs still stack on top.
+- [x] Agency subscribers keep 1,000, including a lifetime buyer while an Agency subscription
+  they already paid for runs out its period; an unpaid Agency comp keeps 1,000; ADR 029
+  precedence is unchanged.
+- [x] The number lives in `plans` (the `lifetime_agency` row), set by one idempotent forward
+  migration; no new plan id, no applied migration edited, no DB function change. The $299 price,
+  the 50-spot cap and the Stripe price are unchanged.
+- [x] The offer states "Everything in Agency, with 250 AI credits a month" wherever it is
+  presented (landing, billing card, plan dialog, /compare, Stripe product description); no other
+  pricing copy changes. `/api/pricing` lists no new plan.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+  Operator after merge: deploy, apply the migration, then sync the Stripe product description.
+
+Research: `docs/research/s45-lifetime-ai-credits.md`. Plan: `docs/plans/s45-lifetime-ai-credits.md`.
+Embed allocation: 0 bytes.
