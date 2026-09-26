@@ -1530,6 +1530,47 @@ done with one, can get back to the list of every site they may edit without re-e
 
 Research: `docs/research/s39-editor-back-to-sites.md`. Plan: `docs/plans/s39-editor-back-to-sites.md`.
 
+## Story s43-launch-polish — Public pages load without errors, and /pricing works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit (Playwright against
+production, desktop and mobile). Complexity: 2. Branch `feature/s43-launch-polish`.
+
+- [x] `/blog` hydrates without React error #418 in any visitor locale or time zone: blog dates
+  (list and article) come from one shared formatter, `en-US` / `dateStyle: "medium"` /
+  `timeZone: "UTC"`, identical on server and client and showing the published calendar day.
+- [x] `/pricing` is a permanent (308) redirect to `/#pricing` in `next.config.ts`; middleware
+  never intercepts it and the sitemap does not list it.
+- [x] Formatter unit test passes under `TZ=Pacific/Kiritimati` and `TZ=UTC`; a hydration render
+  test proves BlogPostList output is stable across locale/zone; a config test pins the exact
+  redirect entry. Other locale-dependent call sites are listed in research, not changed.
+- [x] `npm run precommit` and `npm run build` pass; one commit on the branch. No push, PR,
+  merge or production action in this run.
+
+Research: `docs/research/s43-launch-polish.md`. Plan: `docs/plans/s43-launch-polish.md`.
+Embed allocation: 0 bytes.
+
+## Story s42-api-keys-writes — creating, toggling and deleting an API key works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit. Complexity: 2. Branch
+`feature/s42-api-keys-writes`. Production RLS on `api_keys` grants `authenticated` SELECT
+only and s38 removed its write privileges, so every create/pause/delete from
+`/dashboard/settings` fails today.
+
+- [x] POST, PUT (`isActive`) and DELETE on `/api/api-keys` succeed for a site admin who owns
+  the key: authentication and authorization stay on the user-scoped client, the single write
+  runs through the service-role client scoped by `id` AND `user_id` (option (a); no migration).
+- [x] Non-admins get 403, non-owners 404, unauthenticated callers 401, and no write happens;
+  `key_hash` never appears in a response.
+- [x] A pre-authentication IP limiter guards every verb (GET fails open, writes fail closed),
+  and writes add a fail-closed per-user limiter before the `site_permissions` lookup.
+- [x] GET keeps working under the s38 column grants; a real-DB case proves the service-role
+  write path and the authenticated denial it replaces.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s42-api-keys-writes.md`. Plan: `docs/plans/s42-api-keys-writes.md`.
+The settings panel still has no pause/resume control (PUT is API-only); that is UI work for a
+follow-up story.
+
 ## Story s40-ai-widget-auth — AI suggestions work in edit mode
 
 Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
