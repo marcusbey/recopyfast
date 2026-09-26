@@ -101,7 +101,13 @@ const nextConfig: NextConfig = {
   // Configure redirects for better UX
   async redirects() {
     return [
-      // Add any production redirects here
+      // The 2026-09-25 launch audit found /pricing answering 404: pricing is a
+      // section of the landing page (Pricing.tsx, id="pricing"), yet /pricing
+      // is the URL people type. Permanent (308) because there is no plan for a
+      // standalone page; the sitemap deliberately does not list /pricing.
+      // Config redirects run before middleware, so src/middleware.ts never
+      // sees this path.
+      { source: "/pricing", destination: "/#pricing", permanent: true },
     ];
   },
 
