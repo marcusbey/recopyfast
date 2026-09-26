@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
-import {
-  validateAPIKey,
-  rateLimiter,
-  RATE_LIMIT_CONFIGS,
-} from "@/lib/api/rate-limiter";
+import { validateAPIKey } from "@/lib/api/rate-limiter";
+import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import { analytics } from "@/lib/analytics/tracker";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 
@@ -27,10 +24,81 @@ import { sanitizeHTML } from "@/lib/security/content-sanitizer";
  * Authorization here is `validateAPIKey` plus a strict `apiKey.site_id === siteId`
  * check in every handler — a per-key credential, not a site token, which is why
  * this route uses neither `authorizeSiteRequest` nor a per-site limiter.
+ *
+ * TWO LIMITERS, both on `enforceRateLimit`, both failing closed (s44): a per-IP
+ * guard before `validateAPIKey`, and a per-key bucket right after it — before
+ * the scope and site checks and any `content_elements` access. Until s44 the
+ * only meter was a Postgres limiter that ran AFTER authentication and queried
+ * columns no schema ever had, so this route refused every request it received:
+ * a freshly created key's first call was a 429 in production. Its tests passed
+ * because their Supabase stub accepted any column; the route's suite now runs
+ * against a double that does not (src/__tests__/api/v1/content-route.test.ts).
  */
+
+/**
+ * Pre-authentication flood guard, first on every verb.
+ *
+ * `validateAPIKey` is three round trips — the `api_keys` lookup, the creator's
+ * `admin` row, the `last_used_at` update — and until s44 every one of them ran
+ * before any limiter, so a caller cycling through made-up keys was metered by
+ * nothing (AGENTS.md "Rate limit before authorization"). Per IP, because
+ * nothing else is known yet; loose, because an integration may share an egress
+ * address with others.
+ *
+ * Fails CLOSED. On a store outage the per-key limiter behind it denies every
+ * valid key anyway, so failing open here would admit nothing legitimate — only
+ * unauthenticated traffic to the key lookups, while nothing is metered.
+ */
+function shedIpFlood(request: NextRequest) {
+  return enforceRateLimit(request, {
+    limit: "IP_GENERAL",
+    endpoint: "v1/content:ip",
+    identifier: getClientIp(request),
+    identifierType: "ip",
+    onStoreFailure: "deny",
+  });
+}
+
+/**
+ * The per-key bucket, applied as soon as the key is known and before the
+ * route's scope and site checks or any `content_elements` access.
+ *
+ * s44: this used to be the Postgres `APIRateLimiter`, which queried columns no
+ * schema ever had and so refused every request — a new key's first call was a
+ * 429 in production. It is now the shared Redis limiter every other route uses.
+ *
+ * Fails CLOSED, on every verb, reads included. AGENTS.md's "public reads fail
+ * open" is the widget read (`/api/content/[siteId]` GET), where a refusal would
+ * un-publish every customer's copy at once. This is not that: it is a
+ * service-role read and write of one tenant's content behind a secret
+ * credential, with no visitor waiting on it and a caller that can honour
+ * `Retry-After`. The service-role rule governs (AGENTS.md "Data access",
+ * ADR 002 §4): losing Redis must not remove the only meter in front of it.
+ */
+function limitApiKey(
+  request: NextRequest,
+  apiKey: { id: string; rate_limit_per_minute: number | null },
+) {
+  return enforceRateLimit(request, {
+    // The window (one minute) and the fallback ceiling (100, the column's
+    // default) come from the preset; the ceiling itself is the key's own
+    // `rate_limit_per_minute` — the figure /dashboard/settings shows beside it.
+    // One bucket per key, shared by every verb.
+    limit: "API_CONTENT",
+    maxRequests: apiKey.rate_limit_per_minute,
+    endpoint: "v1/content",
+    identifier: apiKey.id,
+    identifierType: "api_key",
+    onStoreFailure: "deny",
+    message: "API key rate limit exceeded. Please retry after the reset.",
+  });
+}
 
 export async function GET(req: NextRequest) {
   try {
+    const floodLimited = await shedIpFlood(req);
+    if (floodLimited) return floodLimited;
+
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
     // Narrow apiKey to non-undefined for the rest of the handler: a valid result
@@ -42,27 +110,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Check rate limit
-    const rateLimitResult = await rateLimiter.checkAPIKeyLimit(
-      apiKey.id,
-      RATE_LIMIT_CONFIGS.content_read,
-    );
-
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded" },
-        {
-          status: 429,
-          headers: {
-            "X-RateLimit-Limit": rateLimitResult.total.toString(),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": Math.ceil(
-              rateLimitResult.resetTime / 1000,
-            ).toString(),
-          },
-        },
-      );
-    }
+    const keyLimited = await limitApiKey(req, apiKey);
+    if (keyLimited) return keyLimited;
 
     const { searchParams } = new URL(req.url);
     const siteId = searchParams.get("site_id") || apiKey.site_id;
@@ -130,30 +179,19 @@ export async function GET(req: NextRequest) {
       userAgent: req.headers.get("user-agent") ?? undefined,
     });
 
-    return NextResponse.json(
-      {
-        data: (contentElements || []).map((element) => ({
-          ...element,
-          current_content:
-            element.published_content ?? element.original_content ?? "",
-        })),
-        meta: {
-          count: contentElements?.length || 0,
-          site_id: siteId,
-          language,
-          variant,
-        },
+    return NextResponse.json({
+      data: (contentElements || []).map((element) => ({
+        ...element,
+        current_content:
+          element.published_content ?? element.original_content ?? "",
+      })),
+      meta: {
+        count: contentElements?.length || 0,
+        site_id: siteId,
+        language,
+        variant,
       },
-      {
-        headers: {
-          "X-RateLimit-Limit": rateLimitResult.total.toString(),
-          "X-RateLimit-Remaining": rateLimitResult.remaining.toString(),
-          "X-RateLimit-Reset": Math.ceil(
-            rateLimitResult.resetTime / 1000,
-          ).toString(),
-        },
-      },
-    );
+    });
   } catch (error) {
     console.error("API v1 content GET error:", error);
     return NextResponse.json(
@@ -165,6 +203,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const floodLimited = await shedIpFlood(req);
+    if (floodLimited) return floodLimited;
+
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
     // Narrow apiKey to non-undefined for the rest of the handler: a valid result
@@ -176,33 +217,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const keyLimited = await limitApiKey(req, apiKey);
+    if (keyLimited) return keyLimited;
+
     // Check permissions
     if (!apiKey.permissions?.content_write) {
       return NextResponse.json(
         { error: "API key does not have write permissions" },
         { status: 403 },
-      );
-    }
-
-    // Check rate limit
-    const rateLimitResult = await rateLimiter.checkAPIKeyLimit(
-      apiKey.id,
-      RATE_LIMIT_CONFIGS.content_write,
-    );
-
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { error: "Rate limit exceeded" },
-        {
-          status: 429,
-          headers: {
-            "X-RateLimit-Limit": rateLimitResult.total.toString(),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": Math.ceil(
-              rateLimitResult.resetTime / 1000,
-            ).toString(),
-          },
-        },
       );
     }
 
@@ -312,16 +334,7 @@ export async function POST(req: NextRequest) {
           operation: existingElement ? "updated" : "created",
         },
       },
-      {
-        status: existingElement ? 200 : 201,
-        headers: {
-          "X-RateLimit-Limit": rateLimitResult.total.toString(),
-          "X-RateLimit-Remaining": rateLimitResult.remaining.toString(),
-          "X-RateLimit-Reset": Math.ceil(
-            rateLimitResult.resetTime / 1000,
-          ).toString(),
-        },
-      },
+      { status: existingElement ? 200 : 201 },
     );
   } catch (error) {
     console.error("API v1 content POST error:", error);
@@ -339,6 +352,9 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const floodLimited = await shedIpFlood(req);
+    if (floodLimited) return floodLimited;
+
     // Validate API key
     const { valid, apiKey, error } = await validateAPIKey(req);
     // Narrow apiKey to non-undefined for the rest of the handler: a valid result
@@ -349,6 +365,9 @@ export async function DELETE(req: NextRequest) {
         { status: 401 },
       );
     }
+
+    const keyLimited = await limitApiKey(req, apiKey);
+    if (keyLimited) return keyLimited;
 
     // Check permissions
     if (!apiKey.permissions?.content_delete) {

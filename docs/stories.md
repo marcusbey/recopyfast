@@ -1655,3 +1655,24 @@ at s27. Tokenless owner link on the dashboard Content page (`rcf_edit`).
 Live proof 2026-09-26 (partial, `.omx/qa-20260925/live-s41.mjs`): owner edit link → edit mode; reload → still editing; clean-URL navigation → still editing; new tab → visitor; token in sessionStorage only. Open: a three-page save/publish and the share-link walk need a multi-page site with the snippet — both QA sites have one page.
 
 Research: `docs/research/s41-edit-link-multipage.md`. Plan: `docs/plans/s41-edit-link-multipage.md`.
+
+## Story s44-v1-rate-limiter — the public content API answers requests
+
+Operator-prevalidated scope, 2026-09-25, from live production testing. Complexity: 2. Branch
+`feature/s44-v1-rate-limiter`. A freshly created, active API key's first
+`GET /api/v1/content` answered 429: the Postgres limiter behind it reads `api_keys.rate_limit`
+and queries `rate_limits` by `key`/`timestamp`, none of which exist, so it refuses every request.
+
+- [x] A valid key's first GET answers 200 with its site's content; POST/PUT with a write key
+  create/update. The route meters through the shared Redis limiter (option (a)); the Postgres
+  `APIRateLimiter` is deleted. No migration.
+- [x] The per-key ceiling is the key's own `rate_limit_per_minute` per minute, shared by every
+  verb; 429 (with `Retry-After`) only past it. `api_keys.rate_limit` is read nowhere and
+  `validateAPIKey`'s admin re-check is unchanged.
+- [x] A per-IP limiter runs before `validateAPIKey` on every verb; both limiters fail closed
+  (503) on a store outage, before any content is read or written.
+- [x] The route's tests run against a database double that errors on a non-existent column,
+  with column lists derived from the migrations and anchored to production's.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s44-v1-rate-limiter.md`. Plan: `docs/plans/s44-v1-rate-limiter.md`.
