@@ -29,6 +29,16 @@ The Founding Agency row carries `{"monthly_credits": 250}` (migration 2026092612
   `reserve_founding_agency_spot`), **and** no live subscription bills the same plan. A support
   comp or a trial (no payment intent) confers the full plan; so does a live subscription on the
   same plan, which covers a subscriber who buys the lifetime and keeps the period already paid.
+- **An override never lowers an allowance the account already holds.** For a plan held by
+  purchase only, the monthly AI-credit allowance is the highest of the purchased view's and that
+  of every other plan the account holds through a live non-trial grant (bought or comped, each
+  counted the way it is held) or its live subscription. A Lifetime Pro owner (500) who buys
+  Founding Agency keeps 500; a Pro subscriber who buys it keeps 500 until that subscription's paid
+  period ends, then 250; a Starter subscriber gets 250, not 0. Trials do not count (ADR 029 keeps a
+  Pro trial from outranking the purchase; it does not lift the allowance either). Only
+  `monthlyCredits` is floored — the only key any product overrides — and the plan id and every other
+  limit are unchanged (`withAllowanceFloor`, `effective-plan.ts`). Added after the s45 review
+  (findings 1 and 2): without it, both buyers dropped to 250 while the offer is sold to them.
 - **The plan id does not change.** The owner still resolves to `agency`; only the limits object
   differs (`findPlanHeldByPurchase` / `findPurchasedPlanById`). No DB function, Stripe metadata,
   identity check or `PaidPlanId` changes.
@@ -39,6 +49,12 @@ The Founding Agency row carries `{"monthly_credits": 250}` (migration 2026092612
 - **The overriding row stays active** while anyone holds its grant: the loader reads active rows
   only, so deactivating it would silently restore the full plan. The offer is withdrawn with
   `AGENCY_CHECKOUT_ENABLED=false` or the founding cap, never `is_active`.
+- **Never re-run 20260924065000.** Its seed upsert ends in `ON CONFLICT (id) DO UPDATE SET …
+  limits = EXCLUDED.limits` (line 61), which would write `lifetime_agency.limits` back to `{}` —
+  silently restoring 1,000 credits to every lifetime owner — and the "Everything in Agency" copy
+  with it. Migrations are forward-only (AGENTS.md non-negotiable 5) and an applied one is never
+  re-run; this names the one that would undo this decision if it were. A later reseed of this row must
+  carry `{"monthly_credits": 250}` itself.
 - `/api/pricing` does not publish overrides; the offer's copy (description and bullets on the
   same row) states them.
 
@@ -61,9 +77,14 @@ The Founding Agency row carries `{"monthly_credits": 250}` (migration 2026092612
 
 ## Consequences
 
-- Monthly allowance for a lifetime Founding Agency owner: 250 from the migration onward (none
-  exist at the time of writing). Credit packs stack on top as before.
+- Monthly allowance for a lifetime Founding Agency owner: 250 from the migration onward, or more
+  when another plan they hold gives more (none exist at the time of writing). Credit packs stack
+  on top as before.
 - A purchase-only Agency holder now costs one extra `billing_subscriptions` read per resolution
-  (the Agency short-circuit is kept for any grant that confers the full plan).
-- The billing page's plan card still lists the catalogue plan's feature bullets for a lifetime
-  owner (it already showed "$49/month"); correcting that presentation is a separate story.
+  (the Agency short-circuit is kept for any grant that confers the full plan), plus cached
+  catalogue lookups for the other plans it holds; the entitlement read also selects `source`.
+- The billing page's plan card states the allowance the server resolved (the credit wallet's
+  `included`) in place of the catalogue plan's "1,000 AI credits / month" bullet, and shows
+  "Lifetime access" rather than a monthly price when the plan in force is held by a permanent
+  grant that no subscription bills (s45 review, finding 3; before it, every lifetime owner saw
+  "$49/month" or "$19/month").

@@ -12,12 +12,66 @@ interface SubscriptionCardProps {
   subscription?: Subscription;
   /** Plan in force, resolved server-side from the `plans` table. */
   plan: SubscriptionPlan;
+  /**
+   * The plan in force is held through a permanent grant and no subscription
+   * bills it, so it has no monthly price to show.
+   */
+  isLifetime: boolean;
+  /**
+   * The monthly AI-credit allowance this account actually gets — the credit
+   * wallet's `included`, resolved server-side — or null when it is not known.
+   */
+  monthlyCredits: number | null;
   onUpdate: () => void;
+}
+
+/** How a plan's bullet states a monthly allowance: "1,000 AI credits". */
+function allowanceText(credits: number): string {
+  return `${credits.toLocaleString("en-US")} AI credits`;
+}
+
+/**
+ * The plan's feature bullets, with the catalogue's allowance restated as the
+ * one this account gets.
+ *
+ * s45 review, finding 3: a lifetime Founding Agency owner holds `agency` with
+ * 250 monthly credits (ADR 038) — more if another plan they hold lifts it — but
+ * this card printed the Agency row's bullets verbatim, "1,000 AI credits /
+ * month" beside a wallet saying 250. The number now comes from the resolved
+ * allowance; the wording stays the catalogue's. A bullet claiming the catalogue
+ * allowance is dropped rather than left standing when the resolved one is not
+ * known.
+ */
+function featuresWithAllowance(
+  plan: SubscriptionPlan,
+  monthlyCredits: number | null,
+): readonly string[] {
+  if (monthlyCredits === plan.limits.monthlyCredits) {
+    return plan.features;
+  }
+  const claimed = allowanceText(plan.limits.monthlyCredits);
+  return plan.features.flatMap((feature) => {
+    if (!feature.includes(claimed)) {
+      return [feature];
+    }
+    return monthlyCredits === null
+      ? []
+      : [feature.replace(claimed, allowanceText(monthlyCredits))];
+  });
+}
+
+function priceLabel(plan: SubscriptionPlan, isLifetime: boolean): string {
+  if (isLifetime) {
+    return "Lifetime access";
+  }
+  return plan.price === 0 ? "Free" : `$${plan.price}/month`;
 }
 
 export function SubscriptionCard({
   subscription,
   plan,
+  isLifetime,
+  monthlyCredits,
   onUpdate,
 }: SubscriptionCardProps) {
   const [loading, setLoading] = useState(false);
@@ -122,7 +176,7 @@ export function SubscriptionCard({
         <div>
           <h4 className="font-medium text-lg">{plan.name} plan</h4>
           <p className="text-2xl font-semibold text-primary tabular">
-            {plan.price === 0 ? "Free" : `$${plan.price}/month`}
+            {priceLabel(plan, isLifetime)}
           </p>
         </div>
 
@@ -149,22 +203,24 @@ export function SubscriptionCard({
         <div>
           <h5 className="font-medium mb-2">Plan features</h5>
           <ul className="space-y-1 text-sm text-muted-foreground">
-            {plan.features.map((feature, index) => (
-              <li key={index} className="flex items-center">
-                <svg
-                  className="w-4 h-4 text-tone-success-text mr-2"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                {feature}
-              </li>
-            ))}
+            {featuresWithAllowance(plan, monthlyCredits).map(
+              (feature, index) => (
+                <li key={index} className="flex items-center">
+                  <svg
+                    className="w-4 h-4 text-tone-success-text mr-2"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {feature}
+                </li>
+              ),
+            )}
           </ul>
         </div>
 

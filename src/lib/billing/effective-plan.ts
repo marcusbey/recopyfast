@@ -260,10 +260,8 @@ export async function readEffectivePlanId(
   return (await readEffectivePlanBasis(supabase, userId))?.planId ?? null;
 }
 
-/**
- * The plan in force, and whether a purchase is the only thing conferring it.
- */
-interface EffectivePlanBasis {
+/** A plan an account holds, and whether a purchase is the only thing conferring it. */
+interface HeldPlan {
   readonly planId: string;
   /**
    * True when every live grant of `planId` was bought — it carries a Stripe
@@ -283,9 +281,21 @@ interface EffectivePlanBasis {
   readonly isHeldByPurchaseOnly: boolean;
 }
 
+/** The plan in force, and what else the account holds beside it. */
+interface EffectivePlanBasis extends HeldPlan {
+  /**
+   * Every OTHER plan the account holds through a live non-trial grant or its
+   * live subscription. Filled in only when the plan in force is held by
+   * purchase only, because only then can an override (ADR 038) sit below
+   * something the account already has — see `resolveEntitlement`.
+   */
+  readonly otherHeldPlans: readonly HeldPlan[];
+}
+
 interface LiveGrant {
   plan_id: string;
   stripe_payment_intent_id: string | null;
+  source: string | null;
 }
 
 function isPurchaseOnly(grants: readonly LiveGrant[], planId: string): boolean {
@@ -296,13 +306,44 @@ function isPurchaseOnly(grants: readonly LiveGrant[], planId: string): boolean {
   );
 }
 
+/**
+ * The plans other than `planId` that this account already gets an allowance
+ * from: every live non-trial grant (bought or comped) and the live
+ * subscription. Each is described the way the account holds it, so a second
+ * purchased grant is counted at what that purchase confers.
+ *
+ * Trials are left out on purpose. ADR 029 already keeps a Pro trial from
+ * outranking a purchased Agency grant; a trial is 14 card-less days, not an
+ * allowance the buyer paid for or was granted, so it does not lift one either.
+ */
+function otherHeldPlans(
+  grants: readonly LiveGrant[],
+  subscriptionPlanId: string | null,
+  planId: string,
+): HeldPlan[] {
+  const heldPlanIds = new Set([
+    ...grants
+      .filter((grant) => grant.source !== TRIAL_SOURCE)
+      .map((grant) => grant.plan_id),
+    ...(subscriptionPlanId ? [subscriptionPlanId] : []),
+  ]);
+
+  return [...heldPlanIds]
+    .filter((id) => id !== planId && isRecognisedPaidPlanId(id))
+    .map((id) => ({
+      planId: id,
+      isHeldByPurchaseOnly:
+        isPurchaseOnly(grants, id) && subscriptionPlanId !== id,
+    }));
+}
+
 async function readEffectivePlanBasis(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<EffectivePlanBasis | null> {
   const { data: entitlements, error: entitlementError } = await supabase
     .from("plan_entitlements")
-    .select("plan_id, stripe_payment_intent_id")
+    .select("plan_id, stripe_payment_intent_id, source")
     .eq("user_id", userId)
     .is("revoked_at", null)
     // Expiry is a predicate INSIDE the query, never a check on the row after
@@ -349,9 +390,10 @@ async function readEffectivePlanBasis(
   // exactly as before s45. Only a purchase-only Agency grant goes on to ask
   // whether an Agency subscription is still billing — without that read, a
   // subscriber who buys the lifetime would drop to its 250 credits in the
-  // middle of a period they had already paid 1,000 for.
+  // middle of a period they had already paid 1,000 for. The same read tells
+  // `withAllowanceFloor` which lower plan (a Pro subscription) is still billing.
   if (holdsHighestGrant && !isPurchaseOnly(liveGrants, HIGHEST_PAID_PLAN_ID)) {
-    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: false };
+    return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
   const { data: subscription, error: subscriptionError } = await supabase
@@ -373,23 +415,75 @@ async function readEffectivePlanBasis(
     isRecognisedPaidPlanId(HIGHEST_PAID_PLAN_ID) &&
     subscription?.plan === HIGHEST_PAID_PLAN_ID
   ) {
-    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: false };
+    return fullPlan(HIGHEST_PAID_PLAN_ID);
   }
 
+  const subscriptionPlanId = subscription?.plan ?? null;
+
   if (holdsHighestGrant) {
-    return { planId: HIGHEST_PAID_PLAN_ID, isHeldByPurchaseOnly: true };
+    return purchasedPlan(HIGHEST_PAID_PLAN_ID, liveGrants, subscriptionPlanId);
   }
 
   if (grantedPlanId) {
-    return {
-      planId: grantedPlanId,
-      isHeldByPurchaseOnly:
-        isPurchaseOnly(liveGrants, grantedPlanId) &&
-        subscription?.plan !== grantedPlanId,
-    };
+    return isPurchaseOnly(liveGrants, grantedPlanId) &&
+      subscriptionPlanId !== grantedPlanId
+      ? purchasedPlan(grantedPlanId, liveGrants, subscriptionPlanId)
+      : fullPlan(grantedPlanId);
   }
   if (!subscription || !isRecognisedPaidPlanId(subscription.plan)) return null;
-  return { planId: subscription.plan, isHeldByPurchaseOnly: false };
+  return fullPlan(subscription.plan);
+}
+
+function fullPlan(planId: string): EffectivePlanBasis {
+  return { planId, isHeldByPurchaseOnly: false, otherHeldPlans: [] };
+}
+
+function purchasedPlan(
+  planId: string,
+  grants: readonly LiveGrant[],
+  subscriptionPlanId: string | null,
+): EffectivePlanBasis {
+  return {
+    planId,
+    isHeldByPurchaseOnly: true,
+    otherHeldPlans: otherHeldPlans(grants, subscriptionPlanId, planId),
+  };
+}
+
+/** The catalogue plan as the account holds it: purchased view or full row. */
+async function findHeldPlan(held: HeldPlan): Promise<SubscriptionPlan | null> {
+  return held.isHeldByPurchaseOnly
+    ? findPurchasedPlanById(held.planId)
+    : findPlanById(held.planId);
+}
+
+/**
+ * A purchase's allowance override is a floor for the purchase, never a ceiling
+ * on the account: the monthly allowance is the highest of the purchased plan's
+ * and every other plan the account already holds.
+ *
+ * The s45 review (finding 1, critical) caught the version without this: a
+ * Lifetime Pro owner — 500 credits a month for life — who bought Founding
+ * Agency dropped to its 250 permanently, and a Pro subscriber who bought it
+ * dropped from 500 to 250 for the rest of a period they had already paid for
+ * (finding 2), despite the offer card's "You keep the period you have already
+ * paid for". Both are sold the offer (`LifetimeOfferCard`; checkout refuses
+ * only existing `agency` holders). Only the allowance is lifted, and only up;
+ * the plan in force and every other limit stay what ADR 029 and ADR 038 make
+ * them.
+ */
+async function withAllowanceFloor(
+  plan: SubscriptionPlan,
+  otherHeld: readonly HeldPlan[],
+): Promise<SubscriptionPlan> {
+  const others = await Promise.all(otherHeld.map(findHeldPlan));
+  const floor = Math.max(
+    0,
+    ...others.map((other) => other?.limits.monthlyCredits ?? 0),
+  );
+  return floor > plan.limits.monthlyCredits
+    ? { ...plan, limits: { ...plan.limits, monthlyCredits: floor } }
+    : plan;
 }
 
 /**
@@ -407,7 +501,9 @@ async function readEffectivePlanBasis(
  * (ADR 038). That is how a lifetime Founding Agency owner gets Agency with 250
  * monthly AI credits (s45) while keeping `planId: "agency"`, which every Agency
  * check — nav, offers, checkout eligibility, the founding "owned" test — keys
- * off. Every gate reads limits, so nothing but the allowance differs.
+ * off. Every gate reads limits, so nothing but the allowance differs — and
+ * `withAllowanceFloor` keeps that allowance from ever landing below one the
+ * account already had.
  */
 export async function resolveEntitlement(
   supabase: SupabaseClient,
@@ -416,11 +512,15 @@ export async function resolveEntitlement(
   const basis = await readEffectivePlanBasis(supabase, userId);
 
   if (basis !== null) {
-    const plan = basis.isHeldByPurchaseOnly
-      ? await findPurchasedPlanById(basis.planId)
-      : await findPlanById(basis.planId);
+    const plan = await findHeldPlan(basis);
     if (plan) {
-      return { kind: "plan", planId: basis.planId, plan };
+      return {
+        kind: "plan",
+        planId: basis.planId,
+        plan: basis.isHeldByPurchaseOnly
+          ? await withAllowanceFloor(plan, basis.otherHeldPlans)
+          : plan,
+      };
     }
   }
 

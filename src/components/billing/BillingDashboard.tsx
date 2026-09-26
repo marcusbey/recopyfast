@@ -221,6 +221,14 @@ export function BillingDashboard({
     );
   }
 
+  // A plan held through a permanent grant and billed by no subscription has no
+  // monthly price. A lifetime owner still running out a lower subscription's
+  // paid period is billed for that plan, not this one, so it counts too.
+  const isPlanHeldForLife =
+    lifetimeGrant.kind === "granted" &&
+    lifetimeGrant.planIds.includes(plan.id) &&
+    dashboardData.subscription?.plan_id !== plan.id;
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
@@ -253,6 +261,11 @@ export function BillingDashboard({
           <SubscriptionCard
             subscription={dashboardData.subscription}
             plan={plan}
+            isLifetime={isPlanHeldForLife}
+            // The allowance the server resolved for this account, not the
+            // catalogue row's: they differ for a lifetime Founding Agency owner
+            // (ADR 038).
+            monthlyCredits={dashboardData.creditWallet?.included ?? null}
             onUpdate={handleSubscriptionUpdate}
           />
           <PaymentMethodsCard

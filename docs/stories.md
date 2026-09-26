@@ -1687,7 +1687,9 @@ credits or seats on the $299 lifetime Founding Agency"). Complexity: 3. Branch
 except the monthly AI-credit allowance, which is 250 instead of 1,000. Spots stay at 50.
 
 - [x] Entitlement resolution for a lifetime Founding Agency purchase yields every Agency limit
-  and 250 monthly AI credits; purchased credit packs still stack on top.
+  and 250 monthly AI credits; purchased credit packs still stack on top. The 250 never lowers an
+  allowance the owner already holds: a Lifetime Pro owner keeps 500, a Pro subscriber keeps 500
+  until the period they paid for ends (review fix, ADR 038).
 - [x] Agency subscribers keep 1,000, including a lifetime buyer while an Agency subscription
   they already paid for runs out its period; an unpaid Agency comp keeps 1,000; ADR 029
   precedence is unchanged.
@@ -1696,7 +1698,8 @@ except the monthly AI-credit allowance, which is 250 instead of 1,000. Spots sta
   the 50-spot cap and the Stripe price are unchanged.
 - [x] The offer states "Everything in Agency, with 250 AI credits a month" wherever it is
   presented (landing, billing card, plan dialog, /compare, Stripe product description); no other
-  pricing copy changes. `/api/pricing` lists no new plan.
+  pricing copy changes. `/api/pricing` lists no new plan. The billing page's plan card states the
+  allowance the owner actually gets and no monthly price for a plan held for life (review fix).
 - [x] Required local gates pass; one story commit. No push, PR, merge or production action.
   Operator after merge: deploy, apply the migration, then sync the Stripe product description.
 

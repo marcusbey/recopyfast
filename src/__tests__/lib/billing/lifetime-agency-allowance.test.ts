@@ -101,7 +101,7 @@ function row(overrides: Row): Row {
   };
 }
 
-function catalogue(foundingLimits: Row): Row[] {
+function catalogue(foundingLimits: Row, lifetimeProLimits: Row = {}): Row[] {
   return [
     row({
       id: "starter",
@@ -157,7 +157,7 @@ function catalogue(foundingLimits: Row): Row[] {
       kind: "one_time",
       name: "Lifetime Pro",
       price_monthly: "199.00",
-      limits: {},
+      limits: lifetimeProLimits,
       grants_plan_id: "pro",
       sort_order: 40,
     }),
@@ -287,10 +287,10 @@ function foundingGrant(overrides: Row = {}): Row {
   };
 }
 
-function agencySubscription(status: string): Row {
+function subscriptionRow(status: string, plan = "agency"): Row {
   return {
     user_id: OWNER,
-    plan: "agency",
+    plan,
     status,
     created_at: at(-40),
     current_period_start: at(-5),
@@ -371,7 +371,7 @@ describe("lifetime Founding Agency allowance", () => {
   });
 
   it("leaves an Agency subscriber at 1,000", async () => {
-    db.billing_subscriptions = [agencySubscription("active")];
+    db.billing_subscriptions = [subscriptionRow("active")];
 
     const { entitlement, balance } = await allowanceOf();
 
@@ -387,11 +387,11 @@ describe("lifetime Founding Agency allowance", () => {
     // The webhook cancels the subscription at period end, and the offer card
     // promises "You keep the period you have already paid for".
     db.plan_entitlements = [foundingGrant()];
-    db.billing_subscriptions = [agencySubscription("active")];
+    db.billing_subscriptions = [subscriptionRow("active")];
 
     expect((await allowanceOf()).balance.included).toBe(1000);
 
-    db.billing_subscriptions = [agencySubscription("canceled")];
+    db.billing_subscriptions = [subscriptionRow("canceled")];
 
     expect((await allowanceOf()).balance.included).toBe(250);
   });
@@ -446,5 +446,134 @@ describe("lifetime Founding Agency allowance", () => {
 
     expect(entitlement.planId).toBe("agency");
     expect(balance.included).toBe(1000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review fix (s45 review, findings 1 and 2): the 250 is a floor for the
+// purchase, never a ceiling on the account. Buying the lifetime must not lower
+// an allowance the buyer already gets from another live source — a Lifetime Pro
+// grant bought outright (500 for life), a Pro subscription still running out a
+// period they paid for, a support comp of Pro. Both were reachable: the offer
+// card sells Founding Agency to Lifetime Pro owners and to Pro subscribers, and
+// checkout only refuses existing `agency` holders.
+// ---------------------------------------------------------------------------
+
+const PRO_TRIAL: Row = {
+  user_id: OWNER,
+  plan_id: "pro",
+  source: "trial",
+  stripe_payment_intent_id: null,
+  granted_at: at(-1),
+  expires_at: at(13),
+  revoked_at: null,
+};
+
+const LIFETIME_PRO: Row = foundingGrant({
+  plan_id: "pro",
+  stripe_payment_intent_id: "pi_pro_1",
+  granted_at: at(-60),
+});
+
+describe("the lifetime cap never lowers an allowance the owner already gets", () => {
+  it.each<{
+    who: string;
+    grants: Row[];
+    subscriptions: Row[];
+    expected: number;
+  }>([
+    {
+      who: "the lifetime alone",
+      grants: [foundingGrant()],
+      subscriptions: [],
+      expected: 250,
+    },
+    {
+      who: "a Lifetime Pro owner who buys Founding Agency",
+      grants: [LIFETIME_PRO, foundingGrant()],
+      subscriptions: [],
+      expected: 500,
+    },
+    {
+      who: "a Pro subscriber who buys it, mid-way through the period they paid",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("active", "pro")],
+      expected: 500,
+    },
+    {
+      who: "a past-due Pro subscriber who buys it (still a live subscription)",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("past_due", "pro")],
+      expected: 500,
+    },
+    {
+      who: "a Pro subscriber once that period has ended",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("canceled", "pro")],
+      expected: 250,
+    },
+    {
+      // A floor, never an average: a lower plan still billing does not pull
+      // the lifetime's own 250 down to Starter's 0.
+      who: "a Starter subscriber who buys it",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("active", "starter")],
+      expected: 250,
+    },
+    {
+      who: "an Agency subscriber who buys it, while subscribed",
+      grants: [foundingGrant()],
+      subscriptions: [subscriptionRow("active")],
+      expected: 1000,
+    },
+    {
+      who: "the holder of an unpaid support comp of Pro who buys it",
+      grants: [
+        foundingGrant({
+          plan_id: "pro",
+          source: "support_comp",
+          stripe_payment_intent_id: null,
+          granted_at: at(-60),
+        }),
+        foundingGrant(),
+      ],
+      subscriptions: [],
+      expected: 500,
+    },
+    {
+      who: "a buyer inside a 14-day Pro trial (a trial is not an allowance they hold)",
+      grants: [foundingGrant({ granted_at: at(-10) }), PRO_TRIAL],
+      subscriptions: [],
+      expected: 250,
+    },
+  ])(
+    "$who gets $expected monthly AI credits",
+    async ({ grants, subscriptions, expected }) => {
+      db.plan_entitlements = grants;
+      db.billing_subscriptions = subscriptions;
+
+      const { entitlement, balance } = await allowanceOf();
+
+      // The plan stays `agency` with every other Agency limit: only the
+      // allowance is lifted, and only ever up.
+      expect(entitlement.planId).toBe("agency");
+      expect(entitlement.plan?.limits).toEqual({
+        ...AGENCY_EXCEPT_CREDITS,
+        monthlyCredits: expected,
+      });
+      expect(balance.included).toBe(expected);
+    },
+  );
+
+  it("counts another purchased grant at what that purchase confers, not at its plan's full row", async () => {
+    // Hypothetical catalogue: were Lifetime Pro ever to carry its own override
+    // (ADR 038), a Lifetime Pro owner would hold 300, not Pro's 500 — and 300
+    // is what buying Founding Agency must preserve, not 500.
+    catalogueRows = catalogue(FOUNDING_LIMITS_AFTER, { monthly_credits: 300 });
+    db.plan_entitlements = [LIFETIME_PRO, foundingGrant()];
+
+    const { balance } = await allowanceOf();
+
+    expect(balance.included).toBe(300);
   });
 });

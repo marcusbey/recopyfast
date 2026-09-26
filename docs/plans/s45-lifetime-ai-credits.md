@@ -218,3 +218,104 @@ Baseline full Jest: 270 suites passed / 2 skipped, 3,494 tests passed / 39 skipp
 
   Follow-up, not fixed here: the billing page's SubscriptionCard lists the catalogue Agency
   bullets ("1,000 AI credits / month") and "$49/month" to a lifetime owner.
+
+### Review fix
+
+2026-09-26, fix mode on `0d1617d` after the blocked review (`docs/reviews/s45-lifetime-ai-credits.md`,
+max severity critical). Same worktree and CI placeholder environment. Nothing touched production
+or Stripe. Each finding went test-first. Every mutation below was applied alone, then restored
+with `/bin/cp -f` and the file's sha256 checked by script.
+
+- **Findings 1 (critical) and 2 (major): the 250 never lowers an allowance already held.**
+  Tests were added to `lifetime-agency-allowance.test.ts` with the real `plans.ts`,
+  `effective-plan.ts` and `credits/system.ts`: a table asserting `planId agency`, every other
+  Agency limit, and the allowance (entitlement and `getUserCreditBalance().included`).
+  - Red: 5 of 18 failed, each receiving **250**:
+    - Lifetime Pro + lifetime (500 due);
+    - Pro subscriber mid-period + lifetime (500 due);
+    - past-due Pro subscriber + lifetime (500 due);
+    - unpaid support comp of Pro + lifetime (500 due);
+    - another purchased grant counted at what it confers (300 due; hypothetical `lifetime_pro`
+      override `{"monthly_credits": 300}`).
+  - Guards that passed before the change: the lifetime alone 250, the Pro subscription once
+    canceled 250, an Agency subscriber who bought it 1,000, and a buyer inside a Pro trial 250.
+  - Green: `readEffectivePlanBasis` also selects `source` and, for a purchase-only basis, lists
+    every other plan held through a live non-trial grant or the live subscription (each "as
+    held": purchased view or full row). `resolveEntitlement` then lifts `monthlyCredits` to the
+    highest of those (`withAllowanceFloor`, only ever up; the plan id and other limits are
+    unchanged). Result: 18/18.
+  - Mutations:
+    - F1, floor removed → 5 failed.
+    - F2, trials counted → 2 failed.
+    - F3, subscription ignored → 2 failed.
+    - F4, other grants at their full row → 1 failed.
+    - F5, floor applied even when lower → **survived**. The guard "a Starter subscriber who buys
+      it gets 250" was added; it passes on the fix and kills F5 (1 failed). Final: 19/19.
+- **Finding 3 (major): the billing plan card.**
+  - Checked first: today the card shows a lifetime Founding Agency owner **"$49/month"** and
+    "1,000 AI credits / month". It shows a Lifetime Pro owner "$19/month".
+  - New `src/components/billing/__tests__/BillingDashboard.plan-card.test.tsx` renders the
+    dashboard (and so the card) from a `/api/billing/dashboard` payload.
+  - Red: 5 of 6 failed:
+    - the owner's card states "250 AI credits / month" and no "1,000";
+    - no "$49/month" and "Lifetime access";
+    - "500 AI credits / month" when the wallet says 500;
+    - lifetime price kept while a lower Pro subscription runs out;
+    - no allowance restated when the wallet is absent.
+  - The Agency subscriber guard ("1,000 AI credits / month", "$49/month") passed before and
+    after.
+  - Green: `SubscriptionCard` takes `isLifetime` and `monthlyCredits`.
+    - The price line reads "Lifetime access" for a plan held by a permanent grant that no
+      subscription bills.
+    - A bullet stating the catalogue allowance ("1,000 AI credits") is restated with the
+      resolved one, or dropped if that is unknown.
+    - `BillingDashboard` derives both. `isLifetime` comes from the page's `lifetimeGrant` and
+      the live subscription's `plan_id`. `monthlyCredits` is `creditWallet.included`, which the
+      server resolves through `resolveEntitlement`.
+  - Mutations:
+    - C1, lifetime price ignored → 2 failed.
+    - C2, catalogue bullets verbatim → 3 failed.
+    - C3, unknown allowance kept → 1 failed.
+    - C4, wallet ignored → 3 failed.
+    - C5, "no subscription" instead of "no subscription on this plan" → 1 failed.
+    - C6, any granted plan counts as this one → **survived**. The guard "a Pro trial with a
+      Starter comp is not called lifetime" was added and kills it (1 failed). Final: 7/7.
+- **Finding 4 (minor):** ADR 038 now names 20260924065000 (`limits = EXCLUDED.limits`, line 61).
+  Re-running it would write `lifetime_agency.limits` back to `{}` and restore 1,000.
+- **Docs:**
+  - ADR 038 gains the floor rule and the re-run warning. Its Consequences now describe the plan
+    card instead of deferring it.
+  - `docs/stories.md` s45 states the floor and the card.
+- **Gates:**
+  - `npm run precommit`: lint 0 errors (38 inherited warnings, none in touched files),
+    type-check clean. Full Jest: 272 suites passed / 2 skipped, **3,537 tests passed** / 39
+    skipped (+17).
+  - `format:check` and `type-check:build`: clean.
+  - `npm run build`: compiled. The `fetch failed` lines are the placeholder environment's
+    catalogue reads, as before, and the build changed no tracked file.
+- **Declared deviations and interpretations:**
+  1. **"Live paid entitlement".** Read as every live **non-trial** grant, bought *or comped*,
+     plus the live subscription. A support comp of Pro therefore keeps its 500 after a
+     Founding Agency purchase. This is consistent with ADR 038's "a support comp confers the
+     full plan". Trials stay excluded, as the fix instruction and the existing ADR 029 test
+     require. Both behaviours are pinned by tests.
+  2. **Other purchased grants count at what their purchase confers**
+     (`findPurchasedPlanById`), not at their plan's full row. Today this changes nothing,
+     because `lifetime_pro.limits` is `{}`. It is pinned by a hypothetical-catalogue test.
+  3. **Only `monthlyCredits` is floored.** It is the only key any product overrides; other
+     limits are untouched.
+  4. **The plan interdicts no longer hold for billing.** They said `src/components/billing` has
+     an empty diff and the SubscriptionCard follow-up is not fixed here. Finding 3 and the
+     fix-mode instruction override both. The execution log's "Follow-up, not fixed here" line
+     above is superseded by this section. Lifetime Pro holders also stop seeing "$19/month",
+     under the same rule. Starter and Pro bullets state no allowance, so their cards are
+     unchanged.
+  5. **Existing test file edits.** In `lifetime-agency-allowance.test.ts`, the helper
+     `agencySubscription(status)` became `subscriptionRow(status, plan = "agency")`, and
+     `catalogue()` takes an optional `lifetime_pro` limits argument. No existing assertion
+     changed.
+  6. **ADR 038 was edited in place.** It is this story's ADR and has not reached `main`. The
+     fix instruction asked for the re-run note, and the floor rule changes what the ADR
+     decides.
+  7. **The migration was not touched.** Its header still describes the purchase-only rule,
+     which remains true; the floor lives in code.
