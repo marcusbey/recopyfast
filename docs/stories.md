@@ -1501,3 +1501,25 @@ and nine minors); fix `ba25a30` addressed those blockers. The independent
 re-review allows shipping and requests N1 and n1–n7 before merge. Narrow fix
 mode 2 addresses them, retaining the uncommitted reviewer file. SoftwareApplication
 JSON-LD is explicitly deferred to s17 in ADR 032; no merge/deploy authority.
+
+## Story s42-api-keys-writes — creating, toggling and deleting an API key works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit. Complexity: 2. Branch
+`feature/s42-api-keys-writes`. Production RLS on `api_keys` grants `authenticated` SELECT
+only and s38 removed its write privileges, so every create/pause/delete from
+`/dashboard/settings` fails today.
+
+- [x] POST, PUT (`isActive`) and DELETE on `/api/api-keys` succeed for a site admin who owns
+  the key: authentication and authorization stay on the user-scoped client, the single write
+  runs through the service-role client scoped by `id` AND `user_id` (option (a); no migration).
+- [x] Non-admins get 403, non-owners 404, unauthenticated callers 401, and no write happens;
+  `key_hash` never appears in a response.
+- [x] A pre-authentication IP limiter guards every verb (GET fails open, writes fail closed),
+  and writes add a fail-closed per-user limiter before the `site_permissions` lookup.
+- [x] GET keeps working under the s38 column grants; a real-DB case proves the service-role
+  write path and the authenticated denial it replaces.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s42-api-keys-writes.md`. Plan: `docs/plans/s42-api-keys-writes.md`.
+The settings panel still has no pause/resume control (PUT is API-only); that is UI work for a
+follow-up story.
