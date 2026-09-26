@@ -154,3 +154,14 @@ Every command ran with the CI placeholder environment; nothing touched productio
   migration to apply**: production already has the service_role policy and grants this relies
   on. Live check after deploy (operator): create, pause, resume and delete a key from
   `/dashboard/settings` (pause/resume via `PUT /api/api-keys` — the panel has no toggle).
+
+### Review fixes — M1, M2 (2026-09-25)
+
+- **M1:** `validateAPIKey` (`src/lib/api/rate-limiter.ts`) now re-reads the creator's `admin` row on
+  the key's site on every call (`.limit(1)` — no unique (site, user) index), and refuses keys with no
+  site; a failed read fails closed; all refusals return the same "Invalid API key". Red first:
+  `src/lib/api/__tests__/validate-api-key.test.ts` 4 failed → 4 passed; mutant (check disabled) 2 red.
+- **M2:** ADR 037 amends ADR 002 §3/§4 with the dashboard-admin principal; AGENTS.md "Data access"
+  names it.
+- Declared fixture change: `rate-limiter-fail-closed.test.ts` gives its key a creator and answers the admin lookup; assertions unchanged.
+- m1–m3 left as follow-ups (m3 predates the story).
