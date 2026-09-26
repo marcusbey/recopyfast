@@ -9,8 +9,16 @@
  * the app hydrates, under either bundler.
  *
  * The options were moved, not redesigned. These tests pin the ones that carry
- * a decision — production-only, sample rates, Replay masking, no PII — so the
- * move cannot quietly change them.
+ * a decision — production-only, sample rates, no PII — so the move cannot
+ * quietly change them.
+ *
+ * One option was then removed on purpose: Session Replay. Once the file was
+ * actually bundled, the SDK added +121,922 B gzip to every page's first load,
+ * and Replay was 38,965 B of it. The operator ruled on 2026-09-26 that launch
+ * landing pages cannot carry it and that error reporting is the goal. Browser
+ * tracing was kept on a measured cost of 58 B over an errors-only init (see
+ * the comment in `src/instrumentation-client.ts`). The tests below pin both
+ * choices, so neither can change as a side effect.
  */
 
 jest.mock("@sentry/nextjs", () => ({
@@ -45,9 +53,8 @@ interface InitOptions {
   dsn?: string;
   enabled?: boolean;
   tracesSampleRate?: number;
-  replaysSessionSampleRate?: number;
-  replaysOnErrorSampleRate?: number;
   sendDefaultPii?: boolean;
+  tunnel?: string;
   integrations?: unknown[];
   beforeSend?: (event: ErrorEvent, hint: EventHint) => ErrorEvent | null;
 }
@@ -94,23 +101,36 @@ describe("instrumentation-client", () => {
     expect(options.tracesSampleRate).toBe(0.1);
   });
 
-  it("keeps Session Replay at its existing rates, with everything masked", async () => {
-    // Replays render customer websites and their visitors' content. Unmasked,
-    // they would route third parties' personal data into our error tooling.
+  it("keeps browser tracing: the one integration it registers", async () => {
+    // Kept on a measured cost of 58 B gzip over an errors-only init (s46
+    // follow-up). Dropping it is a size decision to re-measure, not a cleanup.
     const { Sentry, options } = await loadUnder("production");
 
-    expect(options.replaysSessionSampleRate).toBe(0.1);
-    expect(options.replaysOnErrorSampleRate).toBe(1.0);
-    expect(Sentry.replayIntegration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        maskAllText: true,
-        maskAllInputs: true,
-        blockAllMedia: true,
-      }),
-    );
-    expect(options.integrations).toContainEqual(
+    expect(Sentry.browserTracingIntegration).toHaveBeenCalledTimes(1);
+    expect(options.integrations).toEqual([
+      expect.objectContaining({ name: "BrowserTracing" }),
+    ]);
+  });
+
+  it("ships no Session Replay: no integration, no replay sample rates", async () => {
+    // Replay cost 38,965 B gzip on every page's first load. Re-adding it is a
+    // decision (lazy-loaded, fully masked, and a CSP change), not a revert.
+    const { Sentry, options } = await loadUnder("production");
+
+    expect(Sentry.replayIntegration).not.toHaveBeenCalled();
+    expect(options.integrations ?? []).not.toContainEqual(
       expect.objectContaining({ name: "Replay" }),
     );
+    expect(options).not.toHaveProperty("replaysSessionSampleRate");
+    expect(options).not.toHaveProperty("replaysOnErrorSampleRate");
+  });
+
+  it("sets no tunnel of its own, so the build-injected /monitoring route applies", async () => {
+    // The SDK derives `tunnel` from `tunnelRoute` in next.config.ts at init.
+    // A hard-coded tunnel here would be a second source of truth for it.
+    const { options } = await loadUnder("production");
+
+    expect(options).not.toHaveProperty("tunnel");
   });
 
   it("never opts into default PII", async () => {

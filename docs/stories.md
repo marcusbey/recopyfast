@@ -1723,7 +1723,9 @@ public key was absent from the homepage JS: the browser SDK was never initialise
 - [x] Browser events go same-origin through `tunnelRoute` `/monitoring`; the middleware lets
   that exact path through without a GoTrue round trip or redirect, keeps its security headers,
   and neither the CSP nor the matcher is widened.
-- [x] `enabled` stays production-only, sample rates and Replay masking unchanged, no PII.
+- [x] `enabled` stays production-only, sample rates unchanged, no PII. The browser ships error
+  reporting and tracing without Session Replay. Operator decision, 2026-09-26: launch pages
+  cannot carry it, and it made up 38,965 B gzip of every page's first load.
 - [x] Required local gates pass, including `npm run build` with a dummy DSN and no
   `SENTRY_AUTH_TOKEN`; one story commit. No push, PR, merge or production action.
 

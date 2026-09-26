@@ -33,28 +33,33 @@ Sentry.init({
   // Only enable in production
   enabled: process.env.NODE_ENV === "production",
 
-  // Performance Monitoring
+  // Performance Monitoring. Browser tracing stays, on a measured cost. The
+  // operator's bar (2026-09-26) was to keep it only if it cost at most 20 KB
+  // gzip over an errors-only init. It costs 58 B: @sentry/nextjs's own `init`
+  // imports browserTracingIntegration as a default integration either way.
+  // Even the tracing code itself, strippable only at build time with a
+  // `__SENTRY_TRACING__: false` define (a next.config decision, not taken), is
+  // 16,734 B. That is under the bar.
   tracesSampleRate: process.env.NODE_ENV === "production" ? 0.1 : 1.0,
-
-  // Session Replay
-  replaysSessionSampleRate: 0.1, // 10% of sessions
-  replaysOnErrorSampleRate: 1.0, // 100% of sessions with errors
 
   // Release tracking
   release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA,
 
-  // Integrations
-  integrations: [
-    Sentry.replayIntegration({
-      // Mask all text + media in session replays. Recopyfast replays render
-      // customer website content (potentially their end-users' PII); capturing it
-      // unmasked would route third-party personal data into our error tooling.
-      maskAllText: true,
-      blockAllMedia: true,
-      maskAllInputs: true,
-    }),
-    Sentry.browserTracingIntegration(),
-  ],
+  // No Session Replay, deliberately. The operator ruled on 2026-09-26 that launch
+  // landing pages cannot carry it and that error reporting is the goal. Replay
+  // sat in `sentry.client.config.ts`, which was never bundled, so it cost nothing
+  // until s46 shipped this file. It then made up 38,965 B gzip of the +121,922 B
+  // the SDK added to every page's first load: shared JS measured 253,686 B with
+  // it and 214,721 B without.
+  //
+  // Re-adding Replay is a later decision, not a revert. The route is to load it
+  // lazily after init, with `Sentry.lazyLoadIntegration("replayIntegration")` and
+  // `Sentry.addIntegration`. Keep `maskAllText`, `maskAllInputs` and
+  // `blockAllMedia`: replays render customer websites and their visitors'
+  // personal data. `lazyLoadIntegration` injects a <script> from
+  // https://browser.sentry-cdn.com, which the CSP's `script-src 'self'` blocks,
+  // so that decision includes the CSP.
+  integrations: [Sentry.browserTracingIntegration()],
 
   // Filtering
   ignoreErrors: [

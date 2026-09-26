@@ -33,7 +33,7 @@ to it. See [ADR 001](./decisions/001-inherited-production-baseline.md).
 | Email | Resend | `^6.14` | `src/lib/email/resend.ts` |
 | Cache / limits | Redis | `^5.8` | rate limiting, sessions, intended pub/sub |
 | Realtime | Socket.io | `^4.8` | separate service in `server/`, deployed on Fly as `recopyfast-ws` (one machine) — see [ADR 004](./decisions/004-embed-transport-split.md) |
-| Errors | Sentry | `@sentry/nextjs ^10.32` | Only wired when `NEXT_PUBLIC_SENTRY_DSN` is set |
+| Errors | Sentry | `@sentry/nextjs ^10.32` | Only wired when `NEXT_PUBLIC_SENTRY_DSN` is set. Browser: errors + tracing, no Session Replay (s46). Files: see Integration points |
 | Tests | Jest 30 + Testing Library, Playwright `^1.58` | — | 374 test files, 1954 passing |
 | Embed build | esbuild `^0.25` | — | `scripts/build-embed.mjs`, runs on `prebuild` |
 
@@ -368,7 +368,7 @@ noise; a comment that says *what broke last time* is the asset.
 | **Images** | `src/lib/images/`, `src/lib/storage/`, `/api/upload/image` | Supabase Storage, `20260801000000_storage_assets_bucket.sql`. Replace an existing `<img>` only |
 | **Realtime** | `server/index.js` (Socket.io) on Fly, one machine | `NEXT_PUBLIC_WS_URL` set in production ⇒ new snippets carry `data-ws-url` ⇒ the widget connects **in an editing session only**. HTTP stays authoritative and realtime is additive: unset the variable and redeploy and the product is its pre-`s07b` self. Reported as a `realtime` check in `GET /api/health` that can degrade the app but never make it unhealthy (ADR 004 "Watch"). See [ADR 004](./decisions/004-embed-transport-split.md), [ADR 022](./decisions/022-realtime-parity-is-editors-only.md), [`server/README.md`](../server/README.md) |
 | **Rate limit / cache** | Redis via `src/lib/api/rate-limit.ts` | `npm run check:redis` |
-| **Errors** | Sentry, 3 config files + `instrumentation.ts` | `next.config.ts` only wraps when the DSN is set, so CI builds without it |
+| **Errors** | Sentry. Browser: `src/instrumentation-client.ts`. Server: `src/instrumentation.ts` loads `sentry.server.config.ts` (Node) or `sentry.edge.config.ts` (Edge) and exports `onRequestError`. Browser events post same-origin to the `/monitoring` tunnel (`src/lib/monitoring/sentry-tunnel.ts`), rewritten to Sentry's ingest | `next.config.ts` only wraps when the DSN is set, so CI builds without it. No root `instrumentation.ts` or `sentry.client.config.ts`: under Turbopack a root copy shadows `src/`, and the client config is never bundled (s46) |
 | **Cron** | `vercel.json` → `/api/cron/generate-blog-post`; `/api/cron/ab-test-lifecycle` exists but is unscheduled | Cron platforms retry — every job must be idempotent |
 | **Outbound webhooks** | `src/lib/webhooks/`, `/api/webhooks` | Distinct from Stripe's inbound `/api/webhooks/stripe`. SSRF check needs `ipaddr.js` at config **and** delivery time |
 

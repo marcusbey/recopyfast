@@ -79,6 +79,39 @@ kept (it already existed), and there is no CSP widening.
      - the first-load JS delta.
    - Add the s46 entry to `docs/stories.md`, fill the Execution log, and make one story commit.
 
+## Follow-up: the browser ships error reporting, not Session Replay
+
+Operator decision, 2026-09-26. The Task 5 build showed the client SDK adding +121,922 B gzip to
+every page's first load. The ruling: launch landing pages cannot carry that, and error reporting
+is the goal. This supersedes two things:
+- "Replay is kept" in the target story;
+- the Replay and `docs/architecture.md` interdicts below.
+
+6. [x] No Session Replay, test-first, in `src/__tests__/instrumentation-client.test.ts`.
+   - Red: Replay is absent. No `replayIntegration` call, no `Replay` integration, and no replay
+     sample rates.
+   - Guard: the client sets no `tunnel` of its own.
+   - Green: remove Replay from `src/instrumentation-client.ts`. Add a why-comment that names
+     the lazy route (`Sentry.lazyLoadIntegration("replayIntegration")`) as a later decision.
+7. [x] Browser tracing, decided by measurement.
+   - Build each case for production, with the dummy DSN `https://public@o0.ingest.sentry.io/0`
+     and no `SENTRY_AUTH_TOKEN`.
+   - Measure the shared first-load JS gzip for three cases:
+     - (a) main before s46;
+     - (b) errors-only;
+     - (c) errors + `browserTracingIntegration` at the current `tracesSampleRate`.
+   - Keep browser tracing only if (c) − (b) ≤ 20 KB, and pin the choice in a test. Server
+     tracing is unchanged.
+8. [x] `docs/architecture.md:36` and `:371` describe the new file layout:
+   - `src/instrumentation-client.ts`;
+   - `src/instrumentation.ts`;
+   - `sentry.server.config.ts` / `sentry.edge.config.ts`;
+   - the `/monitoring` tunnel.
+9. [x] Gates.
+   - `npm run precommit`.
+   - `npm run build`, confirming the dummy DSN is still in `.next/static`.
+   - One commit, `perf: ship Sentry error reporting without Session Replay`.
+
 ## Run interdicts
 
 - `sentry.server.config.ts` and `sentry.edge.config.ts` have empty diffs: sample rates,
@@ -108,6 +141,8 @@ from reading Next's code (research fact 2). Check it against:
 - `src/instrumentation.ts` (rewritten), `src/instrumentation-client.ts` (new)
 - `instrumentation.ts` (deleted), `sentry.client.config.ts` (deleted)
 - `src/lib/monitoring/sentry-tunnel.ts` (new), `next.config.ts`, `src/middleware.ts`
+- Follow-up: `src/instrumentation-client.ts`, its test, `docs/architecture.md`, and the s46
+  entry in `docs/stories.md`
 - Tests: `src/__tests__/instrumentation.test.ts`, `src/__tests__/instrumentation-client.test.ts`,
   `src/__tests__/next-config-sentry.test.ts` (new), `src/__tests__/middleware-matcher.test.ts`
 - `docs/research/s46-sentry-wiring.md`, `docs/plans/s46-sentry-wiring.md`, `docs/stories.md`
@@ -257,3 +292,77 @@ after merge and deploy:
    → 200, and the event in `base32-pg/recopyfast`.
 2. Also trigger a failing route handler. Expect a server event (`onRequestError`).
 3. Optional: set `SENTRY_AUTH_TOKEN` in Vercel for releases and source maps.
+
+### Follow-up, 2026-09-26: the browser ships error reporting, not Session Replay
+
+Same worktree, on top of `72376c8`. Same environment as above, but the builds used
+`NEXT_PUBLIC_SENTRY_DSN=https://public@o0.ingest.sentry.io/0`. Nothing touched production,
+Vercel or Sentry settings.
+
+**Measurement.** The metric is the shared first-load JS: `build-manifest.json`
+`rootMainFiles`, each gzipped with Node's `gzipSync` at the default level, then summed. This
+reproduces the Task 5 figure, 253,686 B, exactly.
+
+| Build | Shared first-load JS, gzip |
+|---|---|
+| (a) `main` before s46 | 131,764 B |
+| s46 as first committed (with Replay) | 253,686 B |
+| (b) errors-only | 214,663 B |
+| (c) errors + `browserTracingIntegration`, `tracesSampleRate` 0.1 | 214,721 B |
+| (d) informative: (b) + `__SENTRY_TRACING__: false` define | 197,987 B |
+| Final commit, which is (c) plus comments | 214,719 B |
+
+- **Tracing decision: kept.** (c) − (b) = 58 B, far under 20 KB. @sentry/nextjs's client `init`
+  bundles `browserTracingIntegration` as a default integration either way (research, follow-up
+  section).
+- Even the tracing code itself, which only a build-time define can remove, is 16,734 B,
+  (c) − (d). That is also under the bar.
+- Replay was 38,965 B, not the ~100 KB assumed. Most of the +121,922 B is the SDK's error
+  reporting core: +82,899 B over (a).
+- (b) and (d) were temporary edits, used only to measure:
+  - (b) is `instrumentation-client.ts` without `tracesSampleRate`, with BrowserTracing filtered
+    out of the defaults, and without `onRouterTransitionStart`;
+  - (d) also adds a `compiler.define` to `next.config.ts`.
+
+  Both files were restored from copies and checked: `next.config.ts` by sha256, the client file
+  with `cmp`. `next.config.ts` has an empty diff.
+
+**Tasks**
+- **Task 6**: red, 1 of 9 failed: "ships no Session Replay". Its companion, "sets no tunnel of
+  its own", passed by construction and is a declared guard. Green: 9/9, plus
+  `instrumentation.test.ts`, 24/24 in total.
+- **Task 7**: "keeps browser tracing: the one integration it registers" is a declared guard.
+  Keeping tracing means there is no red to observe. The existing 10% sampling test still pins
+  the rate. Result: 10/10.
+- **Task 8**: `docs/architecture.md:36` and `:371` rewritten.
+
+**Mutation checks.** Each was applied alone, then restored and checked by sha256. All were
+killed:
+- M8, tracing dropped → 1 failed.
+- M9, own `tunnel` → 1 failed.
+- M10, `replaysOnErrorSampleRate` back → 1 failed.
+- M11, `replayIntegration` back → 2 failed.
+- M12, `enabled: true` → 1 failed.
+- M13, DSN dropped → 1 failed.
+
+**Gates**
+- `npm run precommit`:
+  - lint: 0 errors, 38 inherited warnings;
+  - type-check: clean;
+  - Jest: 275 suites passed / 2 skipped, **3,572 tests passed** / 39 skipped.
+- `format:check`: clean. `type-check:build`: clean.
+- `npm run build`: passed.
+  - `public@o0.ingest.sentry.io` is in 1 file, `.next/static/chunks/29vvcbh1hop_y.js`, which
+    is one of the `rootMainFiles`.
+  - `maskAllText` and `rrweb` are in 0 files. `/monitoring` is in 2.
+  - There is no "ACTION REQUIRED" warning.
+
+**Declared deviations**
+1. The brief said to note that Replay was "+~100 KB". The measurement says 38,965 B, so the
+   why-comments carry the measured figure.
+2. The why-comment adds a trap to the lazy route. `lazyLoadIntegration` loads from
+   `browser.sentry-cdn.com`, which the CSP's `script-src 'self'` blocks.
+3. `docs/stories.md:1726` said "Replay masking unchanged", which is no longer true. That bullet
+   was amended. This was not in the brief.
+4. The story now has two commits, because the operator asked for this follow-up as its own
+   commit.

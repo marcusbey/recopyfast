@@ -179,8 +179,8 @@ Acceptance:
   falls back to `script-src 'self' 'unsafe-inline'`, which blocks `blob:`. Replay then "falls
   back to simple buffer" (`@sentry/replay/build/npm/cjs/index.js:5594`), so replay segments are
   uncompressed and a CSP violation is logged. No CSP widening was made (operator constraint).
-  Replay stays because it already existed in the config. It now ships in every page's first
-  load (see the plan's Execution log for measured size).
+  Replay was first kept because it already existed in the config. The follow-up then removed
+  it (see "Follow-up: client bundle cost" below).
 - **Tunnel path and ad blockers.**
   - `/monitoring` is the orchestrator's choice and a fixed path. Some filter lists know it. A
     random route (`tunnelRoute: true`) would change per build and could not be named in
@@ -195,15 +195,57 @@ Acceptance:
 - `jest.config.js` default env is jsdom with `customExportConditions: [""]`. Suites that load
   the real `withSentryConfig` should use `@jest-environment node`. No existing suite mocks or
   loads `@sentry/nextjs` directly.
-- `docs/architecture.md:36`, `:371` say "3 config files + `instrumentation.ts`". This becomes
-  2 config files, `src/instrumentation.ts` and `src/instrumentation-client.ts`. That is
-  architecture drift for the operator to record. This lane does not touch architecture.
+- `docs/architecture.md:36`, `:371` said "3 config files + `instrumentation.ts`". This becomes
+  2 config files, `src/instrumentation.ts` and `src/instrumentation-client.ts`. That was
+  architecture drift for the operator to record. The operator asked for it to be fixed in the
+  follow-up.
+
+## Follow-up: client bundle cost (operator decision, 2026-09-26)
+
+The ruling: launch landing pages cannot carry +122 KB gzip, and error reporting is the goal. So
+Replay goes, and browser tracing stays only if it costs ≤ 20 KB gzip over errors-only.
+
+**Method.** The metric is the shared first-load JS: the files in `.next/build-manifest.json`
+`rootMainFiles`, each gzipped with Node's `zlib.gzipSync` at the default level, then summed. On
+the Task 5 build this reproduces the logged 253,686 B exactly. Every build used the CI
+placeholder env and `NEXT_PUBLIC_SENTRY_DSN=https://public@o0.ingest.sentry.io/0`, with no
+`SENTRY_AUTH_TOKEN`, `SENTRY_ORG` or `SENTRY_PROJECT`.
+
+| Build | Shared first-load JS, gzip |
+|---|---|
+| (a) `main` before s46 (no browser SDK) | 131,764 B |
+| s46 as first committed (SDK + tracing + Replay) | 253,686 B |
+| (b) errors-only: no Replay, no `tracesSampleRate`, BrowserTracing filtered out of the defaults, no `onRouterTransitionStart` | 214,663 B |
+| (c) errors + `browserTracingIntegration`, `tracesSampleRate` 0.1 (**shipped**) | 214,721 B |
+| (d) informative only: (b) plus `compiler.define { __SENTRY_TRACING__: false }` in `next.config.ts` | 197,987 B |
+
+What the numbers show:
+- **Replay was 38,965 B**, not ~100 KB. That is 253,686 − 214,721.
+- The SDK with error reporting is +82,899 B over (a). That is most of the original +121,922 B.
+- **Browser tracing costs 58 B**, (c) − (b). @sentry/nextjs 10.58's client `init` statically
+  imports `browserTracingIntegration`. It pushes it into its default integrations unless
+  `__SENTRY_TRACING__` is text-replaced with `false` (`build/esm/client/index.js:10`, `:86-89`).
+  So removing the integration from our file removes no code.
+- `withSentryConfig` sets that define only under webpack, through
+  `webpack.treeshake.removeTracing` (`build/cjs/config/webpack.js:549-556`). It has no Turbopack
+  equivalent.
+- Next's own `compiler.define` does reach node_modules under Turbopack: case (d). Its values are
+  JSON-stringified (`next/dist/build/define-env.js:212-222`, `:23-28`). Even so, the tracing
+  code itself is 16,734 B, (c) − (d). That is also ≤ 20 KB.
+- **Decision: keep browser tracing** at `tracesSampleRate` 0.1. A define-based strip would be a
+  `next.config.ts` decision, and it was not taken.
+
+The trap in the documented lazy route: `Sentry.lazyLoadIntegration("replayIntegration")` injects
+a `<script>` from `https://browser.sentry-cdn.com/<version>/<bundle>.min.js`
+(`@sentry/browser/build/npm/esm/prod/utils/lazyLoadIntegration.js:48-49`, `:77-80`). The
+production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:216-217`), which blocks
+it. Re-adding Replay lazily is therefore a CSP decision as well. The SDK has a `cdnBaseUrl`
+option to self-host the bundle.
 
 ## Open questions
 
-- Whether the operator wants Replay in every page's first load. It is kept here because it
-  already existed; lazy-loading it is the documented alternative (context7 "Lazy-Load Replay
-  Integration").
+- ~~Whether the operator wants Replay in every page's first load.~~ Resolved on 2026-09-26: no.
+  Replay is removed, and re-adding it lazily is a later decision (see the follow-up above).
 - Only a live deploy can prove events arrive, through the tunnel and in the Sentry project.
   This lane cannot deploy.
 
