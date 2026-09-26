@@ -1529,3 +1529,38 @@ done with one, can get back to the list of every site they may edit without re-e
 - [ ] Required gates pass; independent review before merge.
 
 Research: `docs/research/s39-editor-back-to-sites.md`. Plan: `docs/plans/s39-editor-back-to-sites.md`.
+
+## Story s40-ai-widget-auth — AI suggestions work in edit mode
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s40-ai-widget-auth`. The person editing a page — the owner in edit mode, or an invited
+editor — clicks "🪄 AI" and gets suggestions, billed to the site owner. Today every attempt fails:
+`/api/ai/suggest` expects a dashboard cookie the widget cannot send.
+
+- [x] `POST /api/ai/suggest` authorises the editor with the existing
+  `validateEditorTokenFromRequest` + `requireEditorPermission(…, "edit")` (device grant in
+  `X-RCF-Editor-Grant`, edit-session or staging token in the body). The public site token alone is
+  refused and nothing is spent. No cookie path and no new auth helper.
+- [x] Spend is charged to the site owner (`admin` row in `site_permissions`, via the existing
+  `resolveSiteOwnerId`), through the service role, never to the caller and never via `sites`.
+  The owner's plan is honoured through the existing `canUseAIFeatures` gate; no plan / no credits
+  fails closed with a clear message, worded for the owner or for an invited editor.
+- [x] Rate limited per IP before authorization and per site after the permission grade, both fail
+  closed. Public CORS on every response (429s included), no cookies; `OPTIONS` 204.
+- [x] Every goal the modal offers is accepted (`engage`, `professional` and `casual` mapped
+  server-side). A missing `OPENAI_API_KEY` refuses before charging and logs loudly; a provider
+  failure refunds the owner and never echoes the provider's message.
+- [x] The widget sends editor credentials (grant header, or token in the body — never in a URL),
+  `siteId`, no site token, and shows the server's message on refusal.
+- [x] "Auto-translate with AI" leaves the Edit Board and `POST /api/edit-board/languages` stops
+  calling the model: it spent unmetered OpenAI per element into `site_languages.translations`,
+  which nothing reads. `/api/ai/translate` has no widget caller and is out of scope.
+- [x] Embed allocation paid in-branch: measured at `0b8014f` as +24 bundle / +27 widget gz for the
+  credentials and message, −77 / −69 for removing auto-translate, net −53 / −48. The gate ratchets
+  down to the new measurement with both deltas itemised (re-measured after the rebase on s39).
+- [ ] Jest covers the route through the real editor-access code with real signed grants, the
+  explicit-payer billing path and the widget's requests. The Playwright count stays 44 (contract);
+  owner and invited-editor suggestions are proven live in production after deploy.
+- [ ] Required gates pass; independent review before merge.
+
+Research: `docs/research/s40-ai-widget-auth.md`. Plan: `docs/plans/s40-ai-widget-auth.md`.

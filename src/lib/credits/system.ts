@@ -1,10 +1,12 @@
 import { randomUUID } from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
 import {
   LIVE_SUBSCRIPTION_STATUSES,
   readTrialGrant,
+  resolveEntitlement,
 } from "@/lib/billing/effective-plan";
 import { readPurchasedCreditBalance, spendableFilter } from "./spendable";
 import type { CreditTransaction, CreditWallet } from "@/types/billing";
@@ -110,12 +112,17 @@ async function insertNonExpiringGrant(
 }
 
 /**
- * Get user's current credit balance
+ * Get user's current credit balance.
+ *
+ * `client` — see the note on `consumeCredits`, which is where it matters.
+ * Absent, this reads the signed-in caller's own wallet exactly as it always
+ * has: the cookie client, and the plan from `getEffectivePlan`.
  */
 export async function getUserCreditBalance(
   userId: string,
+  client?: SupabaseClient,
 ): Promise<CreditBalance> {
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
 
   // Resolved through the entitlement layer so a Lifetime Pro customer, who has
   // no billing_subscriptions row at all, still gets Pro's included credits.
@@ -124,7 +131,14 @@ export async function getUserCreditBalance(
   // allowance, which is the difference between the two kinds of entitlement.
   // This read is on the path the billing dashboard takes, so it must answer
   // rather than throw for someone who has not subscribed.
-  const entitlement = await getEffectivePlan(userId);
+  //
+  // With an explicit payer client the SAME computation runs against that
+  // client: `getEffectivePlan` is only `resolveEntitlement` bound to the
+  // cookie client, and the cookie belongs to whoever is calling, not to the
+  // payer.
+  const entitlement = client
+    ? await resolveEntitlement(client, userId)
+    : await getEffectivePlan(userId);
   const includedCredits =
     entitlement.kind === "plan" ? entitlement.plan.limits.monthlyCredits : 0;
 
@@ -332,7 +346,7 @@ const MAX_DEDUCT_ATTEMPTS = 8;
  * this returns ok, so a failed deduct cannot leave the customer billed.
  */
 async function deductPurchasedCredits(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: SupabaseClient,
   userId: string,
   amount: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -402,14 +416,35 @@ async function deductPurchasedCredits(
   return { ok: false, error: "Failed to deduct purchased credits" };
 }
 
+/**
+ * Spend `credits` from `userId`'s wallet.
+ *
+ * `client` exists for s40, and it is the one place in this module that can
+ * move somebody else's money. `POST /api/ai/suggest` is called by the widget on
+ * a customer's origin: there is no cookie session there, so the cookie client
+ * resolved every payer to "no plan" and every suggestion was refused, even for
+ * an editor the route had just authorised. The route now passes a service-role
+ * client for the SITE OWNER, and every read and write of this call — balance,
+ * entitlement, compare-and-swap, usage row — goes through it.
+ *
+ * Only a route that has already authorised an editor for the site AND resolved
+ * the owner from `site_permissions` may pass a service-role client here. The
+ * client bypasses RLS, so `userId` is the only thing deciding whose wallet is
+ * read and spent; handing one to a route that took `userId` from the request
+ * would let any caller spend any account's credits.
+ *
+ * Absent, nothing changes: the cookie client and `getEffectivePlan`, in that
+ * order, for the signed-in caller's own wallet.
+ */
 export async function consumeCredits(
   userId: string,
   credits: number,
   operation: string,
   metadata?: Record<string, unknown>,
+  client?: SupabaseClient,
 ): Promise<{ success: boolean; error?: string; remainingCredits?: number }> {
-  const supabase = await createClient();
-  const balance = await getUserCreditBalance(userId);
+  const supabase = client ?? (await createClient());
+  const balance = await getUserCreditBalance(userId, client);
 
   if (balance.total < credits) {
     return {
@@ -453,7 +488,7 @@ export async function consumeCredits(
     return { success: false, error: "Failed to record credit usage" };
   }
 
-  const newBalance = await getUserCreditBalance(userId);
+  const newBalance = await getUserCreditBalance(userId, client);
 
   return { success: true, remainingCredits: newBalance.total };
 }

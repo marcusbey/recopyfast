@@ -5392,18 +5392,28 @@
         generateBtn.style.opacity = '0.7';
 
         try {
+          // Editor credentials, not the site token (s40). The site token is
+          // public — it is in this page's source — so it never authorised AI
+          // spend, and sent alone it is refused: the route bills the site
+          // OWNER, and only an editor it can grade may spend on their behalf.
+          // This request used to send only `Bearer SITE_TOKEN`, against a route
+          // that wanted a dashboard cookie this cross-origin fetch can never
+          // carry, so every suggestion failed for everyone.
+          //
+          // The credential rides in `X-RCF-Editor-Grant` (a device grant) or in
+          // the body (an edit-session or staging token) — never in the URL,
+          // where it would land in history, `Referer` and access logs. Do not
+          // swap `editorTokenBody()` for `editorTokenQuery()` here.
           const response = await fetch(RECOPYFAST_API + '/ai/suggest', {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer ' + SITE_TOKEN,
-            },
-            body: JSON.stringify({
+            headers: Object.assign({ 'Content-Type': 'application/json' }, self.editorAuthHeaders()),
+            body: JSON.stringify(Object.assign({
+              siteId: SITE_ID,
               text: currentText,
               context: 'website content',
               goal: goal,
               tone: 'professional'
-            }),
+            }, self.editorTokenBody())),
           });
 
           const data = await response.json();
@@ -5450,7 +5460,7 @@
           } else {
             const errorP = document.createElement('p');
             errorP.style.cssText = 'color: #f87171; margin: 0; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 10px;';
-            errorP.textContent = 'Failed to generate suggestions. Please try again.';
+            errorP.textContent = data.error || 'Failed to generate suggestions. Please try again.';
             suggestionsList.textContent = '';
             suggestionsList.appendChild(errorP);
           }
@@ -6096,16 +6106,6 @@
         }
       });
 
-      const autoTranslateLabel = document.createElement('label');
-      autoTranslateLabel.style.cssText = 'display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 13px; color: #94a3b8;';
-
-      const autoTranslateCheck = document.createElement('input');
-      autoTranslateCheck.type = 'checkbox';
-      autoTranslateCheck.className = 'rcf-eb-checkbox';
-      autoTranslateCheck.checked = true;
-      autoTranslateLabel.appendChild(autoTranslateCheck);
-      autoTranslateLabel.appendChild(document.createTextNode('Auto-translate with AI'));
-
       const addBtn = document.createElement('button');
       addBtn.className = 'rcf-eb-btn rcf-eb-btn-primary';
       addBtn.style.marginTop = '10px';
@@ -6125,8 +6125,7 @@
             },
             body: JSON.stringify({
               siteId: SITE_ID,
-              languageCode: select.value,
-              autoTranslate: autoTranslateCheck.checked
+              languageCode: select.value
             })
           });
 
@@ -6139,7 +6138,6 @@
       };
 
       addSection.appendChild(select);
-      addSection.appendChild(autoTranslateLabel);
       addSection.appendChild(addBtn);
       content.appendChild(addSection);
     }
