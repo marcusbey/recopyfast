@@ -32,3 +32,30 @@ describe("formatDate", () => {
     expect(formatDate("not a date")).toBe("");
   });
 });
+
+/*
+ * s43 review M1: CI runs in UTC, where a formatter that forgot `timeZone` is
+ * indistinguishable from a correct one — every case above stayed green with the
+ * pin deleted, and a runtime `process.env.TZ` switch does not reach Intl inside
+ * a Jest worker. So assert the construction itself: load a fresh copy of the
+ * module and check the formatter it builds is pinned to UTC.
+ */
+describe("formatDate time zone pin", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("builds its formatter pinned to UTC, whatever zone the process runs in", () => {
+    const construct = jest.spyOn(Intl, "DateTimeFormat");
+
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require("../format-date");
+    });
+
+    expect(construct).toHaveBeenCalledWith(
+      "en-US",
+      expect.objectContaining({ timeZone: "UTC" }),
+    );
+  });
+});

@@ -131,3 +131,11 @@ placeholders sourced before every Jest/build run; local Node v24.14.0, machine z
   Reformatting the whole file is out of scope.
 - **Not verified here:** production. Whether the three hard-coded `/blog` slugs exist in
   `blog_posts` (research, Open questions) needs one `curl -I` after deploy.
+
+### Review fix — M1 (2026-09-25)
+
+Deleting `timeZone: "UTC"` left every test green under CI's UTC. A runtime `process.env.TZ`
+switch does not reach Intl inside a Jest worker (tried: mutant still 7/7 green), so the new test
+spies on `Intl.DateTimeFormat` while `jest.isolateModules` loads a fresh module and asserts the
+UTC pin. Proven: fix 6/6 green; mutant under `TZ=UTC` 1 red; restored with `git diff --exit-code`.
+n1 (null `published_at` → 1970) is pre-existing and left as a follow-up.
