@@ -477,6 +477,109 @@ describeDb(
       });
     });
 
+    test("s42: an API key is created, paused and deleted by the service role, never by the authenticated admin", async () => {
+      // /api/api-keys used to write through the user-scoped client. This
+      // database refuses that statement — SELECT-only RLS plus the s38 write
+      // revokes — which is why every create/pause/delete failed in production.
+      // The route now writes with the service role after its own admin check,
+      // filtered by id AND user_id. Both halves are proven here against the
+      // real policies and grants, with the route's exact column lists.
+      const userId = "10000000-0000-4000-8000-000000000042";
+      const otherUserId = "10000000-0000-4000-8000-000000000043";
+      const responseColumns =
+        "id, user_id, site_id, name, key_prefix, scopes, rate_limit_per_minute, " +
+        "is_active, last_used_at, expires_at, created_at, updated_at";
+      const listColumns =
+        "id, name, key_prefix, site_id, scopes, rate_limit_per_minute, " +
+        "is_active, last_used_at, expires_at, created_at, updated_at";
+
+      await withClient(async (client) => {
+        await client.query("BEGIN");
+        try {
+          await client.query(
+            "INSERT INTO auth.users (id, email) VALUES ($1, 's42-admin@example.invalid')",
+            [userId],
+          );
+          const {
+            rows: [site],
+          } = await client.query<{ id: string }>(
+            "INSERT INTO public.sites (domain, name) VALUES ('rcf-s42-api-keys.invalid', 's42 probe') RETURNING id",
+          );
+          await client.query(
+            "INSERT INTO site_permissions (site_id, user_id, permission) VALUES ($1, $2, 'admin')",
+            [site.id, userId],
+          );
+
+          await client.query("SET LOCAL ROLE authenticated");
+          await client.query(
+            "SELECT set_config('request.jwt.claims', $1, true)",
+            [JSON.stringify({ sub: userId, role: "authenticated" })],
+          );
+          await client.query("SAVEPOINT user_scoped_insert");
+          await expect(
+            client.query(
+              `INSERT INTO public.api_keys
+                 (user_id, site_id, name, key_hash, key_prefix, is_active)
+               VALUES ($1, $2, 'denied', 's42-denied-hash', 'rcp_denied00', true)`,
+              [userId, site.id],
+            ),
+          ).rejects.toMatchObject({ code: "42501" });
+          await client.query("ROLLBACK TO SAVEPOINT user_scoped_insert");
+
+          await client.query("SET LOCAL ROLE service_role");
+          const {
+            rows: [created],
+          } = await client.query<Record<string, unknown>>(
+            `INSERT INTO public.api_keys
+               (user_id, site_id, name, key_hash, key_prefix, is_active)
+             VALUES ($1, $2, 'Production', 's42-probe-hash', 'rcp_s42probe', true)
+             RETURNING ${responseColumns}`,
+            [userId, site.id],
+          );
+          expect(created).toMatchObject({
+            user_id: userId,
+            site_id: site.id,
+            is_active: true,
+          });
+          expect(created).not.toHaveProperty("key_hash");
+
+          await client.query("SET LOCAL ROLE authenticated");
+          const { rows: listed } = await client.query<{ id: string }>(
+            `SELECT ${listColumns} FROM public.api_keys
+             WHERE site_id = $1 AND user_id = $2
+             ORDER BY created_at DESC`,
+            [site.id, userId],
+          );
+          expect(listed.map((row) => row.id)).toEqual([created.id]);
+
+          await client.query("SET LOCAL ROLE service_role");
+          const misdirected = await client.query(
+            "UPDATE public.api_keys SET is_active = false WHERE id = $1 AND user_id = $2",
+            [created.id, otherUserId],
+          );
+          expect(misdirected.rowCount).toBe(0);
+
+          const {
+            rows: [paused],
+          } = await client.query<Record<string, unknown>>(
+            `UPDATE public.api_keys SET is_active = false, updated_at = now()
+             WHERE id = $1 AND user_id = $2
+             RETURNING ${responseColumns}`,
+            [created.id, userId],
+          );
+          expect(paused).toMatchObject({ id: created.id, is_active: false });
+
+          const removed = await client.query(
+            "DELETE FROM public.api_keys WHERE id = $1 AND user_id = $2",
+            [created.id, userId],
+          );
+          expect(removed.rowCount).toBe(1);
+        } finally {
+          await client.query("ROLLBACK");
+        }
+      });
+    });
+
     testWithPostgrest(
       "an authenticated dashboard embed reads safe site metadata through the real PostgREST API",
       async () => {

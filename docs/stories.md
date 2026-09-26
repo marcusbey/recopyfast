@@ -1530,6 +1530,82 @@ done with one, can get back to the list of every site they may edit without re-e
 
 Research: `docs/research/s39-editor-back-to-sites.md`. Plan: `docs/plans/s39-editor-back-to-sites.md`.
 
+## Story s43-launch-polish — Public pages load without errors, and /pricing works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit (Playwright against
+production, desktop and mobile). Complexity: 2. Branch `feature/s43-launch-polish`.
+
+- [x] `/blog` hydrates without React error #418 in any visitor locale or time zone: blog dates
+  (list and article) come from one shared formatter, `en-US` / `dateStyle: "medium"` /
+  `timeZone: "UTC"`, identical on server and client and showing the published calendar day.
+- [x] `/pricing` is a permanent (308) redirect to `/#pricing` in `next.config.ts`; middleware
+  never intercepts it and the sitemap does not list it.
+- [x] Formatter unit test passes under `TZ=Pacific/Kiritimati` and `TZ=UTC`; a hydration render
+  test proves BlogPostList output is stable across locale/zone; a config test pins the exact
+  redirect entry. Other locale-dependent call sites are listed in research, not changed.
+- [x] `npm run precommit` and `npm run build` pass; one commit on the branch. No push, PR,
+  merge or production action in this run.
+
+Research: `docs/research/s43-launch-polish.md`. Plan: `docs/plans/s43-launch-polish.md`.
+Embed allocation: 0 bytes.
+
+## Story s42-api-keys-writes — creating, toggling and deleting an API key works
+
+Operator-prevalidated scope, 2026-09-25, from the launch audit. Complexity: 2. Branch
+`feature/s42-api-keys-writes`. Production RLS on `api_keys` grants `authenticated` SELECT
+only and s38 removed its write privileges, so every create/pause/delete from
+`/dashboard/settings` fails today.
+
+- [x] POST, PUT (`isActive`) and DELETE on `/api/api-keys` succeed for a site admin who owns
+  the key: authentication and authorization stay on the user-scoped client, the single write
+  runs through the service-role client scoped by `id` AND `user_id` (option (a); no migration).
+- [x] Non-admins get 403, non-owners 404, unauthenticated callers 401, and no write happens;
+  `key_hash` never appears in a response.
+- [x] A pre-authentication IP limiter guards every verb (GET fails open, writes fail closed),
+  and writes add a fail-closed per-user limiter before the `site_permissions` lookup.
+- [x] GET keeps working under the s38 column grants; a real-DB case proves the service-role
+  write path and the authenticated denial it replaces.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s42-api-keys-writes.md`. Plan: `docs/plans/s42-api-keys-writes.md`.
+The settings panel still has no pause/resume control (PUT is API-only); that is UI work for a
+follow-up story.
+
+## Story s40-ai-widget-auth — AI suggestions work in edit mode
+
+Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch
+`feature/s40-ai-widget-auth`. The person editing a page — the owner in edit mode, or an invited
+editor — clicks "🪄 AI" and gets suggestions, billed to the site owner. Today every attempt fails:
+`/api/ai/suggest` expects a dashboard cookie the widget cannot send.
+
+- [x] `POST /api/ai/suggest` authorises the editor with the existing
+  `validateEditorTokenFromRequest` + `requireEditorPermission(…, "edit")` (device grant in
+  `X-RCF-Editor-Grant`, edit-session or staging token in the body). The public site token alone is
+  refused and nothing is spent. No cookie path and no new auth helper.
+- [x] Spend is charged to the site owner (`admin` row in `site_permissions`, via the existing
+  `resolveSiteOwnerId`), through the service role, never to the caller and never via `sites`.
+  The owner's plan is honoured through the existing `canUseAIFeatures` gate; no plan / no credits
+  fails closed with a clear message, worded for the owner or for an invited editor.
+- [x] Rate limited per IP before authorization and per site after the permission grade, both fail
+  closed. Public CORS on every response (429s included), no cookies; `OPTIONS` 204.
+- [x] Every goal the modal offers is accepted (`engage`, `professional` and `casual` mapped
+  server-side). A missing `OPENAI_API_KEY` refuses before charging and logs loudly; a provider
+  failure refunds the owner and never echoes the provider's message.
+- [x] The widget sends editor credentials (grant header, or token in the body — never in a URL),
+  `siteId`, no site token, and shows the server's message on refusal.
+- [x] "Auto-translate with AI" leaves the Edit Board and `POST /api/edit-board/languages` stops
+  calling the model: it spent unmetered OpenAI per element into `site_languages.translations`,
+  which nothing reads. `/api/ai/translate` has no widget caller and is out of scope.
+- [x] Embed allocation paid in-branch: measured at `0b8014f` as +24 bundle / +27 widget gz for the
+  credentials and message, −77 / −69 for removing auto-translate, net −53 / −48. The gate ratchets
+  down to the new measurement with both deltas itemised (re-measured after the rebase on s39).
+- [ ] Jest covers the route through the real editor-access code with real signed grants, the
+  explicit-payer billing path and the widget's requests. The Playwright count stays 44 (contract);
+  owner and invited-editor suggestions are proven live in production after deploy.
+- [ ] Required gates pass; independent review before merge.
+
+Research: `docs/research/s40-ai-widget-auth.md`. Plan: `docs/plans/s40-ai-widget-auth.md`.
+
 ## Story s41-edit-link-multipage — an edit link keeps working as I click through my site
 
 Operator-prevalidated scope, 2026-09-25, from hands-on testing. Complexity: 3. Branch

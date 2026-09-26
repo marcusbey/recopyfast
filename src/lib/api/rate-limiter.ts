@@ -361,6 +361,38 @@ export async function validateAPIKey(req: NextRequest): Promise<{
       return { valid: false, error: "API key expired" };
     }
 
+    // A key speaks for its creator, so it is only as good as the creator's
+    // standing on the site *now*. s42 made keys creatable for the first time,
+    // and its review (M1) found the gap: this function checked only the hash
+    // and is_active, so an admin who was demoted or removed kept a key with
+    // content_write — and could not be stopped, because the ex-admin is refused
+    // pause/delete and no other admin can see another user's key. Re-reading
+    // the admin row on every call makes removal the revocation. A key with no
+    // site cannot be checked at all, and a failed read fails closed; both get
+    // the same answer as an unknown key.
+    if (!apiKey.site_id || !apiKey.user_id) {
+      console.warn(`[api-keys] refused key ${apiKey.id}: not bound to a site`);
+      return { valid: false, error: "Invalid API key" };
+    }
+
+    const { data: adminRow, error: adminError } = await supabase
+      .from("site_permissions")
+      .select("user_id")
+      .eq("user_id", apiKey.user_id)
+      .eq("site_id", apiKey.site_id)
+      .eq("permission", "admin")
+      // No unique (site_id, user_id) index exists, so a duplicated admin row
+      // must not turn maybeSingle() into an error that refuses a real admin.
+      .limit(1)
+      .maybeSingle();
+
+    if (adminError || !adminRow) {
+      console.warn(
+        `[api-keys] refused key ${apiKey.id}: creator is not an admin of the site${adminError ? ` (${adminError.message})` : ""}`,
+      );
+      return { valid: false, error: "Invalid API key" };
+    }
+
     // Update last used timestamp
     await supabase
       .from("api_keys")
