@@ -1570,3 +1570,24 @@ only and s38 removed its write privileges, so every create/pause/delete from
 Research: `docs/research/s42-api-keys-writes.md`. Plan: `docs/plans/s42-api-keys-writes.md`.
 The settings panel still has no pause/resume control (PUT is API-only); that is UI work for a
 follow-up story.
+
+## Story s44-v1-rate-limiter — the public content API answers requests
+
+Operator-prevalidated scope, 2026-09-25, from live production testing. Complexity: 2. Branch
+`feature/s44-v1-rate-limiter`. A freshly created, active API key's first
+`GET /api/v1/content` answered 429: the Postgres limiter behind it reads `api_keys.rate_limit`
+and queries `rate_limits` by `key`/`timestamp`, none of which exist, so it refuses every request.
+
+- [x] A valid key's first GET answers 200 with its site's content; POST/PUT with a write key
+  create/update. The route meters through the shared Redis limiter (option (a)); the Postgres
+  `APIRateLimiter` is deleted. No migration.
+- [x] The per-key ceiling is the key's own `rate_limit_per_minute` per minute, shared by every
+  verb; 429 (with `Retry-After`) only past it. `api_keys.rate_limit` is read nowhere and
+  `validateAPIKey`'s admin re-check is unchanged.
+- [x] A per-IP limiter runs before `validateAPIKey` on every verb; both limiters fail closed
+  (503) on a store outage, before any content is read or written.
+- [x] The route's tests run against a database double that errors on a non-existent column,
+  with column lists derived from the migrations and anchored to production's.
+- [x] Required local gates pass; one story commit. No push, PR, merge or production action.
+
+Research: `docs/research/s44-v1-rate-limiter.md`. Plan: `docs/plans/s44-v1-rate-limiter.md`.
