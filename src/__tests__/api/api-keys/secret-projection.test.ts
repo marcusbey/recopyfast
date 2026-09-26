@@ -36,8 +36,27 @@ const mockSupabase = {
   ),
 };
 
+/*
+ * s42 moved the route's writes onto the service-role client, which CAN read
+ * key_hash. The explicit returning projection is therefore the whole secret
+ * boundary for POST/PUT, so both clients feed the same `selectCalls` record and
+ * result queue: the assertions below hold whichever client runs the statement.
+ */
+const mockServiceSupabase = {
+  from: jest.fn((table: string) =>
+    makeBuilder(table, resultQueue.shift() ?? { data: null, error: null }),
+  ),
+};
+
 jest.mock("@/lib/supabase/server", () => ({
   createClient: jest.fn(() => Promise.resolve(mockSupabase)),
+}));
+jest.mock("@/lib/supabase/service", () => ({
+  createServiceRoleClient: jest.fn(() => mockServiceSupabase),
+}));
+jest.mock("@/lib/api/rate-limit", () => ({
+  enforceRateLimit: jest.fn(() => Promise.resolve(null)),
+  getClientIp: jest.fn(() => "203.0.113.7"),
 }));
 
 import { GET, POST, PUT } from "@/app/api/api-keys/route";

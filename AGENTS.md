@@ -165,6 +165,11 @@ Service-role is an exception that must be earned per route: an explicit
 before any data access, plus a fail-closed per-site rate limiter. Do not write a fourth auth
 path. See [ADR 002](./docs/decisions/002-rls-tenant-boundary.md).
 
+The one other principal that may reach the service role is a **signed-in site admin writing a
+service-role-only table from the dashboard**: IP guard → `getUser()` → fail-closed per-user limiter
+→ `admin` row read through the RLS client → only then the service client, scoped by the ids those
+checks established. See [ADR 037](./docs/decisions/037-dashboard-admin-service-role-writes.md).
+
 Site ownership is an `admin` row in `site_permissions`, **never** a column on `sites`. Counting
 via `sites.user_id` returns 0 and passes every quota check — that bug already shipped.
 

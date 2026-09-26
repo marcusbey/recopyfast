@@ -31,6 +31,9 @@ jest.mock("@/lib/analytics/tracker", () => ({
 
 const API_KEY_ROW = {
   id: "api-key-1",
+  // s42 review M1: validateAPIKey re-reads the creator's admin row, so the key
+  // needs a creator and the stub below answers that lookup with an admin row.
+  user_id: "user-1",
   site_id: "11111111-1111-1111-1111-111111111111",
   is_active: true,
   scopes: ["read", "write"],
@@ -55,10 +58,12 @@ function tableStub(
     "delete",
     "insert",
     "update",
+    "limit",
   ]) {
     chain[method] = jest.fn(() => chain);
   }
   chain.single = jest.fn(() => Promise.resolve(result()));
+  chain.maybeSingle = jest.fn(() => Promise.resolve(result()));
   chain.then = (
     resolve: (value: unknown) => unknown,
     reject?: (reason: unknown) => unknown,
@@ -79,6 +84,9 @@ jest.mock("@supabase/ssr", () => ({
       }
       if (table === "api_keys") {
         return tableStub(() => ({ data: API_KEY_ROW, error: null }));
+      }
+      if (table === "site_permissions") {
+        return tableStub(() => ({ data: { user_id: "user-1" }, error: null }));
       }
       if (table === "content_elements") {
         contentElementsRead = true;
