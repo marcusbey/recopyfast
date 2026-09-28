@@ -1,10 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { Clock, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { IconTile } from "@/components/ui/icon-tile";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { StatusTone } from "@/components/ui/status-badge";
+import type { CreditPackConfig } from "@/lib/stripe/plan-types";
+import type { FoundingOfferId } from "@/types/billing";
+import { PurchaseCreditsDialog } from "./PurchaseCreditsDialog";
 
 /**
  * What is left of a trial: time, and AI credits.
@@ -23,12 +28,22 @@ export interface TrialCardData {
   endsAt: string;
   creditsUsed: number;
   creditsLimit: number;
+  /** s47a: set when the running trial is a founding offer grant. */
+  offerId?: FoundingOfferId;
 }
 
 interface TrialStatusCardProps {
   /** Null both for "not trialling" and for "we could not find out". */
   trial: TrialCardData | null;
   isLoading?: boolean;
+  /**
+   * s47a: the pack the founding offer card's action row prices and sells.
+   * The offer card shows its actions only when this and `onChoosePlan` are
+   * both given; a plain 14-day trial never shows them.
+   */
+  creditPack?: CreditPackConfig;
+  /** s47a: opens the page's plans (its `UpgradeDialog`). */
+  onChoosePlan?: () => void;
 }
 
 /** Below this many days left, the countdown stops informing and starts asking. */
@@ -66,6 +81,125 @@ function formatEndDate(endsAt: string): string {
       });
 }
 
+function formatShortDate(endsAt: string): string | null {
+  const date = new Date(endsAt);
+  return Number.isNaN(date.getTime())
+    ? null
+    : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function daysLeft(daysRemaining: number): string {
+  return `${daysRemaining} ${daysRemaining === 1 ? "day" : "days"} left`;
+}
+
+/**
+ * The words on the card, for a plain 14-day trial or a founding offer.
+ *
+ * s47a: the offer is the account's one trial row, so the layout, tones and
+ * bar are the trial's. Only what the card says differs — it is 90 days of Pro
+ * metered at a monthly allowance, and must never read as a 14-day trial or
+ * as "trial AI credits" (docs/designs/s47a-founding-20-grant.md, screen 2).
+ */
+interface CardCopy {
+  timeTitle: string;
+  timeTitleClassName: string;
+  timeLine: string;
+  creditsLabel: string;
+  creditsAriaLabel: string;
+  creditsNote: string | null;
+}
+
+function trialCopy(trial: TrialCardData, isExhausted: boolean): CardCopy {
+  return {
+    timeTitle: `${daysLeft(trial.daysRemaining)} in your trial`,
+    timeTitleClassName: "text-title",
+    timeLine: `Ends ${formatEndDate(trial.endsAt)}`,
+    creditsLabel: `of ${trial.creditsLimit} trial AI credits used`,
+    creditsAriaLabel: "Trial AI credits used",
+    creditsNote: isExhausted
+      ? "AI suggestions and translations are paused until you upgrade. Editing text by hand still works."
+      : null,
+  };
+}
+
+function foundingOfferCopy(
+  trial: TrialCardData,
+  isExhausted: boolean,
+): CardCopy {
+  const until = `Pro until ${formatEndDate(trial.endsAt)}.`;
+  return {
+    timeTitle: `Founding offer — ${daysLeft(trial.daysRemaining)}`,
+    timeTitleClassName: "text-title tabular",
+    timeLine:
+      trial.daysRemaining <= WARNING_THRESHOLD_DAYS
+        ? `${until} After that, choose a plan to keep editing. Your site keeps serving its content either way.`
+        : `${until} Nothing is charged when it ends.`,
+    creditsLabel: `of ${trial.creditsLimit} AI credits used this month`,
+    creditsAriaLabel: "AI credits used this month",
+    // Used up replaces the allowance line rather than adding to it. It says AI
+    // now runs on bought credits, which is true whether or not any were bought,
+    // and promises no reset date: the payload does not carry one.
+    creditsNote: isExhausted
+      ? `This month's ${trial.creditsLimit} AI credits are used. AI suggestions now run on credits you buy. Editing text by hand still works.`
+      : `${trial.creditsLimit} AI credits a month for all 3 months. Credits you buy are spent after these.`,
+  };
+}
+
+interface FoundingOfferActionsProps {
+  endsAt: string;
+  creditPack: CreditPackConfig;
+  onChoosePlan: () => void;
+  isExhausted: boolean;
+}
+
+/**
+ * s47a: the offer card's third row. The paragraph says when a plan starts
+ * billing, because checkout bills at once (no `trial_end`): choosing a plan on
+ * day 10 gives up the free days left, and "choose before it ends" alone would
+ * not say so. The pack is the catalogue's, never a literal. With the
+ * allowance used up, buying credits takes the weight; the order stays.
+ */
+function FoundingOfferActions({
+  endsAt,
+  creditPack,
+  onChoosePlan,
+  isExhausted,
+}: FoundingOfferActionsProps) {
+  const [showPurchaseDialog, setShowPurchaseDialog] = useState(false);
+  const endDate = formatShortDate(endsAt);
+  const keepEditing = endDate
+    ? `To keep editing after ${endDate}, choose a plan before then.`
+    : "To keep editing after the offer ends, choose a plan before then.";
+  const pack = `${creditPack.creditsPerPack.toLocaleString("en-US")} credits for $${creditPack.pricePerPack}`;
+
+  return (
+    <div className="border-t pt-5">
+      <p className="mb-3 text-sm text-muted-foreground">
+        {`${keepEditing} A plan is billed from the day you choose it. Need more AI now? ${pack}.`}
+      </p>
+      <div className="flex flex-wrap gap-3">
+        <Button
+          variant={isExhausted ? "outline" : "default"}
+          onClick={onChoosePlan}
+        >
+          Choose a plan
+        </Button>
+        <Button
+          variant={isExhausted ? "default" : "outline"}
+          onClick={() => setShowPurchaseDialog(true)}
+        >
+          Buy more AI credits
+        </Button>
+      </div>
+      <PurchaseCreditsDialog
+        open={showPurchaseDialog}
+        onOpenChange={setShowPurchaseDialog}
+        creditPack={creditPack}
+      />
+    </div>
+  );
+}
+
 function LoadingRows() {
   return (
     <div className="space-y-5" role="status" aria-label="Loading trial status">
@@ -82,7 +216,12 @@ function LoadingRows() {
   );
 }
 
-export function TrialStatusCard({ trial, isLoading }: TrialStatusCardProps) {
+export function TrialStatusCard({
+  trial,
+  isLoading,
+  creditPack,
+  onChoosePlan,
+}: TrialStatusCardProps) {
   if (isLoading) {
     return (
       <Card variant="outline" className="mb-6 p-6">
@@ -103,6 +242,10 @@ export function TrialStatusCard({ trial, isLoading }: TrialStatusCardProps) {
     creditsLimit > 0 ? Math.min((creditsUsed / creditsLimit) * 100, 100) : 100;
   const tone = creditsTone(creditsUsed, creditsLimit);
   const isExhausted = tone === "danger";
+  const isFoundingOffer = Boolean(trial.offerId);
+  const copy = isFoundingOffer
+    ? foundingOfferCopy(trial, isExhausted)
+    : trialCopy(trial, isExhausted);
 
   return (
     <Card variant="outline" className="mb-6 space-y-5 p-6">
@@ -111,13 +254,8 @@ export function TrialStatusCard({ trial, isLoading }: TrialStatusCardProps) {
           <Clock aria-hidden="true" />
         </IconTile>
         <div className="min-w-0">
-          <p className="text-title">
-            {daysRemaining} {daysRemaining === 1 ? "day" : "days"} left in your
-            trial
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Ends {formatEndDate(endsAt)}
-          </p>
+          <p className={copy.timeTitleClassName}>{copy.timeTitle}</p>
+          <p className="text-sm text-muted-foreground">{copy.timeLine}</p>
         </div>
       </div>
 
@@ -129,13 +267,13 @@ export function TrialStatusCard({ trial, isLoading }: TrialStatusCardProps) {
           <p className="text-title text-[0.9375rem]">
             <span className="text-metric tabular">{creditsUsed}</span>{" "}
             <span className="font-normal text-muted-foreground">
-              of {creditsLimit} trial AI credits used
+              {copy.creditsLabel}
             </span>
           </p>
           <div
             className="mt-2 h-2 w-full rounded-full bg-surface-3"
             role="progressbar"
-            aria-label="Trial AI credits used"
+            aria-label={copy.creditsAriaLabel}
             aria-valuenow={spent}
             aria-valuemin={0}
             aria-valuemax={creditsLimit}
@@ -145,14 +283,22 @@ export function TrialStatusCard({ trial, isLoading }: TrialStatusCardProps) {
               style={{ width: `${percentUsed}%` }}
             />
           </div>
-          {isExhausted && (
+          {copy.creditsNote && (
             <p className="mt-2 text-sm text-muted-foreground">
-              AI suggestions and translations are paused until you upgrade.
-              Editing text by hand still works.
+              {copy.creditsNote}
             </p>
           )}
         </div>
       </div>
+
+      {isFoundingOffer && creditPack && onChoosePlan && (
+        <FoundingOfferActions
+          endsAt={endsAt}
+          creditPack={creditPack}
+          onChoosePlan={onChoosePlan}
+          isExhausted={isExhausted}
+        />
+      )}
     </Card>
   );
 }

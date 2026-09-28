@@ -294,6 +294,16 @@ jobs:
           RCF_REQUIRE_TEST_DB: "1"
         run: npx jest --runInBand src/__tests__/db/credit-spend.test.ts
 
+      # s47a: the founding offer's 20-spot cap, eligibility and claim/grant
+      # atomicity are database properties. DB suites run in CI only by name, and
+      # RCF_REQUIRE_TEST_DB turns an unreachable database into a failure instead
+      # of a "[gated]" pass. The suite itself fails closed on a missing migration.
+      - name: Test founding offer capacity against disposable Postgres
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          RCF_REQUIRE_TEST_DB: "1"
+        run: npm test -- --runInBand src/__tests__/db/founding-offer-cap.test.ts
+
       - name: Build production app
         run: npm run build
 

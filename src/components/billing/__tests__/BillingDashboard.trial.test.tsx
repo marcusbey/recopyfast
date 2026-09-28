@@ -1,5 +1,6 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { BillingDashboard } from "../BillingDashboard";
 import type { BillingDashboardData } from "@/types/billing";
 
@@ -174,5 +175,105 @@ describe("the trial status card on the billing page", () => {
 
     await screen.findByRole("heading", { name: /billing & subscription/i });
     expect(screen.queryByText(/left in your trial/i)).toBeNull();
+  });
+});
+
+/**
+ * s47a — the founding offer on the billing page (docs/designs/
+ * s47a-founding-20-grant.md, screens 2 and 3). While it runs, the trial card
+ * carries the offer's copy and its action row. Once it ends, the lapsed panel
+ * names the offer instead of a 14-day trial. Nothing here pins how many
+ * actions the lapsed panel has: s49 adds one.
+ */
+describe("the founding offer on the billing page", () => {
+  const OFFER_TRIAL = {
+    daysRemaining: 64,
+    endsAt: "2026-12-26T15:00:00.000Z",
+    creditsUsed: 12,
+    creditsLimit: 100,
+    offerId: "founding_20" as const,
+  };
+
+  it("shows the offer card, priced from the catalogue, above the page", async () => {
+    renderDashboard(payload({ effectivePlanId: "pro", trial: OFFER_TRIAL }));
+
+    expect(
+      await screen.findByText("Founding offer — 64 days left"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("of 100 AI credits used this month"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Need more AI now\? 1,000 credits for \$19\./),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the plans from the offer card's Choose a plan", async () => {
+    const user = userEvent.setup();
+    renderDashboard(payload({ effectivePlanId: "pro", trial: OFFER_TRIAL }));
+
+    await user.click(
+      await screen.findByRole("button", { name: "Choose a plan" }),
+    );
+
+    // The same UpgradeDialog the header's "Change plan" opens. With no
+    // subscription it is "Choose your plan" and leads to Checkout; "Change your
+    // plan" here was PR #49 finding 1 (BillingDashboard.plan-change.test.tsx).
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: /choose your plan/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("tells an account whose offer ended that it ended, and that nothing was charged", async () => {
+    renderDashboard(
+      payload({ everTrialed: true, endedOfferId: "founding_20" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Your founding offer has ended",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/your 14-day pro trial has ended/i)).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: /your trial has ended/i }),
+    ).toBeNull();
+  });
+
+  it("still opens the plans from the ended-offer panel", async () => {
+    const user = userEvent.setup();
+    renderDashboard(
+      payload({ everTrialed: true, endedOfferId: "founding_20" }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: /upgrade to pro/i }),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("heading", { name: /choose your plan/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps credits ahead of an ended offer", async () => {
+    renderDashboard(
+      payload({
+        everTrialed: true,
+        endedOfferId: "founding_20",
+        creditWallet: { ...EMPTY_WALLET, balance: 250, purchased: 250 },
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: /you're on credits/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/founding offer has ended/i)).toBeNull();
   });
 });

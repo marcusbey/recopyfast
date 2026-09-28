@@ -46,6 +46,25 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("if-no-files-found: error");
   });
 
+  it("runs the founding offer capacity suite against the disposable database", () => {
+    // s47a: CI runs DB suites only by name. Without this step the real-Postgres
+    // proof of the 20-spot cap never runs anywhere but a laptop.
+    const suite = "src/__tests__/db/founding-offer-cap.test.ts";
+    const steps = workflow.split(/^(?=\s+- name: )/m);
+    const step = steps.find((candidate) => candidate.includes(suite));
+    const buildIndex = steps.findIndex((candidate) =>
+      /- name: Build production app\s*$/m.test(candidate),
+    );
+
+    expect(step).toBeDefined();
+    expect(step).toContain(
+      'RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"',
+    );
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(buildIndex).toBeGreaterThan(-1);
+    expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
+  });
+
   it("disables credential-bearing browser media in CI and enables the strict reporter", () => {
     expect(config).toContain('"./e2e/support/strict-reporter.ts"');
     expect(config).not.toContain('["line"]');

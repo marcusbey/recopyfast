@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { TRIAL_SOURCE, resolveEntitlement } from "./effective-plan";
+import { claimFoundingOfferSpot } from "./founding-offer";
 
 /**
  * Starting the 14-day Pro trial.
@@ -103,6 +104,34 @@ export async function grantTrialEntitlement(
 }
 
 /**
+ * Did this sign-in take one of the first 20 founding offer spots (s47a)?
+ *
+ * `claim_founding_offer_spot` decides eligibility and capacity under its own
+ * lock and, on `claimed`, has already written the account's one trial row —
+ * 90 days, marked `offer_id` — in the same transaction as the claim.
+ *
+ * Every other answer means "give them today's trial", and that includes an
+ * error. Refusals (`ineligible`, `sold_out`) are accounts the offer is not for.
+ * An error is the offer failing, and the offer failing must cost the account
+ * nothing it would have had without it. The fallback cannot double-grant: if
+ * the claim committed and only its response was lost, the 14-day insert hits
+ * the one-trial index and reports a duplicate; if a parallel fallback landed
+ * first, the claim's own trial insert failed and rolled the claim back with it.
+ */
+async function claimedFoundingOffer(userId: string): Promise<boolean> {
+  try {
+    const claim = await claimFoundingOfferSpot(userId);
+    return claim.outcome === "claimed";
+  } catch (error) {
+    console.error(
+      `[trial] founding offer claim failed for ${userId}; falling back to the 14-day trial:`,
+      error,
+    );
+    return false;
+  }
+}
+
+/**
  * Give this account a trial if it has never had anything.
  *
  * Called from `/auth/callback` and `/auth/confirm`, which are the only two
@@ -130,6 +159,10 @@ export async function ensureTrialStarted(
     const entitlement = await resolveEntitlement(supabase, userId);
 
     if (entitlement.kind !== "none") {
+      return;
+    }
+
+    if (await claimedFoundingOffer(userId)) {
       return;
     }
 

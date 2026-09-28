@@ -91,6 +91,7 @@ jest.mock("@/lib/billing/entitlements", () => ({
 }));
 
 import { getUserCreditBalance } from "@/lib/credits/system";
+import { getEffectivePlan } from "@/lib/billing/entitlements";
 
 const USER_ID = "user-1";
 
@@ -243,5 +244,84 @@ describe("the included-credit window outside a trial", () => {
     const balance = await getUserCreditBalance(USER_ID);
 
     expect(balance.usedThisMonth).toBe(10);
+  });
+});
+
+/**
+ * s47a — the founding offer is a 90-day trial row metered at 100 a month.
+ *
+ * Its window is the trial's own `granted_at`, stepped on each monthly
+ * anniversary (`startOfCurrentAllowanceWindow`, the helper annual
+ * subscriptions already use). A 14-day trial never reaches its first
+ * anniversary — the shortest gap between two is 28 days — so every case above
+ * is untouched. The calendar month would be worse for the offer: sign up on
+ * the 28th, spend 100, get 100 more on the 1st.
+ */
+describe("the included-credit window during the founding offer", () => {
+  const OFFER_MONTHLY_CREDITS = 100;
+
+  function offerRow(grantedAt: string, expiresAt: string): Row {
+    return trialRow({
+      offer_id: "founding_20",
+      granted_at: grantedAt,
+      expires_at: expiresAt,
+    });
+  }
+
+  beforeEach(() => {
+    (getEffectivePlan as jest.Mock).mockResolvedValue({
+      kind: "plan",
+      planId: "pro",
+      plan: { id: "pro", limits: { monthlyCredits: OFFER_MONTHLY_CREDITS } },
+    });
+  });
+
+  it("an offer row's 100 resets on each monthly anniversary of the grant", async () => {
+    // TODAY is 2026-09-03T10:00Z: day 31 of an offer granted 2026-08-03T09:00Z,
+    // one hour into its second window.
+    db.plan_entitlements = [
+      offerRow("2026-08-03T09:00:00.000Z", "2026-11-01T09:00:00.000Z"),
+    ];
+    db.credit_usage = [
+      usage(100, "2026-08-20T12:00:00.000Z"),
+      usage(10, "2026-09-03T09:30:00.000Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    // Window 1's spend no longer counts; window 2 has spent 10.
+    expect(balance.usedThisMonth).toBe(10);
+    expect(balance.total).toBe(OFFER_MONTHLY_CREDITS - 10);
+  });
+
+  it("still caps spend inside one window at the monthly allowance", async () => {
+    db.plan_entitlements = [
+      offerRow("2026-08-03T09:00:00.000Z", "2026-11-01T09:00:00.000Z"),
+    ];
+    db.credit_usage = [
+      usage(60, "2026-09-03T09:10:00.000Z"),
+      usage(40, "2026-09-03T09:40:00.000Z"),
+    ];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(OFFER_MONTHLY_CREDITS);
+    expect(balance.total).toBe(0);
+  });
+
+  it("the partial fourth window is accepted", async () => {
+    // Plan decision 6: Feb + Mar + Apr 2027 is 89 days, so an offer granted
+    // 2027-02-01T12:00Z opens a fourth window on May 1 that lasts until the
+    // 2027-05-02T12:00Z expiry. Accepted and pinned, not capped.
+    jest.setSystemTime(new Date("2027-05-01T13:00:00.000Z"));
+    db.plan_entitlements = [
+      offerRow("2027-02-01T12:00:00.000Z", "2027-05-02T12:00:00.000Z"),
+    ];
+    db.credit_usage = [usage(100, "2027-04-15T12:00:00.000Z")];
+
+    const balance = await getUserCreditBalance(USER_ID);
+
+    expect(balance.usedThisMonth).toBe(0);
+    expect(balance.total).toBe(OFFER_MONTHLY_CREDITS);
   });
 });

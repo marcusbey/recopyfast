@@ -124,6 +124,7 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`deployment-checklist.md`](./operations/deployment-checklist.md) | Pre-production verification steps |
 | [`database-setup.md`](./operations/database-setup.md) | Supabase schema setup — **canonical** |
 | [`stripe-setup.md`](./operations/stripe-setup.md) | Stripe products, prices and webhook configuration |
+| [`founding-offer.md`](./operations/founding-offer.md) | Founding offer (first 20 accounts): migration-first deploy, live proof, releasing a QA spot, inspection, rollback |
 
 ### `quality/` — how we keep it working
 | File | Contents |
