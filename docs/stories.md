@@ -1787,7 +1787,7 @@ held-by-offer-only branch in `src/lib/billing/effective-plan.ts`. Credit window:
 `src/lib/credits/system.ts:192-209`. Revocation trap: `src/lib/billing/entitlements.ts:142`
 rewrites `source`. `/api/pricing` can lag ~15 minutes — the count needs its own route. CI runs DB
 suites by name (`.github/workflows/ci.yml:258-289`): add a step. Local DB lacks the s45 migration
-`20260926120000`. Research: `docs/research/s47-founding-20-offer.md`. Design:
+`20260926120000`. Research: `docs/research/s47a-founding-20-grant.md`. Design:
 `docs/designs/s47-founding-20-offer*` (shared with s47b). Risk (why 4): an authorization and
 capacity boundary on the sign-in path — a bug either gives away unlimited free Pro or breaks
 sign-in. Known interaction: a refunded AI failure currently becomes a permanent purchased
@@ -1815,6 +1815,86 @@ Split from `s47-founding-20-offer` at research. Complexity: 2. Branch
 
 Agentic notes: landing sections under `src/components/sections/` (Hero, Pricing, FinalCTA);
 Founding Agency "N of 50 founding spots left" block is the visual precedent
-(`docs/designs/s33-agency-plan.md`). Research: `docs/research/s47-founding-20-offer.md`.
+(`docs/designs/s33-agency-plan.md`). Research: `docs/research/s47a-founding-20-grant.md`.
+
+Embed allocation: 0 bytes.
+
+## Story s48-credit-integrity — AI credits are charged once, and refunded when the AI fails
+
+Operator-prevalidated scope, 2026-09-28, from the credit purchase verification
+(`.omx/qa-20260927/REPORT.md`, defects 1–3; owner: fix all three before launch). Complexity: 4.
+Branch `feature/s48-credit-integrity`. Buying credits works; spending them does not always keep
+its promise ("Unused credits are refunded if a feature fails", `PurchaseCreditsDialog.tsx:108`).
+
+- [ ] A translation request in which no text is translated (AI key missing, every provider call
+  failing) charges nothing net: it reports failure, not "Successfully translated 0 elements", and
+  any credits taken are returned. A partial batch returns the failed share. An error after the
+  charge returns the charge. The AI key is checked before charging, as `/api/ai/suggest` does.
+- [ ] A refund returns credits to where they came from: an allowance-funded charge goes back to
+  the monthly or trial allowance, and only a purchased-credit charge goes back to purchased
+  credits. A refund never creates a new never-expiring purchased-credit row, so a trial account
+  that never paid resolves to `none` after its trial whether or not it had a refunded failure.
+- [ ] Concurrent AI requests never lose credits: N simultaneous charges against a balance debit
+  exactly the sum of the successful charges, and no request is refused while the balance covers
+  it. The deduction is one database function (AGENTS.md: multi-step writes are one transaction),
+  proved against real Postgres with a concurrency test CI runs (12 at once, repeated).
+- [ ] "Total purchased" counts only paid credits (refund credits are no longer written as
+  purchases, see above).
+- [ ] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+  production action. Operator after merge: apply the migration first, then deploy.
+
+Agentic notes: evidence and reproduction scripts in `.omx/qa-20260927/` (`credits-probes.ts`,
+`translate-refund-route.mjs`, race results; all refuse non-local targets). Code:
+`src/lib/credits/system.ts` (spend `:371-409`, refund `:558-586`, totals `:740-741`),
+`src/lib/ai/openai-service.ts:98-104,172-201`, `src/app/api/ai/translate/route.ts:190-270`,
+`src/app/api/ai/suggest/route.ts:253-260`, entitlement from balance
+`src/lib/billing/effective-plan.ts:527-529`. Risk (why 4): money path shared by every AI feature
+and by the entitlement gate. Out of scope: per-text pricing for translation (defect 8) and the
+credit-card display fixes (defects 5, 7 display half). Should ship before s47a goes live: a
+lapsed offer account with a refunded failure would otherwise keep dashboard access.
+
+Embed allocation: 0 bytes.
+
+## Story s49-buy-credits-anywhere — anyone can buy an AI credit pack from the billing page
+
+Operator decision, 2026-09-28: anyone may buy credits (the API already allows it; the screens
+did not). Complexity: 2. Branch `feature/s49-buy-credits-anywhere`. Supersedes the s01 design
+rule "trial ended offers only Upgrade to Pro" (`docs/designs/s01-trial-signup.md:53-55`) for the
+credits action only.
+
+- [ ] The lapsed "trial ended" screen and the no-plan screen offer "Buy AI credits ($19 for
+  1,000)" beside the plan options; it opens the existing purchase dialog and checkout.
+- [ ] The "You're on credits" screen offers a top-up with the same dialog.
+- [ ] Copy on those screens states what credits unlock and what still needs a plan (sites,
+  collaborators, A/B testing), matching `resolveEntitlement` `credits` behaviour.
+- [ ] Tests updated: `BillingDashboard.trial.test.tsx:116` and the credits-screen tests assert
+  the new action. Required local gates pass; one story commit. No push, PR, merge or production.
+
+Agentic notes: `src/components/billing/BillingDashboard.tsx:159-179,279`,
+`src/components/billing/CreditBalanceCard.tsx:71-73`, checkout route
+`src/app/api/billing/checkout/route.ts:102-116` (unchanged). Report defect 4.
+
+Embed allocation: 0 bytes.
+
+## Story s50-homepage-truth — every claim on the homepage is true
+
+Operator decision, 2026-09-28, from the launch-kit fact check (PR #47). Complexity: 2. Branch
+`feature/s50-homepage-truth`. The homepage promises things the product or terms don't back.
+
+- [ ] The "30-day money-back guarantee" is removed wherever it appears (owner decision: remove,
+  refunds stay case by case).
+- [ ] Features the PRD froze without a customer-facing surface (audit log, role-based
+  permissions, and any other graveyard item, `docs/prd.md` § graveyard) are not advertised.
+- [ ] Every remaining feature claim (A/B testing, translation, version history, image
+  replacement, "works on any site", "no login") is either demonstrable on production today or
+  reworded/removed; the result is recorded in the story's review with the evidence per claim.
+- [ ] Copy tests and the Playwright landing check pass with the new copy. Required local gates
+  pass; one story commit. No push, PR, merge or production action.
+
+Agentic notes: launch-kit PR #47 (`docs/gtm/`) lists the unverifiable claims and wording used
+instead ("no account" rather than "no login"; "one script tag on the site you already built"
+rather than "works on any site", because a strict CSP blocks the script). Landing sections under
+`src/components/sections/`. Coordinate with s47b, which edits the same Hero/Pricing copy: ship
+s50 first or rebase s47b on it.
 
 Embed allocation: 0 bytes.
