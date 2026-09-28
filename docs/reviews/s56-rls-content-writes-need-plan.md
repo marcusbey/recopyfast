@@ -61,6 +61,19 @@ Five minor findings, no critical, no major.
   - **Declared deviation, approved:** nine policies dropped, not seven. I verified both extra
     policies exist on a replayed database (`20260611020000:129`, `20260731008000:341`) and are
     gone after the migration.
+  - **ADR 042 wording (the `c51171f` delta), checked against the cited migrations. Accurate.**
+    - `20260611020000` aborted in production and is in the ledger:
+      `20260818010000:23-29`. The same header says production `content_versions` was
+      "verified already tight … no permissive INSERT" (`:33-35`).
+    - `20260731008000` aborted too: `20260818000000:92` ("that file aborted too") and `:311`.
+    - No later migration re-creates either policy (grep across `supabase/migrations`), so
+      "seven in production, nine on a replay, converged by the `IF EXISTS` drops" is consistent.
+    - Two nits, not findings:
+      - `:129` and `:341` point at the `DROP POLICY IF EXISTS` line; the `CREATE POLICY` is on
+        `:130` and `:342`.
+      - The `content_history` half would be easier to follow if it cited
+        `20260818000000:92,311` directly, instead of only "the class it documents".
+    - The seven-in-production count itself stays unverified here (no production access).
   - **No drift beyond the plan.** The changed files match the plan's "Files touched" list
     exactly.
 - [x] **Run interdicts respected**, each one checked:
@@ -296,7 +309,9 @@ Five minor findings, no critical, no major.
   hardening. **m4** (site_themes, copy_styles, site_languages member-writable, not served to
   visitors; default-grant inheritance for future content tables) → s53, with ADR 042 Watch updated
   there. **m5** (ADR 042 Amends header should name ADR 002 §2) → s53 docs.
-
+- **Production policy count verified (read-only, `pg_policies`, 2026-09-28):** exactly 7 member write
+  policies on these tables — 6 on `ab_tests`/`ab_test_variants` and "Users can edit content for
+  authorized sites" (ALL) on `content_elements` — matching ADR 042's "seven in production".
 
 Max severity: minor
 Ship allowed: yes
