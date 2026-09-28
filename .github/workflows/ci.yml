@@ -256,6 +256,21 @@ jobs:
           RCF_TEST_POSTGREST_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
             npx jest --runInBand src/__tests__/db/column-privileges.test.ts
 
+      # s56 (ADR 042): no web principal writes a content table. Proved through
+      # the real PostgREST with real GoTrue JWTs, lapsed and paying, and through
+      # the real bulk handlers with a real session. DB suites run in CI only by
+      # name; RCF_REQUIRE_TEST_DB makes a missing database OR a missing
+      # PostgREST target a failure, never a "[gated]" pass.
+      - name: Verify content tables take no direct writes through PostgREST
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          RCF_REQUIRE_TEST_DB: "1"
+          RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"
+        run: |
+          RCF_TEST_POSTGREST_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+          RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            npx jest --runInBand src/__tests__/db/content-write-privileges.test.ts
+
       - name: Test Founding Agency capacity against disposable Postgres
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"

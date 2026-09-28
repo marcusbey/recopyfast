@@ -49,6 +49,7 @@ Two details worth knowing:
 | `function-grants.test.ts`             | A-3, A-5 — SECURITY DEFINER functions executable with the published anon key | `test`         |
 | `site-delete-cascade.test.ts`         | A-35, A-13 — a site holding content could not be deleted at all              | `test`         |
 | `rls-policies.test.ts`                | P2 permissive-policy class                                                   | `test`         |
+| `content-write-privileges.test.ts`    | s56 — a member's direct PostgREST write bypassed the owner-plan gate         | `test`         |
 | `content-version-i18n.test.ts`        | A-15 — snapshot/restore collapse language and variant                        | `test.failing` |
 | `restore-reports-rows.test.ts`        | A-16 — restore reports success while restoring nothing                       | `test.failing` |
 | `content-version-concurrency.test.ts` | A-23 — `create_content_version` races its own UNIQUE constraint              | `test.failing` |

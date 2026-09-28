@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   CREDIT_COSTS,
   refundCharge,
@@ -198,7 +199,13 @@ export async function POST(request: NextRequest) {
       .eq("user_id", user.id)
       .single();
 
-    if (!permission) {
+    // `edit` or `admin` only (s56, ADR 042). Translating writes live copy.
+    // This used to accept ANY permission row, `view` included, and RLS was
+    // the only thing refusing a `view` member's upsert — after that member
+    // had been charged, with the refusal swallowed below. The write now goes
+    // through the service role, which RLS does not check, so the route
+    // refuses it here, before the site limiter, the gate and the charge.
+    if (!permission || !["edit", "admin"].includes(permission.permission)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -223,6 +230,16 @@ export async function POST(request: NextRequest) {
     if (!ownerCanEdit.ok) {
       return ownerCanEditRefusal(ownerCanEdit);
     }
+
+    // The translated rows are written through the service role (s56, ADR 042):
+    // no web principal holds DML on `content_elements` any more, because a
+    // member's direct PostgREST write bypassed the owner-plan gate (s51
+    // review, finding 1). Created only now — after `getUser()`, the
+    // `edit`/`admin` read and the gate — and before the charge, so a missing
+    // service key costs nobody anything. Every row it writes carries the
+    // `siteId` that read established: RLS no longer re-checks it (ADR 037
+    // step 5).
+    const writer = createServiceRoleClient();
 
     // Fail closed on configuration, BEFORE anyone is charged (s48, defect 1).
     // Without a key every model call throws inside `translateText`, which
@@ -311,8 +328,8 @@ export async function POST(request: NextRequest) {
       },
     }));
 
-    // Insert or update translated content
-    const { error: dbError } = await supabase
+    // Insert or update translated content, through the service role (s56).
+    const { error: dbError } = await writer
       .from("content_elements")
       .upsert(translatedElements, {
         onConflict: "site_id,element_id,language,variant",

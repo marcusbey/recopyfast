@@ -99,9 +99,19 @@ const SOURCE_ROWS = [
   },
 ];
 
+/**
+ * Content writes through the SERVICE client, the only writer of
+ * `content_elements` since s56 (ADR 042). A content write through the cookie
+ * client lands in `rlsContentWrites`, which must stay empty.
+ */
 const contentWrites: Record<string, unknown>[] = [];
+const rlsContentWrites: Record<string, unknown>[] = [];
 
-const makeBuilder = (table: string) => {
+const makeBuilder = (table: string, client: "rls" | "service" = "rls") => {
+  const recordContentWrite = (payload: Record<string, unknown>) => {
+    if (table !== "content_elements") return;
+    (client === "service" ? contentWrites : rlsContentWrites).push(payload);
+  };
   const filters: Record<string, unknown> = {};
   let rangeStart = 0;
   let rangeEnd = 499;
@@ -141,11 +151,11 @@ const makeBuilder = (table: string) => {
         : { data: null, error: { code: "PGRST116", message: "No rows" } };
     }),
     upsert: jest.fn((payload: Record<string, unknown>) => {
-      if (table === "content_elements") contentWrites.push(payload);
+      recordContentWrite(payload);
       return builder;
     }),
     insert: jest.fn((payload: Record<string, unknown>) => {
-      if (table === "content_elements") contentWrites.push(payload);
+      recordContentWrite(payload);
       return builder;
     }),
     update: jest.fn(() => builder),
@@ -192,11 +202,13 @@ describe("bulk export → import round trip", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     contentWrites.length = 0;
+    rlsContentWrites.length = 0;
     mockSupabase.auth.getUser.mockResolvedValue({
       data: { user: { id: "user-123", email: "owner@example.com" } },
     });
     (createServiceRoleClient as jest.Mock).mockReturnValue({
       rpc: jest.fn(async () => ({ data: "version-1", error: null })),
+      from: jest.fn((table: string) => makeBuilder(table, "service")),
     });
     (enforceRateLimit as jest.Mock).mockResolvedValue(null);
   });
@@ -227,6 +239,7 @@ describe("bulk export → import round trip", () => {
         failed: 0,
       });
 
+      expect(rlsContentWrites).toEqual([]);
       expect(contentWrites).toHaveLength(SOURCE_ROWS.length);
       SOURCE_ROWS.forEach((source, index) => {
         expect(contentWrites[index]).toMatchObject({

@@ -9,32 +9,32 @@
  * the invoker, so its `INSERT INTO content_history` is judged against the
  * invoker's policies.
  *
- * Both callers use the anon-key user client, i.e. the `authenticated` role:
- * src/app/api/bulk/update/route.ts:20-30 and src/app/api/ai/translate/route.ts:142.
- * The only migration granting `authenticated` INSERT on `content_history` is
+ * Both callers used the anon-key user client, i.e. the `authenticated` role
+ * (src/app/api/bulk/update/route.ts and src/app/api/ai/translate/route.ts).
+ * They no longer do. Since s56 (ADR 042) both write through the service role,
+ * after authorization and the owner-plan gate, and no web principal holds DML
+ * on `content_elements` at all
+ * (20260928140000_content_writes_are_service_role_only.sql). The only migration
+ * granting `authenticated` INSERT on `content_history` was
  * 20260731008000_rls_policies_for_locked_tables.sql:337-348 — the one recorded
- * as aborted in production. 20260804130000_restore_missing_rls_policies.sql
- * restores SELECT and the service_role grant but *not* that INSERT.
+ * as aborted in production; s56 drops that policy on replayed databases too.
  *
- * An `AFTER ... FOR EACH ROW` refusal aborts the statement that fired it. So if
- * the policy is genuinely absent in production, the user's own UPDATE is rolled
- * back — every bulk find-and-replace and every AI translation fails, and the
- * route reports it as a per-element error rather than a systemic one.
+ * An `AFTER ... FOR EACH ROW` refusal aborts the statement that fired it. So
+ * while the callers wrote as `authenticated`, a missing policy would have rolled
+ * back the user's own UPDATE — every bulk find-and-replace and every AI
+ * translation failing, reported as a per-element error rather than a systemic
+ * one.
  *
- * Whether the policy is present in production is B-3, and is not answerable
- * from this repository. This file therefore covers it twice:
+ * This file covers it twice:
  *
  *   1. A source assertion that runs everywhere: the trigger must not depend on
- *      the invoker's policy set at all. That is what SECURITY DEFINER buys, and
- *      it makes the answer to B-3 irrelevant. Closed by
- *      20260809130000_content_history_definer_and_delete_split.sql and enforced
- *      from here on.
+ *      the invoker's policy set at all. That is what SECURITY DEFINER buys.
+ *      Closed by 20260809130000_content_history_definer_and_delete_split.sql and
+ *      enforced from here on.
  *   2. A database test, gated on a reachable Postgres, that performs the write
- *      as `authenticated` for real. It was meant to answer B-3; run against a
- *      local Supabase it instead found a different and larger defect one layer
- *      above the trigger — `authenticated` has no table-level DML on
- *      `content_elements` at all — so B-3 is still open and no longer decides
- *      whether the trigger works. Full measurement in the note on that test.
+ *      as `authenticated` for real. It used to be a `test.failing` expecting
+ *      that write to succeed one day. Since s56 its refusal is the intended
+ *      state, so it asserts the refusal: 42501, and the row unchanged.
  */
 
 import fs from "fs";
@@ -165,10 +165,9 @@ describeWithDb("A-13 an authenticated UPDATE against content_elements", () => {
     await client?.end();
   });
 
-  // Guard for the `test.failing` below, which passes on ANY throw — including a
-  // connection that opened against the wrong database, or a seed that silently
-  // stopped inserting. This asserts the superuser seed path works, so the failure
-  // below is the product's and not this file's.
+  // Guard for the refusal below. It asserts the superuser seed path works — the
+  // right database, a seed that still inserts, a trigger still wired — so the
+  // refusal below is the grant's and not this file's.
   it("guard: the superuser seed path works", async () => {
     await client.query("BEGIN");
     try {
@@ -195,121 +194,92 @@ describeWithDb("A-13 an authenticated UPDATE against content_elements", () => {
     }
   });
 
-  // MEASURED AND STILL BROKEN, for a reason this file did not anticipate — and
-  // NOT the reason A-13 predicted.
+  // WHAT THIS MEASURED, AND WHY IT NOW ASSERTS A REFUSAL.
   //
-  // Run against a local Supabase (image public.ecr.aws/supabase/postgres:15.8.1.085)
-  // with the full migration set applied, this fails at the UPDATE with
+  // This was a `test.failing` named "succeeds and leaves exactly one
+  // content_history row": it expected an `authenticated` UPDATE of
+  // `content_elements` to work one day, because bulk update and AI translate
+  // wrote with the user's JWT. Measured on a local image
+  // (public.ecr.aws/supabase/postgres:15.8.1.085), the UPDATE was refused at the
+  // table level — "permission denied for table content_elements" — because that
+  // image granted every role only `Dxt` on the table, while production and older
+  // images granted `arwdDxt`. The grant, not the trigger, decided it.
   //
-  //   error: permission denied for table content_elements
-  //
-  // That is a table-level GRANT failure, not an RLS refusal and not the
-  // content_history INSERT policy of A-13/B-3. `authenticated` holds no DML on
-  // `content_elements` at all:
-  //
-  //   content_elements | {postgres=arwdDxt/postgres,anon=Dxt/postgres,
-  //                       authenticated=Dxt/postgres,service_role=Dxt/postgres}
-  //
-  // `Dxt` is TRUNCATE, REFERENCES and TRIGGER — no SELECT, INSERT, UPDATE or
-  // DELETE. It comes from that image's stock default privileges for the `postgres`
-  // role, measured with this branch's two migrations removed and the database
-  // reset, so it is neither caused nor worsened by them:
-  //
-  //   r | {postgres=arwdDxt/postgres,anon=Dxt/postgres,
-  //        authenticated=Dxt/postgres,service_role=Dxt/postgres}
-  //
-  // No migration grants table DML on `content_elements` or `content_history` to
-  // anybody, so on this image the gap is schema-wide and hits `service_role` too:
-  // `SET ROLE service_role; INSERT INTO sites …` also answers "permission denied".
-  // An older image (15.8.1.060) defaults to `arwdDxt` for all three roles, which
-  // is why the migrations have never needed explicit GRANTs and why production,
-  // provisioned earlier, does not show this.
-  //
-  // Left as `test.failing` rather than fixed here: the fix is a deliberate
-  // schema-wide GRANT policy — which roles get which DML on which tables — and
-  // that is a security decision with its own blast radius, not a follow-on to the
-  // A-3/A-5/A-35 lockdown this branch is doing. Note that A-13's own remedy still
-  // landed and still holds: `log_content_change()` is SECURITY DEFINER, so the
-  // trigger's write no longer depends on the caller's policy set. This case is
-  // now measuring the statement *above* the trigger.
-  test.failing(
-    "succeeds and leaves exactly one content_history row",
-    async () => {
-      const userId = randomUUID();
-      const suffix = userId.slice(0, 8);
+  // s56 (ADR 042) made that refusal the intended state everywhere. A member's
+  // direct write bypassed the owner-plan gate (s51 review, finding 1: a PATCH
+  // through PostgREST answered 200 on a planless owner's site), so
+  // 20260928140000 revokes INSERT/UPDATE/DELETE/TRUNCATE from `anon`,
+  // `authenticated` and PUBLIC, and bulk update and translate write through the
+  // service role since. Left as `test.failing`, this body would now throw for the
+  // intended reason and "pass" while still claiming a defect — the trap
+  // src/__tests__/db/README.md warns about. So it asserts the refusal itself,
+  // and reads the row back: a refusal that changed the row would be no refusal.
+  test("is refused with 42501 and leaves the row unchanged (s56, ADR 042)", async () => {
+    const userId = randomUUID();
+    const suffix = userId.slice(0, 8);
 
-      await client.query("BEGIN");
-      try {
-        // --- Seed as superuser (RLS bypassed), so the test is about the UPDATE ---
-        // `content_history.changed_by` and `site_permissions.user_id` both
-        // reference auth.users, and the trigger writes auth.uid() into the first
-        // of them — so the JWT subject has to be a real row.
-        await client.query(
-          `INSERT INTO auth.users (id, aud, role, email)
+    await client.query("BEGIN");
+    try {
+      // --- Seed as superuser (RLS bypassed), so the test is about the UPDATE ---
+      // `site_permissions.user_id` references auth.users, so the JWT subject
+      // has to be a real row.
+      await client.query(
+        `INSERT INTO auth.users (id, aud, role, email)
          VALUES ($1, 'authenticated', 'authenticated', $2)`,
-          [userId, `a13-${suffix}@example.test`],
-        );
+        [userId, `a13-${suffix}@example.test`],
+      );
 
-        const site = await client.query(
-          `INSERT INTO sites (domain, name) VALUES ($1, 'A-13 fixture') RETURNING id`,
-          [`a13-${suffix}.example.test`],
-        );
-        const siteId = site.rows[0].id as string;
+      const site = await client.query(
+        `INSERT INTO sites (domain, name) VALUES ($1, 'A-13 fixture') RETURNING id`,
+        [`a13-${suffix}.example.test`],
+      );
+      const siteId = site.rows[0].id as string;
 
-        await client.query(
-          `INSERT INTO site_permissions (user_id, site_id, permission)
+      await client.query(
+        `INSERT INTO site_permissions (user_id, site_id, permission)
          VALUES ($1, $2, 'admin')`,
-          [userId, siteId],
-        );
+        [userId, siteId],
+      );
 
-        const element = await client.query(
-          `INSERT INTO content_elements (site_id, element_id, selector, original_content, current_content)
+      const element = await client.query(
+        `INSERT INTO content_elements (site_id, element_id, selector, original_content, current_content)
          VALUES ($1, 'a13-headline', 'h1', 'Before', 'Before') RETURNING id`,
-          [siteId],
-        );
-        const elementId = element.rows[0].id as string;
+        [siteId],
+      );
+      const elementId = element.rows[0].id as string;
 
-        // --- Act as `authenticated`, which is what the anon-key client is ---
-        await client.query(
-          `SELECT set_config('request.jwt.claims', $1, true)`,
-          [JSON.stringify({ sub: userId, role: "authenticated" })],
-        );
-        await client.query("SET LOCAL ROLE authenticated");
+      // --- Act as `authenticated`, which is what the anon-key client is ---
+      // The savepoint precedes SET LOCAL ROLE, so rolling back to it also
+      // returns this connection to the superuser for the read-back.
+      await client.query("SAVEPOINT before_update");
+      await client.query(`SELECT set_config('request.jwt.claims', $1, true)`, [
+        JSON.stringify({ sub: userId, role: "authenticated" }),
+      ]);
+      await client.query("SET LOCAL ROLE authenticated");
 
-        const updated = await client.query(
+      await expect(
+        client.query(
           `UPDATE content_elements SET current_content = 'After' WHERE id = $1`,
           [elementId],
-        );
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
 
-        // RLS refusals on the row itself are silent (zero rows, no error), so the
-        // update has to be shown to have actually landed.
-        expect(updated.rowCount).toBe(1);
+      await client.query("ROLLBACK TO SAVEPOINT before_update");
 
-        await client.query("RESET ROLE");
+      const row = await client.query(
+        `SELECT current_content FROM content_elements WHERE id = $1`,
+        [elementId],
+      );
+      expect(row.rows).toEqual([{ current_content: "Before" }]);
 
-        const history = await client.query(
-          `SELECT content, change_type, changed_by FROM content_history
+      const history = await client.query(
+        `SELECT change_type FROM content_history
          WHERE content_element_id = $1 AND change_type = 'update'`,
-          [elementId],
-        );
-
-        // Neither branch this file originally predicted is what happens. It
-        // expected either the `authenticated` INSERT policy on content_history to
-        // exist (pass) or to be missing (fail here, answering B-3). Measured, the
-        // run never reaches this point: the UPDATE above is refused at the table
-        // level, because `authenticated` has no UPDATE on `content_elements` — see
-        // the note on this test. So B-3 remains unanswered, and it is now moot for
-        // the trigger, which is SECURITY DEFINER; what blocks the route is the
-        // missing table grant one layer above.
-        //
-        // These three assertions are kept unchanged and are what should hold once
-        // that grant exists. They are the regression guard for the policy too.
-        expect(history.rowCount).toBe(1);
-        expect(history.rows[0].content).toBe("After");
-        expect(history.rows[0].changed_by).toBe(userId);
-      } finally {
-        await client.query("ROLLBACK");
-      }
-    },
-  );
+        [elementId],
+      );
+      expect(history.rowCount).toBe(0);
+    } finally {
+      await client.query("ROLLBACK");
+    }
+  });
 });

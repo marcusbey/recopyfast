@@ -170,6 +170,12 @@ service-role-only table from the dashboard**: IP guard → `getUser()` → fail-
 → `admin` row read through the RLS client → only then the service client, scoped by the ids those
 checks established. See [ADR 037](./docs/decisions/037-dashboard-admin-service-role-writes.md).
 
+No web principal writes a content table (`content_elements`, the history tables, the A/B tables):
+a signed-in `edit`/`admin` member's content write is a route that runs a fail-closed limiter,
+`getUser()`, the permission read and `checkOwnerCanEdit`, and only then writes through the service
+client, scoped by the ids those checks established. See
+[ADR 042](./docs/decisions/042-content-writes-are-service-role-only.md).
+
 Site ownership is an `admin` row in `site_permissions`, **never** a column on `sites`. Counting
 via `sites.user_id` returns 0 and passes every quota check — that bug already shipped.
 

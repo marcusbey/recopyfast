@@ -4,7 +4,9 @@
 // proved in src/__tests__/api/owner-plan-gate.test.ts.
 jest.mock("@/lib/billing/owner-can-edit", () => ({
   ...jest.requireActual("@/lib/billing/owner-can-edit"),
-  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+  checkOwnerCanEdit: jest.fn(() =>
+    Promise.resolve({ ok: true, ownerId: "owner-1" }),
+  ),
 }));
 
 jest.mock("@/lib/ai/openai-service", () => ({
@@ -16,6 +18,8 @@ jest.mock("@/lib/ai/openai-service", () => ({
   },
 }));
 jest.mock("@/lib/supabase/server");
+// The translated rows are written through the service role since s56 (ADR 042).
+jest.mock("@/lib/supabase/service");
 
 jest.mock("@/lib/feature-gating/permissions", () => ({
   consumeFeatureUsage: jest.fn(),
@@ -40,6 +44,8 @@ import { createClient } from "@/lib/supabase/server";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { refundCharge } from "@/lib/credits/system";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { checkOwnerCanEdit } from "@/lib/billing/owner-can-edit";
 
 const TEST_USER = { id: "user-123", email: "user@example.com" };
 
@@ -52,6 +58,16 @@ const mockSupabase = {
   eq: jest.fn().mockReturnThis(),
   single: jest.fn(),
   upsert: jest.fn().mockReturnThis(),
+};
+
+/**
+ * The service client. Since s56 (ADR 042) no web principal holds DML on
+ * `content_elements`, so the translated rows are upserted here, never on the
+ * cookie client above.
+ */
+const mockService = {
+  from: jest.fn(),
+  upsert: jest.fn(),
 };
 
 const mockCreateClient = createClient as jest.MockedFunction<
@@ -98,6 +114,9 @@ describe("/api/ai/translate - POST", () => {
       charge: RECEIPT,
     });
     mockRefundCharge.mockResolvedValue({ success: true, refunded: 5 });
+    mockService.from.mockReturnValue(mockService);
+    mockService.upsert.mockResolvedValue({ error: null });
+    (createServiceRoleClient as jest.Mock).mockReturnValue(mockService);
   });
 
   it("should successfully translate elements", async () => {
@@ -129,7 +148,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert
-    mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+    mockService.upsert.mockResolvedValueOnce({ error: null });
 
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
@@ -161,8 +180,10 @@ describe("/api/ai/translate - POST", () => {
       "website homepage",
     );
 
-    // Verify database upsert
-    expect(mockSupabase.upsert).toHaveBeenCalledWith(
+    // Verify database upsert: on the service client, never the cookie client.
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+    expect(mockService.from).toHaveBeenCalledWith("content_elements");
+    expect(mockService.upsert).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           site_id: VALID_SITE_ID,
@@ -305,6 +326,82 @@ describe("/api/ai/translate - POST", () => {
     expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
   });
 
+  /**
+   * s56 (ADR 042). The route used to accept ANY permission row, `view`
+   * included, and RLS was the only thing refusing a `view` member's upsert —
+   * after that member had been charged, with the error swallowed. RLS no
+   * longer sees this write (the service role makes it), so the route refuses
+   * `view` itself, before the per-site limiter, the gate, the charge and the
+   * model.
+   */
+  it("refuses a view member with 403 before any limiter, gate, charge, model call or write", async () => {
+    mockSupabase.single
+      .mockResolvedValueOnce({ data: { id: VALID_SITE_ID }, error: null })
+      .mockResolvedValueOnce({ data: { permission: "view" }, error: null });
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements: [{ id: "header-1", text: "Welcome" }],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "Forbidden" });
+    // Only the per-IP limiter ran; the per-site one never did.
+    expect(mockEnforceRateLimit).toHaveBeenCalledTimes(1);
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ endpoint: "ai/translate:ip" }),
+    );
+    expect(checkOwnerCanEdit).not.toHaveBeenCalled();
+    expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
+    expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+    expect(mockService.upsert).not.toHaveBeenCalled();
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+  });
+
+  it("writes an edit member's translations through the service client, every row on this site", async () => {
+    allowSiteAccess();
+    mockAiService.batchTranslate.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { id: "header-1", originalText: "Welcome", translatedText: "Hola" },
+        { id: "btn-1", originalText: "Start", translatedText: "Empezar" },
+      ],
+      tokensUsed: 20,
+    });
+
+    const response = await POST(
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements: [
+            { id: "header-1", text: "Welcome" },
+            { id: "btn-1", text: "Start" },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockService.upsert).toHaveBeenCalledTimes(1);
+    const [rows] = mockService.upsert.mock.calls[0] as [
+      Array<{ site_id: string }>,
+    ];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.site_id === VALID_SITE_ID)).toBe(true);
+    expect(mockSupabase.upsert).not.toHaveBeenCalled();
+  });
+
   it("should return 403 when the plan quota rejects the translation", async () => {
     allowSiteAccess();
     mockConsumeFeatureUsage.mockResolvedValue({
@@ -427,7 +524,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert failure
-    mockSupabase.upsert.mockResolvedValueOnce({
+    mockService.upsert.mockResolvedValueOnce({
       error: { message: "Database error" },
     });
 
@@ -466,7 +563,7 @@ describe("/api/ai/translate - POST", () => {
     });
 
     // Mock database upsert
-    mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+    mockService.upsert.mockResolvedValueOnce({ error: null });
 
     const request = new NextRequest("http://localhost/api/ai/translate", {
       method: "POST",
@@ -679,7 +776,7 @@ describe("/api/ai/translate - POST", () => {
           data: rows,
           tokensUsed: 10,
         });
-        mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+        mockService.upsert.mockResolvedValueOnce({ error: null });
 
         const response = await POST(translateRequest(elements));
         const data = await response.json();
@@ -699,7 +796,7 @@ describe("/api/ai/translate - POST", () => {
         data: translationsOf(elements),
         tokensUsed: 10,
       });
-      mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+      mockService.upsert.mockResolvedValueOnce({ error: null });
 
       const response = await POST(translateRequest(elements));
 
