@@ -25,13 +25,13 @@ import type { BillingDashboardData } from "@/types/billing";
 /** What the no-plan panel says once the account's one trial has ended. */
 const ENDED_TRIAL_COPY = {
   heading: "Your trial has ended",
-  body: "Your 14-day Pro trial has ended. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+  body: "Your 14-day Pro trial has ended. Your site keeps serving its current content — editing, new sites and collaborators need Pro. AI credits come with a plan.",
 } as const;
 
 /** s47a: the same panel after a founding offer (docs/designs/s47a-founding-20-grant.md, screen 3). */
 const ENDED_FOUNDING_OFFER_COPY = {
   heading: "Your founding offer has ended",
-  body: "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+  body: "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro. AI credits come with a plan.",
 } as const;
 
 interface BillingDashboardProps {
@@ -135,10 +135,11 @@ export function BillingDashboard({
   const currentPlan = dashboardData.effectivePlanId;
   const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
 
-  // Credits entitle their holder to spend them and to nothing else, so they
-  // have no plan and land here too — but telling them their credits are
-  // unavailable would be false, and they can reach this page under their own
-  // steam rather than being bounced to it.
+  // Credits confer no plan, so their holder lands here too. Since s51 they buy
+  // nothing on their own either: AI spend happens only inside editing, and
+  // editing needs a plan. The balance is kept, not forfeited, and works again
+  // once a plan is chosen — which is what this panel has to say, rather than
+  // promising AI features a credit alone no longer unlocks.
   const creditBalance = dashboardData.creditWallet?.balance ?? 0;
   const holdsCredits = creditBalance > 0;
 
@@ -186,10 +187,10 @@ export function BillingDashboard({
           </h1>
           <p className="mb-6 text-muted-foreground">
             {holdsCredits
-              ? `You have ${creditBalance.toLocaleString("en-US")} credits to spend on AI suggestions and translations. Sites, collaborators and A/B testing need a plan.`
+              ? `You have ${creditBalance.toLocaleString("en-US")} credits, which are kept and work again once you choose a plan. AI credits come with a plan, and so do sites, collaborators and A/B testing.`
               : hasExpiredTrial
                 ? expiredTrialCopy.body
-                : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
+                : "ReCopyFast needs an active subscription before your sites and editors become available. AI credits come with a plan."}
           </p>
           <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
             {hasExpiredTrial ? "Upgrade to Pro" : "See plans"}

@@ -25,6 +25,13 @@ import { NextRequest, after } from "next/server";
 // not export it. Same shape as the request-code suite: re-declare the mock and
 // add `after` as a spy, so a test can hold the deferred callback and prove both
 // that it was deferred and what it does when run.
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("next/server", () => ({
   NextRequest: class MockNextRequest {
     url: string;

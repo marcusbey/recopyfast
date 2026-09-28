@@ -3,6 +3,10 @@ import { createServerClient } from "@supabase/ssr";
 import { BulkUpdatePayload } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -49,6 +53,14 @@ export async function POST(req: NextRequest) {
         { error: "Insufficient permissions" },
         { status: 403 },
       );
+    }
+
+    // Rewrites `published_content` directly, so it needs the SITE OWNER's plan
+    // (s51, ADR 041), checked after the permission read (no oracle) and before
+    // the `bulk_operations` row (a refusal writes nothing).
+    const ownerCanEdit = await checkOwnerCanEdit(site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
     }
 
     // Create bulk operation record

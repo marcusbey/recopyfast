@@ -10,6 +10,10 @@ import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { aiService } from "@/lib/ai/openai-service";
 import { withPublicCors } from "@/lib/http/public-cors";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 function extractStagingToken(request: NextRequest): string | null {
   const authHeader = request.headers.get("authorization");
@@ -120,6 +124,16 @@ export async function POST(request: NextRequest) {
 
     const limited = await meterSite(request, siteId);
     if (limited) return withCors(limited, origin);
+
+    // Needs the SITE OWNER's plan (s51, ADR 041), and before the model is
+    // called: this route runs one uncharged OpenAI completion per element and
+    // then rewrites staged copy. After the access check and the limiter so it
+    // is no oracle for an anonymous caller; 402, never 401/403, so the widget
+    // shows the message rather than a terminal "Session ended".
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withCors(ownerCanEditRefusal(ownerCanEdit), origin);
+    }
 
     const supabase = createServiceRoleClient();
 

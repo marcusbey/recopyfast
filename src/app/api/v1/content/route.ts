@@ -4,6 +4,10 @@ import { validateAPIKey } from "@/lib/api/rate-limiter";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import { analytics } from "@/lib/analytics/tracker";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 /**
  * THIS IS A SERVICE-ROLE ROUTE. All four handlers below build a Supabase client
@@ -244,6 +248,17 @@ export async function POST(req: NextRequest) {
         { error: "API key does not have access to this site" },
         { status: 403 },
       );
+    }
+
+    // An API key writes live copy for as long as it exists — keys never expire
+    // unless given a date — so it is the owner's plan, not the key, that
+    // decides (s51, ADR 041). Keyed by the key's own site, after the key, its
+    // limiter and the site binding have all passed, so a refusal tells a
+    // stranger nothing. The key is not revoked: it works again the moment the
+    // owner picks a plan.
+    const ownerCanEdit = await checkOwnerCanEdit(apiKey.site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
     }
 
     // Service-role client — RLS off. See the note at the top of this file.

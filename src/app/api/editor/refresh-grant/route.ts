@@ -11,7 +11,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { nextActionFor, refreshDeviceGrant } from "@/lib/auth/editor-grants";
+import {
+  nextActionFor,
+  refreshDeviceGrant,
+  validateDeviceGrant,
+} from "@/lib/auth/editor-grants";
 import {
   limitGrantChecks,
   readDeviceContext,
@@ -19,6 +23,10 @@ import {
   readString,
 } from "@/lib/auth/editor-request";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import {
+  checkOwnerCanEdit,
+  PLAN_ENDED_MESSAGE,
+} from "@/lib/billing/owner-can-edit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,6 +57,37 @@ export async function POST(request: NextRequest) {
         ),
         request,
       );
+    }
+
+    // Sliding a grant is issuance, and a lapsed owner's site issues nothing
+    // (s51, ADR 041). But the grant is only authenticated INSIDE
+    // `refreshDeviceGrant`, which also rotates it — so it is validated here
+    // first, read-only, and the owner's plan is asked only of a grant that
+    // passes. Gating before that would answer "plan ended" to a garbage grant
+    // with a public site id and a forged Origin: an oracle on a customer's
+    // billing. An invalid grant falls through to `refreshDeviceGrant`, which
+    // refuses it exactly as before.
+    //
+    // The refusal carries no `nextAction`. The widget ignores every refresh
+    // refusal except `refresh`, so it keeps the grant it holds; nothing is
+    // rotated or revoked, and the same grant slides again once the owner pays.
+    const authenticated = await validateDeviceGrant({ grant, siteId, device });
+    if (authenticated.valid) {
+      const ownerCanEdit = await checkOwnerCanEdit(siteId);
+      if (!ownerCanEdit.ok) {
+        const planEnded = ownerCanEdit.reason !== "unavailable";
+        return withPublicCors(
+          NextResponse.json(
+            {
+              ok: false,
+              reason: ownerCanEdit.reason,
+              ...(planEnded ? { message: PLAN_ENDED_MESSAGE } : {}),
+            },
+            { status: planEnded ? 402 : 503 },
+          ),
+          request,
+        );
+      }
     }
 
     const result = await refreshDeviceGrant({

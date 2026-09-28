@@ -22,7 +22,10 @@ import {
   isPaidPlanId,
   resolveStripePriceId,
 } from "@/lib/stripe/plans";
-import { getGrantedPlanIds } from "@/lib/billing/entitlements";
+import {
+  getEffectivePlan,
+  getGrantedPlanIds,
+} from "@/lib/billing/entitlements";
 import {
   attachCheckoutSession,
   claimSubscriptionCheckoutIntent,
@@ -168,6 +171,26 @@ export async function POST(req: NextRequest) {
 
     if (!parsed.ok) {
       return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+
+    // AI credits come with a plan (s51, ADR 041). AI spend happens only inside
+    // editing, and editing needs the site owner's plan, so a credit sold to an
+    // account without one could not be spent. The no-plan billing screens
+    // offer no purchase control; this refuses the request they would have
+    // made, before any Stripe call. A read failure throws into the catch below
+    // and sells nothing. Credits already held are untouched and become
+    // spendable when a plan is chosen.
+    if (parsed.intent.type === "credits") {
+      const entitlement = await getEffectivePlan(user.id);
+      if (entitlement.kind !== "plan") {
+        return NextResponse.json(
+          {
+            error: "AI credits come with a plan. Choose a plan to buy more.",
+            upgradeRequired: true,
+          },
+          { status: 403 },
+        );
+      }
     }
 
     if (

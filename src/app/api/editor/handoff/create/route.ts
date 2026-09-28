@@ -16,6 +16,10 @@ import { findActiveSiteEditor } from "@/lib/auth/editor-directory";
 import { createHandoff } from "@/lib/auth/editor-handoff";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { readJsonBody, readString } from "@/lib/auth/editor-request";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 /** Build the URL the browser is sent to. `sites.domain` may or may not carry a scheme. */
 function buildSiteUrl(domain: string, handoffCode: string): string {
@@ -60,6 +64,14 @@ export async function POST(request: NextRequest) {
         { error: "not_authorized", message: "You can't edit that site." },
         { status: 403 },
       );
+    }
+
+    // The hub shows `message` when a site can't be opened. A lapsed owner's
+    // site mints no handoff (s51, ADR 041) — asked only now, after the hub
+    // session and the editor row, so it tells a stranger nothing.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
     }
 
     const supabase = createServiceRoleClient();

@@ -237,7 +237,7 @@ describe("the founding offer on the billing page", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+        "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro. AI credits come with a plan.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/your 14-day pro trial has ended/i)).toBeNull();
@@ -275,5 +275,80 @@ describe("the founding offer on the billing page", () => {
       await screen.findByRole("heading", { name: /you're on credits/i }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/founding offer has ended/i)).toBeNull();
+  });
+});
+
+describe("the no-plan panels and AI credits (s51)", () => {
+  // AI spend happens only inside editing, and editing needs a plan, so a
+  // credit sold to an account with no plan could not be spent. The checkout
+  // route refuses it; these screens must not offer it, and must say why.
+  const NO_PLAN_VARIANTS: Array<
+    [string, Partial<BillingDashboardData>, RegExp]
+  > = [
+    [
+      "credits",
+      {
+        everTrialed: false,
+        creditWallet: { ...EMPTY_WALLET, balance: 250, purchased: 250 },
+      },
+      /you're on credits/i,
+    ],
+    ["lapsed", { everTrialed: true }, /your trial has ended/i],
+    [
+      "ended founding offer",
+      { everTrialed: true, endedOfferId: "founding_20" },
+      /your founding offer has ended/i,
+    ],
+    ["never-trialled", { everTrialed: false }, /choose a plan to continue/i],
+  ];
+
+  it.each(NO_PLAN_VARIANTS)(
+    "no-plan screens render no credit purchase control (%s)",
+    async (_variant, overrides, heading) => {
+      renderDashboard(payload(overrides));
+
+      expect(
+        await screen.findByRole("heading", { name: heading }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /buy credits/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /credit/i })).toBeNull();
+    },
+  );
+
+  it("the purchase control the no-plan screens omit is the one a plan holder sees", async () => {
+    // Control for the test above: the same query finds it where it belongs,
+    // so its absence there is not an artefact of the query.
+    renderDashboard(payload({ effectivePlanId: "pro" }));
+
+    expect(
+      await screen.findByRole("button", { name: /buy credits/i }),
+    ).toBeInTheDocument();
+  });
+
+  it.each(NO_PLAN_VARIANTS)(
+    "each no-plan screen says AI credits come with a plan (%s)",
+    async (_variant, overrides, heading) => {
+      renderDashboard(payload(overrides));
+
+      await screen.findByRole("heading", { name: heading });
+      expect(
+        screen.getByText(/AI credits come with a plan/),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("a credits holder is told the credits are kept and work again with a plan", async () => {
+    renderDashboard(
+      payload({
+        everTrialed: false,
+        creditWallet: { ...EMPTY_WALLET, balance: 250, purchased: 250 },
+      }),
+    );
+
+    const body = await screen.findByText(/250 credits/);
+    expect(body).toHaveTextContent(
+      /are kept and work again once you choose a plan/i,
+    );
+    expect(body).not.toHaveTextContent(/to spend on AI suggestions/i);
   });
 });

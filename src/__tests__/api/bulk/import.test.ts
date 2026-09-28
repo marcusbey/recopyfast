@@ -5,6 +5,13 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { MAX_IMPORT_BYTES } from "@/lib/bulk/constants";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr");
 // The route takes one `create_content_version` snapshot after a batch (ADR 008)
 // through the service-role client. Without this mock the suite builds a real

@@ -37,7 +37,15 @@ jest.mock("@/lib/auth/editor-access", () => ({
 
 jest.mock("@/lib/feature-gating/permissions", () => ({
   consumeFeatureUsage: jest.fn(),
-  resolveSiteOwnerId: jest.fn(),
+}));
+
+// The payer is resolved by `checkOwnerCanEdit` since s51, which also requires
+// the owner to hold a plan; by default the fixture's owner does. The gate's own
+// behaviour is proved in src/__tests__/lib/billing/owner-can-edit.test.ts and
+// src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: jest.fn(),
 }));
 
 jest.mock("@/lib/credits/system", () => ({
@@ -56,10 +64,8 @@ import { aiService } from "@/lib/ai/openai-service";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { validateEditorTokenFromRequest } from "@/lib/auth/editor-access";
 import type { EditorAccess } from "@/lib/auth/editor-access";
-import {
-  consumeFeatureUsage,
-  resolveSiteOwnerId,
-} from "@/lib/feature-gating/permissions";
+import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
+import { checkOwnerCanEdit } from "@/lib/billing/owner-can-edit";
 import { refundCharge } from "@/lib/credits/system";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
@@ -67,7 +73,7 @@ const mockAiService = aiService as jest.Mocked<typeof aiService>;
 const mockCreateServiceRoleClient = createServiceRoleClient as jest.Mock;
 const mockValidate = validateEditorTokenFromRequest as jest.Mock;
 const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
-const mockResolveSiteOwnerId = resolveSiteOwnerId as jest.Mock;
+const mockCheckOwnerCanEdit = checkOwnerCanEdit as jest.Mock;
 const mockRefundCharge = refundCharge as jest.Mock;
 const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
 
@@ -128,7 +134,7 @@ describe("/api/ai/suggest - POST", () => {
     mockEnforceRateLimit.mockResolvedValue(null);
     mockValidate.mockResolvedValue({ valid: true, access: GRANT_EDITOR });
     mockCreateServiceRoleClient.mockReturnValue(SERVICE_CLIENT);
-    mockResolveSiteOwnerId.mockResolvedValue(OWNER_ID);
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: OWNER_ID });
     mockConsumeFeatureUsage.mockResolvedValue({
       success: true,
       charge: RECEIPT,
@@ -343,7 +349,7 @@ describe("/api/ai/suggest - POST", () => {
       expect(response.status).toBe(401);
       expect(data).toEqual({ error: "origin_mismatch" });
       expectPublicCors(response);
-      expect(mockResolveSiteOwnerId).not.toHaveBeenCalled();
+      expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
       expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
       expect(mockAiService.generateContentSuggestion).not.toHaveBeenCalled();
     });
@@ -483,10 +489,7 @@ describe("/api/ai/suggest - POST", () => {
 
       await POST(postRequest(validBody));
 
-      expect(mockResolveSiteOwnerId).toHaveBeenCalledWith(
-        SERVICE_CLIENT,
-        SITE_ID,
-      );
+      expect(mockCheckOwnerCanEdit).toHaveBeenCalledWith(SITE_ID);
       expect(mockConsumeFeatureUsage).toHaveBeenCalledWith(
         OWNER_ID,
         "ai_suggestion",
@@ -517,7 +520,10 @@ describe("/api/ai/suggest - POST", () => {
     });
 
     it("refuses a site with no admin row, logs it, and charges nothing", async () => {
-      mockResolveSiteOwnerId.mockResolvedValueOnce(null);
+      mockCheckOwnerCanEdit.mockResolvedValueOnce({
+        ok: false,
+        reason: "no_owner",
+      });
 
       const response = await POST(postRequest(validBody));
       const data = await response.json();
@@ -713,7 +719,7 @@ describe("/api/ai/suggest - POST", () => {
         expect(console.error).toHaveBeenCalledWith(
           expect.stringContaining("OPENAI_API_KEY"),
         );
-        expect(mockResolveSiteOwnerId).not.toHaveBeenCalled();
+        expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
         expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
         expect(mockAiService.generateContentSuggestion).not.toHaveBeenCalled();
       },

@@ -14,6 +14,10 @@ import { MAX_IMPORT_BYTES, MAX_IMPORT_LABEL } from "@/lib/bulk/constants";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
+import {
   optionalBoolean,
   requireEnum,
   requireString,
@@ -104,6 +108,16 @@ export async function POST(req: NextRequest) {
         { error: "Insufficient permissions" },
         { status: 403 },
       );
+    }
+
+    // An import rewrites staged AND published copy, so it needs the SITE
+    // OWNER's plan (s51, ADR 041) — not the caller's: a collaborator with
+    // `edit` on a lapsed owner's site must not publish through the back door.
+    // After the permission check so it is no oracle, and before the
+    // `bulk_operations` row so a refused import leaves nothing behind.
+    const ownerCanEdit = await checkOwnerCanEdit(site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
     }
 
     // Create bulk operation record

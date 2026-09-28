@@ -5,6 +5,13 @@ import { createServerClient } from "@supabase/ssr";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr");
 jest.mock("@/lib/supabase/service");
 jest.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: jest.fn() }));

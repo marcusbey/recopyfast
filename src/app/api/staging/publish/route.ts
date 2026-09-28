@@ -16,6 +16,10 @@ import { webhookManager, WEBHOOK_EVENTS } from "@/lib/webhooks/manager";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 import { normalizePagePath } from "@/lib/content/page-path";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 type PublishRpcRow = {
   element_id: string;
@@ -152,6 +156,16 @@ export async function POST(request: NextRequest) {
       message: "Publish rate limit exceeded for this site.",
     });
     if (limited) return withPublicCors(limited, request);
+
+    // Publishing needs the SITE OWNER's plan (s51, ADR 041): a lapsed owner's
+    // editors must not push copy live. Behind authorization and the limiter so
+    // it is no oracle for an anonymous caller, and 402 rather than 401/403 so
+    // the widget shows the message instead of treating it as "Session ended"
+    // and forgetting the edit link — see staging/content/[siteId] PUT.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
+    }
 
     const elementIds = extractElementIds(body.elementIds);
     const serviceClient = createServiceRoleClient();
