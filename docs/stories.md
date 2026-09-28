@@ -1855,26 +1855,14 @@ lapsed offer account with a refunded failure would otherwise keep dashboard acce
 
 Embed allocation: 0 bytes.
 
-## Story s49-buy-credits-anywhere — anyone can buy an AI credit pack from the billing page
+## Story s49-buy-credits-anywhere — SUPERSEDED by s51 (not built)
 
-Operator decision, 2026-09-28: anyone may buy credits (the API already allows it; the screens
-did not). Complexity: 2. Branch `feature/s49-buy-credits-anywhere`. Supersedes the s01 design
-rule "trial ended offers only Upgrade to Pro" (`docs/designs/s01-trial-signup.md:53-55`) for the
-credits action only.
-
-- [ ] The lapsed "trial ended" screen and the no-plan screen offer "Buy AI credits ($19 for
-  1,000)" beside the plan options; it opens the existing purchase dialog and checkout.
-- [ ] The "You're on credits" screen offers a top-up with the same dialog.
-- [ ] Copy on those screens states what credits unlock and what still needs a plan (sites,
-  collaborators, A/B testing), matching `resolveEntitlement` `credits` behaviour.
-- [ ] Tests updated: `BillingDashboard.trial.test.tsx:116` and the credits-screen tests assert
-  the new action. Required local gates pass; one story commit. No push, PR, merge or production.
-
-Agentic notes: `src/components/billing/BillingDashboard.tsx:159-179,279`,
-`src/components/billing/CreditBalanceCard.tsx:71-73`, checkout route
-`src/app/api/billing/checkout/route.ts:102-116` (unchanged). Report defect 4.
-
-Embed allocation: 0 bytes.
+Product owner decision, 2026-09-28, reversing the earlier "anyone may buy credits": the
+editing-access fact-find showed that every AI feature lives inside the editor, and editing is a
+plan feature (s01 AC: "expiry blocks writes and new resources, never public content delivery").
+A no-plan account could buy credits it cannot spend. Credit purchases therefore need a plan; that
+rule is delivered by s51. Research (`docs/research/s49-buy-credits-anywhere.md`) is kept for its
+billing-screen inventory. No code from this story was committed.
 
 ## Story s50-homepage-truth — every claim on the homepage is true
 
@@ -1909,5 +1897,69 @@ instead ("no account" rather than "no login"; "one script tag on the site you al
 rather than "works on any site", because a strict CSP blocks the script). Landing sections under
 `src/components/sections/`. Coordinate with s47b, which edits the same Hero/Pricing copy: ship
 s50 first or rebase s47b on it.
+
+Embed allocation: 0 bytes.
+
+## Story s51-edit-needs-a-plan — editing, publishing and buying AI credits need a plan
+
+Product owner decision, 2026-09-28, from the editing-access fact-find. Launch-blocking (P0).
+Complexity: 4. Branch `feature/s51-edit-needs-a-plan`. Today no edit or publish path checks the
+site owner's entitlement: a lapsed trial, a lapsed founding-offer account, their invited editors
+and their API keys keep editing and publishing live indefinitely, and a $19 credit pack buys
+permanent editing. This contradicts `docs/stories.md:277` (s01) and
+`docs/designs/s01-trial-signup.md:51-53`.
+
+- [ ] Every content write is refused unless the SITE OWNER's entitlement is `plan`: staging save
+  and publish, version restore, bulk import and bulk update, `/api/v1/content` POST/PUT, and the
+  frozen `edit-board/styles/apply` (which also calls AI without charging). The refusal is a
+  structured `upgradeRequired` error; nothing is written. One server-side helper, keyed by the
+  owner (not the caller), fails closed on any resolution error.
+- [ ] Invited editors of a paying owner are unaffected; invited editors and API keys of a lapsed
+  owner can no longer write, and regain access automatically when the owner picks a plan (no
+  credential is revoked or reissued).
+- [ ] Public delivery never depends on the owner's plan: the embed, `GET /api/content/[siteId]`,
+  discovery, `v1` GET, bulk export and the WebSocket broadcast keep working for a lapsed owner,
+  proved by tests.
+- [ ] Issuance points (edit-session create, editor code submit, handoff, grant refresh) refuse a
+  lapsed owner up front, and the widget and `/edit` hub show "This site's plan has ended — the
+  owner can reactivate it" instead of a generic error.
+- [ ] A credits checkout (`/api/billing/checkout` intent `credits`) requires a `plan`
+  entitlement; the no-plan billing screens do not offer credits, and say AI credits come with a
+  plan. Credits already held are kept and become spendable when a plan is chosen.
+- [ ] `permissions.ts` states that editing needs a plan, and the middleware comment that claims
+  the APIs enforce entitlement is made true. ADR records the rule.
+- [ ] Required local gates pass (in a worktree, local Supabase up); one story commit. No push,
+  PR, merge or production action. Operator before deploy: count production credits-only accounts
+  that paid (query in the runbook) and comp or refund each one.
+
+Agentic notes: fact-find table (paths, auth, file:line) is the research seed — see
+`docs/research/s51-edit-needs-a-plan.md`. Key points: `src/app/api/edit-sessions/create/route.ts:86`,
+`src/app/api/staging/content/[siteId]/route.ts:165`, `src/app/api/staging/publish/route.ts:59`,
+`src/lib/auth/editor-access.ts:138,416`, `src/lib/editor-grants.ts:39-47`, `src/app/api/editor/*`,
+`src/lib/security/rate-limiter.ts:117-133` (v1 keys), `src/app/api/bulk/{import,update}`,
+`src/middleware.ts:165-171`, `src/lib/feature-gating/permissions.ts:74`, owner lookup
+`resolveSiteOwnerId`. Risk (why 4): an authorization change across every write path; a bug either
+keeps the leak or locks paying customers out. Depends on nothing; s47a's lapsed offer accounts
+rely on it to convert.
+
+Embed allocation: small — the widget's upgrade message only.
+
+## Story s52-bill-after-free-period — choosing a plan during the free period doesn't forfeit it
+
+Product owner decision, 2026-09-28, from the s47a design review. Complexity: 3. Branch
+`feature/s52-bill-after-free-period`. Today checkout bills from the day a plan is chosen, so a
+trial or founding-offer account that upgrades early loses its remaining free days, and the
+billing card has to warn about it.
+
+- [ ] A subscription checkout started by an account with a running trial or founding offer sets
+  the first charge to the end of that free period; the account keeps the plan it chose from that
+  moment, with no gap and no double entitlement.
+- [ ] The billing card's "billed from the day you choose" warning is replaced by "billed on
+  <date>".
+- [ ] Lifetime purchases and credit packs are unaffected. Required local gates pass; one story
+  commit.
+
+Agentic notes: `src/lib/stripe/checkout.ts` (subscription_data), ADR 014 trial row, s47a offer
+row. Not launch-blocking.
 
 Embed allocation: 0 bytes.
