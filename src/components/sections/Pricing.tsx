@@ -70,8 +70,11 @@ const TRUST_POINTS = [
   "14-day free trial",
   "No credit card required",
   "Cancel anytime",
-  "30-day money-back guarantee",
 ];
+// "30-day money-back guarantee" was removed in s50 on the owner's decision of
+// 2026-09-28: /terms has no refund clause, and refunds are handled case by
+// case, so it was a promise nothing stood behind. Do not restore it without a
+// refund clause in /terms.
 
 export default function Pricing() {
   const ref = useRef(null);

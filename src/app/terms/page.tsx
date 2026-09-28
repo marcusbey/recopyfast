@@ -269,10 +269,6 @@ export default function Terms() {
                 disruptions
               </li>
               <li>
-                Real-time status monitoring is available at
-                status.recopyfast.com
-              </li>
-              <li>
                 We reserve the right to modify or discontinue features with 30
                 days notice
               </li>
@@ -418,10 +414,10 @@ export default function Terms() {
                 <strong>Security Contact:</strong> Report security
                 vulnerabilities to{" "}
                 <a
-                  href="mailto:security@recopyfast.com"
+                  href="mailto:privacy@recopyfa.st"
                   className="text-sky-600 hover:underline font-medium"
                 >
-                  security@recopyfast.com
+                  privacy@recopyfa.st
                 </a>
               </p>
             </div>
@@ -445,10 +441,10 @@ export default function Terms() {
                     Legal Inquiries
                   </h4>
                   <a
-                    href="mailto:legal@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    legal@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                 </div>
               </div>
@@ -462,10 +458,10 @@ export default function Terms() {
                     Security Issues
                   </h4>
                   <a
-                    href="mailto:security@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    security@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                 </div>
               </div>
@@ -479,10 +475,10 @@ export default function Terms() {
                     Data Protection Officer
                   </h4>
                   <a
-                    href="mailto:privacy@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    privacy@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                 </div>
               </div>
@@ -496,10 +492,10 @@ export default function Terms() {
                     General Support
                   </h4>
                   <a
-                    href="mailto:support@recopyfast.com"
+                    href="mailto:support@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    support@recopyfast.com
+                    support@recopyfa.st
                   </a>
                 </div>
               </div>

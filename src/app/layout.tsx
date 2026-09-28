@@ -39,9 +39,13 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 const SITE_NAME = "ReCopyFast";
-const SITE_TITLE = "ReCopyFast - Universal CMS Layer";
+// Until s50 these said "Universal CMS Layer" and "Transform any website into
+// an editable platform". Neither is true: a site whose Content Security Policy
+// blocks the script cannot run it, and there is no content model. manifest.ts
+// and opengraph-image.tsx carry the same two lines.
+const SITE_TITLE = "ReCopyFast - Edit your website copy in place";
 const SITE_DESCRIPTION =
-  "Transform any website into an editable platform with a simple script tag";
+  "Make the copy on the site you already built editable, with one script tag.";
 
 export const metadata: Metadata = {
   // Without this, every relative OG/Twitter image URL resolves against
@@ -55,7 +59,6 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   keywords: [
     "CMS",
-    "headless CMS",
     "website editing",
     "content management",
     "no-code",
