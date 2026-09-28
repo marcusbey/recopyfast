@@ -37,6 +37,13 @@ import { DELETE, GET, POST, PUT } from "@/app/api/v1/content/route";
 
 let mockDatabase: SchemaStrictDatabase;
 
+// The fixture's owner holds a plan (s51). The owner-plan gate itself is
+// proved in src/__tests__/api/owner-plan-gate.test.ts.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
+
 jest.mock("@supabase/ssr", () => ({
   __esModule: true,
   createServerClient: () => mockDatabase.client,

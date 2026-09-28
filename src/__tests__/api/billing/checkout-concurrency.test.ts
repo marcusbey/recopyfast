@@ -211,6 +211,9 @@ const mockGetGrantedPlanIds = jest.fn();
 
 jest.mock("@/lib/billing/entitlements", () => ({
   getGrantedPlanIds: (...args: unknown[]) => mockGetGrantedPlanIds(...args),
+  // The fixture's buyer holds a plan (s51): credits checkout requires one.
+  // The refusal itself is proved in checkout-credits-plan.test.ts.
+  getEffectivePlan: async () => ({ kind: "plan", planId: "pro", plan: {} }),
 }));
 
 jest.mock("@/lib/billing/user-lock", () => {

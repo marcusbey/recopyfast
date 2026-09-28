@@ -8,6 +8,10 @@ import {
 } from "@/lib/credits/system";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import {
   optionalString,
@@ -210,6 +214,15 @@ export async function POST(request: NextRequest) {
       message: "Too many translation requests for this site. Please slow down.",
     });
     if (siteLimited) return siteLimited;
+
+    // Translating writes `content_elements` and spends AI credits, and both
+    // need the SITE OWNER's plan (s51, ADR 041): credits already bought are
+    // kept, but spend nothing until a plan exists. After the permission read
+    // and the site limiter so it is no oracle, and before anyone is charged.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
+    }
 
     // Fail closed on configuration, BEFORE anyone is charged (s48, defect 1).
     // Without a key every model call throws inside `translateText`, which

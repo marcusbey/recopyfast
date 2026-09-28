@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { refundCharge, type CreditCharge } from "@/lib/credits/system";
+import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import {
-  consumeFeatureUsage,
-  resolveSiteOwnerId,
-} from "@/lib/feature-gating/permissions";
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 import {
   requireEditorPermission,
   validateEditorTokenFromRequest,
@@ -46,11 +47,11 @@ import { withPublicCors, publicOptions } from "@/lib/http/public-cors";
  * is exactly the credential that must never suffice to spend.
  *
  * WHO PAYS. The site owner — the `admin` row in `site_permissions`, via
- * `resolveSiteOwnerId`, the same payer seat billing uses. Never the caller: a
- * device-grant editor has no account to charge, and an edit session can be
- * opened by a collaborator who is not the owner. Never `sites.user_id`: there
- * is no such column, and counting through it once shipped a quota that always
- * read 0. The owner's wallet is read and spent through the service role
+ * `resolveSiteOwnerId` (asked through `checkOwnerCanEdit` since s51), the same
+ * payer seat billing uses. Never the caller: a device-grant editor has no
+ * account to charge, and an edit session can be opened by a collaborator who
+ * is not the owner. Never `sites.user_id`: there is no such column, and
+ * counting through it once shipped a quota that always read 0. The owner's wallet is read and spent through the service role
  * because the owner is not the one calling — which is why this route may only
  * do so AFTER the editor has been authorised and graded.
  *
@@ -263,17 +264,27 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const service = createServiceRoleClient();
-    const ownerId = await resolveSiteOwnerId(service, siteId.value);
-    if (!ownerId) {
-      // A site with no `admin` row is a data inconsistency. Refused rather
-      // than charged to the caller (who may have no account at all), and
-      // logged because an ownerless site is a bug worth seeing.
-      console.error(
-        `[ai/suggest] site ${siteId.value} has no admin row; refusing AI spend`,
-      );
-      return fail(request, 403, { error: NO_PAYER_MESSAGE });
+    // The payer is the site owner, and since s51 the owner must hold a plan
+    // for any AI spend on the site (ADR 041): credits already bought are kept,
+    // but a credits-only or lapsed owner's editors spend nothing. One helper
+    // answers both "who pays" and "may they", so the two cannot disagree.
+    // 402, never 401/403: the widget shows the message either way, and the
+    // editing routes it shares a session with must not look terminal.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId.value);
+    if (!ownerCanEdit.ok) {
+      if (ownerCanEdit.reason === "no_owner") {
+        // A site with no `admin` row is a data inconsistency. Refused rather
+        // than charged to the caller (who may have no account at all), and
+        // logged because an ownerless site is a bug worth seeing.
+        console.error(
+          `[ai/suggest] site ${siteId.value} has no admin row; refusing AI spend`,
+        );
+        return fail(request, 403, { error: NO_PAYER_MESSAGE });
+      }
+      return cors(ownerCanEditRefusal(ownerCanEdit), request);
     }
+    const ownerId = ownerCanEdit.ownerId;
+    const service = createServiceRoleClient();
 
     const usageResult = await consumeFeatureUsage(
       ownerId,

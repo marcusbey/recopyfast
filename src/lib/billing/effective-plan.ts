@@ -148,8 +148,11 @@ export async function readTrialGrant(
  *
  *   plan    — a live subscription or a permanent grant. Capabilities and
  *             quotas come from here and only from here.
- *   credits — no plan, but purchased credits left to spend. They paid for a
- *             delivered good, so it stays spendable; it confers no plan.
+ *   credits — no plan, but purchased credits left. They paid for a
+ *             delivered good, so the balance is kept; it confers no plan,
+ *             and since s51 no editing and no AI spend either until a plan
+ *             exists (ADR 041) — AI spend happens only inside editing, and
+ *             editing needs the site owner's plan (`checkOwnerCanEdit`).
  *   none    — nothing. The paywall.
  *
  * Modelled as a union rather than a boolean beside one, so a caller reaching

@@ -36,6 +36,10 @@ import {
   readString,
 } from "@/lib/auth/editor-request";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 /** One message for every way a code can fail. Wrong, expired, never issued, spent — all the same. */
 function rejectCode(request: NextRequest) {
@@ -156,6 +160,17 @@ export async function POST(request: NextRequest) {
       // Reachable only if the editor was revoked between the code being issued
       // and used. The code is already spent, so this cannot be probed.
       return rejectCode(request);
+    }
+
+    // A grant on a lapsed owner's site would only be refused at its first
+    // save, so none is minted, and the code prompt shows the owner's message
+    // (s51, ADR 041). Only now — after the code is spent and the editor found
+    // — because before that the caller has proved nothing, and "plan ended"
+    // would be an oracle on a customer's billing. 402, never 401/403: the
+    // widget reads `message` either way and must not treat it as terminal.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
     }
 
     const issued = await issueDeviceGrant({

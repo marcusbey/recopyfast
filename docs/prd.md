@@ -387,7 +387,7 @@ balance must never be mistaken for a quota.
 | Starter | Solo owner, one site | 1 site, inline editing, versioning/rollback, invite by email, optional badge |
 | Pro | Marketer, small business | Several sites, **per-section impressions**, A/B testing, staging→publish, no badge, API + webhooks |
 | **Agency (missing)** | The actual buyer | N sites, client sub-accounts, branded subdomain, bulk seat handoff, consolidated billing |
-| Credits | Anyone | AI rewrite + translate, metered |
+| Credits | Plan holders | AI rewrite + translate, metered |
 | Lifetime Pro | Launch offer | Pro entitlement, one payment |
 
 **The Agency plan does not exist in code.** Given that agencies are the chosen buyer and

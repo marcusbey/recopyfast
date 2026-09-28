@@ -55,6 +55,16 @@ jest.mock("@/lib/feature-gating/permissions", () => ({
   consumeFeatureUsage: jest.fn(),
 }));
 
+// The fixture's owner holds a plan (s51). Stated where the entitlement is
+// computed rather than by mocking `checkOwnerCanEdit`, so the gate still asks
+// the real `resolveSiteOwnerId` who the owner is — the property this suite
+// exists to prove.
+jest.mock("@/lib/billing/effective-plan", () => ({
+  ...jest.requireActual("@/lib/billing/effective-plan"),
+  resolveEntitlement: () =>
+    Promise.resolve({ kind: "plan", planId: "pro", plan: { id: "pro" } }),
+}));
+
 import { OPTIONS, POST } from "@/app/api/ai/suggest/route";
 import { aiService } from "@/lib/ai/openai-service";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
@@ -121,6 +131,7 @@ function makeClient(handle: (op: Op) => { data: unknown; error: unknown }) {
         op.filters.push([column, value]);
         return builder;
       },
+      order: () => builder,
       limit: () => builder,
       single: resolve,
       maybeSingle: resolve,

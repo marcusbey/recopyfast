@@ -305,3 +305,35 @@ describe("EditorSignIn — Use a different address", () => {
     },
   );
 });
+
+describe("EditorSignIn — a site whose owner's plan has ended (s51)", () => {
+  // The server's own sentence, pinned verbatim: the hub shows `message` and
+  // must not paraphrase it into "try again", which a lapsed plan will not fix.
+  const PLAN_ENDED_MESSAGE =
+    "This site's plan has ended — the owner can reactivate it.";
+
+  it("shows the plan-ended message when a site can't be opened", async () => {
+    installRoutes({
+      "/api/editor/sites": async () =>
+        reply(200, { ok: true, email: EMAIL, remembered: true, sites: SITES }),
+      "/api/editor/handoff/create": async () =>
+        reply(402, {
+          error: PLAN_ENDED_MESSAGE,
+          message: PLAN_ENDED_MESSAGE,
+          reason: "plan_ended",
+          upgradeRequired: true,
+        }),
+    });
+    const user = userEvent.setup();
+    render(<EditorSignIn />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Hello World/ }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      PLAN_ENDED_MESSAGE,
+    );
+    expect(callsTo("/api/editor/handoff/create")).toHaveLength(1);
+  });
+});

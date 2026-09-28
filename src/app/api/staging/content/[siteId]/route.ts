@@ -17,6 +17,10 @@ import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 import { normalizePagePath } from "@/lib/content/page-path";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 function jsonObject(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -279,6 +283,19 @@ export async function PUT(
       message: "Staging edit rate limit exceeded for this site.",
     });
     if (limited) return withPublicCors(limited, request);
+
+    // Saving needs the SITE OWNER's plan (s51, ADR 041) — keyed by the owner,
+    // never by this caller, whose device grant may have no account at all.
+    // After authorization and the limiter, never before: a "plan ended" answer
+    // to an anonymous caller would tell anyone holding the public site id
+    // whether this customer lapsed. And 402, never 401/403: the widget sends
+    // those to `handleTerminalWriteFailure` (recopyfast.src.js), which forgets
+    // the edit link and says "Session ended" — while any other status alerts
+    // the body's own message and keeps the link for when the owner pays.
+    const ownerCanEdit = await checkOwnerCanEdit(siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
+    }
 
     const sanitizedContent = sanitizeIncomingContent(String(content));
     const supabase = createServiceRoleClient();

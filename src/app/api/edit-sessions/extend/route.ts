@@ -7,6 +7,10 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { readStagingDeviceFingerprint } from "@/lib/auth/staging-device";
 import { MAX_SESSION_LIFETIME_HOURS } from "@/lib/auth/edit-sessions";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 const EXTEND_HOURS = 2;
 const MAX_EXTENSION_HOURS = 24;
@@ -57,6 +61,15 @@ export async function POST(request: NextRequest) {
         ),
         request,
       );
+    }
+
+    // Prolonging a session is issuance, and a lapsed owner's site issues
+    // nothing (s51, ADR 041). After the session has been validated, so the
+    // answer is no oracle; the session itself is left alone and works again
+    // once the owner picks a plan.
+    const ownerCanEdit = await checkOwnerCanEdit(body.siteId);
+    if (!ownerCanEdit.ok) {
+      return withPublicCors(ownerCanEditRefusal(ownerCanEdit), request);
     }
 
     const durationHours = Math.min(

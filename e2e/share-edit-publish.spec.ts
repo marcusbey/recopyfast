@@ -74,6 +74,8 @@ test.describe("share edit publish flow", () => {
     return `${payload}.${signature}`;
   })();
   const editToken = `e2e_edit_${randomUUID()}`;
+  const ownerEmail = `e2e-owner-${siteId}@recopyfast.local`;
+  let ownerId: string | null = null;
 
   // Discovered from the running widget, never hand-authored. A real customer
   // page has no `data-rcf-id` in its markup, so pre-seeding one here would have
@@ -90,7 +92,10 @@ test.describe("share edit publish flow", () => {
     );
 
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
-    await withCoreSetupDiagnostic("seed site", () => seedSite());
+    await withCoreSetupDiagnostic("seed site", async () => {
+      await seedSite();
+      await seedPayingOwner();
+    });
     await withCoreSetupDiagnostic("seed invited editor", () =>
       seedInvitedEditor(),
     );
@@ -111,7 +116,11 @@ test.describe("share edit publish flow", () => {
         try {
           await restoreCapturedContent();
         } finally {
-          await deleteCoreFixture();
+          try {
+            await deleteCoreFixture();
+          } finally {
+            await deletePayingOwner();
+          }
         }
       }
     } finally {
@@ -346,6 +355,44 @@ test.describe("share edit publish flow", () => {
     if (siteError) {
       throw siteError;
     }
+  }
+
+  /**
+   * s51: editing and publishing need the SITE OWNER's plan (ADR 041). This
+   * fixture used to be an ownerless site — no `admin` row — which the gate
+   * refuses as `no_owner`, and rightly: a real site always has one, written by
+   * sites/register. So the fixture says what a working site is: an owner
+   * account, its `admin` row, and a Pro grant with no expiry. Deleting the user
+   * in afterAll cascades both rows.
+   */
+  async function seedPayingOwner() {
+    if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
+
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: ownerEmail,
+      email_confirm: true,
+    });
+    if (error) throw error;
+    if (!data.user) throw new Error("createUser returned no owner.");
+    ownerId = data.user.id;
+
+    const { error: permissionError } = await supabase
+      .from("site_permissions")
+      .insert({ site_id: siteId, user_id: ownerId, permission: "admin" });
+    if (permissionError) throw permissionError;
+
+    const { error: planError } = await supabase
+      .from("plan_entitlements")
+      .insert({ user_id: ownerId, plan_id: "pro", source: "e2e" });
+    if (planError) throw planError;
+  }
+
+  async function deletePayingOwner() {
+    if (!supabase || !ownerId) return;
+
+    const { error } = await supabase.auth.admin.deleteUser(ownerId);
+    if (error) throw error;
+    ownerId = null;
   }
 
   async function seedInvitedEditor() {

@@ -30,6 +30,11 @@ jest.mock("@/lib/auth/editor-directory", () => {
   return { ...actual, findActiveSiteEditor: jest.fn() };
 });
 jest.mock("@/lib/auth/editor-handoff", () => ({ createHandoff: jest.fn() }));
+// The fixture's owner holds a plan (s51), unless a test says otherwise.
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: jest.fn(),
+}));
 
 import { POST } from "@/app/api/editor/handoff/create/route";
 import { findActiveSiteEditor } from "@/lib/auth/editor-directory";
@@ -40,6 +45,10 @@ import {
   createHubSessionToken,
 } from "@/lib/auth/editor-hub-session";
 import { resetSigningKeyCache } from "@/lib/auth/editor-crypto";
+import {
+  checkOwnerCanEdit,
+  PLAN_ENDED_MESSAGE,
+} from "@/lib/billing/owner-can-edit";
 
 const mockCookies = cookies as unknown as jest.Mock;
 const mockFindActiveSiteEditor = findActiveSiteEditor as jest.MockedFunction<
@@ -52,6 +61,9 @@ const mockCreateServiceRoleClient =
   createServiceRoleClient as jest.MockedFunction<
     typeof createServiceRoleClient
   >;
+const mockCheckOwnerCanEdit = checkOwnerCanEdit as jest.MockedFunction<
+  typeof checkOwnerCanEdit
+>;
 
 const EMAIL = "bob@example.com";
 const SITE_ID = "site-1";
@@ -86,6 +98,26 @@ function siteLookupReturns(domain: string | null) {
   );
 }
 
+/**
+ * The no-oracle rule (s51): an unauthenticated caller — or one with no access
+ * on this site — must get the same answer whether the owner's plan lapsed or
+ * not, and the plan must not even be read. Sent twice, once per plan state.
+ */
+async function answerWhateverThePlan(send: () => Promise<Response>) {
+  mockCheckOwnerCanEdit.mockResolvedValue({ ok: false, reason: "plan_ended" });
+  const lapsed = await send();
+  const lapsedAnswer = { status: lapsed.status, body: await lapsed.json() };
+
+  mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
+  const paying = await send();
+  const payingAnswer = { status: paying.status, body: await paying.json() };
+
+  expect(lapsedAnswer).toEqual(payingAnswer);
+  expect(JSON.stringify(lapsedAnswer.body)).not.toContain(PLAN_ENDED_MESSAGE);
+  expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
+  return lapsedAnswer;
+}
+
 describe("POST /api/editor/handoff/create", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -98,6 +130,7 @@ describe("POST /api/editor/handoff/create", () => {
       createdAt: new Date(),
     });
     mockCreateHandoff.mockResolvedValue("handoff-code");
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
     siteLookupReturns("helloworld.com");
   });
 
@@ -163,6 +196,53 @@ describe("POST /api/editor/handoff/create", () => {
     const response = await POST(handoffRequest({ siteId: SITE_ID }));
 
     expect(response.status).toBe(403);
+    expect(mockCreateHandoff).not.toHaveBeenCalled();
+    expect(mockCheckOwnerCanEdit).not.toHaveBeenCalled();
+  });
+
+  it("answers a caller with no hub session identically whether the owner lapsed or pays (s51)", async () => {
+    withHubCookie(undefined);
+
+    const answer = await answerWhateverThePlan(() =>
+      POST(handoffRequest({ siteId: SITE_ID })),
+    );
+
+    expect(answer.status).toBe(401);
+    expect(mockCreateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("answers an address that edits no such site identically whether the owner lapsed or pays (s51)", async () => {
+    withHubCookie(createHubSessionToken(EMAIL, true));
+    mockFindActiveSiteEditor.mockResolvedValue(null);
+
+    const answer = await answerWhateverThePlan(() =>
+      POST(handoffRequest({ siteId: SITE_ID })),
+    );
+
+    expect(answer).toEqual({
+      status: 403,
+      body: { error: "not_authorized", message: "You can't edit that site." },
+    });
+    expect(mockCreateHandoff).not.toHaveBeenCalled();
+  });
+
+  it("handoff/create returns the plan-ended message for a lapsed owner's site", async () => {
+    // s51: the hub shows `message` when a site can't be opened. Asked after
+    // the hub session and the editor row, so a stranger learns nothing.
+    withHubCookie(createHubSessionToken(EMAIL, true));
+    mockCheckOwnerCanEdit.mockResolvedValueOnce({
+      ok: false,
+      reason: "plan_ended",
+    });
+
+    const response = await POST(handoffRequest({ siteId: SITE_ID }));
+
+    expect(response.status).toBe(402);
+    await expect(response.json()).resolves.toMatchObject({
+      message: PLAN_ENDED_MESSAGE,
+      reason: "plan_ended",
+    });
+    expect(mockCheckOwnerCanEdit).toHaveBeenCalledWith(SITE_ID);
     expect(mockCreateHandoff).not.toHaveBeenCalled();
   });
 });

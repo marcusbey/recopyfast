@@ -28,13 +28,17 @@ const CHECKOUT_PATH = "/dashboard/billing";
  * Deliberately `resolveEntitlement` + `hasAnyEntitlement` rather than a
  * condition of its own: the router must not hold a second opinion about who is
  * let in, or the paywall and the feature gates drift and one of them is wrong.
- * A credit holder passes here — they bought something that works, and bouncing
- * them to checkout would put the thing they paid for behind a wall.
+ * A credit holder passes here, deliberately: their balance is kept, and their
+ * dashboard still reads and exports. What they cannot do is write — since s51
+ * every content write and AI spend, and every credential issuance but handoff
+ * redemption, asks `checkOwnerCanEdit` (`@/lib/billing/owner-can-edit`, ADR
+ * 041) for the SITE OWNER's plan, and credits are not a plan. Routing does not
+ * repeat that rule.
  *
  * Fails open. A Supabase blip must not lock a paying customer out of their own
- * dashboard, and this gate is routing, not authorisation — every API route and
- * feature gate resolves entitlement independently, so the worst a false
- * negative here costs is a rendered shell with nothing behind it.
+ * dashboard, and this gate is routing, not authorisation — the write side
+ * resolves the owner's entitlement independently and fails CLOSED there, so the
+ * worst a false negative here costs is a rendered shell with nothing behind it.
  */
 async function isUnentitled(
   supabase: SupabaseClient,
@@ -162,8 +166,14 @@ export async function middleware(request: NextRequest) {
   // session with no plan gets one destination, the checkout page, and typing a
   // dashboard URL does not get round it.
   //
-  // Only page routes are gated. API routes are under /api and enforce their own
-  // entitlement, so they never reach this branch and never pay for the query.
+  // Only page routes are gated. API routes are under /api and never reach this
+  // branch. Their entitlement is enforced where the write happens: every content
+  // write and AI spend, and every credential issuance but handoff redemption,
+  // calls `checkOwnerCanEdit` (s51, ADR 041) after authorising its caller.
+  // Public reads are deliberately ungated and must stay so — the embed, GET
+  // /api/content/[siteId], discovery, GET /api/v1/content, bulk export, the
+  // three validate routes and the WebSocket broadcast serve a lapsed owner's
+  // visitors exactly as before.
   if (
     user &&
     isProtectedRoute &&

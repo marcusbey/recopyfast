@@ -13,6 +13,11 @@ import {
 } from "@/lib/auth/staging-access";
 import { sendStagingVerificationEmail } from "@/lib/email/resend";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { authorizeFirstPartyEditorAccess } from "@/lib/auth/editor-access";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
 
 export async function POST(request: NextRequest) {
   try {
@@ -105,6 +110,21 @@ export async function POST(request: NextRequest) {
 
     if (siteError || !site) {
       return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    }
+
+    // An invite onto a lapsed owner's site would only be refused at its first
+    // save, so none is issued (s51, ADR 041). The admin check lives inside
+    // `createStagingAccess`, which also inserts, so the caller's access is
+    // read first and only someone with a row on the site hears about its plan.
+    const firstPartyAccess = await authorizeFirstPartyEditorAccess(
+      siteId,
+      "view",
+    );
+    if (firstPartyAccess) {
+      const ownerCanEdit = await checkOwnerCanEdit(siteId);
+      if (!ownerCanEdit.ok) {
+        return ownerCanEditRefusal(ownerCanEdit);
+      }
     }
 
     // Create staging access.
