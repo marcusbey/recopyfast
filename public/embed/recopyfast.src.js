@@ -952,9 +952,10 @@
         // current copy whether or not realtime is reachable.
         await this.hydrateStoredContent();
 
-        // A/B testing pipeline (non-blocking for staging mode)
+        // A/B testing pipeline (non-blocking for staging mode). The visitor id
+        // is not minted here: bucketVisitor mints it, and only once a test is
+        // active (s55).
         if (!this.stagingMode) {
-          this.initVisitorId();
           await this.fetchActiveTests();
           await this.bucketVisitor();
           this.applyVariants();
@@ -3216,6 +3217,13 @@
     // ==========================================
 
     initVisitorId() {
+      // Idempotent. bucketVisitor calls this on every pass, and
+      // handleABTestUpdate can run it more than once per page: unguarded, a
+      // cookie write that did not stick would mint a second id for the same
+      // visitor mid-page. ab-bucketing-parity.test.ts presets visitorId and
+      // calls bucketVisitor directly — an unguarded mint overwrites it there.
+      if (this.visitorId) return;
+
       // Read existing cookie
       var cookies = document.cookie.split(';');
       for (var i = 0; i < cookies.length; i++) {
@@ -3252,7 +3260,20 @@
     }
 
     async bucketVisitor() {
-      if (!this.activeTests.length || !this.visitorId) return;
+      if (!this.activeTests.length) return;
+
+      // The visitor id is minted here, past the guard, and nowhere else.
+      //
+      // init used to call initVisitorId one line before fetchActiveTests, so
+      // the id and its one-year rcf_vid cookie were read and written on every
+      // page load of every customer site — before anything knew whether a test
+      // was running. A persistent identifier on a site with no experiment is a
+      // cookie-consent exposure the customer never chose. Both callers, init
+      // and handleABTestUpdate, pass through this line, and only once a test
+      // is active; minting in init alone left a test that went active later
+      // bucketing nobody (visitorId stayed null). Do not move it back into
+      // init.
+      this.initVisitorId();
 
       try {
         var response = await fetch(
