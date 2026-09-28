@@ -1990,13 +1990,13 @@ Embed allocation: 0 bytes.
 Product owner decision, 2026-09-28, from the s50 review (minor 4). Complexity: 2. Branch
 `feature/s54-legal-pages-truth`. Launch-relevant: done before the public launch posts.
 
-- [ ] /privacy and /terms make no claim about features the product does not have: audit logs,
+- [x] /privacy and /terms make no claim about features the product does not have: audit logs,
   role-based access control, SIEM integration, or any other PRD-graveyard item.
-- [ ] The "EU Representative" and any other named role or entity that does not exist is removed or
+- [x] The "EU Representative" and any other named role or entity that does not exist is removed or
   replaced by what is true; every contact line uses `privacy@recopyfa.st` or `support@recopyfa.st`.
-- [ ] The processing and security sections describe the actual stack (Supabase, Stripe, Vercel,
+- [x] The processing and security sections describe the actual stack (Supabase, Stripe, Vercel,
   Fly, OpenAI) without overstating certifications or controls.
-- [ ] A guard test fails if a graveyard feature name reappears on either page. Required local gates
+- [x] A guard test fails if a graveyard feature name reappears on either page. Required local gates
   pass; one story commit. Legal wording is conservative: remove over invent.
 
 Embed allocation: 0 bytes.

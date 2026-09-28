@@ -1,16 +1,28 @@
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
-import {
-  FileText,
-  Shield,
-  Scale,
-  AlertTriangle,
-  Clock,
-  Mail,
-  Lock,
-  Users,
-} from "lucide-react";
+import { FileText, Shield, Scale, Mail, Lock } from "lucide-react";
 
+/**
+ * s54 — every sentence on this page is backed by code or infrastructure, or is
+ * a commitment the owner honours by hand (a mailbox, an email to users).
+ *
+ * Until s54 these terms promised 99.9% uptime on redundant infrastructure,
+ * TLS 1.3, multi-factor authentication, role-based access control, audit
+ * logs, security audits and penetration testing, GDPR and CCPA compliance
+ * protocols, in-app notifications, a 72-hour breach notice, a 30-day export
+ * window and 90-day deletion after account closure, and account termination
+ * "through account settings". None of it was backed: the WebSocket server is
+ * one machine by design (ADR 026), Vercel and Fly both accept TLS 1.2,
+ * settings says two-factor is "Not available yet", audit logs, org roles and
+ * the notification centre are PRD graveyard items, nothing deletes data on a
+ * schedule, and there is no account deletion to close an account with. Signing
+ * in binds users to this page.
+ *
+ * Do not restore "standard" terms. A new claim needs its evidence first (the
+ * inventory is docs/research/s54-legal-pages-truth.md), and a new commitment
+ * needs the owner. src/__tests__/app/legal-pages-truth.test.tsx fails if a
+ * graveyard feature or a removed claim comes back.
+ */
 export default function Terms() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-sky-50 to-white">
@@ -31,17 +43,17 @@ export default function Terms() {
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-4 text-sm text-slate-500">
             <span>
-              <strong>Effective:</strong> August 22, 2025
+              <strong>Effective:</strong> September 28, 2026
             </span>
             <span className="hidden sm:inline">|</span>
             <span>
-              <strong>Last Updated:</strong> August 22, 2025
+              <strong>Last Updated:</strong> September 28, 2026
             </span>
           </div>
         </div>
 
         {/* Quick summary cards */}
-        <div className="grid sm:grid-cols-3 gap-4 mb-16">
+        <div className="grid sm:grid-cols-2 gap-4 mb-16">
           <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
             <Scale className="w-6 h-6 text-sky-600 mb-3" />
             <h3 className="font-semibold text-slate-900 mb-1">Fair Use</h3>
@@ -54,13 +66,6 @@ export default function Terms() {
             <h3 className="font-semibold text-slate-900 mb-1">Your Content</h3>
             <p className="text-sm text-slate-600">
               You own what you create and modify
-            </p>
-          </div>
-          <div className="bg-white rounded-2xl p-6 border border-sky-100 shadow-sm">
-            <Clock className="w-6 h-6 text-sky-600 mb-3" />
-            <h3 className="font-semibold text-slate-900 mb-1">99.9% Uptime</h3>
-            <p className="text-sm text-slate-600">
-              Reliable service you can count on
             </p>
           </div>
         </div>
@@ -92,8 +97,8 @@ export default function Terms() {
             <p className="text-slate-600 mb-4">
               ReCopyFast is a content management service that enables website
               content editing through secure script integration. We provide
-              real-time content editing, multi-language support, AI-powered
-              content suggestions, and collaboration features.
+              real-time content editing, AI-powered content suggestions, and
+              collaboration features.
             </p>
             <div className="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-r-lg">
               <p className="text-sm text-amber-800">
@@ -173,8 +178,7 @@ export default function Terms() {
               <p className="text-sm text-red-800">
                 <strong>Security Notice:</strong> Violations of security
                 policies may result in immediate account suspension and
-                potential legal action. We actively monitor for suspicious
-                activity and maintain detailed audit logs.
+                potential legal action.
               </p>
             </div>
           </section>
@@ -225,22 +229,21 @@ export default function Terms() {
               6.1 Data Security Measures
             </h3>
             <ul className="list-disc pl-6 mb-6 text-slate-600 space-y-2">
-              <li>
-                All data transmission is encrypted using TLS 1.3 or higher
-              </li>
+              <li>All data transmission is encrypted using TLS</li>
               <li>Content is stored with AES-256 encryption at rest</li>
-              <li>Regular security audits and penetration testing</li>
-              <li>Multi-factor authentication for account access</li>
-              <li>Role-based access controls and session management</li>
-              <li>Comprehensive logging and monitoring systems</li>
-              <li>GDPR and CCPA compliance protocols</li>
+              <li>
+                Passwordless sign-in for account owners and invited editors
+              </li>
+              <li>
+                Per-site permissions for invited editors, and session management
+              </li>
+              <li>Error monitoring and logging</li>
             </ul>
 
             <h3 className="text-lg font-medium text-slate-800 mb-3">
               6.2 Your Responsibilities
             </h3>
             <ul className="list-disc pl-6 text-slate-600 space-y-2">
-              <li>Maintain strong, unique passwords for your account</li>
               <li>Immediately report suspected security breaches</li>
               <li>Regularly review and rotate edit tokens</li>
               <li>Ensure your website&apos;s security before integration</li>
@@ -253,21 +256,9 @@ export default function Terms() {
               <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 7
               </span>
-              Service Availability & Business Continuity
+              Service Changes
             </h2>
             <ul className="list-disc pl-6 text-slate-600 space-y-2">
-              <li>
-                We maintain a target uptime of 99.9% with redundant
-                infrastructure
-              </li>
-              <li>
-                Scheduled maintenance is performed during low-traffic periods
-                with advance notice
-              </li>
-              <li>
-                We implement disaster recovery procedures to minimize service
-                disruptions
-              </li>
               <li>
                 We reserve the right to modify or discontinue features with 30
                 days notice
@@ -299,10 +290,7 @@ export default function Terms() {
             <ul className="list-disc pl-6 mb-6 text-slate-600 space-y-2">
               <li>Service interruptions or security incidents</li>
               <li>Third-party integrations or compatibility issues</li>
-              <li>
-                Data loss or corruption (though we implement robust backup
-                systems)
-              </li>
+              <li>Data loss or corruption</li>
               <li>Website performance impacts from our scripts</li>
               <li>User error or misuse of the service</li>
             </ul>
@@ -323,16 +311,18 @@ export default function Terms() {
               <span className="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center text-sm font-semibold text-sky-600">
                 9
               </span>
-              Termination & Data Retention
+              Termination
             </h2>
-
-            <h3 className="text-lg font-medium text-slate-800 mb-3">
-              9.1 Termination Rights
-            </h3>
-            <ul className="list-disc pl-6 mb-6 text-slate-600 space-y-2">
+            <ul className="list-disc pl-6 text-slate-600 space-y-2">
               <li>
-                You may terminate your account at any time through account
-                settings
+                You may stop using the Service at any time: cancel your
+                subscription from Billing, and ask us to delete your account at{" "}
+                <a
+                  href="mailto:privacy@recopyfa.st"
+                  className="text-sky-600 hover:underline font-medium"
+                >
+                  privacy@recopyfa.st
+                </a>
               </li>
               <li>
                 We may terminate accounts for violations of these Terms, with
@@ -345,23 +335,6 @@ export default function Terms() {
               <li>
                 Upon termination, your right to use the Service ceases
                 immediately
-              </li>
-            </ul>
-
-            <h3 className="text-lg font-medium text-slate-800 mb-3">
-              9.2 Data Handling Upon Termination
-            </h3>
-            <ul className="list-disc pl-6 text-slate-600 space-y-2">
-              <li>
-                We provide 30 days to export your data after account closure
-              </li>
-              <li>All edit tokens are immediately invalidated</li>
-              <li>Content data is securely deleted within 90 days</li>
-              <li>
-                Audit logs may be retained for security and compliance purposes
-              </li>
-              <li>
-                Backup systems are purged according to our data retention policy
               </li>
             </ul>
           </section>
@@ -381,7 +354,6 @@ export default function Terms() {
             </p>
             <ul className="list-disc pl-6 text-slate-600 space-y-2">
               <li>Email notification to registered users</li>
-              <li>In-app notifications for 30 days</li>
               <li>
                 Updates to the &ldquo;Last Updated&rdquo; date on this page
               </li>
@@ -401,8 +373,7 @@ export default function Terms() {
             </p>
             <ul className="list-disc pl-6 mb-6 text-slate-600 space-y-2">
               <li>Immediately investigate and contain the incident</li>
-              <li>Notify affected users within 72 hours</li>
-              <li>Provide detailed incident reports and remediation steps</li>
+              <li>Notify affected users as the law requires</li>
               <li>
                 Implement additional security measures to prevent recurrence
               </li>
@@ -472,7 +443,7 @@ export default function Terms() {
                 </div>
                 <div>
                   <h4 className="font-medium text-slate-800 mb-1">
-                    Data Protection Officer
+                    Privacy Requests
                   </h4>
                   <a
                     href="mailto:privacy@recopyfa.st"
