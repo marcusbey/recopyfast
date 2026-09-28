@@ -165,8 +165,18 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *
  * build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45883;
-const MAX_WIDGET_GZ = 33122;
+/*
+ * RATCHETED DOWN 2026-09-28 (s55-no-visitor-cookie-by-default), from 45883 / 33122.
+ *
+ *   45883 / 33122  ceilings before s55 = measured on main at b05666d, where s55 branched
+ *   −3 / −2        rcf_vid minted in bucketVisitor behind the active-test guard,
+ *                  initVisitorId idempotent, the init-time call removed
+ *   45880 / 33120  measured on the branch — the new ceilings
+ *
+ * build-size-gate.test.ts pins the same pair.
+ */
+const MAX_BUNDLE_GZ = 45880;
+const MAX_WIDGET_GZ = 33120;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

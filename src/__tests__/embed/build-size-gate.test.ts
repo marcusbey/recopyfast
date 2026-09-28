@@ -79,8 +79,10 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // persistence + 401/403 clears + noopener +116/+121, Preview Live no-op deletes
 // −8/−11, ≤480px editor bar +26/+24 (itemised on s41's own base; the merged
 // tree measures −293/−298 in total).
-const SEEDED_MAX_BUNDLE_GZ = 45883;
-const SEEDED_MAX_WIDGET_GZ = 33122;
+// RATCHETED 2026-09-28 (s55), DOWNWARD: 45883 → 45880, 33122 → 33120. rcf_vid
+// minted in bucketVisitor behind the active-test guard, init-time call removed.
+const SEEDED_MAX_BUNDLE_GZ = 45880;
+const SEEDED_MAX_WIDGET_GZ = 33120;
 
 interface CheckRun {
   status: number;

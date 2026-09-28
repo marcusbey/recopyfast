@@ -2010,13 +2010,13 @@ Product owner decision, 2026-09-28, from the s54 research. Complexity: 2. Branch
 parked A/B feature no customer can use. Undisclosed and without consent, it exposes customers to
 cookie-law risk just for installing the script.
 
-- [ ] On a page load where the site has no active A/B test, the embed reads no cookie, writes no
+- [x] On a page load where the site has no active A/B test, the embed reads no cookie, writes no
   cookie and generates no visitor id; published copy still applies exactly as before.
-- [ ] Only when `fetchActiveTests` returns at least one active test does the embed create or read
+- [x] Only when `fetchActiveTests` returns at least one active test does the embed create or read
   `rcf_vid`, and the A/B pipeline then behaves as today.
-- [ ] The artifact is rebuilt from the source (`recopyfast.js` is never hand-edited) and the byte
+- [x] The artifact is rebuilt from the source (`recopyfast.js` is never hand-edited) and the byte
   gate passes; the embed does not grow.
-- [ ] Tests cover both paths (no tests → `document.cookie` untouched; active test → cookie set).
+- [x] Tests cover both paths (no tests → `document.cookie` untouched; active test → cookie set).
   Required local gates pass; one story commit.
 
 Agentic notes: `public/embed/recopyfast.src.js:955-962` (A/B pipeline start), `:3218-3238`
