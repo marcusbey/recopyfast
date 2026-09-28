@@ -2054,3 +2054,19 @@ DEFINER, `column-privileges.test.ts`, the publish/staging RPCs. Risk: RLS change
 dashboard's own writes — research must enumerate them first.
 
 Embed allocation: 0 bytes.
+
+## Story s57-lapsed-export — an account without a plan can still export its own content
+
+Product owner decision, 2026-09-28, from the s54 review. Complexity: 2. Branch
+`feature/s57-lapsed-export`. Not launch-blocking. Today the middleware
+(`src/middleware.ts` ~165-196) sends every dashboard page except Billing to checkout for an
+account without a plan, so a lapsed trial or founding-offer owner cannot reach the export screen;
+/privacy now tells them to email the privacy mailbox instead (s54).
+
+- [ ] A signed-in owner whose plan has ended can open the export screen for their own sites and
+  download their content (a read; ADR 041 keeps reads ungated), without regaining any write.
+- [ ] Every other dashboard page still redirects to Billing; no write route changes.
+- [ ] /privacy's "Your Control" copy is updated to say export stays available after a plan ends.
+- [ ] Required local gates pass; one story commit.
+
+Embed allocation: 0 bytes.
