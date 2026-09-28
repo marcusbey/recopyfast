@@ -195,6 +195,20 @@ export class OpenAIService {
         0,
       );
 
+      // `translateText` swallows every provider error, so a batch where every
+      // call failed — a missing key fails them all — used to come back as
+      // `success: true` with no rows. The route then said "Successfully
+      // translated 0 elements" and kept the charge (s48, defect 1). The
+      // sentence is ours, never provider text: `translateText` has already
+      // logged each provider error.
+      if (successfulTranslations.length === 0) {
+        return {
+          success: false,
+          error: "No text could be translated.",
+          tokensUsed: totalTokens,
+        };
+      }
+
       return {
         success: true,
         data: successfulTranslations,

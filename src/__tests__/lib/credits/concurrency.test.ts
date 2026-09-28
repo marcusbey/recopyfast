@@ -1,108 +1,54 @@
 /**
  * A-18 — credit deduction is a lost update, and the ledger is written first.
  *
- * `src/lib/credits/system.ts:207-212` inserts `credit_usage`, then `:227-252`
- * does a read-modify-write on `credits_remaining` with no lock and no
- * compare-and-swap. `refundCredits` (`:349`) keys its idempotency on
- * `Date.now()`, which collides at millisecond resolution.
- *
- * The invariant these tests hold the system to is conservation:
+ * The invariant is conservation:
  *
  *     spendable balance + recorded usage === starting balance
  *
- * Stated that way rather than as "credits_remaining must be 0", so any fix —
- * a transactional RPC, a conditional update, a compare-and-swap loop — passes.
- * Today the ledger and the wallet disagree, in the customer's favour on the
- * concurrent path and against them on the failed one.
+ * History. A-18 found a read-modify-write on `credits_remaining`. The fix was a
+ * per-row compare-and-swap loop, tested here against a fake client — and probe
+ * P4 (`.omx/qa-20260927/REPORT.md`) then measured that loop losing 2–9 credits
+ * per round under twelve concurrent charges: on a collision it restarted with
+ * the full amount without undoing the rows it had already decremented. A fake
+ * client could not see that, because the defect lived in how Postgres
+ * interleaves real transactions.
+ *
+ * s48 moved the whole charge into `spend_credits` (migration 20260928110000,
+ * ADR 040). The concurrency proof is now `src/__tests__/db/credit-spend.test.ts`,
+ * on real Postgres, which CI runs by name: barrier-synchronised and
+ * unsynchronised races asserting conservation row by row and zero refusals.
+ *
+ * What remains here is the TypeScript half as a contract with that function:
+ * how its answer is mapped, and that `consumeCredits` never writes the wallet
+ * or the ledger itself.
  */
 
 type Row = Record<string, unknown>;
-type FakeError = { code?: string; message: string; details?: string };
-type RowsResult = { data: Row[] | null; error: FakeError | null };
+type RowsResult = { data: Row[] | null; error: { message: string } | null };
+
+interface RecordedOp {
+  table: string;
+  operation: "select" | "insert" | "update";
+}
 
 let db: Record<string, Row[]> = {};
-
-/**
- * Runs before a query executes, so a test can hold two callers at the same
- * point and produce a genuine interleaving rather than hoping for one.
- */
-let beforeRun: (table: string, operation: string) => Promise<void> = async () =>
-  undefined;
-
-/** Makes `credit_purchases` reject the deduction, modelling a write failure. */
-let failPurchaseUpdate = false;
-
-/** `credit_purchases.stripe_payment_intent_id` is UNIQUE in the schema. */
-const UNIQUE_COLUMN: Record<string, string> = {
-  credit_purchases: "stripe_payment_intent_id",
-};
+let ops: RecordedOp[] = [];
+let rpcCalls: Array<{ name: string; args: Row }> = [];
+let rpcAnswer: RowsResult = { data: [], error: null };
 
 function createFakeClient() {
   const from = (table: string) => {
     const predicates: Array<(row: Row) => boolean> = [];
-    let operation: "select" | "insert" | "update" = "select";
-    let values: Row = {};
-
-    const rows = (): Row[] => db[table] ?? [];
-    const matched = (): Row[] =>
-      rows().filter((predicateRow) =>
-        predicates.every((predicate) => predicate(predicateRow)),
-      );
+    const op: RecordedOp = { table, operation: "select" };
 
     const run = (): RowsResult => {
-      switch (operation) {
-        case "insert": {
-          const unique = UNIQUE_COLUMN[table];
-          const clashes =
-            unique !== undefined &&
-            values[unique] !== undefined &&
-            rows().some((row) => row[unique] === values[unique]);
-
-          if (clashes) {
-            return {
-              data: null,
-              error: {
-                code: "23505",
-                message: `duplicate key value violates unique constraint "${table}_${unique}_key"`,
-              },
-            };
-          }
-
-          // `created_at` is a column default in the schema, not something the
-          // caller supplies — the billing-period filter reads it.
-          const stored = {
-            created_at: new Date().toISOString(),
-            ...values,
-          };
-          db[table] = [...rows(), stored];
-          return { data: [stored], error: null };
-        }
-
-        case "update": {
-          if (table === "credit_purchases" && failPurchaseUpdate) {
-            return {
-              data: null,
-              error: { code: "40001", message: "could not serialize access" },
-            };
-          }
-          const hits = matched();
-          db[table] = rows().map((row) =>
-            hits.includes(row) ? { ...row, ...values } : row,
-          );
-          return {
-            data: hits.map((row) => ({ ...row, ...values })),
-            error: null,
-          };
-        }
-
-        default:
-          return { data: matched(), error: null };
-      }
-    };
-
-    const settle = async (): Promise<RowsResult> => {
-      await beforeRun(table, operation);
-      return run();
+      ops.push(op);
+      return {
+        data: (db[table] ?? []).filter((row) =>
+          predicates.every((predicate) => predicate(row)),
+        ),
+        error: null,
+      };
     };
 
     const builder = {
@@ -123,50 +69,37 @@ function createFakeClient() {
         predicates.push((row) => String(row[column] ?? "") >= value);
         return builder;
       },
-      // spendableFilter(): every fixture row here has `expires_at: null`, which
-      // that filter's first arm already accepts.
+      // spendableFilter(): every fixture row here has `expires_at: null`.
       or: () => builder,
       order: () => builder,
       limit: () => builder,
-      insert: (payload: Row) => {
-        operation = "insert";
-        values = payload;
+      insert: () => {
+        op.operation = "insert";
         return builder;
       },
-      update: (payload: Row) => {
-        operation = "update";
-        values = payload;
+      update: () => {
+        op.operation = "update";
         return builder;
-      },
-      single: async () => {
-        const { data, error } = await settle();
-        if (error) return { data: null, error };
-        if (!data || data.length !== 1) {
-          return {
-            data: null,
-            error: {
-              code: "PGRST116",
-              message: "JSON object requested, multiple (or no) rows returned",
-            },
-          };
-        }
-        return { data: data[0], error: null };
       },
       maybeSingle: async () => {
-        const { data, error } = await settle();
-        if (error) return { data: null, error };
-        return { data: data?.[0] ?? null, error: null };
+        const { data, error } = run();
+        return { data: data?.[0] ?? null, error };
       },
       then: <T>(
         resolve: (result: RowsResult) => T,
         reject?: (reason: unknown) => T,
-      ) => settle().then(resolve, reject),
+      ) => Promise.resolve(run()).then(resolve, reject),
     };
 
     return builder;
   };
 
-  return { from };
+  const rpc = async (name: string, args: Row) => {
+    rpcCalls.push({ name, args });
+    return rpcAnswer;
+  };
+
+  return { from, rpc };
 }
 
 jest.mock("@/lib/supabase/server", () => ({
@@ -180,60 +113,52 @@ jest.mock("@/lib/supabase/service", () => ({
 // A credit-only holder: purchased credits, no plan, so no included allowance
 // muddies the arithmetic. Not the code under test.
 jest.mock("@/lib/billing/entitlements", () => ({
-  getEffectivePlan: jest.fn(async () => ({ kind: "credits", credits: 10 })),
+  getEffectivePlan: jest.fn(async () => ({
+    kind: "credits",
+    planId: null,
+    plan: null,
+  })),
 }));
 
-import { consumeCredits, refundCredits } from "@/lib/credits/system";
+import { consumeCredits } from "@/lib/credits/system";
 
 const USER_ID = "user-1";
-const STARTING_BALANCE = 10;
 
-/** Releases both callers only once both have reached the same point. */
-function createBarrier(parties: number): () => Promise<void> {
-  let arrived = 0;
-  let release: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  return async () => {
-    arrived += 1;
-    if (arrived >= parties) release();
-    await gate;
+function charged(overrides: Row = {}): RowsResult {
+  return {
+    data: [
+      {
+        outcome: "charged",
+        usage_id: "usage-9",
+        from_allowance: 0,
+        from_purchased: 5,
+        remaining: 5,
+        ...overrides,
+      },
+    ],
+    error: null,
   };
 }
 
-function spendableBalance(): number {
-  return (db.credit_purchases ?? []).reduce(
-    (sum, row) => sum + Number(row.credits_remaining ?? 0),
-    0,
-  );
-}
+describe("A-18: consumeCredits as a contract with spend_credits", () => {
+  let consoleError: jest.SpyInstance;
 
-function recordedUsage(): number {
-  return (db.credit_usage ?? []).reduce(
-    (sum, row) => sum + Number(row.credits_used ?? 0),
-    0,
-  );
-}
-
-describe("A-18: credit deduction under concurrency and failure", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(console, "error").mockImplementation(() => {});
-    beforeRun = async () => undefined;
-    failPurchaseUpdate = false;
+    consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
+    ops = [];
+    rpcCalls = [];
+    rpcAnswer = charged();
     db = {
       billing_subscriptions: [],
+      plan_entitlements: [],
       credit_usage: [],
       credit_purchases: [
         {
           id: "cp_1",
           user_id: USER_ID,
-          credits_purchased: STARTING_BALANCE,
-          credits_remaining: STARTING_BALANCE,
-          price_cents: 1000,
-          stripe_payment_intent_id: "pi_pack_1",
+          credits_purchased: 10,
+          credits_remaining: 10,
           expires_at: null,
           created_at: "2026-08-01T00:00:00.000Z",
         },
@@ -241,125 +166,94 @@ describe("A-18: credit deduction under concurrency and failure", () => {
     };
   });
 
-  /**
-   * Guard for the `test.failing` below. `test.failing` passes on ANY failure,
-   * including a barrier that deadlocks into a timeout or a mock that never
-   * resolves, so each marker needs a sibling proving the machinery works. Here:
-   * the barrier releases, both spends complete, and both usage rows are
-   * written — so the failing case is measuring a lost update, not a hang.
-   */
-  it("guard: the barrier releases and both concurrent spends complete", async () => {
-    const bothReadFirst = createBarrier(2);
-    beforeRun = async (table, operation) => {
-      if (table === "credit_purchases" && operation === "update") {
-        await bothReadFirst();
-      }
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
+
+  it("maps charged to success with the receipt and remaining credits", async () => {
+    const result = await consumeCredits(USER_ID, 5, "translation", {
+      siteId: "site-1",
+    });
+
+    expect(result).toEqual({
+      success: true,
+      remainingCredits: 5,
+      charge: { usageId: "usage-9", userId: USER_ID, credits: 5 },
+    });
+    expect(rpcCalls).toEqual([
+      {
+        name: "spend_credits",
+        args: {
+          p_user_id: USER_ID,
+          p_credits: 5,
+          p_included: 0,
+          p_window_start: expect.any(String),
+          p_operation: "translation",
+          p_metadata: { siteId: "site-1" },
+        },
+      },
+    ]);
+  });
+
+  it("maps insufficient to the existing sentence with the available amount and no receipt", async () => {
+    rpcAnswer = {
+      data: [
+        {
+          outcome: "insufficient",
+          usage_id: null,
+          from_allowance: 0,
+          from_purchased: 0,
+          remaining: 3,
+        },
+      ],
+      error: null,
     };
 
-    const results = await Promise.all([
-      consumeCredits(USER_ID, 5, "ai_translation"),
-      consumeCredits(USER_ID, 5, "ai_translation"),
-    ]);
+    const result = await consumeCredits(USER_ID, 5, "translation");
 
-    expect(results.map((result) => result.success)).toEqual([true, true]);
-    expect(db.credit_usage).toHaveLength(2);
+    // The amount is the function's, read under its lock — not a balance
+    // TypeScript read before the call, which a concurrent charge can make
+    // stale.
+    expect(result).toEqual({
+      success: false,
+      error: "Insufficient credits. You need 5 credits but only have 3.",
+    });
   });
 
-  it("two concurrent 5-credit spends against a 10-credit balance deduct 10", async () => {
-    // Both spends are held at the deduction write until both have taken their
-    // snapshot of `credits_remaining` — the window the read-modify-write
-    // leaves open every time two AI operations overlap.
-    const bothReadFirst = createBarrier(2);
-    beforeRun = async (table, operation) => {
-      if (table === "credit_purchases" && operation === "update") {
-        await bothReadFirst();
-      }
-    };
+  it("an RPC error, no row or an unknown outcome is a failure that charged nothing, logged, never thrown", async () => {
+    const answers: RowsResult[] = [
+      {
+        data: null,
+        error: { message: "function spend_credits does not exist" },
+      },
+      { data: [], error: null },
+      charged({ outcome: "mystery" }),
+    ];
 
-    const [first, second] = await Promise.all([
-      consumeCredits(USER_ID, 5, "ai_translation"),
-      consumeCredits(USER_ID, 5, "ai_translation"),
-    ]);
+    for (const answer of answers) {
+      rpcAnswer = answer;
+      consoleError.mockClear();
 
-    expect(first.success).toBe(true);
-    expect(second.success).toBe(true);
-    expect(recordedUsage()).toBe(10);
-    expect(spendableBalance()).toBe(0);
-    expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
+      const result = await consumeCredits(USER_ID, 5, "translation");
+
+      expect(result).toEqual({
+        success: false,
+        error: "Failed to charge credits",
+      });
+      expect(consoleError).toHaveBeenCalled();
+    }
   });
 
-  it("guard: the injected deduction failure is the one the code reports", async () => {
-    failPurchaseUpdate = true;
+  it("never writes credit_purchases or credit_usage itself", async () => {
+    await consumeCredits(USER_ID, 5, "translation");
 
-    const result = await consumeCredits(USER_ID, 5, "ai_translation");
-
-    // Reached the deduction and failed there — not at the balance check, and
-    // not by throwing out of the fake.
-    expect(result.error).toBe("Failed to deduct purchased credits");
-    expect(spendableBalance()).toBe(STARTING_BALANCE);
-  });
-
-  it("a deduction that fails does not leave the usage on the customer's ledger", async () => {
-    failPurchaseUpdate = true;
-
-    const result = await consumeCredits(USER_ID, 5, "ai_translation");
-
-    expect(result.success).toBe(false);
-    // The wallet still holds 10 and the ledger says 5 were spent. The customer
-    // is billed for an operation that did not happen, and `refundCredits`
-    // cannot compensate it — nothing calls it on this path.
-    expect(spendableBalance() + recordedUsage()).toBe(STARTING_BALANCE);
-  });
-
-  it("guard: a single refund lands, so the collision below is about the key", async () => {
-    jest.spyOn(Date, "now").mockReturnValue(1785484800000);
-
-    const only = await refundCredits(USER_ID, 5, "translation_failed");
-
-    expect(only.success).toBe(true);
-    expect(spendableBalance()).toBe(STARTING_BALANCE + 5);
-    // The key really is time-derived, which is the whole mechanism.
     expect(
-      db.credit_purchases?.some((row) =>
-        String(row.stripe_payment_intent_id).endsWith("1785484800000"),
+      ops.filter(
+        (op) =>
+          (op.table === "credit_purchases" || op.table === "credit_usage") &&
+          op.operation !== "select",
       ),
-    ).toBe(true);
-  });
-
-  it("two refunds for one user in the same millisecond both land", async () => {
-    // `refund_${reason}_${userId}_${Date.now()}` is the whole idempotency key,
-    // so two refunds inside one millisecond are indistinguishable to the
-    // UNIQUE constraint. A pinned clock is the deterministic form of a real
-    // burst; the resolution is milliseconds, not the microseconds a retry
-    // loop or a batch would actually take.
-    jest.spyOn(Date, "now").mockReturnValue(1785484800000);
-
-    const first = await refundCredits(USER_ID, 5, "translation_failed");
-    const second = await refundCredits(USER_ID, 5, "translation_failed");
-
-    expect(first.success).toBe(true);
-    expect(second.success).toBe(true);
-    expect(spendableBalance()).toBe(STARTING_BALANCE + 10);
-  });
-
-  /**
-   * Fix-stable: the sequential path is correct today and must stay correct.
-   */
-  it("deducts correctly when the two spends do not overlap", async () => {
-    await consumeCredits(USER_ID, 5, "ai_translation");
-    const second = await consumeCredits(USER_ID, 5, "ai_translation");
-
-    expect(second.success).toBe(true);
-    expect(spendableBalance()).toBe(0);
-    expect(recordedUsage()).toBe(10);
-  });
-
-  it("refuses a spend larger than the balance without writing a usage row", async () => {
-    const result = await consumeCredits(USER_ID, 25, "bulk_ai_operation");
-
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Insufficient credits/);
-    expect(recordedUsage()).toBe(0);
-    expect(spendableBalance()).toBe(STARTING_BALANCE);
+    ).toEqual([]);
+    expect(rpcCalls.map((call) => call.name)).toEqual(["spend_credits"]);
   });
 });

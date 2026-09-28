@@ -18,12 +18,20 @@ jest.mock("@/lib/api/rate-limit", () => ({
   getClientIp: jest.fn(() => "127.0.0.1"),
 }));
 
+// Without this mock the route's refund ran the real one against a placeholder
+// service client and failed silently, so no test could see a refund (s48).
+jest.mock("@/lib/credits/system", () => ({
+  CREDIT_COSTS: { AI_TRANSLATION: 5 },
+  refundCharge: jest.fn(),
+}));
+
 import { NextRequest, NextResponse } from "next/server";
 import { POST } from "@/app/api/ai/translate/route";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import { refundCharge } from "@/lib/credits/system";
 
 const TEST_USER = { id: "user-123", email: "user@example.com" };
 
@@ -44,6 +52,14 @@ const mockCreateClient = createClient as jest.MockedFunction<
 const mockAiService = aiService as jest.Mocked<typeof aiService>;
 const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
 const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
+const mockRefundCharge = refundCharge as jest.Mock;
+
+/** What the mocked charge returns; every refund must be keyed by exactly this. */
+const RECEIPT = {
+  usageId: "usage-translate-1",
+  userId: TEST_USER.id,
+  credits: 5,
+};
 
 /** sites.id is a UUID column; the route rejects anything that is not one. */
 const VALID_SITE_ID = "7e3b2d6c-1ab1-46f3-92fd-493173fa3e17";
@@ -69,7 +85,11 @@ describe("/api/ai/translate - POST", () => {
       error: null,
     });
     mockEnforceRateLimit.mockResolvedValue(null);
-    mockConsumeFeatureUsage.mockResolvedValue({ success: true });
+    mockConsumeFeatureUsage.mockResolvedValue({
+      success: true,
+      charge: RECEIPT,
+    });
+    mockRefundCharge.mockResolvedValue({ success: true, refunded: 5 });
   });
 
   it("should successfully translate elements", async () => {
@@ -300,6 +320,8 @@ describe("/api/ai/translate - POST", () => {
     expect(response.status).toBe(403);
     expect(data.requiresUpgrade).toBe(true);
     expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+    // A quota refusal charged nothing, so there is nothing to give back.
+    expect(mockRefundCharge).not.toHaveBeenCalled();
   });
 
   it("should short-circuit when the IP rate limiter rejects the request", async () => {
@@ -550,6 +572,158 @@ describe("/api/ai/translate - POST", () => {
     expect(response.status).toBe(500);
     expect(data).toEqual({
       error: "Internal server error",
+    });
+    // s48: the charge had landed, so the catch gives it back.
+    expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+  });
+
+  describe("charges and refunds (s48, defect 1)", () => {
+    const ORIGINAL_OPENAI_KEY = process.env.OPENAI_API_KEY;
+
+    afterEach(() => {
+      if (ORIGINAL_OPENAI_KEY === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = ORIGINAL_OPENAI_KEY;
+      }
+    });
+
+    const elementsOf = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `el-${index}`,
+        text: `Text ${index}`,
+      }));
+
+    const translationsOf = (elements: Array<{ id: string; text: string }>) =>
+      elements.map((element) => ({
+        id: element.id,
+        originalText: element.text,
+        translatedText: `ES ${element.text}`,
+      }));
+
+    const translateRequest = (elements: Array<{ id: string; text: string }>) =>
+      new NextRequest("http://localhost/api/ai/translate", {
+        method: "POST",
+        body: JSON.stringify({
+          siteId: VALID_SITE_ID,
+          fromLanguage: "en",
+          toLanguage: "es",
+          elements,
+        }),
+      });
+
+    it("AI key missing: 503, nothing charged, the model never called", async () => {
+      // jest.setup.js sets a key; this is the deploy that forgot it. The old
+      // route charged 5 credits and answered "Successfully translated 0
+      // elements" (next-dev-refund.log).
+      process.env.OPENAI_API_KEY = "  ";
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+
+      const response = await POST(translateRequest(elementsOf(1)));
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "AI translation is not available right now.",
+      });
+      expect(mockConsumeFeatureUsage).not.toHaveBeenCalled();
+      expect(mockAiService.batchTranslate).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining("OPENAI_API_KEY"),
+      );
+    });
+
+    it.each([
+      [
+        "a failed batch",
+        { success: false, error: "No text could be translated." },
+      ],
+      ["a batch with no rows", { success: true, data: [] }],
+    ])(
+      "nothing translated: failure and the whole charge refunded (%s)",
+      async (_label, batch) => {
+        allowSiteAccess();
+        mockAiService.batchTranslate.mockResolvedValueOnce(batch);
+
+        const response = await POST(translateRequest(elementsOf(2)));
+        const body = JSON.stringify(await response.json());
+
+        expect(response.status).toBe(500);
+        expect(body).not.toContain("Successfully translated");
+        expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+        expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+        expect(RECEIPT.credits).toBe(5);
+      },
+    );
+
+    it.each([
+      // [elements, translated, refunded]
+      [5, 3, 2], // 2 of 5 failed: 5 x 2/5 = 2
+      [3, 2, 2], // 1 of 3 failed: 5 x 1/3 = 1.67, rounded up — floor gives 1
+    ])(
+      "partial batch: the failed share is refunded, rounded up (%i sent, %i translated)",
+      async (sent, translated, refunded) => {
+        allowSiteAccess();
+        const elements = elementsOf(sent);
+        const rows = translationsOf(elements.slice(0, translated));
+        mockAiService.batchTranslate.mockResolvedValueOnce({
+          success: true,
+          data: rows,
+          tokensUsed: 10,
+        });
+        mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+
+        const response = await POST(translateRequest(elements));
+        const data = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(data.translations).toEqual(rows);
+        expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+        expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT, refunded);
+      },
+    );
+
+    it("every element translated: nothing refunded", async () => {
+      allowSiteAccess();
+      const elements = elementsOf(3);
+      mockAiService.batchTranslate.mockResolvedValueOnce({
+        success: true,
+        data: translationsOf(elements),
+        tokensUsed: 10,
+      });
+      mockSupabase.upsert.mockResolvedValueOnce({ error: null });
+
+      const response = await POST(translateRequest(elements));
+
+      expect(response.status).toBe(200);
+      expect(mockRefundCharge).not.toHaveBeenCalled();
+    });
+
+    it("an error after the charge refunds it in the catch", async () => {
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+      mockAiService.batchTranslate.mockRejectedValueOnce(
+        new Error("socket hang up"),
+      );
+
+      const response = await POST(translateRequest(elementsOf(2)));
+
+      expect(response.status).toBe(500);
+      expect(mockRefundCharge).toHaveBeenCalledTimes(1);
+      expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+    });
+
+    it("an error before the charge refunds nothing", async () => {
+      jest.spyOn(console, "error").mockImplementation(() => {});
+      allowSiteAccess();
+      mockConsumeFeatureUsage.mockRejectedValueOnce(
+        new Error("credit_purchases read failed: connection reset"),
+      );
+
+      const response = await POST(translateRequest(elementsOf(2)));
+
+      expect(response.status).toBe(500);
+      expect(mockRefundCharge).not.toHaveBeenCalled();
     });
   });
 });

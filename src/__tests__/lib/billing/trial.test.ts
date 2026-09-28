@@ -109,8 +109,9 @@ describe("grantTrialEntitlement", () => {
   });
 
   it("never synthesises a Stripe payment intent for a free trial", async () => {
-    // `refundCredits` fabricates one for credit_purchases, and copying that here
-    // would put a fake payment id on a row the finance side reads as a purchase.
+    // The old credit refund (removed in s48) fabricated one for
+    // credit_purchases, and copying that here would put a fake payment id on a
+    // row the finance side reads as a purchase.
     // The uniqueness AC 6 needs comes from the partial index on `source`, not
     // from this column.
     await grantTrialEntitlement(USER);

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { findPlanById, findPurchasedPlanById } from "@/lib/stripe/plans";
 import { PAID_PLAN_IDS, type SubscriptionPlan } from "@/lib/stripe/plan-types";
 import {
-  readPurchasedCreditBalance,
+  readPaidCreditBalance,
   spendableFilter,
 } from "@/lib/credits/spendable";
 
@@ -524,7 +524,7 @@ export async function resolveEntitlement(
     }
   }
 
-  const purchasedCredits = await readPurchasedCreditBalance(supabase, userId);
+  const purchasedCredits = await readPaidCreditBalance(supabase, userId);
   if (purchasedCredits > 0) {
     return { kind: "credits", planId: null, plan: null };
   }

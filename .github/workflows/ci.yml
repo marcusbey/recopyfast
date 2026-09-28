@@ -288,6 +288,12 @@ jobs:
           NODE
           npm test -- --runInBand src/__tests__/db/founding-agency-cap.test.ts
 
+      - name: Test AI credit spend and refund against disposable Postgres
+        env:
+          RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+          RCF_REQUIRE_TEST_DB: "1"
+        run: npx jest --runInBand src/__tests__/db/credit-spend.test.ts
+
       - name: Build production app
         run: npm run build
 

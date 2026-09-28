@@ -34,6 +34,22 @@ interface RecordedOp {
 let db: Record<string, Row[]> = {};
 let ops: RecordedOp[] = [];
 
+interface RecordedRpc {
+  name: string;
+  args: Row;
+}
+
+let rpcs: RecordedRpc[] = [];
+
+/** What `spend_credits` answers; the SQL itself is proved in credit-spend.test.ts. */
+const CHARGED: Row = {
+  outcome: "charged",
+  usage_id: "usage-1",
+  from_allowance: 1,
+  from_purchased: 0,
+  remaining: 499,
+};
+
 /**
  * The builder shape of `concurrency.test.ts`, plus the few links the
  * entitlement reads use (`is`, `returns`), and a log of every operation so a
@@ -124,7 +140,12 @@ function createRecordingClient() {
     return builder;
   };
 
-  return { from } as unknown as SupabaseClient;
+  const rpc = async (name: string, args: Row) => {
+    rpcs.push({ name, args });
+    return { data: [CHARGED], error: null };
+  };
+
+  return { from, rpc } as unknown as SupabaseClient;
 }
 
 jest.mock("@/lib/supabase/server", () => ({
@@ -230,6 +251,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
   ops = [];
+  rpcs = [];
   db = {
     billing_subscriptions: [],
     plan_entitlements: [],
@@ -257,6 +279,8 @@ describe("getUserCreditBalance with an explicit client", () => {
       purchased: 5,
       total: 485,
       usedThisMonth: 20,
+      // s48: the window the allowance was summed over, passed to spend_credits.
+      windowStart: "2000-01-01T00:00:00.000Z",
     });
     expect(tablesTouched()).toEqual(
       expect.arrayContaining([
@@ -310,7 +334,7 @@ describe("canUseAIFeatures with an explicit client", () => {
 });
 
 describe("consumeFeatureUsage with an explicit client", () => {
-  it("charges the payer's included credits and records the usage through the client", async () => {
+  it("charges through spend_credits on the payer client with the allowance and window it computed", async () => {
     db.billing_subscriptions = [subscription("pro")];
     const client = createRecordingClient();
 
@@ -321,14 +345,31 @@ describe("consumeFeatureUsage with an explicit client", () => {
       client,
     );
 
-    expect(result).toEqual({ success: true });
-    expect(db.credit_usage).toEqual([
-      expect.objectContaining({
-        user_id: OWNER,
-        credits_used: 1,
-        operation: "ai_suggestion",
-      }),
+    // The whole charge is one database function (s48): the allowance and the
+    // window are the TypeScript half, computed here and passed in, so no plan
+    // or window rule is copied into SQL (ADR 035, ADR 040).
+    expect(rpcs).toEqual([
+      {
+        name: "spend_credits",
+        args: {
+          p_user_id: OWNER,
+          p_credits: 1,
+          p_included: 500,
+          p_window_start: "2000-01-01T00:00:00.000Z",
+          p_operation: "ai_suggestion",
+          p_metadata: { siteId: "site-1" },
+        },
+      },
     ]);
+    // The P4 loss was TypeScript writing the wallet row by row. It writes
+    // neither table any more.
+    expect(
+      ops.filter(
+        (op) =>
+          (op.table === "credit_purchases" || op.table === "credit_usage") &&
+          op.operation !== "select",
+      ),
+    ).toEqual([]);
     expect(db.usage_tracking).toEqual([
       expect.objectContaining({
         user_id: OWNER,
@@ -336,44 +377,57 @@ describe("consumeFeatureUsage with an explicit client", () => {
         metadata: { siteId: "site-1", credits_used: 1 },
       }),
     ]);
-    // Included credits cover it: no purchased pack is touched.
-    expect(
-      ops.filter(
-        (op) => op.table === "credit_purchases" && op.operation === "update",
-      ),
-    ).toHaveLength(0);
     expect(createClient).not.toHaveBeenCalled();
     expect(getEffectivePlan).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      success: true,
+      charge: { usageId: "usage-1", userId: OWNER, credits: 1 },
+    });
   });
 
-  it("decrements purchased credits by compare-and-swap through the client once the allowance is spent", async () => {
-    db.billing_subscriptions = [subscription("pro")];
-    db.credit_usage = [usage(500)];
-    db.credit_purchases = [purchase(5)];
-    const client = createRecordingClient();
+  it("passes a live trial's granted_at, and the calendar month for a credits-only wallet, as the window", async () => {
+    const grantedAt = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    db.plan_entitlements = [
+      {
+        user_id: OWNER,
+        plan_id: "pro",
+        source: "trial",
+        stripe_payment_intent_id: null,
+        granted_at: grantedAt,
+        expires_at: new Date(Date.now() + 12 * 86_400_000).toISOString(),
+        revoked_at: null,
+      },
+    ];
 
-    const result = await consumeFeatureUsage(
+    await consumeFeatureUsage(
       OWNER,
       "ai_suggestion",
       undefined,
-      client,
+      createRecordingClient(),
     );
 
-    expect(result).toEqual({ success: true });
-    const deduction = ops.find(
-      (op) => op.table === "credit_purchases" && op.operation === "update",
+    expect(rpcs[0]?.args).toMatchObject({
+      p_included: 500,
+      p_window_start: grantedAt,
+    });
+
+    rpcs = [];
+    db.plan_entitlements = [];
+    db.credit_purchases = [purchase(5)];
+
+    await consumeFeatureUsage(
+      OWNER,
+      "ai_suggestion",
+      undefined,
+      createRecordingClient(),
     );
-    expect(deduction?.values).toEqual({ credits_remaining: 4 });
-    // The compare half of compare-and-swap: the row is only written if it
-    // still holds the balance that was read.
-    expect(deduction?.filters).toEqual(
-      expect.arrayContaining([
-        ["id", "cp_1"],
-        ["credits_remaining", 5],
-      ]),
-    );
-    expect(db.credit_purchases?.[0]?.credits_remaining).toBe(4);
-    expect(createClient).not.toHaveBeenCalled();
-    expect(getEffectivePlan).not.toHaveBeenCalled();
+
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    expect(rpcs[0]?.args).toMatchObject({
+      p_included: 0,
+      p_window_start: startOfMonth.toISOString(),
+    });
   });
 });

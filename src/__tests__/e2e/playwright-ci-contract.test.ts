@@ -81,4 +81,25 @@ describe("Playwright CI contract", () => {
     expect(coreFlow).toContain('publish: "#rcf-publish-btn"');
     expect(coreFlow).toContain("credentialKind: ShareCredentialKind");
   });
+
+  it("runs the credit spend suite against the disposable database", () => {
+    // s48: the concurrency proof for AI credits lives in a DB suite, and DB
+    // suites only register their real tests when a database answers. CI must
+    // run it by name, with the database required, before the build.
+    const stepStart = workflow.indexOf(
+      "- name: Test AI credit spend and refund against disposable Postgres",
+    );
+    const buildStart = workflow.indexOf("- name: Build production app");
+    expect(stepStart).toBeGreaterThan(-1);
+    expect(buildStart).toBeGreaterThan(stepStart);
+
+    const step = workflow.slice(stepStart, buildStart);
+    expect(step).toContain(
+      'RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"',
+    );
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(step).toContain(
+      "npx jest --runInBand src/__tests__/db/credit-spend.test.ts",
+    );
+  });
 });

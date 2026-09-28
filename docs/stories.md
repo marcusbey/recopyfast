@@ -1731,3 +1731,183 @@ public key was absent from the homepage JS: the browser SDK was never initialise
 
 Research: `docs/research/s46-sentry-wiring.md`. Plan: `docs/plans/s46-sentry-wiring.md`.
 Embed allocation: 0 bytes.
+
+## Story s47a-founding-20-grant — the first 20 people who sign up get Pro free for 3 months
+
+Operator-prevalidated scope, 2026-09-27 (owner approved the launch offer: "First 20 users get
+RecopyFast Pro free for 3 months"). Split from `s47-founding-20-offer` at research (scored 5).
+Complexity: 4. Branch `feature/s47a-founding-20-grant`. Today every new account gets the 14-day
+Pro trial at first sign-in (ADR 014). For the first 20 accounts created after the offer opens,
+that same first sign-in grants Pro for 90 days instead, metered at 100 AI credits a month, no
+card. Account 21 onward gets the 14-day trial exactly as today. When the 90 days end the account
+lands where a lapsed trial lands and chooses a plan.
+
+- [ ] The offer grant IS the account's one trial row (`source = 'trial'`, `plan_id = 'pro'`,
+  expiring 90 days after the claim, server clock) marked as the founding offer — so "one trial
+  per account, ever" still holds and an expired offer account can never receive a second,
+  14-day trial on a later sign-in.
+- [ ] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a 21st;
+  eligibility check, trial row and claim are one transaction. Proved against real Postgres with
+  a concurrency test that CI runs.
+- [ ] Only accounts created after the offer opened, with no plan entitlement, subscription or
+  credit purchase ever, can take a spot; a repeat sign-in never takes one. Any other outcome,
+  including an error in the offer path, falls back to today's 14-day trial and never fails the
+  sign-in.
+- [ ] An offer account resolves to every Pro limit (5 sites, invited editors, All sites, AI)
+  with a monthly AI-credit allowance of 100, in windows anchored on the grant date (a 14-day
+  trial's single window is unchanged). A higher allowance the account holds from any other
+  source is never lowered (ADR 038 floor). Purchased packs stack on top and are spent after the
+  allowance, as today.
+- [ ] Once 20 spots are taken, a new account's first sign-in gets the 14-day trial (500 credits)
+  with no other change.
+- [ ] 90 days after the claim the account resolves to the lapsed state; the billing screen says
+  the founding offer has ended (not "Your 14-day Pro trial has ended") and offers the plans. No
+  charge, no card ever requested by the offer.
+- [ ] The dashboard badge and billing card of an offer account state what it has: "Founding
+  offer — N days left", "N of 100 AI credits used this month"; never "500 trial AI credits" or a
+  14-day countdown.
+- [ ] A public, uncached endpoint returns only the spots-left count (no user data), correct
+  immediately after a claim or release; on any error it returns no number rather than a guess.
+- [ ] The operator can release a spot held by an internal/QA account without a code change
+  (service-role only, runbook in `docs/operations/`). Release sets `revoked_at` only — it must
+  not rewrite `source`, or the account would escape the one-trial index. The count goes back up.
+- [ ] ADR 039 records the representation, the claim lock, the allowance rule, the monthly
+  window (amends ADR 014's single window) and the migration-first order.
+- [ ] Required local gates pass (run in a worktree: the repo-root `.env` breaks tests that read
+  `NEXT_PUBLIC_APP_URL`); one story commit. No push, PR, merge or production action. Operator
+  after merge: apply the migration FIRST (code reading the new column before it exists would
+  fail every gate), then deploy, run the live proof on a QA account, release its spot.
+
+Agentic notes: sign-in path `ensureTrialStarted` → `grantTrialEntitlement`
+(`src/lib/billing/trial.ts`), from `/auth/callback` and `/auth/confirm`. Capacity precedent
+`reserve_founding_agency_spot` (`20260924065000_agency_plan_and_founding_capacity.sql`) — the
+offer takes its own advisory-lock key. Allowance: ADR 038 / s45 cannot express this (the
+catalogue refuses a second product granting `pro`, `src/lib/stripe/plans.ts:416-429`); add a
+held-by-offer-only branch in `src/lib/billing/effective-plan.ts`. Credit window:
+`src/lib/credits/system.ts:192-209`. Revocation trap: `src/lib/billing/entitlements.ts:142`
+rewrites `source`. `/api/pricing` can lag ~15 minutes — the count needs its own route. CI runs DB
+suites by name (`.github/workflows/ci.yml:258-289`): add a step. Local DB lacks the s45 migration
+`20260926120000`. Research: `docs/research/s47a-founding-20-grant.md`. Design:
+`docs/designs/s47-founding-20-offer*` (shared with s47b). Risk (why 4): an authorization and
+capacity boundary on the sign-in path — a bug either gives away unlimited free Pro or breaks
+sign-in. Known interaction: a refunded AI failure currently becomes a permanent purchased
+credit (credit check 2026-09-27), which would keep a lapsed offer account in the dashboard; that
+defect is fixed in its own story, not here. No Stripe product, price or webhook change.
+
+Embed allocation: 0 bytes.
+
+## Story s47b-founding-20-landing — the landing page shows the offer and the spots left
+
+Split from `s47-founding-20-offer` at research. Complexity: 2. Branch
+`feature/s47b-founding-20-landing`. Depends on s47a (count endpoint and the grant it promises).
+
+- [ ] While spots remain, the landing presents "First 20 users get RecopyFast Pro free for 3
+  months" with a live "X of 20 spots left" read from s47a's count endpoint, per
+  `docs/designs/s47-founding-20-offer.md`.
+- [ ] At 0 spots, or when the count is unknown (loading failed), the landing shows the 14-day Pro
+  trial line instead — never a stale or guessed number, and no trial→offer flash that shows the
+  wrong promise.
+- [ ] Every "14-day free trial" claim the offer replaces is updated consistently (Hero, Pricing
+  trust point, FinalCTA as designed); the copy tests (`trial-claims`) and the Playwright landing
+  check (`e2e/landing.spec.ts:196`) assert both states.
+- [ ] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+  production action.
+
+Agentic notes: landing sections under `src/components/sections/` (Hero, Pricing, FinalCTA);
+Founding Agency "N of 50 founding spots left" block is the visual precedent
+(`docs/designs/s33-agency-plan.md`). Research: `docs/research/s47a-founding-20-grant.md`.
+
+Embed allocation: 0 bytes.
+
+## Story s48-credit-integrity — AI credits are charged once, and refunded when the AI fails
+
+Operator-prevalidated scope, 2026-09-28, from the credit purchase verification
+(`.omx/qa-20260927/REPORT.md`, defects 1–3; owner: fix all three before launch). Complexity: 4.
+Branch `feature/s48-credit-integrity`. Buying credits works; spending them does not always keep
+its promise ("Unused credits are refunded if a feature fails", `PurchaseCreditsDialog.tsx:108`).
+
+- [x] A translation request in which no text is translated (AI key missing, every provider call
+  failing) charges nothing net: it reports failure, not "Successfully translated 0 elements", and
+  any credits taken are returned. A partial batch returns the failed share. An error after the
+  charge returns the charge. The AI key is checked before charging, as `/api/ai/suggest` does.
+- [x] A refund returns credits to where they came from: an allowance-funded charge goes back to
+  the monthly or trial allowance, and only a purchased-credit charge goes back to purchased
+  credits. A refund never creates a new never-expiring purchased-credit row, so a trial account
+  that never paid resolves to `none` after its trial whether or not it had a refunded failure.
+- [x] Concurrent AI requests never lose credits: N simultaneous charges against a balance debit
+  exactly the sum of the successful charges, and no request is refused while the balance covers
+  it. The deduction is one database function (AGENTS.md: multi-step writes are one transaction),
+  proved against real Postgres with a concurrency test CI runs (12 at once, repeated).
+- [x] "Total purchased" counts only paid credits (refund credits are no longer written as
+  purchases, see above).
+- [x] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+  production action. Operator after merge: apply the migration first, then deploy.
+
+Agentic notes: evidence and reproduction scripts in `.omx/qa-20260927/` (`credits-probes.ts`,
+`translate-refund-route.mjs`, race results; all refuse non-local targets). Code:
+`src/lib/credits/system.ts` (spend `:371-409`, refund `:558-586`, totals `:740-741`),
+`src/lib/ai/openai-service.ts:98-104,172-201`, `src/app/api/ai/translate/route.ts:190-270`,
+`src/app/api/ai/suggest/route.ts:253-260`, entitlement from balance
+`src/lib/billing/effective-plan.ts:527-529`. Risk (why 4): money path shared by every AI feature
+and by the entitlement gate. Out of scope: per-text pricing for translation (defect 8) and the
+credit-card display fixes (defects 5, 7 display half). Should ship before s47a goes live: a
+lapsed offer account with a refunded failure would otherwise keep dashboard access.
+
+Embed allocation: 0 bytes.
+
+## Story s49-buy-credits-anywhere — anyone can buy an AI credit pack from the billing page
+
+Operator decision, 2026-09-28: anyone may buy credits (the API already allows it; the screens
+did not). Complexity: 2. Branch `feature/s49-buy-credits-anywhere`. Supersedes the s01 design
+rule "trial ended offers only Upgrade to Pro" (`docs/designs/s01-trial-signup.md:53-55`) for the
+credits action only.
+
+- [ ] The lapsed "trial ended" screen and the no-plan screen offer "Buy AI credits ($19 for
+  1,000)" beside the plan options; it opens the existing purchase dialog and checkout.
+- [ ] The "You're on credits" screen offers a top-up with the same dialog.
+- [ ] Copy on those screens states what credits unlock and what still needs a plan (sites,
+  collaborators, A/B testing), matching `resolveEntitlement` `credits` behaviour.
+- [ ] Tests updated: `BillingDashboard.trial.test.tsx:116` and the credits-screen tests assert
+  the new action. Required local gates pass; one story commit. No push, PR, merge or production.
+
+Agentic notes: `src/components/billing/BillingDashboard.tsx:159-179,279`,
+`src/components/billing/CreditBalanceCard.tsx:71-73`, checkout route
+`src/app/api/billing/checkout/route.ts:102-116` (unchanged). Report defect 4.
+
+Embed allocation: 0 bytes.
+
+## Story s50-homepage-truth — every claim on the homepage is true
+
+Operator decision, 2026-09-28, from the launch-kit fact check (PR #47). Complexity: 3 (was 2;
+research found 23 false claims of 68, and the owner added the plans copy). Branch
+`feature/s50-homepage-truth`. The homepage promises things the product or terms don't back.
+Research: `docs/research/s50-homepage-truth.md` (claim-by-claim inventory with verdicts).
+
+- [ ] The "30-day money-back guarantee" is removed wherever it appears (owner decision: remove,
+  refunds stay case by case).
+- [ ] Features the PRD froze without a customer-facing surface (audit log, role-based
+  permissions, and any other graveyard item, `docs/prd.md` § graveyard) are not advertised.
+- [ ] Every claim the research marks FALSE or UNVERIFIABLE is reworded or removed as it
+  recommends, including the unshipped Translate and A/B cards (replaced by Invite and AI Rewrite),
+  "works everywhere", "full version history", the image-generation button, the /docs link, the
+  hardcoded status and version, and the page metadata/OG text; the result is recorded in the
+  story's review with the evidence per claim.
+- [ ] Support promises say "Email support" on every plan: no "Priority support" and no
+  "onboarding call" anywhere (owner decision, 2026-09-28).
+- [ ] Lifetime Pro no longer promises "all future Pro features" (owner decision, 2026-09-28).
+- [ ] Every contact address on the site, /terms and /privacy is on `recopyfa.st`:
+  `support@recopyfa.st` for customers, `privacy@recopyfa.st` on the legal pages; no address on the
+  nonexistent `recopyfast.com` remains. Operator before ship: both mailboxes receive mail.
+- [ ] The plans catalogue copy (feature rows and descriptions in `plans`) matches: one idempotent
+  forward migration, no applied migration edited, no price or limit change. Operator after merge:
+  migration, deploy, then `sync:stripe:live` for the product descriptions.
+- [ ] Copy tests and the Playwright landing check pass with the new copy. Required local gates
+  pass; one story commit. No push, PR, merge or production action.
+
+Agentic notes: launch-kit PR #47 (`docs/gtm/`) lists the unverifiable claims and wording used
+instead ("no account" rather than "no login"; "one script tag on the site you already built"
+rather than "works on any site", because a strict CSP blocks the script). Landing sections under
+`src/components/sections/`. Coordinate with s47b, which edits the same Hero/Pricing copy: ship
+s50 first or rebase s47b on it.
+
+Embed allocation: 0 bytes.
