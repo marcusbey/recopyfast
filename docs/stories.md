@@ -1731,3 +1731,49 @@ public key was absent from the homepage JS: the browser SDK was never initialise
 
 Research: `docs/research/s46-sentry-wiring.md`. Plan: `docs/plans/s46-sentry-wiring.md`.
 Embed allocation: 0 bytes.
+
+## Story s47-founding-20-offer — the first 20 people who sign up get Pro free for 3 months
+
+Operator-prevalidated scope, 2026-09-27 (owner approved the launch offer: "First 20 users get
+RecopyFast Pro free for 3 months"). Complexity: 4. Branch `feature/s47-founding-20-offer`.
+Today every new account gets the 14-day Pro trial at first sign-in (ADR 014). For the first 20
+new accounts after the offer opens, that same first sign-in grants Pro for 90 days instead,
+with 100 AI credits a month, and no card. Account 21 onward gets the 14-day trial exactly as
+today. When the 90 days end the account lands where a lapsed trial lands: it chooses a plan.
+
+- [ ] A brand-new account's first sign-in, while spots remain, yields entitlement `plan` /
+  `pro` expiring 90 days after that sign-in (server clock), with every Pro limit (5 sites,
+  invited editors, All sites, AI) except the monthly AI-credit allowance, which is 100.
+  Purchased credit packs stack on top and are spent after the allowance, as today.
+- [ ] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a
+  21st, and claiming a spot and writing the account's one grant succeed or fail together.
+  An account that already had a trial, a plan, a lifetime grant or credits never takes a
+  spot; neither does a repeat sign-in. Sign-in never fails because the offer errors — it
+  falls back to the 14-day trial.
+- [ ] Once 20 spots are taken, a new account's first sign-in gets the 14-day Pro trial
+  (500 trial credits) with no other change; "one trial per account, ever" still holds.
+- [ ] 90 days after the grant the account resolves to the lapsed state and sees the existing
+  "choose a plan" billing screen; no charge, no card ever requested by the offer.
+- [ ] The landing page shows the offer with a live "X of 20 spots left" read from a public
+  endpoint that returns only the count (no user data). At 0 it stops presenting the offer and
+  shows the 14-day trial line. The count is correct after a claim without a redeploy.
+- [ ] The dashboard trial badge and billing card state what the account actually has:
+  "Founding offer — N days left", "100 AI credits a month"; never "500 trial AI credits" or a
+  14-day countdown for an offer account.
+- [ ] The operator can release a spot held by an internal/QA account without a code change
+  (service-role only, documented in the runbook), so the production live proof does not
+  permanently consume a public spot. The release reverts that account to "no plan".
+- [ ] Required local gates pass; one story commit. No push, PR, merge or production action.
+  Operator after merge: deploy, apply the migration, run the live proof, release its spot.
+
+Agentic notes: grant path is `ensureTrialStarted` → `grantTrialEntitlement`
+(`src/lib/billing/trial.ts`), called from `/auth/callback` and `/auth/confirm` on every
+sign-in. Race-safe capacity precedent: `reserve_founding_agency_spot` (advisory lock,
+`20260924065000_agency_plan_and_founding_capacity.sql`). Per-grant allowance precedent:
+ADR 038 / s45 (`src/lib/billing/effective-plan.ts`). Public count precedent: Founding Agency
+"N of 50 founding spots left" (`src/lib/billing/founding-agency.ts`, `/api/pricing`). Risk
+(why 4): an authorization and capacity boundary written on the sign-in path; a bug either
+gives away unlimited free Pro or breaks sign-in. If the plan exceeds ten tasks, split the
+landing surface into its own story. No Stripe product, price or webhook change.
+
+Embed allocation: 0 bytes.
