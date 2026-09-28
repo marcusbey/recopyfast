@@ -2000,3 +2000,27 @@ Product owner decision, 2026-09-28, from the s50 review (minor 4). Complexity: 2
   pass; one story commit. Legal wording is conservative: remove over invent.
 
 Embed allocation: 0 bytes.
+
+## Story s55-no-visitor-cookie-by-default — the embed sets no cookie unless an A/B test is running
+
+Product owner decision, 2026-09-28, from the s54 research. Complexity: 2. Branch
+`feature/s55-no-visitor-cookie-by-default`. Launch-relevant: the embed sets a one-year first-party
+`rcf_vid` cookie on every visitor of every customer site on every non-staging page load
+(`public/embed/recopyfast.src.js` `initVisitorId`, called before `fetchActiveTests`), for the
+parked A/B feature no customer can use. Undisclosed and without consent, it exposes customers to
+cookie-law risk just for installing the script.
+
+- [ ] On a page load where the site has no active A/B test, the embed reads no cookie, writes no
+  cookie and generates no visitor id; published copy still applies exactly as before.
+- [ ] Only when `fetchActiveTests` returns at least one active test does the embed create or read
+  `rcf_vid`, and the A/B pipeline then behaves as today.
+- [ ] The artifact is rebuilt from the source (`recopyfast.js` is never hand-edited) and the byte
+  gate passes; the embed does not grow.
+- [ ] Tests cover both paths (no tests → `document.cookie` untouched; active test → cookie set).
+  Required local gates pass; one story commit.
+
+Agentic notes: `public/embed/recopyfast.src.js:955-962` (A/B pipeline start), `:3218-3238`
+(`initVisitorId`), the embed build and byte gate (`scripts/build-embed.mjs`, docs/stories.md §
+Byte budget). No server change.
+
+Embed allocation: must be ≤ 0 bytes (net shrink or equal).
