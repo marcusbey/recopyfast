@@ -1963,3 +1963,40 @@ Agentic notes: `src/lib/stripe/checkout.ts` (subscription_data), ADR 014 trial r
 row. Not launch-blocking.
 
 Embed allocation: 0 bytes.
+
+## Story s53-credit-and-offer-hardening — the accepted review findings are bounded and pinned
+
+Product owner decision, 2026-09-28, collecting the findings accepted at the s48, s47a and s50
+reviews. Complexity: 3. Branch `feature/s53-credit-and-offer-hardening`. Not launch-blocking.
+
+- [ ] Overlapping-refund bound (s48 review major): ADR 040's "Watch" list states that a refund
+  overlapping a later charge at the allowance boundary can leave the customer up to the failed
+  call's allowance share short (≤5 translate, ≤1 suggest), and a DB test pins that bound.
+- [ ] A refund that fails (RPC error) is reported to Sentry with the usage id, not only logged.
+- [ ] `claim_founding_offer_spot` sets a short `lock_timeout`, so a stuck lock holder makes a
+  sign-in fall back to the 14-day trial instead of waiting (s47a review m2); tested.
+- [ ] The claim-vs-fallback race test is deterministic (s47a review m3): the targeted mutation is
+  caught on every run.
+- [ ] The catalogue guard covers every retired phrase, not only the five owner phrases, and the
+  static price guard includes `additional_site_price` (s50 review minors 5–6).
+- [ ] Optional hardening considered and recorded in ADR 040: binding refunds to rows created by
+  `spend_credits` (Devin PR #48 finding 4, not exploitable today).
+- [ ] Required local gates pass; one story commit.
+
+Embed allocation: 0 bytes.
+
+## Story s54-legal-pages-truth — /privacy and /terms describe the product that exists
+
+Product owner decision, 2026-09-28, from the s50 review (minor 4). Complexity: 2. Branch
+`feature/s54-legal-pages-truth`. Launch-relevant: done before the public launch posts.
+
+- [ ] /privacy and /terms make no claim about features the product does not have: audit logs,
+  role-based access control, SIEM integration, or any other PRD-graveyard item.
+- [ ] The "EU Representative" and any other named role or entity that does not exist is removed or
+  replaced by what is true; every contact line uses `privacy@recopyfa.st` or `support@recopyfa.st`.
+- [ ] The processing and security sections describe the actual stack (Supabase, Stripe, Vercel,
+  Fly, OpenAI) without overstating certifications or controls.
+- [ ] A guard test fails if a graveyard feature name reappears on either page. Required local gates
+  pass; one story commit. Legal wording is conservative: remove over invent.
+
+Embed allocation: 0 bytes.
