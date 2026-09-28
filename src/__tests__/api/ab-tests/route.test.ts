@@ -1,8 +1,19 @@
 import { GET, POST, PUT } from "@/app/api/ab-tests/route";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 jest.mock("@supabase/ssr");
+// Since s56 (ADR 042) the A/B writes go through the service role, behind the
+// owner-plan gate. The gate itself is proved in owner-plan-gate.test.ts; here
+// the owner holds a plan.
+jest.mock("@/lib/supabase/service");
+jest.mock("@/lib/api/rate-limit", () => ({ enforceRateLimit: jest.fn() }));
+jest.mock("@/lib/billing/owner-can-edit", () => ({
+  ...jest.requireActual("@/lib/billing/owner-can-edit"),
+  checkOwnerCanEdit: () => Promise.resolve({ ok: true, ownerId: "owner-1" }),
+}));
 
 type QueryResult = { data?: unknown; error?: unknown };
 
@@ -15,12 +26,27 @@ type QueryResult = { data?: unknown; error?: unknown };
  * across every query in the route, so a `mockResolvedValueOnce` on `.single()`
  * broke the chain for the next call and the handler fell into its catch block.
  */
-let queryQueue: QueryResult[] = [];
-const fromCalls: string[] = [];
-const insertCalls: unknown[] = [];
-const updateCalls: unknown[] = [];
+interface ClientLog {
+  queue: QueryResult[];
+  from: string[];
+  insert: unknown[];
+  update: unknown[];
+  eq: Array<[string, unknown]>;
+}
+const newLog = (): ClientLog => ({
+  queue: [],
+  from: [],
+  insert: [],
+  update: [],
+  eq: [],
+});
 
-const makeBuilder = (result: QueryResult) => {
+/** The caller's cookie (RLS) client: reads only, since s56. */
+let rls = newLog();
+/** The service client: every A/B write, since s56 (ADR 042). */
+let service = newLog();
+
+const makeBuilder = (result: QueryResult, log: ClientLog) => {
   const settled = { data: null, error: null, ...result };
   const builder: Record<string, unknown> = {
     then: (
@@ -29,33 +55,47 @@ const makeBuilder = (result: QueryResult) => {
     ) => Promise.resolve(settled).then(resolve, reject),
     single: jest.fn(() => Promise.resolve(settled)),
     insert: jest.fn((payload: unknown) => {
-      insertCalls.push(payload);
+      log.insert.push(payload);
       return builder;
     }),
     update: jest.fn((payload: unknown) => {
-      updateCalls.push(payload);
+      log.update.push(payload);
+      return builder;
+    }),
+    eq: jest.fn((column: string, value: unknown) => {
+      log.eq.push([column, value]);
       return builder;
     }),
   };
-  for (const method of ["select", "eq", "order", "delete"]) {
+  for (const method of ["select", "order", "delete"]) {
     builder[method] = jest.fn(() => builder);
   }
   return builder;
 };
 
-const mockSupabase = {
+const clientFor = (log: () => ClientLog) => ({
   auth: { getUser: jest.fn() },
   from: jest.fn((table: string) => {
-    fromCalls.push(table);
-    return makeBuilder(queryQueue.shift() ?? { data: null, error: null });
+    log().from.push(table);
+    return makeBuilder(
+      log().queue.shift() ?? { data: null, error: null },
+      log(),
+    );
   }),
-};
+});
+
+const mockSupabase = clientFor(() => rls);
+const mockService = clientFor(() => service);
 
 (createServerClient as jest.Mock).mockReturnValue(mockSupabase);
 
-/** Queue one result per `.from()` call, in the order the route issues them. */
+/** Queue one result per cookie-client `.from()` call, in route order. */
 const queue = (...results: QueryResult[]) => {
-  queryQueue = [...results];
+  rls.queue = [...results];
+};
+/** Queue one result per service-client `.from()` call, in route order. */
+const queueService = (...results: QueryResult[]) => {
+  service.queue = [...results];
 };
 
 const USER = { id: "user-123" };
@@ -92,11 +132,11 @@ const validTestBody = {
 describe("/api/ab-tests", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    queryQueue = [];
-    fromCalls.length = 0;
-    insertCalls.length = 0;
-    updateCalls.length = 0;
+    rls = newLog();
+    service = newLog();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: USER } });
+    (createServiceRoleClient as jest.Mock).mockReturnValue(mockService);
+    (enforceRateLimit as jest.Mock).mockResolvedValue(null);
   });
 
   describe("GET", () => {
@@ -118,7 +158,7 @@ describe("/api/ab-tests", () => {
 
       expect(response.status).toBe(200);
       expect(result).toEqual(mockTests);
-      expect(fromCalls).toEqual(["site_permissions", "ab_tests"]);
+      expect(rls.from).toEqual(["site_permissions", "ab_tests"]);
     });
 
     it("should return 400 when siteId is missing", async () => {
@@ -157,25 +197,30 @@ describe("/api/ab-tests", () => {
   describe("POST", () => {
     it("should create a new A/B test and its variants", async () => {
       const mockTest = { id: "test-1", name: "Homepage Test", status: "draft" };
-      queue(EDIT_PERMISSION, { data: mockTest }, { error: null });
+      queue(EDIT_PERMISSION);
+      queueService({ data: mockTest }, { error: null });
 
       const response = await POST(jsonRequest("POST", validTestBody));
       const result = await response.json();
 
       expect(response.status).toBe(200);
       expect(result).toEqual(mockTest);
-      expect(fromCalls).toEqual([
-        "site_permissions",
-        "ab_tests",
-        "ab_test_variants",
-      ]);
-      expect(insertCalls[0]).toMatchObject({
+      // s56: the permission read stays on the cookie client; both inserts go
+      // through the service client, and the variants hang off the test just
+      // inserted.
+      expect(rls.from).toEqual(["site_permissions"]);
+      expect(rls.insert).toEqual([]);
+      expect(service.from).toEqual(["ab_tests", "ab_test_variants"]);
+      expect(service.insert[0]).toMatchObject({
         site_id: "site-123",
         name: "Homepage Test",
         created_by: USER.id,
         status: "draft",
       });
-      expect(insertCalls[1]).toHaveLength(2);
+      expect(service.insert[1]).toEqual([
+        expect.objectContaining({ test_id: "test-1" }),
+        expect.objectContaining({ test_id: "test-1" }),
+      ]);
     });
 
     it("should return 400 when required fields are missing", async () => {
@@ -233,8 +278,8 @@ describe("/api/ab-tests", () => {
     });
 
     it("should roll back the test when variant creation fails", async () => {
-      queue(
-        EDIT_PERMISSION,
+      queue(EDIT_PERMISSION);
+      queueService(
         { data: { id: "test-1" } },
         { error: { message: "variant insert failed" } },
       );
@@ -245,12 +290,27 @@ describe("/api/ab-tests", () => {
       expect(response.status).toBe(500);
       expect(result.error).toBe("Failed to create A/B test");
       // The orphaned test row is deleted before the error is returned.
-      expect(fromCalls).toEqual([
-        "site_permissions",
+      expect(service.from).toEqual([
         "ab_tests",
         "ab_test_variants",
         "ab_tests",
       ]);
+    });
+
+    it("answers 429 before reading the session when the limiter refuses", async () => {
+      (enforceRateLimit as jest.Mock).mockResolvedValue(
+        NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 }),
+      );
+
+      const response = await POST(jsonRequest("POST", validTestBody));
+
+      expect(response.status).toBe(429);
+      expect(mockSupabase.auth.getUser).not.toHaveBeenCalled();
+      expect(service.from).toEqual([]);
+      expect(enforceRateLimit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ onStoreFailure: "deny" }),
+      );
     });
   });
 
@@ -262,15 +322,83 @@ describe("/api/ab-tests", () => {
       queue(
         { data: { site_id: "site-123", created_by: USER.id } },
         EDIT_PERMISSION,
-        { data: mockUpdatedTest },
       );
+      queueService({ data: mockUpdatedTest });
 
       const response = await PUT(jsonRequest("PUT", updateBody));
       const result = await response.json();
 
       expect(response.status).toBe(200);
       expect(result).toEqual(mockUpdatedTest);
-      expect(updateCalls[0]).toMatchObject({ status: "running" });
+      // s56: the update goes through the service client, scoped to the test
+      // AND the site read back through the caller's own client.
+      expect(rls.update).toEqual([]);
+      expect(service.update[0]).toMatchObject({ status: "running" });
+      expect(service.eq).toEqual(
+        expect.arrayContaining([
+          ["id", "test-1"],
+          ["site_id", "site-123"],
+        ]),
+      );
+    });
+
+    /**
+     * s56. The update used to spread the request body into the row
+     * (`...updates`), and RLS `WITH CHECK` was the only thing stopping a caller
+     * moving a test to another site or rewriting its author. The service role
+     * that writes it now checks nothing, so the route writes an allowlist.
+     */
+    it("writes only allowlisted fields: never site_id, created_by, id or created_at", async () => {
+      queue(
+        { data: { site_id: "site-123", created_by: USER.id } },
+        EDIT_PERMISSION,
+      );
+      queueService({ data: { id: "test-1", status: "active" } });
+
+      const response = await PUT(
+        jsonRequest("PUT", {
+          test_id: "test-1",
+          status: "active",
+          site_id: "another-tenants-site",
+          created_by: "someone-else",
+          id: "another-test",
+          created_at: "2020-01-01T00:00:00Z",
+          // What the parked A/B UI sends (useABTests, useABTestCreation).
+          auto_complete: false,
+          min_sample_size: 250,
+          confidence_threshold: 0.99,
+          name: "Renamed",
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const written = service.update[0] as Record<string, unknown>;
+      for (const forbidden of ["site_id", "created_by", "id", "created_at"]) {
+        expect(written).not.toHaveProperty(forbidden);
+      }
+      expect(written).toMatchObject({
+        status: "active",
+        auto_complete: false,
+        min_sample_size: 250,
+        confidence_threshold: 0.99,
+        name: "Renamed",
+      });
+    });
+
+    it("answers 429 before reading the session when the limiter refuses", async () => {
+      (enforceRateLimit as jest.Mock).mockResolvedValue(
+        NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 }),
+      );
+
+      const response = await PUT(jsonRequest("PUT", updateBody));
+
+      expect(response.status).toBe(429);
+      expect(mockSupabase.auth.getUser).not.toHaveBeenCalled();
+      expect(service.from).toEqual([]);
+      expect(enforceRateLimit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ onStoreFailure: "deny" }),
+      );
     });
 
     it("should return 400 when test_id is missing", async () => {

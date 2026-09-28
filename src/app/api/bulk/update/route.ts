@@ -7,9 +7,27 @@ import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
 } from "@/lib/billing/owner-can-edit";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate limit before authorization, per AGENTS.md: the permission check
+    // below costs a `site_permissions` lookup, so a limiter placed behind it
+    // never sees the flood it exists to stop. Above the body read as well: a
+    // refusal should not pay for parsing an operations array.
+    //
+    // `deny` on store failure: since s56 (ADR 042) this route rewrites
+    // `published_content` through the SERVICE role, in a loop, and a
+    // service-role write path is fail-closed or it does not exist (AGENTS.md).
+    // Until s56 it had no limiter at all (ADR 041 "Watch").
+    const limited = await enforceRateLimit(req, {
+      limit: "API_UPLOAD",
+      endpoint: "bulk/update",
+      onStoreFailure: "deny",
+    });
+    if (limited) return limited;
+
     const body: BulkUpdatePayload = await req.json();
     const { site_id, operations } = body;
 
@@ -63,6 +81,15 @@ export async function POST(req: NextRequest) {
       return ownerCanEditRefusal(ownerCanEdit);
     }
 
+    // The content write goes through the service role (s56, ADR 042). No web
+    // principal holds DML on `content_elements` any more: a member's direct
+    // PostgREST PATCH used to bypass the owner-plan gate above (s51 review,
+    // finding 1). Created only now — after `getUser()`, the `edit`/`admin`
+    // read and the gate — and scoped by the `site_id` that read established,
+    // because RLS no longer re-checks the row (ADR 037 step 5). The lookups
+    // and the `bulk_operations` rows stay on the caller's own client.
+    const writer = createServiceRoleClient();
+
     // Create bulk operation record
     const operationId = uuidv4();
     const { error: operationError } = await supabase
@@ -89,6 +116,7 @@ export async function POST(req: NextRequest) {
         site_id,
         user.id,
         supabase,
+        writer,
       );
 
       // Update operation status
@@ -195,6 +223,7 @@ async function processBulkUpdates(
   siteId: string,
   userId: string,
   supabase: ReturnType<typeof import("@supabase/ssr").createServerClient>,
+  writer: ReturnType<typeof createServiceRoleClient>,
 ): Promise<{
   successful: number;
   failed: number;
@@ -317,16 +346,20 @@ async function processBulkUpdates(
       // Sanitize computed content before writing to DB (XSS prevention)
       const sanitizedNewContent = sanitizeHTML(newContent, "RICH_TEXT");
 
-      // Update content element if changed
+      // Update content element if changed. `element.id` was read back through
+      // the caller's RLS client, filtered by this site; the `site_id` filter
+      // repeats that scope on the service-role write, which RLS no longer
+      // checks (s56).
       if (sanitizedNewContent !== element.current_content) {
-        const { error: updateError } = await supabase
+        const { error: updateError } = await writer
           .from("content_elements")
           .update({
             published_content: sanitizedNewContent,
             current_content: sanitizedNewContent,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", element.id);
+          .eq("id", element.id)
+          .eq("site_id", siteId);
 
         if (updateError) {
           errors.push(`Failed to update ${element_id}: ${updateError.message}`);

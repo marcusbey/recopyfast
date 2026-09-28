@@ -352,6 +352,12 @@ noise; a comment that says *what broke last time* is the asset.
 - Multi-step writes go through a Postgres function, not two round trips (see
   `20260617000000_publish_staging_transaction.sql`, `20260803020000_restore_atomic_publish.sql`).
   `SECURITY DEFINER` functions are locked down explicitly — two migrations do only that.
+- **No web principal holds DML on a content table.** `anon`, `authenticated` and PUBLIC have no
+  write grant and no write policy on `content_elements`, `content_versions`, `content_history`,
+  `staging_history` or the five A/B tables. A member's direct PostgREST PATCH once bypassed the
+  owner-plan gate (s51 review, finding 1). Every content write is a route using the service
+  client after authorization and `checkOwnerCanEdit`; `src/__tests__/db/content-write-privileges.test.ts`
+  holds the line list-wide ([ADR 042](./decisions/042-content-writes-are-service-role-only.md)).
 
 ---
 
@@ -360,7 +366,7 @@ noise; a comment that says *what broke last time* is the asset.
 | Concern | Where | Notes |
 |---|---|---|
 | **Account auth** | Supabase Auth, cookie session, refreshed in `middleware.ts` | Protected: `/dashboard`, `/settings`. `/dashboard/billing` is deliberately never gated — it is Stripe's return URL on both success and cancel |
-| **Entitlement gate** | `middleware.ts` → `billing/effective-plan.ts` (pages); `billing/owner-can-edit.ts` (writes) | Pages: routing only, fails **open** — a Supabase blip must not lock a paying customer out. Writes: every content write, AI spend and credential issuance (bar handoff redemption) calls `checkOwnerCanEdit`, which requires the **site owner's** entitlement to be `plan` and fails **closed** (402 `plan_ended`, 503 on a read error), after the route has authorised its caller. Public reads never read a plan ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)) |
+| **Entitlement gate** | `middleware.ts` → `billing/effective-plan.ts` (pages); `billing/owner-can-edit.ts` (writes) | Pages: routing only, fails **open** — a Supabase blip must not lock a paying customer out. Writes: every content write, AI spend and credential issuance (bar handoff redemption) calls `checkOwnerCanEdit`, which requires the **site owner's** entitlement to be `plan` and fails **closed** (402 `plan_ended`, 503 on a read error), after the route has authorised its caller. Public reads never read a plan ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). The database holds the same line: no web principal can write a content table, so the Data API has no way around the gate ([ADR 042](./decisions/042-content-writes-are-service-role-only.md)) |
 | **Non-account editing** | `src/lib/auth/editor-*.ts`, `/api/editor/*`, `/api/edit-sessions/*` | Scoped, expiring grants. The highest-consequence surface in the product: a leaked grant is a defacement of a customer's live site |
 | **Payments** | `src/lib/stripe/*`, `/api/billing/*`, `/api/webhooks/stripe` | Checkout is serialized (`checkout-reservation.ts` + `user-lock.ts`); credits are spent and refunded by database functions under a per-user lock ([ADR 040](./decisions/040-credits-spent-and-refunded-in-the-database.md)). Webhook replay must not double-grant — `billing_events` is the idempotency ledger |
 | **AI** | `src/lib/ai/`, `/api/ai/suggest`, `/api/ai/translate` | OpenAI, credit-metered. Credits cover **AI only**, and only once the site owner holds a plan — a wallet balance is never a quota, and credits are sold to plan holders only ([ADR 041](./decisions/041-editing-needs-the-site-owners-plan.md)). `/api/ai/suggest` is the widget's: authorised by editor credentials (`validateEditorTokenFromRequest`, graded `edit`), never the site token, and charged to the site owner through the service role ([ADR 035](./decisions/035-widget-ai-charged-to-site-owner.md)). `/api/ai/translate` has no widget caller |

@@ -1,6 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { ABTest, ABTestVariant } from "@/types";
+import { createServiceRoleClient } from "@/lib/supabase/service";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  checkOwnerCanEdit,
+  ownerCanEditRefusal,
+} from "@/lib/billing/owner-can-edit";
+
+/**
+ * The only `ab_tests` columns a PUT may write (s56, ADR 042).
+ *
+ * The update used to spread the request body into the row (`...updates`).
+ * RLS `WITH CHECK` on `site_id` was the only thing stopping a caller moving a
+ * test onto another tenant's site, or rewriting `created_by`/`id`. The write
+ * now runs as the service role, which checks nothing, so anything not listed
+ * here is ignored. These are the fields the A/B screens send
+ * (`useABTests`, `useABTestCreation`) plus the test's own settings.
+ */
+const UPDATABLE_TEST_FIELDS = [
+  "name",
+  "description",
+  "status",
+  "traffic_split",
+  "success_metric",
+  "start_date",
+  "end_date",
+  "target_element_id",
+  "auto_complete",
+  "min_sample_size",
+  "confidence_threshold",
+] as const;
+
+function pickUpdatableFields(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    UPDATABLE_TEST_FIELDS.filter((field) =>
+      Object.prototype.hasOwnProperty.call(body, field),
+    ).map((field) => [field, body[field]]),
+  );
+}
+
+/**
+ * Rate limit before authorization, per AGENTS.md: `getUser()` and the
+ * permission read cost round trips a flood would otherwise buy for free.
+ * `deny` on store failure: since s56 these writes run as the service role, and
+ * a service-role write path is fail-closed or it does not exist.
+ */
+function limitWrites(req: NextRequest, endpoint: string) {
+  return enforceRateLimit(req, {
+    limit: "API_UPLOAD",
+    endpoint,
+    onStoreFailure: "deny",
+  });
+}
 
 interface ABTestVariantInput {
   content_element_id: string;
@@ -83,6 +137,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const limited = await limitWrites(req, "ab-tests:create");
+    if (limited) return limited;
+
     const body = await req.json();
     const {
       site_id,
@@ -145,6 +202,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // A test serves its variants' copy to visitors, so creating one is a
+    // content write and needs the SITE OWNER's plan (s56 closes ADR 041's
+    // "Watch": `ab-tests/*` was in neither list). After the permission read so
+    // it is no oracle, before any write.
+    const ownerCanEdit = await checkOwnerCanEdit(site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
+    }
+
     // Validate traffic percentages
     const totalTraffic = variants.reduce(
       (sum: number, v: ABTestVariantInput) => sum + (v.traffic_percentage || 0),
@@ -157,8 +223,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The writes go through the service role (s56, ADR 042): no web principal
+    // holds DML on the A/B tables any more, because a member's direct
+    // PostgREST write bypassed the owner-plan gate. Created only after
+    // `getUser()`, the `edit`/`admin` read and the gate; the test's `site_id`
+    // is the one that read checked, and the variants hang off the test just
+    // inserted — RLS no longer re-checks either (ADR 037 step 5).
+    const service = createServiceRoleClient();
+
     // Create A/B test
-    const { data: test, error: testError } = await supabase
+    const { data: test, error: testError } = await service
       .from("ab_tests")
       .insert({
         site_id,
@@ -187,13 +261,13 @@ export async function POST(req: NextRequest) {
       traffic_percentage: variant.traffic_percentage,
     }));
 
-    const { error: variantsError } = await supabase
+    const { error: variantsError } = await service
       .from("ab_test_variants")
       .insert(variantInserts);
 
     if (variantsError) {
       // Cleanup test if variants failed
-      await supabase.from("ab_tests").delete().eq("id", test.id);
+      await service.from("ab_tests").delete().eq("id", test.id);
       throw variantsError;
     }
 
@@ -209,8 +283,12 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const limited = await limitWrites(req, "ab-tests:update");
+    if (limited) return limited;
+
     const body = await req.json();
-    const { test_id, status, ...updates } = body;
+    const { test_id } = body;
+    const updates = pickUpdatableFields(body);
 
     if (!test_id) {
       return NextResponse.json({ error: "Missing test_id" }, { status: 400 });
@@ -261,17 +339,27 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Update test
-    const { data: updatedTest, error: updateError } = await supabase
-      .from("ab_tests")
-      .update({
-        ...updates,
-        status,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", test_id)
-      .select()
-      .single();
+    // Starting, pausing or reconfiguring a served test needs the SITE OWNER's
+    // plan (s56, ADR 041 "Watch"), keyed by the test's own site as read above
+    // through the caller's client — never a site named in the body.
+    const ownerCanEdit = await checkOwnerCanEdit(test.site_id);
+    if (!ownerCanEdit.ok) {
+      return ownerCanEditRefusal(ownerCanEdit);
+    }
+
+    // Update test, through the service role (s56, ADR 042), writing only the
+    // allowlist and scoped to this test on the site the checks established.
+    const { data: updatedTest, error: updateError } =
+      await createServiceRoleClient()
+        .from("ab_tests")
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", test_id)
+        .eq("site_id", test.site_id)
+        .select()
+        .single();
 
     if (updateError) {
       throw updateError;

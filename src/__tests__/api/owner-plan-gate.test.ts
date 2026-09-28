@@ -31,6 +31,7 @@ const SITE = "11111111-1111-4111-8111-111111111111";
 const OWNER = "22222222-2222-4222-8222-222222222222";
 const VERSION = "33333333-3333-4333-8333-333333333333";
 const STYLE = "44444444-4444-4444-8444-444444444444";
+const AB_TEST = "66666666-6666-4666-8666-666666666666";
 const SITE_API_KEY = "site-api-key-secret";
 const SITE_DOMAIN = "customer.example";
 const ORIGIN = `https://${SITE_DOMAIN}`;
@@ -193,6 +194,8 @@ import * as v1Content from "@/app/api/v1/content/route";
 import * as aiTranslate from "@/app/api/ai/translate/route";
 import * as aiSuggest from "@/app/api/ai/suggest/route";
 import * as publicContent from "@/app/api/content/[siteId]/route";
+import * as abTests from "@/app/api/ab-tests/route";
+import * as abTestsGenerate from "@/app/api/ab-tests/generate/route";
 
 const mockResolveEntitlement = resolveEntitlement as jest.MockedFunction<
   typeof resolveEntitlement
@@ -297,8 +300,15 @@ const apiKeyHeader = { "X-API-Key": "rcf_live_key" };
 /**
  * Every handler that writes content (or spends AI on it), with the caller the
  * handler actually authenticates. `ok` is the status a paying owner gets.
+ * `serviceOnly` marks a route whose every write must go through the service
+ * client: since s56 (ADR 042) no web principal holds DML on the A/B tables.
  */
-const WRITE_ROUTES: Array<{ name: string; ok: number; call: Call }> = [
+const WRITE_ROUTES: Array<{
+  name: string;
+  ok: number;
+  call: Call;
+  serviceOnly?: boolean;
+}> = [
   {
     name: "staging PUT",
     ok: 200,
@@ -418,6 +428,55 @@ const WRITE_ROUTES: Array<{ name: string; ok: number; call: Call }> = [
         }),
       ),
   },
+  {
+    name: "ab-tests POST",
+    ok: 200,
+    serviceOnly: true,
+    call: () =>
+      abTests.POST(
+        json("POST", "/api/ab-tests", {
+          site_id: SITE,
+          name: "Hero test",
+          success_metric: "conversion_rate",
+          variants: [
+            {
+              content_element_id: "ce-1",
+              variant_name: "control",
+              content: "Hello",
+              traffic_percentage: 50,
+            },
+            {
+              content_element_id: "ce-1",
+              variant_name: "bolder",
+              content: "Hello!",
+              traffic_percentage: 50,
+            },
+          ],
+        }),
+      ),
+  },
+  {
+    name: "ab-tests PUT",
+    ok: 200,
+    serviceOnly: true,
+    call: () =>
+      abTests.PUT(
+        json("PUT", "/api/ab-tests", { test_id: AB_TEST, status: "active" }),
+      ),
+  },
+  {
+    name: "ab-tests/generate POST",
+    ok: 200,
+    serviceOnly: true,
+    call: () =>
+      abTestsGenerate.POST(
+        json("POST", "/api/ab-tests/generate", {
+          site_id: SITE,
+          element_id: "hero",
+          original_text: "Hello",
+        }),
+      ),
+  },
 ];
 
 /** Public delivery and every read the editor makes. None may read a plan. */
@@ -504,6 +563,8 @@ function seedDatabase() {
       user_id: OWNER,
     },
     content_versions: { id: VERSION, site_id: SITE, version_number: 1 },
+    // The A/B test PUT reads back its own site before the gate (s56).
+    ab_tests: { id: AB_TEST, site_id: SITE },
     copy_styles: { id: STYLE, name: "Bold", prompt: "Make it bold" },
     billing_subscriptions: null,
   };
@@ -576,6 +637,7 @@ function refuseEveryCredential() {
 
 let suggestSpy: jest.SpyInstance;
 let translateSpy: jest.SpyInstance;
+let generateSpy: jest.SpyInstance;
 let consoleError: jest.SpyInstance;
 let consoleWarn: jest.SpyInstance;
 
@@ -597,21 +659,34 @@ beforeEach(() => {
     data: [{ id: "hero", originalText: "Hello", translatedText: "Bonjour" }],
     tokensUsed: 3,
   } as unknown as Awaited<ReturnType<typeof aiService.batchTranslate>>);
+  generateSpy = jest.spyOn(aiService, "generateABVariants").mockResolvedValue({
+    success: true,
+    data: [{ name: "Bolder", content: "Hello!", rationale: "Emphasis" }],
+    tokensUsed: 3,
+  } as unknown as Awaited<ReturnType<typeof aiService.generateABVariants>>);
   consoleError = jest.spyOn(console, "error").mockImplementation(() => {});
   consoleWarn = jest.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   // Spies only: the module factories above must keep their implementations.
-  for (const spy of [suggestSpy, translateSpy, consoleError, consoleWarn]) {
+  for (const spy of [
+    suggestSpy,
+    translateSpy,
+    generateSpy,
+    consoleError,
+    consoleWarn,
+  ]) {
     spy.mockRestore();
   }
 });
 
 const aiSpend = () =>
-  suggestSpy.mock.calls.length + translateSpy.mock.calls.length;
+  suggestSpy.mock.calls.length +
+  translateSpy.mock.calls.length +
+  generateSpy.mock.calls.length;
 
-describe.each(WRITE_ROUTES)("$name", ({ name, ok, call }) => {
+describe.each(WRITE_ROUTES)("$name", ({ name, ok, call, serviceOnly }) => {
   it(`refuses ${name} for a lapsed owner with 402 plan_ended and writes nothing`, async () => {
     mockResolveEntitlement.mockResolvedValue(LAPSED);
 
@@ -650,6 +725,11 @@ describe.each(WRITE_ROUTES)("$name", ({ name, ok, call }) => {
 
     expect(response.status).toBe(ok);
     expect(mockDb.mutations.length).toBeGreaterThan(0);
+    if (serviceOnly) {
+      expect(
+        mockDb.mutations.filter((mutation) => mutation.client !== "service"),
+      ).toEqual([]);
+    }
   });
 
   it(`answers an uncredentialed caller of ${name} with its own refusal, never plan_ended`, async () => {
