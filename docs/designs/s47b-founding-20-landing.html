@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Design reference — s47b-founding-20-landing</title>
+<style>
+  /* ==========================================================================
+     REFERENCE MOCKUP — s47b-founding-20-landing
+     Marketing surface: legacy sky/slate palette, light only, no app tokens.
+     Values below are the ones already in use on the landing:
+       - sky-50..500, slate-600/700/900: declared in src/app/globals.css
+       - sky-600/700, teal-50..800, slate-400/500/800: Tailwind v4 defaults
+         already used by Hero.tsx / Pricing.tsx / FinalCTA.tsx
+         (unrecorded in docs/design-system.md, see gap 1)
+       - .glass: copied from globals.css
+     The WebGL sky is drawn as a FLAT sky stand-in (no gradients allowed in
+     this mockup). NOT production code: Execute edits Hero.tsx, Pricing.tsx
+     and FinalCTA.tsx with their existing patterns.
+     ========================================================================= */
+
+  :root {
+    color-scheme: only light;
+
+    /* globals.css legacy marketing palette */
+    --sky-50: hsl(204 100% 97%);
+    --sky-100: hsl(204 94% 94%);
+    --sky-200: hsl(201 94% 86%);
+    --sky-500: hsl(199 89% 48%);
+    --slate-600: hsl(215 19% 35%);
+    --slate-700: hsl(215 25% 27%);
+    --slate-900: hsl(222 47% 11%);
+
+    /* Tailwind v4 defaults already used on the landing */
+    --sky-600: oklch(58.8% 0.158 241.966);
+    --teal-50: oklch(98.4% 0.014 180.72);
+    --teal-500: oklch(70.4% 0.14 182.503);
+    --teal-600: oklch(60% 0.118 184.704);
+    --teal-700: oklch(51.1% 0.096 186.391);
+    --teal-800: oklch(43.7% 0.078 188.216);
+    --slate-400: oklch(70.4% 0.04 256.788);
+    --slate-500: oklch(55.4% 0.046 257.417);
+    --slate-800: oklch(27.9% 0.041 260.031);
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--slate-900); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; padding: 32px 16px 96px; }
+  .wrap { max-width: 1280px; margin: 0 auto; }
+  p { margin: 0; }
+
+  /* ---- document chrome (not part of the design) --------------------------- */
+  .ref-note { background: var(--sky-50); border: 1px solid var(--sky-200); color: var(--slate-700); border-radius: 12px; padding: 12px 16px; font-size: 13px; margin-bottom: 40px; }
+  .screen-label { font-size: 11px; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--slate-500); margin-bottom: 4px; }
+  .screen-title { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  .screen-desc { font-size: 13px; color: var(--slate-600); margin-bottom: 24px; max-width: 76ch; }
+  .group-label { font-size: 13px; font-weight: 600; margin: 40px 0 12px; }
+  .scroll-x { overflow-x: auto; padding-bottom: 8px; }
+  .boards { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .board { border: 1px dashed var(--slate-400); border-radius: 12px; overflow: hidden; background: #fff; }
+  .board-tag { padding: 8px 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--slate-600); border-bottom: 1px dashed var(--slate-400); background: #fff; }
+  .board-tag span { font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .board--desktop { width: 1240px; }
+  .board--mobile { width: 390px; }
+  .band-label { font-size: 10px; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--slate-500); margin-bottom: 16px; text-align: left; }
+  .ctx { border: 1px dashed var(--slate-400); border-radius: 24px; color: var(--slate-500); font-size: 12px; padding: 16px; text-align: center; }
+
+  table.states { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.states th, table.states td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--sky-100); }
+  table.states th { font-size: 11px; font-weight: 600; letter-spacing: 0.075em; text-transform: uppercase; color: var(--slate-500); }
+
+  /* ---- bands: flat stand-ins for the WebGL sky ---------------------------- */
+  .band { padding: 48px 44px; text-align: center; }
+  .band--hero { background: var(--sky-200); }
+  .band--pricing { background: var(--sky-50); }
+  .band--final { background: var(--sky-100); border-top: 1px solid color-mix(in oklab, white 30%, transparent); }
+  .board--mobile .band { padding: 40px 24px; }
+  .container { max-width: 1152px; margin: 0 auto; }
+
+  /* ---- .glass (globals.css) ---------------------------------------------- */
+  .glass {
+    background: color-mix(in oklab, white 14%, transparent);
+    border: 1px solid color-mix(in oklab, white 30%, transparent);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 60%, transparent),
+      inset 0 -1px 0 color-mix(in oklab, white 12%, transparent),
+      0 2px 40px -12px hsl(200 40% 30% / 0.18);
+    backdrop-filter: blur(32px) saturate(180%);
+  }
+
+  /* ---- hero pill: rounded-full px-4 py-2, text-sm slate-800, mb-6 --------- */
+  .pill-slot { height: 38px; margin-bottom: 24px; display: flex; justify-content: center; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 16px; font-size: 14px; line-height: 20px; color: var(--slate-800); white-space: nowrap; text-decoration: none; }
+  .pill svg { width: 16px; height: 16px; color: var(--teal-700); flex-shrink: 0; }
+  .pill .count { font-weight: 600; color: var(--teal-800); font-variant-numeric: tabular-nums; }
+  .pill--loading { width: 22rem; height: 38px; }
+  .board--mobile .pill--loading { width: 17rem; }
+  /* Tailwind animate-pulse (2s cycle; see gap 3) */
+  .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+  /* hero context (unchanged) */
+  .h1 { font-weight: 800; letter-spacing: -0.035em; line-height: 0.94; color: var(--slate-900); font-size: 3.4rem; margin: 0 0 24px; }
+  .h1 .field { display: inline-block; background: rgb(255 255 255 / 0.7); box-shadow: 0 0 0 2px color-mix(in oklab, var(--sky-500) 70%, transparent); border-radius: 12px; padding: 0 16px; color: var(--sky-600); }
+  .h1 .dim { color: color-mix(in oklab, var(--slate-900) 45%, transparent); }
+  .board--mobile .h1 { font-size: 2.05rem; }
+  .sub { max-width: 36rem; margin: 0 auto 32px; color: var(--slate-800); font-size: 1rem; }
+  .hero-ctas { display: flex; gap: 16px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  .btn-hero { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; background: var(--sky-600); color: #fff; font-weight: 600; padding: 12px 24px; }
+  .link-demo { color: var(--slate-700); font-weight: 500; padding: 12px 24px; }
+  .under-line { margin-top: 16px; font-size: 14px; color: var(--slate-600); }
+
+  /* ---- pricing header (context) ------------------------------------------ */
+  .eyebrow { display: inline-block; margin-bottom: 24px; font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.075em; color: var(--sky-600); }
+  .h2 { font-weight: 700; letter-spacing: -0.025em; font-size: 2.6rem; line-height: 1.1; margin: 0 0 24px; }
+  .h2 .soft { color: var(--slate-400); }
+  .board--mobile .h2 { font-size: 2.1rem; }
+  .lede { color: var(--slate-600); font-size: 1.125rem; max-width: 42rem; margin: 0 auto 32px; }
+  .toggle { display: inline-flex; gap: 16px; align-items: center; padding: 4px; background: #fff; border: 1px solid var(--sky-200); border-radius: 999px; }
+  .toggle span { padding: 8px 24px; border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--slate-600); }
+  .toggle .on { background: var(--sky-500); color: #fff; }
+
+  /* ---- the offer card ------------------------------------------------------ */
+  .offer { text-align: left; background: #fff; border: 2px solid var(--teal-500); border-radius: 24px; padding: 32px; margin-bottom: 32px; }
+  .offer-grid { display: grid; align-items: center; gap: 32px; grid-template-columns: 1fr auto; }
+  .board--mobile .offer-grid { grid-template-columns: 1fr; }
+  .tile48 { width: 48px; height: 48px; border-radius: 16px; background: var(--teal-50); display: flex; align-items: center; justify-content: center; margin-bottom: 16px; }
+  .tile48 svg { width: 24px; height: 24px; color: var(--teal-700); }
+  .tag { display: inline-block; border-radius: 999px; background: var(--teal-700); color: #fff; font-size: 14px; font-weight: 600; padding: 6px 16px; margin-bottom: 12px; }
+  .offer h3 { font-size: 1.5rem; font-weight: 600; line-height: 1.3; color: var(--slate-900); margin: 0 0 8px; }
+  .offer .desc { font-size: 14px; color: var(--slate-600); }
+  .benefits { list-style: none; margin: 24px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  .board--mobile .benefits { grid-template-columns: 1fr; }
+  .benefits li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; color: var(--slate-700); }
+  .benefits svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; color: var(--teal-700); }
+  .price-col { min-width: 14rem; text-align: right; }
+  .board--mobile .price-col { text-align: center; }
+  .price { display: flex; align-items: baseline; gap: 4px; justify-content: flex-end; }
+  .board--mobile .price { justify-content: center; }
+  .price .amount { font-size: 3rem; font-weight: 700; line-height: 1; color: var(--slate-900); }
+  .price .per { color: var(--slate-600); }
+  .spot-count { margin-top: 4px; font-size: 14px; font-weight: 500; color: var(--teal-800); font-variant-numeric: tabular-nums; }
+  .cta { display: block; text-decoration: none; margin-top: 20px; border-radius: 12px; background: var(--teal-700); color: #fff; font-weight: 600; padding: 12px 24px; text-align: center; }
+  .fine { margin-top: 32px; border-top: 1px solid var(--sky-100); padding-top: 24px; font-size: 14px; color: var(--slate-600); }
+  .fine p + p { margin-top: 8px; }
+
+  /* ---- trust rows ---------------------------------------------------------- */
+  .trust { margin-top: 64px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 24px; font-size: 14px; color: var(--slate-500); }
+  .trust span { display: inline-flex; align-items: center; gap: 8px; }
+  .trust svg { width: 16px; height: 16px; color: var(--teal-600); }
+  .trust--final { color: var(--slate-800); }
+  .dot { width: 6px; height: 6px; border-radius: 999px; background: var(--teal-600); }
+  .varies { outline: 1px dashed var(--teal-600); outline-offset: 4px; border-radius: 4px; }
+
+  /* final CTA context (unchanged) */
+  .final-pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 16px; font-size: 14px; color: var(--slate-800); margin-bottom: 32px; }
+  .final-pill i { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--slate-500); display: inline-block; }
+  .final-h2 { font-weight: 700; font-size: 2.4rem; line-height: 1.1; letter-spacing: -0.025em; margin: 0 0 24px; }
+  .board--mobile .final-h2 { font-size: 2rem; }
+  .final-ctas { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+  .btn-dark { border-radius: 999px; background: var(--slate-900); color: #fff; font-weight: 600; padding: 16px 32px; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-rocket" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <p class="ref-note">
+    <strong>Reference mockup, not production code.</strong> Low-fidelity static HTML for
+    docs/designs/s47b-founding-20-landing.md. Marketing surface, light only. Drawn as the page
+    will be <em>after s50</em>: no money-back guarantee, FinalCTA pill "Set up in minutes". The sky
+    is a flat stand-in. Dashed teal outlines mark the only text that varies by state. "20" is
+    the count route's <code>limit</code>, never a literal.
+  </p>
+
+  <p class="screen-label">Screen — / (landing)</p>
+  <h2 class="screen-title">The founding offer and its live spot count</h2>
+  <p class="screen-desc">
+    One count, one request (<code>GET /api/offers/founding</code>). Hero pill, pricing offer card
+    and both trust rows read it together. Failed renders exactly like Sold out.
+  </p>
+
+  <table class="states">
+    <thead><tr><th>State</th><th>Hero pill (md+ / below md)</th><th>Under hero buttons</th><th>Pricing offer card</th><th>Trust rows, first item</th></tr></thead>
+    <tbody>
+      <tr><td>Loading</td><td>Empty glass pill, pulse, same height, not a link</td><td>No credit card required.</td><td>Not rendered</td><td>Free trial</td></tr>
+      <tr><td>Spots left (17)</td><td>First 20 users get ReCopyFast Pro free for 3 months · 17 of 20 spots left / Pro free for 3 months · 17 of 20 left</td><td>No credit card required.</td><td>"17 of 20 spots left"</td><td>3 months free for the first 20</td></tr>
+      <tr><td>Last spot (1)</td><td>… · Last spot left / Pro free for 3 months · Last spot left</td><td>No credit card required.</td><td>"Last spot left — 1 of 20"</td><td>3 months free for the first 20</td></tr>
+      <tr><td>Sold out (0) = Failed</td><td>Every new account gets 14 days of Pro, free / 14 days of Pro, free</td><td>No credit card required.</td><td>Not rendered</td><td>14-day free trial</td></tr>
+    </tbody>
+  </table>
+
+  <!-- =====================================================================
+       1440 (max-w-6xl container)
+       ===================================================================== -->
+  <p class="group-label">1440 — one artboard per state</p>
+  <div class="scroll-x"><div class="boards">
+
+    <!-- ---------------- 1440 · Loading ---------------- -->
+    <div class="board board--desktop">
+      <div class="board-tag">Loading <span>no number, no promise; the pill slot holds its height; the offer card is not rendered</span></div>
+      <div class="band band--hero"><div class="container">
+        <p class="band-label">Hero</p>
+        <div class="pill-slot"><div class="glass pill pill--loading pulse" aria-hidden="true"></div></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <p class="sub">Stop waiting days for simple text updates. Add one line of code and give your team direct control over the words on your website.</p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span><span class="link-demo">Watch it work</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div></div>
+      <div class="band band--pricing"><div class="container">
+        <p class="band-label">Pricing</p>
+        <span class="eyebrow">Pricing</span>
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="ctx" style="margin-top:64px">Plan cards (Starter · Pro · Agency), Lifetime Pro, Founding Agency — unchanged (own skeleton while /api/pricing loads)</div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>Free trial</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div></div>
+      <div class="band band--final"><div class="container">
+        <p class="band-label">Final CTA</p>
+        <span class="glass final-pill"><i></i>Set up in minutes</span>
+        <p class="final-h2">Ready to take control<br />of your content?</p>
+        <div class="final-ctas"><span class="btn-dark">Get started →</span><span class="link-demo">See it in action →</span></div>
+        <div class="trust trust--final"><span class="varies"><i class="dot"></i>Free trial</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div></div>
+    </div>
+
+    <!-- ---------------- 1440 · Spots left ---------------- -->
+    <div class="board board--desktop">
+      <div class="board-tag">Spots left — 17 of 20 <span>full hook in the pill; offer card between subtitle and toggle</span></div>
+      <div class="band band--hero"><div class="container">
+        <p class="band-label">Hero</p>
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>First 20 users get ReCopyFast Pro free for 3 months · <span class="count">17 of 20 spots left</span></a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <p class="sub">Stop waiting days for simple text updates. Add one line of code and give your team direct control over the words on your website.</p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span><span class="link-demo">Watch it work</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div></div>
+      <div class="band band--pricing" id="pricing"><div class="container">
+        <p class="band-label">Pricing</p>
+        <span class="eyebrow">Pricing</span>
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="offer varies">
+          <div class="offer-grid">
+            <div>
+              <div class="tile48"><svg><use href="#i-rocket"/></svg></div>
+              <span class="tag">Founding offer</span>
+              <h3>First 20 users get ReCopyFast Pro free for 3 months</h3>
+              <p class="desc">Every Pro feature for 90 days, with 100 AI credits a month. No credit card, and nothing is charged when it ends.</p>
+              <ul class="benefits">
+                <li><svg><use href="#i-check"/></svg>5 websites</li>
+                <li><svg><use href="#i-check"/></svg>Invited editors</li>
+                <li><svg><use href="#i-check"/></svg>All sites view</li>
+                <li><svg><use href="#i-check"/></svg>AI suggestions</li>
+                <li><svg><use href="#i-check"/></svg>100 AI credits a month</li>
+                <li><svg><use href="#i-check"/></svg>No credit card required</li>
+              </ul>
+            </div>
+            <div class="price-col">
+              <div class="price"><span class="amount">$0</span><span class="per">for 3 months</span></div>
+              <p class="spot-count">17 of 20 spots left</p>
+              <a class="cta" href="/signup">Claim your spot</a>
+            </div>
+          </div>
+          <div class="fine">
+            <p>After 90 days, choose a plan to keep editing. Your site keeps serving its content either way. Need more AI before then? 1,000 credits for $19.</p>
+            <p>Spots go in sign-up order. If all 20 are taken when you sign up, you get the 14-day Pro trial instead.</p>
+          </div>
+        </div>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="ctx" style="margin-top:64px">Plan cards (Starter · Pro · Agency), Lifetime Pro, Founding Agency — unchanged</div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>3 months free for the first 20</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div></div>
+      <div class="band band--final"><div class="container">
+        <p class="band-label">Final CTA</p>
+        <span class="glass final-pill"><i></i>Set up in minutes</span>
+        <p class="final-h2">Ready to take control<br />of your content?</p>
+        <div class="final-ctas"><span class="btn-dark">Get started →</span><span class="link-demo">See it in action →</span></div>
+        <div class="trust trust--final"><span class="varies"><i class="dot"></i>3 months free for the first 20</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div></div>
+    </div>
+
+    <!-- ---------------- 1440 · Last spot ---------------- -->
+    <div class="board board--desktop">
+      <div class="board-tag">Last spot — 1 of 20 <span>only the count text changes: no red, no timer, no animation</span></div>
+      <div class="band band--hero"><div class="container">
+        <p class="band-label">Hero</p>
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>First 20 users get ReCopyFast Pro free for 3 months · <span class="count">Last spot left</span></a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <p class="sub">Stop waiting days for simple text updates. Add one line of code and give your team direct control over the words on your website.</p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span><span class="link-demo">Watch it work</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div></div>
+      <div class="band band--pricing"><div class="container">
+        <p class="band-label">Pricing</p>
+        <span class="eyebrow">Pricing</span>
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="offer">
+          <div class="offer-grid">
+            <div>
+              <div class="tile48"><svg><use href="#i-rocket"/></svg></div>
+              <span class="tag">Founding offer</span>
+              <h3>First 20 users get ReCopyFast Pro free for 3 months</h3>
+              <p class="desc">Every Pro feature for 90 days, with 100 AI credits a month. No credit card, and nothing is charged when it ends.</p>
+              <ul class="benefits">
+                <li><svg><use href="#i-check"/></svg>5 websites</li>
+                <li><svg><use href="#i-check"/></svg>Invited editors</li>
+                <li><svg><use href="#i-check"/></svg>All sites view</li>
+                <li><svg><use href="#i-check"/></svg>AI suggestions</li>
+                <li><svg><use href="#i-check"/></svg>100 AI credits a month</li>
+                <li><svg><use href="#i-check"/></svg>No credit card required</li>
+              </ul>
+            </div>
+            <div class="price-col">
+              <div class="price"><span class="amount">$0</span><span class="per">for 3 months</span></div>
+              <p class="spot-count varies">Last spot left — 1 of 20</p>
+              <a class="cta" href="/signup">Claim your spot</a>
+            </div>
+          </div>
+          <div class="fine">
+            <p>After 90 days, choose a plan to keep editing. Your site keeps serving its content either way. Need more AI before then? 1,000 credits for $19.</p>
+            <p>Spots go in sign-up order. If all 20 are taken when you sign up, you get the 14-day Pro trial instead.</p>
+          </div>
+        </div>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="ctx" style="margin-top:64px">Plan cards, Lifetime Pro, Founding Agency — unchanged</div>
+        <div class="trust"><span><svg><use href="#i-check"/></svg>3 months free for the first 20</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div></div>
+      <div class="band band--final"><div class="container">
+        <p class="band-label">Final CTA</p>
+        <span class="glass final-pill"><i></i>Set up in minutes</span>
+        <p class="final-h2">Ready to take control<br />of your content?</p>
+        <div class="final-ctas"><span class="btn-dark">Get started →</span><span class="link-demo">See it in action →</span></div>
+        <div class="trust trust--final"><span><i class="dot"></i>3 months free for the first 20</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div></div>
+    </div>
+
+    <!-- ---------------- 1440 · Sold out / Failed ---------------- -->
+    <div class="board board--desktop">
+      <div class="board-tag">Sold out = Failed <span>the 14-day trial line; no offer card, no "unavailable" message, no number</span></div>
+      <div class="band band--hero"><div class="container">
+        <p class="band-label">Hero</p>
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>Every new account gets 14 days of Pro, free</a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <p class="sub">Stop waiting days for simple text updates. Add one line of code and give your team direct control over the words on your website.</p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span><span class="link-demo">Watch it work</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div></div>
+      <div class="band band--pricing"><div class="container">
+        <p class="band-label">Pricing</p>
+        <span class="eyebrow">Pricing</span>
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="ctx" style="margin-top:64px">Plan cards, Lifetime Pro, Founding Agency — unchanged</div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>14-day free trial</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div></div>
+      <div class="band band--final"><div class="container">
+        <p class="band-label">Final CTA</p>
+        <span class="glass final-pill"><i></i>Set up in minutes</span>
+        <p class="final-h2">Ready to take control<br />of your content?</p>
+        <div class="final-ctas"><span class="btn-dark">Get started →</span><span class="link-demo">See it in action →</span></div>
+        <div class="trust trust--final"><span class="varies"><i class="dot"></i>14-day free trial</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div></div>
+    </div>
+
+  </div></div>
+
+  <!-- =====================================================================
+       390
+       ===================================================================== -->
+  <p class="group-label">390 — one artboard per state (short pill form below md; card stacks; price column centred)</p>
+  <div class="boards">
+
+    <!-- ---------------- 390 · Loading ---------------- -->
+    <div class="board board--mobile">
+      <div class="board-tag">Loading</div>
+      <div class="band band--hero">
+        <div class="pill-slot"><div class="glass pill pill--loading pulse" aria-hidden="true"></div></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div>
+      <div class="band band--pricing">
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>Free trial</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div>
+      <div class="band band--final">
+        <div class="trust trust--final" style="margin-top:0"><span class="varies"><i class="dot"></i>Free trial</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div>
+    </div>
+
+    <!-- ---------------- 390 · Spots left ---------------- -->
+    <div class="board board--mobile">
+      <div class="board-tag">Spots left — 17 of 20</div>
+      <div class="band band--hero">
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>Pro free for 3 months · <span class="count">17 of 20 left</span></a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div>
+      <div class="band band--pricing">
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="offer varies">
+          <div class="offer-grid">
+            <div>
+              <div class="tile48"><svg><use href="#i-rocket"/></svg></div>
+              <span class="tag">Founding offer</span>
+              <h3>First 20 users get ReCopyFast Pro free for 3 months</h3>
+              <p class="desc">Every Pro feature for 90 days, with 100 AI credits a month. No credit card, and nothing is charged when it ends.</p>
+              <ul class="benefits">
+                <li><svg><use href="#i-check"/></svg>5 websites</li>
+                <li><svg><use href="#i-check"/></svg>Invited editors</li>
+                <li><svg><use href="#i-check"/></svg>All sites view</li>
+                <li><svg><use href="#i-check"/></svg>AI suggestions</li>
+                <li><svg><use href="#i-check"/></svg>100 AI credits a month</li>
+                <li><svg><use href="#i-check"/></svg>No credit card required</li>
+              </ul>
+            </div>
+            <div class="price-col">
+              <div class="price"><span class="amount">$0</span><span class="per">for 3 months</span></div>
+              <p class="spot-count">17 of 20 spots left</p>
+              <a class="cta" href="/signup">Claim your spot</a>
+            </div>
+          </div>
+          <div class="fine">
+            <p>After 90 days, choose a plan to keep editing. Your site keeps serving its content either way. Need more AI before then? 1,000 credits for $19.</p>
+            <p>Spots go in sign-up order. If all 20 are taken when you sign up, you get the 14-day Pro trial instead.</p>
+          </div>
+        </div>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>3 months free for the first 20</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div>
+      <div class="band band--final">
+        <div class="trust trust--final" style="margin-top:0"><span class="varies"><i class="dot"></i>3 months free for the first 20</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div>
+    </div>
+
+    <!-- ---------------- 390 · Last spot ---------------- -->
+    <div class="board board--mobile">
+      <div class="board-tag">Last spot — 1 of 20</div>
+      <div class="band band--hero">
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>Pro free for 3 months · <span class="count">Last spot left</span></a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div>
+      <div class="band band--pricing">
+        <div class="offer">
+          <div class="offer-grid">
+            <div>
+              <div class="tile48"><svg><use href="#i-rocket"/></svg></div>
+              <span class="tag">Founding offer</span>
+              <h3>First 20 users get ReCopyFast Pro free for 3 months</h3>
+              <p class="desc">Every Pro feature for 90 days, with 100 AI credits a month. No credit card, and nothing is charged when it ends.</p>
+              <ul class="benefits">
+                <li><svg><use href="#i-check"/></svg>5 websites</li>
+                <li><svg><use href="#i-check"/></svg>Invited editors</li>
+                <li><svg><use href="#i-check"/></svg>All sites view</li>
+                <li><svg><use href="#i-check"/></svg>AI suggestions</li>
+                <li><svg><use href="#i-check"/></svg>100 AI credits a month</li>
+                <li><svg><use href="#i-check"/></svg>No credit card required</li>
+              </ul>
+            </div>
+            <div class="price-col">
+              <div class="price"><span class="amount">$0</span><span class="per">for 3 months</span></div>
+              <p class="spot-count varies">Last spot left — 1 of 20</p>
+              <a class="cta" href="/signup">Claim your spot</a>
+            </div>
+          </div>
+          <div class="fine">
+            <p>After 90 days, choose a plan to keep editing. Your site keeps serving its content either way. Need more AI before then? 1,000 credits for $19.</p>
+            <p>Spots go in sign-up order. If all 20 are taken when you sign up, you get the 14-day Pro trial instead.</p>
+          </div>
+        </div>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="trust"><span><svg><use href="#i-check"/></svg>3 months free for the first 20</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div>
+      <div class="band band--final">
+        <div class="trust trust--final" style="margin-top:0"><span><i class="dot"></i>3 months free for the first 20</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div>
+    </div>
+
+    <!-- ---------------- 390 · Sold out / Failed ---------------- -->
+    <div class="board board--mobile">
+      <div class="board-tag">Sold out = Failed</div>
+      <div class="band band--hero">
+        <div class="pill-slot"><a class="glass pill varies" href="#pricing"><svg><use href="#i-rocket"/></svg>14 days of Pro, free</a></div>
+        <p class="h1">Change your <span class="field">testimonial</span> <span class="dim">in seconds.</span></p>
+        <div class="hero-ctas"><span class="btn-hero">Start your free trial →</span></div>
+        <p class="under-line">No credit card required.</p>
+      </div>
+      <div class="band band--pricing">
+        <p class="h2">Simple pricing,<br /><span class="soft">no surprises</span></p>
+        <p class="lede">Choose the plan that fits your needs. Upgrade anytime.</p>
+        <div class="toggle"><span class="on">Monthly</span><span>Yearly</span></div>
+        <div class="trust"><span class="varies"><svg><use href="#i-check"/></svg>14-day free trial</span><span><svg><use href="#i-check"/></svg>No credit card required</span><span><svg><use href="#i-check"/></svg>Cancel anytime</span></div>
+      </div>
+      <div class="band band--final">
+        <div class="trust trust--final" style="margin-top:0"><span class="varies"><i class="dot"></i>14-day free trial</span><span><i class="dot"></i>No credit card required</span><span><i class="dot"></i>Cancel anytime</span></div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+</body>
+</html>

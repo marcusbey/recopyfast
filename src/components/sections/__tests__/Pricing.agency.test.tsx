@@ -87,7 +87,7 @@ afterEach(() => {
 
 describe("Agency pricing", () => {
   it("keeps Lifetime Pro and adds the founding offer below the subscriptions", async () => {
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     expect(
       await screen.findByRole("heading", { name: "Agency" }),
@@ -108,7 +108,7 @@ describe("Agency pricing", () => {
 
   it("shows the exact yearly charge rather than multiplying the rounded equivalent", async () => {
     const user = userEvent.setup();
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     await screen.findByRole("heading", { name: "Agency" });
     await user.click(screen.getByRole("button", { name: /yearly/i }));
@@ -125,7 +125,7 @@ describe("Agency pricing", () => {
         pricingResponse({ remaining: 0, limit: 50, soldOut: true }),
     });
 
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     expect(await screen.findAllByText("Sold out")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Sold out" })).toBeDisabled();
@@ -140,7 +140,7 @@ describe("Agency pricing", () => {
       json: async () => pricingResponse(null),
     });
 
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     await screen.findByRole("heading", { name: "Founding Agency (lifetime)" });
     expect(screen.queryByText(/founding spots left/i)).toBeNull();
@@ -163,7 +163,7 @@ describe("Agency pricing", () => {
       json: async () => legacyResponse,
     });
 
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     await screen.findByRole("heading", { name: "Founding Agency (lifetime)" });
     expect(screen.queryByText(/founding spots left/i)).toBeNull();
@@ -185,7 +185,7 @@ describe("Agency pricing", () => {
     });
     const user = userEvent.setup();
 
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
     await screen.findByRole("heading", { name: "Agency" });
     await user.click(screen.getByRole("button", { name: /yearly/i }));
 

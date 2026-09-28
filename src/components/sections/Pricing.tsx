@@ -10,6 +10,9 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import Link from "next/link";
+import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
+import FoundingOfferCard from "./FoundingOfferCard";
+import { foundingOfferTrustLead } from "./founding-offer-copy";
 
 /**
  * Prices, feature bullets and the overage rate all come from `/api/pricing`,
@@ -38,6 +41,7 @@ interface PricingOneTimeProduct {
   price: number;
   features: string[];
   grantsPlanId: string | null;
+  creditsPerPack?: number;
 }
 
 interface PricingResponse {
@@ -60,23 +64,26 @@ const PLAN_ICONS: Record<string, LucideIcon> = {
 
 const FALLBACK_ICON = Sparkles;
 
-// The first two were removed once, because there was no trial and subscription
-// Checkout always collected a card — they were promises the product did not
-// honour. Both are true again: every new account is granted 14 days of Pro at
-// sign-in with no Stripe customer and no payment method (see
-// src/lib/billing/trial.ts). Do not restore either claim without that grant
+// The row leads with `foundingOfferTrustLead(offer)`: "14-day free trial" used
+// to be a fixed first item, but the first 20 accounts now get 90 days instead
+// (s47a), so the lead follows the founding-offer count (s47b). The two claims
+// below hold under the 14-day trial and under the founding offer alike: both
+// grants are made at sign-in with no Stripe customer and no payment method (see
+// src/lib/billing/trial.ts). "No credit card required" was removed once,
+// because there was no trial and subscription Checkout always collected a card
+// — a promise the product did not honour. Do not restore it without that grant
 // still being in place.
-const TRUST_POINTS = [
-  "14-day free trial",
-  "No credit card required",
-  "Cancel anytime",
-];
+const TRUST_POINTS = ["No credit card required", "Cancel anytime"];
 // "30-day money-back guarantee" was removed in s50 on the owner's decision of
 // 2026-09-28: /terms has no refund clause, and refunds are handled case by
 // case, so it was a promise nothing stood behind. Do not restore it without a
 // refund clause in /terms.
 
-export default function Pricing() {
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+export default function Pricing({ offer }: { offer: FoundingOfferView }) {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-100px" });
   const [isYearly, setIsYearly] = useState(false);
@@ -109,6 +116,15 @@ export default function Pricing() {
   const lifetimePro = pricing?.oneTimeProducts.find(
     (product) => product.id === "lifetime_pro",
   );
+  const creditsProduct = pricing?.oneTimeProducts.find(
+    (product) => product.id === "credits",
+  );
+  // Both numbers or neither: the offer card never names a pack it cannot price.
+  const creditPack =
+    isPositiveNumber(creditsProduct?.creditsPerPack) &&
+    isPositiveNumber(creditsProduct?.price)
+      ? { credits: creditsProduct.creditsPerPack, price: creditsProduct.price }
+      : null;
 
   return (
     <section
@@ -141,6 +157,18 @@ export default function Pricing() {
           <p className="text-lg sm:text-xl text-slate-600 leading-relaxed max-w-2xl mx-auto mb-8">
             Choose the plan that fits your needs. Upgrade anytime.
           </p>
+
+          {/* Only while spots remain. Loading and closed render nothing here:
+              the section is far below the fold, so the card arriving causes
+              no visible shift, and a placeholder would linger for every visit
+              after the spots are gone. */}
+          {offer.status === "open" && (
+            <FoundingOfferCard
+              remaining={offer.remaining}
+              limit={offer.limit}
+              creditPack={creditPack}
+            />
+          )}
 
           {/* Billing toggle */}
           <div className="inline-flex items-center gap-4 p-1 bg-white rounded-full border border-sky-200 shadow-sm">
@@ -405,7 +433,7 @@ export default function Pricing() {
           className="mt-16 text-center"
         >
           <div className="flex flex-wrap justify-center items-center gap-6 text-sm text-slate-500">
-            {TRUST_POINTS.map((point) => (
+            {[foundingOfferTrustLead(offer), ...TRUST_POINTS].map((point) => (
               <span key={point} className="flex items-center gap-2">
                 <Check className="w-4 h-4 text-teal-600" />
                 {point}
