@@ -15,6 +15,7 @@ import Privacy from "@/app/privacy/page";
  *
  * The page bodies (audit logs, RBAC, the EU representative) are a separate
  * legal review; only the addresses and the dead status-page bullet change here.
+ * s54 renamed or removed the roles nobody holds; the addresses are unchanged.
  */
 
 jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
@@ -71,7 +72,7 @@ describe("legal contact addresses", () => {
     for (const label of [
       "Legal Inquiries",
       "Security Issues",
-      "Data Protection Officer",
+      "Privacy Requests",
     ]) {
       expect(addressUnder(label)).toBe(`mailto:${PRIVACY}`);
     }
@@ -82,11 +83,7 @@ describe("legal contact addresses", () => {
 
     render(<Privacy />);
     expect(addressUnder("General Support")).toBe(`mailto:${SUPPORT}`);
-    for (const label of [
-      "Data Protection Officer",
-      "Security Team",
-      "EU Representative",
-    ]) {
+    for (const label of ["Privacy Requests", "Security Issues"]) {
       expect(addressUnder(label)).toBe(`mailto:${PRIVACY}`);
     }
   });
