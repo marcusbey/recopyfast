@@ -200,7 +200,6 @@ test.describe("Landing Page", () => {
     expect(pricingText).toContain("14-day free trial");
     expect(pricingText).toContain("No credit card required");
     expect(pricingText).toContain("Cancel anytime");
-    expect(pricingText).toContain("30-day money-back guarantee");
   });
 
   // E2E-018: No unsubstantiated social proof (see removal of fabricated claims)
@@ -209,6 +208,14 @@ test.describe("Landing Page", () => {
   }) => {
     await page.goto("/", { waitUntil: "load", timeout: 45000 });
     await expect(pricingSection(page)).toBeAttached({ timeout: 15000 });
+    // The plan cards render after the client-side /api/pricing fetch. Without
+    // this wait the body is read before their bullets exist, and the catalogue
+    // half of the list below passes on a page that never showed it.
+    await expect(
+      pricingSection(page)
+        .locator("h3")
+        .filter({ hasText: /^Starter$/ }),
+    ).toBeAttached({ timeout: 15000 });
 
     const pageText = await page.textContent("body");
 
@@ -230,5 +237,39 @@ test.describe("Landing Page", () => {
     for (const claim of fabricated) {
       expect(pageText).not.toContain(claim);
     }
+
+    // s50: claims retired because the product does not back them. Matched
+    // case-sensitively on purpose: `body` text includes the inline RSC
+    // payload, where Tailwind class names such as `translate-y` live.
+    const retired = [
+      "money-back",
+      "Priority support",
+      "onboarding call",
+      "future Pro features",
+      "A/B",
+      "Every string on the site, in another language",
+      "Find out which words actually win",
+      "Role-based permissions",
+      "audit log",
+      "Works everywhere",
+      "Full version history",
+      "unlimited translations",
+      "Comprehensive docs",
+      "All systems operational",
+      "v1.0.0",
+      "Five minutes",
+      "five minutes",
+      "5 minutes",
+    ];
+
+    for (const claim of retired) {
+      expect(pageText).not.toContain(claim);
+    }
+
+    // An href never reaches textContent, and the dead domain lived in one.
+    expect((await page.content()).toLowerCase()).not.toContain(
+      "recopyfast.com",
+    );
+    expect(await page.title()).not.toContain("Universal CMS");
   });
 });

@@ -60,8 +60,5 @@ describe("Pricing", () => {
     expect(await screen.findByText(/14-day free trial/i)).toBeInTheDocument();
     expect(screen.getByText(/no credit card required/i)).toBeInTheDocument();
     expect(screen.getByText(/cancel anytime/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/30-day money-back guarantee/i),
-    ).toBeInTheDocument();
   });
 });

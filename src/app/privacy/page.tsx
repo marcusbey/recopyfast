@@ -361,10 +361,10 @@ export default function Privacy() {
             <p className="text-slate-600">
               To exercise any of these rights, contact us at{" "}
               <a
-                href="mailto:privacy@recopyfast.com"
+                href="mailto:privacy@recopyfa.st"
                 className="text-sky-600 hover:underline font-medium"
               >
-                privacy@recopyfast.com
+                privacy@recopyfa.st
               </a>
               . We will respond within 30 days and may require identity
               verification for security.
@@ -461,10 +461,10 @@ export default function Privacy() {
                     Data Protection Officer
                   </h4>
                   <a
-                    href="mailto:privacy@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    privacy@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                   <p className="text-xs text-slate-500 mt-1">
                     Privacy rights & policy questions
@@ -481,10 +481,10 @@ export default function Privacy() {
                     Security Team
                   </h4>
                   <a
-                    href="mailto:security@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    security@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                   <p className="text-xs text-slate-500 mt-1">
                     Security concerns & vulnerability reports
@@ -501,10 +501,10 @@ export default function Privacy() {
                     EU Representative
                   </h4>
                   <a
-                    href="mailto:eu-representative@recopyfast.com"
+                    href="mailto:privacy@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    eu-representative@recopyfast.com
+                    privacy@recopyfa.st
                   </a>
                   <p className="text-xs text-slate-500 mt-1">
                     EU data subject rights & GDPR
@@ -521,10 +521,10 @@ export default function Privacy() {
                     General Support
                   </h4>
                   <a
-                    href="mailto:support@recopyfast.com"
+                    href="mailto:support@recopyfa.st"
                     className="text-sky-600 hover:underline text-sm"
                   >
-                    support@recopyfast.com
+                    support@recopyfa.st
                   </a>
                   <p className="text-xs text-slate-500 mt-1">
                     General inquiries & technical support

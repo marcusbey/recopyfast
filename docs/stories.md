@@ -1871,22 +1871,22 @@ research found 23 false claims of 68, and the owner added the plans copy). Branc
 `feature/s50-homepage-truth`. The homepage promises things the product or terms don't back.
 Research: `docs/research/s50-homepage-truth.md` (claim-by-claim inventory with verdicts).
 
-- [ ] The "30-day money-back guarantee" is removed wherever it appears (owner decision: remove,
+- [x] The "30-day money-back guarantee" is removed wherever it appears (owner decision: remove,
   refunds stay case by case).
-- [ ] Features the PRD froze without a customer-facing surface (audit log, role-based
+- [x] Features the PRD froze without a customer-facing surface (audit log, role-based
   permissions, and any other graveyard item, `docs/prd.md` § graveyard) are not advertised.
-- [ ] Every claim the research marks FALSE or UNVERIFIABLE is reworded or removed as it
+- [x] Every claim the research marks FALSE or UNVERIFIABLE is reworded or removed as it
   recommends, including the unshipped Translate and A/B cards (replaced by Invite and AI Rewrite),
   "works everywhere", "full version history", the image-generation button, the /docs link, the
   hardcoded status and version, and the page metadata/OG text; the result is recorded in the
   story's review with the evidence per claim.
-- [ ] Support promises say "Email support" on every plan: no "Priority support" and no
+- [x] Support promises say "Email support" on every plan: no "Priority support" and no
   "onboarding call" anywhere (owner decision, 2026-09-28).
-- [ ] Lifetime Pro no longer promises "all future Pro features" (owner decision, 2026-09-28).
-- [ ] Every contact address on the site, /terms and /privacy is on `recopyfa.st`:
+- [x] Lifetime Pro no longer promises "all future Pro features" (owner decision, 2026-09-28).
+- [x] Every contact address on the site, /terms and /privacy is on `recopyfa.st`:
   `support@recopyfa.st` for customers, `privacy@recopyfa.st` on the legal pages; no address on the
   nonexistent `recopyfast.com` remains. Operator before ship: both mailboxes receive mail.
-- [ ] The plans catalogue copy (feature rows and descriptions in `plans`) matches: one idempotent
+- [x] The plans catalogue copy (feature rows and descriptions in `plans`) matches: one idempotent
   forward migration, no applied migration edited, no price or limit change. Operator after merge:
   migration, deploy, then `sync:stripe:live` for the product descriptions.
 - [ ] Copy tests and the Playwright landing check pass with the new copy. Required local gates

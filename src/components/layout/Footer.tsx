@@ -1,6 +1,6 @@
 "use client";
 
-import { Zap, Github, Mail, Rocket, Shield, BookOpen } from "lucide-react";
+import { Zap, Github, Mail, Rocket, Shield } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 
@@ -21,6 +21,26 @@ const footerLinks = {
   ],
 };
 
+/*
+  s50 removed or corrected every claim below, each one false on production
+  (owner decision 2026-09-28):
+
+  - The email link went to hello@recopyfast.com. recopyfast.com is an
+    unregistered domain (NXDOMAIN): the mail bounced, and whoever registers the
+    domain receives every message a customer sends. support@recopyfa.st is the
+    customer mailbox.
+  - "Transform any website into an intelligent content management platform":
+    a site whose Content Security Policy blocks the script cannot run it, and
+    there is no content model to manage.
+  - "All systems operational" with a pulsing green dot was hardcoded, with no
+    check behind it, and would have stayed green through an outage. There is no
+    status page (/status returns 404).
+  - "v1.0.0" matched nothing: package.json says 0.1.0 and nothing versions
+    releases.
+  - "Comprehensive docs" pointed at no docs: /docs returns 404. "Secure &
+    lightweight" became "Secure by default", because the widget is over its own
+    gzip budget.
+*/
 const socialLinks = [
   {
     icon: Github,
@@ -29,15 +49,14 @@ const socialLinks = [
   },
   {
     icon: Mail,
-    href: "mailto:hello@recopyfast.com",
+    href: "mailto:support@recopyfa.st",
     label: "Email",
   },
 ];
 
 const quickFeatures = [
   { icon: Rocket, text: "One-line integration" },
-  { icon: Shield, text: "Secure & lightweight" },
-  { icon: BookOpen, text: "Comprehensive docs" },
+  { icon: Shield, text: "Secure by default" },
 ];
 
 export default function Footer() {
@@ -65,8 +84,8 @@ export default function Footer() {
             </div>
 
             <p className="text-slate-600 mb-8 max-w-md leading-relaxed">
-              Transform any website into an intelligent content management
-              platform with a single script tag. No backend changes required.
+              Make the copy on the site you already built editable, with one
+              script tag. No backend changes, no migration.
             </p>
 
             {/* Quick Features */}
@@ -138,16 +157,6 @@ export default function Footer() {
             <span className="text-slate-400 text-sm">
               Made with care for content teams
             </span>
-          </div>
-
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2 text-sm">
-              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-              <span className="text-slate-500">All systems operational</span>
-            </div>
-            <div className="text-xs text-slate-400 bg-sky-50 px-3 py-1 rounded-full border border-sky-100">
-              v1.0.0
-            </div>
           </div>
         </div>
       </div>
