@@ -1983,6 +1983,18 @@ reviews. Complexity: 3. Branch `feature/s53-credit-and-offer-hardening`. Not lau
   `spend_credits` (Devin PR #48 finding 4, not exploitable today).
 - [ ] Required local gates pass; one story commit.
 
+- [ ] Also collected from the s47a/s47b/s50/s51/s54/s56 reviews and PR bot findings (2026-09-28):
+  s47a — dialog-level test pinning `hasSubscription` (moved to s52 with R1/r3); s47b — tie "5 websites"
+  on the offer card to Pro's catalogue limit, and `toFoundingOfferView` prefers loading/error over
+  retained data on refetch; s51 — test that the gate runs after the per-site limiter, owner lookup
+  with NULL `created_at` / team admin rows, ADR 041 note that grants and sessions age out during a
+  long lapse; s54 — the bite check reads the rendered HTML string; s56 — bulk/update service-write
+  site-scope test, update-history-policy read-back before rollback, ADR 042 Watch for member-writable
+  `site_themes`/`copy_styles`/`site_languages` and default-grant inheritance, ADR 042 names ADR 002 §2,
+  cap `ab-tests/generate` model input, per-user/site limiters for `ab-tests/generate` and
+  `bulk/import`; product copy — `BillingDashboard.tsx` still lists "A/B testing" (not a customer
+  feature).
+
 Embed allocation: 0 bytes.
 
 ## Story s54-legal-pages-truth — /privacy and /terms describe the product that exists
@@ -2070,3 +2082,15 @@ account without a plan, so a lapsed trial or founding-offer owner cannot reach t
 - [ ] Required local gates pass; one story commit.
 
 Embed allocation: 0 bytes.
+
+## Story s58-mobile-swipe-test-bites — the hero demo swipe test catches the snap-back bug
+
+Product owner decision, 2026-09-28, from the s47b review. Complexity: 2. Not launch-blocking.
+`e2e/hero-demo-mobile.spec.ts`'s "two swipes never scroll the demo backwards" passes with the
+snap-back fix undone (on main and after s47b), so it does not protect what it was written for.
+
+- [ ] With the snap-back fix reverted, the swipe test fails; with it, the test passes 10/10 runs
+  (single worker, iPhone 13 profile). The Playwright total stays 44.
+
+Embed allocation: 0 bytes.
+
