@@ -1878,16 +1878,29 @@ Embed allocation: 0 bytes.
 
 ## Story s50-homepage-truth — every claim on the homepage is true
 
-Operator decision, 2026-09-28, from the launch-kit fact check (PR #47). Complexity: 2. Branch
+Operator decision, 2026-09-28, from the launch-kit fact check (PR #47). Complexity: 3 (was 2;
+research found 23 false claims of 68, and the owner added the plans copy). Branch
 `feature/s50-homepage-truth`. The homepage promises things the product or terms don't back.
+Research: `docs/research/s50-homepage-truth.md` (claim-by-claim inventory with verdicts).
 
 - [ ] The "30-day money-back guarantee" is removed wherever it appears (owner decision: remove,
   refunds stay case by case).
 - [ ] Features the PRD froze without a customer-facing surface (audit log, role-based
   permissions, and any other graveyard item, `docs/prd.md` § graveyard) are not advertised.
-- [ ] Every remaining feature claim (A/B testing, translation, version history, image
-  replacement, "works on any site", "no login") is either demonstrable on production today or
-  reworded/removed; the result is recorded in the story's review with the evidence per claim.
+- [ ] Every claim the research marks FALSE or UNVERIFIABLE is reworded or removed as it
+  recommends, including the unshipped Translate and A/B cards (replaced by Invite and AI Rewrite),
+  "works everywhere", "full version history", the image-generation button, the /docs link, the
+  hardcoded status and version, and the page metadata/OG text; the result is recorded in the
+  story's review with the evidence per claim.
+- [ ] Support promises say "Email support" on every plan: no "Priority support" and no
+  "onboarding call" anywhere (owner decision, 2026-09-28).
+- [ ] Lifetime Pro no longer promises "all future Pro features" (owner decision, 2026-09-28).
+- [ ] Every contact address on the site, /terms and /privacy is on `recopyfa.st`:
+  `support@recopyfa.st` for customers, `privacy@recopyfa.st` on the legal pages; no address on the
+  nonexistent `recopyfast.com` remains. Operator before ship: both mailboxes receive mail.
+- [ ] The plans catalogue copy (feature rows and descriptions in `plans`) matches: one idempotent
+  forward migration, no applied migration edited, no price or limit change. Operator after merge:
+  migration, deploy, then `sync:stripe:live` for the product descriptions.
 - [ ] Copy tests and the Playwright landing check pass with the new copy. Required local gates
   pass; one story commit. No push, PR, merge or production action.
 
