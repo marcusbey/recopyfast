@@ -5,7 +5,7 @@ with the live product, the product wins and the doc is fixed.
 
 | File | Contents |
 |---|---|
-| [`launch-2026-09-28.md`](./launch-2026-09-28.md) | Launch-day kit built around the first-20 Pro offer (s47), gated until s47 is live, with a 14-day-trial fallback for every asset: positioning, offer block, X thread and single post, founder DM/email, Show HN and Indie Hackers posts, objection replies, launch-day checklist, metrics with read-only queries, claims ledger |
+| [`launch-2026-09-28.md`](./launch-2026-09-28.md) | Launch-day kit built around the first-20 Pro offer (s47). Nothing posts until s50 (homepage truth) is live; the offer waits for s47, with a 14-day-trial fallback for every asset. Holds the owner's copy decisions of 2026-09-28, plus: positioning, offer block, X thread and single post, founder DM/email, Show HN and Indie Hackers posts, objection replies, launch-day checklist, metrics with read-only queries, claims ledger |
 
 Rules that apply to anything added here:
 

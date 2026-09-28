@@ -140,7 +140,7 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 ### [`gtm/`](./gtm/README.md) — how we sell it
 | File | Contents |
 |---|---|
-| [`launch-2026-09-28.md`](./gtm/launch-2026-09-28.md) | Launch-day kit: first-20 Pro offer (gated on s47) with a 14-day-trial fallback, ready-to-post copy, checklist, metrics |
+| [`launch-2026-09-28.md`](./gtm/launch-2026-09-28.md) | Launch-day kit: first-20 Pro offer (gated on s50 and s47) with a 14-day-trial fallback, owner copy decisions, ready-to-post copy, checklist, metrics |
 
 ### `quality/` — how we keep it working
 
