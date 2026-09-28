@@ -1732,48 +1732,89 @@ public key was absent from the homepage JS: the browser SDK was never initialise
 Research: `docs/research/s46-sentry-wiring.md`. Plan: `docs/plans/s46-sentry-wiring.md`.
 Embed allocation: 0 bytes.
 
-## Story s47-founding-20-offer — the first 20 people who sign up get Pro free for 3 months
+## Story s47a-founding-20-grant — the first 20 people who sign up get Pro free for 3 months
 
 Operator-prevalidated scope, 2026-09-27 (owner approved the launch offer: "First 20 users get
-RecopyFast Pro free for 3 months"). Complexity: 4. Branch `feature/s47-founding-20-offer`.
-Today every new account gets the 14-day Pro trial at first sign-in (ADR 014). For the first 20
-new accounts after the offer opens, that same first sign-in grants Pro for 90 days instead,
-with 100 AI credits a month, and no card. Account 21 onward gets the 14-day trial exactly as
-today. When the 90 days end the account lands where a lapsed trial lands: it chooses a plan.
+RecopyFast Pro free for 3 months"). Split from `s47-founding-20-offer` at research (scored 5).
+Complexity: 4. Branch `feature/s47a-founding-20-grant`. Today every new account gets the 14-day
+Pro trial at first sign-in (ADR 014). For the first 20 accounts created after the offer opens,
+that same first sign-in grants Pro for 90 days instead, metered at 100 AI credits a month, no
+card. Account 21 onward gets the 14-day trial exactly as today. When the 90 days end the account
+lands where a lapsed trial lands and chooses a plan.
 
-- [ ] A brand-new account's first sign-in, while spots remain, yields entitlement `plan` /
-  `pro` expiring 90 days after that sign-in (server clock), with every Pro limit (5 sites,
-  invited editors, All sites, AI) except the monthly AI-credit allowance, which is 100.
-  Purchased credit packs stack on top and are spent after the allowance, as today.
-- [ ] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a
-  21st, and claiming a spot and writing the account's one grant succeed or fail together.
-  An account that already had a trial, a plan, a lifetime grant or credits never takes a
-  spot; neither does a repeat sign-in. Sign-in never fails because the offer errors — it
-  falls back to the 14-day trial.
-- [ ] Once 20 spots are taken, a new account's first sign-in gets the 14-day Pro trial
-  (500 trial credits) with no other change; "one trial per account, ever" still holds.
-- [ ] 90 days after the grant the account resolves to the lapsed state and sees the existing
-  "choose a plan" billing screen; no charge, no card ever requested by the offer.
-- [ ] The landing page shows the offer with a live "X of 20 spots left" read from a public
-  endpoint that returns only the count (no user data). At 0 it stops presenting the offer and
-  shows the 14-day trial line. The count is correct after a claim without a redeploy.
-- [ ] The dashboard trial badge and billing card state what the account actually has:
-  "Founding offer — N days left", "100 AI credits a month"; never "500 trial AI credits" or a
-  14-day countdown for an offer account.
+- [ ] The offer grant IS the account's one trial row (`source = 'trial'`, `plan_id = 'pro'`,
+  expiring 90 days after the claim, server clock) marked as the founding offer — so "one trial
+  per account, ever" still holds and an expired offer account can never receive a second,
+  14-day trial on a later sign-in.
+- [ ] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a 21st;
+  eligibility check, trial row and claim are one transaction. Proved against real Postgres with
+  a concurrency test that CI runs.
+- [ ] Only accounts created after the offer opened, with no plan entitlement, subscription or
+  credit purchase ever, can take a spot; a repeat sign-in never takes one. Any other outcome,
+  including an error in the offer path, falls back to today's 14-day trial and never fails the
+  sign-in.
+- [ ] An offer account resolves to every Pro limit (5 sites, invited editors, All sites, AI)
+  with a monthly AI-credit allowance of 100, in windows anchored on the grant date (a 14-day
+  trial's single window is unchanged). A higher allowance the account holds from any other
+  source is never lowered (ADR 038 floor). Purchased packs stack on top and are spent after the
+  allowance, as today.
+- [ ] Once 20 spots are taken, a new account's first sign-in gets the 14-day trial (500 credits)
+  with no other change.
+- [ ] 90 days after the claim the account resolves to the lapsed state; the billing screen says
+  the founding offer has ended (not "Your 14-day Pro trial has ended") and offers the plans. No
+  charge, no card ever requested by the offer.
+- [ ] The dashboard badge and billing card of an offer account state what it has: "Founding
+  offer — N days left", "N of 100 AI credits used this month"; never "500 trial AI credits" or a
+  14-day countdown.
+- [ ] A public, uncached endpoint returns only the spots-left count (no user data), correct
+  immediately after a claim or release; on any error it returns no number rather than a guess.
 - [ ] The operator can release a spot held by an internal/QA account without a code change
-  (service-role only, documented in the runbook), so the production live proof does not
-  permanently consume a public spot. The release reverts that account to "no plan".
-- [ ] Required local gates pass; one story commit. No push, PR, merge or production action.
-  Operator after merge: deploy, apply the migration, run the live proof, release its spot.
+  (service-role only, runbook in `docs/operations/`). Release sets `revoked_at` only — it must
+  not rewrite `source`, or the account would escape the one-trial index. The count goes back up.
+- [ ] ADR 039 records the representation, the claim lock, the allowance rule, the monthly
+  window (amends ADR 014's single window) and the migration-first order.
+- [ ] Required local gates pass (run in a worktree: the repo-root `.env` breaks tests that read
+  `NEXT_PUBLIC_APP_URL`); one story commit. No push, PR, merge or production action. Operator
+  after merge: apply the migration FIRST (code reading the new column before it exists would
+  fail every gate), then deploy, run the live proof on a QA account, release its spot.
 
-Agentic notes: grant path is `ensureTrialStarted` → `grantTrialEntitlement`
-(`src/lib/billing/trial.ts`), called from `/auth/callback` and `/auth/confirm` on every
-sign-in. Race-safe capacity precedent: `reserve_founding_agency_spot` (advisory lock,
-`20260924065000_agency_plan_and_founding_capacity.sql`). Per-grant allowance precedent:
-ADR 038 / s45 (`src/lib/billing/effective-plan.ts`). Public count precedent: Founding Agency
-"N of 50 founding spots left" (`src/lib/billing/founding-agency.ts`, `/api/pricing`). Risk
-(why 4): an authorization and capacity boundary written on the sign-in path; a bug either
-gives away unlimited free Pro or breaks sign-in. If the plan exceeds ten tasks, split the
-landing surface into its own story. No Stripe product, price or webhook change.
+Agentic notes: sign-in path `ensureTrialStarted` → `grantTrialEntitlement`
+(`src/lib/billing/trial.ts`), from `/auth/callback` and `/auth/confirm`. Capacity precedent
+`reserve_founding_agency_spot` (`20260924065000_agency_plan_and_founding_capacity.sql`) — the
+offer takes its own advisory-lock key. Allowance: ADR 038 / s45 cannot express this (the
+catalogue refuses a second product granting `pro`, `src/lib/stripe/plans.ts:416-429`); add a
+held-by-offer-only branch in `src/lib/billing/effective-plan.ts`. Credit window:
+`src/lib/credits/system.ts:192-209`. Revocation trap: `src/lib/billing/entitlements.ts:142`
+rewrites `source`. `/api/pricing` can lag ~15 minutes — the count needs its own route. CI runs DB
+suites by name (`.github/workflows/ci.yml:258-289`): add a step. Local DB lacks the s45 migration
+`20260926120000`. Research: `docs/research/s47-founding-20-offer.md`. Design:
+`docs/designs/s47-founding-20-offer*` (shared with s47b). Risk (why 4): an authorization and
+capacity boundary on the sign-in path — a bug either gives away unlimited free Pro or breaks
+sign-in. Known interaction: a refunded AI failure currently becomes a permanent purchased
+credit (credit check 2026-09-27), which would keep a lapsed offer account in the dashboard; that
+defect is fixed in its own story, not here. No Stripe product, price or webhook change.
+
+Embed allocation: 0 bytes.
+
+## Story s47b-founding-20-landing — the landing page shows the offer and the spots left
+
+Split from `s47-founding-20-offer` at research. Complexity: 2. Branch
+`feature/s47b-founding-20-landing`. Depends on s47a (count endpoint and the grant it promises).
+
+- [ ] While spots remain, the landing presents "First 20 users get RecopyFast Pro free for 3
+  months" with a live "X of 20 spots left" read from s47a's count endpoint, per
+  `docs/designs/s47-founding-20-offer.md`.
+- [ ] At 0 spots, or when the count is unknown (loading failed), the landing shows the 14-day Pro
+  trial line instead — never a stale or guessed number, and no trial→offer flash that shows the
+  wrong promise.
+- [ ] Every "14-day free trial" claim the offer replaces is updated consistently (Hero, Pricing
+  trust point, FinalCTA as designed); the copy tests (`trial-claims`) and the Playwright landing
+  check (`e2e/landing.spec.ts:196`) assert both states.
+- [ ] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+  production action.
+
+Agentic notes: landing sections under `src/components/sections/` (Hero, Pricing, FinalCTA);
+Founding Agency "N of 50 founding spots left" block is the visual precedent
+(`docs/designs/s33-agency-plan.md`). Research: `docs/research/s47-founding-20-offer.md`.
 
 Embed allocation: 0 bytes.
