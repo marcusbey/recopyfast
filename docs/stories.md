@@ -2024,3 +2024,33 @@ Agentic notes: `public/embed/recopyfast.src.js:955-962` (A/B pipeline start), `:
 Byte budget). No server change.
 
 Embed allocation: must be ≤ 0 bytes (net shrink or equal).
+
+## Story s56-rls-content-writes-need-plan — direct database writes also need the owner's plan
+
+Product owner decision, 2026-09-28, from the s51 review (major). Launch-blocking (P0).
+Complexity: 3 (to be confirmed at research). Branch `feature/s56-rls-content-writes-need-plan`.
+s51 gates every application write route on the site owner's plan (ADR 041), but a signed-in
+`edit`/`admin` site member can still write `content_elements.published_content` directly through
+PostgREST with the public anon key and their own session: RLS policy "Users can edit content for
+authorized sites" is FOR ALL and `authenticated` holds INSERT/UPDATE/DELETE. The A/B tables share
+the gap. Proven locally (planless owner PATCH → 200, live row changed).
+
+- [ ] A direct PostgREST INSERT/UPDATE/DELETE on `content_elements` (and every other table that
+  holds publishable content or A/B test data) by a member of a site whose OWNER has no `plan`
+  entitlement is refused and changes nothing; the same member of a paying owner's site is
+  unaffected wherever direct writes are legitimately used.
+- [ ] Every application path that writes those tables keeps working for paying owners (dashboard,
+  widget, bulk, v1, publish RPCs) — research lists which paths use the user's session vs the service
+  role, and the fix is chosen accordingly (owner-plan check inside RLS via a SECURITY DEFINER
+  helper, or revoking direct writes where only service-role routes write).
+- [ ] Public reads (visitors' content GET, embed) are untouched.
+- [ ] `ab-tests/*` routes are gated on the owner's plan like other writes (ADR 041 Watch).
+- [ ] Proved against real Postgres through PostgREST with a user JWT (lapsed → refused, paying →
+  allowed), run by CI. ADR 041's Watch entry is closed. Migration first, then deploy.
+
+Agentic notes: s51 review report (`docs/reviews/s51-edit-needs-a-plan.md`), ADR 041, the
+`owner-can-edit` helper and `resolveEntitlement` (TS), `function-grants.test.ts` rules on SECURITY
+DEFINER, `column-privileges.test.ts`, the publish/staging RPCs. Risk: RLS changes can break the
+dashboard's own writes — research must enumerate them first.
+
+Embed allocation: 0 bytes.
