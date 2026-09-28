@@ -137,6 +137,11 @@ Subordinate to [`architecture.md`](./architecture.md) above.
 | [`founding-offer.md`](./operations/founding-offer.md)             | Founding offer (first 20 accounts): migration-first deploy, live proof, releasing a QA spot, inspection, rollback |
 | [`edit-needs-a-plan.md`](./operations/edit-needs-a-plan.md)       | Before deploying s51: list paid credits-only accounts to comp or refund                                           |
 
+### [`gtm/`](./gtm/README.md) — how we sell it
+| File | Contents |
+|---|---|
+| [`launch-2026-09-28.md`](./gtm/launch-2026-09-28.md) | Launch-day kit: first-20 Pro offer (live) with a 14-day-trial fallback, owner copy decisions, ready-to-post copy, checklist, metrics |
+
 ### `quality/` — how we keep it working
 
 | File                                                               | Contents                                      |
