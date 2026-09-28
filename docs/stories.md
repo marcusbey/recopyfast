@@ -1801,16 +1801,16 @@ Embed allocation: 0 bytes.
 Split from `s47-founding-20-offer` at research. Complexity: 2. Branch
 `feature/s47b-founding-20-landing`. Depends on s47a (count endpoint and the grant it promises).
 
-- [ ] While spots remain, the landing presents "First 20 users get RecopyFast Pro free for 3
+- [x] While spots remain, the landing presents "First 20 users get RecopyFast Pro free for 3
   months" with a live "X of 20 spots left" read from s47a's count endpoint, per
   `docs/designs/s47-founding-20-offer.md`.
-- [ ] At 0 spots, or when the count is unknown (loading failed), the landing shows the 14-day Pro
+- [x] At 0 spots, or when the count is unknown (loading failed), the landing shows the 14-day Pro
   trial line instead — never a stale or guessed number, and no trial→offer flash that shows the
   wrong promise.
-- [ ] Every "14-day free trial" claim the offer replaces is updated consistently (Hero, Pricing
+- [x] Every "14-day free trial" claim the offer replaces is updated consistently (Hero, Pricing
   trust point, FinalCTA as designed); the copy tests (`trial-claims`) and the Playwright landing
   check (`e2e/landing.spec.ts:196`) assert both states.
-- [ ] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+- [x] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
   production action.
 
 Agentic notes: landing sections under `src/components/sections/` (Hero, Pricing, FinalCTA);

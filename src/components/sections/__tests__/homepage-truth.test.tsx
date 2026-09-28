@@ -38,7 +38,7 @@ afterEach(() => {
 
 describe("Pricing", () => {
   it("makes no money-back promise", async () => {
-    render(<Pricing />);
+    render(<Pricing offer={{ status: "closed" }} />);
 
     // The trust row rendered, so the absence below is not vacuous.
     expect(await screen.findByText(/cancel anytime/i)).toBeInTheDocument();
@@ -155,7 +155,7 @@ describe("HowItWorks", () => {
 
 describe("FinalCTA", () => {
   it("makes no five-minute claim", () => {
-    const { container } = render(<FinalCTA />);
+    const { container } = render(<FinalCTA offer={{ status: "closed" }} />);
 
     expect(screen.getByText("Set up in minutes")).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/5 minutes/);

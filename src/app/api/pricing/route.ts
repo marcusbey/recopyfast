@@ -52,6 +52,7 @@ interface OneTimeProductPayload {
   currency: string;
   features: string[];
   grantsPlanId: string | null;
+  creditsPerPack?: number;
 }
 
 interface PricingResponse {
@@ -225,6 +226,11 @@ async function buildPricingResponse(): Promise<PricingResponse> {
       currency: DEFAULT_CURRENCY,
       features: [...product.features],
       grantsPlanId: product.grantsPlanId,
+      // The landing's founding-offer fine print names the pack from this
+      // payload, never from a literal (s47b).
+      ...(product.id === "credits"
+        ? { creditsPerPack: catalogue.creditPack.creditsPerPack }
+        : {}),
     })),
     foundingAgencyAvailability,
     fetchedAt: new Date().toISOString(),

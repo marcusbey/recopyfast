@@ -38,8 +38,6 @@ test.use({ ...devices["iPhone 13"], browserName: "chromium" });
 /** The demo site's own scrolling viewport — `siteScrollRef` in InteractiveHero. */
 const DEMO_SCROLLER = "[data-demo-scroller]";
 
-/** Enough page scroll to reach the demo's sticky track and pin it. */
-const APPROACH_PX = 400;
 const SWIPE_DISTANCE_PX = 260;
 const SWIPE_STEPS = 12;
 
@@ -99,11 +97,65 @@ async function demoScrollTop(page: Page): Promise<number> {
     .evaluate((el) => el.scrollTop);
 }
 
+/**
+ * How far the top of the demo's sticky track is below the top of the viewport:
+ * the page scroll left before the demo pins. 0 or less means it is pinned.
+ *
+ * Measured from the section, never from the scroller: the scroller is keyed by
+ * site, so the attract loop replaces that node every few seconds.
+ */
+async function demoTrackOffset(page: Page): Promise<number> {
+  return page
+    .getByRole("region", { name: "Interactive demo" })
+    .evaluate((section) => {
+      const sticky = Array.from(section.querySelectorAll("div")).find(
+        (el) => getComputedStyle(el).position === "sticky",
+      );
+      const track = sticky?.parentElement;
+      if (!track) throw new Error("the demo has no sticky track");
+      return track.getBoundingClientRect().top;
+    });
+}
+
+/**
+ * CSS px past the pin. Just over InteractiveHero's SCROLL_ENGAGED_AT (0.01 of
+ * the track, about 15 px on this profile): scrolling into the demo is what ends
+ * its attract loop, and with it the site swaps that replace the scroller.
+ */
+const ENGAGE_PX = 24;
+
+/** Wheel rounds before giving up on pinning the demo; two suffice in practice. */
+const MAX_APPROACH_WHEELS = 6;
+
+/*
+ * Scrolls to the MEASURED top of the sticky track, not a fixed offset. It was
+ * `mouse.wheel(0, 400)`, which encoded the hero's height at the time — and
+ * wheel deltas are device pixels, so on this 3x profile it moved the page
+ * about 133 CSS px, well short of the track (514 px). The swipes had to carry
+ * the page the rest of the way. The founding-offer pill (s47b) made the hero
+ * 62 px taller, the track moved to 576 px, and the swipes sometimes no longer
+ * reached it: the demo never moved and the test failed on a layout change,
+ * not on the snap-back it guards. Measuring keeps the test about the swipes.
+ *
+ * A loop, not one wheel: the track's offset drifts while the page scrolls, so
+ * a single measured wheel lands short. Each round re-measures.
+ */
 async function openPinnedDemo(page: Page): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator(DEMO_SCROLLER).first().waitFor({ state: "visible" });
-  await page.mouse.wheel(0, APPROACH_PX);
-  await page.waitForTimeout(600); // Lenis easing
+  const ratio = await page.evaluate(() => window.devicePixelRatio);
+
+  for (let wheel = 0; ; wheel++) {
+    const remaining = (await demoTrackOffset(page)) + ENGAGE_PX;
+    if (remaining <= 1) break;
+    if (wheel === MAX_APPROACH_WHEELS) throw new Error("the demo never pinned");
+    await page.mouse.wheel(0, remaining * ratio);
+    await page.waitForTimeout(600); // Lenis easing
+  }
+
+  // A site swap the attract loop started before it ended may still be
+  // animating out; the swipes need the one scroller that remains.
+  await expect(page.locator(DEMO_SCROLLER)).toHaveCount(1);
 }
 
 test.describe("Hero demo on a phone", () => {

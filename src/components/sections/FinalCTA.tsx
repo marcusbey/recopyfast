@@ -4,8 +4,10 @@ import { motion, useInView } from "framer-motion";
 import { useRef } from "react";
 import { ArrowRight, Zap } from "lucide-react";
 import Link from "next/link";
+import type { FoundingOfferView } from "@/hooks/useFoundingOffer";
+import { foundingOfferTrustLead } from "./founding-offer-copy";
 
-export default function FinalCTA() {
+export default function FinalCTA({ offer }: { offer: FoundingOfferView }) {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, margin: "-100px" });
 
@@ -92,23 +94,34 @@ export default function FinalCTA() {
           className="mt-16 flex flex-wrap justify-center items-center gap-6 text-sm text-slate-800"
         >
           {/*
-            These two were removed once, when there was no trial anywhere and
-            subscription Checkout always collected a card — both were claims the
-            product broke. They are true again because a new account is granted
-            14 days of Pro at sign-in, with no Stripe customer and no card (see
-            src/lib/billing/trial.ts). If that grant is ever removed, these go
-            with it.
+            The first item follows the founding-offer count (s47b): "3 months
+            free for the first N" while spots remain, "14-day free trial" once
+            they are gone or the count is unknown, "Free trial" while it loads.
+            It used to be a fixed "14-day free trial", which undersold the
+            first 20 accounts (s47a grants them 90 days).
+
+            The other two hold under both grants. They were removed once, when
+            there was no trial anywhere and subscription Checkout always
+            collected a card — claims the product broke. They are true again
+            because a new account is granted Pro at sign-in, with no Stripe
+            customer and no card (see src/lib/billing/trial.ts). If that grant
+            is ever removed, these go with it.
+
+            The dots were emerald-500, a hue the design system forbids on the
+            marketing surface. They are teal-600, the same as the Pricing
+            trust-row checks. Not `bg-primary`: app tokens are `light-dark()`
+            and would follow OS dark mode on a page that is pinned light.
           */}
           <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-            14-day free trial
+            <span className="w-1.5 h-1.5 bg-teal-600 rounded-full" />
+            {foundingOfferTrustLead(offer)}
           </span>
           <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            <span className="w-1.5 h-1.5 bg-teal-600 rounded-full" />
             No credit card required
           </span>
           <span className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            <span className="w-1.5 h-1.5 bg-teal-600 rounded-full" />
             Cancel anytime
           </span>
         </motion.div>

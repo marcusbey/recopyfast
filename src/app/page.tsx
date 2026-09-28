@@ -11,6 +11,10 @@ import Benefits from "@/components/sections/Benefits";
 import Pricing from "@/components/sections/Pricing";
 import FinalCTA from "@/components/sections/FinalCTA";
 import HeroDemo from "@/components/landing/HeroDemo";
+import {
+  toFoundingOfferView,
+  useFoundingOffer,
+} from "@/hooks/useFoundingOffer";
 
 // Dynamic import to avoid SSR issues with Three.js. The loading gradient runs
 // the same horizon-to-zenith ramp as the shader, so the hand-off is a sharpening
@@ -33,6 +37,10 @@ export default function Home() {
      is the cost useLenis exists to avoid. */
   useLenis();
 
+  /* One request for every section that names the founding offer, so the hero
+     and the pricing card cannot disagree about the count (s47b). */
+  const offer = toFoundingOfferView(useFoundingOffer());
+
   return (
     <div className="min-h-screen">
       {/* Volumetric sky above the fold, cheap layered sky below it. */}
@@ -40,7 +48,7 @@ export default function Home() {
 
       <Header />
       <main className="relative z-10">
-        <Hero />
+        <Hero offer={offer} />
 
         {/* The demo, pinned under the headline while page scroll drives the
             demo site's own scroll. See HeroDemo for the mechanics. */}
@@ -60,8 +68,8 @@ export default function Home() {
 
         <HowItWorks />
         <Benefits />
-        <Pricing />
-        <FinalCTA />
+        <Pricing offer={offer} />
+        <FinalCTA offer={offer} />
       </main>
       <Footer />
     </div>
