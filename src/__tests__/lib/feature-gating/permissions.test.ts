@@ -368,6 +368,36 @@ describe("Feature Gating Permissions", () => {
       expect(result.error).toBe("Insufficient credits");
       expect(mockInsert).not.toHaveBeenCalled();
     });
+
+    // s48: a refund is keyed by the receipt of the charge it undoes, so the
+    // route that charged must get that receipt back from here.
+    it("consumeFeatureUsage passes the charge receipt through", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
+      asMock(getUserCreditBalance).mockResolvedValue(creditBalance(100));
+      const charge = {
+        usageId: "usage-1",
+        userId: testUserId,
+        credits: CREDIT_COSTS.AI_SUGGESTION,
+      };
+      asMock(consumeCredits).mockResolvedValue({
+        success: true,
+        remainingCredits: 99,
+        charge,
+      });
+
+      const result = await consumeFeatureUsage(testUserId, "ai_suggestion");
+
+      expect(result).toEqual({ success: true, charge });
+    });
+
+    it("collaboration returns no receipt", async () => {
+      asMock(getEffectivePlan).mockResolvedValue(entitled(PRO_PLAN));
+
+      const result = await consumeFeatureUsage(testUserId, "collaboration");
+
+      expect(result).toEqual({ success: true });
+      expect(consumeCredits).not.toHaveBeenCalled();
+    });
   });
 
   /**

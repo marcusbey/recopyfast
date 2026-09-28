@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createClient } from "@/lib/supabase/server";
-import { CREDIT_COSTS, refundCredits } from "@/lib/credits/system";
+import {
+  CREDIT_COSTS,
+  refundCharge,
+  type CreditCharge,
+} from "@/lib/credits/system";
 import { consumeFeatureUsage } from "@/lib/feature-gating/permissions";
 import { sanitizeHTML } from "@/lib/security/content-sanitizer";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
@@ -23,6 +27,21 @@ const MAX_CONTEXT_LENGTH = 1000;
  */
 const MAX_ELEMENTS_PER_REQUEST = 100;
 const MAX_ELEMENT_TEXT_LENGTH = 5000;
+
+/** Ours, for a batch that reported success with no rows; never provider text. */
+const NOTHING_TRANSLATED = "No text could be translated.";
+
+/**
+ * The credits to give back when only part of a batch came back.
+ *
+ * A request costs a flat `AI_TRANSLATION` whatever its size, so the failed
+ * share is that cost pro rata, rounded UP: rounding favours the customer by at
+ * most one credit, and `refund_credit_usage` caps the total at what was
+ * charged. Per-text pricing (REPORT defect 8) will remove the rounding.
+ */
+function failedShare(failed: number, total: number): number {
+  return Math.ceil((CREDIT_COSTS.AI_TRANSLATION * failed) / total);
+}
 
 interface TranslationElement {
   id: string;
@@ -69,6 +88,12 @@ function parseElements(
 }
 
 export async function POST(request: NextRequest) {
+  // The receipt of THIS request's charge, once it has landed (s48). The catch
+  // refunds exactly that, so a failure before the charge gives nothing back,
+  // and a failure after it — the model call throwing — no longer keeps it.
+  // Before s48 the catch never refunded at all (REPORT defect 1).
+  let charge: CreditCharge | null = null;
+
   try {
     // Pre-auth IP limit: throttle the unauthenticated path before it can be
     // used to probe for valid sessions against a paid endpoint.
@@ -186,6 +211,22 @@ export async function POST(request: NextRequest) {
     });
     if (siteLimited) return siteLimited;
 
+    // Fail closed on configuration, BEFORE anyone is charged (s48, defect 1).
+    // Without a key every model call throws inside `translateText`, which
+    // swallows it; the route charged 5 credits and answered "Successfully
+    // translated 0 elements" (next-dev-refund.log). Same check, same reason as
+    // /api/ai/suggest: the variable is in neither `validateConfig` nor
+    // `/api/health`, so this log line is where its absence becomes visible.
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      console.error(
+        "[ai/translate] OPENAI_API_KEY is not set in this environment — refusing translation before charging anyone.",
+      );
+      return NextResponse.json(
+        { error: "AI translation is not available right now." },
+        { status: 503 },
+      );
+    }
+
     // Check feature access and consume usage
     const usageResult = await consumeFeatureUsage(user.id, "translation", {
       siteId,
@@ -205,6 +246,7 @@ export async function POST(request: NextRequest) {
         { status: 403 },
       );
     }
+    charge = usageResult.charge ?? null;
 
     // Translate all elements
     const result = await aiService.batchTranslate(
@@ -214,21 +256,34 @@ export async function POST(request: NextRequest) {
       context,
     );
 
-    if (!result.success) {
-      // Credits were charged before the model was called, so a provider failure
-      // would otherwise bill the customer for nothing.
-      await refundCredits(
-        user.id,
-        CREDIT_COSTS.AI_TRANSLATION,
-        "translation_failed",
+    const translated = result.success ? (result.data ?? []) : [];
+
+    if (translated.length === 0) {
+      // Credits were charged before the model was called, so a batch that
+      // translated nothing gives the whole charge back. This branch used to be
+      // unreachable: `batchTranslate` reported `success: true` with no rows
+      // (s48, defect 1). Cleared first so the catch cannot refund it again.
+      const failedCharge = charge;
+      charge = null;
+      if (failedCharge) {
+        await refundCharge(failedCharge);
+      }
+      return NextResponse.json(
+        { error: result.error ?? NOTHING_TRANSLATED },
+        { status: 500 },
       );
-      return NextResponse.json({ error: result.error }, { status: 500 });
+    }
+
+    // Part of the batch failed: the customer pays for the share that came back.
+    const failed = elements.length - translated.length;
+    if (failed > 0 && charge) {
+      await refundCharge(charge, failedShare(failed, elements.length));
     }
 
     // Save translations to database as new language variant.
     // Sanitize AI-generated content before writing (XSS prevention — AI output
     // can contain injected markup if the source content was adversarially crafted).
-    const translatedElements = result.data!.map((translation) => ({
+    const translatedElements = translated.map((translation) => ({
       site_id: siteId,
       element_id: translation.id,
       selector: "", // Will be populated from existing element
@@ -257,12 +312,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      translations: result.data,
+      translations: translated,
       tokensUsed: result.tokensUsed,
-      message: `Successfully translated ${result.data!.length} elements to ${toLanguage}`,
+      message: `Successfully translated ${translated.length} elements to ${toLanguage}`,
     });
   } catch (error) {
     console.error("Translation API error:", error);
+    // A charge that landed goes back. After a partial refund this asks for
+    // the full charge again; `refund_credit_usage` caps it at what is left.
+    if (charge) {
+      await refundCharge(charge);
+    }
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },

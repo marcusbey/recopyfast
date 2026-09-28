@@ -25,7 +25,7 @@ jest.mock("@/lib/billing/entitlements", () => ({
   getEffectivePlan: jest.fn(),
 }));
 
-import { addPurchasedCredits, refundCredits } from "@/lib/credits/system";
+import { addPurchasedCredits } from "@/lib/credits/system";
 
 const NOT_NULL_VIOLATION = {
   code: "23502",
@@ -115,17 +115,6 @@ describe("granting credits before the migration has run", () => {
     expect(console.warn).toHaveBeenCalledWith(
       expect.stringContaining("20260802020000"),
     );
-  });
-
-  it("refunds survive the same schema gap", async () => {
-    insert
-      .mockResolvedValueOnce({ error: NOT_NULL_VIOLATION })
-      .mockResolvedValueOnce({ error: null });
-
-    const result = await refundCredits("user-1", 50, "ai_failed");
-
-    expect(result.success).toBe(true);
-    expect(insert.mock.calls[1][0].expires_at).toBe(NEVER);
   });
 });
 

@@ -350,6 +350,7 @@ describe("lifetime Founding Agency allowance", () => {
       purchased: 0,
       total: 250,
       usedThisMonth: 0,
+      windowStart: expect.any(String),
     });
   });
 
@@ -367,6 +368,7 @@ describe("lifetime Founding Agency allowance", () => {
       purchased: 1000,
       total: 210 + 1000,
       usedThisMonth: 40,
+      windowStart: expect.any(String),
     });
   });
 

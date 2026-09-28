@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiService } from "@/lib/ai/openai-service";
 import { createServiceRoleClient } from "@/lib/supabase/service";
-import { CREDIT_COSTS, refundCredits } from "@/lib/credits/system";
+import { refundCharge, type CreditCharge } from "@/lib/credits/system";
 import {
   consumeFeatureUsage,
   resolveSiteOwnerId,
@@ -137,32 +137,36 @@ function fail(
 /**
  * Give back what this request took, after the model failed to deliver.
  *
+ * By the receipt the charge returned (s48), never by the owner's id: the old
+ * owner-keyed refund, `(ownerId, 1, reason)`, could not know the credit had
+ * come from the owner's monthly allowance, so it minted a new never-expiring
+ * purchased credit AND left the allowance spent (probe P2) — a paid-looking
+ * balance that kept a lapsed trial past the paywall (P3). `refundCharge` returns the credit to
+ * where it came from and never creates a row.
+ *
  * Never throws: it runs on the way out of a failure, and a refund that threw
  * from the `catch` would turn a 500 with CORS into an unhandled rejection the
- * widget cannot read. `refundCredits` logs its own insert failure.
+ * widget cannot read. `refundCharge` logs its own failure and never throws; the
+ * guard stays because this is the last line before the response.
  */
-async function refundOwner(ownerId: string): Promise<void> {
+async function refundOwner(charge: CreditCharge): Promise<void> {
   try {
-    await refundCredits(
-      ownerId,
-      CREDIT_COSTS.AI_SUGGESTION,
-      "ai_suggestion_failed",
-    );
+    await refundCharge(charge);
   } catch (refundError) {
     console.error(
-      `[ai/suggest] refund to site owner ${ownerId} failed:`,
+      `[ai/suggest] refund to site owner ${charge.userId} failed:`,
       refundError,
     );
   }
 }
 
 export async function POST(request: NextRequest) {
-  // Who was charged by THIS request, once and only once the charge has landed.
+  // The receipt of THIS request's charge, once and only once it has landed.
   // The `catch` below refunds exactly that: a failure before the charge (the
-  // owner lookup, the gate itself) took nothing and must give nothing back —
-  // a refund is a fresh non-expiring grant, so an unconditional one would mint
-  // credits on every failed lookup.
-  let chargedOwnerId: string | null = null;
+  // owner lookup, the gate itself) took nothing and must give nothing back.
+  // Once refunded it is cleared, so the `catch` cannot refund it a second time
+  // (the database would cap a second refund at 0 anyway — s48).
+  let charge: CreditCharge | null = null;
 
   try {
     // Pre-auth IP limit. Every request here is a potential OpenAI call, so the
@@ -292,7 +296,7 @@ export async function POST(request: NextRequest) {
         requiresUpgrade: true,
       });
     }
-    chargedOwnerId = ownerId;
+    charge = usageResult.charge ?? null;
 
     // Generate content suggestions
     const result = await aiService.generateContentSuggestion({
@@ -315,8 +319,11 @@ export async function POST(request: NextRequest) {
         `[ai/suggest] provider failed for site ${siteId.value}; refunding the owner:`,
         result.error,
       );
-      chargedOwnerId = null;
-      await refundOwner(ownerId);
+      const failedCharge = charge;
+      charge = null;
+      if (failedCharge) {
+        await refundOwner(failedCharge);
+      }
       return fail(request, 502, {
         error:
           "AI suggestions are unavailable right now. You were not charged.",
@@ -334,8 +341,8 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     console.error("Content suggestion API error:", error);
-    if (chargedOwnerId) {
-      await refundOwner(chargedOwnerId);
+    if (charge) {
+      await refundOwner(charge);
     }
     return fail(request, 500, { error: "Internal server error" });
   }

@@ -10,6 +10,7 @@ import {
   getUserCreditBalance,
   consumeCredits,
   CREDIT_COSTS,
+  type CreditCharge,
 } from "@/lib/credits/system";
 
 /**
@@ -487,7 +488,7 @@ export async function consumeFeatureUsage(
   feature: "ai_suggestion" | "translation" | "collaboration",
   metadata?: Record<string, unknown>,
   client?: SupabaseClient,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; charge?: CreditCharge }> {
   const supabase = client ?? (await createClient());
 
   let creditsRequired = 0;
@@ -505,6 +506,10 @@ export async function consumeFeatureUsage(
     return { success: false, error: permission.reason };
   }
 
+  // The receipt of the charge, handed back so the route that charged can
+  // refund exactly this charge if the model then fails (s48).
+  let charge: CreditCharge | undefined;
+
   if (feature === "ai_suggestion" || feature === "translation") {
     const result = await consumeCredits(
       userId,
@@ -517,6 +522,7 @@ export async function consumeFeatureUsage(
     if (!result.success) {
       return { success: false, error: result.error };
     }
+    charge = result.charge;
   }
 
   await supabase.from("usage_tracking").insert({
@@ -529,7 +535,7 @@ export async function consumeFeatureUsage(
     },
   });
 
-  return { success: true };
+  return charge ? { success: true, charge } : { success: true };
 }
 
 /**

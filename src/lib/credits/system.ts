@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -8,7 +7,7 @@ import {
   readTrialGrant,
   resolveEntitlement,
 } from "@/lib/billing/effective-plan";
-import { readPurchasedCreditBalance, spendableFilter } from "./spendable";
+import { isLegacyRefundGrant, readPurchasedCreditBalance } from "./spendable";
 import type { CreditTransaction, CreditWallet } from "@/types/billing";
 
 /**
@@ -41,6 +40,18 @@ export interface CreditBalance {
   purchased: number; // Purchased credits, which do not expire
   total: number; // Total available credits
   usedThisMonth: number; // Credits used in the current billing period
+  windowStart: string; // Start of the allowance window usedThisMonth is summed over
+}
+
+/**
+ * The receipt of a charge that landed: the `credit_usage` row `spend_credits`
+ * wrote, whose wallet it was, and how much. A refund is keyed by this and by
+ * nothing else — see `refundCharge`.
+ */
+export interface CreditCharge {
+  usageId: string;
+  userId: string;
+  credits: number;
 }
 
 /**
@@ -215,6 +226,7 @@ export async function getUserCreditBalance(
     purchased: purchasedCredits,
     total: Math.max(0, includedCredits - usedThisMonth) + purchasedCredits,
     usedThisMonth,
+    windowStart: startOfPeriod,
   };
 }
 
@@ -333,99 +345,39 @@ export async function hasEnoughCredits(
   return balance.total >= creditsRequired;
 }
 
-/**
- * Consume credits for an AI operation
- */
-const MAX_DEDUCT_ATTEMPTS = 8;
-
-/**
- * Decrement purchased credits with compare-and-swap so two overlapping spends
- * cannot both write the same `credits_remaining` snapshot.
- *
- * A missed CAS is a retry, not a silent success. Usage is written only after
- * this returns ok, so a failed deduct cannot leave the customer billed.
- */
-async function deductPurchasedCredits(
-  supabase: SupabaseClient,
-  userId: string,
-  amount: number,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (amount <= 0) {
-    return { ok: true };
-  }
-
-  for (let attempt = 0; attempt < MAX_DEDUCT_ATTEMPTS; attempt++) {
-    const { data: purchases, error: purchasesError } = await supabase
-      .from("credit_purchases")
-      .select("id, credits_remaining")
-      .eq("user_id", userId)
-      .gt("credits_remaining", 0)
-      .or(spendableFilter())
-      .order("created_at", { ascending: true });
-
-    if (purchasesError) {
-      console.error("Error loading credit purchases:", purchasesError);
-      return { ok: false, error: "Failed to deduct purchased credits" };
-    }
-
-    let remainingToDeduct = amount;
-    const steps: Array<{ id: string; from: number; to: number }> = [];
-
-    for (const purchase of purchases || []) {
-      if (remainingToDeduct <= 0) break;
-      const available = Number(purchase.credits_remaining);
-      const toDeduct = Math.min(remainingToDeduct, available);
-      steps.push({
-        id: purchase.id,
-        from: available,
-        to: available - toDeduct,
-      });
-      remainingToDeduct -= toDeduct;
-    }
-
-    if (remainingToDeduct > 0) {
-      return { ok: false, error: "Failed to deduct purchased credits" };
-    }
-
-    let collided = false;
-
-    for (const step of steps) {
-      const { data: updated, error: deductError } = await supabase
-        .from("credit_purchases")
-        .update({ credits_remaining: step.to })
-        .eq("id", step.id)
-        .eq("credits_remaining", step.from)
-        .select("id");
-
-      if (deductError) {
-        console.error("Error deducting purchased credits:", deductError);
-        return { ok: false, error: "Failed to deduct purchased credits" };
-      }
-
-      if (!updated || updated.length === 0) {
-        collided = true;
-        break;
-      }
-    }
-
-    if (!collided) {
-      return { ok: true };
-    }
-  }
-
-  return { ok: false, error: "Failed to deduct purchased credits" };
+/** One row of `spend_credits` (migration 20260928110000). */
+interface SpendCreditsRow {
+  outcome: string;
+  usage_id: string | null;
+  from_allowance: number;
+  from_purchased: number;
+  remaining: number;
 }
 
 /**
- * Spend `credits` from `userId`'s wallet.
+ * Spend `credits` from `userId`'s wallet, and return the receipt a refund needs.
+ *
+ * The whole charge is one call to `spend_credits` (migration 20260928110000,
+ * ADR 040): under a per-user lock it draws the allowance first, then purchase
+ * rows oldest first, and records the usage row with the rows it debited — or
+ * refuses without writing anything. It replaced a TypeScript compare-and-swap
+ * loop that, on a collision, restarted with the full amount without undoing
+ * the rows it had already decremented: twelve concurrent charges lost 2–9
+ * credits per round and refused requests the wallet covered (probe P4), and
+ * two concurrent charges could both draw the same allowance. Do not move any
+ * part of the spend back out of the function.
+ *
+ * TypeScript keeps one half: `getUserCreditBalance` decides how much is
+ * included and since when, and both are passed in. No plan or window rule
+ * lives in SQL.
  *
  * `client` exists for s40, and it is the one place in this module that can
  * move somebody else's money. `POST /api/ai/suggest` is called by the widget on
  * a customer's origin: there is no cookie session there, so the cookie client
  * resolved every payer to "no plan" and every suggestion was refused, even for
  * an editor the route had just authorised. The route now passes a service-role
- * client for the SITE OWNER, and every read and write of this call — balance,
- * entitlement, compare-and-swap, usage row — goes through it.
+ * client for the SITE OWNER, and every read of this call — balance,
+ * entitlement — and the `spend_credits` call itself go through it.
  *
  * Only a route that has already authorised an editor for the site AND resolved
  * the owner from `site_permissions` may pass a service-role client here. The
@@ -442,55 +394,48 @@ export async function consumeCredits(
   operation: string,
   metadata?: Record<string, unknown>,
   client?: SupabaseClient,
-): Promise<{ success: boolean; error?: string; remainingCredits?: number }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  remainingCredits?: number;
+  charge?: CreditCharge;
+}> {
   const supabase = client ?? (await createClient());
   const balance = await getUserCreditBalance(userId, client);
 
-  if (balance.total < credits) {
+  // The allowance and its window are the TypeScript half; the arithmetic and
+  // the exclusion are the database's. No plan or window rule enters SQL.
+  const { data, error } = await supabase.rpc("spend_credits", {
+    p_user_id: userId,
+    p_credits: credits,
+    p_included: balance.included,
+    p_window_start: balance.windowStart,
+    p_operation: operation,
+    p_metadata: metadata ?? {},
+  });
+
+  const row = error ? null : (data as SpendCreditsRow[] | null)?.[0];
+
+  if (row?.outcome === "charged" && typeof row.usage_id === "string") {
     return {
-      success: false,
-      error: `Insufficient credits. You need ${credits} credits but only have ${balance.total}.`,
+      success: true,
+      remainingCredits: row.remaining,
+      charge: { usageId: row.usage_id, userId, credits },
     };
   }
 
-  // Purchased credits are only touched once the included allowance is spent.
-  const includedRemaining = Math.max(
-    0,
-    balance.included - balance.usedThisMonth,
-  );
-  const creditsToDeductFromPurchased = credits - includedRemaining;
-
-  const deducted = await deductPurchasedCredits(
-    supabase,
-    userId,
-    creditsToDeductFromPurchased,
-  );
-  if (!deducted.ok) {
-    return { success: false, error: deducted.error };
+  if (row?.outcome === "insufficient") {
+    return {
+      success: false,
+      error: `Insufficient credits. You need ${credits} credits but only have ${row.remaining}.`,
+    };
   }
 
-  const { error: usageError } = await supabase.from("credit_usage").insert({
-    user_id: userId,
-    credits_used: credits,
-    operation,
-    metadata,
-  });
-
-  if (usageError) {
-    console.error("Error recording credit usage:", usageError);
-    if (creditsToDeductFromPurchased > 0) {
-      await refundCredits(
-        userId,
-        creditsToDeductFromPurchased,
-        `usage_insert_failed_${operation}`,
-      );
-    }
-    return { success: false, error: "Failed to record credit usage" };
-  }
-
-  const newBalance = await getUserCreditBalance(userId, client);
-
-  return { success: true, remainingCredits: newBalance.total };
+  console.error(
+    `spend_credits did not charge ${userId} for ${operation}:`,
+    error ?? row ?? "no row returned",
+  );
+  return { success: false, error: "Failed to charge credits" };
 }
 
 /**
@@ -548,41 +493,68 @@ export async function addPurchasedCredits(
 }
 
 /**
- * Refund credits from a failed operation.
+ * Give back all or part of a charge, to where it came from.
  *
- * Adds a fresh non-expiring grant rather than trying to restore the exact rows
- * that were decremented: the monotonicity trigger on `credit_purchases`
- * deliberately forbids increasing `credits_remaining`, and reversing that for
- * refunds would reopen the hole it exists to close.
+ * Keyed by the receipt `consumeCredits` returned in the same request, and by
+ * nothing else: never an id from a request body, never a bare user id. The
+ * refund it replaced took `(userId, credits)`, could not know where a charge
+ * came from, and so minted a new never-expiring "purchased" row every time —
+ * even for a charge the monthly allowance had paid, which then stayed counted
+ * as used (probe P2). That row alone let a lapsed, never-paying trial through
+ * the paywall (probe P3). `refund_credit_usage` instead returns purchased
+ * credits first, into the exact rows the charge debited, then the allowance by
+ * lowering the charge's net `credits_used` — so the wallet ends as if only the
+ * kept share had been charged, and no row is ever created.
+ *
+ * Service role only: raising `credits_remaining` is refused by the
+ * monotonicity trigger for everyone else, and `authenticated` cannot execute
+ * the function at all. The database caps the amount at what the charge still
+ * holds, so refunding a receipt twice (a provider failure, then the catch)
+ * never returns more than was taken.
+ *
+ * Never throws: it runs on the way out of a failure. Returns what was actually
+ * given back.
  */
-export async function refundCredits(
-  userId: string,
-  credits: number,
-  reason: string,
-): Promise<{ success: boolean; error?: string }> {
-  if (!Number.isInteger(credits) || credits <= 0) {
-    return {
-      success: false,
-      error: "Refund amount must be a positive integer",
-    };
+export async function refundCharge(
+  charge: CreditCharge,
+  credits: number = charge.credits,
+): Promise<{ success: boolean; refunded: number }> {
+  if (!Number.isInteger(credits) || credits <= 0 || credits > charge.credits) {
+    console.error(
+      `refundCharge refused ${credits} credits for usage ${charge.usageId}, which charged ${charge.credits}`,
+    );
+    return { success: false, refunded: 0 };
   }
 
-  const supabase = createServiceRoleClient();
+  try {
+    const { data, error } = await createServiceRoleClient().rpc(
+      "refund_credit_usage",
+      {
+        p_usage_id: charge.usageId,
+        p_user_id: charge.userId,
+        p_credits: credits,
+      },
+    );
+    const row = error
+      ? null
+      : (data as Array<{ refunded: number }> | null)?.[0];
 
-  const { error } = await insertNonExpiringGrant(supabase, {
-    user_id: userId,
-    credits_purchased: credits,
-    credits_remaining: credits,
-    price_cents: 0,
-    stripe_payment_intent_id: `refund_${reason}_${userId}_${randomUUID()}_${Date.now()}`,
-  });
+    if (!row || typeof row.refunded !== "number") {
+      console.error(
+        `refund_credit_usage failed for usage ${charge.usageId}:`,
+        error ?? "no row returned",
+      );
+      return { success: false, refunded: 0 };
+    }
 
-  if (error) {
-    console.error("Error refunding credits:", error);
-    return { success: false, error: "Failed to refund credits" };
+    return { success: true, refunded: row.refunded };
+  } catch (refundError) {
+    console.error(
+      `refund_credit_usage threw for usage ${charge.usageId}:`,
+      refundError,
+    );
+    return { success: false, refunded: 0 };
   }
-
-  return { success: true };
 }
 
 /** The `credit_purchases` grant a single Stripe payment created. */
@@ -719,7 +691,7 @@ export async function getCreditWallet(userId: string): Promise<CreditWallet> {
   const purchases = assertRead(
     await supabase
       .from("credit_purchases")
-      .select("credits_purchased")
+      .select("credits_purchased, stripe_payment_intent_id")
       .eq("user_id", userId),
     "credit_purchases totals read",
   );
@@ -737,8 +709,12 @@ export async function getCreditWallet(userId: string): Promise<CreditWallet> {
     included: balance.included,
     purchased: balance.purchased,
     usedThisMonth: balance.usedThisMonth,
+    // Paid credits only: a legacy `refund_` row was minted by the old refund,
+    // not bought — see `isLegacyRefundGrant` (s48).
     totalPurchased:
-      purchases?.reduce((sum, p) => sum + (p.credits_purchased || 0), 0) || 0,
+      purchases
+        ?.filter((p) => !isLegacyRefundGrant(p.stripe_payment_intent_id))
+        .reduce((sum, p) => sum + (p.credits_purchased || 0), 0) || 0,
     totalConsumed:
       usage?.reduce((sum, u) => sum + (u.credits_used || 0), 0) || 0,
   };
@@ -763,10 +739,13 @@ export async function getCreditTransactions(
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(limit),
+    // `credits_used` is the net charge (s48): a fully refunded request is a
+    // row at 0, which is not a consumption the customer should see.
     supabase
       .from("credit_usage")
       .select("id, credits_used, operation, created_at")
       .eq("user_id", userId)
+      .gt("credits_used", 0)
       .order("created_at", { ascending: false })
       .limit(limit),
   ]);

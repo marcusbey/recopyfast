@@ -1826,21 +1826,21 @@ Operator-prevalidated scope, 2026-09-28, from the credit purchase verification
 Branch `feature/s48-credit-integrity`. Buying credits works; spending them does not always keep
 its promise ("Unused credits are refunded if a feature fails", `PurchaseCreditsDialog.tsx:108`).
 
-- [ ] A translation request in which no text is translated (AI key missing, every provider call
+- [x] A translation request in which no text is translated (AI key missing, every provider call
   failing) charges nothing net: it reports failure, not "Successfully translated 0 elements", and
   any credits taken are returned. A partial batch returns the failed share. An error after the
   charge returns the charge. The AI key is checked before charging, as `/api/ai/suggest` does.
-- [ ] A refund returns credits to where they came from: an allowance-funded charge goes back to
+- [x] A refund returns credits to where they came from: an allowance-funded charge goes back to
   the monthly or trial allowance, and only a purchased-credit charge goes back to purchased
   credits. A refund never creates a new never-expiring purchased-credit row, so a trial account
   that never paid resolves to `none` after its trial whether or not it had a refunded failure.
-- [ ] Concurrent AI requests never lose credits: N simultaneous charges against a balance debit
+- [x] Concurrent AI requests never lose credits: N simultaneous charges against a balance debit
   exactly the sum of the successful charges, and no request is refused while the balance covers
   it. The deduction is one database function (AGENTS.md: multi-step writes are one transaction),
   proved against real Postgres with a concurrency test CI runs (12 at once, repeated).
-- [ ] "Total purchased" counts only paid credits (refund credits are no longer written as
+- [x] "Total purchased" counts only paid credits (refund credits are no longer written as
   purchases, see above).
-- [ ] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
+- [x] Required local gates pass (in a worktree); one story commit. No push, PR, merge or
   production action. Operator after merge: apply the migration first, then deploy.
 
 Agentic notes: evidence and reproduction scripts in `.omx/qa-20260927/` (`credits-probes.ts`,

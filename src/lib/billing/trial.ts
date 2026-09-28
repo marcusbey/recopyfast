@@ -67,9 +67,9 @@ function trialExpiry(): string {
  * for `authenticated` — the same reason the lifetime grant is written that way.
  * An account must never be able to hand itself a plan.
  *
- * `stripe_payment_intent_id` stays NULL. `refundCredits` fabricates a synthetic
- * key for `credit_purchases`, and copying that habit here would put a
- * payment-shaped id on a row nobody paid for. The uniqueness that makes "one
+ * `stripe_payment_intent_id` stays NULL. The old credit refund (removed in s48)
+ * fabricated a synthetic `refund_…` key for `credit_purchases`, and copying that
+ * habit here would put a payment-shaped id on a row nobody paid for. The uniqueness that makes "one
  * trial per account, ever" true comes from the partial unique index on
  * `(user_id) WHERE source = 'trial'`
  * (20260817000000_trial_entitlements.sql), which is also the only thing that

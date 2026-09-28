@@ -42,7 +42,7 @@ jest.mock("@/lib/feature-gating/permissions", () => ({
 
 jest.mock("@/lib/credits/system", () => ({
   CREDIT_COSTS: { AI_SUGGESTION: 1 },
-  refundCredits: jest.fn(),
+  refundCharge: jest.fn(),
 }));
 
 jest.mock("@/lib/api/rate-limit", () => ({
@@ -60,7 +60,7 @@ import {
   consumeFeatureUsage,
   resolveSiteOwnerId,
 } from "@/lib/feature-gating/permissions";
-import { refundCredits } from "@/lib/credits/system";
+import { refundCharge } from "@/lib/credits/system";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 const mockAiService = aiService as jest.Mocked<typeof aiService>;
@@ -68,11 +68,13 @@ const mockCreateServiceRoleClient = createServiceRoleClient as jest.Mock;
 const mockValidate = validateEditorTokenFromRequest as jest.Mock;
 const mockConsumeFeatureUsage = consumeFeatureUsage as jest.Mock;
 const mockResolveSiteOwnerId = resolveSiteOwnerId as jest.Mock;
-const mockRefundCredits = refundCredits as jest.Mock;
+const mockRefundCharge = refundCharge as jest.Mock;
 const mockEnforceRateLimit = enforceRateLimit as jest.Mock;
 
 const SITE_ID = "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f";
 const OWNER_ID = "owner-user-1";
+/** What the mocked charge returns; a refund must be keyed by exactly this. */
+const RECEIPT = { usageId: "usage-suggest-1", userId: OWNER_ID, credits: 1 };
 const SERVICE_CLIENT = { service: true };
 
 const GRANT_EDITOR: EditorAccess = {
@@ -127,8 +129,11 @@ describe("/api/ai/suggest - POST", () => {
     mockValidate.mockResolvedValue({ valid: true, access: GRANT_EDITOR });
     mockCreateServiceRoleClient.mockReturnValue(SERVICE_CLIENT);
     mockResolveSiteOwnerId.mockResolvedValue(OWNER_ID);
-    mockConsumeFeatureUsage.mockResolvedValue({ success: true });
-    mockRefundCredits.mockResolvedValue({ success: true });
+    mockConsumeFeatureUsage.mockResolvedValue({
+      success: true,
+      charge: RECEIPT,
+    });
+    mockRefundCharge.mockResolvedValue({ success: true, refunded: 1 });
   });
 
   afterEach(() => {
@@ -725,11 +730,10 @@ describe("/api/ai/suggest - POST", () => {
       const response = await POST(postRequest(validBody));
       const data = await response.json();
 
-      expect(mockRefundCredits).toHaveBeenCalledWith(
-        OWNER_ID,
-        1,
-        "ai_suggestion_failed",
-      );
+      // The receipt the charge returned — never the owner id, which could
+      // only mint a fresh credit (s48, probe P2).
+      expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+      expect(mockRefundCharge).toHaveBeenCalledTimes(1);
       expect(response.status).toBe(502);
       expect(data).toEqual({
         error:
@@ -754,19 +758,16 @@ describe("/api/ai/suggest - POST", () => {
 
       // Reached the model — this 500 is the model's failure, not an earlier crash.
       expect(mockAiService.generateContentSuggestion).toHaveBeenCalledTimes(1);
-      expect(mockRefundCredits).toHaveBeenCalledWith(
-        OWNER_ID,
-        1,
-        "ai_suggestion_failed",
-      );
+      expect(mockRefundCharge).toHaveBeenCalledWith(RECEIPT);
+      expect(mockRefundCharge).toHaveBeenCalledTimes(1);
       expect(response.status).toBe(500);
       expect(data).toEqual({ error: "Internal server error" });
       expectPublicCors(response);
     });
 
     it("refunds nothing when the gate itself throws, before the charge landed", async () => {
-      // A refund is a fresh non-expiring grant. Refunding a charge that never
-      // happened would mint a credit on every failed balance read.
+      // No charge landed, so there is no receipt: the route must not refund,
+      // and before s48 a refund here minted a credit on every failed read.
       mockConsumeFeatureUsage.mockRejectedValueOnce(
         new Error("credit_purchases read failed: connection reset"),
       );
@@ -775,7 +776,7 @@ describe("/api/ai/suggest - POST", () => {
 
       expect(mockConsumeFeatureUsage).toHaveBeenCalledTimes(1);
       expect(response.status).toBe(500);
-      expect(mockRefundCredits).not.toHaveBeenCalled();
+      expect(mockRefundCharge).not.toHaveBeenCalled();
       expectPublicCors(response);
     });
   });
