@@ -50,6 +50,7 @@ jest.mock("@/lib/stripe/payment-methods", () => ({
 
 jest.mock("@/lib/billing/effective-plan", () => ({
   readTrialGrant: jest.fn(),
+  readGrantedPlanIds: jest.fn(),
 }));
 
 import { GET } from "@/app/api/billing/dashboard/route";
@@ -57,7 +58,10 @@ import { getUserSubscription } from "@/lib/stripe/subscription";
 import { getCreditWallet, getCreditTransactions } from "@/lib/credits/system";
 import { getPlanCatalogue } from "@/lib/stripe/plans";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
-import { readTrialGrant } from "@/lib/billing/effective-plan";
+import {
+  readGrantedPlanIds,
+  readTrialGrant,
+} from "@/lib/billing/effective-plan";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
 
@@ -91,6 +95,8 @@ beforeEach(() => {
   asMock(getCreditTransactions).mockResolvedValue([]);
   asMock(getPlanCatalogue).mockResolvedValue(CATALOGUE);
   asMock(readTrialGrant).mockResolvedValue(null);
+  // No permanent grant unless a test says otherwise (PR #49 finding 2).
+  asMock(readGrantedPlanIds).mockResolvedValue([]);
 });
 
 const DAY_MS = 24 * 60 * 60 * 1000;

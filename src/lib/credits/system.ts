@@ -185,15 +185,21 @@ export async function getUserCreditBalance(
   // would eventually disagree about which rows still count.
   const purchasedCredits = await readPurchasedCreditBalance(supabase, userId);
 
-  // A trial's allowance is granted once, for the whole trial.
+  // A trial's allowance runs in monthly windows anchored on its own grant.
   //
   // A trialling account resolves to `pro` and therefore inherits Pro's 500
   // included credits — nobody grants them, they fall out of the plan. But with
   // no subscription row the window below defaulted to the calendar month, so a
   // trial started on the 25th drew 500 credits and then 500 more on the 1st:
-  // 1,000 credits of OpenAI spend on fourteen card-less days. The trial's own
-  // `granted_at` makes it one non-renewing window regardless of which dates it
-  // spans, which is the "a trial never grants uncapped spend" half of AC 8.
+  // 1,000 credits of OpenAI spend on fourteen card-less days. Anchoring on the
+  // trial's own `granted_at` closes that, which is the "a trial never grants
+  // uncapped spend" half of AC 8.
+  //
+  // s47a (ADR 039) steps that anchor on each monthly anniversary, because the
+  // founding offer is a 90-day trial row metered at 100 a MONTH: a single
+  // window would give it 100 in total. A 14-day trial never reaches its first
+  // anniversary — the shortest gap between two is 28 days — so for it this is
+  // still one non-renewing window, exactly as before.
   //
   // Below the subscription deliberately: once someone converts, the thing being
   // billed owns the period again, and the lapsing trial grant must not hold the
@@ -208,7 +214,10 @@ export async function getUserCreditBalance(
         )
         ? startOfCurrentAllowanceWindow(subscription.current_period_start)
         : subscription.current_period_start
-      : null) || (trial?.isActive ? trial.grantedAt : startOfCurrentMonth());
+      : null) ||
+    (trial?.isActive
+      ? startOfCurrentAllowanceWindow(trial.grantedAt)
+      : startOfCurrentMonth());
 
   const usage = assertRead(
     await supabase

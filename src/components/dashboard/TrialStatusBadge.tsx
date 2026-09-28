@@ -60,7 +60,17 @@ export function TrialStatusBadge() {
   if (!trial) return null;
 
   const { daysRemaining } = trial;
-  const label = `Trial — ${daysRemaining} ${daysRemaining === 1 ? "day" : "days"} left`;
+  const daysLeft = `${daysRemaining} ${daysRemaining === 1 ? "day" : "days"} left`;
+  // s47a: the founding offer is the account's one trial row, so it arrives on
+  // the same payload with `offerId` set. Only the words change — it is 90 days
+  // of Pro, not a 14-day trial, and must never read as one.
+  const isFoundingOffer = Boolean(trial.offerId);
+  const label = isFoundingOffer
+    ? `Founding offer — ${daysLeft}`
+    : `Trial — ${daysLeft}`;
+  const description = isFoundingOffer
+    ? `Your founding offer gives you Pro until ${formatEndDate(trial.endsAt)}. Open billing to choose a plan.`
+    : `Your Pro trial ends ${formatEndDate(trial.endsAt)}. Open billing to upgrade.`;
 
   return (
     <Link
@@ -68,11 +78,12 @@ export function TrialStatusBadge() {
       className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <StatusBadge
+        className={isFoundingOffer ? "tabular" : undefined}
         status={{
           label,
           tone: toneFor(daysRemaining),
           icon: Clock,
-          description: `Your Pro trial ends ${formatEndDate(trial.endsAt)}. Open billing to upgrade.`,
+          description,
         }}
       />
     </Link>

@@ -4,7 +4,10 @@ import { getUserSubscription } from "@/lib/stripe/subscription";
 import { getCreditWallet, getCreditTransactions } from "@/lib/credits/system";
 import { getPlanCatalogue } from "@/lib/stripe/plans";
 import { getEffectivePlan } from "@/lib/billing/entitlements";
-import { readTrialGrant } from "@/lib/billing/effective-plan";
+import {
+  readGrantedPlanIds,
+  readTrialGrant,
+} from "@/lib/billing/effective-plan";
 import { trialDaysRemaining } from "@/lib/billing/trial";
 import { listPaymentMethods } from "@/lib/stripe/payment-methods";
 import type { BillingDashboardData, PaymentMethod } from "@/types/billing";
@@ -140,7 +143,20 @@ export async function GET() {
     // conversion seamless — so "unexpired" stops meaning "still trialling" at
     // the moment someone starts paying, and the card has to disappear then.
     const trialGrant = await readTrialGrant(supabase, user.id);
-    const isTrialling = Boolean(trialGrant?.isActive) && !subscription;
+    // A permanent non-trial grant converts too, with no subscription row: a
+    // Lifetime or Founding Agency purchase, or a comp. The unexpired trial row
+    // survives underneath it, so without this a founding offer holder who had
+    // just paid outright kept a card counting down and saying "Choose a plan"
+    // (PR #49 review, finding 2). Same rule as the badge's
+    // (`/api/billing/entitlement`), and only asked when it can matter.
+    const isTrialling =
+      Boolean(trialGrant?.isActive) &&
+      !subscription &&
+      (await readGrantedPlanIds(supabase, user.id)).length === 0;
+    // s47a: a founding offer that has lapsed or been released. Spread below,
+    // like `offerId`, so every other account's payload keeps its old keys.
+    const endedOfferId =
+      trialGrant && !trialGrant.isActive ? trialGrant.offerId : undefined;
 
     const dashboardData: BillingDashboardData = {
       customer: customer || undefined,
@@ -159,9 +175,11 @@ export async function GET() {
               endsAt: trialGrant.expiresAt,
               creditsUsed: creditWallet.usedThisMonth,
               creditsLimit: creditWallet.included,
+              ...(trialGrant.offerId ? { offerId: trialGrant.offerId } : {}),
             }
           : null,
       everTrialed: trialGrant !== null,
+      ...(endedOfferId ? { endedOfferId } : {}),
     };
 
     return NextResponse.json(dashboardData);

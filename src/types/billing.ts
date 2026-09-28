@@ -12,6 +12,14 @@ import type {
 export type { PlanLimits, SubscriptionPlan as PlanData };
 
 /**
+ * `plan_entitlements.offer_id` — the founding offer a trial row was claimed
+ * under (s47a, ADR 039). Declared here rather than in
+ * `@/lib/billing/founding-offer` so client components can name it without
+ * importing that module and its service-role client.
+ */
+export type FoundingOfferId = "founding_20";
+
+/**
  * The dashboard shell's view of what an account is entitled to.
  *
  * Served by `GET /api/billing/entitlement`. It mirrors the three states of
@@ -38,6 +46,12 @@ export type { PlanLimits, SubscriptionPlan as PlanData };
 export interface TrialSummary {
   daysRemaining: number;
   endsAt: string;
+  /**
+   * s47a: present only when the running trial is a founding offer grant.
+   * Absent — the key is omitted, not null — for a plain 14-day trial, whose
+   * payload stays exactly what it was before the offer.
+   */
+  offerId?: FoundingOfferId;
 }
 
 export interface EntitlementSummary {
@@ -210,6 +224,12 @@ export interface BillingDashboardData {
    * tells them apart.
    */
   everTrialed: boolean;
+  /**
+   * s47a: the founding offer this account's spent trial was, once it has
+   * lapsed or been released. Absent for everyone else. Picks the lapsed copy
+   * ("Your founding offer has ended") over the 14-day trial's.
+   */
+  endedOfferId?: FoundingOfferId;
 }
 
 // Subscription management

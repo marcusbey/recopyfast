@@ -254,6 +254,68 @@ describe("GET /api/billing/entitlement", () => {
       expect(body.trial).toBeUndefined();
     });
 
+    it("carries the founding offer and its 90-day countdown (s47a)", async () => {
+      const endsAt = new Date(Date.now() + 89.5 * 86400000).toISOString();
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 0.5 * 86400000).toISOString(),
+        expiresAt: endsAt,
+        isActive: true,
+        offerId: "founding_20",
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue(null);
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toEqual({
+        daysRemaining: 90,
+        endsAt,
+        offerId: "founding_20",
+      });
+    });
+
+    it("keeps a plain trial's payload byte-for-byte what it was before the offer", async () => {
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+        expiresAt: IN_NINE_DAYS,
+        isActive: true,
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue(null);
+
+      // Serialised, so the key set and its order are pinned, not just values.
+      const text = JSON.stringify(await (await GET()).json());
+
+      expect(text).toBe(
+        JSON.stringify({
+          kind: "plan",
+          planId: "pro",
+          planName: "Pro",
+          trial: { daysRemaining: 9, endsAt: IN_NINE_DAYS },
+        }),
+      );
+    });
+
+    it("stops counting down a founding offer once the customer has bought outright", async () => {
+      // PR #49 finding 2, badge side: the same rule as a plain trial.
+      signedIn();
+      mockGetEffectivePlan.mockResolvedValue(PRO_PLAN);
+      mockReadTrialGrant.mockResolvedValue({
+        grantedAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+        expiresAt: new Date(Date.now() + 80 * 86400000).toISOString(),
+        isActive: true,
+        offerId: "founding_20",
+      });
+      (getUserSubscription as jest.Mock).mockResolvedValue(null);
+      mockReadGrantedPlanIds.mockResolvedValue(["pro"]);
+
+      const body = await (await GET()).json();
+
+      expect(body.trial).toBeUndefined();
+    });
+
     it("does not look for a trial for an account with no plan at all", async () => {
       // An active trial always resolves to `kind: "plan"`, so anything else
       // cannot be trialling and must not cost an extra query on every page.

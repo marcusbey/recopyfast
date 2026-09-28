@@ -40,6 +40,14 @@ jest.mock("@/lib/billing/effective-plan", () => {
   return { ...actual, resolveEntitlement: jest.fn() };
 });
 
+// Mocked explicitly, defaulting to `sold_out` in beforeEach, so the cases
+// below that predate the founding offer run the real "not claimed" path
+// rather than an error path that happens to fall back the same way.
+jest.mock("@/lib/billing/founding-offer", () => {
+  const actual = jest.requireActual("@/lib/billing/founding-offer");
+  return { ...actual, claimFoundingOfferSpot: jest.fn() };
+});
+
 import {
   TRIAL_DURATION_DAYS,
   ensureTrialStarted,
@@ -47,6 +55,7 @@ import {
 } from "@/lib/billing/trial";
 import { resolveEntitlement } from "@/lib/billing/effective-plan";
 import type { Entitlement } from "@/lib/billing/effective-plan";
+import { claimFoundingOfferSpot } from "@/lib/billing/founding-offer";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
 
@@ -75,6 +84,7 @@ beforeEach(() => {
   inserts.length = 0;
   insertError = null;
   asMock(resolveEntitlement).mockResolvedValue(UNENTITLED);
+  asMock(claimFoundingOfferSpot).mockResolvedValue({ outcome: "sold_out" });
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 
@@ -197,4 +207,90 @@ describe("ensureTrialStarted", () => {
     expect(inserts).toHaveLength(0);
     expect(console.error).toHaveBeenCalled();
   });
+});
+
+describe("ensureTrialStarted with the founding offer (s47a)", () => {
+  it("writes no 14-day trial when the account claimed an offer spot", async () => {
+    // The claim function wrote the 90-day trial row itself, in the same
+    // transaction as the claim.
+    asMock(claimFoundingOfferSpot).mockResolvedValue({
+      outcome: "claimed",
+      entitlementId: "grant-1",
+      expiresAt: "2026-12-27T10:00:00.000Z",
+    });
+
+    await ensureTrialStarted(supabase, USER);
+
+    expect(claimFoundingOfferSpot).toHaveBeenCalledWith(USER);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it.each(["sold_out", "ineligible"])(
+    "writes today's 14-day trial when the claim is %s",
+    async (outcome) => {
+      asMock(claimFoundingOfferSpot).mockResolvedValue({ outcome });
+
+      await ensureTrialStarted(supabase, USER);
+
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0].row).toMatchObject({
+        plan_id: "pro",
+        source: "trial",
+        stripe_payment_intent_id: null,
+      });
+      expect(inserts[0].row).not.toHaveProperty("offer_id");
+    },
+  );
+
+  it.each([
+    [
+      "rejects",
+      () =>
+        asMock(claimFoundingOfferSpot).mockRejectedValue(
+          new Error("Failed to claim the founding offer: timeout"),
+        ),
+    ],
+    [
+      "throws",
+      () =>
+        asMock(claimFoundingOfferSpot).mockImplementation(() => {
+          throw new Error("unexpected");
+        }),
+    ],
+  ])(
+    "falls back to the 14-day trial when the claim %s",
+    async (_label, arrange) => {
+      arrange();
+
+      await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+
+      expect(inserts).toHaveLength(1);
+      expect(inserts[0].row).toMatchObject({ plan_id: "pro", source: "trial" });
+      expect(console.error).toHaveBeenCalled();
+    },
+  );
+
+  it("lets sign-in proceed, and logs, when the claim and the fallback both fail", async () => {
+    asMock(claimFoundingOfferSpot).mockRejectedValue(new Error("rpc down"));
+    insertError = { code: "42501", message: "permission denied" };
+
+    await expect(ensureTrialStarted(supabase, USER)).resolves.toBeUndefined();
+
+    expect(console.error).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["a plan", ON_A_PLAN],
+    ["credits", HOLDS_CREDITS],
+  ])(
+    "an account entitled by %s neither claims nor writes",
+    async (_label, entitlement) => {
+      asMock(resolveEntitlement).mockResolvedValue(entitlement);
+
+      await ensureTrialStarted(supabase, USER);
+
+      expect(claimFoundingOfferSpot).not.toHaveBeenCalled();
+      expect(inserts).toHaveLength(0);
+    },
+  );
 });

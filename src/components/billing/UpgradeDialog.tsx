@@ -27,8 +27,20 @@ import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 interface UpgradeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Plan in force, or null when the account has none. */
+  /**
+   * The plan the account keeps — through a subscription or a permanent grant —
+   * or null. Never a plan held only by a trial or the founding offer: that plan
+   * is exactly what the account is here to buy, so it must stay selectable.
+   */
   currentPlan: string | null;
+  /**
+   * Whether a live Stripe subscription exists to change in place. Passed in,
+   * never inferred from `currentPlan`: a trialling or founding offer account
+   * holds `pro` with no subscription at all, and inferring one sent its plan
+   * change to `PUT /api/billing/subscription`, which answered "No active
+   * subscription found" (PR #49 review, finding 1).
+   */
+  hasSubscription: boolean;
   /** Plan catalogue, resolved server-side from the `plans` table. */
   catalogue: PlanCatalogue;
   /**
@@ -51,6 +63,7 @@ export function UpgradeDialog({
   open,
   onOpenChange,
   currentPlan,
+  hasSubscription,
   catalogue,
   lifetimeOffers,
   foundingAgencyAvailability,
@@ -74,10 +87,9 @@ export function UpgradeDialog({
 
   const { startCheckout, isRedirecting, error: checkoutError } = useCheckout();
 
-  // No plan means no Stripe subscription to prorate, so the submit below has to
-  // open Checkout rather than change a plan in place. A credit holder is in
-  // exactly that position: money spent with us, but nothing to prorate.
-  const hasSubscription = currentPlan !== null;
+  // No subscription means nothing to prorate, so the submit below opens
+  // Checkout rather than changing a plan in place. A credit holder, a trial, the
+  // founding offer and a lifetime owner are all in that position.
   const isBusy = isRedirecting || isChangingPlan;
   const error = planChangeError ?? checkoutError;
   const selectedPlanData = plans.find((plan) => plan.id === selectedPlan);

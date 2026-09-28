@@ -84,6 +84,7 @@ describe("UpgradeDialog Agency plan", () => {
         open
         onOpenChange={jest.fn()}
         currentPlan={null}
+        hasSubscription={false}
         catalogue={CATALOGUE}
         lifetimeOffers={CATALOGUE.oneTimeProducts}
         foundingAgencyAvailability={null}
@@ -105,6 +106,7 @@ describe("UpgradeDialog Agency plan", () => {
         open
         onOpenChange={jest.fn()}
         currentPlan={null}
+        hasSubscription={false}
         catalogue={CATALOGUE}
         lifetimeOffers={CATALOGUE.oneTimeProducts}
         foundingAgencyAvailability={{ remaining: 0, limit: 50, soldOut: true }}
@@ -125,6 +127,7 @@ describe("UpgradeDialog Agency plan", () => {
         open
         onOpenChange={jest.fn()}
         currentPlan={null}
+        hasSubscription={false}
         catalogue={CATALOGUE}
         lifetimeOffers={CATALOGUE.oneTimeProducts}
         foundingAgencyAvailability={{

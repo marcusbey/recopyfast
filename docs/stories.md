@@ -1742,40 +1742,40 @@ that same first sign-in grants Pro for 90 days instead, metered at 100 AI credit
 card. Account 21 onward gets the 14-day trial exactly as today. When the 90 days end the account
 lands where a lapsed trial lands and chooses a plan.
 
-- [ ] The offer grant IS the account's one trial row (`source = 'trial'`, `plan_id = 'pro'`,
+- [x] The offer grant IS the account's one trial row (`source = 'trial'`, `plan_id = 'pro'`,
   expiring 90 days after the claim, server clock) marked as the founding offer — so "one trial
   per account, ever" still holds and an expired offer account can never receive a second,
   14-day trial on a later sign-in.
-- [ ] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a 21st;
+- [x] Exactly 20 spots, owned by the database: concurrent first sign-ins can never claim a 21st;
   eligibility check, trial row and claim are one transaction. Proved against real Postgres with
   a concurrency test that CI runs.
-- [ ] Only accounts created after the offer opened, with no plan entitlement, subscription or
+- [x] Only accounts created after the offer opened, with no plan entitlement, subscription or
   credit purchase ever, can take a spot; a repeat sign-in never takes one. Any other outcome,
   including an error in the offer path, falls back to today's 14-day trial and never fails the
   sign-in.
-- [ ] An offer account resolves to every Pro limit (5 sites, invited editors, All sites, AI)
+- [x] An offer account resolves to every Pro limit (5 sites, invited editors, All sites, AI)
   with a monthly AI-credit allowance of 100, in windows anchored on the grant date (a 14-day
   trial's single window is unchanged). A higher allowance the account holds from any other
   source is never lowered (ADR 038 floor). Purchased packs stack on top and are spent after the
   allowance, as today.
-- [ ] Once 20 spots are taken, a new account's first sign-in gets the 14-day trial (500 credits)
+- [x] Once 20 spots are taken, a new account's first sign-in gets the 14-day trial (500 credits)
   with no other change.
-- [ ] 90 days after the claim the account resolves to the lapsed state; the billing screen says
+- [x] 90 days after the claim the account resolves to the lapsed state; the billing screen says
   the founding offer has ended (not "Your 14-day Pro trial has ended") and offers the plans. No
   charge, no card ever requested by the offer.
-- [ ] The dashboard badge and billing card of an offer account state what it has: "Founding
+- [x] The dashboard badge and billing card of an offer account state what it has: "Founding
   offer — N days left", "N of 100 AI credits used this month"; never "500 trial AI credits" or a
   14-day countdown.
-- [ ] A public, uncached endpoint returns only the spots-left count (no user data), correct
+- [x] A public, uncached endpoint returns only the spots-left count (no user data), correct
   immediately after a claim or release; on any error it returns no number rather than a guess.
-- [ ] The operator can release a spot held by an internal/QA account without a code change
+- [x] The operator can release a spot held by an internal/QA account without a code change
   (service-role only, runbook in `docs/operations/`). Release sets `revoked_at` only — it must
   not rewrite `source`, or the account would escape the one-trial index. The count goes back up.
-- [ ] ADR 039 records the representation, the claim lock, the allowance rule, the monthly
+- [x] ADR 039 records the representation, the claim lock, the allowance rule, the monthly
   window (amends ADR 014's single window) and the migration-first order.
-- [ ] Required local gates pass (run in a worktree: the repo-root `.env` breaks tests that read
+- [x] Required local gates pass (run in a worktree: the repo-root `.env` breaks tests that read
   `NEXT_PUBLIC_APP_URL`); one story commit. No push, PR, merge or production action. Operator
-  after merge: apply the migration FIRST (code reading the new column before it exists would
+  before merge (merging deploys): apply the migration FIRST (code reading the new column before it exists would
   fail every gate), then deploy, run the live proof on a QA account, release its spot.
 
 Agentic notes: sign-in path `ensureTrialStarted` → `grantTrialEntitlement`

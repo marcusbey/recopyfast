@@ -22,6 +22,18 @@ import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import type { BillingDashboardData } from "@/types/billing";
 
+/** What the no-plan panel says once the account's one trial has ended. */
+const ENDED_TRIAL_COPY = {
+  heading: "Your trial has ended",
+  body: "Your 14-day Pro trial has ended. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+} as const;
+
+/** s47a: the same panel after a founding offer (docs/designs/s47a-founding-20-grant.md, screen 3). */
+const ENDED_FOUNDING_OFFER_COPY = {
+  heading: "Your founding offer has ended",
+  body: "Your 90 days of free Pro are over, and nothing was charged. Your site keeps serving its current content — editing, new sites and collaborators need Pro.",
+} as const;
+
 interface BillingDashboardProps {
   /**
    * Whether a permanent plan grant is already in force, resolved server-side by
@@ -155,6 +167,11 @@ export function BillingDashboard({
   // trial. Credits outrank it: a credit holder who also trialled once still has
   // something spendable, and that is the more useful fact.
   const hasExpiredTrial = dashboardData.everTrialed && !holdsCredits;
+  // s47a: an ended founding offer is an ended trial (it was the account's one
+  // trial row), but it was 90 days of Pro, not 14 — so it says so.
+  const expiredTrialCopy = dashboardData.endedOfferId
+    ? ENDED_FOUNDING_OFFER_COPY
+    : ENDED_TRIAL_COPY;
 
   if (currentPlan === null) {
     return (
@@ -164,14 +181,14 @@ export function BillingDashboard({
             {holdsCredits
               ? "You're on credits"
               : hasExpiredTrial
-                ? "Your trial has ended"
+                ? expiredTrialCopy.heading
                 : "Choose a plan to continue"}
           </h1>
           <p className="mb-6 text-muted-foreground">
             {holdsCredits
               ? `You have ${creditBalance.toLocaleString("en-US")} credits to spend on AI suggestions and translations. Sites, collaborators and A/B testing need a plan.`
               : hasExpiredTrial
-                ? "Your 14-day Pro trial has ended. Your site keeps serving its current content — editing, new sites and collaborators need Pro."
+                ? expiredTrialCopy.body
                 : "ReCopyFast needs an active subscription before your sites, editors and AI credits become available."}
           </p>
           <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
@@ -195,6 +212,7 @@ export function BillingDashboard({
           open={showUpgradeDialog}
           onOpenChange={setShowUpgradeDialog}
           currentPlan={null}
+          hasSubscription={hasLiveSubscription}
           catalogue={dashboardData.catalogue}
           lifetimeOffers={lifetimeOffers}
           foundingAgencyAvailability={foundingAgencyAvailability}
@@ -252,7 +270,12 @@ export function BillingDashboard({
           is the fact that governs everything below it. It renders nothing when
           `trial` is null — which covers a paying customer, an account that
           never trialled, and a payload that failed to load. */}
-      <TrialStatusCard trial={dashboardData.trial} />
+      <TrialStatusCard
+        trial={dashboardData.trial}
+        // s47a: the founding offer card's action row. A plain trial ignores both.
+        creditPack={dashboardData.catalogue.creditPack}
+        onChoosePlan={() => setShowUpgradeDialog(true)}
+      />
 
       <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
 
@@ -296,7 +319,12 @@ export function BillingDashboard({
       <UpgradeDialog
         open={showUpgradeDialog}
         onOpenChange={setShowUpgradeDialog}
-        currentPlan={currentPlan}
+        // A running trial or founding offer confers the plan without owning
+        // it: that plan must stay buyable, and there is nothing to change in
+        // place (PR #49 review, finding 1). `trial` is only set while nothing
+        // is billed and no permanent grant exists (the dashboard route).
+        currentPlan={dashboardData.trial ? null : currentPlan}
+        hasSubscription={hasLiveSubscription}
         catalogue={dashboardData.catalogue}
         lifetimeOffers={lifetimeOffers}
         foundingAgencyAvailability={foundingAgencyAvailability}
