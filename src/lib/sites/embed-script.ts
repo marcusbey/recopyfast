@@ -28,6 +28,7 @@ export interface StableEmbedInstallation {
     scriptHash: string;
     styleHash: string;
     scriptSource: string;
+    connectSources: string[];
   };
 }
 
@@ -56,6 +57,18 @@ function escapeAttribute(value: string) {
 
 function nonceAttribute(nonce?: string) {
   return nonce ? ` nonce="${escapeAttribute(nonce)}"` : "";
+}
+
+function websocketConnectSource(value: string): string {
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:") url.protocol = "wss:";
+    else if (url.protocol === "http:") url.protocol = "ws:";
+    else if (url.protocol !== "ws:" && url.protocol !== "wss:") return "";
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -135,7 +148,6 @@ export function buildEmbedScript({
   const wsAttribute = wsOrigin
     ? ` data-ws-url="${escapeAttribute(wsOrigin)}"`
     : "";
-
   return `<script src="${escapeAttribute(appOrigin)}/embed/recopyfast.js" data-site-id="${escapeAttribute(siteId)}" data-site-token="${escapeAttribute(siteToken)}" data-api-url="${escapeAttribute(appOrigin)}/api"${wsAttribute}></script>`;
 }
 
@@ -159,6 +171,10 @@ export function buildStableEmbedInstallation({
   const wsAttribute = wsOrigin
     ? ` data-ws-url="${escapeAttribute(wsOrigin)}"`
     : "";
+  const socketSource = wsOrigin ? websocketConnectSource(wsOrigin) : "";
+  const connectSources = socketSource
+    ? Array.from(new Set([appOrigin, socketSource]))
+    : [appOrigin];
   const shared =
     ` data-rcf-startup="${STABLE_COPY_PROTOCOL_VERSION}"` +
     ` data-site-id="${escapeAttribute(siteId)}"` +
@@ -174,6 +190,7 @@ export function buildStableEmbedInstallation({
       scriptHash: STABLE_COPY_BOOTSTRAP_SCRIPT_HASH,
       styleHash: STABLE_COPY_GATE_STYLE_HASH,
       scriptSource: appOrigin,
+      connectSources,
     },
   };
 }

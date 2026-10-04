@@ -110,6 +110,9 @@ describe("buildStableEmbedInstallation", () => {
     expect(installation.runtimeTag).toContain(
       'src="https://app.recopyfast.com/embed/recopyfast.js"',
     );
+    expect(installation.csp.connectSources).toEqual([
+      "https://app.recopyfast.com",
+    ]);
   });
 
   it("escapes configuration into attributes while keeping the inline program byte-identical", () => {
@@ -172,6 +175,20 @@ describe("buildStableEmbedInstallation", () => {
       ),
     );
     expect(installation.csp.scriptSource).toBe("https://app.recopyfast.com");
+  });
+
+  it("maps the configured socket origin to an explicit websocket connect source", () => {
+    const installation = buildStableEmbedInstallation({
+      siteId: "site-123",
+      siteToken: "site-token-abc",
+      appUrl: "https://app.recopyfast.com",
+      wsUrl: "https://ws.recopyfast.com/",
+    });
+
+    expect(installation.csp.connectSources).toEqual([
+      "https://app.recopyfast.com",
+      "wss://ws.recopyfast.com",
+    ]);
   });
 
   it("keeps the canonical configured bootstrap within its independent gzip ceiling", () => {

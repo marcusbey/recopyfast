@@ -11,8 +11,8 @@
     "h1,h2,h3,h4,h5,h6,p,span,li,td,th,label,button," +
     "a.rcf-editable-link,div[data-rcf-content]";
   var EXCLUDED_SELECTOR =
-    '[data-rcf-ignore],[contenteditable=""],[contenteditable="true"],' +
-    '[contenteditable="plaintext-only"],#rcf-staging-banner,#rcf-edit-board,.rcf-overlay';
+    '[data-rcf-ignore],[contenteditable]:not([contenteditable="false"]),' +
+    "#rcf-staging-banner,#rcf-edit-board,.rcf-overlay";
 
   // Terminal reason codes cross the inline/external boundary and stay compact
   // for the hard bootstrap budget: c=config, s=style, d=deadline, x=exception,
@@ -38,15 +38,13 @@
     var apiUrl = script && script.getAttribute("data-api-url");
     var nonce = (script && script.nonce) || "";
     var pagePath = normalizedPagePath(documentRef);
+    // One exact binding lets the external runtime reject a mismatched
+    // bootstrap without repeating four public property names in every head.
+    var binding = protocol + "\0" + siteId + "\0" + apiUrl + "\0" + pagePath;
     var existing = windowRef[STATE_KEY];
 
     if (existing) {
-      if (
-        existing.v !== protocol ||
-        existing.site !== siteId ||
-        existing.api !== apiUrl ||
-        existing.path !== pagePath
-      ) {
+      if (existing.k !== binding) {
         if (typeof existing.fail === "function") {
           existing.fail("c");
         }
@@ -64,14 +62,10 @@
     var startupAttach = null;
 
     var state = {
-      v: protocol,
-      site: siteId,
-      api: apiUrl,
-      path: pagePath,
+      k: binding,
       status: "a",
       code: null,
       at: null,
-      content: null,
       fail: function (reason) {
         settle("f", reason, true);
       },
@@ -101,10 +95,7 @@
         observers[index].disconnect();
       }
       observers = [];
-      if (
-        startupAttach &&
-        Element.prototype.attachShadow === startupAttach
-      ) {
+      if (Element.prototype.attachShadow === startupAttach) {
         Element.prototype.attachShadow = nativeAttach;
       }
 
@@ -115,21 +106,13 @@
 
       for (var rootIndex = 0; rootIndex < styledRoots.length; rootIndex += 1) {
         var root = styledRoots[rootIndex];
-        var style =
-          root.querySelector &&
-          root.querySelector("style[" + STYLE_ATTRIBUTE + "]");
+        var style = root.querySelector("style[" + STYLE_ATTRIBUTE + "]");
         if (style) style.remove();
       }
     }
 
     function settle(status, reason, shouldAbort) {
-      if (
-        state.status === "d" ||
-        state.status === "f" ||
-        state.status === "p"
-      ) {
-        return;
-      }
+      if (state.status !== "a" && state.status !== "h") return;
 
       state.status = status;
       state.code = reason;
@@ -138,10 +121,7 @@
     }
 
     function installStyle(root) {
-      if (
-        root.querySelector &&
-        root.querySelector("style[" + STYLE_ATTRIBUTE + "]")
-      ) {
+      if (root.querySelector("style[" + STYLE_ATTRIBUTE + "]")) {
         return true;
       }
 
@@ -181,25 +161,15 @@
 
       for (var index = 0; index < element.childNodes.length; index += 1) {
         var node = element.childNodes[index];
-        if (
-          node.nodeType === Node.TEXT_NODE &&
-          node.textContent.trim().length >= 2
-        ) {
-          return true;
+        if (node.nodeType === 3 && node.textContent.trim()) {
+          return element.textContent.trim().length >= 2;
         }
       }
       return false;
     }
 
     function hold(element) {
-      if (
-        !isEligible(element) ||
-        state.status === "f" ||
-        state.status === "p" ||
-        state.status === "d"
-      ) {
-        return;
-      }
+      if (!isEligible(element) || !state.can()) return;
 
       if (held.has(element)) {
         if (
@@ -229,7 +199,11 @@
         state.status = "h";
         state.at = performance.now();
         timer = setTimeout(function () {
-          state.fail("d");
+          // Keep the already-started public GET alive after text falls back.
+          // Stored images retain their legacy late hydration, while `i` makes
+          // the runtime reject text, A/B, socket and polling mutations.
+          state.i = true;
+          settle("f", "d", false);
         }, DEADLINE_MS);
       }
     }
@@ -297,8 +271,8 @@
               Array.from(
                 target.parentElement.querySelectorAll("source"),
               ).forEach(function (source) {
-                  source.remove();
-                });
+                source.remove();
+              });
               for (
                 var sourceIndex = 0;
                 sourceIndex < snapshot.sources.length;
@@ -322,7 +296,7 @@
     function scan(node) {
       if (!node) return;
 
-      if (node.nodeType === Node.TEXT_NODE) {
+      if (node.nodeType === 3) {
         hold(node.parentElement);
         return;
       }
@@ -343,20 +317,15 @@
     }
 
     function gateRoot(root) {
-      if (styledRoots.indexOf(root) !== -1) {
-        if (!installStyle(root)) {
-          state.fail("s");
-          return;
-        }
-        scan(root);
-        return;
-      }
+      if (!state.can()) return;
+      var wasStyled = styledRoots.includes(root);
       if (!installStyle(root)) {
         state.fail("s");
         return;
       }
 
       scan(root);
+      if (wasStyled || !state.can()) return;
       var observer = new MutationObserver(function (mutations) {
         if (!installStyle(root)) {
           state.fail("s");
@@ -377,7 +346,7 @@
     // terminal before any request or observer can create a legacy late swap.
     if (
       !script ||
-      !protocol ||
+      protocol !== "2" ||
       !siteId ||
       !siteToken ||
       !apiUrl ||
@@ -397,8 +366,7 @@
     Element.prototype.attachShadow = startupAttach;
 
     if (!installStyle(documentRef.head || documentRef.documentElement)) {
-      state.status = "f";
-      state.code = "s";
+      state.fail("s");
       return;
     }
 
@@ -421,14 +389,16 @@
       function () {
         scan(documentRef.body);
         if (held.size === 0 && state.status === "a") {
-          settle("d", "e", false);
+          state.i = true;
+          settle("f", "e", false);
         }
       },
       { once: true },
     );
 
-    // Recovery is armed above before this request begins. This read is public:
-    // it carries only the site token and explicitly leaks no editor URL/referrer.
+    // Recovery is armed above before this request begins. Cross-origin reads
+    // leak no referrer; same-origin reads send only the origin root so the API
+    // can prove the request came from the installed customer host.
     if (typeof windowRef.fetch !== "function") {
       state.fail("n");
       state.content = Promise.resolve(null);
@@ -441,17 +411,24 @@
       encodeURIComponent(siteId) +
       "?page_path=" +
       encodeURIComponent(pagePath);
+    // URL parsing deliberately stays inside the outer fail-safe: malformed
+    // trusted configuration releases the gate without issuing a request.
+    var origin = documentRef.location.origin;
+    var sameOrigin = new URL(apiUrl).origin === origin;
     var request = {
       headers: { Authorization: "Bearer " + siteToken },
       credentials: "omit",
-      referrerPolicy: "no-referrer",
+      referrerPolicy: sameOrigin ? "origin" : "no-referrer",
     };
+    // Same-origin site authorization needs a host signal. Send only the origin
+    // root; path/query/hash and editor parameters remain excluded.
+    if (sameOrigin) request.referrer = origin + "/";
     if (controller) request.signal = controller.signal;
 
     state.content = windowRef
       .fetch(endpoint, request)
       .then(function (response) {
-        if (!response.ok) throw new Error("HTTP " + response.status);
+        if (!response.ok) throw new Error(response.status);
         return response.json();
       })
       .catch(function () {

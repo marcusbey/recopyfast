@@ -591,6 +591,7 @@ describe("GET /api/sites", () => {
         scriptHash: expect.stringMatching(/^sha256-/),
         styleHash: expect.stringMatching(/^sha256-/),
         scriptSource: expect.any(String),
+        connectSources: expect.arrayContaining([expect.any(String)]),
       },
     });
   });

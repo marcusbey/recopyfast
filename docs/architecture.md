@@ -87,7 +87,7 @@ src/
 public/embed/
   recopyfast.src.js       SOURCE OF TRUTH, hand-edited, 5397 lines
   recopyfast.js           BUILD ARTIFACT — never hand-edit
-  socket.io-client.min.js standalone fallback copy
+  socket.io-client.min.js standalone transport artifact; runtime uses its bundled copy
 server/                   Express + Socket.io service (own package.json, own Fly app)
 supabase/migrations/      43 SQL migrations, timestamp-prefixed
 scripts/                  build-embed, sync-stripe-catalogue, qa-journey, check-redis, install-hooks

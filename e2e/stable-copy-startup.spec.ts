@@ -16,6 +16,7 @@ const INSTALLATION = buildStableEmbedInstallation({
   siteId: SITE_ID,
   siteToken: SITE_TOKEN,
   appUrl: APP_ORIGIN,
+  wsUrl: "",
   nonce: "AbCdEfGhIjKlMnOpQrStUvWx",
 });
 
@@ -31,6 +32,7 @@ type Scenario = {
   react?: boolean;
   styleBlocked?: boolean;
   hashCsp?: boolean;
+  sameOrigin?: boolean;
 };
 
 const scenarios: Scenario[] = [
@@ -96,6 +98,14 @@ const scenarios: Scenario[] = [
     finalVisible: "Published headline",
     hashCsp: true,
   },
+  {
+    id: "stable-same-origin-auth-signal",
+    stable: true,
+    delayMs: 30,
+    firstVisible: "Published headline",
+    finalVisible: "Published headline",
+    sameOrigin: true,
+  },
 ];
 
 let widgetSource = "";
@@ -157,18 +167,30 @@ function probeScript() {
 }
 
 function fixtureHtml(scenario: Scenario) {
+  const installation = scenario.sameOrigin
+    ? buildStableEmbedInstallation({
+        siteId: SITE_ID,
+        siteToken: SITE_TOKEN,
+        appUrl: CUSTOMER_ORIGIN,
+        wsUrl: "",
+      })
+    : INSTALLATION;
   const runtime = scenario.stable
-    ? INSTALLATION.runtimeTag
+    ? installation.runtimeTag
     : buildEmbedScript({
         siteId: SITE_ID,
         siteToken: SITE_TOKEN,
         appUrl: APP_ORIGIN,
+        wsUrl: "",
       });
+  const shadowPrelude = scenario.styleBlocked
+    ? `<script>window.__nativeAttachShadow=Element.prototype.attachShadow</script>`
+    : "";
   const head = `${
     scenario.slowFont
       ? `<style nonce="AbCdEfGhIjKlMnOpQrStUvWx">@font-face{font-family:SlowProof;src:url('${APP_ORIGIN}/slow-font.woff2')}#headline{font-family:SlowProof,sans-serif}</style>`
       : ""
-  }${scenario.stable ? INSTALLATION.headBootstrap : ""}${probeScript()}`;
+  }${shadowPrelude}${scenario.stable ? installation.headBootstrap : ""}${probeScript()}`;
   const ordinary = `<main><h1 id="headline" data-rcf-id="hero">Authored headline</h1><p data-rcf-ignore id="ignored">Ignored host copy</p></main>`;
   const react = `<div id="react-root"><section id="react-shell"><h1 id="headline" data-rcf-id="hero" data-rcf-content><span>Authored</span> <span>headline</span></h1><p data-rcf-ignore id="ignored">Ignored host copy</p></section></div><script nonce="AbCdEfGhIjKlMnOpQrStUvWx">${reactHydration}</script>`;
   const shadow = scenario.shadow
@@ -217,6 +239,12 @@ async function proof(page: Page) {
     reactErrors:
       (window as unknown as { __reactRecoverableErrors?: string[] })
         .__reactRecoverableErrors ?? [],
+    hookRestored:
+      !(window as unknown as { __nativeAttachShadow?: unknown })
+        .__nativeAttachShadow ||
+      Element.prototype.attachShadow ===
+        (window as unknown as { __nativeAttachShadow?: unknown })
+          .__nativeAttachShadow,
   }));
 }
 
@@ -226,12 +254,14 @@ test("stable startup controls the first visible managed frame", async ({
   let scenario = scenarios[0];
   let trackRequests = 0;
   let contentGets = 0;
+  let contentHeaders: Record<string, string> = {};
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.origin === CUSTOMER_ORIGIN) {
+    if (url.origin === CUSTOMER_ORIGIN && url.pathname === "/pricing") {
       const probeHash = hashSource(inlineBody(probeScript()));
+      const connectSources = INSTALLATION.csp.connectSources.join(" ");
       await route.fulfill({
         status: 200,
         contentType: "text/html",
@@ -240,14 +270,15 @@ test("stable startup controls the first visible managed frame", async ({
             ? {
                 "content-security-policy": scenario.styleBlocked
                   ? `default-src 'none'; script-src 'unsafe-inline' ${APP_ORIGIN}; connect-src ${APP_ORIGIN}; style-src 'none'`
-                  : `default-src 'none'; script-src ${APP_ORIGIN} '${INSTALLATION.csp.scriptHash}' '${probeHash}'; connect-src ${APP_ORIGIN}; style-src '${INSTALLATION.csp.styleHash}'`,
+                  : `default-src 'none'; script-src ${APP_ORIGIN} '${INSTALLATION.csp.scriptHash}' '${probeHash}'; connect-src ${connectSources}; style-src '${INSTALLATION.csp.styleHash}'`,
               }
             : {},
         body: fixtureHtml(scenario),
       });
       return;
     }
-    if (url.href === `${APP_ORIGIN}/embed/recopyfast.js`) {
+    const runtimeOrigin = scenario.sameOrigin ? CUSTOMER_ORIGIN : APP_ORIGIN;
+    if (url.href === `${runtimeOrigin}/embed/recopyfast.js`) {
       await route.fulfill({
         status: 200,
         contentType: "application/javascript",
@@ -276,6 +307,7 @@ test("stable startup controls the first visible managed frame", async ({
       request.method() === "GET"
     ) {
       contentGets += 1;
+      contentHeaders = request.headers();
       await new Promise((resolve) => setTimeout(resolve, scenario.delayMs));
       await fulfillJson(route, [
         {
@@ -343,6 +375,7 @@ test("stable startup controls the first visible managed frame", async ({
       scenario = candidate;
       trackRequests = 0;
       contentGets = 0;
+      contentHeaders = {};
       await page.goto(`${CUSTOMER_ORIGIN}/pricing?case=${candidate.id}`, {
         waitUntil: "domcontentloaded",
       });
@@ -364,6 +397,15 @@ test("stable startup controls the first visible managed frame", async ({
         "Ignored host copy",
       );
       expect(contentGets).toBe(candidate.styleBlocked ? 0 : 1);
+      if (candidate.sameOrigin) {
+        expect(contentHeaders.authorization).toBe(`Bearer ${SITE_TOKEN}`);
+        expect(contentHeaders.origin).toBeUndefined();
+        expect(contentHeaders.referer).toBe(`${CUSTOMER_ORIGIN}/`);
+        expect(contentHeaders.referer).not.toContain("pricing");
+        expect(contentHeaders.referer).not.toContain("rcf_");
+      } else if (candidate.stable && !candidate.styleBlocked) {
+        expect(contentHeaders.referer).toBeUndefined();
+      }
 
       if (
         candidate.stable &&
@@ -389,6 +431,7 @@ test("stable startup controls the first visible managed frame", async ({
       }
       if (candidate.styleBlocked) {
         expect(captured.startup).toMatchObject({ status: "f", code: "s" });
+        expect(captured.hookRestored).toBe(true);
       }
     });
   }

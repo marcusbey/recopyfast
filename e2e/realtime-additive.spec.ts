@@ -14,11 +14,10 @@ import { randomUUID } from "node:crypto";
  * The drill runs the same page twice with the realtime service NOT running:
  *
  *   - AC 6, no `data-ws-url` at all — a snippet issued before `s07`. The widget
- *     must take the early return at recopyfast.src.js:2703, and in particular
- *     must not fetch `/embed/socket.io-client.min.js`: that fallback loader is
- *     dead code today and turning realtime on is what wakes it (ADR 004 names
- *     lazy-loading from our origin as *the* rejected option, because our origin
- *     is not the customer's `'self'`).
+ *     must take the early return, and in particular must not fetch the standalone
+ *     `/embed/socket.io-client.min.js` compatibility artifact. The production
+ *     bundle already owns its namespaced client; there is no runtime fallback
+ *     loader for a host CSP to admit.
  *
  *   - AC 5, `data-ws-url` pointing at a port with nothing behind it. The widget
  *     must fail to connect and carry on: no uncaught exception reaching the host

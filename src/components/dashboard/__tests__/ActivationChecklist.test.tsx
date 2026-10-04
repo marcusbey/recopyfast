@@ -62,6 +62,7 @@ const INSTALLATION = {
     scriptHash: "sha256-script",
     styleHash: "sha256-style",
     scriptSource: "https://www.recopyfa.st",
+    connectSources: ["https://www.recopyfa.st"],
   },
 };
 

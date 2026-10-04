@@ -27,6 +27,7 @@ describe("SiteInstallationCard", () => {
       scriptHash: "sha256-script",
       styleHash: "sha256-style",
       scriptSource: "https://example.test",
+      connectSources: ["https://example.test", "wss://ws.example.test"],
     },
   };
 
@@ -153,10 +154,48 @@ describe("SiteInstallationCard", () => {
       expect(screen.getByText("'sha256-script'")).toBeInTheDocument();
       expect(screen.getByText("'sha256-style'")).toBeInTheDocument();
       expect(screen.getByText("https://example.test")).toBeInTheDocument();
+      expect(screen.getByText(/public copy startup csp/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /hashes authorize only the public copy startup bootstrap and temporary gate style/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /editor styling needs compatible host csp configuration or a nonce integration/i,
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/hashes alone do not authorize editor styling/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/connect-src/i)).toHaveTextContent(
+        "connect-src https://example.test wss://ws.example.test",
+      );
       expect(
         screen.getByText(/do not enable unsafe-inline/i),
       ).toBeInTheDocument();
       expect(screen.queryByText(/disable protection/i)).not.toBeInTheDocument();
+    });
+
+    it("renders only the API origin under connect-src when realtime is off", () => {
+      render(
+        <SiteInstallationCard
+          site={site({
+            installation: {
+              ...INSTALLATION,
+              csp: {
+                ...INSTALLATION.csp,
+                connectSources: ["https://example.test"],
+              },
+            },
+          })}
+        />,
+      );
+
+      const instruction = screen.getByText(/connect-src/i);
+      expect(instruction).toHaveTextContent("connect-src https://example.test");
+      expect(instruction).not.toHaveTextContent("ws://");
+      expect(instruction).not.toHaveTextContent("wss://");
     });
   });
 

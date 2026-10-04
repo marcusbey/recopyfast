@@ -36,7 +36,8 @@ initial document instead of applying a late startup replacement.
    applying a late replacement. Nonce support must cover both generated script and style.
 3. In parallel, load the runtime and gather the final published rows/A/B decision. Font
    readiness remains a requirement only for edit-time geometry. Public prefetch never
-   contains private headers or URL credentials and explicitly uses a no-referrer policy.
+   contains private headers or URL credentials. Cross-origin reads use no-referrer;
+   same-origin reads send only the explicit bare origin under ADR 044.
    Existing A/B transport remains outside this refactor.
 4. When complete before deadline, commit final values synchronously and reveal once.
    Gather before mutation so expiry cannot expose partly applied baseline/variant content.
@@ -102,8 +103,10 @@ covered by a blanket no-flash claim. Images keep their existing replacement beha
   CSP hash metadata. Keep legacy buildEmbedScript unchanged for old consumers; new-install
   surfaces use both placements. The inline body is byte-identical across sites; configuration
   is escaped into attributes. Propagate nonce/hash support to both script and style.
-- Early content fetch explicitly uses referrerPolicy: "no-referrer". It sends no editor
-  credential, copies no query credentials, and retains the runtime URL scrub. Existing
+- Early cross-origin content fetch uses referrerPolicy: "no-referrer". Same-origin
+  requests explicitly send only document.location.origin + "/" with the origin policy
+  (ADR 044), preserving the mandatory domain proof without paths or credentials.
+  Both omit cookies and editor credentials, copy no query credentials, and retain URL scrubbing. Existing
   A/B query-token transport is outside this refactor; the no-URL-token rule applies to
   the new content prefetch and private credentials.
 - The visibility timer always releases. The late-apply lockout governs PUBLIC startup.

@@ -927,9 +927,10 @@
           if (privateContent) {
             if (startup && typeof startup.drop === 'function') startup.drop('p');
             await this.hydrateStoredContent();
-          } else if (!startup || startup.v !== STARTUP_PROTOCOL ||
-                     startup.site !== SITE_ID || startup.api !== RECOPYFAST_API ||
-                     startup.path !== normalizedPagePath() || !startup.can()) {
+          } else if (STARTUP_PROTOCOL !== '2' || !startup ||
+                     startup.k !== STARTUP_PROTOCOL + '\0' + SITE_ID + '\0' +
+                       RECOPYFAST_API + '\0' + normalizedPagePath() ||
+                     (!startup.i && !startup.can())) {
             // A new runtime without its matching native-head bootstrap must not
             // recreate the legacy late swap. Authored copy is the safe terminal
             // result for this public document.
@@ -2611,7 +2612,7 @@
       const skipTags = ['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED'];
       if (skipTags.includes(element.tagName)) return true;
       if (element.hasAttribute('data-rcf-ignore')) return true;
-      if (element.closest('[contenteditable="true"]')) return true;
+      if (element.closest('[contenteditable]:not([contenteditable="false"])')) return true;
       if (element.closest('#rcf-staging-banner')) return true;
       if (element.closest('#rcf-edit-board')) return true;
       if (element.closest('.rcf-overlay')) return true;
@@ -2621,16 +2622,17 @@
       // every one of them. Filter on rendered size instead: tracking pixels,
       // spacers and tiny icons are not content anyone wants to edit.
       if (element.tagName === 'IMG') {
+        if (this.serverKnownElementIds && this.serverKnownElementIds.has(computeStableElementId(element))) return false;
         const MIN_EDITABLE_IMAGE_PX = 48;
         return element.offsetWidth < MIN_EDITABLE_IMAGE_PX ||
                element.offsetHeight < MIN_EDITABLE_IMAGE_PX;
       }
 
-      const hasOnlyElements = Array.from(element.childNodes).every(function(node) {
-        return node.nodeType !== Node.TEXT_NODE || !node.textContent.trim();
+      const hasDirectText = Array.from(element.childNodes).some(function(node) {
+        return node.nodeType === Node.TEXT_NODE && node.textContent.trim();
       });
 
-      return hasOnlyElements && !element.hasAttribute('data-rcf-content');
+      return !hasDirectText && !element.hasAttribute('data-rcf-content');
     }
 
     /**
@@ -3528,8 +3530,14 @@
 
     async hydrateStableStartup(startup) {
       const rows = await startup.content;
-      if (!Array.isArray(rows) || !startup.can()) {
+      const imagesOnly = startup.i;
+      if (!Array.isArray(rows) || (!imagesOnly && !startup.can())) {
         startup.fail('n');
+        return;
+      }
+
+      if (imagesOnly) {
+        this.hydrateStoredImages(rows);
         return;
       }
 
@@ -3549,7 +3557,9 @@
         })
       ]);
       const shownTests = startup.apply(this, rows, abReady, snapshots);
-      if (shownTests === null) {
+      if (!shownTests) {
+        this.activeTests = [];
+        this.variantAssignments = {};
         return;
       }
 
@@ -3564,6 +3574,7 @@
         }, function() {});
       }
       startup.done();
+      this.hydrateStoredImages(rows);
       if (shownTests.length) {
         this.setupClickTracking();
         this.trackImpressions();
@@ -3594,6 +3605,8 @@
      */
     async hydrateStoredContent() {
       if (!RECOPYFAST_API) return;
+      if (STARTUP_MARKED && (!PUBLIC_STARTUP || PUBLIC_STARTUP.status === 'f') &&
+          !this.canReachStagingContent()) return;
 
       const staged = this.canReachStagingContent();
       const endpoint = contentReadEndpoint(staged, this.editorTokenQuery());
@@ -3621,9 +3634,10 @@
       }
 
       this.applyStoredContent(rows);
+      this.hydrateStoredImages(rows);
     }
 
-    applyStoredContent(rows) {
+    applyStoredContent(rows, imagesOnly) {
       if (!Array.isArray(rows)) return;
       this.serverKnownElementIds = new Set();
       for (let i = 0; i < rows.length; i++) {
@@ -3632,10 +3646,17 @@
         this.serverKnownElementIds.add(row.element_id);
         const elementData = this.elements.get(row.element_id);
         const content = row.current_content;
-        if (elementData && typeof content === 'string' && content !== '') {
+        if (elementData && (!imagesOnly || elementData.element.tagName === 'IMG') &&
+            typeof content === 'string' && content !== '') {
           this.applyContentToElement(elementData, content, row.metadata);
         }
       }
+    }
+
+    hydrateStoredImages(rows) {
+      this.applyStoredContent(rows, true);
+      this.scanForContent();
+      this.applyStoredContent(rows, true);
     }
 
     setupMutationObserver() {
@@ -5411,28 +5432,7 @@
     }
 
     startPolling() {
-      const self = this;
-      setInterval(async function() {
-        if (STARTUP_MARKED && (!PUBLIC_STARTUP || PUBLIC_STARTUP.status === 'f') &&
-            !self.canReachStagingContent()) return;
-        try {
-          const staged = self.canReachStagingContent();
-          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery());
-
-          const response = await fetch(endpoint, {
-            headers: Object.assign({
-              'Authorization': 'Bearer ' + SITE_TOKEN,
-            }, self.editorAuthHeaders()),
-          });
-          if (response.ok) {
-            const data = await response.json();
-            const updates = staged ? data.content : data;
-            updates.forEach(function(update) { self.handleContentUpdate(update); });
-          }
-        } catch (error) {
-          console.error('ReCopyFast: Polling error:', error);
-        }
-      }, 5000);
+      setInterval(this.hydrateStoredContent.bind(this), 5000);
     }
 
     updateContent(elementId, content) {

@@ -63,23 +63,24 @@ behavior: `docs/designs/s61-stable-copy-loading.md`.
 
 - Task 5 source and route tests are complete. The focused content-route run passed 48/48;
   the five related content suites passed 153 tests, with typecheck, lint and format green.
-- The generated head bootstrap is fresh and measures 2,491 bytes gzip against its fixed
+- The generated head bootstrap is fresh and measures 2,497 bytes gzip against its fixed
   2,500-byte ceiling with a representative high-entropy 112-character site token and
-  24-character nonce. Its generator, CSP hashes, no-referrer request, 200 ms recovery,
-  duplicate/mismatch handling, text-node observation and open-root behavior have targeted
-  passing tests.
+  24-character nonce. Its generator, CSP hashes, cross-origin no-referrer and same-origin
+  bare-origin request, 200 ms recovery, duplicate/mismatch handling, text-node observation
+  and open-root behavior have targeted passing tests.
 - The current runtime handoff tests pass for early-fetch reuse without a font wait, atomic
   baseline/A/B reveal, delayed A/B falling back to the valid baseline without a late variant
   or impression, and missing/unsupported marked runtimes retaining authored copy.
-- The permanent Playwright regression passes one test with eight internal scenarios: the
+- The permanent Playwright regression passes one test with nine internal scenarios: the
   legacy swap control, fast baseline, authored deadline fallback, delayed-A/B baseline,
   synchronous open shadow root with a blocked font, real React 19 `hydrateRoot` over nested
   hero spans, CSP style-block fallback, and quoted bootstrap/style hash admission without
-  `unsafe-inline`. The separate evidence capture passed seven
-  scenarios with zero layout shift and zero React recoverable errors. Its timings are
-  frame-sampled CSS visibility, not guaranteed glyph-paint timestamps.
-- The embed build passes all three fixed size gates: 45,873 bytes gzip for the bundle
-  (ceiling 45,880), 33,116 for the widget slice (ceiling 33,120), and 2,491 for the
+  `unsafe-inline`, plus same-origin authorization with a bare-origin Referer and no Origin
+  header. The separate evidence capture passed seven scenarios with zero layout shift and
+  zero React recoverable errors. Its timings are frame-sampled CSS visibility, not guaranteed
+  glyph-paint timestamps.
+- The embed build passes all three fixed size gates: 45,840 bytes gzip for the bundle
+  (ceiling 45,880), 33,085 for the widget slice (ceiling 33,120), and 2,497 for the
   configured bootstrap (ceiling 2,500). The ceilings were not changed. Headroom remains
   deliberately narrow, so freshness and size checks stay blocking on every rebuild.
 - A preliminary 20-request production HTTP operator sample measured median 589 ms, range
@@ -120,8 +121,12 @@ These refine the tasks above and take precedence over their shorter summaries.
   the design. Keep the legacy builder intact. Add per-open-root style and observation for
   roots present during startup. Prove missing/blocked/late bootstrap cannot enter a legacy
   swap path through a new v2 runtime tag.
-- Task 3 sets no-referrer explicitly and verifies that sensitive editor URL parameters
-  cannot reach request URL, headers, referrer or log-facing data.
+- Task 3 uses no-referrer for cross-origin public fetches. Browser-proven same-origin
+  GETs omit Origin, so only that case sends an explicit origin-only referrer
+  (document.location.origin + "/", referrerPolicy: origin), retaining the existing
+  mandatory site-domain authorization. No path, query, hash or private parameter may
+  appear in either case; cookies remain omitted. This bounded implementation refinement
+  preserves the validated privacy goal and adds no server authorization bypass.
 - Task 4 lockout is public-only. Private authorized preview can hydrate after mask release.
   Valid published rows win as baseline if A/B fails/misses the cap; no unshown variant
   impression. Gather before synchronous commit and roll back partial host exceptions.

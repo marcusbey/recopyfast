@@ -39,6 +39,7 @@ function installationFor(token: string): StableEmbedInstallation {
       scriptHash: "sha256-script",
       styleHash: "sha256-style",
       scriptSource: "http://localhost:3000",
+      connectSources: ["http://localhost:3000"],
     },
   };
 }

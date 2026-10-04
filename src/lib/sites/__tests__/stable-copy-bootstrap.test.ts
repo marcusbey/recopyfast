@@ -2,15 +2,13 @@ import { JSDOM } from "jsdom";
 import { buildStableEmbedInstallation } from "../embed-script";
 
 interface StartupState {
-  api: string;
-  path: string;
-  v: string;
-  site: string;
+  k: string;
   status: string;
   at: number | null;
   content: Promise<unknown>;
   can: () => boolean;
   fail: (reason: string) => void;
+  done: () => void;
   snap: (widget: unknown) => unknown;
   apply: (
     widget: unknown,
@@ -26,13 +24,16 @@ function bootDocument(options: {
   fetchImpl?: jest.Mock;
   siteId?: string;
   siteToken?: string;
+  appUrl?: string;
+  blockInitialStyle?: boolean;
 }) {
   const fetchImpl = options.fetchImpl ?? jest.fn(() => new Promise(() => {}));
   const installation = buildStableEmbedInstallation({
     siteId: options.siteId ?? "site-123",
     siteToken: options.siteToken ?? "site-token-abc",
-    appUrl: "https://api.example",
+    appUrl: options.appUrl ?? "https://api.example",
   });
+  let nativeAttachShadow: typeof Element.prototype.attachShadow | undefined;
   const dom = new JSDOM(
     `<!doctype html><html><head>${installation.headBootstrap}</head><body>${options.body ?? ""}</body></html>`,
     {
@@ -41,6 +42,13 @@ function bootDocument(options: {
         options.url ??
         "https://customer.example/pricing/index.html?rcf_token=secret#plans",
       beforeParse(window) {
+        nativeAttachShadow = window.Element.prototype.attachShadow;
+        if (options.blockInitialStyle) {
+          Object.defineProperty(window.HTMLStyleElement.prototype, "sheet", {
+            configurable: true,
+            get: () => null,
+          });
+        }
         Object.defineProperty(window, "fetch", {
           configurable: true,
           value: fetchImpl,
@@ -51,7 +59,7 @@ function bootDocument(options: {
 
   const startup = (dom.window as unknown as { __rcfStartup: StartupState })
     .__rcfStartup;
-  return { dom, fetchImpl, installation, startup };
+  return { dom, fetchImpl, installation, startup, nativeAttachShadow };
 }
 
 async function mutations() {
@@ -79,23 +87,49 @@ describe("stable-copy head bootstrap", () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(`${url}${JSON.stringify(init)}`).not.toContain("rcf_token");
     expect(`${url}${JSON.stringify(init)}`).not.toContain("secret");
-    expect(startup).toMatchObject({
-      v: "2",
-      site: "site-123",
-      api: "https://api.example/api",
+    expect(startup.k).toBe("2\0site-123\0https://api.example/api\0/pricing");
+  });
+
+  it("sends only the bare origin referrer to a trusted same-origin API", () => {
+    const { fetchImpl } = bootDocument({
+      appUrl: "https://customer.example",
+      url: "https://customer.example/pricing?rcf_token=secret#plans",
     });
-    expect(startup.path).toBe("/pricing");
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://customer.example/api/content/site-123?page_path=%2Fpricing",
+      expect.objectContaining({
+        credentials: "omit",
+        headers: { Authorization: "Bearer site-token-abc" },
+        referrer: "https://customer.example/",
+        referrerPolicy: "origin",
+      }),
+    );
+    const options = JSON.stringify(fetchImpl.mock.calls[0][1]);
+    expect(options).not.toContain("pricing");
+    expect(options).not.toContain("rcf_token");
+    expect(options).not.toContain("secret");
+  });
+
+  it("fails safe without a request when the configured API URL is invalid", () => {
+    const { fetchImpl, startup } = bootDocument({ appUrl: ":invalid:" });
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(startup).toMatchObject({ status: "f", code: "x" });
   });
 
   it("conceals eligible direct text but excludes ignored, editable and structural wrappers", async () => {
-    const { dom, startup } = bootDocument({});
+    const { dom } = bootDocument({});
     const document = dom.window.document;
     document.body.innerHTML = `
       <h1 id="held">Published headline target</h1>
       <p data-rcf-ignore id="ignored">Ignored copy</p>
       <div contenteditable="true"><span id="editable">Draft copy</span></div>
+      <div contenteditable><span id="editable-empty">Draft shorthand</span></div>
+      <div contenteditable="plaintext-only"><span id="editable-plain">Draft plain text</span></div>
       <div id="structural"><span>Child text only</span></div>
       <div data-rcf-content id="region"><strong>Explicit region</strong></div>
+      <button id="split">A<span>B</span></button>
     `;
 
     await mutations();
@@ -114,6 +148,12 @@ describe("stable-copy head bootstrap", () => {
     expect(document.querySelector("#editable")).not.toHaveAttribute(
       "data-rcf-startup-held",
     );
+    expect(document.querySelector("#editable-empty")).not.toHaveAttribute(
+      "data-rcf-startup-held",
+    );
+    expect(document.querySelector("#editable-plain")).not.toHaveAttribute(
+      "data-rcf-startup-held",
+    );
     expect(document.querySelector("#structural")).not.toHaveAttribute(
       "data-rcf-startup-held",
     );
@@ -121,20 +161,27 @@ describe("stable-copy head bootstrap", () => {
       "data-rcf-startup-held",
       "",
     );
+    expect(document.querySelector("#split")).toHaveAttribute(
+      "data-rcf-startup-held",
+      "",
+    );
     expect(document.querySelectorAll("[data-rcf-startup-held]")).toHaveLength(
-      3,
+      4,
     );
   });
 
   it("arms the 200 ms recovery deadline on the first managed concealment", async () => {
     jest.useFakeTimers();
-    const { dom, startup } = bootDocument({});
+    const { dom, startup, nativeAttachShadow } = bootDocument({});
     const heading = dom.window.document.createElement("h1");
     heading.textContent = "Authored headline";
     dom.window.document.body.appendChild(heading);
     await mutations();
 
     expect(startup.status).toBe("h");
+    expect(dom.window.Element.prototype.attachShadow).not.toBe(
+      nativeAttachShadow,
+    );
     expect(heading).toHaveAttribute("data-rcf-startup-held", "");
 
     jest.advanceTimersByTime(199);
@@ -143,6 +190,82 @@ describe("stable-copy head bootstrap", () => {
 
     expect(startup.status).toBe("f");
     expect(heading).not.toHaveAttribute("data-rcf-startup-held");
+    expect(dom.window.Element.prototype.attachShadow).toBe(nativeAttachShadow);
+    const lateRoot = dom.window.document
+      .createElement("div")
+      .attachShadow({ mode: "open" });
+    expect(lateRoot.querySelector("style[data-rcf-startup-style]")).toBeNull();
+  });
+
+  it("restores the native shadow hook after apply without clobbering a host override", () => {
+    const applied = bootDocument({ body: "<h1>Managed copy</h1>" });
+    applied.startup.done();
+    expect(applied.dom.window.Element.prototype.attachShadow).toBe(
+      applied.nativeAttachShadow,
+    );
+
+    const overridden = bootDocument({ body: "<h1>Managed copy</h1>" });
+    const startupHook = overridden.dom.window.Element.prototype.attachShadow;
+    const hostOverride = function (
+      this: Element,
+      options: ShadowRootInit,
+    ): ShadowRoot {
+      return startupHook.call(this, options);
+    };
+    overridden.dom.window.Element.prototype.attachShadow = hostOverride;
+    overridden.startup.fail("d");
+    expect(overridden.dom.window.Element.prototype.attachShadow).toBe(
+      hostOverride,
+    );
+    const delegatedRoot = overridden.dom.window.document
+      .createElement("div")
+      .attachShadow({ mode: "open" });
+    expect(
+      delegatedRoot.querySelector("style[data-rcf-startup-style]"),
+    ).toBeNull();
+  });
+
+  it("restores attachShadow when CSP blocks the initial gate style", () => {
+    const { dom, startup, nativeAttachShadow } = bootDocument({
+      body: "<h1>Authored copy</h1>",
+      blockInitialStyle: true,
+    });
+
+    expect(startup).toMatchObject({ status: "f", code: "s" });
+    expect(dom.window.Element.prototype.attachShadow).toBe(nativeAttachShadow);
+  });
+
+  it("does not re-arm shadow gating after a host-style failure settles startup", async () => {
+    const { dom, startup, nativeAttachShadow } = bootDocument({});
+    const document = dom.window.document;
+    const firstHost = document.createElement("div");
+    const secondHost = document.createElement("div");
+    const firstRoot = nativeAttachShadow!.call(firstHost, { mode: "open" });
+    const secondRoot = nativeAttachShadow!.call(secondHost, { mode: "open" });
+    firstRoot.innerHTML = '<h2 id="shadow-failure">Authored first</h2>';
+    secondRoot.innerHTML = "<h2>Authored second</h2>";
+    const nativeGetComputedStyle = dom.window.getComputedStyle.bind(dom.window);
+    jest.spyOn(dom.window, "getComputedStyle").mockImplementation((element) => {
+      if ((element as HTMLElement).id === "shadow-failure") {
+        return { visibility: "visible" } as CSSStyleDeclaration;
+      }
+      return nativeGetComputedStyle(element);
+    });
+
+    const fragment = document.createDocumentFragment();
+    fragment.append(firstHost, secondHost);
+    document.body.appendChild(fragment);
+    await mutations();
+
+    expect(startup).toMatchObject({ status: "f", code: "s" });
+    expect(firstRoot.querySelector("style[data-rcf-startup-style]")).toBeNull();
+    expect(
+      secondRoot.querySelector("style[data-rcf-startup-style]"),
+    ).toBeNull();
+
+    firstRoot.appendChild(document.createElement("span"));
+    await mutations();
+    expect(firstRoot.querySelector("style[data-rcf-startup-style]")).toBeNull();
   });
 
   it("checks the deadline when the first concealment began at monotonic time zero", async () => {
@@ -162,7 +285,7 @@ describe("stable-copy head bootstrap", () => {
   });
 
   it("reclassifies a parser-added text node through its eligible parent", async () => {
-    const { dom, startup } = bootDocument({
+    const { dom } = bootDocument({
       body: "<p>Keep the startup gate active</p>",
     });
     const heading = dom.window.document.createElement("h1");
@@ -193,7 +316,7 @@ describe("stable-copy head bootstrap", () => {
   });
 
   it("installs the gate inside open shadow roots present during startup", async () => {
-    const { dom, startup } = bootDocument({});
+    const { dom } = bootDocument({});
     const host = dom.window.document.createElement("div");
     const root = host.attachShadow({ mode: "open" });
 

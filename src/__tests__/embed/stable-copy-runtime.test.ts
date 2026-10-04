@@ -41,10 +41,15 @@ async function until(check: () => boolean, timeoutMs = 300): Promise<void> {
 interface StartupState {
   status: string;
   code: string | null;
+  i?: boolean;
+  apply: (...args: unknown[]) => unknown;
+  fail: (reason: string) => void;
 }
 
 interface WidgetInstance {
   handleContentUpdate(data: { elementId: string; content: string }): void;
+  activeTests: unknown[];
+  variantAssignments: Record<string, string>;
 }
 
 function startup(window: JSDOM["window"]): StartupState {
@@ -61,6 +66,7 @@ function createPage(options: {
   fonts?: { status: string; ready: Promise<unknown> };
   fetch: jest.Mock;
   runtimeProtocol?: string;
+  bootstrapProtocol?: string;
 }) {
   const installation = buildStableEmbedInstallation({
     siteId: SITE_ID,
@@ -74,8 +80,15 @@ function createPage(options: {
           'data-rcf-startup="2"',
           `data-rcf-startup="${options.runtimeProtocol}"`,
         );
+  const headBootstrap =
+    options.bootstrapProtocol === undefined
+      ? installation.headBootstrap
+      : installation.headBootstrap.replace(
+          'data-rcf-startup="2"',
+          `data-rcf-startup="${options.bootstrapProtocol}"`,
+        );
   const html = `<!doctype html><html><head>${
-    options.includeBootstrap === false ? "" : installation.headBootstrap
+    options.includeBootstrap === false ? "" : headBootstrap
   }</head><body>${options.body ?? '<h1 id="headline">Authored headline</h1>'}${
     runtimeTag
   }</body></html>`;
@@ -244,6 +257,128 @@ describe("stable-copy runtime handoff", () => {
     expect(headline).toHaveAttribute("data-rcf-variant", "variant-1");
   });
 
+  it("keeps shorthand/plaintext editable descendants private while hydrating split direct text", async () => {
+    const rows =
+      deferred<Array<{ element_id: string; current_content: string }>>();
+    const fetch = jest.fn((url: string, init?: { method?: string }) => {
+      if (url.includes(`/content/${SITE_ID}?`) && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => rows.promise,
+        });
+      }
+      return Promise.resolve(response({ tests: [] }));
+    });
+    const { dom } = createPage({
+      body: `
+        <div contenteditable><span id="editable-empty" data-rcf-id="editable-empty">Draft shorthand</span></div>
+        <div contenteditable="plaintext-only"><span id="editable-plain" data-rcf-id="editable-plain">Draft plain text</span></div>
+        <button id="split" data-rcf-id="split">A<span>B</span></button>
+      `,
+      fetch,
+    });
+    openPages.push(dom);
+    dom.window.eval(WIDGET_SOURCE);
+    rows.resolve([
+      { element_id: "editable-empty", current_content: "Leaked shorthand" },
+      { element_id: "editable-plain", current_content: "Leaked plain" },
+      { element_id: "split", current_content: "Published split" },
+    ]);
+    await until(() => startup(dom.window).status === "d");
+
+    expect(
+      dom.window.document.querySelector("#editable-empty")?.textContent,
+    ).toBe("Draft shorthand");
+    expect(
+      dom.window.document.querySelector("#editable-plain")?.textContent,
+    ).toBe("Draft plain text");
+    expect(dom.window.document.querySelector("#split")?.textContent).toBe(
+      "Published split",
+    );
+  });
+
+  it("clears unshown experiment state when the atomic commit rolls back", async () => {
+    const rows =
+      deferred<Array<{ element_id: string; current_content: string }>>();
+    let targetId = "";
+    const fetch = jest.fn((url: string, init?: { method?: string }) => {
+      if (url.includes(`/content/${SITE_ID}?`) && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => rows.promise,
+        });
+      }
+      if (url.includes(`/ab-tests/active/${SITE_ID}`)) {
+        return Promise.resolve(
+          response({
+            tests: [
+              {
+                id: "rollback-test",
+                target_element_id: targetId,
+                variants: [
+                  {
+                    id: "rollback-variant",
+                    variant_content: "Unshown variant",
+                    traffic_percentage: 100,
+                    is_control: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        );
+      }
+      if (url.includes(`/ab-tests/bucket/${SITE_ID}`)) {
+        return Promise.resolve(
+          response({
+            assignments: { "rollback-test": "rollback-variant" },
+            geo: null,
+          }),
+        );
+      }
+      return Promise.resolve(response({ success: true }));
+    });
+    const { dom } = createPage({ fetch });
+    openPages.push(dom);
+    const startupState = startup(dom.window);
+    startupState.apply = () => {
+      startupState.fail("x");
+      return null;
+    };
+    const beacon = jest.fn(() => true);
+    Object.defineProperty(dom.window.navigator, "sendBeacon", {
+      configurable: true,
+      value: beacon,
+    });
+    dom.window.eval(WIDGET_SOURCE);
+
+    const headline =
+      dom.window.document.querySelector<HTMLElement>("#headline")!;
+    await until(() => headline.hasAttribute("data-rcf-id"));
+    targetId = headline.getAttribute("data-rcf-id")!;
+    rows.resolve([
+      { element_id: targetId, current_content: "Published baseline" },
+    ]);
+    await until(() => startupState.status === "f");
+
+    const instance = widget(dom.window);
+    expect(instance.activeTests).toEqual([]);
+    expect(instance.variantAssignments).toEqual({});
+    (
+      dom.window as unknown as {
+        rcf: { trackConversion(eventName: string, value: number): void };
+      }
+    ).rcf.trackConversion("signup", 1);
+    headline.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(beacon).not.toHaveBeenCalled();
+    expect(
+      fetch.mock.calls.some(([url]) => String(url).includes("/ab-tests/track")),
+    ).toBe(false);
+  });
+
   it("keeps authored copy when a v2 runtime tag has no matching head bootstrap", async () => {
     const fetch = jest
       .fn()
@@ -328,6 +463,31 @@ describe("stable-copy runtime handoff", () => {
     },
   );
 
+  it("fails closed when an unsupported head/runtime protocol pair matches", async () => {
+    const fetch = jest.fn().mockResolvedValue(response([]));
+    const { dom } = createPage({
+      fetch,
+      runtimeProtocol: "3",
+      bootstrapProtocol: "3",
+    });
+    openPages.push(dom);
+
+    dom.window.eval(WIDGET_SOURCE);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(startup(dom.window)).toMatchObject({ status: "f", code: "l" });
+    expect(dom.window.document.querySelector("#headline")?.textContent).toBe(
+      "Authored headline",
+    );
+    expect(
+      fetch.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes(`/content/${SITE_ID}?`) &&
+          !(init as { method?: string } | undefined)?.method,
+      ),
+    ).toBe(false);
+  });
+
   it("reveals a valid published baseline before the cap when A/B hangs, without a late variant or impression", async () => {
     const rows =
       deferred<Array<{ element_id: string; current_content: string }>>();
@@ -397,6 +557,99 @@ describe("stable-copy runtime handoff", () => {
     expect(
       fetch.mock.calls.some(([url]) => String(url).includes("/ab-tests/track")),
     ).toBe(false);
+  });
+
+  it("hydrates stored images before intrinsic dimensions become available", async () => {
+    const rows =
+      deferred<Array<{ element_id: string; current_content: string }>>();
+    const fetch = jest.fn((url: string, init?: { method?: string }) => {
+      if (url.includes(`/content/${SITE_ID}?`) && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => rows.promise,
+        });
+      }
+      return Promise.resolve(response({ tests: [] }));
+    });
+    const { dom } = createPage({
+      body: '<img id="image" data-rcf-id="image" src="https://customer.example/authored.png" alt="Authored">',
+      fetch,
+    });
+    openPages.push(dom);
+    const image =
+      dom.window.document.querySelector<HTMLImageElement>("#image")!;
+    expect(image.offsetWidth).toBe(0);
+    expect(image.offsetHeight).toBe(0);
+    await until(
+      () =>
+        startup(dom.window).status === "f" && startup(dom.window).code === "e",
+    );
+    const lateText = dom.window.document.createElement("h1");
+    lateText.setAttribute("data-rcf-id", "late-text");
+    lateText.textContent = "Late authored text";
+    dom.window.document.body.appendChild(lateText);
+    expect(startup(dom.window)).toMatchObject({
+      status: "f",
+      code: "e",
+      i: true,
+    });
+    dom.window.eval(WIDGET_SOURCE);
+    rows.resolve([
+      {
+        element_id: "image",
+        current_content: "https://cdn.example/published.png",
+      },
+      {
+        element_id: "late-text",
+        current_content: "Late published text",
+      },
+    ]);
+
+    await until(() => image.src === "https://cdn.example/published.png");
+    expect(lateText.textContent).toBe("Late authored text");
+    expect(startup(dom.window)).toMatchObject({ status: "f", code: "e" });
+  });
+
+  it("keeps text authored after the deadline while applying the delayed image row", async () => {
+    const rows =
+      deferred<Array<{ element_id: string; current_content: string }>>();
+    const fetch = jest.fn((url: string, init?: { method?: string }) => {
+      if (url.includes(`/content/${SITE_ID}?`) && !init?.method) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => rows.promise,
+        });
+      }
+      return Promise.resolve(response({ tests: [] }));
+    });
+    const { dom } = createPage({
+      body: `
+        <h1 id="headline" data-rcf-id="headline">Authored headline</h1>
+        <img id="image" data-rcf-id="image" src="https://customer.example/authored.png" alt="Authored">
+      `,
+      fetch,
+    });
+    openPages.push(dom);
+    const headline =
+      dom.window.document.querySelector<HTMLElement>("#headline")!;
+    const image =
+      dom.window.document.querySelector<HTMLImageElement>("#image")!;
+    dom.window.eval(WIDGET_SOURCE);
+
+    await until(() => startup(dom.window).status === "f");
+    expect(startup(dom.window).code).toBe("d");
+    rows.resolve([
+      { element_id: "headline", current_content: "Late published headline" },
+      {
+        element_id: "image",
+        current_content: "https://cdn.example/published.png",
+      },
+    ]);
+
+    await until(() => image.src === "https://cdn.example/published.png");
+    expect(headline.textContent).toBe("Authored headline");
   });
 
   it("discards public prefetch and permits later authorized private hydration", async () => {

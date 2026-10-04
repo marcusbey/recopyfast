@@ -10,7 +10,7 @@
  * Layout:
  *   public/embed/recopyfast.src.js         source of truth, readable, hand-edited
  *   public/embed/recopyfast.js             build output — what customers load
- *   public/embed/socket.io-client.min.js   standalone socket.io, same-origin fallback
+ *   public/embed/socket.io-client.min.js   standalone transport compatibility artifact
  *   public/embed/stable-copy-bootstrap.src.js  readable native-head source
  *   src/lib/sites/stable-copy-bootstrap.generated.ts  static browser constants
  *
@@ -670,7 +670,7 @@ async function main() {
       `bundle   ${path.relative(ROOT, BUNDLE_OUT)}  ${formatKb(bundleBytes)}` +
         ` (widget ${formatKb(Buffer.byteLength(widget))}` +
         ` + socket.io-client ${socketVersion} ${formatKb(Buffer.byteLength(socketIo))})`,
-      `fallback ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
+      `transport ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
       formatGzLine(measured, ceilings),
       formatBootstrapGzLine(bootstrapGz),
     ].join("\n"),

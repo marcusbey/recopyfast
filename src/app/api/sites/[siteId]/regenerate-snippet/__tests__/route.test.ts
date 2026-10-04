@@ -293,6 +293,7 @@ describe("POST /api/sites/[siteId]/regenerate-snippet", () => {
           scriptHash: expect.stringMatching(/^sha256-/),
           styleHash: expect.stringMatching(/^sha256-/),
           scriptSource: expect.any(String),
+          connectSources: expect.arrayContaining([expect.any(String)]),
         },
       },
     });

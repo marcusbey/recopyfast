@@ -203,14 +203,21 @@ export function StableInstallationInstructions({
       </Alert>
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>
-          Restrictive CSP: add <code>{`'${installation.csp.scriptHash}'`}</code>{" "}
-          to script-src and <code>{`'${installation.csp.styleHash}'`}</code> to
-          style-src.
+          Public copy startup CSP: add{" "}
+          <code>{`'${installation.csp.scriptHash}'`}</code> to script-src and{" "}
+          <code>{`'${installation.csp.styleHash}'`}</code> to style-src.
         </p>
         <p>
+          These hashes authorize only the public copy startup bootstrap and
+          temporary gate style. Editor styling needs compatible host CSP
+          configuration or a nonce integration; these hashes alone do not
+          authorize editor styling.
+        </p>
+        <p>
+          connect-src <code>{installation.csp.connectSources.join(" ")}</code>.
           Allow the external runtime from{" "}
-          <code>{installation.csp.scriptSource}</code>. Do not enable
-          unsafe-inline.
+          <code>{installation.csp.scriptSource}</code> in script-src. Do not
+          enable unsafe-inline.
         </p>
       </div>
     </div>

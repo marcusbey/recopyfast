@@ -19,7 +19,7 @@ const WIDGET_SOURCE = path.join(
 );
 
 const METHOD_BEGIN = "    async hydrateStoredContent() {";
-const NEXT_METHOD = "    applyStoredContent(rows) {";
+const NEXT_METHOD = "    applyStoredContent(rows, imagesOnly) {";
 
 interface FakeWidget {
   elements: Map<
@@ -55,6 +55,8 @@ function loadHydrateStoredContent(
     "RECOPYFAST_API",
     "SITE_ID",
     "SITE_TOKEN",
+    "STARTUP_MARKED",
+    "PUBLIC_STARTUP",
     "contentReadEndpoint",
     "fetch",
     "console",
@@ -63,6 +65,8 @@ function loadHydrateStoredContent(
     "https://recopyfast.test/api",
     "site-123",
     "revoked-token",
+    false,
+    null,
     () => "https://recopyfast.test/api/content/site-123?page_path=%2F",
     fetch,
     { warn, log: jest.fn() },

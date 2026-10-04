@@ -144,6 +144,7 @@ describe("/api/sites/register - POST", () => {
           scriptHash: expect.stringMatching(/^sha256-/),
           styleHash: expect.stringMatching(/^sha256-/),
           scriptSource: "https://recopyfast.com",
+          connectSources: ["https://recopyfast.com", "ws://localhost:4001"],
         },
       },
     });
