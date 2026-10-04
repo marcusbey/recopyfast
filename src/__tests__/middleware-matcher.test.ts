@@ -105,6 +105,12 @@ const CRAWLER_ASSETS = ["/robots.txt", "/sitemap.xml"];
 /** The public landing page and its one exact cross-origin preview runtime. */
 const TRY_ASSETS = ["/try", "/try/rcf-try.js"];
 
+/** Public installation reading and its byte-identical agent handoff. */
+const INSTALLATION_DOCS = [
+  "/docs/install",
+  "/docs/install/agent-instructions.md",
+];
+
 /**
  * Sentry's same-origin tunnel (s46). The browser posts error envelopes here and
  * a rewrite forwards them to Sentry; whether the poster is signed in changes
@@ -116,6 +122,7 @@ const SESSIONLESS_PATHS = [
   ...EMBED_ASSETS,
   ...CRAWLER_ASSETS,
   ...TRY_ASSETS,
+  ...INSTALLATION_DOCS,
   ...TUNNEL_PATHS,
 ];
 
@@ -151,7 +158,7 @@ describe("middleware matcher", () => {
   );
 });
 
-describe("a request that cannot carry a session", () => {
+describe("a request whose response does not depend on a session", () => {
   it.each(SESSIONLESS_PATHS)(
     "spends no GoTrue round trip on %s",
     async (pathname) => {

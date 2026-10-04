@@ -476,3 +476,11 @@ Still open:
 
 *Anything below the perimeter table that is already built and now sits in the graveyard
 stays deployed and untouched. Frozen means no new work — it does not mean delete.*
+
+
+## Installation documentation
+
+The self-serve installation flow includes a public guide showing the generated
+script, page scope, host requirements, verification and invitations, plus an
+agent-ready installation brief. Documentation must state current SPA and
+analytics constraints rather than claim compatibility the widget has not proved.

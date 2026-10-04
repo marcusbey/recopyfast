@@ -37,6 +37,17 @@ describe("SiteInstallationCard", () => {
     });
   });
 
+  it.each(["awaiting-install", "live", "stale"] as const)(
+    "links the full installation guide while the site is %s",
+    (status) => {
+      render(<SiteInstallationCard site={site({ status })} />);
+
+      expect(
+        screen.getByRole("link", { name: "Installation guide" }),
+      ).toHaveAttribute("href", "/docs/install");
+    },
+  );
+
   describe("awaiting install", () => {
     it("shows the state, the snippet and a copy control", () => {
       render(<SiteInstallationCard site={site()} />);
@@ -69,7 +80,13 @@ describe("SiteInstallationCard", () => {
       // navigator.clipboard for the whole file, which the copy test below owns.
       fireEvent.mouseDown(screen.getByRole("tab", { name: "Next.js" }));
 
-      expect(await screen.findByText(/app\/layout\.tsx/i)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/after the page has hydrated/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/client-side route changes/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/rcf_handoff/i)).toBeInTheDocument();
     });
 
     it("confirms a copy in place, since there is nowhere else to put it", async () => {

@@ -7,6 +7,7 @@ import { useState, useEffect } from "react";
 const footerLinks = {
   Product: [
     { name: "Features", href: "/#features" },
+    { name: "Installation guide", href: "/docs/install" },
     { name: "Pricing", href: "/#pricing" },
     { name: "Demo", href: "/demo" },
     { name: "Compare tools", href: "/compare" },

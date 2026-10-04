@@ -2,10 +2,10 @@
  * Where the embed snippet goes, per stack — as typed data, in one place.
  *
  * The snippet itself is built by `buildEmbedScript()` and is identical for
- * every stack; the only thing that differs is which file the owner opens. That
- * difference used to exist nowhere at all: the dashboard printed a `<script>`
- * tag and left "so where do I put this" unanswered, which is the step an owner
- * stalls on.
+ * every stack. Full-document sites differ only in where the owner pastes it.
+ * React and Next.js are different: hydration, client navigation and
+ * URL-collecting analytics all affect whether the integration is safe and
+ * complete.
  *
  * THIS IS THE SINGLE SOURCE. `s18`'s public install pages extend this array
  * with the remaining stacks rather than keeping their own copy — the failure
@@ -13,9 +13,11 @@
  * day they are written and quietly disagree six months later, with nothing to
  * say which is current.
  *
- * Every recipe ends in the same place: immediately before `</body>`. The widget
- * reads the DOM it is handed, so a snippet in `<head>` runs before the copy it
- * is meant to discover exists.
+ * The Next.js recipe used to say that a root-layout tag completed installation.
+ * On aicompoz.com the document-level widget remained mounted across client
+ * navigation, while analytics could inspect credential-bearing editor URLs
+ * before the widget removed their query values. Keep those checks explicit;
+ * the widget does not expose a complete SPA teardown/reinitialization contract.
  */
 
 export type InstallRecipeId = "wordpress" | "nextjs" | "html";
@@ -25,9 +27,9 @@ export interface InstallRecipe {
   id: InstallRecipeId;
   /** What the stack is called, in the owner's words. */
   label: string;
-  /** The file to open and the exact spot in it. */
+  /** Where and how the generated snippet should load. */
   location: string;
-  /** The one caveat that stack has, when it has one. */
+  /** Integration caveats that must remain visible with the recipe. */
   notes?: string;
 }
 
@@ -44,9 +46,9 @@ export const installRecipes: readonly InstallRecipe[] = [
     id: "nextjs",
     label: "Next.js",
     location:
-      "Add it to app/layout.tsx, just before the closing </body> tag of the root layout.",
+      'For React or Next.js, load the generated tag after the page has hydrated. In Next.js, next/script with strategy="afterInteractive" is one option; preserve every generated attribute and value.',
     notes:
-      "On the Pages Router the same tag goes in pages/_document.tsx, inside <body> after <Main />.",
+      "The widget has no complete lifecycle for client-side route changes. Verify direct loads, internal navigation, Back, reload, and returning to an edited page; a root layout or one-time script load does not complete SPA integration. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_edit_token, rcf_staging, or rcf_token. Use full-document navigation only when appropriate.",
   },
   {
     id: "html",
