@@ -110,9 +110,9 @@ export default function Demo() {
               That is the whole product
             </h2>
             <p className="mx-auto mb-8 max-w-xl text-lg leading-relaxed text-slate-600">
-              One script tag on your site turns it into the page you just
-              edited. Your developers keep the codebase; everyone else stops
-              queueing for copy changes.
+              Two small script placements on your site turn it into the page you
+              just edited. Your developers keep the codebase; everyone else
+              stops queueing for copy changes.
             </p>
             <Link
               href="/signup"

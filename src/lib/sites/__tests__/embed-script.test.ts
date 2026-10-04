@@ -25,11 +25,15 @@
  */
 
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import {
   buildEmbedScript,
+  buildStableEmbedInstallation,
   getPublicAppUrl,
   getPublicWebSocketUrl,
+  STABLE_COPY_PROTOCOL_VERSION,
 } from "../embed-script";
 
 describe("buildEmbedScript", () => {
@@ -76,6 +80,113 @@ describe("buildEmbedScript", () => {
       'data-api-url="https://dashboard.example.com/api"',
     );
     expect(script).toContain('data-ws-url="wss://socket.example.com"');
+  });
+});
+
+describe("buildStableEmbedInstallation", () => {
+  it("keeps the legacy one-tag builder intact and returns the new two-placement contract", () => {
+    const legacy = buildEmbedScript({
+      siteId: "site-123",
+      siteToken: "site-token-abc",
+      appUrl: "https://app.recopyfast.com",
+      wsUrl: "",
+    });
+
+    const installation = buildStableEmbedInstallation({
+      siteId: "site-123",
+      siteToken: "site-token-abc",
+      appUrl: "https://app.recopyfast.com",
+      wsUrl: "",
+    });
+
+    expect(legacy).toBe(
+      '<script src="https://app.recopyfast.com/embed/recopyfast.js" data-site-id="site-123" data-site-token="site-token-abc" data-api-url="https://app.recopyfast.com/api"></script>',
+    );
+    expect(installation.protocolVersion).toBe(STABLE_COPY_PROTOCOL_VERSION);
+    expect(installation.headBootstrap).toContain("<script");
+    expect(installation.runtimeTag).toContain(
+      `data-rcf-startup="${STABLE_COPY_PROTOCOL_VERSION}"`,
+    );
+    expect(installation.runtimeTag).toContain(
+      'src="https://app.recopyfast.com/embed/recopyfast.js"',
+    );
+  });
+
+  it("escapes configuration into attributes while keeping the inline program byte-identical", () => {
+    const first = buildStableEmbedInstallation({
+      siteId: 'site"><unsafe',
+      siteToken: 'token&"><unsafe',
+      appUrl: "https://app.recopyfast.com",
+      nonce: 'nonce&"><unsafe',
+    });
+    const second = buildStableEmbedInstallation({
+      siteId: "another-site",
+      siteToken: "another-token",
+      appUrl: "https://other.example",
+      nonce: "another-nonce",
+    });
+
+    const inlineProgram = (tag: string) =>
+      tag.slice(tag.indexOf(">") + 1, tag.lastIndexOf("</script>"));
+
+    expect(inlineProgram(first.headBootstrap)).toBe(
+      inlineProgram(second.headBootstrap),
+    );
+    expect(first.headBootstrap).toContain(
+      'data-site-id="site&quot;&gt;&lt;unsafe"',
+    );
+    expect(first.headBootstrap).toContain(
+      'data-site-token="token&amp;&quot;&gt;&lt;unsafe"',
+    );
+    expect(first.headBootstrap).toContain(
+      'nonce="nonce&amp;&quot;&gt;&lt;unsafe"',
+    );
+    expect(first.runtimeTag).toContain(
+      'nonce="nonce&amp;&quot;&gt;&lt;unsafe"',
+    );
+    expect(inlineProgram(first.headBootstrap)).not.toContain("site-123");
+    expect(inlineProgram(first.headBootstrap)).not.toContain("another-token");
+  });
+
+  it("returns CSP hashes for the exact generated inline script and gate style", () => {
+    const installation = buildStableEmbedInstallation({
+      siteId: "site-123",
+      siteToken: "site-token-abc",
+      appUrl: "https://app.recopyfast.com",
+    });
+
+    const program = installation.headBootstrap.slice(
+      installation.headBootstrap.indexOf(">") + 1,
+      installation.headBootstrap.lastIndexOf("</script>"),
+    );
+    const hash = (value: string) =>
+      `sha256-${createHash("sha256").update(value).digest("base64")}`;
+
+    expect(installation.csp.scriptHash).toBe(hash(program));
+    expect(installation.csp.styleHash).toBe(
+      hash(
+        readFileSync(
+          path.join(process.cwd(), "public", "embed", "stable-copy-gate.css"),
+          "utf8",
+        ).trim(),
+      ),
+    );
+    expect(installation.csp.scriptSource).toBe("https://app.recopyfast.com");
+  });
+
+  it("keeps the canonical configured bootstrap within its independent gzip ceiling", () => {
+    const installation = buildStableEmbedInstallation({
+      siteId: "123e4567-e89b-42d3-a456-426614174000",
+      siteToken:
+        "123e4567-e89b-42d3-a456-426614174000.1760000000.9f47c2a8e10b6d35a0f4e9c271bd8a6503ce7f1a94b2d680e51c39af76d084be",
+      appUrl: "https://www.recopyfa.st",
+      nonce: "AbCdEfGhIjKlMnOpQrStUvWx",
+    });
+
+    expect(
+      gzipSync(Buffer.from(installation.headBootstrap, "utf8"), { level: 9 })
+        .length,
+    ).toBeLessThanOrEqual(2500);
   });
 });
 

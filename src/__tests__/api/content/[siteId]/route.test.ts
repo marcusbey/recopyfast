@@ -253,6 +253,8 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
+      const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+      process.env.NEXT_PUBLIC_APP_URL = "https://app.recopyfast.test";
       mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce({
         site: { id: "site-123", domain: "example.com", api_key: "api-key" },
         allowedOrigin: null,
@@ -273,12 +275,238 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(200);
       expect(data).toEqual(mockContentElements);
+      expect(mockAuthorizeFirstPartySiteRequest).toHaveBeenCalledWith(
+        "site-123",
+      );
       expect(mockAuthorizeSiteRequest).not.toHaveBeenCalled();
       // allowedOrigin is null for first-party requests, so withCors() falls
       // back to NEXT_PUBLIC_APP_URL rather than echoing a caller-supplied origin.
-      expect(
-        response.headers.get("Access-Control-Allow-Origin"),
-      ).not.toBeNull();
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+        "https://app.recopyfast.test",
+      );
+
+      if (originalAppUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_APP_URL;
+      } else {
+        process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
+      }
+    });
+
+    describe("explicit site credentials", () => {
+      const dashboardAuth = {
+        site: { id: "site-123", domain: "example.com", api_key: "api-key" },
+        allowedOrigin: null,
+      };
+
+      afterEach(() => {
+        // Several red-state cases intentionally leave a one-shot widget-auth
+        // rejection unconsumed while the route still takes the cookie branch.
+        // Clear that queue so one expected failure cannot poison the next test.
+        mockAuthorizeSiteRequest.mockReset();
+      });
+
+      it.each([
+        {
+          label: "a Bearer token",
+          url: "http://localhost/api/content/site-123",
+          headers: {
+            Authorization: "Bearer signed-token",
+            Origin: "https://example.com",
+          },
+          token: "signed-token",
+        },
+        {
+          label: "a legacy query token",
+          url: "http://localhost/api/content/site-123?token=legacy-token",
+          headers: { Origin: "https://example.com" },
+          token: "legacy-token",
+        },
+      ] satisfies Array<{
+        label: string;
+        url: string;
+        headers: Record<string, string>;
+        token: string;
+      }>)(
+        "routes $label directly to site authorization even when a dashboard cookie is valid",
+        async ({ url, headers, token }) => {
+          mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce(
+            dashboardAuth,
+          );
+          mockServiceClient.range.mockResolvedValueOnce({
+            data: mockContentElements,
+            error: null,
+          });
+
+          const response = await GET(
+            new NextRequest(url, {
+              headers: headers as Record<string, string>,
+            }),
+            { params: Promise.resolve({ siteId: "site-123" }) },
+          );
+
+          expect(response.status).toBe(200);
+          expect(mockAuthorizeFirstPartySiteRequest).not.toHaveBeenCalled();
+          expect(mockAuthorizeSiteRequest).toHaveBeenCalledWith({
+            siteId: "site-123",
+            token,
+            origin: "https://example.com",
+            referer: null,
+          });
+          expect(response.headers.get("Access-Control-Max-Age")).toBeNull();
+        },
+      );
+
+      it.each([
+        {
+          label: "a malformed Bearer header",
+          url: "http://localhost/api/content/site-123",
+          headers: {
+            Authorization: "Bearer",
+            Origin: "https://example.com",
+          },
+          token: null,
+          error: new SiteAuthError(
+            "Missing site token",
+            "site_token_missing",
+            401,
+            "https://example.com",
+          ),
+        },
+        {
+          label: "an unsupported Authorization scheme",
+          url: "http://localhost/api/content/site-123",
+          headers: {
+            Authorization: "Basic credentials",
+            Origin: "https://example.com",
+          },
+          token: null,
+          error: new SiteAuthError(
+            "Missing site token",
+            "site_token_missing",
+            401,
+            "https://example.com",
+          ),
+        },
+        {
+          label: "an empty legacy query token",
+          url: "http://localhost/api/content/site-123?token=",
+          headers: { Origin: "https://example.com" },
+          token: "",
+          error: new SiteAuthError(
+            "Missing site token",
+            "site_token_missing",
+            401,
+            "https://example.com",
+          ),
+        },
+        {
+          label: "a revoked Bearer token",
+          url: "http://localhost/api/content/site-123",
+          headers: {
+            Authorization: "Bearer revoked-token",
+            Origin: "https://example.com",
+          },
+          token: "revoked-token",
+          error: new SiteAuthError(
+            "Invalid site token",
+            "site_token_invalid",
+            401,
+            "https://example.com",
+          ),
+        },
+        {
+          label: "a revoked legacy query token",
+          url: "http://localhost/api/content/site-123?token=revoked-token",
+          headers: { Origin: "https://example.com" },
+          token: "revoked-token",
+          error: new SiteAuthError(
+            "Invalid site token",
+            "site_token_invalid",
+            401,
+            "https://example.com",
+          ),
+        },
+      ] satisfies Array<{
+        label: string;
+        url: string;
+        headers: Record<string, string>;
+        token: string | null;
+        error: SiteAuthError;
+      }>)(
+        "never lets $label fall through to a valid dashboard cookie",
+        async ({ url, headers, token, error }) => {
+          mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce(
+            dashboardAuth,
+          );
+          mockAuthorizeSiteRequest.mockRejectedValueOnce(error);
+
+          const response = await GET(
+            new NextRequest(url, {
+              headers: headers as Record<string, string>,
+            }),
+            { params: Promise.resolve({ siteId: "site-123" }) },
+          );
+
+          expect(response.status).toBe(401);
+          expect(await response.json()).toEqual({
+            error: error.message,
+            code: error.code,
+          });
+          expect(mockAuthorizeFirstPartySiteRequest).not.toHaveBeenCalled();
+          expect(mockAuthorizeSiteRequest).toHaveBeenCalledWith({
+            siteId: "site-123",
+            token,
+            origin: "https://example.com",
+            referer: null,
+          });
+          expect(mockServiceClient.range).not.toHaveBeenCalled();
+          expect(response.headers.get("Access-Control-Max-Age")).toBeNull();
+        },
+      );
+
+      it("denies the actual GET after key rotation even when the preflight can be cached", async () => {
+        const preflight = await OPTIONS(
+          new NextRequest("http://localhost/api/content/site-123", {
+            method: "OPTIONS",
+            headers: { Origin: "https://example.com" },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+        expect(preflight.status).toBe(204);
+
+        // Access-Control-Max-Age only lets the browser skip another OPTIONS
+        // call. The credential can be revoked during that window, so the GET
+        // still has to reach the site authorizer and fail on the rotated key.
+        mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce(dashboardAuth);
+        mockAuthorizeSiteRequest.mockRejectedValueOnce(
+          new SiteAuthError(
+            "Invalid site token",
+            "site_token_invalid",
+            401,
+            "https://example.com",
+          ),
+        );
+
+        const response = await GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token-signed-before-key-rotation",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+        expect(response.status).toBe(401);
+        expect(await response.json()).toEqual({
+          error: "Invalid site token",
+          code: "site_token_invalid",
+        });
+        expect(mockAuthorizeFirstPartySiteRequest).not.toHaveBeenCalled();
+        expect(mockAuthorizeSiteRequest).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.range).not.toHaveBeenCalled();
+        expect(response.headers.get("Access-Control-Max-Age")).toBeNull();
+      });
     });
 
     /**
@@ -849,6 +1077,8 @@ describe("/api/content/[siteId]", () => {
       expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
         "https://example.com",
       );
+      expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+      expect(response.headers.get("Vary")).toBe("Origin");
     });
 
     it("should withhold the grant, not the answer, when origin not allowed", async () => {
@@ -872,9 +1102,46 @@ describe("/api/content/[siteId]", () => {
       });
 
       expect(response.status).toBe(204);
-      expect(response.headers.get("Access-Control-Allow-Origin")).not.toBe(
-        "https://malicious.com",
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+      expect(response.headers.get("Vary")).toBe("Origin");
+    });
+
+    it("does not reveal whether an unknown site exists", async () => {
+      mockAuthorizeSiteOrigin.mockRejectedValueOnce(
+        new SiteAuthError("Site not found", "site_not_found", 401),
       );
+
+      const response = await OPTIONS(
+        new NextRequest("http://localhost/api/content/unknown-site", {
+          method: "OPTIONS",
+          headers: { Origin: "https://example.com" },
+        }),
+        { params: Promise.resolve({ siteId: "unknown-site" }) },
+      );
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+      expect(response.headers.get("Vary")).toBe("Origin");
+    });
+
+    it("keeps a no-Origin preflight uniform without inventing a CORS grant", async () => {
+      mockAuthorizeSiteOrigin.mockRejectedValueOnce(
+        new Error("Missing origin"),
+      );
+
+      const response = await OPTIONS(
+        new NextRequest("http://localhost/api/content/site-123", {
+          method: "OPTIONS",
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.status).toBe(204);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      expect(response.headers.get("Access-Control-Max-Age")).toBe("86400");
+      expect(response.headers.get("Vary")).toBe("Origin");
     });
   });
 });

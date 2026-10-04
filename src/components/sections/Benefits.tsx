@@ -74,7 +74,7 @@ const supporting = [
   },
   {
     icon: Globe2,
-    title: "One script tag",
+    title: "Two small script placements",
     description:
       "On the site you already built: React, Vue, WordPress, Webflow or plain HTML. Its Content Security Policy has to allow our script.",
   },

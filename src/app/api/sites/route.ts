@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
-import { buildEmbedScript } from "@/lib/sites/embed-script";
+import {
+  buildEmbedScript,
+  buildStableEmbedInstallation,
+} from "@/lib/sites/embed-script";
 import { resolveEffectiveSiteStatus } from "@/lib/sites/site-status";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 
@@ -10,6 +13,9 @@ const HISTORY_ID_BATCH_SIZE = 200;
 
 export async function GET(request: NextRequest) {
   try {
+    // Keep the standard route signature even though authorization is resolved
+    // through the server Supabase client rather than request headers here.
+    void request;
     const supabase = await createClient();
     const serviceClient = createServiceRoleClient();
 
@@ -179,6 +185,9 @@ export async function GET(request: NextRequest) {
         const embedScript = siteToken
           ? buildEmbedScript({ siteId: site.id, siteToken })
           : undefined;
+        const installation = siteToken
+          ? buildStableEmbedInstallation({ siteId: site.id, siteToken })
+          : undefined;
 
         return {
           id: site.id,
@@ -199,7 +208,7 @@ export async function GET(request: NextRequest) {
           last_mismatch_domain: site.last_mismatch_domain ?? null,
           last_mismatch_at: site.last_mismatch_at ?? null,
           stats,
-          ...(canInstall ? { siteToken, embedScript } : {}),
+          ...(canInstall ? { siteToken, embedScript, installation } : {}),
         };
       }),
     );

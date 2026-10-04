@@ -1,9 +1,46 @@
+import {
+  STABLE_COPY_BOOTSTRAP_SCRIPT_HASH,
+  STABLE_COPY_BOOTSTRAP_SOURCE,
+  STABLE_COPY_GATE_STYLE_HASH,
+} from "./stable-copy-bootstrap.generated";
+
 export interface BuildEmbedScriptParams {
   siteId: string;
   siteToken: string;
   appUrl?: string;
   wsUrl?: string;
 }
+
+export interface BuildStableEmbedInstallationParams
+  extends BuildEmbedScriptParams {
+  /**
+   * A CSP nonce supplied by the host application. It is copied to both script
+   * placements and to the gate style created by the bootstrap.
+   */
+  nonce?: string;
+}
+
+export interface StableEmbedInstallation {
+  headBootstrap: string;
+  runtimeTag: string;
+  protocolVersion: string;
+  csp: {
+    scriptHash: string;
+    styleHash: string;
+    scriptSource: string;
+  };
+}
+
+export const STABLE_COPY_PROTOCOL_VERSION = "2";
+
+/**
+ * Generated native head bootstrap for the stable-copy startup protocol.
+ *
+ * Keep this classic ES2018 script self-contained: it runs while the HTML parser
+ * is still in <head>, before a framework runtime or the external widget exists.
+ * The external runtime consumes the state object it creates; it must not copy
+ * path normalization, eligibility, request, or deadline policy.
+ */
 
 function normalizeOrigin(value: string) {
   return value.replace(/\/+$/, "");
@@ -15,6 +52,10 @@ function escapeAttribute(value: string) {
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function nonceAttribute(nonce?: string) {
+  return nonce ? ` nonce="${escapeAttribute(nonce)}"` : "";
 }
 
 /**
@@ -96,4 +137,43 @@ export function buildEmbedScript({
     : "";
 
   return `<script src="${escapeAttribute(appOrigin)}/embed/recopyfast.js" data-site-id="${escapeAttribute(siteId)}" data-site-token="${escapeAttribute(siteToken)}" data-api-url="${escapeAttribute(appOrigin)}/api"${wsAttribute}></script>`;
+}
+
+/**
+ * Build the supported two-placement installation.
+ *
+ * `buildEmbedScript` remains unchanged for snippets already stored or copied.
+ * New installation surfaces use this object so a framework cannot accidentally
+ * put the head bootstrap at the external runtime's body-safe placement.
+ */
+export function buildStableEmbedInstallation({
+  siteId,
+  siteToken,
+  appUrl = getPublicAppUrl(),
+  wsUrl,
+  nonce,
+}: BuildStableEmbedInstallationParams): StableEmbedInstallation {
+  const appOrigin = normalizeOrigin(appUrl);
+  const apiUrl = `${appOrigin}/api`;
+  const wsOrigin = normalizeOrigin(wsUrl ?? getPublicWebSocketUrl(appUrl));
+  const wsAttribute = wsOrigin
+    ? ` data-ws-url="${escapeAttribute(wsOrigin)}"`
+    : "";
+  const shared =
+    ` data-rcf-startup="${STABLE_COPY_PROTOCOL_VERSION}"` +
+    ` data-site-id="${escapeAttribute(siteId)}"` +
+    ` data-site-token="${escapeAttribute(siteToken)}"` +
+    ` data-api-url="${escapeAttribute(apiUrl)}"`;
+  const nonceValue = nonceAttribute(nonce);
+
+  return {
+    protocolVersion: STABLE_COPY_PROTOCOL_VERSION,
+    headBootstrap: `<script${shared}${nonceValue}>${STABLE_COPY_BOOTSTRAP_SOURCE}</script>`,
+    runtimeTag: `<script src="${escapeAttribute(appOrigin)}/embed/recopyfast.js"${shared}${wsAttribute}${nonceValue}></script>`,
+    csp: {
+      scriptHash: STABLE_COPY_BOOTSTRAP_SCRIPT_HASH,
+      styleHash: STABLE_COPY_GATE_STYLE_HASH,
+      scriptSource: appOrigin,
+    },
+  };
 }

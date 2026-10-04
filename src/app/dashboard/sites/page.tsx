@@ -522,7 +522,7 @@ export default function SitesPage() {
                 }
                 steps={[
                   "Register the domain you want to make editable.",
-                  "Paste the one-line script tag into that site's HTML.",
+                  "Add the two small script placements to that site.",
                   "Open your site and edit any text in place — changes appear here.",
                 ]}
               />

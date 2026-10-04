@@ -42,6 +42,7 @@ yarn-error.log*
 /playwright-report/
 /blob-report/
 /e2e-screenshots/
+/.artifacts/
 
 # agent tooling scratch
 /.omc/

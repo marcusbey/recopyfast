@@ -22,13 +22,14 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveSiteStatus, StatusBadge } from "@/components/ui/status-badge";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
 import { SiteEditorsCard } from "./SiteEditorsCard";
 
 interface ActivationChecklistProps {
   siteId: string;
   siteName: string;
   domain: string;
-  embedScript: string;
+  installation: StableEmbedInstallation;
   userId: string;
 }
 
@@ -66,7 +67,7 @@ export function ActivationChecklist({
   siteId,
   siteName,
   domain,
-  embedScript,
+  installation,
   userId,
 }: ActivationChecklistProps) {
   const { data, loading, error, refetch, dismiss, dismissing, dismissError } =
@@ -79,14 +80,14 @@ export function ActivationChecklist({
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const isComplete = Boolean(data?.installed && data.invited && data.published);
 
-  const handleCopy = async () => {
+  const handleCopy = async (value: string, label: string) => {
     setActionError(null);
     setCopyNotice(null);
     try {
-      await navigator.clipboard.writeText(embedScript);
-      setCopyNotice("Snippet copied");
+      await navigator.clipboard.writeText(value);
+      setCopyNotice(`${label} copied`);
     } catch {
-      setActionError("Could not copy the snippet. Try again.");
+      setActionError(`Could not copy the ${label.toLowerCase()}. Try again.`);
     }
   };
 
@@ -158,14 +159,29 @@ export function ActivationChecklist({
           label: "Install detected",
           complete: data.installed,
           action: (
-            <Button
-              size="sm"
-              aria-label={`Copy snippet for ${siteName}`}
-              onClick={() => void handleCopy()}
-            >
-              <ClipboardCopy className="mr-2 h-4 w-4" aria-hidden="true" />
-              Copy snippet
-            </Button>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                size="sm"
+                aria-label={`Copy head bootstrap for ${siteName}`}
+                onClick={() =>
+                  void handleCopy(installation.headBootstrap, "Head bootstrap")
+                }
+              >
+                <ClipboardCopy className="mr-2 h-4 w-4" aria-hidden="true" />
+                Copy head bootstrap
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-label={`Copy runtime tag for ${siteName}`}
+                onClick={() =>
+                  void handleCopy(installation.runtimeTag, "Runtime tag")
+                }
+              >
+                <ClipboardCopy className="mr-2 h-4 w-4" aria-hidden="true" />
+                Copy runtime tag
+              </Button>
+            </div>
           ),
         },
         {

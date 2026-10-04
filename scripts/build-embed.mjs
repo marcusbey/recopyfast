@@ -11,6 +11,8 @@
  *   public/embed/recopyfast.src.js         source of truth, readable, hand-edited
  *   public/embed/recopyfast.js             build output — what customers load
  *   public/embed/socket.io-client.min.js   standalone socket.io, same-origin fallback
+ *   public/embed/stable-copy-bootstrap.src.js  readable native-head source
+ *   src/lib/sites/stable-copy-bootstrap.generated.ts  static browser constants
  *
  * The source keeps the `.src.js` suffix so the artifact can own the public
  * `/embed/recopyfast.js` URL that is already baked into every issued embed
@@ -34,6 +36,23 @@ const EMBED_DIR = path.join(ROOT, "public", "embed");
 const SOURCE = path.join(EMBED_DIR, "recopyfast.src.js");
 const BUNDLE_OUT = path.join(EMBED_DIR, "recopyfast.js");
 const SOCKET_OUT = path.join(EMBED_DIR, "socket.io-client.min.js");
+const BOOTSTRAP_SOURCE = path.join(EMBED_DIR, "stable-copy-bootstrap.src.js");
+const BOOTSTRAP_STYLE = path.join(EMBED_DIR, "stable-copy-gate.css");
+const BOOTSTRAP_OUT = path.join(
+  ROOT,
+  "src",
+  "lib",
+  "sites",
+  "stable-copy-bootstrap.generated.ts",
+);
+const BOOTSTRAP_STYLE_MARKER = "__RCF_STABLE_COPY_GATE_STYLE__";
+const MAX_BOOTSTRAP_GZ = 2500;
+const CANONICAL_BOOTSTRAP_ATTRIBUTES =
+  ' data-rcf-startup="2"' +
+  ' data-site-id="123e4567-e89b-42d3-a456-426614174000"' +
+  ' data-site-token="123e4567-e89b-42d3-a456-426614174000.1760000000.9f47c2a8e10b6d35a0f4e9c271bd8a6503ce7f1a94b2d680e51c39af76d084be"' +
+  ' data-api-url="https://www.recopyfa.st/api"' +
+  ' nonce="AbCdEfGhIjKlMnOpQrStUvWx"';
 
 /**
  * The editing rules (colour parsing, backdrop resolution, contrast, geometry)
@@ -208,6 +227,10 @@ function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 
+function cspHash(text) {
+  return `sha256-${createHash("sha256").update(text).digest("base64")}`;
+}
+
 function socketIoClientVersion() {
   const require = createRequire(import.meta.url);
   return require("socket.io-client/package.json").version;
@@ -294,6 +317,80 @@ async function buildWidget(esbuild, source) {
   });
 
   return result.code;
+}
+
+/**
+ * Compile the readable native-head coordinator into the exact inline program
+ * every generated installation emits. Configuration stays in script attributes,
+ * so this body and its CSP hash remain byte-identical across sites.
+ */
+async function buildStableCopyBootstrap(esbuild, source, gateStyle) {
+  const marker = JSON.stringify(BOOTSTRAP_STYLE_MARKER);
+  if (!source.includes(marker)) {
+    throw new Error(
+      `${path.relative(ROOT, BOOTSTRAP_SOURCE)} is missing ${marker}.`,
+    );
+  }
+
+  const withStyle = source.replace(marker, JSON.stringify(gateStyle.trim()));
+  const result = await esbuild.transform(withStyle, {
+    minify: true,
+    target: ["es2018"],
+    loader: "js",
+    legalComments: "none",
+  });
+
+  return result.code.trim();
+}
+
+function bootstrapSourceHash(source, gateStyle) {
+  return sha256(`${source}\0${gateStyle}`);
+}
+
+function renderBootstrapModule(program, gateStyle, sourceHash) {
+  return [
+    "// GENERATED FILE, DO NOT EDIT.",
+    "// Source: public/embed/stable-copy-bootstrap.src.js + stable-copy-gate.css",
+    "// Rebuild: node scripts/build-embed.mjs",
+    `${STALE_MARKER}${sourceHash}`,
+    "// prettier-ignore",
+    `export const STABLE_COPY_BOOTSTRAP_SOURCE = ${JSON.stringify(program)};`,
+    `export const STABLE_COPY_BOOTSTRAP_SCRIPT_HASH =\n  ${JSON.stringify(cspHash(program))};`,
+    `export const STABLE_COPY_GATE_STYLE_HASH =\n  ${JSON.stringify(cspHash(gateStyle.trim()))};`,
+    "",
+  ].join("\n");
+}
+
+function parseGeneratedBootstrap(generated) {
+  const match = generated.match(
+    /^export const STABLE_COPY_BOOTSTRAP_SOURCE = (.+);$/m,
+  );
+  if (!match) {
+    throw new Error(
+      `${path.relative(ROOT, BOOTSTRAP_OUT)} has no generated bootstrap source. ` +
+        "Run: node scripts/build-embed.mjs",
+    );
+  }
+  return JSON.parse(match[1]);
+}
+
+function measureConfiguredBootstrap(program) {
+  return gzipSize(
+    `<script${CANONICAL_BOOTSTRAP_ATTRIBUTES}>${program}</script>`,
+  );
+}
+
+function formatBootstrapGzLine(size) {
+  return `gzipped  bootstrap ${size} B (max ${MAX_BOOTSTRAP_GZ})`;
+}
+
+function enforceBootstrapCeiling(size) {
+  if (size <= MAX_BOOTSTRAP_GZ) return;
+  throw new Error(
+    `MAX_BOOTSTRAP_GZ exceeded: the canonical configured head bootstrap is ` +
+      `${size} B gzipped, ceiling ${MAX_BOOTSTRAP_GZ} B — over by ` +
+      `${size - MAX_BOOTSTRAP_GZ} B. Make the bootstrap smaller; do not raise the ceiling.`,
+  );
 }
 
 function banner(sourceHash, socketVersion) {
@@ -456,14 +553,18 @@ function enforceCeilings(measured, ceilings) {
 async function main() {
   const isCheck = process.argv.includes("--check");
 
-  const [source, rulesSource] = await Promise.all([
-    readFile(SOURCE, "utf8"),
-    readFile(RULES_SOURCE, "utf8"),
-  ]);
+  const [source, rulesSource, bootstrapSource, bootstrapStyle] =
+    await Promise.all([
+      readFile(SOURCE, "utf8"),
+      readFile(RULES_SOURCE, "utf8"),
+      readFile(BOOTSTRAP_SOURCE, "utf8"),
+      readFile(BOOTSTRAP_STYLE, "utf8"),
+    ]);
 
   // Both inputs feed the artifact, so both must feed the staleness marker —
   // otherwise editing the shared rules would silently ship the old widget.
   const sourceHash = sha256(`${source}\0${rulesSource}`);
+  const bootstrapHash = bootstrapSourceHash(bootstrapSource, bootstrapStyle);
 
   if (isCheck) {
     // Two files off disk and nothing else. This branch deliberately never
@@ -472,9 +573,10 @@ async function main() {
     // to run in the places a staleness check is worth running. The size gate
     // measures the committed bytes for the same reason — those are the bytes a
     // customer downloads; a fresh rebuild would measure bytes nobody has.
-    const [built, transport] = await Promise.all([
+    const [built, transport, generatedBootstrap] = await Promise.all([
       readIfExists(BUNDLE_OUT),
       readIfExists(SOCKET_OUT),
+      readIfExists(BOOTSTRAP_OUT),
     ]);
     const expected = `${STALE_MARKER}${sourceHash}`;
 
@@ -496,23 +598,39 @@ async function main() {
           "measured apart from the transport. Run: node scripts/build-embed.mjs",
       );
     }
+    if (
+      generatedBootstrap === null ||
+      !generatedBootstrap.includes(`${STALE_MARKER}${bootstrapHash}`)
+    ) {
+      throw new Error(
+        `${path.relative(ROOT, BOOTSTRAP_OUT)} is stale — it was not built from the current ` +
+          `${path.relative(ROOT, BOOTSTRAP_SOURCE)} + ${path.relative(ROOT, BOOTSTRAP_STYLE)}. ` +
+          "Run: node scripts/build-embed.mjs",
+      );
+    }
 
     const ceilings = resolveCeilings();
     const measured = measureBundle(built, transport);
+    const bootstrapGz = measureConfiguredBootstrap(
+      parseGeneratedBootstrap(generatedBootstrap),
+    );
 
     console.log("embed artifact is up to date");
     console.log(formatGzLine(measured, ceilings));
+    console.log(formatBootstrapGzLine(bootstrapGz));
 
     enforceCeilings(measured, ceilings);
+    enforceBootstrapCeiling(bootstrapGz);
     return;
   }
 
   const esbuild = await loadEsbuild();
   const socketVersion = socketIoClientVersion();
 
-  const [socketIo, rules] = await Promise.all([
+  const [socketIo, rules, bootstrap] = await Promise.all([
     buildSocketIo(esbuild),
     buildRules(esbuild),
+    buildStableCopyBootstrap(esbuild, bootstrapSource, bootstrapStyle),
   ]);
 
   const widget = await buildWidget(esbuild, injectRules(source, rules));
@@ -521,10 +639,16 @@ async function main() {
   // time the widget runs — no second request, and no injected <script> element
   // for a nonce- or hash-based customer CSP to reject.
   const bundle = `${banner(sourceHash, socketVersion)}${socketIo}\n${widget}\n`;
+  const generatedBootstrap = renderBootstrapModule(
+    bootstrap,
+    bootstrapStyle,
+    bootstrapHash,
+  );
 
   await Promise.all([
     writeFile(BUNDLE_OUT, bundle, "utf8"),
     writeFile(SOCKET_OUT, socketIo, "utf8"),
+    writeFile(BOOTSTRAP_OUT, generatedBootstrap, "utf8"),
   ]);
 
   const sourceBytes = Buffer.byteLength(source);
@@ -532,6 +656,7 @@ async function main() {
 
   const ceilings = resolveCeilings();
   const measured = measureBundle(bundle, socketIo);
+  const bootstrapGz = measureConfiguredBootstrap(bootstrap);
 
   // The raw-KB lines stay. They are how a reader sees that the artifact is
   // 174 KB on disk and 46 KB on the wire: raw byte savings land at roughly a
@@ -547,6 +672,7 @@ async function main() {
         ` + socket.io-client ${socketVersion} ${formatKb(Buffer.byteLength(socketIo))})`,
       `fallback ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
       formatGzLine(measured, ceilings),
+      formatBootstrapGzLine(bootstrapGz),
     ].join("\n"),
   );
 
@@ -555,6 +681,7 @@ async function main() {
   // report "stale" — a second, louder, entirely misleading error for the same
   // cause. The build fails, the bytes it built are still there to measure.
   enforceCeilings(measured, ceilings);
+  enforceBootstrapCeiling(bootstrapGz);
 }
 
 main().catch((error) => {

@@ -19,7 +19,7 @@ const WIDGET_SOURCE = path.join(
 );
 
 const METHOD_BEGIN = "    async hydrateStoredContent() {";
-const NEXT_METHOD = "    setupMutationObserver() {";
+const NEXT_METHOD = "    applyStoredContent(rows) {";
 
 interface FakeWidget {
   elements: Map<
@@ -30,6 +30,7 @@ interface FakeWidget {
   editorTokenQuery: () => string;
   editorAuthHeaders: () => Record<string, string>;
   applyContentToElement: jest.Mock;
+  applyStoredContent: jest.Mock;
   hydrateStoredContent: () => Promise<void>;
 }
 
@@ -83,6 +84,7 @@ function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {
     editorTokenQuery: () => "",
     editorAuthHeaders: () => ({}),
     applyContentToElement: jest.fn(),
+    applyStoredContent: jest.fn(),
     hydrateStoredContent: loadHydrateStoredContent(fetch, warn),
   };
 }
@@ -103,12 +105,25 @@ describe("widget handling of a refused site token", () => {
     await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      "ReCopyFast: could not load saved content (HTTP 401); showing the page as authored.",
-    );
+    expect(warn).toHaveBeenCalledWith("ReCopyFast: HTTP 401; original kept.");
     expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
+    expect(widget.applyContentToElement).not.toHaveBeenCalled();
+    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
+      "Authored headline",
+    );
+  });
+
+  it("keeps the caught transport error while naming the authored-copy fallback", async () => {
+    const failure = new Error("network unavailable");
+    const fetch = jest.fn().mockRejectedValue(failure);
+    const warn = jest.fn();
+    const widget = makeWidget(fetch, warn);
+
+    await widget.hydrateStoredContent();
+
+    expect(warn).toHaveBeenCalledWith("ReCopyFast: original kept.", failure);
     expect(widget.applyContentToElement).not.toHaveBeenCalled();
     expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
       "Authored headline",

@@ -2,7 +2,10 @@ import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 import { buildSiteToken } from "@/lib/security/site-auth";
-import { buildEmbedScript } from "@/lib/sites/embed-script";
+import {
+  buildEmbedScript,
+  buildStableEmbedInstallation,
+} from "@/lib/sites/embed-script";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { requireUuid } from "@/lib/api/validation";
@@ -97,12 +100,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const siteToken = buildSiteToken(site.id, site.api_key);
     const embedScript = buildEmbedScript({ siteId: site.id, siteToken });
+    const installation = buildStableEmbedInstallation({
+      siteId: site.id,
+      siteToken,
+    });
 
     // The raw signing key never crosses this boundary. A freshly signed token
     // and its ready-to-paste snippet are the only credentials the dashboard
     // needs, and no-store prevents either from entering an intermediary cache.
     return NextResponse.json(
-      { ok: true, siteToken, embedScript },
+      { ok: true, siteToken, embedScript, installation },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

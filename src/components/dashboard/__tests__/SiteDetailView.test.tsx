@@ -6,7 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { SiteDetailView } from "../SiteDetailView";
-import { buildEmbedScript } from "@/lib/sites/embed-script";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
 import type { Site } from "@/types";
 
 // Mock date-fns
@@ -14,37 +14,34 @@ jest.mock("date-fns", () => ({
   formatDistanceToNow: jest.fn(() => "5 hours ago"),
 }));
 
-/**
- * The real builder, watched. s07b task 5 turns on *which* of the two snippet
- * sources this screen uses: `site.embedScript` comes from `GET /api/sites`,
- * which reads `NEXT_PUBLIC_WS_URL` at request time, while the
- * `buildEmbedScript` fallback below runs in the browser, where Next.js has
- * already inlined that value at build time. The two can disagree after a
- * variable is set without a redeploy, so the call count is the assertion —
- * a stub returning a fixed string would prove nothing about which path ran.
- */
-jest.mock("@/lib/sites/embed-script", () => {
-  const actual = jest.requireActual("@/lib/sites/embed-script");
-  return { ...actual, buildEmbedScript: jest.fn(actual.buildEmbedScript) };
-});
 jest.mock("../ActivationChecklist", () => ({
   ActivationChecklist: (props: {
     siteId: string;
-    embedScript: string;
+    installation: StableEmbedInstallation;
     userId: string;
   }) => (
     <div
       data-testid="activation-checklist"
       data-site-id={props.siteId}
       data-user-id={props.userId}
-      data-snippet={props.embedScript}
+      data-head-bootstrap={props.installation.headBootstrap}
+      data-runtime-tag={props.installation.runtimeTag}
     />
   ),
 }));
 
-const mockBuildEmbedScript = buildEmbedScript as jest.MockedFunction<
-  typeof buildEmbedScript
->;
+function installationFor(token: string): StableEmbedInstallation {
+  return {
+    protocolVersion: "2",
+    headBootstrap: `<script data-placement="head" data-site-token="${token}">bootstrap</script>`,
+    runtimeTag: `<script data-placement="runtime" data-site-token="${token}" src="http://localhost:3000/embed/recopyfast.js"></script>`,
+    csp: {
+      scriptHash: "sha256-script",
+      styleHash: "sha256-style",
+      scriptSource: "http://localhost:3000",
+    },
+  };
+}
 
 describe("SiteDetailView", () => {
   const mockSite: Site & {
@@ -60,6 +57,7 @@ describe("SiteDetailView", () => {
     last_mismatch_domain?: string | null;
     embedScript?: string;
     siteToken?: string;
+    installation?: StableEmbedInstallation;
   } = {
     id: "test-site-id",
     domain: "example.com",
@@ -79,6 +77,7 @@ describe("SiteDetailView", () => {
     embedScript:
       '<script src="http://localhost:3000/embed/recopyfast.js"></script>',
     siteToken: "test-site-token-123",
+    installation: installationFor("test-site-token-123"),
   };
 
   beforeEach(() => {
@@ -132,50 +131,58 @@ describe("SiteDetailView", () => {
     expect(timeElements.length).toBeGreaterThan(0);
   });
 
-  it("renders embed script section", () => {
+  it("renders the two-placement installation section", () => {
     render(<SiteDetailView site={mockSite} />);
 
-    expect(screen.getByText("Embed Script")).toBeInTheDocument();
+    expect(screen.getByText("Installation code")).toBeInTheDocument();
     expect(
-      screen.getByText(/Add this script to your website/i),
+      screen.getByText(/head bootstrap and runtime tag/i),
     ).toBeInTheDocument();
   });
 
-  /**
-   * s07b task 5. The dashboard is a *consumer* of the snippet: whatever
-   * `GET /api/sites` returned is what an owner copies. The fallback at
-   * `SiteDetailView.tsx:93-98` exists for the case where it returned none, and
-   * it is the one path on this screen that reads a build-time
-   * `NEXT_PUBLIC_WS_URL` rather than the serving runtime's. It must therefore
-   * stay unreachable whenever the API did supply a snippet — otherwise the
-   * screen would show a `data-ws-url` from the build while the API hands out
-   * one from the runtime, and the two look right on their own.
-   */
-  it("renders the snippet the API supplied without rebuilding it", () => {
+  it("renders the API-supplied head bootstrap and runtime as separate placements", () => {
     render(<SiteDetailView site={mockSite} />);
 
-    expect(screen.getAllByText(mockSite.embedScript!).length).toBeGreaterThan(
-      0,
-    );
-    expect(mockBuildEmbedScript).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(mockSite.installation!.headBootstrap),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(mockSite.installation!.runtimeTag),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /copy head bootstrap/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /copy runtime tag/i }),
+    ).toBeInTheDocument();
   });
 
-  it("builds one itself only when the API supplied none", () => {
-    const siteWithoutScript = { ...mockSite };
-    delete siteWithoutScript.embedScript;
+  it("renders the typed installation the API supplied", () => {
+    render(<SiteDetailView site={mockSite} />);
 
-    render(<SiteDetailView site={siteWithoutScript} />);
-
-    expect(mockBuildEmbedScript).toHaveBeenCalledWith({
-      siteId: mockSite.id,
-      siteToken: mockSite.siteToken,
-    });
-
-    const built = mockBuildEmbedScript.mock.results[0].value as string;
-    expect(screen.getAllByText(built).length).toBeGreaterThan(0);
+    expect(
+      screen.getByText(mockSite.installation!.headBootstrap),
+    ).toBeInTheDocument();
   });
 
-  it("copies embed script to clipboard", async () => {
+  it("does not synthesize an installation when the typed API field is absent", () => {
+    const siteWithoutInstallation = { ...mockSite };
+    delete siteWithoutInstallation.installation;
+
+    render(<SiteDetailView site={siteWithoutInstallation} />);
+
+    expect(
+      screen.getByText("Installation code is unavailable"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy head bootstrap/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy runtime tag/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("copies the head bootstrap and runtime separately", async () => {
     // Mock clipboard API
     Object.assign(navigator, {
       clipboard: {
@@ -185,18 +192,21 @@ describe("SiteDetailView", () => {
 
     render(<SiteDetailView site={mockSite} />);
 
-    const copyButton = screen.getByText("Copy Embed Script");
-    fireEvent.click(copyButton);
+    fireEvent.click(
+      screen.getByRole("button", { name: /copy head bootstrap/i }),
+    );
 
     await waitFor(() => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-        mockSite.embedScript,
+        mockSite.installation!.headBootstrap,
       );
     });
 
-    // Check for "Copied!" confirmation
+    fireEvent.click(screen.getByRole("button", { name: /copy runtime tag/i }));
     await waitFor(() => {
-      expect(screen.getByText("Copied!")).toBeInTheDocument();
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        mockSite.installation!.runtimeTag,
+      );
     });
   });
 
@@ -225,7 +235,14 @@ describe("SiteDetailView", () => {
     const checklist = screen.getByTestId("activation-checklist");
     expect(checklist).toHaveAttribute("data-site-id", mockSite.id);
     expect(checklist).toHaveAttribute("data-user-id", "user-1");
-    expect(checklist).toHaveAttribute("data-snippet", mockSite.embedScript);
+    expect(checklist).toHaveAttribute(
+      "data-head-bootstrap",
+      mockSite.installation!.headBootstrap,
+    );
+    expect(checklist).toHaveAttribute(
+      "data-runtime-tag",
+      mockSite.installation!.runtimeTag,
+    );
   });
 
   it("hides activation from a non-admin without install credentials", () => {
@@ -238,6 +255,15 @@ describe("SiteDetailView", () => {
 
     expect(
       screen.queryByTestId("activation-checklist"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(mockSite.installation!.headBootstrap),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(mockSite.installation!.runtimeTag),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy head bootstrap/i }),
     ).not.toBeInTheDocument();
   });
 
@@ -289,6 +315,7 @@ describe("SiteDetailView", () => {
     const newToken = "new-site-token-456";
     const newScript =
       '<script src="http://localhost:3000/embed/recopyfast.js" data-site-token="new-site-token-456"></script>';
+    const newInstallation = installationFor(newToken);
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
@@ -300,6 +327,7 @@ describe("SiteDetailView", () => {
             ok: true,
             siteToken: newToken,
             embedScript: newScript,
+            installation: newInstallation,
           }),
         } as Response;
       }
@@ -317,8 +345,12 @@ describe("SiteDetailView", () => {
     });
 
     render(<SiteDetailView site={mockSite} userId="user-1" />);
-    fireEvent.click(screen.getByRole("button", { name: /copy embed script/i }));
-    expect(await screen.findByText("Copied!")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /copy head bootstrap/i }),
+    );
+    expect(
+      await screen.findByText("Head bootstrap copied"),
+    ).toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: /regenerate snippet/i }),
     );
@@ -327,20 +359,37 @@ describe("SiteDetailView", () => {
     );
 
     expect(await screen.findByText(newToken)).toBeInTheDocument();
-    expect(screen.getAllByText(newScript).length).toBeGreaterThan(0);
+    expect(screen.getByText(newInstallation.headBootstrap)).toBeInTheDocument();
+    expect(screen.getByText(newInstallation.runtimeTag)).toBeInTheDocument();
     expect(screen.getByTestId("activation-checklist")).toHaveAttribute(
-      "data-snippet",
-      newScript,
+      "data-head-bootstrap",
+      newInstallation.headBootstrap,
+    );
+    expect(screen.getByTestId("activation-checklist")).toHaveAttribute(
+      "data-runtime-tag",
+      newInstallation.runtimeTag,
     );
     expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
-    expect(screen.queryByText(mockSite.embedScript!)).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /copy embed script/i }),
+      screen.queryByText(mockSite.installation!.headBootstrap),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /copy head bootstrap/i }),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /copy embed script/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /copy head bootstrap/i }),
+    );
     await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(newScript);
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        newInstallation.headBootstrap,
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: /copy runtime tag/i }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        newInstallation.runtimeTag,
+      );
     });
 
     fireEvent.click(screen.getByRole("button", { name: /copy site token/i }));
@@ -349,14 +398,16 @@ describe("SiteDetailView", () => {
     });
 
     fireEvent.click(
-      screen.getByRole("button", { name: /view install snippet/i }),
+      screen.getByRole("button", { name: /view installation code/i }),
     );
-    expect(screen.getAllByText(newScript).length).toBeGreaterThan(1);
+    expect(screen.getAllByText(newInstallation.headBootstrap).length).toBe(2);
+    expect(screen.getAllByText(newInstallation.runtimeTag).length).toBe(2);
   });
 
   it("keeps a same-site rotation through stale props and clears it when the selected site changes", async () => {
     const newToken = "rotated-token";
     const newScript = '<script data-site-token="rotated-token"></script>';
+    const newInstallation = installationFor(newToken);
     const fetchMock = global.fetch as jest.MockedFunction<typeof fetch>;
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);
@@ -365,7 +416,12 @@ describe("SiteDetailView", () => {
         status: 200,
         json: async () =>
           url.includes("/regenerate-snippet")
-            ? { ok: true, siteToken: newToken, embedScript: newScript }
+            ? {
+                ok: true,
+                siteToken: newToken,
+                embedScript: newScript,
+                installation: newInstallation,
+              }
             : url.includes("/api/domains/verify")
               ? { verifications: [], canManage: true }
               : {},
@@ -380,9 +436,13 @@ describe("SiteDetailView", () => {
       await screen.findByRole("button", { name: /regenerate now/i }),
     );
     expect(await screen.findByText(newToken)).toBeInTheDocument();
+    expect(screen.getByText(newInstallation.headBootstrap)).toBeInTheDocument();
+    expect(screen.getByText(newInstallation.runtimeTag)).toBeInTheDocument();
 
     rerender(<SiteDetailView site={{ ...mockSite }} />);
     expect(screen.getByText(newToken)).toBeInTheDocument();
+    expect(screen.getByText(newInstallation.headBootstrap)).toBeInTheDocument();
+    expect(screen.getByText(newInstallation.runtimeTag)).toBeInTheDocument();
     expect(screen.queryByText(mockSite.siteToken!)).not.toBeInTheDocument();
 
     rerender(
@@ -394,6 +454,7 @@ describe("SiteDetailView", () => {
           domain: "viewer.example.com",
           siteToken: undefined,
           embedScript: undefined,
+          installation: undefined,
         }}
       />,
     );
@@ -452,6 +513,7 @@ describe("SiteDetailView", () => {
           ok: true,
           siteToken: "late-rotated-token",
           embedScript: '<script data-site-token="late-rotated-token"></script>',
+          installation: installationFor("late-rotated-token"),
         }),
       } as Response);
       await pendingRegeneration;
@@ -498,15 +560,19 @@ describe("SiteDetailView", () => {
       await screen.findByText(/failed to regenerate snippet/i),
     ).toBeInTheDocument();
     expect(screen.getByText(mockSite.siteToken!)).toBeInTheDocument();
-    expect(screen.getAllByText(mockSite.embedScript!).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getByText(mockSite.installation!.headBootstrap),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(mockSite.installation!.runtimeTag),
+    ).toBeInTheDocument();
   });
 
   it("does not offer regeneration without install credentials", () => {
     const siteWithoutCredentials = { ...mockSite };
     delete siteWithoutCredentials.siteToken;
     delete siteWithoutCredentials.embedScript;
+    delete siteWithoutCredentials.installation;
 
     render(<SiteDetailView site={siteWithoutCredentials} />);
 

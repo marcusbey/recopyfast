@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { buildSiteToken } from "@/lib/security/site-auth";
-import { buildEmbedScript } from "@/lib/sites/embed-script";
+import {
+  buildEmbedScript,
+  buildStableEmbedInstallation,
+} from "@/lib/sites/embed-script";
 import { canCreateWebsite } from "@/lib/feature-gating/permissions";
 import { enforceRateLimit, getClientIp } from "@/lib/api/rate-limit";
 
@@ -188,6 +191,10 @@ export async function POST(request: NextRequest) {
 
     const siteToken = buildSiteToken(site.id, site.api_key);
     const embedScript = buildEmbedScript({ siteId: site.id, siteToken });
+    const installation = buildStableEmbedInstallation({
+      siteId: site.id,
+      siteToken,
+    });
 
     return NextResponse.json({
       site: {
@@ -199,6 +206,7 @@ export async function POST(request: NextRequest) {
       apiKey: site.api_key,
       siteToken,
       embedScript,
+      installation,
     });
   } catch (error) {
     console.error("Error in site registration:", error);

@@ -200,11 +200,11 @@ export default function CompareIndexPage() {
                       Focused copy editing for an existing site.
                     </td>
                     <td className="px-6 py-5 text-sm leading-relaxed text-slate-600">
-                      Add one script. Published edits are applied in the
-                      visitor&apos;s browser after the page loads; visitors
-                      without JavaScript and crawlers that do not render
-                      JavaScript see the original HTML. Put SEO-critical copy in
-                      the site&apos;s source as well.
+                      Add two small script placements. Published edits are
+                      applied in the visitor&apos;s browser after the page
+                      loads; visitors without JavaScript and crawlers that do
+                      not render JavaScript see the original HTML. Put
+                      SEO-critical copy in the site&apos;s source as well.
                     </td>
                   </tr>
                 </tbody>

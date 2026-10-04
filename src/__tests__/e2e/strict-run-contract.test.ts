@@ -13,11 +13,11 @@ function passingTests(count: number): FinalTestRecord[] {
 }
 
 describe("enforceStrictRunContract", () => {
-  it("accepts exactly 44 passed tests", () => {
-    expect(enforceStrictRunContract(passingTests(44), 44)).toMatchObject({
-      expected: 44,
-      total: 44,
-      passed: 44,
+  it("accepts exactly 45 passed tests", () => {
+    expect(enforceStrictRunContract(passingTests(45), 45)).toMatchObject({
+      expected: 45,
+      total: 45,
+      passed: 45,
       failed: 0,
       skipped: 0,
       flaky: 0,
@@ -27,18 +27,18 @@ describe("enforceStrictRunContract", () => {
   it.each(["failed", "skipped", "flaky"] as const)(
     "fails when one test is %s",
     (outcome) => {
-      const tests = passingTests(44);
+      const tests = passingTests(45);
       tests[12] = { ...tests[12], outcome };
 
-      expect(() => enforceStrictRunContract(tests, 44)).toThrow(
+      expect(() => enforceStrictRunContract(tests, 45)).toThrow(
         /playwright run contract failed/i,
       );
     },
   );
 
   it("fails when collection silently drops a test", () => {
-    expect(() => enforceStrictRunContract(passingTests(43), 44)).toThrow(
-      /expected 44.*collected 43/i,
+    expect(() => enforceStrictRunContract(passingTests(44), 45)).toThrow(
+      /expected 45.*collected 44/i,
     );
   });
 });

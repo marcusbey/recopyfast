@@ -337,16 +337,31 @@ export async function GET(
     // customer's site; a dashboard session proves their owner is logged in.
     let isWidgetRequest = false;
 
-    // Dashboard requests are same-origin with a Supabase session and never
-    // carry a site token, so try that path first; only fall back to the
-    // widget's token/origin path when there is no session (or no permission
-    // row), keeping the widget's behavior byte-for-byte unchanged.
-    const firstPartyAuth = await authorizeFirstPartySiteRequest(siteId);
+    const token = extractToken(request);
+    const hasExplicitSiteCredential =
+      request.headers.has("authorization") ||
+      request.nextUrl.searchParams.has("token");
+
+    // Dashboard requests are same-origin with a Supabase session and carry no
+    // site credential. That absence is the boundary: once a caller sends any
+    // Authorization header or legacy `?token` parameter, the existing
+    // token-and-origin authorizer owns the request even when the credential is
+    // malformed, empty or revoked.
+    //
+    // This used to try the cookie session first. A browser holding a valid
+    // dashboard cookie could therefore present a revoked widget token and be
+    // accepted without the token being checked at all. Besides keeping an old
+    // key alive after rotation, that made the public fast path pay for a
+    // Supabase session lookup before its normal site authorization. Never
+    // "helpfully" fall back from an explicit credential to cookie auth: an
+    // invalid credential is a refusal, not an invitation to change principals.
+    const firstPartyAuth = hasExplicitSiteCredential
+      ? null
+      : await authorizeFirstPartySiteRequest(siteId);
 
     if (firstPartyAuth) {
       allowedOrigin = firstPartyAuth.allowedOrigin;
     } else {
-      const token = extractToken(request);
       const origin = request.headers.get("origin");
       const referer = request.headers.get("referer");
 
@@ -759,5 +774,16 @@ export async function OPTIONS(
   // browser blocked it before it was ever sent: published copy could not reach a
   // visitor on any real customer site. That is the defect 47e414e set out to fix,
   // still live, because the fixture that verified it did not cross an origin.
-  return withCors(new NextResponse(null, { status: 204 }), allowedOrigin);
+  const response = withCors(
+    new NextResponse(null, { status: 204 }),
+    allowedOrigin,
+    false,
+  );
+
+  // Cache only this permission-to-send result. The actual GET is authorized on
+  // every request because token rotation can happen during this 24-hour window;
+  // putting the same directive on GET would cache credential-bound content and
+  // let a successful preflight be mistaken for an authentication decision.
+  response.headers.set("Access-Control-Max-Age", "86400");
+  return response;
 }

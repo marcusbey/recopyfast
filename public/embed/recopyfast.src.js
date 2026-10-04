@@ -1,11 +1,6 @@
 (function() {
   'use strict';
 
-  // `document.currentScript` is only meaningful while this script is being
-  // parsed, so capture what we need from it up front. Everything that needs the
-  // embed's own URL later (e.g. loading socket.io) reads this instead.
-  var EMBED_SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
-
   // Configuration
   // Derive API/WS URLs from data attributes on the script tag, or window globals.
   // Warn loudly rather than silently falling back to localhost.
@@ -48,36 +43,14 @@
   const RECOPYFAST_API = window.RECOPYFAST_API;
   const RECOPYFAST_WS = window.RECOPYFAST_WS;
 
-  // socket.io must never come from a third-party CDN: customer sites (and our
-  // own app) serve `script-src 'self'`, which blocks cross-origin scripts. The
-  // production build inlines socket.io-client ahead of this file, so
-  // `window.__recopyfastSocketIO` is normally already there. When it isn't (raw
-  // unbuilt source), fall back to a copy served next to this script — "self"
-  // from the browser's point of view is the origin the embed was loaded from,
-  // not the customer's page origin.
-  const SOCKET_IO_FALLBACK_URL = (function() {
-    if (!EMBED_SCRIPT_SRC) return null;
-    try {
-      const url = new URL(EMBED_SCRIPT_SRC);
-      url.search = '';
-      url.hash = '';
-      url.pathname = url.pathname.replace(/[^/]*$/, 'socket.io-client.min.js');
-      return url.href;
-    } catch (e) {
-      return null;
-    }
-  })();
-
   function getSocketIOFactory() {
-    if (window.__recopyfastSocketIO && typeof window.__recopyfastSocketIO.io === 'function') {
-      return window.__recopyfastSocketIO.io;
-    }
-    // A socket.io build already on the customer's page is good enough.
-    if (typeof window.io === 'function') return window.io;
-    return null;
+    return window.__recopyfastSocketIO && window.__recopyfastSocketIO.io;
   }
   const SITE_ID = document.currentScript.getAttribute('data-site-id');
   const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
+  const STARTUP_PROTOCOL = document.currentScript.getAttribute('data-rcf-startup');
+  const STARTUP_MARKED = STARTUP_PROTOCOL !== null;
+  const PUBLIC_STARTUP = STARTUP_MARKED ? window.__rcfStartup : null;
 
   // Staging mode detection from URL parameters. `let`, not `const`: on a load
   // with no credential in the URL, the edit-link restore below fills them in.
@@ -922,7 +895,9 @@
 
     async init() {
       try {
-        await this.waitForDOM();
+        if (document.readyState === 'loading') {
+          await new Promise(function(resolve) { document.addEventListener('DOMContentLoaded', resolve); });
+        }
 
         if (this.stagingMode && (this.stagingToken || this.editSessionToken)) {
           await this.initStagingMode();
@@ -938,29 +913,40 @@
         // one (see initEditorAuth).
         await this.initEditorAuth();
 
-        // Anything measured before web fonts land describes the fallback face,
-        // and the two have different advance widths — capacity estimates and
-        // overflow checks taken now would be wrong by the difference. Capped so
-        // a font that never arrives cannot wedge edit mode.
-        await Rules.whenFontsReady(window);
+        const privateContent = this.canReachStagingContent();
+        const startup = PUBLIC_STARTUP;
+
+        // Font metrics are an editing-geometry requirement. Published visitor
+        // text has no geometry dependency, and making it wait here produced the
+        // exact authored-copy flash the native head read is meant to close.
+        if (privateContent) await Rules.whenFontsReady(window);
 
         this.scanForContent();
 
-        // Apply what has already been saved for this site. Must come before the
-        // A/B pipeline so that a running test's variant copy wins over the
-        // published baseline, and before the socket handshake so a visitor sees
-        // current copy whether or not realtime is reachable.
-        await this.hydrateStoredContent();
-
-        // A/B testing pipeline (non-blocking for staging mode). The visitor id
-        // is not minted here: bucketVisitor mints it, and only once a test is
-        // active (s55).
-        if (!this.stagingMode) {
-          await this.fetchActiveTests();
-          await this.bucketVisitor();
-          this.applyVariants();
-          this.setupClickTracking();
-          this.trackImpressions();
+        if (STARTUP_MARKED) {
+          if (privateContent) {
+            if (startup && typeof startup.drop === 'function') startup.drop('p');
+            await this.hydrateStoredContent();
+          } else if (!startup || startup.v !== STARTUP_PROTOCOL ||
+                     startup.site !== SITE_ID || startup.api !== RECOPYFAST_API ||
+                     startup.path !== normalizedPagePath() || !startup.can()) {
+            // A new runtime without its matching native-head bootstrap must not
+            // recreate the legacy late swap. Authored copy is the safe terminal
+            // result for this public document.
+            if (startup && typeof startup.fail === 'function') startup.fail('r');
+          } else {
+            await this.hydrateStableStartup(startup);
+          }
+        } else {
+          // Old one-tag installs retain their established late-hydration path.
+          await this.hydrateStoredContent();
+          if (!privateContent) {
+            await this.fetchActiveTests();
+            await this.bucketVisitor();
+            this.applyVariants();
+            this.setupClickTracking();
+            this.trackImpressions();
+          }
         }
 
         await this.establishConnection();
@@ -2559,16 +2545,6 @@
       return overlay;
     }
 
-    waitForDOM() {
-      return new Promise(function(resolve) {
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', resolve);
-        } else {
-          resolve();
-        }
-      });
-    }
-
     /**
      * Collect matches across the document *and* any open shadow roots.
      *
@@ -2602,7 +2578,7 @@
 
         // An <img> is identified by its source, not by text content.
         const isImage = element.tagName === 'IMG';
-        const text = isImage ? (element.getAttribute('src') || '') : self.getElementText(element);
+        const text = isImage ? (element.getAttribute('src') || '') : element.textContent;
         if (!text || text.trim().length < 2) return;
 
         // Deterministic — see computeStableElementId. The same element yields
@@ -2657,13 +2633,6 @@
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
     }
 
-    getElementText(element) {
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        return element.value;
-      }
-      return element.textContent;
-    }
-
     /**
      * The editable source text.
      *
@@ -2672,21 +2641,6 @@
      * database as "SHIP FAST" and permanently destroy the author's copy. It
      * also collapses whitespace, which mangles `white-space: pre` blocks.
      */
-    getFullElementText(element) {
-      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
-        return (element.value || element.placeholder || '').trim();
-      }
-
-      const text = Rules.readEditableText(element);
-
-      // Visually truncated copy sometimes stashes the full string out of band.
-      if (text.endsWith('...') || text.endsWith('…')) {
-        return element.title || element.getAttribute('data-full-text') || text;
-      }
-
-      return text;
-    }
-
     /**
      * EDITING STYLE SYSTEM
      *
@@ -2705,18 +2659,10 @@
      * already legible is left completely alone, because an unnecessary scrim is
      * a visible design change.
      */
-    assessReadability(element) {
-      return Rules.assessReadability(element);
-    }
-
     /**
      * Caret / selection / outline colours for the surface this element sits on.
      * These paint around and through the text, never replacing it.
      */
-    getEditingColors(element) {
-      return Rules.resolveAffordances(element);
-    }
-
     // Determine element type for appropriate edit handler
     getElementEditType(element) {
       const tagName = element.tagName.toLowerCase();
@@ -2969,9 +2915,13 @@
         return;
       }
 
-      try {
-        const io = await this.loadSocketIO();
+      const io = getSocketIOFactory();
+      if (!io) {
+        this.startPolling();
+        return;
+      }
 
+      try {
         this.socket = io(RECOPYFAST_WS, {
           query: {
             siteId: SITE_ID,
@@ -3014,38 +2964,6 @@
         console.error('ReCopyFast: Failed to establish connection:', error);
         this.startPolling();
       }
-    }
-
-    loadSocketIO() {
-      return new Promise(function(resolve, reject) {
-        const existing = getSocketIOFactory();
-        if (existing) {
-          resolve(existing);
-          return;
-        }
-
-        if (!SOCKET_IO_FALLBACK_URL) {
-          reject(new Error('socket.io-client is unavailable and its URL could not be derived from the embed script src'));
-          return;
-        }
-
-        const script = document.createElement('script');
-        script.src = SOCKET_IO_FALLBACK_URL;
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        script.onload = function() {
-          const factory = getSocketIOFactory();
-          if (factory) {
-            resolve(factory);
-          } else {
-            reject(new Error('socket.io-client loaded but exposed no client factory'));
-          }
-        };
-        script.onerror = function() {
-          reject(new Error('Failed to load socket.io-client from ' + SOCKET_IO_FALLBACK_URL));
-        };
-        document.head.appendChild(script);
-      });
     }
 
     sendContentMap() {
@@ -3365,14 +3283,8 @@
     // out of the shipped file and runs both against shared vectors. Edit one
     // without the other and that test fails.
     //
-    // Math.imul, not `*`. This read `hash = (hash * 16777619) >>> 0`, a float64
-    // multiply whose product reaches ~7.2e16 — past 2^53, so it is rounded, and
-    // rounding there destroys the low bits that `% 100` goes on to read.
-    // Measured over 10,000 seeded visitor ids: 57% of hashes had their low
-    // three bits at zero, per-bucket counts ran 4 to 328 instead of ~100, and
-    // splits of 10/90, 5/95 and 33/33/34 all missed their configured share by
-    // more than the 2 percentage points the product promises. Nothing errored;
-    // the traffic was simply split wrong.
+    // Math.imul, not `*`. A float64 multiply rounds past 2^53 and destroys the
+    // low bits `% 100` reads, which previously skewed configured traffic splits.
     fnv1aHash(str) {
       var hash = 2166136261;
       for (var i = 0; i < str.length; i++) {
@@ -3384,6 +3296,7 @@
 
     applyVariants() {
       var self = this;
+      var shown = [];
 
       this.activeTests.forEach(function(test) {
         var assignedVariantId = self.variantAssignments[test.id];
@@ -3392,15 +3305,16 @@
         var variant = test.variants.find(function(v) { return v.id === assignedVariantId; });
         if (!variant) return;
 
-        // Skip replacement for control variants — visitor sees original
-        if (variant.is_control) return;
-
         // Find target element by target_element_id in the elements map
         var targetElementId = test.target_element_id;
         if (!targetElementId) return;
 
         var elementData = self.elements.get(targetElementId);
         if (!elementData || !elementData.element) return;
+        shown.push(test);
+
+        // Skip replacement for control variants — visitor sees original
+        if (variant.is_control) return;
 
         // Replace content
         if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
@@ -3413,6 +3327,7 @@
         elementData.element.setAttribute('data-rcf-test', test.id);
         elementData.element.setAttribute('data-rcf-variant', assignedVariantId);
       });
+      return shown;
     }
 
     setupClickTracking() {
@@ -3521,6 +3436,8 @@
     }
 
     handleABTestUpdate(data) {
+      if (STARTUP_MARKED && (!PUBLIC_STARTUP ||
+          PUBLIC_STARTUP.status === 'f' || PUBLIC_STARTUP.status === 'd')) return;
       var self = this;
       if (data.status === 'active') {
         // Reload test config
@@ -3542,7 +3459,9 @@
     // END A/B TESTING METHODS
     // ==========================================
 
-    handleContentUpdate(data) {
+    handleContentUpdate(data, explicit) {
+      if (STARTUP_MARKED && (!PUBLIC_STARTUP || PUBLIC_STARTUP.status === 'f') &&
+          !this.canReachStagingContent() && !explicit) return;
       const elementId = data.elementId;
       const content = data.content;
       const language = data.language;
@@ -3607,6 +3526,51 @@
       return true;
     }
 
+    async hydrateStableStartup(startup) {
+      const rows = await startup.content;
+      if (!Array.isArray(rows) || !startup.can()) {
+        startup.fail('n');
+        return;
+      }
+
+      const snapshots = startup.snap(this);
+      if (!startup.can()) {
+        startup.fail('d');
+        return;
+      }
+
+      const self = this;
+      const ab = this.fetchActiveTests().then(function() { return self.bucketVisitor(); });
+      const elapsed = performance.now() - startup.at;
+      const abReady = await Promise.race([
+        ab.then(function() { return true; }, function() { return false; }),
+        new Promise(function(resolve) {
+          setTimeout(resolve, Math.max(0, startup.limit - elapsed), false);
+        })
+      ]);
+      const shownTests = startup.apply(this, rows, abReady, snapshots);
+      if (shownTests === null) {
+        return;
+      }
+
+      this.activeTests = shownTests;
+      if (!abReady) {
+        this.variantAssignments = {};
+        ab.then(function() {
+          if (startup.status === 'd') {
+            self.activeTests = [];
+            self.variantAssignments = {};
+          }
+        }, function() {});
+      }
+      startup.done();
+      if (shownTests.length) {
+        this.setupClickTracking();
+        this.trackImpressions();
+      }
+    }
+
+
     /**
      * Pull the site's saved content and apply it to this page load.
      *
@@ -3645,41 +3609,32 @@
         });
 
         if (!response.ok) {
-          console.warn('ReCopyFast: could not load saved content (HTTP ' + response.status + '); showing the page as authored.');
+          console.warn('ReCopyFast: HTTP ' + response.status + '; original kept.');
           return;
         }
 
         const body = await response.json();
         rows = staged ? (body && body.content) : body;
       } catch (error) {
-        console.warn('ReCopyFast: saved content unavailable; showing authored page.', error);
+        console.warn('ReCopyFast: original kept.', error);
         return;
       }
 
+      this.applyStoredContent(rows);
+    }
+
+    applyStoredContent(rows) {
       if (!Array.isArray(rows)) return;
-
-      // Everything the server already holds for this site. Discovery is only
-      // worth a write when the page shows something absent from this set.
       this.serverKnownElementIds = new Set();
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i] && rows[i].element_id) {
-          this.serverKnownElementIds.add(rows[i].element_id);
-        }
-      }
-
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         if (!row || !row.element_id) continue;
-
+        this.serverKnownElementIds.add(row.element_id);
         const elementData = this.elements.get(row.element_id);
-        if (!elementData) continue; // stored, but not present on this page
-
         const content = row.current_content;
-        // Blanking the page is the one outcome worth guarding against, and an
-        // empty string here means every stored column was null — a data gap,
-        // not somebody deliberately publishing nothing.
-        if (typeof content !== 'string' || content === '') continue;
-        this.applyContentToElement(elementData, content, row.metadata);
+        if (elementData && typeof content === 'string' && content !== '') {
+          this.applyContentToElement(elementData, content, row.metadata);
+        }
       }
     }
 
@@ -4188,7 +4143,12 @@
       // animated path appended its "Animation paused" badge as a child first,
       // so that string ended up inside the user's editable content and got
       // saved into the database.
-      const originalText = this.getFullElementText(element);
+      let originalText = element.tagName === 'INPUT' || element.tagName === 'TEXTAREA'
+        ? (element.value || element.placeholder || '').trim()
+        : Rules.readEditableText(element);
+      if (originalText.endsWith('...') || originalText.endsWith('…')) {
+        originalText = element.title || element.getAttribute('data-full-text') || originalText;
+      }
       const hadMarkup = Rules.hasMarkupChildren(element);
 
       const teardown = [];
@@ -5067,7 +5027,7 @@
       }
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       // For input/textarea, edit placeholder and value
@@ -5207,7 +5167,7 @@
       element.classList.remove('rcf-hovering');
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       const rect = element.getBoundingClientRect();
@@ -5453,6 +5413,8 @@
     startPolling() {
       const self = this;
       setInterval(async function() {
+        if (STARTUP_MARKED && (!PUBLIC_STARTUP || PUBLIC_STARTUP.status === 'f') &&
+            !self.canReachStagingContent()) return;
         try {
           const staged = self.canReachStagingContent();
           const endpoint = contentReadEndpoint(staged, self.editorTokenQuery());
@@ -5474,7 +5436,7 @@
     }
 
     updateContent(elementId, content) {
-      this.handleContentUpdate({ elementId: elementId, content: content });
+      this.handleContentUpdate({ elementId: elementId, content: content }, true);
     }
 
     destroy() {

@@ -68,8 +68,8 @@ export default function Blog() {
             Start editing your site in minutes
           </h3>
           <p className="text-sm text-muted-foreground mb-8 max-w-2xl mx-auto">
-            Drop one script tag into any site and make its copy editable — no
-            migration, no rebuild.
+            Add two small script placements to the site you already built and
+            make its copy editable — no migration, no rebuild.
           </p>
           <Link
             href="/signup"

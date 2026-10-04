@@ -26,6 +26,13 @@ const ROOT = process.cwd();
 const SCRIPT = path.join(ROOT, "scripts", "build-embed.mjs");
 const BUNDLE = path.join(ROOT, "public", "embed", "recopyfast.js");
 const TRANSPORT = path.join(ROOT, "public", "embed", "socket.io-client.min.js");
+const BOOTSTRAP_GENERATED = path.join(
+  ROOT,
+  "src",
+  "lib",
+  "sites",
+  "stable-copy-bootstrap.generated.ts",
+);
 
 const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 
@@ -259,6 +266,16 @@ describe("embed byte gate — the ratchet", () => {
     expect(printed.maxBundleGz).toBeLessThanOrEqual(SEEDED_MAX_BUNDLE_GZ);
     expect(printed.maxWidgetGz).toBeLessThanOrEqual(SEEDED_MAX_WIDGET_GZ);
   });
+
+  it("reports and enforces the independent configured bootstrap ceiling", () => {
+    const run = runCheck();
+    const match = run.output.match(/bootstrap (\d+) B \(max (\d+)\)/);
+
+    expect(run.status).toBe(0);
+    expect(match).not.toBeNull();
+    expect(Number(match?.[1])).toBeLessThanOrEqual(2500);
+    expect(Number(match?.[2])).toBe(2500);
+  });
 });
 
 describe("embed byte gate — what the gate must not break", () => {
@@ -288,6 +305,33 @@ describe("embed byte gate — what the gate must not break", () => {
     }
 
     expect(readFileSync(BUNDLE).equals(original)).toBe(true);
+    expect(runCheck().status).toBe(0);
+  });
+
+  it("fails --check when the generated bootstrap constants are stale", () => {
+    const original = readFileSync(BOOTSTRAP_GENERATED);
+    const marker = "// @generated-from-sha256 ";
+    const at = original.indexOf(marker);
+
+    expect(at).toBeGreaterThan(-1);
+
+    try {
+      const tampered = Buffer.from(original);
+      const digitAt = at + marker.length;
+      tampered[digitAt] = original[digitAt] === 0x30 ? 0x31 : 0x30;
+      writeFileSync(BOOTSTRAP_GENERATED, tampered);
+
+      const run = runCheck();
+
+      expect(run.status).not.toBe(0);
+      expect(run.output).toContain(
+        "stable-copy-bootstrap.generated.ts is stale",
+      );
+    } finally {
+      writeFileSync(BOOTSTRAP_GENERATED, original);
+    }
+
+    expect(readFileSync(BOOTSTRAP_GENERATED).equals(original)).toBe(true);
     expect(runCheck().status).toBe(0);
   });
 

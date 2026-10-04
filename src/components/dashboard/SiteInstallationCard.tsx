@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { installRecipes } from "@/lib/sites/install-recipes";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
 
 /**
  * The one place a site's install state is shown.
@@ -28,7 +29,8 @@ import { installRecipes } from "@/lib/sites/install-recipes";
  * tone and the body change. That sameness is what makes the flip legible — the
  * owner is watching one shape change, not being handed a different screen.
  *
- * Purely presentational. The status arrives already resolved from
+ * Purely presentational. The status and generated installation arrive already
+ * resolved from
  * `GET /api/sites`, which calls `resolveEffectiveSiteStatus` once per site;
  * nothing here recomputes the staleness window, and nothing here gates
  * anything on it (AC 7).
@@ -43,6 +45,7 @@ export interface SiteInstallationCardSite {
   last_mismatch_domain?: string | null;
   embedScript?: string;
   siteToken?: string;
+  installation?: StableEmbedInstallation;
 }
 
 interface SiteInstallationCardProps {
@@ -61,59 +64,101 @@ function relativeTime(value?: string | null): string | null {
   return formatDistanceToNow(parsed, { addSuffix: true });
 }
 
-interface SnippetProps {
-  embedScript: string;
+interface InstallationProps {
+  installation: StableEmbedInstallation;
 }
 
 /**
- * The snippet and its copy control.
+ * The two generated placements and their copy controls.
  *
- * The confirmation is the button's own label swapping for two seconds. The
- * design system has no toast or transient-feedback primitive (its own gap #1),
- * and this is exactly the case that needs one — the owner has to know the click
- * registered before they leave for another tab. Swapping the label fills the
- * gap without inventing a primitive beside `src/components/ui/`, and it is the
- * pattern the Embed Script card on this same page already uses.
+ * The design system has no toast or transient-feedback primitive (its own gap
+ * #1), so confirmation and failure stay inline beside code that remains
+ * selectable. The owner knows which placement copied without losing the manual
+ * fallback when clipboard permission is denied.
  */
-function InstallSnippet({ embedScript }: SnippetProps) {
-  const [copied, setCopied] = useState(false);
+export function StableInstallationSnippets({
+  installation,
+}: InstallationProps) {
+  const [notice, setNotice] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(embedScript);
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPY_CONFIRMATION_MS);
+  const handleCopy = async (value: string, label: string) => {
+    setNotice(null);
+    try {
+      await navigator.clipboard.writeText(value);
+      const message = `${label} copied`;
+      setNotice({ kind: "success", message });
+      setTimeout(() => {
+        setNotice((current) => (current?.message === message ? null : current));
+      }, COPY_CONFIRMATION_MS);
+    } catch {
+      setNotice({
+        kind: "error",
+        message: `Could not copy the ${label.toLowerCase()}. Select it manually.`,
+      });
+    }
   };
 
+  const placements = [
+    {
+      label: "Head bootstrap",
+      value: installation.headBootstrap,
+      help: "Place this native inline script in <head>, before any body content exists.",
+    },
+    {
+      label: "Runtime tag",
+      value: installation.runtimeTag,
+      help: "Load this external script at the platform's body or hydration-safe runtime point.",
+    },
+  ] as const;
+
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-surface-1 p-4">
-        <code className="break-all font-mono text-sm text-foreground">
-          {embedScript}
-        </code>
-      </div>
-      <Button variant="outline" size="sm" onClick={handleCopy}>
-        {copied ? (
-          <>
-            <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />
-            Copied
-          </>
-        ) : (
-          <>
+    <div className="space-y-4">
+      {notice && (
+        <Alert variant={notice.kind === "error" ? "destructive" : "success"}>
+          {notice.kind === "success" && (
+            <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          )}
+          <AlertDescription>{notice.message}</AlertDescription>
+        </Alert>
+      )}
+      {placements.map((placement) => (
+        <section key={placement.label} className="space-y-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {placement.label}
+            </p>
+            <p className="text-sm text-muted-foreground">{placement.help}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-surface-1 p-4">
+            <code className="break-all font-mono text-sm text-foreground">
+              {placement.value}
+            </code>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleCopy(placement.value, placement.label)}
+          >
             <Copy className="mr-2 h-4 w-4" aria-hidden="true" />
-            Copy snippet
-          </>
-        )}
-      </Button>
+            Copy {placement.label.toLowerCase()}
+          </Button>
+        </section>
+      ))}
     </div>
   );
 }
 
 /** The `awaiting-install` body: where the snippet goes, per stack (AC 5). */
-function InstallInstructions({ embedScript }: SnippetProps) {
+export function StableInstallationInstructions({
+  installation,
+}: InstallationProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Add this snippet to your site
+        Add both generated placements to your site
       </p>
       <Tabs defaultValue={installRecipes[0].id}>
         <TabsList>
@@ -125,38 +170,72 @@ function InstallInstructions({ embedScript }: SnippetProps) {
         </TabsList>
         {installRecipes.map((recipe) => (
           <TabsContent key={recipe.id} value={recipe.id} className="space-y-3">
-            <p className="text-sm text-muted-foreground">{recipe.location}</p>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Head:</span>{" "}
+              {recipe.headLocation}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Runtime:</span>{" "}
+              {recipe.runtimeLocation}
+            </p>
             {recipe.notes && (
               <p className="text-sm text-muted-foreground">{recipe.notes}</p>
             )}
-            <InstallSnippet embedScript={embedScript} />
+            <StableInstallationSnippets installation={installation} />
           </TabsContent>
         ))}
       </Tabs>
+      <Alert variant="info">
+        <AlertTitle>Existing installs need both placements</AlertTitle>
+        <AlertDescription>
+          The old single tag keeps working, but it cannot protect text that
+          painted before it loaded. Replace it with this head bootstrap and
+          runtime tag to use stable initial copy.
+        </AlertDescription>
+      </Alert>
+      <Alert variant="info">
+        <AlertTitle>Safe fallback</AlertTitle>
+        <AlertDescription>
+          If the head bootstrap is late or blocked by Content Security Policy,
+          visitors keep the page&apos;s authored text. ReCopyFast will not apply
+          a late public startup swap on that page load.
+        </AlertDescription>
+      </Alert>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p>
+          Restrictive CSP: add <code>{installation.csp.scriptHash}</code> to
+          script-src and <code>{installation.csp.styleHash}</code> to style-src.
+        </p>
+        <p>
+          Allow the external runtime from{" "}
+          <code>{installation.csp.scriptSource}</code>. Do not enable
+          unsafe-inline.
+        </p>
+      </div>
     </div>
   );
 }
 
 /** `live` and `stale` lead with the state; the snippet is one click away. */
-function SnippetDisclosure({ embedScript }: SnippetProps) {
+function SnippetDisclosure({ installation }: InstallationProps) {
   const [open, setOpen] = useState(false);
 
   if (!open) {
     return (
       <Button variant="link" size="sm" onClick={() => setOpen(true)}>
-        View install snippet
+        View installation code
       </Button>
     );
   }
 
-  return <InstallSnippet embedScript={embedScript} />;
+  return <StableInstallationSnippets installation={installation} />;
 }
 
 export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
   const status = site.status ?? "awaiting-install";
   const definition = resolveSiteStatus(status);
   const Glyph = definition.icon;
-  const embedScript = site.embedScript ?? "";
+  const installation = site.installation;
 
   const liveSince = relativeTime(site.live_at);
   const lastReport = relativeTime(site.last_reported_at);
@@ -194,9 +273,9 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
           </Alert>
         )}
 
-        {status === "awaiting-install" && (
+        {status === "awaiting-install" && installation && (
           <>
-            <InstallInstructions embedScript={embedScript} />
+            <StableInstallationInstructions installation={installation} />
             <Alert variant="info">
               <AlertTitle>Checking automatically</AlertTitle>
               <AlertDescription>
@@ -220,7 +299,7 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
                 Last report {lastReport}.
               </p>
             )}
-            <SnippetDisclosure embedScript={embedScript} />
+            {installation && <SnippetDisclosure installation={installation} />}
           </>
         )}
 
@@ -235,8 +314,22 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
                 and nothing here has been switched off.
               </AlertDescription>
             </Alert>
-            <SnippetDisclosure embedScript={embedScript} />
+            {installation && <SnippetDisclosure installation={installation} />}
           </>
+        )}
+        {!installation && (
+          <Alert variant="info">
+            <AlertTitle>
+              {site.siteToken
+                ? "Installation code is unavailable"
+                : "Installation code is restricted"}
+            </AlertTitle>
+            <AlertDescription>
+              {site.siteToken
+                ? "Refresh the site details before installing. The legacy one-tag value is kept for older clients, but this screen requires both generated placements."
+                : "A site admin can view and rotate the installation credentials."}
+            </AlertDescription>
+          </Alert>
         )}
       </CardContent>
     </Card>

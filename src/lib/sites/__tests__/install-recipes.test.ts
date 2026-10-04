@@ -22,22 +22,43 @@ describe("install recipes", () => {
     ]);
   });
 
-  it("gives every recipe a label and a location an owner can act on", () => {
+  it("gives every recipe separate head and runtime locations an owner can act on", () => {
     for (const recipe of installRecipes) {
       expect(recipe.label.trim().length).toBeGreaterThan(0);
-      expect(recipe.location.trim().length).toBeGreaterThan(0);
+      expect(recipe.headLocation.trim().length).toBeGreaterThan(0);
+      expect(recipe.runtimeLocation.trim().length).toBeGreaterThan(0);
     }
   });
 
   /**
-   * Every stack's instruction ends in the same place — immediately before
-   * `</body>`. The widget reads the DOM it is given, so a snippet in `<head>`
-   * runs before the copy it is meant to discover exists.
+   * Stable startup has two placements. Collapsing them back into one tag makes
+   * the bootstrap late enough for authored text to paint before protection is
+   * armed, which is exactly the visible swap this story closes.
    */
-  it("names the closing body tag in every recipe", () => {
+  it("puts the bootstrap in head and the runtime at a body-safe point", () => {
     for (const recipe of installRecipes) {
-      expect(`${recipe.location} ${recipe.notes ?? ""}`).toContain("</body>");
+      expect(recipe.headLocation).toMatch(/head/i);
+      expect(recipe.runtimeLocation).toMatch(/body|hydration/i);
     }
+  });
+
+  it("keeps Next.js parser-time bootstrap instructions distinct from next/script", () => {
+    const recipe = getInstallRecipe("nextjs") as InstallRecipe;
+
+    expect(recipe.headLocation).toMatch(/native inline/i);
+    expect(recipe.headLocation).toMatch(/before.*body/i);
+    expect(recipe.headLocation).not.toMatch(/beforeInteractive/i);
+    expect(recipe.runtimeLocation).toMatch(/after hydration/i);
+  });
+
+  it("names WordPress header/footer and plain HTML head/body placements", () => {
+    const wordpress = getInstallRecipe("wordpress") as InstallRecipe;
+    const html = getInstallRecipe("html") as InstallRecipe;
+
+    expect(wordpress.headLocation).toMatch(/header/i);
+    expect(wordpress.runtimeLocation).toMatch(/footer/i);
+    expect(html.headLocation).toContain("<head>");
+    expect(html.runtimeLocation).toContain("</body>");
   });
 
   it("uses each id exactly once", () => {

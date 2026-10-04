@@ -14,14 +14,18 @@ jest.mock("@/components/dashboard/ActivationChecklist", () => ({
   ActivationChecklist: ({
     siteId,
     userId,
+    installation,
   }: {
     siteId: string;
     userId: string;
+    installation: { headBootstrap: string; runtimeTag: string };
   }) => (
     <div
       data-testid="activation-checklist"
       data-site-id={siteId}
       data-user-id={userId}
+      data-head-bootstrap={installation.headBootstrap}
+      data-runtime-tag={installation.runtimeTag}
     />
   ),
 }));
@@ -37,6 +41,16 @@ const sites = Array.from({ length: 7 }, (_, index) => ({
     ? {
         siteToken: `token-${index + 1}`,
         embedScript: `<script data-site-id="site-${index + 1}"></script>`,
+        installation: {
+          protocolVersion: "2",
+          headBootstrap: `<script data-head="site-${index + 1}"></script>`,
+          runtimeTag: `<script data-runtime="site-${index + 1}"></script>`,
+          csp: {
+            scriptHash: "sha256-script",
+            styleHash: "sha256-style",
+            scriptSource: "https://www.recopyfa.st",
+          },
+        },
       }
     : {}),
 }));
@@ -69,6 +83,10 @@ describe("dashboard activation integration", () => {
     expect(screen.getAllByTestId("activation-checklist")[0]).toHaveAttribute(
       "data-user-id",
       "user-1",
+    );
+    expect(screen.getAllByTestId("activation-checklist")[0]).toHaveAttribute(
+      "data-head-bootstrap",
+      '<script data-head="site-1"></script>',
     );
   });
 });

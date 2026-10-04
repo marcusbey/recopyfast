@@ -581,6 +581,18 @@ describe("GET /api/sites", () => {
     expect(data.sites[0].embedScript).toContain("recopyfast.js");
     expect(data.sites[0].embedScript).toContain("site-1");
     expect(data.sites[0].embedScript).toContain("site-token-abc");
+    expect(data.sites[0].installation).toMatchObject({
+      protocolVersion: "2",
+      headBootstrap: expect.stringContaining(
+        'data-site-token="site-token-abc"',
+      ),
+      runtimeTag: expect.stringContaining('data-site-token="site-token-abc"'),
+      csp: {
+        scriptHash: expect.stringMatching(/^sha256-/),
+        styleHash: expect.stringMatching(/^sha256-/),
+        scriptSource: expect.any(String),
+      },
+    });
   });
 
   it("never leaks the raw api_key to the client", async () => {
@@ -612,6 +624,7 @@ describe("GET /api/sites", () => {
     expect(mockBuildSiteToken).not.toHaveBeenCalled();
     expect(data.sites[0].siteToken).toBeUndefined();
     expect(data.sites[0].embedScript).toBeUndefined();
+    expect(data.sites[0].installation).toBeUndefined();
     expect(JSON.stringify(data)).not.toContain("test-api-key-1");
   });
 
@@ -630,5 +643,6 @@ describe("GET /api/sites", () => {
     expect(mockBuildSiteToken).not.toHaveBeenCalled();
     expect(data.sites[0].siteToken).toBeUndefined();
     expect(data.sites[0].embedScript).toBeUndefined();
+    expect(data.sites[0].installation).toBeUndefined();
   });
 });

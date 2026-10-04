@@ -30,7 +30,7 @@ jest.mock("next/og", () => ({
 
 const TITLE = "ReCopyFast - Edit your website copy in place";
 const DESCRIPTION =
-  "Make the copy on the site you already built editable, with one script tag.";
+  "Make the copy on the site you already built editable with two small script placements.";
 
 describe("site metadata", () => {
   it("titles the site by what it does", () => {
@@ -39,7 +39,7 @@ describe("site metadata", () => {
     expect(metadata.twitter?.title).toBe(TITLE);
   });
 
-  it("describes it as one script tag on the site you already built", () => {
+  it("describes the two-placement installation on the site you already built", () => {
     expect(metadata.description).toBe(DESCRIPTION);
     expect(metadata.openGraph?.description).toBe(DESCRIPTION);
     expect(metadata.twitter?.description).toBe(DESCRIPTION);

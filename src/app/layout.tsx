@@ -45,7 +45,7 @@ const SITE_NAME = "ReCopyFast";
 // and opengraph-image.tsx carry the same two lines.
 const SITE_TITLE = "ReCopyFast - Edit your website copy in place";
 const SITE_DESCRIPTION =
-  "Make the copy on the site you already built editable, with one script tag.";
+  "Make the copy on the site you already built editable with two small script placements.";
 
 export const metadata: Metadata = {
   // Without this, every relative OG/Twitter image URL resolves against
@@ -62,7 +62,7 @@ export const metadata: Metadata = {
     "website editing",
     "content management",
     "no-code",
-    "script tag",
+    "installation snippet",
     "live editing",
   ],
   alternates: {

@@ -54,6 +54,16 @@ const popup = {
   close: jest.fn(),
 };
 const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const INSTALLATION = {
+  protocolVersion: "2",
+  headBootstrap: '<script data-placement="head">bootstrap</script>',
+  runtimeTag: '<script data-placement="runtime" src="recopyfast.js"></script>',
+  csp: {
+    scriptHash: "sha256-script",
+    styleHash: "sha256-style",
+    scriptSource: "https://www.recopyfa.st",
+  },
+};
 
 function activation(overrides: Record<string, unknown> = {}) {
   return {
@@ -79,7 +89,7 @@ function renderChecklist() {
       siteId={SITE_ID}
       siteName="Client Site"
       domain="client.example.com"
-      embedScript='<script data-site-id="site"></script>'
+      installation={INSTALLATION}
       userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
     />,
   );
@@ -141,7 +151,12 @@ describe("ActivationChecklist", () => {
     expect(screen.getAllByText("Invite a client")).toHaveLength(2);
     expect(screen.getByText("An edit published")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
+      screen.getByRole("button", {
+        name: "Copy head bootstrap for Client Site",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy runtime tag for Client Site" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Invite a client to Client Site" }),
@@ -156,7 +171,7 @@ describe("ActivationChecklist", () => {
   });
 
   it.each([
-    ["installed", "Copy snippet for Client Site"],
+    ["installed", "Copy head bootstrap for Client Site"],
     ["invited", "Invite a client to Client Site"],
     ["published", "Open Client Site in edit mode"],
   ])("removes the %s action after real progress completes", (fact, action) => {
@@ -241,22 +256,34 @@ describe("ActivationChecklist", () => {
     ).toBeInTheDocument();
   });
 
-  it("copies only the emitted snippet and reports clipboard failure inline", async () => {
+  it("copies each emitted placement and reports clipboard failure inline", async () => {
     renderChecklist();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
+      screen.getByRole("button", {
+        name: "Copy head bootstrap for Client Site",
+      }),
     );
     await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(
-        '<script data-site-id="site"></script>',
-      ),
+      expect(writeText).toHaveBeenCalledWith(INSTALLATION.headBootstrap),
     );
-    expect(await screen.findByText("Snippet copied")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Head bootstrap copied"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Copy runtime tag for Client Site" }),
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(INSTALLATION.runtimeTag),
+    );
+    expect(await screen.findByText("Runtime tag copied")).toBeInTheDocument();
 
     writeText.mockRejectedValueOnce(new Error("denied"));
     fireEvent.click(
-      screen.getByRole("button", { name: "Copy snippet for Client Site" }),
+      screen.getByRole("button", {
+        name: "Copy head bootstrap for Client Site",
+      }),
     );
     expect(await screen.findByText(/could not copy/i)).toBeInTheDocument();
   });
@@ -291,7 +318,7 @@ describe("ActivationChecklist", () => {
             siteId={SITE_ID}
             siteName="Client Site"
             domain="client.example.com"
-            embedScript='<script data-site-id="site"></script>'
+            installation={INSTALLATION}
             userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
           />,
         );
@@ -312,7 +339,7 @@ describe("ActivationChecklist", () => {
             siteId={SITE_ID}
             siteName="Client Site"
             domain="client.example.com"
-            embedScript='<script data-site-id="site"></script>'
+            installation={INSTALLATION}
             userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
           />,
         );
@@ -368,7 +395,7 @@ describe("ActivationChecklist", () => {
           siteId={SITE_ID}
           siteName="Client Site"
           domain="client.example.com"
-          embedScript='<script data-site-id="site"></script>'
+          installation={INSTALLATION}
           userId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         />,
       );

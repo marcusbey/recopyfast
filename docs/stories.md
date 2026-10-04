@@ -2094,3 +2094,29 @@ snap-back fix undone (on main and after s47b), so it does not protect what it wa
 
 Embed allocation: 0 bytes.
 
+
+## Story s61-stable-copy-loading — show one initial version of managed text
+
+User direction, 2026-10-04: prevent the authored/published double display by default,
+and make published copy load faster. Applies to supported initial full-page loads,
+not one hero. Complexity: 4. Branch `feature/s61-stable-copy-loading`.
+
+- [ ] The generated installation includes a native early head bootstrap. Protection is
+  standard behavior, not an opt-in flag. Existing script URL remains compatible.
+- [ ] The bootstrap starts the authorized public read immediately; the runtime reuses it.
+  Public text delivery does not wait for fonts or editor geometry.
+- [ ] Eligible initial text is held with its layout space preserved, then final published
+  copy and any A/B assignment are committed before a single reveal.
+- [ ] At a fixed 200 ms application deadline, or on failure, reveal authored text and
+  abandon automatic late initial replacements for that document. No permanently hidden text.
+- [ ] JS/CSP blocking, network failure, invalid data, ignored regions, staging and stored
+  editor credentials keep their existing safety boundaries.
+- [ ] Token-bearing public reads skip dashboard session lookup; successful content preflight
+  permissions can be cached while every GET still checks the current token and origin.
+- [ ] Instructions, agent brief and supported framework installation recipes describe the
+  required migration, privacy boundary and failure behavior accurately.
+- [ ] First-visible-frame, timeout, A/B, private-mode and speed tests pass; real aicompoz
+  homepage evidence is collected after authorized release. Existing byte ceilings remain.
+
+Embed allocation: no increase to either existing gzip ceiling. A separate early bootstrap
+must have an explicit measured size gate. No cache/CDN/SSR architecture in this story.

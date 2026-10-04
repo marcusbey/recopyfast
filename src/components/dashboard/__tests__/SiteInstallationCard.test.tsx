@@ -17,6 +17,18 @@ jest.mock("date-fns", () => ({
 describe("SiteInstallationCard", () => {
   const EMBED_SCRIPT =
     '<script src="https://example.test/embed/recopyfast.js" data-site-id="site-1"></script>';
+  const INSTALLATION = {
+    protocolVersion: "2",
+    headBootstrap:
+      '<script data-rcf-startup="2" data-site-token="site-token-abc">bootstrap</script>',
+    runtimeTag:
+      '<script src="https://example.test/embed/recopyfast.js" data-rcf-startup="2" data-site-token="site-token-abc"></script>',
+    csp: {
+      scriptHash: "sha256-script",
+      styleHash: "sha256-style",
+      scriptSource: "https://example.test",
+    },
+  };
 
   const site = (overrides: Record<string, unknown> = {}) => ({
     id: "site-1",
@@ -27,6 +39,7 @@ describe("SiteInstallationCard", () => {
     last_mismatch_domain: null,
     embedScript: EMBED_SCRIPT,
     siteToken: "site-token-abc",
+    installation: INSTALLATION,
     ...overrides,
   });
 
@@ -38,14 +51,18 @@ describe("SiteInstallationCard", () => {
   });
 
   describe("awaiting install", () => {
-    it("shows the state, the snippet and a copy control", () => {
+    it("shows the state and both placement-specific copy controls", () => {
       render(<SiteInstallationCard site={site()} />);
 
       expect(screen.getByText("Installation")).toBeInTheDocument();
       expect(screen.getByText("Awaiting install")).toBeInTheDocument();
-      expect(screen.getByText(EMBED_SCRIPT)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.headBootstrap)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.runtimeTag)).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: /copy snippet/i }),
+        screen.getByRole("button", { name: /copy head bootstrap/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /copy runtime tag/i }),
       ).toBeInTheDocument();
     });
 
@@ -70,25 +87,72 @@ describe("SiteInstallationCard", () => {
       fireEvent.mouseDown(screen.getByRole("tab", { name: "Next.js" }));
 
       expect(await screen.findByText(/app\/layout\.tsx/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/native inline/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/after hydration/i).length).toBeGreaterThan(0);
     });
 
-    it("confirms a copy in place, since there is nowhere else to put it", async () => {
+    it("copies and confirms each placement independently", async () => {
       render(<SiteInstallationCard site={site()} />);
 
-      fireEvent.click(screen.getByRole("button", { name: /copy snippet/i }));
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy head bootstrap/i }),
+      );
 
       await waitFor(() => {
         expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-          EMBED_SCRIPT,
+          INSTALLATION.headBootstrap,
         );
       });
-      expect(await screen.findByText("Copied")).toBeInTheDocument();
+      expect(
+        await screen.findByText("Head bootstrap copied"),
+      ).toBeInTheDocument();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy runtime tag/i }),
+      );
+      await waitFor(() => {
+        expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+          INSTALLATION.runtimeTag,
+        );
+      });
+      expect(await screen.findByText("Runtime tag copied")).toBeInTheDocument();
+    });
+
+    it("keeps both values visible and reports which copy failed", async () => {
+      (navigator.clipboard.writeText as jest.Mock).mockRejectedValueOnce(
+        new Error("denied"),
+      );
+      render(<SiteInstallationCard site={site()} />);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy head bootstrap/i }),
+      );
+
+      expect(
+        await screen.findByText(/could not copy the head bootstrap/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.headBootstrap)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.runtimeTag)).toBeInTheDocument();
     });
 
     it("says the check is automatic, so nobody waits on us", () => {
       render(<SiteInstallationCard site={site()} />);
 
       expect(screen.getByText(/no refresh needed/i)).toBeInTheDocument();
+    });
+
+    it("explains legacy migration, blocked-bootstrap fallback and CSP", () => {
+      render(<SiteInstallationCard site={site()} />);
+
+      expect(
+        screen.getByText(/old single tag keeps working/i),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/visitors keep the page's authored text/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/sha256-script/)).toBeInTheDocument();
+      expect(screen.getByText(/sha256-style/)).toBeInTheDocument();
+      expect(screen.queryByText(/disable protection/i)).not.toBeInTheDocument();
     });
   });
 
@@ -113,7 +177,7 @@ describe("SiteInstallationCard", () => {
 
       expect(screen.getByText("Awaiting install")).toBeInTheDocument();
       expect(screen.queryByText("Live")).not.toBeInTheDocument();
-      expect(screen.getByText(EMBED_SCRIPT)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.headBootstrap)).toBeInTheDocument();
     });
   });
 
@@ -134,13 +198,16 @@ describe("SiteInstallationCard", () => {
     it("keeps the snippet available but out of the way", () => {
       render(<SiteInstallationCard site={liveSite} />);
 
-      expect(screen.queryByText(EMBED_SCRIPT)).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(INSTALLATION.headBootstrap),
+      ).not.toBeInTheDocument();
 
       fireEvent.click(
-        screen.getByRole("button", { name: /view install snippet/i }),
+        screen.getByRole("button", { name: /view installation code/i }),
       );
 
-      expect(screen.getByText(EMBED_SCRIPT)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.headBootstrap)).toBeInTheDocument();
+      expect(screen.getByText(INSTALLATION.runtimeTag)).toBeInTheDocument();
     });
   });
 

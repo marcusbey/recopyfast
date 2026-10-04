@@ -30,6 +30,7 @@ import {
   Plus,
   Zap,
 } from "lucide-react";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
 
 const RECENT_SITES_LIMIT = 5;
 
@@ -43,6 +44,7 @@ interface DashboardSite {
   status?: SiteStatus;
   embedScript?: string;
   siteToken?: string;
+  installation?: StableEmbedInstallation;
   stats?: {
     edits_count?: number;
     content_elements_count?: number;
@@ -195,10 +197,14 @@ export default function DashboardPage() {
         <section aria-label="Activation checklists" className="space-y-4">
           {sites
             .filter(
-              (site): site is DashboardSite & { embedScript: string } =>
-                typeof site.embedScript === "string" &&
-                site.embedScript.length > 0 &&
-                typeof site.siteToken === "string",
+              (
+                site,
+              ): site is DashboardSite & {
+                siteToken: string;
+                installation: StableEmbedInstallation;
+              } =>
+                typeof site.siteToken === "string" &&
+                site.installation !== undefined,
             )
             .map((site) => (
               <ActivationChecklist
@@ -206,7 +212,7 @@ export default function DashboardPage() {
                 siteId={site.id}
                 siteName={site.name}
                 domain={site.domain}
-                embedScript={site.embedScript}
+                installation={site.installation}
                 userId={user.id}
               />
             ))}
@@ -322,7 +328,7 @@ export default function DashboardPage() {
                   }
                   steps={[
                     "Register the domain you want to make editable.",
-                    "Paste the one-line script tag into that site's HTML.",
+                    "Add the two small script placements to that site.",
                     "Open your site and edit any text in place — changes appear here.",
                   ]}
                 />

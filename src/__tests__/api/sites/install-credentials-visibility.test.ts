@@ -111,7 +111,7 @@ describe("GET /api/sites — install credentials", () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it("gives an admin the site token and the embed snippet", async () => {
+  it("gives an admin the site token, legacy snippet and stable installation", async () => {
     installTables("admin");
 
     const body = await listSites();
@@ -119,6 +119,12 @@ describe("GET /api/sites — install credentials", () => {
 
     expect(site.siteToken).toEqual(expect.any(String));
     expect(site.embedScript).toContain("data-site-token=");
+    expect(site.installation.headBootstrap).toContain(
+      `data-site-token="${site.siteToken}"`,
+    );
+    expect(site.installation.runtimeTag).toContain(
+      `data-site-token="${site.siteToken}"`,
+    );
   });
 
   it("gives an editor neither", async () => {
@@ -129,9 +135,11 @@ describe("GET /api/sites — install credentials", () => {
 
     expect(site.siteToken).toBeUndefined();
     expect(site.embedScript).toBeUndefined();
+    expect(site.installation).toBeUndefined();
     // And no back door: the HMAC secret the token is minted from must not be
     // in the response either.
     expect(JSON.stringify(body)).not.toContain(SITE.api_key);
+    expect(JSON.stringify(body)).not.toContain("data-rcf-startup");
   });
 
   it("gives a viewer neither", async () => {
@@ -142,7 +150,9 @@ describe("GET /api/sites — install credentials", () => {
 
     expect(site.siteToken).toBeUndefined();
     expect(site.embedScript).toBeUndefined();
+    expect(site.installation).toBeUndefined();
     expect(JSON.stringify(body)).not.toContain(SITE.api_key);
+    expect(JSON.stringify(body)).not.toContain("data-rcf-startup");
   });
 
   it("still refuses a caller with no session", async () => {

@@ -281,6 +281,20 @@ describe("POST /api/sites/[siteId]/regenerate-snippet", () => {
       embedScript: expect.stringContaining(
         `data-site-token="${body.siteToken}"`,
       ),
+      installation: {
+        protocolVersion: "2",
+        headBootstrap: expect.stringContaining(
+          `data-site-token="${body.siteToken}"`,
+        ),
+        runtimeTag: expect.stringContaining(
+          `data-site-token="${body.siteToken}"`,
+        ),
+        csp: {
+          scriptHash: expect.stringMatching(/^sha256-/),
+          styleHash: expect.stringMatching(/^sha256-/),
+          scriptSource: expect.any(String),
+        },
+      },
     });
     expect(body).not.toHaveProperty("apiKey");
     expect(JSON.stringify(body)).not.toContain("new-site-key-from-write");

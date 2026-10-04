@@ -55,7 +55,7 @@ const socialLinks = [
 ];
 
 const quickFeatures = [
-  { icon: Rocket, text: "One-line integration" },
+  { icon: Rocket, text: "Two-part installation" },
   { icon: Shield, text: "Secure by default" },
 ];
 
@@ -84,8 +84,8 @@ export default function Footer() {
             </div>
 
             <p className="text-slate-600 mb-8 max-w-md leading-relaxed">
-              Make the copy on the site you already built editable, with one
-              script tag. No backend changes, no migration.
+              Make the copy on the site you already built editable with two
+              small script placements. No backend changes, no migration.
             </p>
 
             {/* Quick Features */}

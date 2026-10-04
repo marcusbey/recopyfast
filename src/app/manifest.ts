@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "ReCopyFast - Edit your website copy in place",
     short_name: "ReCopyFast",
     description:
-      "Make the copy on the site you already built editable, with one script tag.",
+      "Make the copy on the site you already built editable with two small script placements.",
     start_url: "/",
     scope: "/",
     display: "standalone",

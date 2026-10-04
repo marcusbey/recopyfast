@@ -20,7 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { type SiteStatus } from "@/components/ui/status-badge";
 import { DomainVerification } from "./DomainVerification";
-import { SiteInstallationCard } from "./SiteInstallationCard";
+import {
+  SiteInstallationCard,
+  StableInstallationSnippets,
+} from "./SiteInstallationCard";
 import {
   CheckCircle2,
   Copy,
@@ -41,7 +44,7 @@ import { BulkOperations } from "./BulkOperations";
 import { ShareButton } from "./ShareButton";
 import { SiteEditorsCard } from "./SiteEditorsCard";
 import { ActivationChecklist } from "./ActivationChecklist";
-import { buildEmbedScript } from "@/lib/sites/embed-script";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
 
 export type { SiteStatus };
 
@@ -59,6 +62,7 @@ interface SiteWithDetails extends Site {
   last_mismatch_at?: string | null;
   embedScript?: string;
   siteToken?: string;
+  installation?: StableEmbedInstallation;
 }
 
 interface SiteDetailViewProps {
@@ -99,7 +103,6 @@ function StatTile({ label, value, icon: Icon }: StatTileProps) {
 }
 
 export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
-  const [copiedScript, setCopiedScript] = useState(false);
   const [copiedToken, setCopiedToken] = useState(false);
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
   const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false);
@@ -118,6 +121,7 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
   const [credentials, setCredentials] = useState({
     siteToken: site.siteToken,
     embedScript: site.embedScript,
+    installation: site.installation,
   });
 
   useEffect(() => {
@@ -129,49 +133,47 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
     // this request has already made that snippet invalid.
     const didChangeSite = credentialSiteId.current !== site.id;
     const didLoseInstallAccess =
-      !site.siteToken && (credentials.siteToken || credentials.embedScript);
+      !site.siteToken &&
+      (credentials.siteToken ||
+        credentials.embedScript ||
+        credentials.installation);
 
     if (didChangeSite || didLoseInstallAccess) {
       credentialSiteId.current = site.id;
       setCredentials({
         siteToken: site.siteToken,
         embedScript: site.embedScript,
+        installation: site.installation,
       });
       setRegenerated(false);
-      setCopiedScript(false);
       setCopiedToken(false);
       setRegenerateDialogOpen(false);
       setRegenerateError(null);
     }
   }, [
     credentials.embedScript,
+    credentials.installation,
     credentials.siteToken,
     site.id,
     site.siteToken,
     site.embedScript,
+    site.installation,
   ]);
 
   // Effects run after paint. During the first render for a newly selected site,
   // use its props immediately so the previous site's secret cannot flash on
   // screen while the state synchronisation above is queued.
   const displayedCredentials = !site.siteToken
-    ? { siteToken: undefined, embedScript: undefined }
+    ? { siteToken: undefined, embedScript: undefined, installation: undefined }
     : credentialSiteId.current === site.id
       ? credentials
-      : { siteToken: site.siteToken, embedScript: site.embedScript };
+      : {
+          siteToken: site.siteToken,
+          embedScript: site.embedScript,
+          installation: site.installation,
+        };
 
-  const embedScript =
-    displayedCredentials.embedScript ||
-    buildEmbedScript({
-      siteId: site.id,
-      siteToken: displayedCredentials.siteToken || "YOUR_SITE_TOKEN",
-    });
-
-  const handleCopyScript = async () => {
-    await navigator.clipboard.writeText(embedScript);
-    setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2000);
-  };
+  const installation = displayedCredentials.installation;
 
   const handleCopyToken = async () => {
     if (displayedCredentials.siteToken) {
@@ -194,10 +196,16 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
       const body: {
         siteToken?: string;
         embedScript?: string;
+        installation?: StableEmbedInstallation;
         error?: string;
       } = await response.json();
 
-      if (!response.ok || !body.siteToken || !body.embedScript) {
+      if (
+        !response.ok ||
+        !body.siteToken ||
+        !body.embedScript ||
+        !body.installation
+      ) {
         throw new Error(body.error || "Failed to regenerate snippet");
       }
 
@@ -218,8 +226,8 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
       setCredentials({
         siteToken: body.siteToken,
         embedScript: body.embedScript,
+        installation: body.installation,
       });
-      setCopiedScript(false);
       setCopiedToken(false);
       setRegenerated(true);
       setRegenerateDialogOpen(false);
@@ -301,13 +309,13 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
         </CardContent>
       </Card>
 
-      {userId && displayedCredentials.siteToken && (
+      {userId && displayedCredentials.siteToken && installation && (
         <ActivationChecklist
           key={`${userId}:${site.id}`}
           siteId={site.id}
           siteName={site.name}
           domain={site.domain}
-          embedScript={embedScript}
+          installation={installation}
           userId={userId}
         />
       )}
@@ -341,60 +349,48 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
           navigated to a 404 is worse than no card. The components and API
           routes are intact, so restoring this is a revert. */}
 
-      {/* Embed Script */}
-      <Card className="border-border">
-        <CardHeader>
-          <CardTitle>Embed Script</CardTitle>
-          <CardDescription>
-            Add this script to your website to enable ReCopyFast features
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {regenerated && (
-              <Alert variant="success">
-                <AlertTitle>Snippet regenerated</AlertTitle>
-                <AlertDescription>
-                  Copy this new snippet to your site. Old snippets no longer
-                  work for new requests. Existing live editing connections may
-                  continue until they reconnect.
-                </AlertDescription>
-              </Alert>
-            )}
-            <div className="bg-surface-1 rounded-lg p-4 border border-border">
-              <code className="text-sm text-foreground break-all">
-                {embedScript}
-              </code>
-            </div>
-            <Button onClick={handleCopyScript} className="w-full">
-              {copiedScript ? (
-                <>
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy Embed Script
-                </>
+      {/* Installation credentials are admin-only: `installation` is derived
+          only while the matching site token is present, so a collaborator can
+          never receive a locally rebuilt copy after the API withheld it. */}
+      {installation && displayedCredentials.siteToken && (
+        <Card className="border-border">
+          <CardHeader>
+            <CardTitle>Installation code</CardTitle>
+            <CardDescription>
+              Add the head bootstrap and runtime tag at their separate lifecycle
+              points.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {regenerated && (
+                <Alert variant="success">
+                  <AlertTitle>Snippet regenerated</AlertTitle>
+                  <AlertDescription>
+                    Copy both new installation pieces to your site. Old snippets
+                    no longer work for new requests. Existing live editing
+                    connections may continue until they reconnect.
+                  </AlertDescription>
+                </Alert>
               )}
-            </Button>
-            {displayedCredentials.siteToken && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => {
-                  setRegenerateError(null);
-                  setRegenerateDialogOpen(true);
-                }}
-              >
-                <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
-                Regenerate snippet
-              </Button>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+              <StableInstallationSnippets installation={installation} />
+              {displayedCredentials.siteToken && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setRegenerateError(null);
+                    setRegenerateDialogOpen(true);
+                  }}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Regenerate snippet
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Site Token */}
       {displayedCredentials.siteToken && (
@@ -448,8 +444,9 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
       <SiteInstallationCard
         site={{
           ...site,
-          embedScript,
+          embedScript: displayedCredentials.embedScript,
           siteToken: displayedCredentials.siteToken,
+          installation,
         }}
       />
 
@@ -505,7 +502,7 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
               Old snippets stop working for new requests as soon as this
               succeeds. Existing live editing connections may continue until
               they reconnect. Replace the snippet on {site.domain} with the new
-              one shown here.
+              head bootstrap and runtime tag shown here.
             </DialogDescription>
           </DialogHeader>
 

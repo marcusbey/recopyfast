@@ -1,11 +1,12 @@
 /**
- * Where the embed snippet goes, per stack — as typed data, in one place.
+ * Where both stable-startup placements go, per stack — as typed data, in one
+ * place.
  *
- * The snippet itself is built by `buildEmbedScript()` and is identical for
- * every stack; the only thing that differs is which file the owner opens. That
- * difference used to exist nowhere at all: the dashboard printed a `<script>`
- * tag and left "so where do I put this" unanswered, which is the step an owner
- * stalls on.
+ * `buildStableEmbedInstallation()` returns one native head bootstrap and one
+ * hydration-safe runtime tag. Their bytes are identical across stacks; only
+ * the files and lifecycle points differ. Treating them as one location would
+ * put the bootstrap back at body-end, after authored text may already have
+ * painted — the exact visible swap s61 exists to close.
  *
  * THIS IS THE SINGLE SOURCE. `s18`'s public install pages extend this array
  * with the remaining stacks rather than keeping their own copy — the failure
@@ -13,9 +14,8 @@
  * day they are written and quietly disagree six months later, with nothing to
  * say which is current.
  *
- * Every recipe ends in the same place: immediately before `</body>`. The widget
- * reads the DOM it is handed, so a snippet in `<head>` runs before the copy it
- * is meant to discover exists.
+ * Existing one-tag installations still run through `buildEmbedScript()`, but
+ * they need migration to both placements for the new first-paint protection.
  */
 
 export type InstallRecipeId = "wordpress" | "nextjs" | "html";
@@ -25,8 +25,10 @@ export interface InstallRecipe {
   id: InstallRecipeId;
   /** What the stack is called, in the owner's words. */
   label: string;
-  /** The file to open and the exact spot in it. */
-  location: string;
+  /** Where the parser-time bootstrap must run before body content exists. */
+  headLocation: string;
+  /** Where the external runtime can load without racing framework hydration. */
+  runtimeLocation: string;
   /** The one caveat that stack has, when it has one. */
   notes?: string;
 }
@@ -35,26 +37,32 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "wordpress",
     label: "WordPress",
-    location:
-      "Paste it into your theme's footer.php, immediately before the closing </body> tag.",
+    headLocation:
+      "Paste the head bootstrap into a trusted header-and-footer plugin's Header section, or into header.php inside <head> before page content.",
+    runtimeLocation:
+      "Paste the runtime tag into the plugin's Footer section, or into footer.php immediately before </body>.",
     notes:
-      "No access to theme files? A header-and-footer snippet plugin drops it in the same place, and survives theme updates.",
+      "Use both placements. An existing single-tag install still runs, but it cannot protect text that painted before that tag loaded.",
   },
   {
     id: "nextjs",
     label: "Next.js",
-    location:
-      "Add it to app/layout.tsx, just before the closing </body> tag of the root layout.",
+    headLocation:
+      "Render the head bootstrap as a native inline <script> in app/layout.tsx inside <head>, before <body> begins. Do not wrap the bootstrap in next/script.",
+    runtimeLocation:
+      "Load the external runtime after hydration from the root layout. next/script with afterInteractive is appropriate for this runtime tag only.",
     notes:
-      "On the Pages Router the same tag goes in pages/_document.tsx, inside <body> after <Main />.",
+      "On the Pages Router, emit the bootstrap natively in pages/_document.tsx <Head> and load the runtime after hydration from the application.",
   },
   {
     id: "html",
     label: "Plain HTML",
-    location:
-      "Paste it before the closing </body> tag of every page you want to be editable.",
+    headLocation:
+      "Paste the head bootstrap inside <head>, before page content and before <body> begins.",
+    runtimeLocation:
+      "Paste the runtime tag immediately before </body> on every page you want to be editable.",
     notes:
-      "Sharing one footer include across pages means pasting it once; otherwise each page needs its own copy.",
+      "Shared head and footer includes let you add each placement once; otherwise both placements are required on every page.",
   },
 ] as const;
 

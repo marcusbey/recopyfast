@@ -132,6 +132,20 @@ describe("/api/sites/register - POST", () => {
       siteToken: "signed-site-token",
       embedScript:
         '<script src="https://recopyfast.com/embed/recopyfast.js" data-site-id="site-123" data-site-token="signed-site-token" data-api-url="https://recopyfast.com/api" data-ws-url="http://localhost:4001"></script>',
+      installation: {
+        protocolVersion: "2",
+        headBootstrap: expect.stringContaining(
+          'data-site-token="signed-site-token"',
+        ),
+        runtimeTag: expect.stringContaining(
+          'data-site-token="signed-site-token"',
+        ),
+        csp: {
+          scriptHash: expect.stringMatching(/^sha256-/),
+          styleHash: expect.stringMatching(/^sha256-/),
+          scriptSource: "https://recopyfast.com",
+        },
+      },
     });
 
     // Verify database calls

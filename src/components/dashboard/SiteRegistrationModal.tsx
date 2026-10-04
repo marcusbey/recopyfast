@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Check, Copy, Loader2, AlertCircle, ExternalLink } from "lucide-react";
+import { Check, Loader2, AlertCircle, ExternalLink } from "lucide-react";
+import type { StableEmbedInstallation } from "@/lib/sites/embed-script";
+import { StableInstallationInstructions } from "./SiteInstallationCard";
 
 interface SiteRegistrationModalProps {
   isOpen: boolean;
@@ -46,6 +48,7 @@ interface RegistrationResponse {
   apiKey: string;
   siteToken: string;
   embedScript: string;
+  installation?: StableEmbedInstallation;
 }
 
 export function SiteRegistrationModal({
@@ -61,7 +64,6 @@ export function SiteRegistrationModal({
   const [isLoading, setIsLoading] = useState(false);
   const [registrationResult, setRegistrationResult] =
     useState<RegistrationResponse | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const validateUrl = (url: string): boolean => {
     try {
@@ -139,25 +141,14 @@ export function SiteRegistrationModal({
     }
   };
 
-  const handleCopyScript = async () => {
-    if (!registrationResult) return;
-
-    try {
-      await navigator.clipboard.writeText(registrationResult.embedScript);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
   const handleClose = () => {
     setFormData({ name: "", domain: "" });
     setErrors({});
     setRegistrationResult(null);
-    setCopied(false);
     onClose();
   };
+
+  const installation = registrationResult?.installation ?? null;
 
   // `onSuccess` already fired at registration, so this is only a dismissal.
   const handleGoToDashboard = () => {
@@ -323,52 +314,27 @@ export function SiteRegistrationModal({
 
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground font-medium">
-                    Step 1: Copy the embed script
+                    Step 1: Add both generated placements
                   </p>
-                  <div className="relative">
-                    {/* Was `bg-foreground text-foreground` — background and
-                        text resolved to the same colour, so the snippet the
-                        customer has to copy was invisible in both themes. */}
-                    <pre className="bg-surface-2 text-foreground p-4 pr-24 rounded-lg text-xs overflow-x-auto">
-                      <code>{registrationResult.embedScript}</code>
-                    </pre>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="absolute top-2 right-2 bg-card hover:bg-surface-2"
-                      onClick={handleCopyScript}
-                    >
-                      {copied ? (
-                        <>
-                          <Check className="w-3 h-3 mr-1" />
-                          Copied!
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 mr-1" />
-                          Copy
-                        </>
-                      )}
-                    </Button>
-                  </div>
+                  {installation && (
+                    <StableInstallationInstructions
+                      installation={installation}
+                    />
+                  )}
+                  {!installation && (
+                    <Alert variant="destructive">
+                      <AlertDescription>
+                        Installation code was not returned. Refresh the
+                        dashboard before installing so both required placements
+                        are available.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground font-medium">
-                    Step 2: Add the script to your website
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Paste the script tag in your HTML, just before the closing{" "}
-                    <code className="bg-surface-2 px-1.5 py-0.5 rounded text-xs">
-                      &lt;/body&gt;
-                    </code>{" "}
-                    tag.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground font-medium">
-                    Step 3: That&apos;s it — your text is already editable
+                    Step 2: That&apos;s it — your text is already editable
                   </p>
                   {/*
                     These instructions used to tell people to add a

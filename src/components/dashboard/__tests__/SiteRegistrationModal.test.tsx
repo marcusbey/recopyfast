@@ -46,6 +46,17 @@ const spyOnClipboard = () =>
  */
 const TYPING = { delay: null };
 
+const stableInstallation = (siteToken: string) => ({
+  protocolVersion: "2",
+  headBootstrap: `<script data-placement="head" data-site-token="${siteToken}">bootstrap</script>`,
+  runtimeTag: `<script data-placement="runtime" data-site-token="${siteToken}" src="http://localhost:3000/embed/recopyfast.js"></script>`,
+  csp: {
+    scriptHash: "sha256-script",
+    styleHash: "sha256-style",
+    scriptSource: "http://localhost:3000",
+  },
+});
+
 describe("SiteRegistrationModal", () => {
   const mockOnClose = jest.fn();
   const mockOnSuccess = jest.fn();
@@ -244,6 +255,7 @@ describe("SiteRegistrationModal", () => {
       siteToken: "test-site-token-xyz789",
       embedScript:
         '<script src="http://localhost:3000/embed/recopyfast.js" data-site-id="test-site-123" data-site-token="test-site-token-xyz789"></script>',
+      installation: stableInstallation("test-site-token-xyz789"),
     };
 
     it("should successfully register a site", async () => {
@@ -313,7 +325,7 @@ describe("SiteRegistrationModal", () => {
       });
     });
 
-    it("should display embed script in success state", async () => {
+    it("should display both stable installation placements in success state", async () => {
       const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
@@ -336,10 +348,15 @@ describe("SiteRegistrationModal", () => {
       expect(
         await screen.findByText(/Site Registered Successfully!/i),
       ).toBeInTheDocument();
-      expect(screen.getByText(/recopyfast.js/)).toBeInTheDocument();
       expect(
-        screen.getByText(/data-site-id="test-site-123"/),
+        screen.getByText(mockSuccessResponse.installation.headBootstrap),
       ).toBeInTheDocument();
+      expect(
+        screen.getByText(mockSuccessResponse.installation.runtimeTag),
+      ).toBeInTheDocument();
+      expect(mockSuccessResponse.installation.runtimeTag).toContain(
+        'data-site-token="test-site-token-xyz789"',
+      );
     });
 
     it("should show integration instructions", async () => {
@@ -369,13 +386,16 @@ describe("SiteRegistrationModal", () => {
       });
 
       expect(
-        screen.getByText(/Step 1: Copy the embed script/i),
+        screen.getByText(/Step 1: Add both generated placements/i),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Step 2: Add the script to your website/i),
+        screen.getByRole("tab", { name: /WordPress/i }),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Step 3: That's it — your text is already editable/i),
+        screen.getByRole("tab", { name: /Next\.js/i }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/Step 2: That's it — your text is already editable/i),
       ).toBeInTheDocument();
     });
 
@@ -396,7 +416,7 @@ describe("SiteRegistrationModal", () => {
       // reads data-rcf-ignore / data-rcf-content.
       // Each attribute appears twice: once in the prose, once in the code
       // sample below it.
-      await screen.findByText(/Step 3/i);
+      await screen.findByText(/Step 2/i);
       expect(screen.getAllByText(/data-rcf-ignore/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/data-rcf-content/).length).toBeGreaterThan(0);
       expect(
@@ -495,9 +515,10 @@ describe("SiteRegistrationModal", () => {
       siteToken: "test-site-token-xyz789",
       embedScript:
         '<script src="http://localhost:3000/embed/recopyfast.js" data-site-id="test-site-123"></script>',
+      installation: stableInstallation("test-site-token-xyz789"),
     };
 
-    it("should copy embed script to clipboard", async () => {
+    it("should copy the head and runtime placements separately", async () => {
       const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
@@ -524,15 +545,27 @@ describe("SiteRegistrationModal", () => {
       });
 
       const writeText = spyOnClipboard();
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(
+        screen.getByRole("button", { name: /copy head bootstrap/i }),
+      );
 
-      expect(writeText).toHaveBeenCalledWith(mockSuccessResponse.embedScript);
+      expect(writeText).toHaveBeenCalledWith(
+        mockSuccessResponse.installation.headBootstrap,
+      );
       expect(
-        await screen.findByRole("button", { name: /^Copied!$/ }),
+        await screen.findByText("Head bootstrap copied"),
       ).toBeInTheDocument();
+
+      await user.click(
+        screen.getByRole("button", { name: /copy runtime tag/i }),
+      );
+      expect(writeText).toHaveBeenCalledWith(
+        mockSuccessResponse.installation.runtimeTag,
+      );
+      expect(await screen.findByText("Runtime tag copied")).toBeInTheDocument();
     });
 
-    it('should show temporary "Copied" state', async () => {
+    it("should clear the placement-specific copy confirmation", async () => {
       const user = userEvent.setup(TYPING);
       (global.fetch as jest.Mock).mockResolvedValueOnce({
         ok: true,
@@ -559,20 +592,19 @@ describe("SiteRegistrationModal", () => {
       });
 
       spyOnClipboard();
-      // Scoped by role: the page copy contains "ReCopyFast", which also matches
-      // a bare /Copy/i text query.
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(
+        screen.getByRole("button", { name: /copy head bootstrap/i }),
+      );
 
       expect(
-        await screen.findByRole("button", { name: /^Copied!$/ }),
+        await screen.findByText("Head bootstrap copied"),
       ).toBeInTheDocument();
 
-      // Wait for the copied state to reset (2 seconds)
       await waitFor(
         () => {
           expect(
-            screen.getByRole("button", { name: /^Copy$/ }),
-          ).toBeInTheDocument();
+            screen.queryByText("Head bootstrap copied"),
+          ).not.toBeInTheDocument();
         },
         { timeout: 3000 },
       );
