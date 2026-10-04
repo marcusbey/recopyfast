@@ -24,14 +24,19 @@ round trips first. This shortens the swap window; it does not promise zero flash
   Preserve unknown/invalid-count fallback, capped pages, empty termination,
   returned rows, per-scope counts, ordering and error propagation. Compare count
   cost with the removed empty query; keep the optimization only if it helps.
-- [ ] 3. Run targeted route/helper tests, full repository checks and independent
+- [x] 3. Run targeted route/helper tests, full repository checks and independent
   review. Assert no widget/auth/CORS/plan/staging changes and no dependencies added.
   Keep failing baseline security audits visible rather than bypassing them.
-- [ ] 4. Benchmark matched before/after visitor reads (at least five each) on the
-  same content/path and comparable cache/network conditions. Record response
-  median/range, paint-to-response timing, correct hero text, and failure fallback.
-  Open the reviewed PR. After authorized merge/deploy and passing release gates,
-  verify the exact deployed revision and repeat the public hero check.
+- [x] 4a. Benchmark matched before/after helper reads in five alternating pairs on
+  the same page-scoped content. The final imported helpers returned the same 258
+  rows in every pair, reduced PostgREST requests from four to two, and improved
+  the pagination-only median from 346 ms to 268 ms (23%). Do not present this as
+  a full-API or browser improvement.
+- [ ] 4b. Open the reviewed PR and record hosted CI evidence. After authorized
+  merge/deploy and passing release gates, verify the exact deployed revision and
+  run at least five comparable visitor checks on the same content/path. Record
+  the full API response median/range, paint-to-response timing, correct hero text,
+  and failure fallback.
 
 ## Boundaries
 
