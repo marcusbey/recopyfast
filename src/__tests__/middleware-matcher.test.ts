@@ -111,6 +111,15 @@ const INSTALLATION_DOCS = [
   "/docs/install/agent-instructions.md",
 ];
 
+/** Sibling and suffix paths must still take the ordinary session-aware path. */
+const INSTALLATION_DOC_NEAR_MISSES = [
+  "/docs/install/private",
+  "/docs/install-extra",
+  "/docs/install-not-public",
+  "/docs/install/agent-instructions.md.bak",
+  "/docs/install/agent-instructions.md/extra",
+];
+
 /**
  * Sentry's same-origin tunnel (s46). The browser posts error envelopes here and
  * a rewrite forwards them to Sentry; whether the poster is signed in changes
@@ -185,6 +194,16 @@ describe("a request whose response does not depend on a session", () => {
     expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
     expect(getUser).toHaveBeenCalledTimes(1);
   });
+
+  it.each(INSTALLATION_DOC_NEAR_MISSES)(
+    "does not broaden the installation-docs bypass to %s",
+    async (pathname) => {
+      await run(pathname);
+
+      expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+      expect(getUser).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each(SESSIONLESS_PATHS)(
     "is still served with nosniff: %s",
