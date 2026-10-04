@@ -169,7 +169,7 @@ export default function InstallGuidePage() {
                       <p className="mt-2 text-sm leading-relaxed text-slate-600">
                         {guide.copySnippet.exampleLead}
                       </p>
-                      <pre className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-4 text-sm leading-relaxed text-slate-100">
+                      <pre className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-sm leading-relaxed text-slate-100">
                         <code data-testid="installation-example">
                           {INSTALLATION_EXAMPLE.displaySnippet}
                         </code>
