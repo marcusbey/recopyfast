@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { build } from "esbuild";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   buildEmbedScript,
@@ -11,6 +12,12 @@ const CUSTOMER_ORIGIN = "https://customer.example";
 const SITE_ID = "123e4567-e89b-42d3-a456-426614174000";
 const SITE_TOKEN =
   "123e4567-e89b-42d3-a456-426614174000.1760000000.9f47c2a8e10b6d35a0f4e9c271bd8a6503ce7f1a94b2d680e51c39af76d084be";
+const INSTALLATION = buildStableEmbedInstallation({
+  siteId: SITE_ID,
+  siteToken: SITE_TOKEN,
+  appUrl: APP_ORIGIN,
+  nonce: "AbCdEfGhIjKlMnOpQrStUvWx",
+});
 
 type Scenario = {
   id: string;
@@ -23,6 +30,7 @@ type Scenario = {
   slowFont?: boolean;
   react?: boolean;
   styleBlocked?: boolean;
+  hashCsp?: boolean;
 };
 
 const scenarios: Scenario[] = [
@@ -79,6 +87,14 @@ const scenarios: Scenario[] = [
     firstVisible: "Authored headline",
     finalVisible: "Authored headline",
     styleBlocked: true,
+  },
+  {
+    id: "stable-quoted-csp-hashes",
+    stable: true,
+    delayMs: 30,
+    firstVisible: "Published headline",
+    finalVisible: "Published headline",
+    hashCsp: true,
   },
 ];
 
@@ -141,26 +157,32 @@ function probeScript() {
 }
 
 function fixtureHtml(scenario: Scenario) {
-  const installation = buildStableEmbedInstallation({
-    siteId: SITE_ID,
-    siteToken: SITE_TOKEN,
-    appUrl: APP_ORIGIN,
-    nonce: "AbCdEfGhIjKlMnOpQrStUvWx",
-  });
   const runtime = scenario.stable
-    ? installation.runtimeTag
-    : buildEmbedScript({ siteId: SITE_ID, siteToken: SITE_TOKEN, appUrl: APP_ORIGIN });
+    ? INSTALLATION.runtimeTag
+    : buildEmbedScript({
+        siteId: SITE_ID,
+        siteToken: SITE_TOKEN,
+        appUrl: APP_ORIGIN,
+      });
   const head = `${
     scenario.slowFont
       ? `<style nonce="AbCdEfGhIjKlMnOpQrStUvWx">@font-face{font-family:SlowProof;src:url('${APP_ORIGIN}/slow-font.woff2')}#headline{font-family:SlowProof,sans-serif}</style>`
       : ""
-  }${scenario.stable ? installation.headBootstrap : ""}${probeScript()}`;
+  }${scenario.stable ? INSTALLATION.headBootstrap : ""}${probeScript()}`;
   const ordinary = `<main><h1 id="headline" data-rcf-id="hero">Authored headline</h1><p data-rcf-ignore id="ignored">Ignored host copy</p></main>`;
   const react = `<div id="react-root"><section id="react-shell"><h1 id="headline" data-rcf-id="hero" data-rcf-content><span>Authored</span> <span>headline</span></h1><p data-rcf-ignore id="ignored">Ignored host copy</p></section></div><script nonce="AbCdEfGhIjKlMnOpQrStUvWx">${reactHydration}</script>`;
   const shadow = scenario.shadow
     ? `<div id="shadow-host"></div><script nonce="AbCdEfGhIjKlMnOpQrStUvWx">document.getElementById('shadow-host').attachShadow({mode:'open'}).innerHTML='<h2 id="shadow-headline" data-rcf-id="shadow">Authored shadow</h2>'</script>`
     : "";
   return `<!doctype html><html><head>${head}</head><body>${scenario.react ? react : ordinary}${shadow}${runtime}</body></html>`;
+}
+
+function hashSource(value: string) {
+  return `sha256-${createHash("sha256").update(value).digest("base64")}`;
+}
+
+function inlineBody(tag: string) {
+  return tag.slice(tag.indexOf(">") + 1, tag.lastIndexOf("</script>"));
 }
 
 async function fulfillJson(route: Route, body: unknown) {
@@ -174,13 +196,33 @@ async function fulfillJson(route: Route, body: unknown) {
 
 async function proof(page: Page) {
   return page.evaluate(() => ({
-    ...(window as unknown as { __proof: { frames: Array<{ at: number; text: string | null; shadow: string | null }>; cls: number } }).__proof,
-    startup: (window as unknown as { __rcfStartup?: { status: string; code: string | null } }).__rcfStartup ?? null,
-    reactErrors: (window as unknown as { __reactRecoverableErrors?: string[] }).__reactRecoverableErrors ?? [],
+    ...(
+      window as unknown as {
+        __proof: {
+          frames: Array<{
+            at: number;
+            text: string | null;
+            shadow: string | null;
+          }>;
+          cls: number;
+        };
+      }
+    ).__proof,
+    startup:
+      (
+        window as unknown as {
+          __rcfStartup?: { status: string; code: string | null };
+        }
+      ).__rcfStartup ?? null,
+    reactErrors:
+      (window as unknown as { __reactRecoverableErrors?: string[] })
+        .__reactRecoverableErrors ?? [],
   }));
 }
 
-test("stable startup controls the first visible managed frame", async ({ page }) => {
+test("stable startup controls the first visible managed frame", async ({
+  page,
+}) => {
   let scenario = scenarios[0];
   let trackRequests = 0;
   let contentGets = 0;
@@ -189,22 +231,28 @@ test("stable startup controls the first visible managed frame", async ({ page })
     const request = route.request();
     const url = new URL(request.url());
     if (url.origin === CUSTOMER_ORIGIN) {
+      const probeHash = hashSource(inlineBody(probeScript()));
       await route.fulfill({
         status: 200,
         contentType: "text/html",
-        headers: scenario.styleBlocked
-          ? {
-              "content-security-policy":
-                `default-src 'none'; script-src 'unsafe-inline' ${APP_ORIGIN}; ` +
-                `connect-src ${APP_ORIGIN}; style-src 'none'`,
-            }
-          : {},
+        headers:
+          scenario.styleBlocked || scenario.hashCsp
+            ? {
+                "content-security-policy": scenario.styleBlocked
+                  ? `default-src 'none'; script-src 'unsafe-inline' ${APP_ORIGIN}; connect-src ${APP_ORIGIN}; style-src 'none'`
+                  : `default-src 'none'; script-src ${APP_ORIGIN} '${INSTALLATION.csp.scriptHash}' '${probeHash}'; connect-src ${APP_ORIGIN}; style-src '${INSTALLATION.csp.styleHash}'`,
+              }
+            : {},
         body: fixtureHtml(scenario),
       });
       return;
     }
     if (url.href === `${APP_ORIGIN}/embed/recopyfast.js`) {
-      await route.fulfill({ status: 200, contentType: "application/javascript", body: widgetSource });
+      await route.fulfill({
+        status: 200,
+        contentType: "application/javascript",
+        body: widgetSource,
+      });
       return;
     }
     if (url.href === `${APP_ORIGIN}/slow-font.woff2`) {
@@ -223,14 +271,19 @@ test("stable startup controls the first visible managed frame", async ({ page })
       });
       return;
     }
-    if (url.pathname.endsWith(`/api/content/${SITE_ID}`) && request.method() === "GET") {
+    if (
+      url.pathname.endsWith(`/api/content/${SITE_ID}`) &&
+      request.method() === "GET"
+    ) {
       contentGets += 1;
       await new Promise((resolve) => setTimeout(resolve, scenario.delayMs));
       await fulfillJson(route, [
         {
           element_id: "hero",
           current_content:
-            scenario.ab === "slow" ? "Published baseline" : "Published headline",
+            scenario.ab === "slow"
+              ? "Published baseline"
+              : "Published headline",
         },
         ...(scenario.shadow
           ? [{ element_id: "shadow", current_content: "Published shadow" }]
@@ -238,7 +291,10 @@ test("stable startup controls the first visible managed frame", async ({ page })
       ]);
       return;
     }
-    if (url.pathname.endsWith(`/api/content/${SITE_ID}`) && request.method() === "POST") {
+    if (
+      url.pathname.endsWith(`/api/content/${SITE_ID}`) &&
+      request.method() === "POST"
+    ) {
       await fulfillJson(route, { success: true });
       return;
     }
@@ -290,9 +346,12 @@ test("stable startup controls the first visible managed frame", async ({ page })
       await page.goto(`${CUSTOMER_ORIGIN}/pricing?case=${candidate.id}`, {
         waitUntil: "domcontentloaded",
       });
-      await expect(page.locator("#headline")).toHaveText(candidate.finalVisible, {
-        timeout: 1000,
-      });
+      await expect(page.locator("#headline")).toHaveText(
+        candidate.finalVisible,
+        {
+          timeout: 1000,
+        },
+      );
       if (candidate.delayMs > 200 || candidate.ab === "slow") {
         await page.waitForTimeout(300);
       }
@@ -301,10 +360,16 @@ test("stable startup controls the first visible managed frame", async ({ page })
       expect(captured.frames[0]?.text).toBe(candidate.firstVisible);
       expect(captured.frames.at(-1)?.text).toBe(candidate.finalVisible);
       expect(captured.cls).toBe(0);
-      expect(await page.locator("#ignored").textContent()).toBe("Ignored host copy");
+      expect(await page.locator("#ignored").textContent()).toBe(
+        "Ignored host copy",
+      );
       expect(contentGets).toBe(candidate.styleBlocked ? 0 : 1);
 
-      if (candidate.stable && !candidate.styleBlocked && candidate.delayMs <= 200) {
+      if (
+        candidate.stable &&
+        !candidate.styleBlocked &&
+        candidate.delayMs <= 200
+      ) {
         expect(captured.startup?.status).toBe("d");
       }
       if (candidate.id === "stable-deadline") {
@@ -312,7 +377,9 @@ test("stable startup controls the first visible managed frame", async ({ page })
       }
       if (candidate.ab === "slow") {
         expect(trackRequests).toBe(0);
-        expect(await page.locator("#headline").getAttribute("data-rcf-variant")).toBeNull();
+        expect(
+          await page.locator("#headline").getAttribute("data-rcf-variant"),
+        ).toBeNull();
       }
       if (candidate.shadow) {
         expect(captured.frames[0]?.shadow).toBe("Published shadow");

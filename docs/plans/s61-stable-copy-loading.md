@@ -71,10 +71,11 @@ behavior: `docs/designs/s61-stable-copy-loading.md`.
 - The current runtime handoff tests pass for early-fetch reuse without a font wait, atomic
   baseline/A/B reveal, delayed A/B falling back to the valid baseline without a late variant
   or impression, and missing/unsupported marked runtimes retaining authored copy.
-- The permanent Playwright regression passes one test with seven internal scenarios: the
+- The permanent Playwright regression passes one test with eight internal scenarios: the
   legacy swap control, fast baseline, authored deadline fallback, delayed-A/B baseline,
   synchronous open shadow root with a blocked font, real React 19 `hydrateRoot` over nested
-  hero spans, and CSP style-block fallback. The separate evidence capture passed seven
+  hero spans, CSP style-block fallback, and quoted bootstrap/style hash admission without
+  `unsafe-inline`. The separate evidence capture passed seven
   scenarios with zero layout shift and zero React recoverable errors. Its timings are
   frame-sampled CSS visibility, not guaranteed glyph-paint timestamps.
 - The embed build passes all three fixed size gates: 45,873 bytes gzip for the bundle

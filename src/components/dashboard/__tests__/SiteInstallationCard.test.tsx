@@ -150,8 +150,12 @@ describe("SiteInstallationCard", () => {
       expect(
         screen.getByText(/visitors keep the page's authored text/i),
       ).toBeInTheDocument();
-      expect(screen.getByText(/sha256-script/)).toBeInTheDocument();
-      expect(screen.getByText(/sha256-style/)).toBeInTheDocument();
+      expect(screen.getByText("'sha256-script'")).toBeInTheDocument();
+      expect(screen.getByText("'sha256-style'")).toBeInTheDocument();
+      expect(screen.getByText("https://example.test")).toBeInTheDocument();
+      expect(
+        screen.getByText(/do not enable unsafe-inline/i),
+      ).toBeInTheDocument();
       expect(screen.queryByText(/disable protection/i)).not.toBeInTheDocument();
     });
   });

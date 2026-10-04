@@ -203,8 +203,9 @@ export function StableInstallationInstructions({
       </Alert>
       <div className="space-y-1 text-xs text-muted-foreground">
         <p>
-          Restrictive CSP: add <code>{installation.csp.scriptHash}</code> to
-          script-src and <code>{installation.csp.styleHash}</code> to style-src.
+          Restrictive CSP: add <code>{`'${installation.csp.scriptHash}'`}</code>{" "}
+          to script-src and <code>{`'${installation.csp.styleHash}'`}</code> to
+          style-src.
         </p>
         <p>
           Allow the external runtime from{" "}
