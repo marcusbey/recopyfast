@@ -2094,3 +2094,23 @@ snap-back fix undone (on main and after s47b), so it does not protect what it wa
 
 Embed allocation: 0 bytes.
 
+
+## Story s63-release-dependency-patches — clear the existing production dependency gates
+
+Product owner approval, 2026-10-05: “ok start” to the performance/release plan, including
+security patches required before production. Complexity: 2. Branch
+`feature/s63-release-dependency-patches`, from main. No new dependency.
+
+- [x] Root and server production audits have zero high/critical advisories, with known
+  moderate/low patches included when available within existing dependency ranges.
+- [x] Only lockfile patch/minor resolutions required by the advisories change. No force
+  upgrade, dependency addition, blanket unrelated update or runtime feature change.
+- [x] Existing application, sanitization and websocket contracts pass all required gates
+  and unchanged embed size ceilings. Root and server resolved versions are recorded.
+- [ ] Independent review, one story commit and reviewable draft PR; manual merge/deploy.
+
+PR58 already patches root engine.io/ip-address only. This owner-requested release work
+covers the additional root Next/brace-expansion/moment/DOMPurify and server issues. Its
+review must explicitly reconcile the overlapping lockfile patch; PR58 remains untouched.
+
+Embed allocation: 0 bytes.
