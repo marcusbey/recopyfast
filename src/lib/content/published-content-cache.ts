@@ -4,6 +4,7 @@ import { createClient, RESP_TYPES } from "redis";
 export const PUBLIC_CONTENT_CACHE_FORMAT = "rcf-public-content-v1";
 export const PUBLIC_CONTENT_CACHE_TTL_SECONDS = 300;
 export const PUBLIC_CONTENT_CACHE_MAX_BYTES = 1024 * 1024;
+export const PUBLIC_CONTENT_CACHE_COMMAND_QUEUE_MAX_LENGTH = 16;
 const DEFAULT_READ_BUDGET_MS = 30;
 const DEFAULT_WRITE_BUDGET_MS = 250;
 
@@ -158,6 +159,12 @@ function validateRows(
 function defaultCreateClient(redisUrl: string): CacheRedisClient {
   return createClient({
     url: redisUrl,
+    // `disableOfflineQueue` only refuses work while the socket is offline. A
+    // peer can remain ready, accept GETRANGE/SET and stop replying; request
+    // timeouts then settle while node-redis still retains each command in its
+    // ordered waiting-for-reply queue. Cap that private queue so an optional
+    // cache outage cannot accumulate one retained promise per visitor/fill.
+    commandsQueueMaxLength: PUBLIC_CONTENT_CACHE_COMMAND_QUEUE_MAX_LENGTH,
     disableOfflineQueue: true,
     socket: {
       connectTimeout: DEFAULT_WRITE_BUDGET_MS,

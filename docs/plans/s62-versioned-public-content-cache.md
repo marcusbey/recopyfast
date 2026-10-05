@@ -49,8 +49,10 @@ prerequisite to execution; accepted safety repairs are recorded before the imple
      Visitor read/connect together have a 30 ms programmed budget; deferred connect+SET has
      a separate total 250 ms budget so a slower cold handshake can warm the private singleton.
      Error listener, offline queue disabled, no reconnect loop, identity-safe cleanup: a late
-     timeout never destroys another operation or replacement client. All errors are redacted;
-     missing env/errors/corruption produce miss. No 250 ms wait in the visitor response.
+     timeout never destroys another operation or replacement client. Cap the private node-redis
+     command queue at 16: `disableOfflineQueue` rejects disconnected work but does not bound
+     commands already sent to a ready peer that stops replying. All errors are redacted; missing
+     env/errors/corruption produce miss. No 250 ms wait in the visitor response.
 - [x] 4. Integrate only after successful widget auth and page normalization, keep cookie
      dashboard reads uncached. Hit uses identical published response and per-request CORS. Miss
      uses current pagination/projection. Re-read revision after DB fill, and schedule cache
@@ -60,8 +62,11 @@ prerequisite to execution; accepted safety repairs are recorded before the imple
 - [x] 5. Test warm hit, empty hit, miss, DB errors, invalid/revoked token with warm cache,
      denied origin, legacy/path/language/variant separation, no-token dashboard, metadata privacy,
      malformed/oversized cache, missing Redis, rejection/timeouts, simultaneous clients and a
-     delayed old fill after Publish. No error/auth/private response enters storage. Include
-     mutation proofs for skipping auth-before-hit and removing revision invalidation.
+     delayed old fill after Publish. An owned ready RESP peer must withhold replies across more
+     than 16 mixed GET/SET calls, prove callers still settle as miss/false with only 16 retained
+     commands, then release ordered replies and recover on the same client. No
+     error/auth/private response enters storage. Include mutation proofs for skipping
+     auth-before-hit and removing revision invalidation.
 - [x] 6. Run matched fixture backend measurements (20 alternating pairs; same rows/payload)
      with production-mode route semantics and isolated data/cache. Report connection/read/fill
      timing, p50/p95 and timeout/error overhead honestly. Do not substitute artificial DB latency

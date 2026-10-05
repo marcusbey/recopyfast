@@ -141,3 +141,20 @@ pricing failures do not exercise the s62 cache path, but they remain a verificat
 until hosted CI runs against its seeded stack. `npm run audit:prod` also remains blocked
 by the inherited dependency advisories being repaired on the separate security branch;
 this story does not change dependency manifests or lockfiles.
+
+## Review repair: ready-socket command queue
+
+The pinned independent review found that the 30 ms and 250 ms `Promise.race` budgets
+bound callers but cannot cancel a command already written to Redis. `disableOfflineQueue`
+only rejects work while the client is disconnected or reconnecting. A ready TCP peer that
+accepts GETRANGE/SET and stops replying leaves those commands in node-redis's ordered
+waiting-for-reply queue after each cache caller has fallen back.
+
+The installed node-redis queue counts both commands waiting to write and commands waiting
+for a reply. The private content client therefore sets `commandsQueueMaxLength: 16`; excess
+cache work rejects through the existing redacted fail-open path while PostgreSQL remains
+authoritative. A real node-redis regression uses an owned loopback RESP peer: it completes
+the client handshake, withholds more than 16 mixed reads and writes, verifies only 16 reach
+the peer while every caller settles, releases replies in order, and proves a later valid
+read succeeds over the same connection. The rate-limiter Redis client and its fail-closed
+budgets remain unchanged.
