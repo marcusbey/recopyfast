@@ -1,12 +1,17 @@
-import { NextRequest } from "next/server";
+import { after, NextRequest } from "next/server";
 import { GET, POST, PUT, OPTIONS } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
+  readPublicContentRevision,
   SiteAuthError,
 } from "@/lib/security/site-auth";
+import {
+  isPublicContentCacheEnabled,
+  publishedContentCache,
+} from "@/lib/content/published-content-cache";
 
 jest.mock("@/lib/supabase/service");
 // Only authorization is stubbed, and only because it needs a database. This file
@@ -22,8 +27,16 @@ jest.mock("@/lib/security/site-auth", () => {
     authorizeFirstPartySiteRequest: jest.fn(),
     authorizeSiteRequest: jest.fn(),
     authorizeSiteOrigin: jest.fn(),
+    readPublicContentRevision: jest.fn(),
   };
 });
+jest.mock("@/lib/content/published-content-cache", () => ({
+  isPublicContentCacheEnabled: jest.fn(),
+  publishedContentCache: {
+    read: jest.fn(),
+    write: jest.fn(),
+  },
+}));
 
 const mockAuthorizeFirstPartySiteRequest =
   authorizeFirstPartySiteRequest as jest.MockedFunction<
@@ -35,11 +48,27 @@ const mockAuthorizeSiteRequest = authorizeSiteRequest as jest.MockedFunction<
 const mockAuthorizeSiteOrigin = authorizeSiteOrigin as jest.MockedFunction<
   typeof authorizeSiteOrigin
 >;
+const mockReadPublicContentRevision =
+  readPublicContentRevision as jest.MockedFunction<
+    typeof readPublicContentRevision
+  >;
+const mockIsPublicContentCacheEnabled =
+  isPublicContentCacheEnabled as jest.MockedFunction<
+    typeof isPublicContentCacheEnabled
+  >;
+const mockCacheRead = publishedContentCache.read as jest.MockedFunction<
+  typeof publishedContentCache.read
+>;
+const mockCacheWrite = publishedContentCache.write as jest.MockedFunction<
+  typeof publishedContentCache.write
+>;
+const mockAfter = after as jest.Mock;
 
 type MockServiceClient = {
   from: jest.Mock;
   select: jest.Mock;
   eq: jest.Mock;
+  is: jest.Mock;
   order: jest.Mock;
   range: jest.Mock;
   single: jest.Mock;
@@ -53,6 +82,7 @@ const mockServiceClient: MockServiceClient = {
   from: jest.fn(() => mockServiceClient),
   select: jest.fn(() => mockServiceClient),
   eq: jest.fn(() => mockServiceClient),
+  is: jest.fn(() => mockServiceClient),
   order: jest.fn(() => mockServiceClient),
   range: jest.fn(),
   single: jest.fn(),
@@ -68,6 +98,10 @@ const mockCreateServiceRoleClient =
 describe("/api/content/[siteId]", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsPublicContentCacheEnabled.mockReturnValue(false);
+    mockCacheRead.mockResolvedValue(null);
+    mockCacheWrite.mockResolvedValue(true);
+    mockReadPublicContentRevision.mockResolvedValue(null);
     mockCreateServiceRoleClient.mockReturnValue(
       mockServiceClient as unknown as ReturnType<
         typeof createServiceRoleClient
@@ -88,6 +122,7 @@ describe("/api/content/[siteId]", () => {
     mockServiceClient.from.mockReturnValue(mockServiceClient);
     mockServiceClient.select.mockReturnValue(mockServiceClient);
     mockServiceClient.eq.mockImplementation(() => mockServiceClient);
+    mockServiceClient.is.mockImplementation(() => mockServiceClient);
     mockServiceClient.order.mockImplementation(() => mockServiceClient);
     mockServiceClient.range.mockResolvedValue({ data: [], error: null });
     mockServiceClient.single.mockResolvedValue({
@@ -253,6 +288,8 @@ describe("/api/content/[siteId]", () => {
     });
 
     it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
+      const originalAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+      process.env.NEXT_PUBLIC_APP_URL = "https://app.recopyfast.test";
       mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce({
         site: { id: "site-123", domain: "example.com", api_key: "api-key" },
         allowedOrigin: null,
@@ -279,6 +316,218 @@ describe("/api/content/[siteId]", () => {
       expect(
         response.headers.get("Access-Control-Allow-Origin"),
       ).not.toBeNull();
+
+      if (originalAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+      else process.env.NEXT_PUBLIC_APP_URL = originalAppUrl;
+    });
+
+    describe("versioned public cache", () => {
+      const siteId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const revision = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      const cacheIdentity = {
+        siteId,
+        revision,
+        language: "en",
+        variant: "default",
+        pagePath: "/pricing",
+      };
+      const cachedRows = [
+        {
+          id: "row-1",
+          site_id: siteId,
+          element_id: "hero",
+          selector: "h1",
+          published_content: "Published",
+          original_content: "Original",
+          current_content: "Published",
+          language: "en",
+          variant: "default",
+          page_path: "/pricing",
+          metadata: { type: "h1" },
+          published_at: "2026-10-05T00:00:00.000Z",
+        },
+      ];
+
+      function widgetRequest(token = "signed-token") {
+        return new NextRequest(
+          `http://localhost/api/content/${siteId}?page_path=%2Fpricing`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Origin: "https://example.com",
+            },
+          },
+        );
+      }
+
+      beforeEach(() => {
+        mockIsPublicContentCacheEnabled.mockReturnValue(true);
+        mockAuthorizeSiteRequest.mockResolvedValue({
+          site: { id: siteId, domain: "example.com", api_key: "api-key" },
+          allowedOrigin: "https://example.com",
+          publicContentRevision: revision,
+        });
+      });
+
+      afterEach(() => {
+        // In the red phase, a cache hit never reaches the queued DB response.
+        // Clear one-shot pages so an expected cache assertion cannot poison the
+        // next unrelated liveness or write test.
+        mockServiceClient.range.mockReset();
+      });
+
+      it("authenticates before serving a warm cache hit", async () => {
+        mockCacheRead.mockResolvedValueOnce(cachedRows);
+
+        const response = await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual(cachedRows);
+        expect(mockAuthorizeSiteRequest).toHaveBeenCalledWith({
+          siteId,
+          token: "signed-token",
+          origin: "https://example.com",
+          referer: null,
+          includePublicContentRevision: true,
+        });
+        expect(mockCacheRead).toHaveBeenCalledWith(cacheIdentity);
+        expect(mockServiceClient.range).not.toHaveBeenCalled();
+        expect(mockCacheWrite).not.toHaveBeenCalled();
+        expect(mockAfter).not.toHaveBeenCalled();
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+          "https://example.com",
+        );
+      });
+
+      it("treats an empty cached array as a hit", async () => {
+        mockCacheRead.mockResolvedValueOnce([]);
+
+        const response = await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+
+        expect(await response.json()).toEqual([]);
+        expect(mockServiceClient.range).not.toHaveBeenCalled();
+      });
+
+      it("never asks the cache when current token authorization fails", async () => {
+        mockAuthorizeSiteRequest.mockRejectedValueOnce(
+          new SiteAuthError(
+            "Invalid site token",
+            "site_token_invalid",
+            401,
+            "https://example.com",
+          ),
+        );
+
+        const response = await GET(widgetRequest("revoked"), {
+          params: Promise.resolve({ siteId }),
+        });
+
+        expect(response.status).toBe(401);
+        expect(mockCacheRead).not.toHaveBeenCalled();
+      });
+
+      it("keeps cookie dashboard reads outside the cache", async () => {
+        mockAuthorizeFirstPartySiteRequest.mockResolvedValueOnce({
+          site: { id: siteId, domain: "example.com", api_key: "api-key" },
+          allowedOrigin: null,
+        });
+        mockServiceClient.range
+          .mockResolvedValueOnce({ data: cachedRows, error: null })
+          .mockResolvedValueOnce({ data: [], error: null });
+
+        const response = await GET(
+          new NextRequest(`http://localhost/api/content/${siteId}`),
+          { params: Promise.resolve({ siteId }) },
+        );
+
+        expect(response.status).toBe(200);
+        expect(mockAuthorizeSiteRequest).not.toHaveBeenCalled();
+        expect(mockCacheRead).not.toHaveBeenCalled();
+        expect(mockAfter).not.toHaveBeenCalled();
+      });
+
+      it("returns a DB miss immediately and fills only after a stable revision recheck", async () => {
+        mockServiceClient.range
+          .mockResolvedValueOnce({ data: cachedRows, error: null })
+          .mockResolvedValueOnce({ data: [], error: null })
+          .mockResolvedValueOnce({ data: [], error: null });
+        mockReadPublicContentRevision.mockResolvedValueOnce(revision);
+
+        const response = await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+        const body = await response.json();
+
+        expect(response.status).toBe(200);
+        expect(body).toEqual(cachedRows);
+        expect(mockCacheWrite).not.toHaveBeenCalled();
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        const deferredFill = mockAfter.mock.calls[0][0] as () => Promise<void>;
+        await deferredFill();
+        expect(mockReadPublicContentRevision).toHaveBeenCalledWith(siteId);
+        expect(mockCacheWrite).toHaveBeenCalledWith(cacheIdentity, cachedRows);
+      });
+
+      it("does not cache a delayed fill after the revision changes", async () => {
+        mockServiceClient.range
+          .mockResolvedValueOnce({ data: cachedRows, error: null })
+          .mockResolvedValueOnce({ data: [], error: null })
+          .mockResolvedValueOnce({ data: [], error: null });
+        mockReadPublicContentRevision.mockResolvedValueOnce(
+          "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        );
+
+        await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+        const deferredFill = mockAfter.mock.calls[0][0] as () => Promise<void>;
+        await deferredFill();
+
+        expect(mockCacheWrite).not.toHaveBeenCalled();
+      });
+
+      it("does not schedule a fill for a database error", async () => {
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: null,
+          error: { message: "db unavailable" },
+        });
+
+        const response = await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+
+        expect(response.status).toBe(500);
+        expect(mockAfter).not.toHaveBeenCalled();
+        expect(mockCacheWrite).not.toHaveBeenCalled();
+      });
+
+      it("stays on the old auth projection and DB path while disabled", async () => {
+        mockIsPublicContentCacheEnabled.mockReturnValueOnce(false);
+        mockAuthorizeSiteRequest.mockResolvedValueOnce({
+          site: { id: siteId, domain: "example.com", api_key: "api-key" },
+          allowedOrigin: "https://example.com",
+        });
+        mockServiceClient.range
+          .mockResolvedValueOnce({ data: cachedRows, error: null })
+          .mockResolvedValueOnce({ data: [], error: null });
+
+        const response = await GET(widgetRequest(), {
+          params: Promise.resolve({ siteId }),
+        });
+
+        expect(response.status).toBe(200);
+        expect(mockAuthorizeSiteRequest).toHaveBeenCalledWith({
+          siteId,
+          token: "signed-token",
+          origin: "https://example.com",
+          referer: null,
+        });
+        expect(mockCacheRead).not.toHaveBeenCalled();
+      });
     });
 
     /**

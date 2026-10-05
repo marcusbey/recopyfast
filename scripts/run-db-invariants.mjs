@@ -21,6 +21,7 @@ const BOOTSTRAP = path.join(
   "bootstrap-supabase-fixtures.sql",
 );
 const REQUIRED_MIGRATION = "20260925120000_sites_api_key_column_grants.sql";
+const REVISION_MIGRATION = "20261005000000_versioned_public_content_cache.sql";
 const isPreFixProof = process.argv.includes("--pre-fix-proof");
 
 function run(command, args, options = {}) {
@@ -149,6 +150,9 @@ try {
   if (!isPreFixProof && !migrations.includes(REQUIRED_MIGRATION)) {
     throw new Error(`Required migration is missing: ${REQUIRED_MIGRATION}`);
   }
+  if (!isPreFixProof && !migrations.includes(REVISION_MIGRATION)) {
+    throw new Error(`Required migration is missing: ${REVISION_MIGRATION}`);
+  }
 
   for (const migration of migrations) {
     run(
@@ -161,11 +165,13 @@ try {
   // Forward migrations must converge if an operator retries after an uncertain
   // connection result. Apply the security migration a second time explicitly.
   if (!isPreFixProof) {
-    run(
-      psql,
-      [...psqlArgs, "--file", path.join(MIGRATIONS_DIR, REQUIRED_MIGRATION)],
-      psqlOptions,
-    );
+    for (const migration of [REQUIRED_MIGRATION, REVISION_MIGRATION]) {
+      run(
+        psql,
+        [...psqlArgs, "--file", path.join(MIGRATIONS_DIR, migration)],
+        psqlOptions,
+      );
+    }
   }
 
   const node = process.execPath;
@@ -175,6 +181,7 @@ try {
       require.resolve("jest/bin/jest"),
       "--runInBand",
       "src/__tests__/db/column-privileges.test.ts",
+      "src/__tests__/db/public-content-revision.test.ts",
     ],
     {
       env: {

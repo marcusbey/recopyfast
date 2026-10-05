@@ -2094,3 +2094,38 @@ snap-back fix undone (on main and after s47b), so it does not protect what it wa
 
 Embed allocation: 0 bytes.
 
+## Story s62-versioned-public-content-cache — deliver published copy from a current server cache
+
+Product owner decision, 2026-10-05: “ok start” approves the performance plan explained in
+the preceding turn: integrate the existing fixes in preview, cache published content after
+authorization, invalidate transactionally, and prove the actual aicompoz.com homepage.
+This story owns only the versioned backend cache. Complexity: 4. Branch
+`feature/s62-versioned-public-content-cache`, independently from main.
+
+- [ ] Widget content reads authenticate the current site token and origin on every request
+      before cache access; revoked tokens cannot read a warm cache. Cookie dashboard reads stay
+      uncached. Errors, CORS decisions, grants, draft content and A/B endpoints are never cached.
+- [ ] A service-only UUID revision on sites changes transactionally for every content_elements
+      INSERT/UPDATE/DELETE and TRUNCATE, including import, discovery, v1 writes and publish RPCs.
+      A moved row invalidates both sites; rollback restores both content and revision.
+- [ ] Cache identity includes format version, site id, public revision, language, variant and
+      normalized page path, keeping omitted legacy path distinct from root and other pages.
+      Only the existing published row projection, with staging attributes removed, is stored.
+- [ ] Cache connection/read consumes at most a 30 ms programmed budget; cache writes run
+      after response. Missing, failed, corrupt, oversized or timed-out cache falls back to the
+      existing database path without dropping rows or exposing a host-page error.
+- [ ] A concurrent publish during a fill never leaves stale/mixed content addressable under
+      the next revision. Real disposable PostgreSQL tests prove trigger coverage, rollback,
+      concurrency, migration retry and effective column/function privileges; meaningful cache and
+      route tests exercise cached/fresh/missing/error paths and revocation.
+- [ ] Required local checks and independent review pass; measurement reports matched rows
+      and backend timing, separately from browser paint and production. Neither cached test data
+      nor a 200 ms visibility fallback counts as production speed success.
+
+Embed allocation: 0 bytes. No widget source/artifact, dependency or lockfile change.
+
+Delivery dependencies: existing s59/PR56, s60/PR57 and s61/PR59 remain their own branches.
+Use a non-shippable diagnostic integration workspace to test the combined behavior; no stacked
+feature PR. Security audit remediation and the separate aicompoz head adapter have their own
+release gates. Before production approval, at least 19/20 representative cold visits on the
+actual landing page must reveal published copy within the existing 200 ms hold.

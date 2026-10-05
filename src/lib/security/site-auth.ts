@@ -12,7 +12,12 @@ interface SiteRecord {
 export interface SiteAuthContext {
   site: SiteRecord;
   allowedOrigin: string | null;
+  /** Present only when the caller explicitly requested the cache generation. */
+  publicContentRevision?: string | null;
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type SiteAuthErrorCode =
   | "site_token_missing"
@@ -166,15 +171,25 @@ export async function authorizeSiteRequest(options: {
   token: string | null;
   origin?: string | null;
   referer?: string | null;
+  includePublicContentRevision?: boolean;
 }): Promise<SiteAuthContext> {
-  const { siteId, token, origin, referer } = options;
+  const {
+    siteId,
+    token,
+    origin,
+    referer,
+    includePublicContentRevision = false,
+  } = options;
 
   const supabase = createServiceRoleClient();
-  const { data: site, error } = await supabase
-    .from("sites")
-    .select("id, domain, api_key")
-    .eq("id", siteId)
-    .single();
+  // Keep both projections as static literals. The source-level security census
+  // audits every api_key read and must be able to see the cache-only expansion.
+  const siteSelection = includePublicContentRevision
+    ? supabase
+        .from("sites")
+        .select("id, domain, api_key, public_content_revision")
+    : supabase.from("sites").select("id, domain, api_key");
+  const { data: site, error } = await siteSelection.eq("id", siteId).single();
 
   if (error || !site) {
     throw new SiteAuthError("Site not found", "site_not_found", 401);
@@ -256,9 +271,23 @@ export async function authorizeSiteRequest(options: {
       : null
     : permittedOrigin;
 
+  const siteWithOptionalRevision = site as SiteRecord & {
+    public_content_revision?: unknown;
+  };
+  const { public_content_revision: rawRevision, ...authorizedSite } =
+    siteWithOptionalRevision;
+
   return {
-    site,
+    site: authorizedSite,
     allowedOrigin,
+    ...(includePublicContentRevision
+      ? {
+          publicContentRevision:
+            typeof rawRevision === "string" && UUID_PATTERN.test(rawRevision)
+              ? rawRevision
+              : null,
+        }
+      : {}),
   };
 }
 
@@ -314,6 +343,31 @@ export async function authorizeFirstPartySiteRequest(
     site,
     allowedOrigin: null,
   };
+}
+
+/**
+ * Re-read only the server-owned cache generation after a public DB fill.
+ *
+ * This is not authorization: the request already passed authorizeSiteRequest.
+ * The UUID guard prevents a caller-controlled malformed id from becoming a
+ * PostgREST cast error, and any unavailable value simply disables cache fill.
+ */
+export async function readPublicContentRevision(
+  siteId: string,
+): Promise<string | null> {
+  if (!UUID_PATTERN.test(siteId)) return null;
+  const serviceClient = createServiceRoleClient();
+  const { data, error } = await serviceClient
+    .from("sites")
+    .select("public_content_revision")
+    .eq("id", siteId)
+    .single();
+  if (error || !data) return null;
+  const revision = (data as { public_content_revision?: unknown })
+    .public_content_revision;
+  return typeof revision === "string" && UUID_PATTERN.test(revision)
+    ? revision
+    : null;
 }
 
 export function sanitizeIncomingContent(content: string) {

@@ -130,6 +130,7 @@ describe("sites source-read projections", () => {
         "src/app/api/sites/route.ts: id, domain, name, created_at, updated_at, api_key, status, live_at, last_reported_at, last_mismatch_domain, last_mismatch_at",
         "src/lib/security/site-auth.ts: id, domain, api_key",
         "src/lib/security/site-auth.ts: id, domain, api_key",
+        "src/lib/security/site-auth.ts: id, domain, api_key, public_content_revision",
       ].sort(),
     );
     expect(embeddedViolations).toEqual([]);
@@ -172,10 +173,16 @@ describe("sites source-read projections", () => {
     );
 
     expect(
-      directSiteProjections(siteAuth).filter((projection) =>
-        projection.includes("api_key"),
-      ),
-    ).toHaveLength(2);
+      directSiteProjections(siteAuth)
+        .filter((projection) => projection.includes("api_key"))
+        .sort(),
+    ).toEqual(
+      [
+        "id, domain, api_key",
+        "id, domain, api_key",
+        "id, domain, api_key, public_content_revision",
+      ].sort(),
+    );
     expect(
       directSiteProjections(websocketServer).filter((projection) =>
         projection.includes("api_key"),

@@ -133,6 +133,9 @@ jest.mock('next/server', () => ({
       },
     },
   ),
+  // Next 16 post-response work. Suites inspect the callback explicitly rather
+  // than running it during the request that scheduled it.
+  after: jest.fn(),
 }))
 
 // Mock Next.js router

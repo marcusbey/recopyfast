@@ -247,14 +247,16 @@ jobs:
           printf 'SUPABASE_SERVICE_ROLE_KEY=%s\n' "$service_role_key" >> "$GITHUB_ENV"
           rm -f "$status_file"
 
-      - name: Verify secret-column privileges through PostgreSQL and PostgREST
+      - name: Verify secret-column privileges and content revisions through PostgreSQL and PostgREST
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           RCF_REQUIRE_TEST_DB: "1"
           RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"
         run: |
           RCF_TEST_POSTGREST_ANON_KEY="$NEXT_PUBLIC_SUPABASE_ANON_KEY" \
-            npx jest --runInBand src/__tests__/db/column-privileges.test.ts
+            npx jest --runInBand \
+              src/__tests__/db/column-privileges.test.ts \
+              src/__tests__/db/public-content-revision.test.ts
 
       # s56 (ADR 042): no web principal writes a content table. Proved through
       # the real PostgREST with real GoTrue JWTs, lapsed and paying, and through

@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartySiteRequest,
   authorizeSiteRequest,
   authorizeSiteOrigin,
   parseOrigin,
+  readPublicContentRevision,
   SiteAuthError,
 } from "@/lib/security/site-auth";
 import { markSiteLive, recordSiteReport } from "@/lib/sites/site-status";
@@ -17,6 +18,12 @@ import { enforceRateLimit } from "@/lib/api/rate-limit";
 import { validateContentAttributePatch } from "@/lib/api/validation";
 import { fetchPageScopedRows } from "@/lib/content/paged-elements";
 import { normalizePagePath } from "@/lib/content/page-path";
+import {
+  isPublicContentCacheEnabled,
+  publishedContentCache,
+  type PublicContentCacheIdentity,
+  type PublicContentRow,
+} from "@/lib/content/published-content-cache";
 
 interface ContentElementRow {
   site_id: string;
@@ -336,6 +343,8 @@ export async function GET(
     // Only the widget's own token proves the script is still running on the
     // customer's site; a dashboard session proves their owner is logged in.
     let isWidgetRequest = false;
+    let publicContentRevision: string | null = null;
+    const cacheEnabled = isPublicContentCacheEnabled();
 
     // Dashboard requests are same-origin with a Supabase session and never
     // carry a site token, so try that path first; only fall back to the
@@ -351,12 +360,15 @@ export async function GET(
       const referer = request.headers.get("referer");
 
       try {
-        ({ allowedOrigin } = await authorizeSiteRequest({
+        const siteAuth = await authorizeSiteRequest({
           siteId,
           token: token,
           origin,
           referer,
-        }));
+          ...(cacheEnabled ? { includePublicContentRevision: true } : {}),
+        });
+        allowedOrigin = siteAuth.allowedOrigin;
+        publicContentRevision = siteAuth.publicContentRevision ?? null;
         isWidgetRequest = true;
       } catch (authError) {
         console.error("Content GET authorization failed:", authError);
@@ -379,6 +391,30 @@ export async function GET(
     }
     const pagePath =
       normalizedPagePath === null ? null : normalizedPagePath.value;
+
+    const cacheIdentity: PublicContentCacheIdentity | null =
+      cacheEnabled && isWidgetRequest && publicContentRevision
+        ? {
+            siteId,
+            revision: publicContentRevision,
+            language,
+            variant,
+            pagePath,
+          }
+        : null;
+
+    if (cacheIdentity) {
+      const cached = await publishedContentCache.read(cacheIdentity);
+      if (cached !== null) {
+        // A cache hit is still a real widget page view. Keep the current
+        // liveness contract on this independent branch; s60 moves that write
+        // off the response path separately.
+        await bestEffortSiteWrite("liveness bump", siteId, () =>
+          recordSiteReport(supabase, siteId),
+        );
+        return withCors(NextResponse.json(cached), allowedOrigin);
+      }
+    }
 
     // A scoped page read includes author-declared ids (page_path IS NULL),
     // while an omitted path keeps old widgets working. Both paths paginate:
@@ -435,7 +471,20 @@ export async function GET(
         current_content:
           element.published_content ?? element.original_content ?? "",
       };
-    });
+    }) as PublicContentRow[];
+
+    if (cacheIdentity) {
+      // `after` preserves the visitor response boundary: the second database
+      // check and cold Redis connect/write receive their own bounded budget.
+      // Versioned keys already make old generations unreachable; the recheck
+      // also avoids storing a mixed paginated fill after a concurrent write.
+      const rowsForCache = transformedContent;
+      after(async () => {
+        const currentRevision = await readPublicContentRevision(siteId);
+        if (currentRevision !== cacheIdentity.revision) return;
+        await publishedContentCache.write(cacheIdentity, rowsForCache);
+      });
+    }
 
     // The one ongoing "this site is still running our script" signal.
     //

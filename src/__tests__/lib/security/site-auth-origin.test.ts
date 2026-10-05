@@ -47,6 +47,7 @@ import {
   authorizeSiteRequest,
   authorizeSiteOrigin,
   buildSiteToken,
+  readPublicContentRevision,
 } from "@/lib/security/site-auth";
 import { POST, GET, OPTIONS } from "@/app/api/content/[siteId]/route";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -181,6 +182,67 @@ describe("authorizeSiteRequest Origin enforcement", () => {
     expect(context.site.id).toBe(SITE_ID);
   });
 
+  it("keeps the historical sites projection when revision lookup is omitted", async () => {
+    await authorizeSiteRequest({
+      siteId: SITE_ID,
+      token: publishedSiteToken(),
+      origin: `https://${REGISTERED_DOMAIN}`,
+      referer: null,
+    });
+
+    expect(serviceClient.select).toHaveBeenCalledWith("id, domain, api_key");
+  });
+
+  it("optionally returns a validated public content revision in the same auth lookup", async () => {
+    const revision = "123e4567-e89b-42d3-a456-426614174000";
+    serviceClient.single.mockResolvedValueOnce({
+      data: {
+        id: SITE_ID,
+        domain: REGISTERED_DOMAIN,
+        api_key: API_KEY,
+        public_content_revision: revision,
+      },
+      error: null,
+    });
+
+    const context = await authorizeSiteRequest({
+      siteId: SITE_ID,
+      token: publishedSiteToken(),
+      origin: `https://${REGISTERED_DOMAIN}`,
+      referer: null,
+      includePublicContentRevision: true,
+    });
+
+    expect(serviceClient.select).toHaveBeenCalledWith(
+      "id, domain, api_key, public_content_revision",
+    );
+    expect(context.publicContentRevision).toBe(revision);
+    expect(context.site).not.toHaveProperty("public_content_revision");
+  });
+
+  it("does not turn a malformed revision into an authorization failure", async () => {
+    serviceClient.single.mockResolvedValueOnce({
+      data: {
+        id: SITE_ID,
+        domain: REGISTERED_DOMAIN,
+        api_key: API_KEY,
+        public_content_revision: "not-a-uuid",
+      },
+      error: null,
+    });
+
+    const context = await authorizeSiteRequest({
+      siteId: SITE_ID,
+      token: publishedSiteToken(),
+      origin: `https://${REGISTERED_DOMAIN}`,
+      referer: null,
+      includePublicContentRevision: true,
+    });
+
+    expect(context.site.id).toBe(SITE_ID);
+    expect(context.publicContentRevision).toBeNull();
+  });
+
   // Independent of the refusal below: the call reaches the real code path and
   // looks the site up, so a rejection there is the Origin decision and not a
   // broken fixture throwing on the way in.
@@ -249,6 +311,40 @@ describe("authorizeSiteRequest Origin enforcement", () => {
     await expect(authorizeSiteOrigin(SITE_ID, null, null)).rejects.toThrow(
       "Origin not allowed",
     );
+  });
+});
+
+describe("public content revision recheck", () => {
+  const UUID_SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const REVISION = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  it("rejects a malformed site id without querying", async () => {
+    await expect(readPublicContentRevision("site-123")).resolves.toBeNull();
+    expect(serviceClient.from).not.toHaveBeenCalled();
+  });
+
+  it("reads and validates the current revision through the service client", async () => {
+    serviceClient.single.mockResolvedValueOnce({
+      data: { public_content_revision: REVISION },
+      error: null,
+    });
+
+    await expect(readPublicContentRevision(UUID_SITE_ID)).resolves.toBe(
+      REVISION,
+    );
+    expect(serviceClient.select).toHaveBeenCalledWith(
+      "public_content_revision",
+    );
+    expect(serviceClient.eq).toHaveBeenCalledWith("id", UUID_SITE_ID);
+  });
+
+  it("treats a missing or malformed revision as cache-unavailable", async () => {
+    serviceClient.single.mockResolvedValueOnce({
+      data: { public_content_revision: "bad" },
+      error: null,
+    });
+
+    await expect(readPublicContentRevision(UUID_SITE_ID)).resolves.toBeNull();
   });
 });
 
