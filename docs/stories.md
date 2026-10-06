@@ -2095,6 +2095,26 @@ snap-back fix undone (on main and after s47b), so it does not protect what it wa
 Embed allocation: 0 bytes.
 
 
+## Story s60-public-content-timing — published copy reaches visitors sooner
+
+As a visitor to a website with ReCopyFast, I see published copy sooner after the
+initial page paint, reducing the visible swap from authored HTML to saved text.
+
+Complexity: 3. Dependencies: existing public content authorization and page-scoped
+pagination. This is a latency fix for shipped behavior, not a new content source.
+
+- [ ] A successful widget content GET returns without awaiting advisory liveness
+  bookkeeping, while still scheduling that bookkeeping reliably after response.
+- [ ] Public page reads avoid the terminal empty database wave when a reliable
+  exact row count is available. Unknown/invalid counts preserve current fallback.
+  Server row caps, errors, page/shared scope and deterministic ordering stay safe.
+- [ ] Existing authentication, CORS, original-copy fallback, staging secrecy,
+  editor paths and all-site legacy reads keep their current contracts.
+- [ ] Benchmarks record before/after request timing and hero behavior on the same
+  aicompoz.com page; improvements are measured rather than inferred from green tests.
+- [ ] Documentation does not claim zero flash: browser-side fetching still occurs
+  after authored HTML can paint. No hardcoded source-copy sync or whole-page mask.
+
 ## Story s63-release-dependency-patches — clear the existing production dependency gates
 
 Product owner approval, 2026-10-05: “ok start” to the performance/release plan, including

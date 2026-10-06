@@ -20,11 +20,9 @@
 
 import { NextRequest, NextResponse, after } from "next/server";
 
-// The route imports `after` from "next/server". The repo's global mock
-// (jest.setup.js) predates that API and does not export it, so this file
-// re-declares the same NextRequest/NextResponse shape used everywhere else in
-// the suite and adds `after` as a spy — recording the deferred callback so a
-// test can invoke it directly and prove what it does.
+// This suite needs more than the global no-op `after`: it re-declares the same
+// NextRequest/NextResponse shape used everywhere else and captures each deferred
+// callback so a test can invoke it directly and prove what it does.
 jest.mock("next/server", () => ({
   NextRequest: class MockNextRequest {
     url: string;
