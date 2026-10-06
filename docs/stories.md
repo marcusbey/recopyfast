@@ -2129,3 +2129,39 @@ Use a non-shippable diagnostic integration workspace to test the combined behavi
 feature PR. Security audit remediation and the separate aicompoz head adapter have their own
 release gates. Before production approval, at least 19/20 representative cold visits on the
 actual landing page must reveal published copy within the existing 200 ms hold.
+
+## Story s63-release-dependency-patches — clear the existing production dependency gates
+
+Product owner approval, 2026-10-05: “ok start” to the performance/release plan, including
+security patches required before production. Complexity: 2. Branch
+`feature/s63-release-dependency-patches`, from main. No new dependency.
+
+- [x] Root and server production audits have zero high/critical advisories, with known
+  moderate/low patches included when available within existing dependency ranges.
+- [x] Only lockfile patch/minor resolutions required by the advisories change. No force
+  upgrade, dependency addition, blanket unrelated update or runtime feature change.
+- [x] Existing application, sanitization and websocket contracts pass all required gates
+  and unchanged embed size ceilings. Root and server resolved versions are recorded.
+- [ ] Independent review, one story commit and reviewable draft PR; manual merge/deploy.
+
+PR58 already patches root engine.io/ip-address only. This owner-requested release work
+covers the additional root Next/brace-expansion/moment/DOMPurify and server issues. Its
+review must explicitly reconcile the overlapping lockfile patch; PR58 remains untouched.
+
+Embed allocation: 0 bytes.
+
+## Story s64-rollout-dependency-refresh — keep the active rollout audit gates green
+
+Owner-approved rollout continuation, 2026-10-06. Complexity 2. Branch
+`feature/s64-rollout-dependency-refresh`, independently from main. Fresh registry advisories
+made main `719eb45` fail after s63/PR60 passed and shipped. No new dependency.
+
+- [ ] Root and server production audits report zero blocking vulnerabilities after minimal
+  within-range updates of proxy-addr, sharp and source-map-js. Existing manifest ranges stay.
+- [ ] Generated locks name only the needed patched paths; no force/major/unrelated update.
+- [ ] Relevant request-IP, sanitizer/image and websocket tests plus required full gates pass.
+  Embed/browser artifacts and fixed gzip ceilings remain unchanged.
+- [ ] Fresh independent review and normal hooks/CI pass before authorized squash merge.
+  Deployment identity and public health are verified afterward; no billing/content mutation.
+
+Embed allocation: 0 bytes. This security prerequisite stays separate from s59–s62.
