@@ -1,135 +1,112 @@
 # Review — Story s60-public-content-timing
 
-> Fresh-context review. Each issue is classified critical / major / minor.
-> Diff reviewed: `git diff main...feature/s60-public-content-timing`, commit
-> `e21563787793cf00982c6899bb218258e8032c2c` on `9aa492d5afee05268e24440dc679d20214840bc9`.
-> The reviewed commit tree is `0158c51309a9b26f8dcfe6a51bd784690764cf11`.
-> Judged against the validated plan, research, `AGENTS.md`, and ADRs 002, 006 and 030.
+> Fresh-context review of `git diff origin/main...feature/s60-public-content-timing`.
+> Pinned commit: `b2c3a9e8e4012b8cb986c1bb3e1396fa9e4109b5`.
+> Pinned tree: `d1c64704b6010aa7d65cf1ac371dd4155cada410`.
+> Base: `origin/main` at `4aed967e93cb8f3c09f12ccfaa0545926e3bb30a`.
+> Judged against the validated plan, research, `AGENTS.md`, ADRs 002, 006 and 030,
+> and the exact production-security baseline already merged into main.
 
-## Summary
+## Verdict
 
-No critical, major or minor issue remains in the final diff.
+The final diff correctly removes two avoidable waits from the public content path. A successful
+widget read schedules advisory liveness through Next `after()` instead of awaiting it; dashboard,
+authorization-refusal and content-read-failure paths schedule nothing. Page-scoped public reads use
+fresh exact counts to avoid known-empty terminal requests while preserving server caps, legacy
+unknown-count behavior, returned rows, deterministic ordering and error propagation.
 
-The public content response no longer waits for advisory liveness bookkeeping. A successful
-widget read schedules the existing best-effort write with Next `after()`; dashboard reads,
-authorization failures and content-read failures schedule nothing. A deferred write failure is
-logged without changing the already-built response or its CORS header.
-
-Page-scoped public hydration now asks PostgREST for exact counts and avoids the terminal empty
-wave when the latest reliable per-scope count is exhausted. Legacy all-site reads and every other
-helper caller remain on empty-page termination. Counts are refreshed on each counted page so an
-insert before an offset cannot hide an originally existing tail row; one missing or invalid later
-count permanently restores the empty-page fallback for that scope.
-
-The review found three issues before the final commit, all resolved and regression-tested:
-
-- exact count was initially enabled for legacy all-site hydration as well as the measured
-  page-scoped path;
-- the first implementation froze the first count and could omit an old tail row after a
-  concurrent insert shifted a capped page;
-- the pending-write test initially asserted settlement only after releasing the held write.
+The s60 source files are byte-identical to the previously reviewed timing candidate after merging
+the s64 security baseline. Both production audits now pass at the exact final source. I found
+no critical, major or minor issue.
 
 ## Plan and scope compliance
 
-- [x] **Task 1 — deferred liveness.** `GET /api/content/[siteId]` calls `after()` only after a
-  successful widget authorization, content read and response transformation. Tests cover one
-  scheduled write, no dashboard/auth/read-failure write, a deliberately pending write, and an
-  unchanged 200 body/CORS header when the deferred write throws.
-- [x] **Task 2 — exact-count pagination.** Tests cover one-wave completion, server caps, zero,
-  missing/null/negative/fractional/NaN/infinite/unsafe/string counts, a later missing or invalid
-  count, a growing count caused by an inserted boundary row, stale high/low counts, first and
-  later errors, per-scope parallelism and deterministic ordering.
-- [x] **Task 3 — local proof and independent review.** Lint, full and production type-checks,
-  format, build and Jest are green. Package manifests and lockfiles are unchanged. The widget,
-  authentication helpers, font gating, caching, SSR, staging runtime and embed artifacts have no
-  diff.
-- [ ] **Task 4 — release-stage proof remains.** Two five-pair read-only helper benchmarks are
-  recorded. The final imported helpers returned the same 258 rows in every pair, reduced
-  PostgREST reads from four to two, and improved median time from 346 ms to 268 ms (23%). One
-  candidate pair was slower, so the evidence does not claim a uniform speedup. A deployed
-  full-API/browser measurement, exact paint-to-response timing, failure fallback on a real
-  visitor page, PR/CI evidence and post-deploy revision check cannot exist before the manual
-  release and remain explicit verification work below.
+- [x] **Deferred liveness.** `GET /api/content/[siteId]` schedules one `recordSiteReport` only
+  after successful widget authorization, content retrieval and response transformation. The
+  response settles while a deliberately held write is pending, and deferred failure cannot alter
+  its body, status or CORS header.
+- [x] **Principal boundary preserved.** A first-party dashboard session never records visitor
+  liveness. Authorization failures and untyped authorization exceptions return before scheduling;
+  content-read failures also schedule nothing. Site-token authorization and per-request CORS have
+  no source diff beyond the moved bookkeeping boundary.
+- [x] **Exact-count pagination is narrowly enabled.** Only a normalized page-scoped public GET
+  requests `{ count: "exact" }`; an omitted `page_path` retains the legacy projection and
+  empty-page termination. The page and shared scopes each own their count/fallback state.
+- [x] **Changing-count correctness.** Every reliable later count replaces the prior target, so an
+  insertion before the current offset cannot hide the original tail. Once a count is missing or
+  invalid, that scope permanently returns to empty-page termination. Returned pages are never
+  sliced to a count, and first/later query errors return no partial response.
+- [x] **Server caps and ordering preserved.** The next range advances by rows actually returned,
+  not the requested 1,000-row size. Page/shared reads remain concurrent and the combined result is
+  still sorted by `element_id`, then `id`.
+- [x] **No scope expansion.** There is no widget, staging, cache, schema, dependency, manifest,
+  authentication helper, billing, CSP, endpoint or response-field change. The global Jest mock only
+  adds the real `next/server.after` surface needed by routes that already use it.
+- [ ] **Release-stage proof remains.** The reviewed helper benchmark is local/operator evidence.
+  Exact deployed revision, full API/browser timing, visible published copy and failure fallback are
+  still post-merge checks under task 4b.
 
-The branch also carries the new `docs/stories.md` entry although the repository lifecycle normally
-lands framing docs on `main` before story work. The user approved this concrete branch plan while
-`main` remains protected by manual merge, so this is recorded as a nonblocking lifecycle deviation,
-not a source or runtime finding.
+The branch carries its approved `docs/stories.md` entry although framing docs normally land on
+main before story execution. This remains the previously recorded nonblocking lifecycle deviation;
+it does not change runtime behavior or the reviewed source boundary.
 
-## Anti-hallucination and rules check
+## API and anti-hallucination checks
 
-- `next/server` in the installed Next 16.3.5 package exports
-  `after<T>(Promise<T> | (() => T | Promise<T>)): void`; the same primitive is already used by
-  editor-code and publish routes.
-- Supabase PostgREST `select` accepts `count: "exact"` and returns `count: number | null`.
-  Exact count is a real `COUNT(*)`, which is why the final benchmark and page-scoped opt-in matter.
-- `recordSiteReport(supabase, siteId)` exists with the used signature and throws database write
-  errors for the existing best-effort wrapper to log.
-- All five other `fetchPageScopedRows` callers were opened. None requests a count, so each keeps
-  its prior empty-page behavior.
-- Service-role authorization order, CORS selection, published/original fallback, staged metadata
-  secrecy and deterministic row order are unchanged. ADR 002's principal boundary, ADR 006's
-  widget-only liveness signal, and ADR 030's public staging boundary remain intact.
-- No dependency, schema, endpoint, response field, widget byte, source-copy hardcode, font wait,
-  cache, SSR bridge or whole-page mask was added.
+- Installed Next 16.3.8 exports `after<T>(Promise<T> | (() => T | Promise<T>)): void`, matching
+  the callback used by the route.
+- The installed Supabase/PostgREST client accepts `select(columns, { count: "exact" })` and returns
+  `count: number | null`; the route requests that option only for scoped public hydration.
+- `recordSiteReport(supabase, siteId)` exists with the used signature, updates only
+  `last_reported_at`, and throws write errors for the existing best-effort wrapper to log.
+- All five other production callers of `fetchPageScopedRows` were inspected. None opts into exact
+  counts, so each retains the prior unknown-count path.
+- The final rebase changed none of the timing source, route tests, helper tests, research or plan
+  bytes from commit `23ada77`; it only incorporated the already-reviewed security baseline.
 
-## Verification
+## Independent verification
 
-- **Reviewer full suite:** `npm test -- --runInBand` with the CI inert environment — **310 suites
-  passed, 2 skipped; 4,037 tests passed, 38 skipped, 0 failed**. The run used the frozen working
-  tree; its recorded hashes and Git tree match final commit `e215637` exactly.
-- **Reviewer focused suite in an isolated archive:** route plus helper — **66/66 passed** before
-  mutation and **66/66 passed** after restoration.
-- **Final repository gates:** lint **0 errors** (35 existing warnings), `type-check`,
-  `type-check:build`, `format:check` and `build` passed. The production build compiled on Next
-  16.3.5 and rebuilt the unchanged embed at 45,759 bytes gzip, within its current 45,880-byte
-  ratchet.
-- **Production dependency audit remains red by design:** `npm run audit:prod` reports six known
-  advisories — 1 critical, 2 high, 2 moderate and 1 low. No dependency changed. This review does
-  not waive that separate release gate.
+All reviewer commands used Node 24.14.0 unless noted:
+
+- Focused route/helper run: **66/66 tests passed**.
+- Full Jest: **310 suites and 4,037 tests passed**; 2 suites / 38 tests skipped; zero failures.
+- Lint passed with 0 errors / 35 inherited warnings. `type-check`, `type-check:build` and the
+  configured `format:check` passed.
+- Root and server `npm audit --omit=dev --json` both exited 0 with zero vulnerabilities.
+  `npm ls --all --omit=dev` exited 0 in both dependency trees.
+- The Next 16.3.8 production build compiled, type-checked and generated all routes successfully.
+  Expected inert-environment Redis, Supabase and pricing diagnostics remained non-fatal.
+- Embed freshness and fixed Node 24 gzip ceilings passed unchanged: 45,880-byte bundle,
+  33,120-byte widget and 13,141-byte transport.
+- `git diff --check` is clean. The pre-existing untracked `.lavish/` directory was preserved and
+  excluded from the review.
 
 ### Mutation proof
 
-Mutations ran only in archive `/tmp/s60-final-review.t9XuLm`; source files in the story worktree
-were never changed. Both archive files were restored byte-for-byte before the final green run.
+Mutations ran only in disposable archives of the pinned commit and were removed from the active
+workspace afterward. The source worktree remained byte-clean.
 
-| Mutation | Result |
+| Neutralized behavior | Result |
 | --- | --- |
-| Freeze the first valid exact count with `exactCountTarget ??= result.count` | **1 red / 24**: the inserted-boundary regression omitted original row 199 |
-| Replace deferred `after()` liveness with the old awaited write | **3 red / 42**: scheduling, pending-response timing and deferred-error tests |
-
-## Regressions checked
-
-- Page and shared scopes still start concurrently and retain independent count/fallback state.
-- Missing counts never become trusted later; a count that disappears mid-read disables count
-  termination for the rest of that scope.
-- Every returned page is preserved even when cumulative rows exceed the latest count.
-- First- and later-page errors still return no partial data.
-- A missing `page_path` retains the legacy all-site query and terminal empty request.
-- Dashboard reads do not update visitor liveness. Failed authorization and failed content reads
-  still exit before scheduling background work.
+| Freeze the first valid exact count with `exactCountTarget ??= result.count` | **1 red / 23 green**: the inserted-boundary case omitted the original final row |
+| Replace deferred `after()` liveness with the old awaited write | **3 red / 39 green**: scheduling, pending-response and deferred-failure assertions |
 
 ## Findings
 
 None.
 
-## Not verified
+## Not verified here
 
-- **Deployed visitor timing.** The final code was not merged or deployed during review. After the
-  dependency gate is cleared and the exact reviewed revision is deployed, load the real
-  aicompoz.com landing page at least five comparable times, record API response end and
-  paint-to-response range/median, and confirm the saved hero text replaces the authored text.
-- **Real `after()` execution.** Unit tests capture and run the callback, and the production build
-  compiles it, but no deployed function invocation proved that `last_reported_at` advances after
-  the response. On a controlled site, compare the timestamp before and after one widget read and
-  inspect logs for a forced or naturally occurring write failure without altering the response.
-- **Large scoped-page performance.** Correctness under server caps and changing counts is covered,
-  but the benchmark's two scopes each completed in one counted wave. Repeated exact `COUNT(*)`
-  cost on a genuinely multi-wave scoped page was not measured.
-- **Browser and CI.** The reviewer did not run Playwright or a hosted PR CI run. No widget code
-  changed, but the release should retain the existing real-page rendering checks.
-- **Production release.** No PR, merge, deployment or production revision identity was created or
-  inferred by this review. The six-advisory audit failure must be cleared before release.
+- Hosted CI for the final pinned SHA remains a mandatory merge gate. This source report does not
+  turn a pending or failed check green.
+- No merge, deployment, production request or customer content mutation ran in this review.
+- Deployed `after()` execution still needs a controlled timestamp observation: the content response
+  must finish first, then `last_reported_at` must advance without changing that response.
+- The real aicompoz homepage still needs the plan's comparable visitor measurements after deploy:
+  full API response range/median, paint-to-response timing, correct hero copy and failure fallback.
+- The helper covers capped and changing multi-page results. Repeated exact `COUNT(*)` cost on a
+  genuinely large hosted page remains production performance evidence, not a source correctness gap.
+- Registry advisories can change without a source commit. Final CI and the merge operation must use
+  the current audit result rather than treating this report as a permanent waiver.
 
 Max severity: none
 Ship allowed: yes
