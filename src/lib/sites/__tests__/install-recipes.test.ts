@@ -29,15 +29,40 @@ describe("install recipes", () => {
     }
   });
 
-  /**
-   * Every stack's instruction ends in the same place — immediately before
-   * `</body>`. The widget reads the DOM it is given, so a snippet in `<head>`
-   * runs before the copy it is meant to discover exists.
-   */
-  it("names the closing body tag in every recipe", () => {
-    for (const recipe of installRecipes) {
+  it("puts full-document stacks before the closing body tag", () => {
+    for (const recipe of installRecipes.filter(
+      ({ id }) => id === "wordpress" || id === "html",
+    )) {
       expect(`${recipe.location} ${recipe.notes ?? ""}`).toContain("</body>");
     }
+  });
+
+  /**
+   * The widget does not expose a complete teardown/reinitialization lifecycle.
+   * A root-layout tag can remain mounted across client navigation and therefore
+   * cannot be described as a complete SPA installation.
+   */
+  it("requires React and Next.js integrations to verify hydration and navigation", () => {
+    const recipe = getInstallRecipe("nextjs") as InstallRecipe;
+    const guidance = `${recipe.location} ${recipe.notes ?? ""}`;
+
+    expect(guidance).toMatch(/after (?:the page has )?hydrat(?:e|ed|ion)/i);
+    expect(guidance).toMatch(/client-side route changes/i);
+    expect(guidance).toMatch(/internal navigation/i);
+    expect(guidance).toMatch(/back/i);
+    expect(guidance).toMatch(/reload/i);
+    expect(guidance).not.toMatch(/seamless|works automatically/i);
+  });
+
+  it("warns React and Next.js integrations about URL-collecting analytics", () => {
+    const recipe = getInstallRecipe("nextjs") as InstallRecipe;
+    const guidance = `${recipe.location} ${recipe.notes ?? ""}`;
+
+    expect(guidance).toMatch(/analytics/i);
+    expect(guidance).toMatch(/rcf_handoff/);
+    expect(guidance).toMatch(/rcf_edit_token/);
+    expect(guidance).toMatch(/rcf_staging/);
+    expect(guidance).toMatch(/rcf_token/);
   });
 
   it("uses each id exactly once", () => {

@@ -2095,6 +2095,33 @@ snap-back fix undone (on main and after s47b), so it does not protect what it wa
 Embed allocation: 0 bytes.
 
 
+## Story s59-installation-guide — customers and agents can install the real snippet
+
+As a website owner, I can follow a public installation guide or give a complete
+brief to my agent, so my intended website pages become editable and I can verify
+the result without guessing where to paste the snippet.
+
+Complexity: 3. Dependencies: shipped snippet generation, installation status and
+editor invitation flows (s02, s29, s35, s41). Fits the existing self-serve install
+and first-client-publish scope; adds guidance, not a new editing/authentication path.
+
+- [ ] Public `/docs/install` explains the generated snippet using placeholders;
+  examples match `buildEmbedScript`, including optional websocket configuration.
+- [ ] The guide covers exact host registration, page coverage, installation,
+  detection, invitation, save versus publish, independent visitor verification,
+  rollback and relevant troubleshooting. It does not promise universal SPA support.
+- [ ] A visible Copy agent instructions control and a plain-text/Markdown endpoint
+  provide the same actionable brief, with required inputs, bounded authority and
+  explicit verification/reporting criteria. Public content contains no live tokens.
+- [ ] Footer and site Installation card expose the guide. Shared installation
+  recipes are corrected so the dashboard does not contradict the public guide.
+- [ ] Analytics URL collection and SPA lifecycle caveats are explicit; the guide
+  never treats a referrer policy alone as credential-leak protection or a widget
+  destroy call as complete SPA teardown.
+- [ ] Public reading, keyboard navigation, small-screen layout, copy success and
+  clipboard failure are verified. Existing snippet and invitation behavior stays
+  unchanged; no new package is introduced.
+
 ## Story s60-public-content-timing — published copy reaches visitors sooner
 
 As a visitor to a website with ReCopyFast, I see published copy sooner after the

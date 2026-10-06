@@ -53,7 +53,8 @@ async function isUnentitled(
 }
 
 /**
- * Paths whose caller cannot have a session, so asking about one is pure cost.
+ * Paths whose response does not depend on a session, so asking about one is
+ * pure cost.
  *
  * Everything under `embed/` is a static file in `public/` fetched by every
  * visitor to every customer site that has installed the widget — third parties
@@ -78,6 +79,12 @@ async function isUnentitled(
  * Exact match: with `trailingSlash` off, `/monitoring/` is redirected before it
  * gets here, and anything under the path is not the tunnel.
  *
+ * The installation guide and its Markdown handoff are public documentation.
+ * A visitor may happen to carry a session cookie, but it changes neither
+ * response. Sending those reads through GoTrue would make the help needed to
+ * complete an installation depend on authentication being available, which
+ * defeats the public route contract introduced by s59.
+ *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
  * executable JavaScript loaded cross-origin onto every customer site — the one
@@ -86,6 +93,8 @@ async function isUnentitled(
 function isSessionlessPath(pathname: string): boolean {
   return (
     pathname.startsWith("/embed/") ||
+    pathname === "/docs/install" ||
+    pathname === "/docs/install/agent-instructions.md" ||
     pathname === "/try" ||
     pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
@@ -302,8 +311,8 @@ export const config = {
      * API routes ARE included so they receive security headers
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
-     * `embed/`, `/try`, its exact runtime asset, robots.txt, sitemap.xml and
-     * the Sentry tunnel are deliberately NOT excluded here.
+     * `embed/`, `/docs/install`, `/try`, its exact runtime asset, robots.txt,
+     * sitemap.xml and the Sentry tunnel are deliberately NOT excluded here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so

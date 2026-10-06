@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { CheckCircle2, Copy } from "lucide-react";
+import Link from "next/link";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -238,6 +239,10 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
             <SnippetDisclosure embedScript={embedScript} />
           </>
         )}
+
+        <Button asChild variant="link" size="sm" className="h-auto px-0">
+          <Link href="/docs/install">Installation guide</Link>
+        </Button>
       </CardContent>
     </Card>
   );
