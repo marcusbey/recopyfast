@@ -1,9 +1,9 @@
 # Review — Story s59-installation-guide
 
 > Fresh-context review of `git diff origin/main...feature/s59-installation-guide`.
-> Pinned commit: `8bce3944c2c126730c9651b80503f62b0c3cf69d`.
-> Pinned tree: `c7d6a354dec801475ac5fd4478a3899c372b165e`.
-> Base: `origin/main` at `4aed967e93cb8f3c09f12ccfaa0545926e3bb30a`.
+> Pinned commit: `f0a676d1870c532baee66925e24f9b6552a23c10`.
+> Pinned tree: `a46ed89723fd9efd5f92733171cfae819048ed88`.
+> Base: `origin/main` at `fb7f41ca09437dce1bac41398cc58399203584b5`.
 > Judged against the validated plan, research, screen/copy designs, `AGENTS.md`, the
 > accepted installation/authentication decisions and the actual APIs named by the guide.
 
@@ -19,6 +19,11 @@ The two major issues found during the preceding review are fixed in `16a7c83`. T
 the approved App-surface tokens and typography, and the agent brief now describes the real invited-
 editor email-code flow without inventing a magic-link alternative. I found no remaining critical,
 major or minor issue.
+
+The final merge reconciles this branch with the independently reviewed, CI-green and deployed s60
+mainline. It changes no s59 product, test, research, plan or design byte. The only conflict was the
+append-only story ledger; the resolution preserves the s59 block from the reviewed branch and the
+s60 block from main verbatim.
 
 ## Resolved review findings
 
@@ -91,25 +96,37 @@ deviation rather than product behavior drift.
 - The agent handoff retains bounded authority, token redaction, synthetic analytics probes,
   separate-visitor verification, restoration and rollback instructions.
 
+## Final main reconciliation
+
+- `HEAD^2` is exactly current `origin/main` (`fb7f41c`), and the final merge tree is pinned above.
+- Every s59 product file matches reviewed commit `c9a155f` byte-for-byte.
+- The s59 story block matches `c9a155f` verbatim; the adjacent s60 story block matches
+  `origin/main` verbatim. No criterion from either story was dropped or rewritten.
+- `git diff origin/main...HEAD` remains the same 25-file s59 surface. Main's s60 route/helper,
+  tests and docs do not reappear as PR56 changes.
+
 ## Independent verification
 
 Fresh reviewer checks used Node 24.14.0:
 
-- Focused documentation, middleware and editor-code flow: **12 suites / 120 tests passed**.
+- Focused documentation, middleware and editor-code flow on the reconciled tree:
+  **12 suites / 120 tests passed**.
 - Changed-file ESLint: 0 errors. Full TypeScript and configured format checks passed.
 - Root and server production audits both exited 0 with zero vulnerabilities.
 - Next 16.3.8 production build passed and emitted both `/docs/install` and the Markdown endpoint.
 - Embed freshness passed unchanged at the fixed Node 24 ceilings: 45,880-byte bundle,
   33,120-byte widget and 13,141-byte transport. The widget SHA-256 remains identical to main:
   `6676bd5c5edce7f9f1cee18c79807e5e400e969fe13d7ca0828480547e7b61f9`.
-- The branch's normal final hooks also recorded the full 4,041-test and coverage gates green after
-  the review repair. Hosted final-SHA CI remains mandatory before merge.
+- The final reconciliation's normal precommit recorded **4,041 tests passed / 38 skipped**, with
+  lint, type-check and format green. Hosted final-SHA CI remains mandatory before merge.
 - `git diff --check` is clean. The generated `AGENTS.md` delta and pre-existing `.lavish/`
   directory were preserved and excluded from the story review.
 
 ### Mutation proof
 
-Mutations ran only in disposable archives of the pinned commit. The active worktree stayed clean.
+Mutations ran in disposable archives of the byte-identical s59 product source immediately before
+the final main-only reconciliation. The active worktree stayed clean, and the reconciliation proof
+above confirms neither guarded implementation changed.
 
 | Neutralized behavior | Result |
 | --- | --- |
