@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import {
   authorizeFirstPartySiteRequest,
@@ -386,11 +386,17 @@ export async function GET(
     // PostgREST 1,000-row cap on ordinary multi-page sites.
     const { data: contentElements, error } = await fetchPageScopedRows(
       (scope) => {
-        let query = supabase
-          .from("content_elements")
-          .select(
-            "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
-          )
+        const contentElementsTable = supabase.from("content_elements");
+        let query = (
+          pagePath === null
+            ? contentElementsTable.select(
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+              )
+            : contentElementsTable.select(
+                "id, site_id, element_id, selector, published_content, original_content, language, variant, page_path, metadata, published_at",
+                { count: "exact" },
+              )
+        )
           .eq("site_id", siteId)
           .eq("language", language)
           .eq("variant", variant);
@@ -449,9 +455,18 @@ export async function GET(
     // Not on the first-party branch: an owner opening their dashboard says
     // nothing about whether visitors' browsers are still running the script.
     if (isWidgetRequest) {
-      await bestEffortSiteWrite("liveness bump", siteId, () =>
-        recordSiteReport(supabase, siteId),
-      );
+      // This update is operational bookkeeping, not part of the content the
+      // visitor asked for. It used to add a complete Supabase write round trip
+      // after the published rows were already available, extending the visible
+      // authored-copy window on every customer page. `after()` keeps the write
+      // tied to this request's lifetime while allowing the response to commit
+      // first. Failure stays best-effort and log-visible; there is no response
+      // left to corrupt, which is exactly the boundary documented above.
+      after(async () => {
+        await bestEffortSiteWrite("liveness bump", siteId, () =>
+          recordSiteReport(supabase, siteId),
+        );
+      });
     }
 
     return withCors(NextResponse.json(transformedContent), allowedOrigin);
