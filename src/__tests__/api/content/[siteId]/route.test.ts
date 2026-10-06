@@ -62,7 +62,14 @@ const mockCacheRead = publishedContentCache.read as jest.MockedFunction<
 const mockCacheWrite = publishedContentCache.write as jest.MockedFunction<
   typeof publishedContentCache.write
 >;
-const mockAfter = after as jest.Mock;
+const mockAfter = after as jest.MockedFunction<typeof after>;
+
+async function runAfterTask(
+  task: Parameters<typeof after>[0] | undefined,
+): Promise<void> {
+  if (!task) throw new Error("Expected deferred work to be scheduled");
+  await (typeof task === "function" ? task() : task);
+}
 
 type MockServiceClient = {
   from: jest.Mock;
@@ -202,6 +209,56 @@ describe("/api/content/[siteId]", () => {
       );
     });
 
+    it("requests an exact count for the public hydration pagination", async () => {
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+        count: mockContentElements.length,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123?page_path=%2F", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.select).toHaveBeenCalledWith(
+        expect.stringContaining("published_content"),
+        { count: "exact" },
+      );
+    });
+
+    it("keeps legacy all-site hydration on unknown-count pagination", async () => {
+      mockServiceClient.range.mockResolvedValueOnce({
+        data: mockContentElements,
+        error: null,
+      });
+
+      const response = await GET(
+        new NextRequest("http://localhost/api/content/site-123", {
+          headers: {
+            Authorization: "Bearer token",
+            Origin: "https://example.com",
+          },
+        }),
+        { params: Promise.resolve({ siteId: "site-123" }) },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockServiceClient.select).not.toHaveBeenCalledWith(
+        expect.stringContaining("published_content"),
+        { count: "exact" },
+      );
+      // Without an authoritative count the helper must retain its original
+      // terminal empty-page request, even when the first page is short.
+      expect(mockServiceClient.range).toHaveBeenCalledTimes(2);
+    });
+
     it("should return empty array when no content found", async () => {
       mockServiceClient.range.mockResolvedValueOnce({
         data: null,
@@ -271,6 +328,8 @@ describe("/api/content/[siteId]", () => {
       expect(response.status).toBe(401);
       expect(data.error).toBe("Missing site token");
       expect(data.code).toBe("site_token_missing");
+      expect(mockAfter).not.toHaveBeenCalled();
+      expect(mockServiceClient.update).not.toHaveBeenCalled();
     });
 
     it("does not reflect an untyped authorization exception", async () => {
@@ -285,6 +344,8 @@ describe("/api/content/[siteId]", () => {
 
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: "Unauthorized" });
+      expect(mockAfter).not.toHaveBeenCalled();
+      expect(mockServiceClient.update).not.toHaveBeenCalled();
     });
 
     it("should authorize a first-party dashboard session without a token or Origin, and skip the widget path entirely", async () => {
@@ -395,7 +456,18 @@ describe("/api/content/[siteId]", () => {
         expect(mockCacheRead).toHaveBeenCalledWith(cacheIdentity);
         expect(mockServiceClient.range).not.toHaveBeenCalled();
         expect(mockCacheWrite).not.toHaveBeenCalled();
-        expect(mockAfter).not.toHaveBeenCalled();
+        // A cache hit is still a real widget page view, but s60's response
+        // boundary applies to this early return too. The advisory write stays
+        // tied to the request through Next `after()` without delaying cached
+        // content delivery.
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+
+        const deferredLiveness = mockAfter.mock.calls[0]?.[0];
+        await runAfterTask(deferredLiveness);
+        expect(mockServiceClient.update).toHaveBeenCalledWith({
+          last_reported_at: expect.any(String),
+        });
         expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
           "https://example.com",
         );
@@ -465,11 +537,21 @@ describe("/api/content/[siteId]", () => {
         expect(response.status).toBe(200);
         expect(body).toEqual(cachedRows);
         expect(mockCacheWrite).not.toHaveBeenCalled();
-        expect(mockAfter).toHaveBeenCalledTimes(1);
-        const deferredFill = mockAfter.mock.calls[0][0] as () => Promise<void>;
-        await deferredFill();
+        expect(mockAfter).toHaveBeenCalledTimes(2);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+
+        const deferredFill = mockAfter.mock.calls[0]?.[0];
+        const deferredLiveness = mockAfter.mock.calls[1]?.[0];
+        expect(deferredFill).not.toBe(deferredLiveness);
+        await runAfterTask(deferredFill);
         expect(mockReadPublicContentRevision).toHaveBeenCalledWith(siteId);
         expect(mockCacheWrite).toHaveBeenCalledWith(cacheIdentity, cachedRows);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+
+        await runAfterTask(deferredLiveness);
+        expect(mockServiceClient.update).toHaveBeenCalledWith({
+          last_reported_at: expect.any(String),
+        });
       });
 
       it("does not cache a delayed fill after the revision changes", async () => {
@@ -548,10 +630,10 @@ describe("/api/content/[siteId]", () => {
         });
       };
 
-      it("records a report when the widget's own token authorized the read", async () => {
+      it("records a report after the widget's successful content response", async () => {
         queueContentQuery();
 
-        await GET(
+        const response = await GET(
           new NextRequest("http://localhost/api/content/site-123", {
             headers: {
               Authorization: "Bearer token",
@@ -561,9 +643,67 @@ describe("/api/content/[siteId]", () => {
           { params: Promise.resolve({ siteId: "site-123" }) },
         );
 
+        expect(response.status).toBe(200);
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
+
+        const deferredWrite = mockAfter.mock.calls[0]?.[0];
+        expect(deferredWrite).toEqual(expect.any(Function));
+        await runAfterTask(deferredWrite);
+
         expect(mockServiceClient.update).toHaveBeenCalledWith({
           last_reported_at: expect.any(String),
         });
+      });
+
+      it("returns published content while the deferred liveness write is still pending", async () => {
+        queueContentQuery();
+
+        let releaseWrite!: (value: { error: null }) => void;
+        const pendingWrite = new Promise<{ error: null }>((resolve) => {
+          releaseWrite = resolve;
+        });
+        const finishUpdate = jest.fn(() => pendingWrite);
+        mockServiceClient.update.mockReturnValueOnce({
+          eq: finishUpdate,
+        });
+
+        let deferredWork: Promise<void> | null = null;
+        mockAfter.mockImplementationOnce((task) => {
+          deferredWork = runAfterTask(task);
+        });
+
+        const responsePromise = GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+        let responseSettled = false;
+        void responsePromise.then(() => {
+          responseSettled = true;
+        });
+        // Every dependency before the liveness write is an already-resolved
+        // test double. Let that microtask queue drain once; a handler awaiting
+        // the held write remains unsettled, while a deferred handler is done.
+        await new Promise((resolve) => setImmediate(resolve));
+        const responseSettledBeforeRelease = responseSettled;
+
+        // Always release the held write so a red test leaves no pending promise.
+        releaseWrite({ error: null });
+        const eventualResponse = await responsePromise;
+        if (deferredWork) await deferredWork;
+
+        expect(responseSettledBeforeRelease).toBe(true);
+        expect(eventualResponse.status).toBe(200);
+        expect(await eventualResponse.json()).toEqual(mockContentElements);
+        expect(
+          eventualResponse.headers.get("Access-Control-Allow-Origin"),
+        ).toBe("https://example.com");
+        expect(finishUpdate).toHaveBeenCalledWith("id", "site-123");
       });
 
       it("records nothing when the dashboard's own session authorized the read", async () => {
@@ -581,13 +721,17 @@ describe("/api/content/[siteId]", () => {
           params: Promise.resolve({ siteId: "site-123" }),
         });
 
+        expect(mockAfter).not.toHaveBeenCalled();
         expect(mockServiceClient.update).not.toHaveBeenCalled();
       });
 
-      it("serves the content even when the liveness write fails", async () => {
+      it("keeps the successful response unchanged when deferred liveness fails", async () => {
         // `stale` is advisory. Nothing about it may stand between a visitor and
         // the copy on the page they asked for.
         queueContentQuery();
+        const errorLog = jest
+          .spyOn(console, "error")
+          .mockImplementation(() => undefined);
         mockServiceClient.update.mockImplementation(() => {
           throw new Error("sites table unavailable");
         });
@@ -603,8 +747,43 @@ describe("/api/content/[siteId]", () => {
         );
         const data = await response.json();
 
+        expect(mockAfter).toHaveBeenCalledTimes(1);
+        const deferredWrite = mockAfter.mock.calls[0]?.[0];
+        expect(deferredWrite).toEqual(expect.any(Function));
+        await runAfterTask(deferredWrite);
+
         expect(response.status).toBe(200);
         expect(data).toEqual(mockContentElements);
+        expect(response.headers.get("Access-Control-Allow-Origin")).toBe(
+          "https://example.com",
+        );
+        expect(errorLog).toHaveBeenCalledWith(
+          "[content] liveness bump failed for site site-123:",
+          expect.any(Error),
+        );
+        errorLog.mockRestore();
+      });
+
+      it("schedules no liveness write when the content read fails", async () => {
+        mockServiceClient.range.mockResolvedValueOnce({
+          data: null,
+          error: { message: "content unavailable" },
+        });
+        jest.spyOn(console, "error").mockImplementation(() => undefined);
+
+        const response = await GET(
+          new NextRequest("http://localhost/api/content/site-123", {
+            headers: {
+              Authorization: "Bearer token",
+              Origin: "https://example.com",
+            },
+          }),
+          { params: Promise.resolve({ siteId: "site-123" }) },
+        );
+
+        expect(response.status).toBe(500);
+        expect(mockAfter).not.toHaveBeenCalled();
+        expect(mockServiceClient.update).not.toHaveBeenCalled();
       });
     });
   });

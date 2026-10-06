@@ -3,6 +3,7 @@ const CONTENT_ELEMENT_PAGE_SIZE = 1000;
 type QueryResult<T> = {
   data: T[] | null;
   error: { message?: string } | null;
+  count?: number | null;
 };
 
 type QueryScope =
@@ -15,9 +16,17 @@ type QueryBuilder<T> = PromiseLike<QueryResult<T>> & {
   range: (from: number, to: number) => QueryBuilder<T>;
 };
 
+function isReliableExactCount(
+  count: number | null | undefined,
+): count is number {
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0;
+}
+
 async function collectPages<T>(buildQuery: () => QueryBuilder<T>) {
   const rows: T[] = [];
   let offset = 0;
+  let exactCountTarget: number | null = null;
+  let canUseExactCount = true;
 
   for (;;) {
     let query = buildQuery();
@@ -28,12 +37,35 @@ async function collectPages<T>(buildQuery: () => QueryBuilder<T>) {
     const result = await query;
     if (result.error) return { data: null, error: result.error };
 
+    // s60: the public read asks PostgREST for an exact count so the common
+    // 223-row page does not wait for a second, known-empty request. Refresh the
+    // target from every valid response: an insert before the current offset can
+    // repeat a boundary row and move the old tail onto one more page. Freezing
+    // the first count would then stop before that tail. Conversely, once any
+    // response omits or corrupts the count, keep this scope on the proven
+    // empty-page fallback; a later count cannot repair the blind page.
+    if (canUseExactCount) {
+      if (isReliableExactCount(result.count)) {
+        exactCountTarget = result.count;
+      } else {
+        canUseExactCount = false;
+        exactCountTarget = null;
+      }
+    }
+
     const page = result.data ?? [];
     if (page.length === 0) {
       return { data: rows, error: null };
     }
 
     rows.push(...page);
+    // Never slice to the latest count. Concurrent inserts or deletes can shift
+    // offset pages so they repeat or omit rows; every row the database did
+    // return must survive even when the cumulative length passes that count.
+    if (exactCountTarget !== null && rows.length >= exactCountTarget) {
+      return { data: rows, error: null };
+    }
+
     // PostgREST may enforce a server max_rows smaller than the requested
     // range. Advancing by the request size skips rows after any capped page;
     // stopping on a short page truncates the result. Only an empty response is

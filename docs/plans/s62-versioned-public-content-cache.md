@@ -77,6 +77,16 @@ prerequisite to execution; accepted safety repairs are recorded before the imple
      disposable PostgreSQL proof, without weakening audit or browser-count gates. Obtain an
      independent fresh review; then prepare a draft PR with security/release evidence gaps visible.
 
+## Mainline integration checkpoint
+
+After s60 lands on `main`, synchronize that exact mainline commit with a merge commit. Preserve
+its exact-count page-scoped reads and legacy unknown-count fallback. Extend its deferred liveness
+boundary across s62's warm-cache early return, and keep cache fill plus liveness as separate
+post-response tasks on a miss. Prove both combined paths in the route suite. Do not bring s59,
+s61, the customer-site adapter or any other open feature into this branch. This checkpoint does
+not complete task 7: the final combined source still requires all gates and a new independent
+review.
+
 ## Release conditions
 
 No live migration, merge, promotion or real customer copy mutation in this story execution.

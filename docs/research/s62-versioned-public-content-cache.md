@@ -158,3 +158,24 @@ the client handshake, withholds more than 16 mixed reads and writes, verifies on
 the peer while every caller settles, releases replies in order, and proves a later valid
 read succeeds over the same connection. The rate-limiter Redis client and its fail-closed
 budgets remain unchanged.
+
+## Mainline s60 integration, 2026-10-06
+
+The cache branch merged `origin/main` at `fb7f41c`, after s60 passed its final review and hosted
+checks. This is a mainline synchronization, not a stacked feature: s59, s61 and the customer-site
+adapter remain outside this branch.
+
+The combined route keeps s60's exact-count optimization only on normalized page-scoped database
+reads. Legacy reads with no `page_path` retain unknown-count empty-page termination, and a warm
+cache hit bypasses pagination entirely. Both response paths preserve advisory liveness without
+putting its write round trip back in front of the visitor:
+
+- a warm cache hit schedules `recordSiteReport` through its own Next `after()` callback before
+  returning the cached public projection; and
+- a cache miss schedules the stable-revision cache fill and liveness as two separate `after()`
+  callbacks. A delayed or skipped fill cannot suppress the liveness task, and liveness cannot
+  delay or write into the cached envelope.
+
+The operator's current median of 826 ms was measured against the old deployed backend. It is a
+pre-deployment baseline, not evidence for this combined source and not a reason to weaken the
+unchanged 200 ms browser acceptance gate.

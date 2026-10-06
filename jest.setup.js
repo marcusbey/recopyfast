@@ -57,6 +57,9 @@ if (typeof global.URLSearchParams === 'undefined') {
 
 // Mock Next.js server components
 jest.mock('next/server', () => ({
+  // Post-response work. Tests that care about the deferred callback replace this
+  // no-op with a capturing implementation and run the callback deliberately.
+  after: jest.fn(),
   NextRequest: class MockNextRequest {
     constructor(url, init) {
       this.url = url

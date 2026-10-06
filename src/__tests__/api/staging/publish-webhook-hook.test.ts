@@ -21,10 +21,9 @@
 
 import { NextRequest, after } from "next/server";
 
-// The repo's global next/server mock (jest.setup.js) predates `after` and does
-// not export it. Same shape as the request-code suite: re-declare the mock and
-// add `after` as a spy, so a test can hold the deferred callback and prove both
-// that it was deferred and what it does when run.
+// This suite needs more than the global no-op `after`. Same shape as the
+// request-code suite: re-declare the mock and capture deferred callbacks so a
+// test can prove both that work was deferred and what it does when run.
 // The fixture's owner holds a plan (s51). The owner-plan gate itself is
 // proved in src/__tests__/api/owner-plan-gate.test.ts.
 jest.mock("@/lib/billing/owner-can-edit", () => ({
