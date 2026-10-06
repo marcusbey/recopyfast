@@ -318,7 +318,7 @@ If any input cannot be established from the user's request, the source or the cu
 - Every in-scope page initializes correctly on direct load, internal navigation, reload and Back/return. For a one-page installation, verify the widget does not persist onto an out-of-scope page.
 - For editor-entry pages, verify URL-collecting analytics cannot see the temporary credentials. Use synthetic values for automated leakage probes, never a real editor token.
 - If the user requested an invitation, send it with the requested permissions through the application's normal flow. Reuse an existing editor record and resend when appropriate. Distinguish request acceptance, provider delivery and recipient sign-in.
-- The recipient enters their own email sign-in code or magic link. Do not read their inbox codes, mint an administrative impersonation session, or mark authentication complete without evidence.
+- The recipient enters their own six-digit emailed sign-in code. Do not read their inbox code, mint an administrative impersonation session, or mark authentication complete without evidence.
 - With the user's authorization and authenticated session, change one agreed element, save a draft, publish, verify from a separate visitor session, then restore the original and verify the restoration. If authentication or publication is unavailable, mark those exact steps untested.
 
 ## Report back

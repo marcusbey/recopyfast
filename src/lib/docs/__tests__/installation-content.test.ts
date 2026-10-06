@@ -91,6 +91,14 @@ describe("installation documentation content", () => {
     expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain("critical hero copy");
   });
 
+  it("documents the invited-editor email-code flow without promising a magic link", () => {
+    expect(INSTALLATION_GUIDE.invite.steps.join(" ")).toMatch(/emailed code/i);
+    expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain(
+      "six-digit emailed sign-in code",
+    );
+    expect(AGENT_INSTALLATION_INSTRUCTIONS).not.toMatch(/\bmagic link\b/i);
+  });
+
   it("publishes one stable Markdown download path and no live credentials", () => {
     expect(AGENT_INSTRUCTIONS_DOWNLOAD_PATH).toBe(
       "/docs/install/agent-instructions.md",

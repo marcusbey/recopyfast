@@ -50,6 +50,21 @@ The user can obtain the correct snippet from Sites, understand exactly where it
 belongs, choose page scope, hand an agent the downloadable brief, and distinguish
 installation detection from a completed invited-editor publishing test.
 
+## Review repair evidence
+
+- A regression test first failed because the canonical agent brief advertised a
+  magic-link alternative. The brief now requires the actual six-digit emailed
+  code, and the documentation plus editor request/submit-code regression set
+  passes 40/40 tests.
+- The public page now uses app semantic tokens, Instrument Sans at weight 600 and
+  JetBrains Mono for code. Production-browser checks at 1440×1000 and 390×844
+  show no horizontal page overflow. Screenshots are under
+  `output/playwright/s59-installation-guide-review/`.
+- Fresh Node 24 gates pass: lint has zero errors and 35 inherited warnings;
+  format, both TypeScript checks and the production build pass; full Jest and
+  coverage each pass 314 suites / 4,041 tests with the existing 2 suites /
+  38 tests skipped. Coverage is 63.82% statements and 64.44% lines.
+
 ## Validation checkpoint
 
 The repository requires `validated: yes` to be set only after human plan approval.

@@ -46,6 +46,21 @@ The current widget observes the document and retains state; its exposed destroy
 method does not completely remove all listeners/timers. Do not advertise generic
 SPA teardown/reinit or seamless route changes in documentation.
 
+## Review repair facts
+
+Fresh review on 2026-10-06 found two implementation drifts from the verified
+contracts above:
+
+- `/docs/install` is an informational app surface. The design system reserves
+  `sky-*`, `slate-*`, `font-display` and weight 700 for Marketing, while this
+  screen's approved design calls for semantic app tokens, Instrument Sans and
+  JetBrains Mono for machine text.
+- Invited editors authenticate at `/edit` through
+  `POST /api/editor/request-code` and `POST /api/editor/submit-code`.
+  `EditorSignIn.tsx` fixes `CODE_LENGTH` at six and labels the input `6-digit code`.
+  Owner login supports magic links elsewhere, but the invited-editor flow does
+  not, so the installation brief must describe only the emailed-code path.
+
 ## Constraints and unknowns
 
 The global historical story-breakdown review still says `Stories ready: no`.

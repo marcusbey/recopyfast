@@ -80,14 +80,17 @@ export default function InstallGuidePage() {
   const guide = INSTALLATION_GUIDE;
 
   return (
-    <div data-theme="light" className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="border-b border-sky-100 bg-white">
+    <div
+      data-theme="light"
+      className="min-h-screen bg-background font-sans text-foreground"
+    >
+      <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
           <Link
             href="/"
-            className="inline-flex items-center gap-2.5 rounded-md font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+            className="inline-flex items-center gap-2.5 rounded-md font-semibold tracking-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-600 text-white">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Zap className="h-5 w-5" aria-hidden="true" />
             </span>
             <span className="text-xl">ReCopyFast</span>
@@ -99,25 +102,25 @@ export default function InstallGuidePage() {
       </header>
 
       <main>
-        <section className="border-b border-sky-100 bg-white px-6 py-14 sm:py-20">
+        <section className="border-b border-border bg-card px-6 py-14 sm:py-20">
           <div className="mx-auto max-w-4xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-sky-700">
+            <p className="text-sm font-semibold uppercase tracking-[0.16em] text-primary">
               Installation guide
             </p>
-            <h1 className="mt-4 font-display text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+            <h1 className="mt-4 font-sans text-4xl font-semibold leading-[1.17] tracking-[-0.025em] sm:text-[2.625rem]">
               {guide.title}
             </h1>
-            <p className="mt-6 max-w-3xl text-lg leading-relaxed text-slate-600 sm:text-xl">
+            <p className="mt-6 max-w-3xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
               {guide.introduction}
             </p>
-            <p className="mt-3 max-w-3xl text-base leading-relaxed text-slate-600">
+            <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground">
               {guide.requirement}
             </p>
           </div>
         </section>
 
         <div className="mx-auto max-w-6xl px-6 py-10 sm:py-14">
-          <details className="mb-8 rounded-xl border border-sky-100 bg-white p-5 shadow-sm lg:hidden">
+          <details className="mb-8 rounded-xl border border-border bg-card p-5 shadow-sm lg:hidden">
             <summary className="cursor-pointer font-semibold">
               On this page
             </summary>
@@ -130,7 +133,7 @@ export default function InstallGuidePage() {
             <aside className="hidden lg:block">
               <nav
                 aria-label="Installation guide contents"
-                className="sticky top-6 rounded-xl border border-sky-100 bg-white p-5 shadow-sm"
+                className="sticky top-6 rounded-xl border border-border bg-card p-5 shadow-sm"
               >
                 <p className="mb-4 font-semibold">On this page</p>
                 <ContentsLinks />
@@ -146,7 +149,7 @@ export default function InstallGuidePage() {
                     </h2>
                   </CardHeader>
                   <CardContent className="space-y-6">
-                    <ol className="list-decimal space-y-3 pl-5 text-slate-700">
+                    <ol className="list-decimal space-y-3 pl-5 text-foreground">
                       {guide.copySnippet.steps.map((step) => (
                         <li key={step} className="pl-1 leading-relaxed">
                           {step}
@@ -166,10 +169,10 @@ export default function InstallGuidePage() {
                       <h3 className={SUBSECTION_HEADING_CLASS_NAME}>
                         What the generated snippet looks like
                       </h3>
-                      <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                         {guide.copySnippet.exampleLead}
                       </p>
-                      <pre className="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-sm leading-relaxed text-slate-100">
+                      <pre className="mt-4 overflow-x-auto rounded-lg border border-border bg-surface-2 p-4 font-mono text-sm leading-relaxed text-foreground">
                         <code data-testid="installation-example">
                           {INSTALLATION_EXAMPLE.displaySnippet}
                         </code>
@@ -177,13 +180,13 @@ export default function InstallGuidePage() {
                     </div>
 
                     <div
-                      className="overflow-x-auto rounded-lg border border-slate-200"
+                      className="overflow-x-auto rounded-lg border border-border"
                       role="region"
                       aria-label="Snippet attributes"
                       tabIndex={0}
                     >
                       <table className="w-full min-w-[34rem] border-collapse text-left text-sm">
-                        <thead className="bg-sky-50">
+                        <thead className="bg-muted">
                           <tr>
                             <th className="px-4 py-3 font-semibold" scope="col">
                               Part
@@ -197,14 +200,14 @@ export default function InstallGuidePage() {
                           {guide.copySnippet.snippetParts.map((part) => (
                             <tr
                               key={part.attribute}
-                              className="border-t border-sky-100"
+                              className="border-t border-border"
                             >
                               <th className="px-4 py-3 align-top" scope="row">
                                 <code className="font-mono text-xs">
                                   {part.attribute}
                                 </code>
                               </th>
-                              <td className="px-4 py-3 leading-relaxed text-slate-600">
+                              <td className="px-4 py-3 leading-relaxed text-muted-foreground">
                                 {part.purpose}
                               </td>
                             </tr>
@@ -232,7 +235,7 @@ export default function InstallGuidePage() {
                       {guide.pageScope.title}
                     </h2>
                   </CardHeader>
-                  <CardContent className="space-y-5 text-slate-700">
+                  <CardContent className="space-y-5 text-foreground">
                     <ul className="list-disc space-y-3 pl-5">
                       {guide.pageScope.choices.map((choice) => (
                         <li key={choice} className="pl-1 leading-relaxed">
@@ -266,13 +269,13 @@ export default function InstallGuidePage() {
                         {platform.paragraphs.map((paragraph) => (
                           <p
                             key={paragraph}
-                            className="leading-relaxed text-slate-700"
+                            className="leading-relaxed text-foreground"
                           >
                             {paragraph}
                           </p>
                         ))}
                         {platform.bullets && (
-                          <ul className="list-disc space-y-3 pl-5 text-slate-700">
+                          <ul className="list-disc space-y-3 pl-5 text-foreground">
                             {platform.bullets.map((bullet) => (
                               <li key={bullet} className="pl-1 leading-relaxed">
                                 {bullet}
@@ -314,7 +317,7 @@ export default function InstallGuidePage() {
                     </h2>
                   </CardHeader>
                   <CardContent className="space-y-5">
-                    <ol className="list-decimal space-y-3 pl-5 text-slate-700">
+                    <ol className="list-decimal space-y-3 pl-5 text-foreground">
                       {guide.verify.steps.map((step) => (
                         <li key={step} className="pl-1 leading-relaxed">
                           {step}
@@ -341,14 +344,14 @@ export default function InstallGuidePage() {
                     </h2>
                   </CardHeader>
                   <CardContent className="space-y-5">
-                    <ol className="list-decimal space-y-3 pl-5 text-slate-700">
+                    <ol className="list-decimal space-y-3 pl-5 text-foreground">
                       {guide.invite.steps.map((step) => (
                         <li key={step} className="pl-1 leading-relaxed">
                           {step}
                         </li>
                       ))}
                     </ol>
-                    <p className="leading-relaxed text-slate-700">
+                    <p className="leading-relaxed text-foreground">
                       {guide.invite.planGuidance}
                     </p>
                   </CardContent>
@@ -364,13 +367,13 @@ export default function InstallGuidePage() {
                   </CardHeader>
                   <CardContent>
                     <div
-                      className="overflow-x-auto rounded-lg border border-slate-200"
+                      className="overflow-x-auto rounded-lg border border-border"
                       role="region"
                       aria-label="Installation troubleshooting"
                       tabIndex={0}
                     >
                       <table className="w-full min-w-[38rem] border-collapse text-left text-sm">
-                        <thead className="bg-sky-50">
+                        <thead className="bg-muted">
                           <tr>
                             <th className="px-4 py-3 font-semibold" scope="col">
                               What you see
@@ -384,7 +387,7 @@ export default function InstallGuidePage() {
                           {guide.troubleshooting.rows.map((row) => (
                             <tr
                               key={row.symptom}
-                              className="border-t border-sky-100"
+                              className="border-t border-border"
                             >
                               <th
                                 className="px-4 py-3 align-top font-semibold"
@@ -392,7 +395,7 @@ export default function InstallGuidePage() {
                               >
                                 {row.symptom}
                               </th>
-                              <td className="px-4 py-3 leading-relaxed text-slate-600">
+                              <td className="px-4 py-3 leading-relaxed text-muted-foreground">
                                 {row.checks}
                               </td>
                             </tr>
@@ -412,7 +415,7 @@ export default function InstallGuidePage() {
                     </h2>
                   </CardHeader>
                   <CardContent>
-                    <p className="leading-relaxed text-slate-700">
+                    <p className="leading-relaxed text-foreground">
                       {guide.rollback.guidance}
                     </p>
                   </CardContent>
@@ -422,7 +425,7 @@ export default function InstallGuidePage() {
               <section id="agent-brief" className="scroll-mt-6">
                 <Card variant="elevated">
                   <CardHeader>
-                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-sky-700">
+                    <p className="text-sm font-semibold uppercase tracking-[0.14em] text-primary">
                       Agent handoff
                     </p>
                     <h2 className={SECTION_HEADING_CLASS_NAME}>
@@ -430,7 +433,7 @@ export default function InstallGuidePage() {
                     </h2>
                   </CardHeader>
                   <CardContent className="space-y-5">
-                    <p className="leading-relaxed text-slate-700">
+                    <p className="leading-relaxed text-foreground">
                       Give this brief to an agent that can inspect and publish
                       the website. Replace the bracketed inputs first. The exact
                       same Markdown is available to copy or download.
@@ -448,7 +451,7 @@ export default function InstallGuidePage() {
                     </div>
                     <pre
                       data-testid="agent-installation-brief"
-                      className="max-h-[36rem] overflow-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-100 sm:p-5"
+                      className="max-h-[36rem] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface-2 p-4 font-mono text-xs leading-relaxed text-foreground sm:p-5"
                       tabIndex={0}
                     >
                       {AGENT_INSTALLATION_INSTRUCTIONS}
@@ -457,11 +460,11 @@ export default function InstallGuidePage() {
                 </Card>
               </section>
 
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-muted-foreground">
                 Need help with a platform-specific blocker? Email{" "}
                 <a
                   href="mailto:support@recopyfa.st"
-                  className="inline-flex items-center gap-1 font-semibold text-sky-700 underline-offset-4 hover:underline"
+                  className="inline-flex items-center gap-1 font-semibold text-primary underline-offset-4 hover:underline"
                 >
                   support@recopyfa.st
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
