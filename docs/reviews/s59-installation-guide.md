@@ -1,144 +1,139 @@
 # Review — Story s59-installation-guide
 
-> Fresh-context anti-hallucination review.
-> Diff reviewed: `git diff main...feature/s59-installation-guide`, from base
-> `9aa492d` through committed source SHA `9eefdf3` (implementation `bea9203`,
-> review-fix test commit `9eefdf3`), plus the pending one-class follow-up delta
-> that adds `font-mono` to the snippet example. Root owns the follow-up commit,
-> so this report does not invent a SHA for it.
-> Judged against the validated plan, research, screen and copy designs,
-> `AGENTS.md`, the accepted installation/authentication ADRs, and the actual APIs
-> and UI labels named by the guide.
+> Fresh-context review of `git diff origin/main...feature/s59-installation-guide`.
+> Pinned commit: `8bce3944c2c126730c9651b80503f62b0c3cf69d`.
+> Pinned tree: `c7d6a354dec801475ac5fd4478a3899c372b165e`.
+> Base: `origin/main` at `4aed967e93cb8f3c09f12ccfaa0545926e3bb30a`.
+> Judged against the validated plan, research, screen/copy designs, `AGENTS.md`, the
+> accepted installation/authentication decisions and the actual APIs named by the guide.
 
-## Summary
+## Verdict
 
-The story implements the requested public guide and agent handoff without
-changing the embed, authentication, editing, billing, database, or dependency
-surfaces. The generated example comes from `buildEmbedScript`; the page, copy
-control, visible brief, and Markdown response share one runtime source; the two
-public middleware exceptions remain exact; and both requested entry links are
-present.
+The public installation guide, dashboard/footer entry points and downloadable agent handoff are
+implemented coherently at the pinned source. Runtime content comes from one typed module, the
+placeholder snippet comes from the real builder, public documentation paths retain security headers
+without paying for a session lookup, and the shared Next.js recipe states the current hydration,
+navigation and analytics limits.
 
-The first review mutation exposed that the middleware test did not protect the
-exact-path boundary. The follow-up test-only commit adds five negative near-match
-cases. Repeating the same broadened-prefix mutation on the final SHA now makes
-all five cases fail. The one minor presentation drift found on `9eefdf3` was
-then corrected by the scoped `font-mono` follow-up. No open finding remains.
+The two major issues found during the preceding review are fixed in `16a7c83`. The page now follows
+the approved App-surface tokens and typography, and the agent brief now describes the real invited-
+editor email-code flow without inventing a magic-link alternative. I found no remaining critical,
+major or minor issue.
+
+## Resolved review findings
+
+### App-surface design drift
+
+Initial severity: major. Resolved by `16a7c83`.
+
+`/docs/install` previously used the Marketing-only `sky-*` / `slate-*` palette,
+`font-display` and weight 700 despite its approved design specifying semantic App tokens,
+Instrument Sans and JetBrains Mono. The final page uses `background`, `card`, `surface-2`,
+`foreground`, `muted-foreground`, `border`, `primary` and `ring`; headings use `font-sans`
+with weight 600, while snippets and the agent brief use `font-mono`. No `sky-*`, `slate-*`,
+`font-display` or `font-bold` class remains in the page source.
+
+The final production-browser evidence at 1440×1000 and 390×844 shows the expected deep-teal App
+surface, readable hierarchy, desktop contents rail, mobile disclosure and no horizontal page
+overflow. I inspected both final viewport captures during this review.
+
+### Invented invited-editor magic-link path
+
+Initial severity: major. Resolved by `16a7c83`.
+
+The downloadable brief previously told an invited editor to use an emailed code “or magic link.”
+The actual `/edit` flow calls `/api/editor/request-code` and `/api/editor/submit-code` and exposes a
+six-digit code field; owner authentication is the separate surface that supports magic links. The
+runtime brief now requires the recipient's own “six-digit emailed sign-in code,” and its regression
+explicitly refuses the phrase “magic link.” Historical design-copy files remain specifications of
+the pre-repair draft; the plan deliberately makes the typed runtime module canonical for the page,
+copy action and Markdown response.
+
+## Plan and scope compliance
+
+- [x] The approved guide and agent brief live in `src/lib/docs/installation-content.ts`. The
+  placeholder example is produced through the real `buildEmbedScript` signature with explicit
+  public origins and no live credential.
+- [x] `/docs/install` is server-rendered. Only the copy control is client-side. Clipboard success
+  follows a resolved `writeText`; denial or an unavailable API displays and focuses the complete
+  selectable fallback.
+- [x] `/docs/install/agent-instructions.md` returns the exact same runtime string displayed and
+  copied on the page, with Markdown content type and attachment filename.
+- [x] Footer and `SiteInstallationCard` link the public guide. The card exposes it while a site is
+  awaiting installation, live or stale.
+- [x] The canonical Next.js recipe no longer claims a root-layout script completes SPA support.
+  It requires hydration, direct-load/navigation/Back/reload checks and protection from analytics
+  reading editor-entry query credentials.
+- [x] The guide truthfully documents the legacy supported runtime: saved copy arrives after widget
+  startup and a network read, so this documentation story promises neither SSR nor zero-flash
+  rendering. The later stable-startup story remains separate.
+- [x] Public middleware exemptions are exact for the guide and Markdown endpoint. Near-match and
+  child paths retain the ordinary session-aware path; both public paths retain the normal security
+  headers.
+- [x] No dependency, manifest, lock, embed source/artifact, migration, billing, editor, content
+  route or provider configuration changes in the story diff.
+- [ ] Merge, deployment and post-deploy URL/dashboard verification remain task 6.
+
+The branch also carries its approved PRD/story framing changes although repository lifecycle rules
+normally land framing documents on main first. This remains a recorded nonblocking process
+deviation rather than product behavior drift.
+
+## API and content checks
+
+- Every changed import and component/API exists with the used shape: Next `Metadata` and `Link`,
+  installed Lucide icons, current `Button` / `Card` / `Alert` variants and
+  `buildEmbedScript(BuildEmbedScriptParams)`.
+- Registered hosts preserve `www` and subdomain distinctions; snippet regeneration rotates the
+  signing key; public content is page-scoped; Save writes staging content and Publish promotes it.
+- An existing active editor uses the existing resend action rather than a second enrollment.
+  Installation detection, invitation delivery, recipient authentication and edit/publish proof
+  remain separately reported outcomes.
+- The agent handoff retains bounded authority, token redaction, synthetic analytics probes,
+  separate-visitor verification, restoration and rollback instructions.
+
+## Independent verification
+
+Fresh reviewer checks used Node 24.14.0:
+
+- Focused documentation, middleware and editor-code flow: **12 suites / 120 tests passed**.
+- Changed-file ESLint: 0 errors. Full TypeScript and configured format checks passed.
+- Root and server production audits both exited 0 with zero vulnerabilities.
+- Next 16.3.8 production build passed and emitted both `/docs/install` and the Markdown endpoint.
+- Embed freshness passed unchanged at the fixed Node 24 ceilings: 45,880-byte bundle,
+  33,120-byte widget and 13,141-byte transport. The widget SHA-256 remains identical to main:
+  `6676bd5c5edce7f9f1cee18c79807e5e400e969fe13d7ca0828480547e7b61f9`.
+- The branch's normal final hooks also recorded the full 4,041-test and coverage gates green after
+  the review repair. Hosted final-SHA CI remains mandatory before merge.
+- `git diff --check` is clean. The generated `AGENTS.md` delta and pre-existing `.lavish/`
+  directory were preserved and excluded from the story review.
+
+### Mutation proof
+
+Mutations ran only in disposable archives of the pinned commit. The active worktree stayed clean.
+
+| Neutralized behavior | Result |
+| --- | --- |
+| Restore the invented “email sign-in code or magic link” brief | **1 red / 6 green**: the editor-flow documentation regression failed |
+| Broaden exact docs exemptions to `pathname.startsWith("/docs/install")` | **5 red / 44 green**: every protected near-match bypass was detected |
 
 ## Findings
 
-No open findings.
+None.
 
-Resolved during review:
+## Not verified here
 
-- **minor — `src/app/docs/install/page.tsx:172` at `9eefdf3`.** The placeholder
-  snippet initially used the browser's default monospace face instead of the
-  JetBrains Mono token required by
-  `docs/designs/s59-installation-guide.md:22-24`. The pending follow-up delta
-  adds `font-mono` to the snippet `<pre>`. The reviewer inspected the exact
-  one-class diff, `git diff --check` is clean, ESLint reports 0 errors, and the
-  page suite passes 4/4.
-
-## Plan and design compliance
-
-- [x] The approved guide and agent brief live in
-  `src/lib/docs/installation-content.ts`. The example is built through the real
-  `buildEmbedScript` signature with explicit placeholder values and production
-  origins.
-- [x] `/docs/install` is server-rendered. Only the copy control is a client
-  component. Clipboard success follows a resolved `writeText`; denial and an
-  unavailable API show and focus a selectable fallback.
-- [x] `/docs/install/agent-instructions.md` returns the exact same 5,770-byte
-  Markdown string used by the copy control and visible `<pre>`. The final string
-  also byte-matches `docs/designs/s59-agent-installation-copy.md`.
-- [x] The footer and `SiteInstallationCard` link to the guide. The card exposes
-  the link in awaiting-install, live, and stale states.
-- [x] The shared Next.js recipe no longer claims a root-layout script completes
-  SPA integration. Hydration, route navigation, Back/reload, analytics URL
-  collection, credential query parameters, and the lack of a complete widget
-  teardown contract are stated in both user and agent guidance.
-- [x] The final copy truthfully states the first-paint limitation: published
-  content arrives after widget startup and a network read, so snippet
-  installation does not promise zero-flash rendering or SSR.
-- [x] The page structure matches the design: compact header, desktop contents
-  rail, mobile disclosure, generated snippet explanation, verification,
-  troubleshooting, rollback, and the agent brief. Heading hierarchy is H1 → H2
-  → H3.
-- [x] No package, lockfile, embed source/artifact, migration, billing, editor,
-  or content-route file changed. Task 6 (PR, manual merge, deployment proof) is
-  intentionally outside this review and remains pending.
-
-## API and content verification
-
-- [x] Every changed import and called API exists with the used shape:
-  `buildEmbedScript(BuildEmbedScriptParams)`, Next `Metadata` and `Link`, the
-  installed Lucide icons, and the existing `Button`, `Card`, and `Alert`
-  variants. The installed `next/script` type accepts
-  `strategy="afterInteractive"` as described by the guide.
-- [x] The operational copy matches source behavior:
-  registered hosts preserve `www` and subdomain distinctions; regeneration
-  rotates `sites.api_key`; computed element IDs and reads are page-scoped;
-  `/edit` uses a six-digit emailed-code flow; an existing active editor needs
-  PATCH/resend for another invitation email; Save writes staging content and
-  Publish promotes it; installation status is separate from edit/publish proof.
-- [x] The example is inert placeholder text on the guide. It contains no live
-  credential and preserves the optional WebSocket explanation.
-- [x] No accepted ADR is contradicted. In particular, the durable-token/key
-  rotation contract, exact origin pin, page-scoped content behavior, and
-  sessionStorage edit-link caveat remain intact.
-
-## Tests and neutralization
-
-- [x] **Reviewer full Jest on committed SHA `9eefdf3`:** with the repository's
-  documented CI app origin (`NEXT_PUBLIC_APP_URL=http://localhost:3000`), **314
-  suites passed, 2 skipped; 4,040 tests passed, 38 skipped; 0 failed**.
-- [x] A bare-shell run first produced one unrelated failure in
-  `src/__tests__/api/content/[siteId]/route.test.ts` because its first-party CORS
-  assertion explicitly falls back to `NEXT_PUBLIC_APP_URL`. The isolated suite
-  passed 38/38, and the full suite passed, once the documented placeholder was
-  supplied. No s59 file participates in that route.
-- [x] Final middleware suite: **49/49 passed**. `git diff --check` is clean.
-- [x] The implementation commit hook and final review-fix hook additionally
-  reported lint, type-check, format, build, and the full Jest suite green.
-- [x] **Pending font-only follow-up:** reviewer ESLint reports 0 errors and the
-  installation page suite passes **4/4**. A second full-suite run is not needed
-  to prove a single Tailwind font class with no logic, content, or API change.
-- [x] Mutations were made only in isolated archives of final SHA `9eefdf3`, then
-  trashed. The story worktree's tracked files remained byte-clean.
-
-| Neutralized behavior | Red tests |
-| --- | ---: |
-| Clipboard rejection/unavailability falsely sets `copied` | **2** |
-| Markdown response appends content absent from the canonical brief | **1** |
-| Exact docs paths broaden to `startsWith("/docs/install")` | **5** |
-
-## Limits and release evidence still required
-
-- The final HTTP Markdown response was checked at 5,770 bytes and matches the
-  final design copy. The earlier browser download was 5,420 bytes and predated
-  the added first-paint caveat, so it is deliberately excluded as final download
-  proof. After deployment, download the file again and compare it with the HTTP
-  response or canonical source.
-- Browser evidence before the final copy amendment showed 200 responses without
-  auth, no desktop/mobile overflow, an inert example, correct heading order,
-  keyboard section navigation, copy-success feedback, and keyboard access to the
-  download. Repeat the mobile/desktop and clipboard-denial gestures on the final
-  deployed artifact; the browser adapter could not read back the successful
-  clipboard payload, while the unit test does assert the exact `writeText`
-  argument.
-- No real customer site was installed and no live invitation, email delivery,
-  recipient sign-in, save, publish, visitor reload, or restoration was performed.
-  Those are appropriately outside this documentation-only story. The post-merge
-  check should open both public URLs without a session, follow both dashboard
-  entry links, then execute one authorized end-to-end installation journey.
-- The ordinary Jest run skips 38 environment-gated tests, including database
-  coverage. This story changes no schema or data-access path, so no real database
-  harness was warranted for the review.
-- `npm audit --omit=dev --audit-level=high` currently exits 1 with six known
-  advisories: one critical, two high, two moderate, and one low. No package or
-  lockfile changed in this story, so this is not an s59 finding, but the
-  repository's production-audit gate remains red and limits overall release
-  readiness until handled separately.
+- Hosted CI for the final pinned SHA remains a hard merge gate. This report does not turn a pending
+  or failed check green.
+- No merge, deployment, production environment change, customer-site installation, invitation,
+  provider delivery, recipient sign-in, save, publish, visitor reload or restoration ran here.
+- After deployment, open both public documentation URLs without a session, follow the footer and
+  dashboard links, repeat mobile/desktop and clipboard-denial gestures, and compare the downloaded
+  Markdown bytes with the runtime source.
+- The ordinary full suite's 38 environment-gated tests remain skipped. This story changes no
+  database or provider path; the focused editor-flow checks, production build and clean audits are
+  the relevant fresh reviewer evidence.
+- Registry advisories can change without a source commit. Merge must use the current hosted audit
+  result rather than treating this report as a permanent waiver.
 
 Max severity: none
 Ship allowed: yes
