@@ -2114,3 +2114,19 @@ covers the additional root Next/brace-expansion/moment/DOMPurify and server issu
 review must explicitly reconcile the overlapping lockfile patch; PR58 remains untouched.
 
 Embed allocation: 0 bytes.
+
+## Story s64-rollout-dependency-refresh — keep the active rollout audit gates green
+
+Owner-approved rollout continuation, 2026-10-06. Complexity 2. Branch
+`feature/s64-rollout-dependency-refresh`, independently from main. Fresh registry advisories
+made main `719eb45` fail after s63/PR60 passed and shipped. No new dependency.
+
+- [ ] Root and server production audits report zero blocking vulnerabilities after minimal
+  within-range updates of proxy-addr, sharp and source-map-js. Existing manifest ranges stay.
+- [ ] Generated locks name only the needed patched paths; no force/major/unrelated update.
+- [ ] Relevant request-IP, sanitizer/image and websocket tests plus required full gates pass.
+  Embed/browser artifacts and fixed gzip ceilings remain unchanged.
+- [ ] Fresh independent review and normal hooks/CI pass before authorized squash merge.
+  Deployment identity and public health are verified afterward; no billing/content mutation.
+
+Embed allocation: 0 bytes. This security prerequisite stays separate from s59–s62.
