@@ -6,8 +6,9 @@
 - Amends:
   - [ADR 002](./002-rls-tenant-boundary.md) and AGENTS.md "Data access" — adds one named
     exception to "an explicit `authorize*` call before any service-role data access": the
-    snapshot read `GET /api/published/[siteId]`, and nothing else. Neither ADR 002's body nor
-    AGENTS.md is edited.
+    snapshot read `GET /api/published/[siteId]`, and nothing else. ADR 002's body is not
+    edited; AGENTS.md "Data access" and the header of `src/lib/http/public-cors.ts` carry a
+    one-line pointer here, so a reader applying either rule finds the exception.
 - Numbering: 043–045 are taken on the unmerged s61/s62 branches (045 is s62's
   "versioned public content cache"); expect to renumber if one of them merges first.
 
@@ -61,10 +62,16 @@ customer's own page. It never kept published copy from anyone.
 Two consequences, stated rather than assumed:
 
 - **Not-yet-public sites.** A site registered for a domain that is not live yet now has its
-  published rows readable by anyone who holds its site id. Today, the same reader with the
-  snippet's token and a forged `Origin` already gets them. Whoever holds the token holds the site
-  id — it is the token's first segment (`<siteId>.<issuedAt>.<hmac>`) and sits beside it in the
-  same snippet. The audience is the same; the request needs one value fewer.
+  published rows readable by anyone who holds its site id. Today, the same reader needs the
+  snippet's token and a forged `Origin`. Every token holder has the site id — it is the token's
+  first segment (`<siteId>.<issuedAt>.<hmac>`) and sits beside it in the same snippet — but the
+  site id also travels where the token does not: every outgoing webhook envelope carries
+  `site_id` (`deliverWebhook` in `src/lib/webhooks/manager.ts`), so every receiver and its logs
+  have it, and the dashboard puts it in the query string of its own API requests
+  (`/api/webhooks?siteId=…`, `/api/bulk/export?siteId=…`). So for a site that is not live yet,
+  the audience that can read its published rows grows from token holders to site-id holders.
+  This decision accepts that wider audience; it does not claim the two are the same. Copy that
+  is not ready for visitors belongs in staging, which this read never serves.
 - **Cross-site browser reads.** They become possible (`Access-Control-Allow-Origin: *`, no
   credentials). They read the same text the customer serves to every visitor.
 
@@ -73,22 +80,36 @@ Two consequences, stated rather than assumed:
 - **Fixed public projection** — the helper rebuilds every row from named fields, so a widened
   select cannot leak a column through it, and a row carrying `staging_content`,
   `staging_updated_at` or `published_by` fails the whole response (500) rather than being trimmed.
-- **One page per request.** There is no unauthenticated whole-site read and no page index.
-- **One URL per snapshot.** The CDN keys on the query string, so the route accepts exactly one
-  spelling: the three parameters in order, as `URLSearchParams` serializes them, a lowercase UUID
-  site id, a canonical page path (`normalizePagePath`, and no trailing slash but `/`), and a
-  language and variant of 1–64 characters without control characters. Everything else is a 400
-  with `Cache-Control: no-store`, before the limiter and before the database.
+- **One page per request, plus the site's shared rows.** There is no unauthenticated whole-site
+  read and no page index. But shared rows (`page_path IS NULL`) come with every page, exactly as
+  the content GET returns them, and an author-written `data-rcf-id` — the anchoring the
+  integrator doc recommends — is reported by the embed with no page path, so it is stored as a
+  shared row. A request for any page path, known or not, therefore returns all of the site's
+  shared rows, and every page's payload grows with the number of site-wide anchors, toward the
+  1 MiB cap. A page over the cap fails closed with a 500; once the shared rows alone pass it,
+  every page of the site does.
+- **One parameter set per snapshot.** The CDN keys on the query string, so the route accepts the
+  three parameters in order, as `URLSearchParams` serializes them, a lowercase UUID site id, a
+  canonical page path (`normalizePagePath`, and no trailing slash but `/`), and a language and
+  variant of 1–64 characters without control characters. Another order, an extra, repeated or
+  missing parameter, or an invalid value is a 400 with `Cache-Control: no-store`, before the
+  limiter and before the database. This saves CDN entries; it is not the abuse bound.
 
-  **Known gap, measured on `next start` (Next 16.3.8):** the handler never sees the raw query.
-  Next re-serializes it, URLSearchParams-style, before the route runs: parameter order, extra,
-  repeated and missing parameters survive and are refused, but percent-encoding variants of the
-  same values (`page=/` for `page=%2F`, `%2f`, `%65n` for `en`, `%20` for `+`, a trailing `&`)
-  arrive already canonical and are served. If Vercel's CDN keys on the raw query string, each such
-  spelling is its own cache entry and its own database read, bounded only by the per-IP limiter.
-  How to close it (in the middleware, at the CDN, or by accepting it) is open; see Watch.
+  **Percent-encoding spellings are served as the canonical key (owner decision, 2026-10-07).**
+  Measured on `next start` (Next 16.3.8, s65a review): the handler never sees the raw query. Next
+  re-serializes it, URLSearchParams-style, before the route runs, so percent-encoding spellings
+  of the same values (`page=/` or `%2f` for `page=%2F`, `%65n` for `en`, `%20` for `+`, a trailing
+  `&`) arrive canonical and are served as the canonical key. `e2e/published-snapshot-ssr.spec.ts`
+  asserts this against a running server: the refused forms above answer 400 `no-store`, and `page=/` and
+  `page=%2f` answer 200 with the canonical body and ETag. Refusing those spellings would take
+  `skipProxyUrlNormalize`, a global Next flag that changes the URL every middleware path sees,
+  plus a second canonical check in the middleware. The owner amended the Abuse criterion
+  instead: any caller can already mint unlimited distinct canonical keys (any page, language or
+  variant), each a cache miss costing at least three queries, so refusing other spellings never
+  bounded anything. The limiter below does, for canonical random keys and every other form alike.
 
-- **A per-IP limiter before the first query** (`IP_GENERAL`, fail open — a public read).
+- **A per-IP limiter before the first query — the abuse bound** (`IP_GENERAL`, fail open — a
+  public read).
 - **A 1 MiB body cap**, failing closed with an uncached 500.
 - **No cookie read or set**, and the path is in the middleware's `isSessionlessPath`, so
   `auth.getUser()` cannot rotate a session cookie onto it.
@@ -184,6 +205,9 @@ it is the owner's call.
 - The remote migration ledger (`supabase migration list --linked`) must show
   `20261005000000` as applied, matching the file, before merge. The operator runs it; this
   environment is not linked.
-- Encoding variants reach the database (see "One URL per snapshot"). Measure on the preview
-  whether two spellings of one key share an `x-vercel-cache` entry; if they do not, decide
-  whether to refuse them where the raw URL is still visible or to accept the IP-limited cost.
+- Percent-encoding spellings are served (see "One parameter set per snapshot"). Measure on the
+  preview whether two spellings of one key share an `x-vercel-cache` entry. If they do not, each
+  is an extra miss inside the same per-IP limit, which the owner accepted on 2026-10-07; reopen
+  only with a measured cost.
+- Shared-row growth. Every page carries all of a site's shared rows, so a site with many
+  authored anchors approaches the 1 MiB cap on every page at once.

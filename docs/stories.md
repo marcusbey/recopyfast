@@ -2233,10 +2233,13 @@ writer can be missed and no visitor can force rebuilds. There are no permanent v
 - [ ] Plan rule: public delivery never depends on the owner's plan (s51 AC 3, ADR 041). A lapsed
   owner's snapshot keeps serving, with a test. No new exposure, no new lockout.
 - [ ] Abuse: the uncached origin is rate limited (public read: fail open, justified in a
-  comment). Malformed site ids, pages, languages or variants, unknown query parameters,
-  parameter-order and encoding variants are rejected before any database query; unknown but
-  well-formed keys get a short negative-cache response. A route test shows every non-canonical
-  form reaches the database zero times.
+  comment) — that limiter is the abuse bound, for canonical random keys and every other form
+  alike. Malformed site ids, pages, languages or variants and unknown, missing, duplicated or
+  reordered query parameters are rejected before any database query (route test: zero database
+  calls), and the same refusals hold on a real `next start` server. Percent-encoding spellings
+  that Next re-serializes before the handler runs are served as their canonical equivalent:
+  canonicalization saves CDN entries, it is not an abuse bound (owner decision 2026-10-07,
+  ADR 046). Unknown but well-formed keys get a short negative-cache response.
 - [ ] Speed: 20 fresh-connection production requests from the operator's machine (edge region
   recorded) are all CDN hits with server wait (TTFB minus TLS) p50 ≤ 80 ms and max < 200 ms,
   and a reused-connection sample has TTFB p50 ≤ 50 ms. Recorded beside a same-session sample of

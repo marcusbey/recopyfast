@@ -32,10 +32,11 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
  * anyone — it only stopped cross-site BROWSER reads of text that is already
  * public on the customer's own page. What stands in for authorization here:
  * the fixed public projection (`src/lib/content/public-rows.ts`), one page per
- * request (no site-wide or page index), a canonical-key check that refuses
- * other parameter sets, orders and invalid values before any work (encoding
- * variants excepted — ADR 046's known gap), a per-IP limiter before the database,
- * and a body cap. Nothing written by this route, nothing private read.
+ * request (no site-wide or page index), a per-IP limiter before the database —
+ * the abuse bound — and a body cap. A canonical-key check refuses other
+ * parameter sets, orders and invalid values before any work; percent-encoding
+ * spellings are served as their canonical key (ADR 046). Nothing written by
+ * this route, nothing private read.
  *
  * FRESHNESS IS A LIFETIME, NOT AN INVALIDATION. Published copy changes through
  * at least seven paths (publish RPC, bulk update/import, v1 POST/PUT,
@@ -135,9 +136,9 @@ async function readSnapshotBody(
   | { kind: "fault" }
 > {
   // Service role, with no `authorize*` call before it: ADR 046 is the single
-  // exception to that rule, for this read only. What bounds it is everything
-  // above — canonical key, IP limiter — and the fixed projection below. Do not
-  // copy this shape to another route; the next one needs its own ADR.
+  // exception to that rule, for this read only. What bounds it is the IP
+  // limiter above and the fixed projection below. Do not copy this shape to
+  // another route; the next one needs its own ADR.
   const supabase = createServiceRoleClient();
 
   const { data: site, error: siteError } = await supabase
@@ -205,10 +206,13 @@ export async function GET(
     const { siteId } = await params;
 
     // First, before the limiter and the database: the CDN keys on the query
-    // string, so every non-canonical spelling must cost nothing and cache
-    // nothing, or it is a free cache bypass. `nextUrl.search` is the query as
-    // Next re-serialized it, so percent-encoding variants arrive canonical and
-    // are not caught here — the known gap recorded in ADR 046.
+    // string, so another parameter set or order costs nothing and caches
+    // nothing. This saves CDN entries; it is not the abuse bound — a caller
+    // can mint unlimited canonical keys (any page, language, variant), and the
+    // limiter below is what bounds those and everything else (ADR 046, Abuse
+    // AC as amended 2026-10-07). `nextUrl.search` is the query as Next
+    // re-serialized it, so percent-encoding spellings arrive canonical and are
+    // served as the canonical key, by owner decision.
     const parsed = parsePublishedSnapshotKey(siteId, request.nextUrl.search);
     if (!parsed.ok) {
       return uncached(

@@ -28,9 +28,9 @@ request carrying it is never served from the CDN.
 **Build the query with `URLSearchParams`, in exactly this order**, so that every caller shares
 the same CDN entry. Parameters in another order, an extra parameter (a cache buster, say), a
 repeated or a missing parameter are refused with `400`. Spell the values exactly as
-`URLSearchParams` does too (`%2F` for `/`, `+` for a space): the server currently accepts other
-percent-encodings of the same value, but each spelling may be a separate CDN entry, so it can
-only be slower.
+`URLSearchParams` does too (`%2F` for `/`, `+` for a space). Other percent-encodings of the same
+value (`page=/`, `page=%2f`) are served as the same snapshot, with the same body and `ETag`, but
+each spelling may be a separate CDN entry, so it can only be slower.
 
 ```js
 const query = new URLSearchParams([
@@ -85,17 +85,21 @@ const response = await fetch(
   to the authored value, then to an empty string. Treat it as **text** and escape it into your
   HTML — the embed applies it as `textContent`, never as markup. Skip a row whose
   `current_content` is empty; the embed does the same.
-- `rows` holds the page's own rows plus the site's shared rows (`page_path: null`), ordered by
-  `element_id`. An unknown page is `200` with `rows: []`.
+- `rows` holds the page's own rows plus **all** of the site's shared rows (`page_path: null`),
+  ordered by `element_id`. Every author-written `data-rcf-id` anchor is a shared row (see
+  [Anchoring](#anchoring-data-rcf-id)), so an unknown page is `200` with the site's shared rows,
+  and `rows: []` only when the site has none. Each anchor you add grows every page's response,
+  and a response over 1 MiB is refused with `500`.
 - For a link (`<a>`) the embed also applies `metadata.href`, and for an image `metadata.alt`;
   for an image, `current_content` is the `src`.
 - The rows are the same, field for field, as the embed's own read for that page. Staging drafts,
   unpublished link targets and publisher identity are never included.
 
-Other statuses: `400` for any non-canonical request (never cached), `404` with
-`{ "error": "Site not found" }` for an unknown or deleted site (cached like a `200`), `429` when
-one IP sends too many uncached requests, `500` on a server fault (never cached). On anything but
-`200`, render your authored copy — the embed will still apply published copy in the browser.
+Other statuses: `400` for another parameter order or set, or an invalid value (never cached),
+`404` with `{ "error": "Site not found" }` for an unknown or deleted site (cached like a `200`),
+`429` when one IP sends too many uncached requests, `500` on a server fault or an oversized
+response (never cached). On anything but `200`, render your authored copy — the embed will still
+apply published copy in the browser.
 
 ## Anchoring: `data-rcf-id`
 

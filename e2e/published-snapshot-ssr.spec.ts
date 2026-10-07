@@ -98,13 +98,42 @@ test.describe("published snapshot rendered by the host", () => {
       .digest("hex");
     return `${payload}.${signature}`;
   })();
-  const snapshotUrl = `${APP_URL}/api/published/${siteId}?${new URLSearchParams(
-    [
-      ["page", "/"],
-      ["language", "en"],
-      ["variant", "default"],
-    ],
-  ).toString()}`;
+  const snapshotPath = `${APP_URL}/api/published/${siteId}`;
+  // `page=%2F&language=en&variant=default`: the one spelling the route keys on.
+  const snapshotUrl = `${snapshotPath}?${new URLSearchParams([
+    ["page", "/"],
+    ["language", "en"],
+    ["variant", "default"],
+  ]).toString()}`;
+
+  /**
+   * Abuse AC as amended on 2026-10-07 (ADR 046), checked on the running app
+   * rather than on the parser: the route test hands the parser the raw query,
+   * which a deployed Next server never does. Next re-serializes the query
+   * before the handler runs, so the two lists below are what an outside caller
+   * actually gets.
+   *
+   * Refused (400, `no-store`, never edge-cached): another parameter set or
+   * order. These survive Next's re-serialization and must still cost nothing.
+   */
+  const REFUSED_QUERIES: Record<string, string> = {
+    reordered: "language=en&page=%2F&variant=default",
+    extra: "page=%2F&language=en&variant=default&cb=1",
+    duplicated: "page=%2F&page=%2F&language=en&variant=default",
+    missing: "page=%2F&language=en",
+  };
+
+  /**
+   * Served as the canonical key (same bytes, same ETag): percent-encoding
+   * spellings of the same values. Next hands the handler the canonical query,
+   * and the owner decided not to refuse them (canonicalization saves CDN
+   * entries; the IP limiter is the abuse bound). If this starts answering 400,
+   * someone has changed that decision without amending the AC and ADR 046.
+   */
+  const CANONICAL_EQUIVALENT_QUERIES: Record<string, string> = {
+    "lowercase %2f": "page=%2f&language=en&variant=default",
+    "literal /": "page=/&language=en&variant=default",
+  };
 
   test.beforeAll(async () => {
     supabase = await withCoreSetupDiagnostic("create local client", () =>
@@ -138,12 +167,36 @@ test.describe("published snapshot rendered by the host", () => {
     const snapshot = await request.get(snapshotUrl);
     expect(snapshot.status()).toBe(200);
     expect(snapshot.headers()["set-cookie"]).toBeUndefined();
-    const body = (await snapshot.json()) as {
+    const canonicalText = await snapshot.text();
+    const canonicalEtag = snapshot.headers()["etag"];
+    expect(canonicalEtag).toMatch(/^"[0-9a-f]{64}"$/);
+    const body = JSON.parse(canonicalText) as {
       rows: Array<{ element_id: string; current_content: string }>;
     };
     expect(
       body.rows.find((row) => row.element_id === ELEMENT_ID)?.current_content,
     ).toBe(PUBLISHED_TEXT);
+
+    for (const [form, query] of Object.entries(REFUSED_QUERIES)) {
+      const refused = await request.get(`${snapshotPath}?${query}`);
+      expect(refused.status(), `${form} query`).toBe(400);
+      expect(refused.headers()["cache-control"], `${form} query`).toBe(
+        "no-store",
+      );
+      expect(
+        refused.headers()["vercel-cdn-cache-control"],
+        `${form} query`,
+      ).toBeUndefined();
+    }
+
+    for (const [form, query] of Object.entries(CANONICAL_EQUIVALENT_QUERIES)) {
+      const equivalent = await request.get(`${snapshotPath}?${query}`);
+      expect(equivalent.status(), `${form} spelling`).toBe(200);
+      expect(equivalent.headers()["etag"], `${form} spelling`).toBe(
+        canonicalEtag,
+      );
+      expect(await equivalent.text(), `${form} spelling`).toBe(canonicalText);
+    }
 
     await installTextObserver(page);
 

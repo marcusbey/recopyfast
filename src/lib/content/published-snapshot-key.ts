@@ -6,25 +6,35 @@ import { normalizePagePath } from "@/lib/content/page-path";
  * `GET /api/published/[siteId]?page=…&language=…&variant=…` is cached by
  * Vercel's CDN, and the CDN keys a function response on the whole query string
  * (https://vercel.com/docs/caching/cdn-cache). Every spelling of the same key
- * that the origin answered would be a separate cache entry and a separate
- * database read — `?cb=1`, `?language=en&page=…`, `%2f` for `%2F`, `%20` for
- * `+` — which turns the cache into something any caller can bypass at will.
- * So the origin answers exactly one spelling and refuses the rest before it
- * spends anything: no limiter, no database.
+ * that the origin answers can be a separate cache entry and a separate
+ * database read — `?cb=1`, `?language=en&page=…`. So the origin answers one
+ * parameter set in one order and refuses the rest before it spends anything:
+ * no limiter, no database.
+ *
+ * THIS IS CDN HYGIENE, NOT THE ABUSE BOUND. Any caller can already mint
+ * unlimited distinct canonical keys — any page, language or variant, each a
+ * cache miss and a database read. The per-IP limiter in the route is what
+ * bounds that, for canonical random keys and every other form alike (s65a
+ * Abuse AC as amended by the owner on 2026-10-07, ADR 046). Refusing other
+ * spellings saves CDN entries; do not describe it as the thing that stops a
+ * flood, and do not drop the limiter because this check exists.
  *
  * The canonical spelling is whatever `URLSearchParams` serializes, in the order
  * page, language, variant. An integrator gets it from
  * `new URLSearchParams([["page", p], ["language", l], ["variant", v]])` in any
  * runtime, without a library from us.
  *
- * KNOWN GAP (s65a, measured on `next start`, Next 16.3.8). Inside a deployed
- * Next server the route never sees the raw query: Next re-serializes it,
- * URLSearchParams-style, before the handler runs. Order, extra, repeated and
- * missing parameters survive that and are refused here; percent-encoding
- * variants (`/` vs `%2F`, `%2f`, `%20` vs `+`) arrive already canonical and
- * pass. This parser still refuses them when given the raw string (the unit
- * tests do). Whether those spellings are separate CDN entries is an open item
- * in ADR 046 — do not "fix" it by loosening the checks that do work.
+ * WHAT A DEPLOYED SERVER ACTUALLY REFUSES (measured on `next start`, Next
+ * 16.3.8; asserted by `e2e/published-snapshot-ssr.spec.ts`). The handler
+ * never sees the raw query: Next re-serializes it, URLSearchParams-style,
+ * before the route runs. Order, extra, repeated and missing parameters survive
+ * that and are refused here. Percent-encoding spellings of the same values
+ * (`/` or `%2f` for `%2F`, `%20` for `+`) arrive already canonical and are
+ * served as the canonical key — by owner decision, not by accident: refusing
+ * them would take `skipProxyUrlNormalize` (a global Next flag) and a second
+ * check in the middleware, to save CDN entries the limiter already bounds.
+ * This parser still refuses them when given the raw string (the unit tests
+ * do); keep that — it is correct wherever the raw query is visible.
  */
 
 /** Lowercase only: an uppercase id is a second cache key for the same site. */

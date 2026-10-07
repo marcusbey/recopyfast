@@ -153,3 +153,31 @@ Repo DoD (single PR, lint/type-check/format/build/test green, review passed, dep
 every s65a AC checked with its evidence; migration sha256 equality and remote-ledger status
 recorded in the PR; ADR 046 and the integrator doc merged; production measurement (20 requests,
 thresholds, freshness probe) recorded after the authorized deploy; embed artifact unchanged.
+
+## Fix round 1 — 2026-10-07 (owner: "Fix majors first"; M1 → "Amend the criterion")
+
+Source: `docs/reviews/s65a-published-copy-snapshot.md`. The amended Abuse AC is in `docs/stories.md`.
+
+- [x] F1 (M2) — Run `src/__tests__/db/published-snapshot-freshness.test.ts` by name in CI with
+  `RCF_REQUIRE_TEST_DB=1`, the PostgREST URL and the service key, in the e2e-job step that already
+  does this for `content-write-privileges`. It must fail CI if the database is unreachable, never
+  pass as `[gated]`.
+- [ ] F2 (M1) — Align code comments (`published-snapshot-key.ts:12`, `route.ts:209`), ADR 046 and
+  the integrator doc with the amended AC: the limiter is the abuse bound; encoding spellings are
+  served canonical. Add a real-server check (Playwright `request.get` against the running app,
+  inside the existing s65a spec — no new spec, count unchanged): reordered/extra/duplicate/missing
+  params → 400 `no-store`; `%2F`/`%2f` page spelling → 200 with the same body and ETag as canonical.
+- [x] F3 (m1) — ADR 046: drop "the audience is the same"; state that the site id also travels in
+  webhook envelopes and dashboard URLs, so a not-yet-public site's published rows reach a wider
+  audience than token holders.
+- [x] F4 (m2) — Integrator doc and ADR: shared rows (authored `data-rcf-id` anchors are stored
+  with `page_path` NULL) are returned for every page; fix "an unknown page is 200 with rows: []",
+  and note payload growth with site-wide anchors toward the 1 MiB cap.
+- [x] F5 (m4) — One-line pointers to ADR 046 in AGENTS.md "Data access" (the single exception to
+  authorize-before-service-role) and in the header comment of `src/lib/http/public-cors.ts`.
+  No behaviour change to the shared CORS helper.
+- [x] F6 (m5) — Run `scripts/__tests__/measure-published-snapshot.test.mjs` in CI next to the
+  existing script test.
+
+Interdicts unchanged. m6 (framing edits on the feature branch) is a coordinator call: kept, same
+precedent as s61; the stories changes merge with this PR.

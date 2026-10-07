@@ -65,6 +65,54 @@ describe("Playwright CI contract", () => {
     expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
   });
 
+  it("runs the snapshot freshness proof by name, with the database and PostgREST required", () => {
+    // s65a review M2: the direct-SQL freshness proof is the Freshness AC's
+    // evidence, and it is a DB suite. The plain `npm test` step records it as a
+    // "[gated]" pass, so unless a step names it with RCF_REQUIRE_TEST_DB=1, the
+    // PostgREST URL and the service key, CI never runs it at all.
+    const suite = "src/__tests__/db/published-snapshot-freshness.test.ts";
+    const steps = workflow.split(/^(?=\s+- name: )/m);
+    const step = steps.find((candidate) => candidate.includes(suite));
+    const startIndex = steps.findIndex((candidate) =>
+      /- name: Start Supabase and export local credentials\s*$/m.test(
+        candidate,
+      ),
+    );
+    const buildIndex = steps.findIndex((candidate) =>
+      /- name: Build production app\s*$/m.test(candidate),
+    );
+
+    expect(step).toBeDefined();
+    expect(step).toContain("src/__tests__/db/content-write-privileges.test.ts");
+    expect(step).toContain(
+      'RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"',
+    );
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(step).toContain('RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"');
+    expect(step).toContain(
+      'RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY"',
+    );
+    expect(startIndex).toBeGreaterThan(-1);
+    expect(steps.indexOf(step as string)).toBeGreaterThan(startIndex);
+    expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
+  });
+
+  it("runs the snapshot measurement tooling test beside the Stripe tooling test", () => {
+    // s65a review m5: `node --test` files are not Jest suites, so `npm test`
+    // never collects them. A script test that no CI step names guards nothing.
+    const mainJob = workflow.slice(
+      workflow.indexOf("\n  ci:\n"),
+      workflow.indexOf("\n  e2e:\n"),
+    );
+
+    expect(mainJob).toContain(
+      "node --test scripts/__tests__/sync-stripe-catalogue.test.mjs",
+    );
+    expect(mainJob).toContain(
+      "node --test scripts/__tests__/measure-published-snapshot.test.mjs",
+    );
+  });
+
   it("disables credential-bearing browser media in CI and enables the strict reporter", () => {
     expect(config).toContain('"./e2e/support/strict-reporter.ts"');
     expect(config).not.toContain('["line"]');
