@@ -246,5 +246,93 @@ major issue.
   matches sha256 `6ee41347…`.
 - **No local Playwright or DB suites.** The Docker disk is full, so the CI logs were used instead.
 
+---
+
+# Delta review — fix round 4, Devin Review findings (`25d21cc..632db72`)
+
+Reviewed by a fresh-context `reviewer` subagent on 2026-10-07. The verdict covers the whole story
+diff at `632db72` and carries forward the earlier conclusions for every part this round did not
+touch.
+
+## D1 — language/variant length cap removed (correct)
+
+Checked independently: neither the writers nor the database bound these fields.
+
+| Path | What it does with `language` / `variant` |
+|---|---|
+| `content_elements` columns | plain `TEXT`; no CHECK, no `varchar(n)` (`20250817000000_complete_database_setup.sql:33-34`) |
+| v1 POST/PUT | `|| "en"` / `|| "default"` only, no length check (`v1/content/route.ts:236-321`) |
+| bulk import | same pattern (`:456-457, 531-532`) |
+| translate | language capped at 20 characters, variant always `"default"` |
+| discovery | `en` / `default` only |
+| bulk update | writes neither field |
+| staging RPC | only UPDATEs rows already matched; never inserts |
+
+The authenticated GET reads both fields without a limit, so Devin's premise holds.
+
+What is still refused, all before any database query: empty values, control characters, and
+non-canonical queries. The route test asserts that the service client and the limiter are never
+called on control-character cases.
+
+Removed or replaced tests are declared:
+- **Parser:** the "over 64 characters" cases became accepted 65- and 500-character variants.
+- **Route:** "oversized language" became "control character in the language" (added coverage).
+- **E2E:** the 65-character case became `en%0A`. The total stays 45.
+
+ADR 046, the integrator doc and `REJECTION_MESSAGES` all say "not empty, no control characters,
+any length".
+
+## D2/D3 — the measure script trusts only HTTP 200 plus a valid envelope
+
+A response counts only if `readSnapshot` sees status 200, `format === "rcf-published-v1"` and a
+`rows` array.
+- **Freshness mode:** anything else is counted in `failedPolls` and polling continues.
+- **Speed mode:** a first threshold covers the warm-up plus every sample.
+- **Exit code:** non-zero whenever the condition or a threshold is not met.
+
+Disabling each check turned tests red:
+- **Measure-script tests:** pre-fix `readSnapshot` → 7 red; status check → 1; format check → 1;
+  status threshold → 4; warm-up passing → 1; `failedPolls` increment → 3. Two harmless controls
+  → 0.
+- **Parser/route tests:** restoring a `<= 64` cap → 4 red (exactly the new tests); removing the
+  control-character check → 13; removing the empty check → 2.
+
+Every mutation was restored, and `git diff --exit-code` came back clean each time.
+
+## Evidence
+
+- **Local:** Jest 4194 passed / 38 skipped; lint 0 errors; type-check and format:check clean;
+  measure-script tests 14/14.
+- **CI run 37665493175 (all green):**
+  - `PASS src/__tests__/db/published-snapshot-freshness.test.ts`
+  - Playwright strict summary: 45 passed, 0 failed, 0 skipped, 0 flaky (expected 45). The
+    `en%0A` refusal sits in the s65a test's `REFUSED_QUERIES` loop.
+- **Interdicts on `main...632db72`:** no changes to the content GET route, `public/embed/`, the
+  package files, `next.config.ts` or `.env*`. The only migration is the s62 file (sha256
+  `6ee41347…6c62c5b`).
+
+## Findings (minor only)
+
+- **Duplicated format string.** `"rcf-published-v1"` is written separately in the measure script
+  (:330) and the route (:69). A bump fails safe, since every run fails, but the two can drift.
+- **Uneven test coverage.**
+  - The long-length acceptance tests use only *variant*; one shared check covers *language* today.
+  - The status-only part of the check is pinned by a single freshness test.
+- **Real ceiling and network errors.**
+  - The ADR's "the platform's URL limit is the only ceiling" is optimistic: the PostgREST gateway
+    URL limit is likely lower. This matches the authenticated GET and fails safe as an uncached 500.
+  - A network error during freshness polling exits 1 instead of counting a failed poll. It never
+    produces a false MET, and this behaviour predates the round.
+
+## Not verified
+
+- Local Playwright and Docker (disk full); the CI logs were used instead.
+- The script against the real Vercel edge. After deploy:
+  - a mistyped site id must fail the status threshold;
+  - a deletion probe must end MET on an HTTP 200.
+- A 65+ character variant end to end through v1 and the snapshot on a real server.
+- The actual Vercel and PostgREST URL ceilings.
+- Whether D2/D3 were written test-first; they landed in a single commit.
+
 Max severity: minor
 Ship allowed: yes
