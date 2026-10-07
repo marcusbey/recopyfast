@@ -36,8 +36,10 @@ Two of those are outside publish entirely.
 
 **`GET /api/published/[siteId]?page=<path>&language=<lang>&variant=<variant>` returns the current
 published rows of one page, to anyone, with no token, origin, referrer or cookie, through
-Vercel's CDN with a lifetime of at most 60 seconds.** It is the single exception to
-"`authorize*` before service role".
+Vercel's CDN with a lifetime of at most 60 seconds.** It is a named exception to
+"`authorize*` before service role", for this read only. It is not the only service-role path
+that takes no credential: `POST /api/editor/request-code` takes an email address alone, and
+returns no site data (the same neutral response whether or not the address is recognised).
 
 What it serves is exactly what the widget-authorized content GET serves for the same page:
 
@@ -92,9 +94,10 @@ Two consequences, stated rather than assumed:
 - **One parameter set per snapshot.** The CDN keys on the query string, so the route accepts the
   three parameters in order, as `URLSearchParams` serializes them, a lowercase UUID site id, a
   canonical page path (`normalizePagePath`, and no trailing slash but `/`), and a language and
-  variant of 1–64 characters without control characters. Another order, an extra, repeated or
-  missing parameter, or an invalid value is a 400 with `Cache-Control: no-store`, before the
-  limiter and before the database. This saves CDN entries; it is not the abuse bound.
+  variant of 1–64 characters without control characters. Another order, an extra (except Next's
+  internal keys, below), repeated or missing parameter, or an invalid value is a 400 with
+  `Cache-Control: no-store`, before the limiter and before the database. This saves CDN entries;
+  it is not the abuse bound.
 
   **Percent-encoding spellings are served as the canonical key (owner decision, 2026-10-07).**
   Measured on `next start` (Next 16.3.8, s65a review): the handler never sees the raw query. Next
@@ -108,6 +111,17 @@ Two consequences, stated rather than assumed:
   instead: any caller can already mint unlimited distinct canonical keys (any page, language or
   variant), each a cache miss costing at least three queries, so refusing other spellings never
   bounded anything. The limiter below does, for canonical random keys and every other form alike.
+
+  **Next's internal query keys are dropped, not refused.** Next 16.3.8 deletes
+  `nextInternalLocale`, and every key that starts with `nxtP` or `nxtI` and is longer than that
+  prefix, from the query before the route handler runs (`filterInternalQuery` in
+  `node_modules/next/dist/server/server-utils.js:47-58`, called from
+  `node_modules/next/dist/server/route-modules/route-module.js`). The canonical-key check never
+  sees them, so `…&variant=default&nxtPfoo=1` is served as the canonical key instead of a 400,
+  and is its own CDN entry. Seen on `next start` in s65a fix round 3: `nxtPfoo`, `nxtIfoo` and
+  `nextInternalLocale` got past the check, while a bare `nxtP` and `cb` were refused. Same cost
+  class as the percent-encoding spellings, bounded by the same limiter. (Next also uses
+  `nxtP<param>` keys to pass route parameters; a key named after `siteId` was not examined.)
 
 - **A per-IP limiter before the first query — the abuse bound** (`IP_GENERAL`, fail open — a
   public read).

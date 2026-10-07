@@ -32,6 +32,11 @@ repeated or a missing parameter are refused with `400`. Spell the values exactly
 value (`page=/`, `page=%2f`) are served as the same snapshot, with the same body and `ETag`, but
 each spelling may be a separate CDN entry, so it can only be slower.
 
+An exception to the `400` for an extra parameter: the server removes Next's internal query keys
+(`nextInternalLocale`, and any key that starts with `nxtP` or `nxtI` and is longer than that
+prefix) before the check, so a request carrying one is served like the request without it —
+again as a separate CDN entry. Do not send them.
+
 ```js
 const query = new URLSearchParams([
   ["page", pagePath], // e.g. "/pricing"

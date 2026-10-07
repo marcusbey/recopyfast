@@ -200,3 +200,17 @@ Source: the re-review in `docs/reviews/s65a-published-copy-snapshot.md` (Max sev
 - [x] G5 (n5) — `docs/architecture/published-snapshot.md`: state the uncached budget
   (`IP_GENERAL`, 200 requests/min per IP, `published/read` bucket) and advise pacing/retry for
   static builds and shared egress IPs.
+
+## Fix round 3 — 2026-10-07 (owner: "Fix p1–p3, then ship")
+
+Source: round-2 re-review in `docs/reviews/s65a-published-copy-snapshot.md` (Max severity minor, Ship allowed yes).
+
+- [x] H1 (p1) — Remove the false uniqueness claim: `src/app/api/published/[siteId]/route.ts:27-29`
+  and `:138-139`, ADR 046 lines 39-40. Say "a named exception"; drop "every other service-role
+  read runs `authorize*`"; name `POST /api/editor/request-code` as an existing service-role path
+  that takes no credential and returns no site data. Comments/docs only.
+- [x] H2 (p2) — The route's 429 test (`src/__tests__/api/published/route.test.ts` ~:615) asserts
+  the `Retry-After` header the integrator doc promises.
+- [x] H3 (p3) — ADR 046 (lines ~95-96) and the integrator doc: Next strips internal `nxtP*` /
+  `nxtI*` / `nextInternalLocale` query keys before the handler, so such "extra" parameters are
+  served as the canonical key (same accepted cost class, bounded by the limiter) rather than 400.

@@ -24,19 +24,21 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
  * hold — so the only way a visitor sees published copy first is for the host to
  * already have it when it renders. This is that read.
  *
- * UNAUTHENTICATED ON PURPOSE. Every other service-role read in this app runs an
- * `authorize*` call first (AGENTS.md "Data access", ADR 002). This route is the
- * single named exception, recorded in ADR 046: the widget's site token sits in
- * the source of every customer page and `Origin` is forgeable by anything that
- * is not a browser, so the content GET's check never kept published copy from
- * anyone — it only stopped cross-site BROWSER reads of text that is already
- * public on the customer's own page. What stands in for authorization here:
- * the fixed public projection (`src/lib/content/public-rows.ts`), one page per
- * request (no site-wide or page index), a per-IP limiter before the database —
- * the abuse bound — and a body cap. A canonical-key check refuses other
- * parameter sets, orders and invalid values before any work; percent-encoding
- * spellings are served as their canonical key (ADR 046). Nothing written by
- * this route, nothing private read.
+ * UNAUTHENTICATED ON PURPOSE. The rule is an `authorize*` call before any
+ * service-role data access (AGENTS.md "Data access", ADR 002). This route is a
+ * named exception to it, recorded in ADR 046. It is not the only service-role
+ * path that takes no credential: `POST /api/editor/request-code` takes an
+ * email address alone, and returns no site data. Why this one is safe: the
+ * widget's site token sits in the source of every customer page and `Origin`
+ * is forgeable by anything that is not a browser, so the content GET's check
+ * never kept published copy from anyone — it only stopped cross-site BROWSER
+ * reads of text that is already public on the customer's own page. What stands
+ * in for authorization here: the fixed public projection
+ * (`src/lib/content/public-rows.ts`), one page per request (no site-wide or page
+ * index), a per-IP limiter before the database — the abuse bound — and a body
+ * cap. A canonical-key check refuses other parameter sets, orders and invalid
+ * values before any work; percent-encoding spellings are served as their
+ * canonical key (ADR 046). Nothing written by this route, nothing private read.
  *
  * FRESHNESS IS A LIFETIME, NOT AN INVALIDATION. Published copy changes through
  * at least seven paths (publish RPC, bulk update/import, v1 POST/PUT,
@@ -135,8 +137,8 @@ async function readSnapshotBody(
   | { kind: "site_not_found" }
   | { kind: "fault" }
 > {
-  // Service role, with no `authorize*` call before it: ADR 046 is the single
-  // exception to that rule, for this read only. What bounds it is the IP
+  // Service role, with no `authorize*` call before it: ADR 046 names this read
+  // as an exception to that rule, for this read only. What bounds it is the IP
   // limiter above and the fixed projection below. Do not copy this shape to
   // another route; the next one needs its own ADR.
   const supabase = createServiceRoleClient();

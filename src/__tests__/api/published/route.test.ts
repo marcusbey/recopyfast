@@ -625,6 +625,12 @@ describe("refusals", () => {
     expect(response.status).toBe(429);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("vercel-cdn-cache-control")).toBeNull();
+    // The integrator doc tells static builds to wait `Retry-After` and retry
+    // (s65a review p2): seconds until this IP's window resets, never absent.
+    const retryAfter = response.headers.get("retry-after");
+    expect(retryAfter).toMatch(/^\d+$/);
+    expect(Number(retryAfter)).toBeGreaterThanOrEqual(1);
+    expect(Number(retryAfter)).toBeLessThanOrEqual(30);
     expect(mockFrom).not.toHaveBeenCalled();
   });
 

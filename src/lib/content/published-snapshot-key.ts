@@ -28,13 +28,16 @@ import { normalizePagePath } from "@/lib/content/page-path";
  * 16.3.8; asserted by `e2e/published-snapshot-ssr.spec.ts`). The handler
  * never sees the raw query: Next re-serializes it, URLSearchParams-style,
  * before the route runs. Order, extra, repeated and missing parameters survive
- * that and are refused here. Percent-encoding spellings of the same values
- * (`/` or `%2f` for `%2F`, `%20` for `+`) arrive already canonical and are
- * served as the canonical key — by owner decision, not by accident: refusing
- * them would take `skipProxyUrlNormalize` (a global Next flag) and a second
- * check in the middleware, to save CDN entries the limiter already bounds.
- * This parser still refuses them when given the raw string (the unit tests
- * do); keep that — it is correct wherever the raw query is visible.
+ * that and are refused here — except Next's own internal keys (`nxtP…`,
+ * `nxtI…`, `nextInternalLocale`), which Next deletes before the handler, so
+ * they are served as the canonical key (ADR 046). Percent-encoding spellings
+ * of the same values (`/` or `%2f` for `%2F`, `%20` for `+`) arrive already
+ * canonical and are served as the canonical key — by owner decision, not by
+ * accident: refusing them would take `skipProxyUrlNormalize` (a global Next
+ * flag) and a second check in the middleware, to save CDN entries the limiter
+ * already bounds. This parser still refuses them when given the raw string
+ * (the unit tests do); keep that — it is correct wherever the raw query is
+ * visible.
  */
 
 /** Lowercase only: an uppercase id is a second cache key for the same site. */
