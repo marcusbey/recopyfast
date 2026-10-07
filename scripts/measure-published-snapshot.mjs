@@ -23,6 +23,9 @@
  *   - With `--content-token` and `--origin`, the same number of fresh requests
  *     to today's widget content GET, for a same-session comparison. The token
  *     is sent as the widget sends it and never printed.
+ *   - Every warm-up and measured snapshot response must be HTTP 200 with the
+ *     `rcf-published-v1` envelope, or the run fails: a fast cached 404 (a
+ *     mistyped `--site`) is not a speed result.
  *
  * Freshness mode:
  *   node scripts/measure-published-snapshot.mjs --site <uuid> --freshness \
@@ -32,7 +35,9 @@
  *   Polls the canonical snapshot URL until the text appears in (or disappears
  *   from) some row's `current_content`, and prints the elapsed time — from
  *   `--since` (the moment you published or deleted) when given, else from the
- *   start of polling. The story bound is ≤ 60 s.
+ *   start of polling. The story bound is ≤ 60 s. Only an HTTP 200 carrying the
+ *   snapshot envelope can prove the condition; any other response is counted
+ *   as a failed poll and polling continues to the timeout.
  *
  * Exit code 1 when a threshold or the freshness condition is not met.
  */
@@ -253,7 +258,42 @@ export function timedRequest(url, { agent = false, headers = {} } = {}) {
   });
 }
 
-export function evaluateThresholds({ fresh, reused }) {
+/** How many offending samples a threshold detail names before it stops. */
+const MAX_LISTED_SAMPLES = 5;
+
+/**
+ * Every timed sample must be a real snapshot before its timing means
+ * anything. Devin's review of PR #64 found the hole: an unknown but
+ * well-formed site id is negative-cached as a 404 with the same CDN lifetime
+ * as a 200, so a mistyped `--site` produced fast HITs that passed every speed
+ * threshold while delivering no snapshot at all.
+ */
+function snapshotStatusThreshold({ warmup, fresh, reused }) {
+  const labelled = [
+    ...warmup.map((sample, index) => [`warm-up ${index + 1}`, sample]),
+    ...fresh.map((sample, index) => [`fresh ${index + 1}`, sample]),
+    ...reused.map((sample, index) => [`reused ${index + 1}`, sample]),
+  ];
+  const bad = labelled.filter(([, sample]) => readSnapshot(sample) === null);
+  const listed = bad
+    .slice(0, MAX_LISTED_SAMPLES)
+    .map(([label, sample]) => `${label}: ${sample.status ?? "no status"}`);
+  const more =
+    bad.length > MAX_LISTED_SAMPLES
+      ? `, +${bad.length - MAX_LISTED_SAMPLES} more`
+      : "";
+
+  return {
+    name: "every warm-up and measured response is a 200 snapshot",
+    pass: labelled.length > 0 && bad.length === 0,
+    detail:
+      bad.length === 0
+        ? `${labelled.length}/${labelled.length} 200 snapshot`
+        : `${bad.length}/${labelled.length} not a 200 snapshot: ${listed.join(", ")}${more}`,
+  };
+}
+
+export function evaluateThresholds({ warmup = [], fresh, reused }) {
   const waits = fresh.map((sample) => sample.serverWaitMs);
   const waitP50 = percentile(waits, 50);
   const waitMax = waits.length === 0 ? Number.NaN : Math.max(...waits);
@@ -263,6 +303,7 @@ export function evaluateThresholds({ fresh, reused }) {
   );
 
   return [
+    snapshotStatusThreshold({ warmup, fresh, reused }),
     {
       name: "every fresh request is a CDN HIT",
       pass: fresh.length > 0 && fresh.every((sample) => sample.cache === "HIT"),
@@ -286,18 +327,32 @@ export function evaluateThresholds({ fresh, reused }) {
   ];
 }
 
-function hasText(body, text) {
+const SNAPSHOT_FORMAT = "rcf-published-v1";
+
+/**
+ * The parsed snapshot when a sample is one — HTTP 200 and the
+ * `rcf-published-v1` envelope with a `rows` array — else null. Anything else
+ * (an error status, an `{ error }` body, an HTML error page) proves nothing
+ * about published copy, in either direction.
+ */
+function readSnapshot(sample) {
+  if (sample?.status !== 200 || typeof sample.body !== "string") return null;
   try {
-    const parsed = JSON.parse(body);
-    const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
-    return rows.some(
-      (row) =>
-        typeof row?.current_content === "string" &&
-        row.current_content.includes(text),
-    );
+    const parsed = JSON.parse(sample.body);
+    return parsed?.format === SNAPSHOT_FORMAT && Array.isArray(parsed.rows)
+      ? parsed
+      : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function hasText(snapshot, text) {
+  return snapshot.rows.some(
+    (row) =>
+      typeof row?.current_content === "string" &&
+      row.current_content.includes(text),
+  );
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -312,31 +367,33 @@ export async function pollFreshness({
 }) {
   const deadline = Date.now() + timeoutMs;
   let attempts = 0;
+  let failedPolls = 0;
   let last = null;
+  const outcome = (met) => ({
+    met,
+    elapsedMs: Date.now() - since,
+    attempts,
+    failedPolls,
+    status: last.status,
+    cache: last.cache,
+    region: last.region,
+  });
 
   for (;;) {
     attempts += 1;
     last = await timedRequest(url);
-    const isPresent = hasText(last.body, text);
-    if ((expect === "present") === isPresent) {
-      return {
-        met: true,
-        elapsedMs: Date.now() - since,
-        attempts,
-        status: last.status,
-        cache: last.cache,
-        region: last.region,
-      };
+    // Only a valid snapshot can prove the condition. Before Devin's review of
+    // PR #64, a 500's `{ error }` body read as "no rows", so `--expect absent`
+    // printed MET on the first failed request. A failed read is counted and
+    // polling goes on until the deadline.
+    const snapshot = readSnapshot(last);
+    if (snapshot === null) {
+      failedPolls += 1;
+    } else if ((expect === "present") === hasText(snapshot, text)) {
+      return outcome(true);
     }
     if (Date.now() + intervalMs > deadline) {
-      return {
-        met: false,
-        elapsedMs: Date.now() - since,
-        attempts,
-        status: last.status,
-        cache: last.cache,
-        region: last.region,
-      };
+      return outcome(false);
     }
     await sleep(intervalMs);
   }
@@ -356,7 +413,7 @@ function withoutBody({ body: _body, ...sample }) {
   return sample;
 }
 
-async function measure(options) {
+export async function measure(options) {
   const url = snapshotUrl(options);
   const warmup = [];
   for (let index = 0; index < options.warmup; index += 1) {
@@ -398,7 +455,7 @@ async function measure(options) {
     }
   }
 
-  const thresholds = evaluateThresholds({ fresh, reused });
+  const thresholds = evaluateThresholds({ warmup, fresh, reused });
   const regions = [
     ...new Set(fresh.map((sample) => sample.region ?? "unknown")),
   ];
@@ -468,7 +525,8 @@ async function main() {
     } else {
       console.log(
         `${result.met ? "MET" : "NOT MET"}: text ${options.expect} after ` +
-          `${(result.elapsedMs / 1000).toFixed(1)} s, ${result.attempts} poll(s), ` +
+          `${(result.elapsedMs / 1000).toFixed(1)} s, ${result.attempts} poll(s) ` +
+          `(${result.failedPolls} failed: not a 200 snapshot), ` +
           `last ${result.status} ${result.cache ?? "-"} ${result.region ?? "-"}`,
       );
     }

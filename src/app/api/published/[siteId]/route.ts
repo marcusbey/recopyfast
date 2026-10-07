@@ -90,10 +90,8 @@ const REJECTION_MESSAGES: Record<SnapshotKeyRejection, string> = {
   non_canonical_query:
     "Query must be exactly page, language and variant, in that order, as URLSearchParams serializes them",
   invalid_page: "Page must be a canonical page path",
-  invalid_language:
-    "Language must be 1 to 64 characters without control characters",
-  invalid_variant:
-    "Variant must be 1 to 64 characters without control characters",
+  invalid_language: "Language must be non-empty, without control characters",
+  invalid_variant: "Variant must be non-empty, without control characters",
 };
 
 /**

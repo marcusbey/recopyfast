@@ -94,7 +94,10 @@ Two consequences, stated rather than assumed:
 - **One parameter set per snapshot.** The CDN keys on the query string, so the route accepts the
   three parameters in order, as `URLSearchParams` serializes them, a lowercase UUID site id, a
   canonical page path (`normalizePagePath`, and no trailing slash but `/`), and a language and
-  variant of 1–64 characters without control characters. Another order, an extra (except Next's
+  variant that are not empty and carry no control characters, of any length: v1 POST/PUT and bulk
+  import store unbounded TEXT, and the 64-character cap s65a first shipped made such published
+  rows unreachable (Devin, PR #64). The platform's URL limit is the only ceiling; the limiter
+  below is the abuse bound. Another order, an extra (except Next's
   internal keys, below), repeated or missing parameter, or an invalid value is a 400 with
   `Cache-Control: no-store`, before the limiter and before the database. This saves CDN entries;
   it is not the abuse bound.

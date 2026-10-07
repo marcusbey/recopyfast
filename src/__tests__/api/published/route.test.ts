@@ -440,6 +440,38 @@ describe("GET /api/published/[siteId] — a served snapshot", () => {
       new Set(["sites", "content_elements"]),
     );
   });
+
+  // s65a fix round 4 (Devin, PR #64). `content_elements.variant` is
+  // unconstrained TEXT, and v1 POST/PUT and bulk import store whatever the
+  // caller sent. A 64-character key cap here made such published rows
+  // unreachable: the host fell back to authored copy, which is the flash.
+  it.each([65, 500])(
+    "serves a row published under a %i-character variant",
+    async (length) => {
+      const variant = "v".repeat(length);
+      db.content_elements.push(
+        contentRow({
+          id: `long-${length}`,
+          element_id: "campaign-title",
+          variant,
+          published_content: "Campaign headline",
+        }),
+      );
+
+      const response = await published(
+        new URLSearchParams([
+          ["page", "/pricing"],
+          ["language", "en"],
+          ["variant", variant],
+        ]).toString(),
+      );
+      const body = await bodyOf(response);
+
+      expect(response.status).toBe(200);
+      expect(body.variant).toBe(variant);
+      expect(body.rows.map((row) => row.id)).toEqual([`long-${length}`]);
+    },
+  );
 });
 
 describe("retraction and freshness at the origin", () => {
@@ -562,9 +594,9 @@ describe("refusals", () => {
     ],
     ["a relative page", SITE_ID, "page=pricing&language=en&variant=default"],
     [
-      "an oversized language",
+      "a control character in the language",
       SITE_ID,
-      `page=%2Fpricing&language=${"x".repeat(65)}&variant=default`,
+      "page=%2Fpricing&language=en%0A&variant=default",
     ],
     [
       "a control character in the variant",

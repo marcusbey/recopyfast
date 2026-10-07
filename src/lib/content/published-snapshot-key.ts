@@ -57,11 +57,20 @@ const SNAPSHOT_PARAMS = ["page", "language", "variant"] as const;
  * column (promotion writes staging content). A charset rule tighter than "no
  * control characters" would therefore refuse rows that exist and are served by
  * the content GET today. What is refused: empty (every writer substitutes
- * `en`/`default` for an empty value, so no row can carry one), longer than 64
- * characters, and C0/DEL/C1 control characters, which no browser or header can
- * carry intact and which would forge log lines if echoed.
+ * `en`/`default` for an empty value, so no row can carry one) and C0/DEL/C1
+ * control characters, which no browser or header can carry intact and which
+ * would forge log lines if echoed. A row stored with one (only v1 or bulk
+ * import could write it) is unreachable here; that trade is deliberate.
+ *
+ * NO LENGTH CAP. s65a first refused values over 64 characters. Devin's review
+ * of PR #64 showed the cost: v1 POST/PUT and bulk import store any length, the
+ * authenticated content GET reads any length, so a published row under a
+ * 65-character campaign variant was unreachable here — the host rendered
+ * authored copy and the visitor saw the flash this route exists to remove.
+ * The ceiling is the platform's URL length limit; the per-IP limiter in the
+ * route is the abuse bound (ADR 046). Do not put a cap back unless every
+ * writer enforces the same one first.
  */
-const MAX_LANGUAGE_OR_VARIANT_LENGTH = 64;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
 
 export interface PublishedSnapshotKey {
@@ -95,11 +104,7 @@ export function canonicalSnapshotQuery(
 }
 
 function isValidLanguageOrVariant(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value.length <= MAX_LANGUAGE_OR_VARIANT_LENGTH &&
-    !CONTROL_CHARACTERS.test(value)
-  );
+  return value.length > 0 && !CONTROL_CHARACTERS.test(value);
 }
 
 /**

@@ -214,3 +214,22 @@ Source: round-2 re-review in `docs/reviews/s65a-published-copy-snapshot.md` (Max
 - [x] H3 (p3) — ADR 046 (lines ~95-96) and the integrator doc: Next strips internal `nxtP*` /
   `nxtI*` / `nextInternalLocale` query keys before the handler, so such "extra" parameters are
   served as the canonical key (same accepted cost class, bounded by the limiter) rather than 400.
+
+## Fix round 4 — 2026-10-07 (owner: "Fix Devin's 3 findings")
+
+Source: Devin Review on PR #64 (inline comments 4209903619, 4209903815, 4209904081).
+
+- [x] D1 (🔴) — Language/variant length: writers (v1 POST/PUT, bulk) store unbounded TEXT and the
+  authenticated GET reads it, so the snapshot's 64-character cap makes valid published rows
+  unreachable (host falls back to authored copy = the flash). Planner decision: drop the length cap
+  in `published-snapshot-key.ts`; keep the control-character and canonical-form refusals; the
+  platform's URL limit is the only ceiling (the per-IP limiter is the abuse bound, owner decision
+  2026-10-07). Tests: a 65- and a 500-character variant are accepted (parser + route); the round-2
+  e2e refused case "65-character language" is replaced by a control-character language (still
+  refused) — same test, Playwright total stays 45. Update ADR 046 / integrator doc wording on bounds.
+- [x] D2 (🟡) — `scripts/measure-published-snapshot.mjs` freshness probe: a poll only counts if it is
+  HTTP 200 with a valid snapshot envelope (`format`, `rows` array). Non-200 / malformed polls are
+  counted as failed polls and polling continues; exit non-zero if no valid response proves the
+  condition before the deadline. Test-first in `scripts/__tests__/measure-published-snapshot.test.mjs`.
+- [x] D3 (🟡) — Same script, speed mode: require status 200 (and a valid envelope) for the warm-up
+  and every measured sample; any non-200 sample fails the run with a clear message. Test-first.

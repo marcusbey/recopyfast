@@ -124,7 +124,8 @@ test.describe("published snapshot rendered by the host", () => {
     duplicated: "page=%2F&page=%2F&language=en&variant=default",
     missing: "page=%2F&language=en",
     "trailing-slash page": "page=%2Fpricing%2F&language=en&variant=default",
-    "oversized language": `page=%2F&language=${"x".repeat(65)}&variant=default`,
+    "control character in the language":
+      "page=%2F&language=en%0A&variant=default",
   };
 
   /**

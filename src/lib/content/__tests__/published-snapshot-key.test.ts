@@ -73,6 +73,10 @@ describe("parsePublishedSnapshotKey", () => {
     ],
     ["non-ASCII values", "/café", "fr", "défaut"],
     ["a 64-character variant", "/", "en", "v".repeat(64)],
+    // No length cap (s65a fix round 4): v1 POST/PUT and bulk import store
+    // unbounded TEXT, so any length a writer stored must stay reachable.
+    ["a 65-character variant", "/", "en", "v".repeat(65)],
+    ["a 500-character variant", "/", "en", "v".repeat(500)],
   ])("accepts %s", (_label, page, language, variant) => {
     const result = parsePublishedSnapshotKey(
       SITE_ID,
@@ -177,7 +181,6 @@ describe("parsePublishedSnapshotKey", () => {
   ] as const)("%s", (field, reason) => {
     it.each([
       ["empty", ""],
-      ["over 64 characters", "x".repeat(65)],
       ["a newline", "en\n"],
       ["a carriage return", "en\r"],
       ["a NUL", "en\u0000"],
