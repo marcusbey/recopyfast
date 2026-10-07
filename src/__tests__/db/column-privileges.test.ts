@@ -121,6 +121,10 @@ const HIDDEN_COLUMNS = [
   ["staging_access", "verified_origin_hash"],
 ] as const;
 
+/** Server coordination state that is not customer metadata or a credential. */
+const SERVER_ONLY_COLUMNS = [["sites", "public_content_revision"]] as const;
+const NON_WEB_COLUMNS = [...HIDDEN_COLUMNS, ...SERVER_ONLY_COLUMNS] as const;
+
 // Keep this list explicit and reviewable. Supabase documents postgres,
 // service_role, supabase_admin and supabase_etl_admin as elevated platform
 // roles; its initial-schema source gives supabase_read_only_user BYPASSRLS and
@@ -203,7 +207,9 @@ async function hasEffectiveTablePrivilege(
 }
 
 async function reviewedSchemaColumns(query: Query, table: string) {
-  const hidden = HIDDEN_COLUMNS.filter(([hiddenTable]) => hiddenTable === table)
+  const hidden = NON_WEB_COLUMNS.filter(
+    ([hiddenTable]) => hiddenTable === table,
+  )
     .map(([, column]) => column)
     .sort();
   const { rows } = await query<{ column_name: string }>(
@@ -223,7 +229,7 @@ async function reviewedSchemaColumns(query: Query, table: string) {
 async function protectedHiddenPrivilegeOffenders(query: Query) {
   const { rows } = await query<{ offender: string }>(`
     WITH hidden(table_name, column_name) AS (
-      VALUES ${HIDDEN_COLUMNS.map(
+      VALUES ${NON_WEB_COLUMNS.map(
         ([table, column]) => `('${table}', '${column}')`,
       ).join(",\n             ")}
     )
@@ -307,8 +313,19 @@ describeDb(
       }
     });
 
-    test("PUBLIC, anon and authenticated are denied every hidden column", async () => {
+    test("PUBLIC, anon and authenticated are denied every hidden and server-only column", async () => {
       expect(await protectedHiddenPrivilegeOffenders(query)).toEqual([]);
+    });
+
+    test("the public content revision remains service-only", async () => {
+      for (const role of ["anon", "authenticated"]) {
+        expect(await effectiveColumns(query, role, "sites")).not.toContain(
+          "public_content_revision",
+        );
+      }
+      expect(await effectiveColumns(query, "service_role", "sites")).toContain(
+        "public_content_revision",
+      );
     });
 
     test("protected tables remain owned by an explicitly reviewed privileged role", async () => {
@@ -340,6 +357,7 @@ describeDb(
           FROM pg_roles r
           CROSS JOIN (VALUES
             ('sites', 'api_key'),
+            ('sites', 'public_content_revision'),
             ('webhooks', 'secret'),
             ('api_keys', 'key_hash'),
             ('editor_device_grants', 'grant_hash'),
