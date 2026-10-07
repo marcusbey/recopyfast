@@ -140,6 +140,8 @@ npm run check:redis
 - CORS: `src/lib/http/public-cors.ts` (`*`, token-authenticated, never cookies) vs per-route
   `withCors(res, allowedOrigin)` (one echoed origin, with credentials). Absence of the header
   is how "no grant" is expressed. `*` is never a fallback and never pairs with credentials.
+  `GET /api/published/[siteId]` uses `public-cors.ts` with no token at all, by
+  [ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md).
 
 ## Validation
 
@@ -164,6 +166,9 @@ Service-role is an exception that must be earned per route: an explicit
 `authorizeSiteRequest` / `authorizeFirstPartySiteRequest` / `authorizeIngestRequest` call
 before any data access, plus a fail-closed per-site rate limiter. Do not write a fourth auth
 path. See [ADR 002](./docs/decisions/002-rls-tenant-boundary.md).
+`GET /api/published/[siteId]` is a named unauthenticated exception: no `authorize*` call, a
+fail-open per-IP limiter and a fixed public projection, by
+[ADR 046](./docs/decisions/046-unauthenticated-published-copy-snapshot.md) — not a pattern to copy.
 
 The one other principal that may reach the service role is a **signed-in site admin writing a
 service-role-only table from the dashboard**: IP guard → `getUser()` → fail-closed per-user limiter

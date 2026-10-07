@@ -30,7 +30,7 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("NODE_ENV=production npm run start");
   });
 
-  it("runs all 44 tests and always cleans up and uploads the redacted summary", () => {
+  it("runs all 45 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -38,11 +38,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":44');
-    expect(workflow).toContain("report.expected !== 44");
-    expect(workflow).toContain("report.total !== 44");
-    expect(workflow).toContain("report.passed !== 44");
-    expect(config).toContain("expected: 44");
+    expect(workflow).toContain('"expected":45');
+    expect(workflow).toContain("report.expected !== 45");
+    expect(workflow).toContain("report.total !== 45");
+    expect(workflow).toContain("report.passed !== 45");
+    expect(config).toContain("expected: 45");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
@@ -63,6 +63,54 @@ describe("Playwright CI contract", () => {
     expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
     expect(buildIndex).toBeGreaterThan(-1);
     expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
+  });
+
+  it("runs the snapshot freshness proof by name, with the database and PostgREST required", () => {
+    // s65a review M2: the direct-SQL freshness proof is the Freshness AC's
+    // evidence, and it is a DB suite. The plain `npm test` step records it as a
+    // "[gated]" pass, so unless a step names it with RCF_REQUIRE_TEST_DB=1, the
+    // PostgREST URL and the service key, CI never runs it at all.
+    const suite = "src/__tests__/db/published-snapshot-freshness.test.ts";
+    const steps = workflow.split(/^(?=\s+- name: )/m);
+    const step = steps.find((candidate) => candidate.includes(suite));
+    const startIndex = steps.findIndex((candidate) =>
+      /- name: Start Supabase and export local credentials\s*$/m.test(
+        candidate,
+      ),
+    );
+    const buildIndex = steps.findIndex((candidate) =>
+      /- name: Build production app\s*$/m.test(candidate),
+    );
+
+    expect(step).toBeDefined();
+    expect(step).toContain("src/__tests__/db/content-write-privileges.test.ts");
+    expect(step).toContain(
+      'RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"',
+    );
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(step).toContain('RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"');
+    expect(step).toContain(
+      'RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY"',
+    );
+    expect(startIndex).toBeGreaterThan(-1);
+    expect(steps.indexOf(step as string)).toBeGreaterThan(startIndex);
+    expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
+  });
+
+  it("runs the snapshot measurement tooling test beside the Stripe tooling test", () => {
+    // s65a review m5: `node --test` files are not Jest suites, so `npm test`
+    // never collects them. A script test that no CI step names guards nothing.
+    const mainJob = workflow.slice(
+      workflow.indexOf("\n  ci:\n"),
+      workflow.indexOf("\n  e2e:\n"),
+    );
+
+    expect(mainJob).toContain(
+      "node --test scripts/__tests__/sync-stripe-catalogue.test.mjs",
+    );
+    expect(mainJob).toContain(
+      "node --test scripts/__tests__/measure-published-snapshot.test.mjs",
+    );
   });
 
   it("disables credential-bearing browser media in CI and enables the strict reporter", () => {

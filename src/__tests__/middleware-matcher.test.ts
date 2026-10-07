@@ -127,12 +127,23 @@ const INSTALLATION_DOC_NEAR_MISSES = [
  */
 const TUNNEL_PATHS = [SENTRY_TUNNEL_ROUTE];
 
+/**
+ * s65a's published-copy snapshot (ADR 046). Vercel's CDN refuses to cache a
+ * response carrying `set-cookie`, and `auth.getUser()` below can rotate a
+ * session cookie onto any response it touches — so a visitor who happens to be
+ * signed in to ReCopyFast would make the snapshot uncacheable for that request,
+ * and every such response would be a GoTrue round trip on a host's render path.
+ */
+const PUBLISHED_SNAPSHOT_PATH =
+  "/api/published/6f1c2b9e-3d4a-4b5c-8d6e-7f8091a2b3c4";
+
 const SESSIONLESS_PATHS = [
   ...EMBED_ASSETS,
   ...CRAWLER_ASSETS,
   ...TRY_ASSETS,
   ...INSTALLATION_DOCS,
   ...TUNNEL_PATHS,
+  PUBLISHED_SNAPSHOT_PATH,
 ];
 
 beforeEach(() => {
@@ -275,4 +286,53 @@ describe("the Sentry tunnel", () => {
 
     expect(connectSrc?.split(" ")).toContain("'self'");
   });
+});
+
+describe("the published-copy snapshot (s65a)", () => {
+  /** A visitor signed in to ReCopyFast: Supabase session cookies present. */
+  function signedInRequest(pathname: string): NextRequest {
+    return {
+      url: `https://app.test${pathname}`,
+      nextUrl: new URL(pathname, "https://app.test"),
+      cookies: {
+        getAll: () => [
+          { name: "sb-access-token", value: "expired-access" },
+          { name: "sb-refresh-token", value: "refresh" },
+        ],
+        set: jest.fn(),
+      },
+    } as unknown as NextRequest;
+  }
+
+  it("never reaches GoTrue nor sets a cookie, even with a session cookie", async () => {
+    const response = (await middleware(
+      signedInRequest(PUBLISHED_SNAPSHOT_PATH),
+    )) as unknown as StubResponse;
+
+    expect(asMock(createServerClient)).not.toHaveBeenCalled();
+    expect(getUser).not.toHaveBeenCalled();
+    expect(response.cookies.set).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "default-src 'self'",
+    );
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("does reach GoTrue for the same cookie on an ordinary API path, so the above means something", async () => {
+    await middleware(signedInRequest("/api/sites"));
+
+    expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+    expect(getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["/api/published", "/api/publishedx/abc", "/api/staging/publish"])(
+    "does not broaden the snapshot bypass to %s",
+    async (pathname) => {
+      await run(pathname);
+
+      expect(asMock(createServerClient)).toHaveBeenCalledTimes(1);
+      expect(getUser).toHaveBeenCalledTimes(1);
+    },
+  );
 });
