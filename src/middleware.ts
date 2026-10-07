@@ -85,6 +85,16 @@ async function isUnentitled(
  * complete an installation depend on authentication being available, which
  * defeats the public route contract introduced by s59.
  *
+ * `/api/published/` is s65a's published-copy snapshot (ADR 046): an
+ * unauthenticated read that only works because Vercel's CDN caches it. Vercel
+ * refuses to cache any response carrying `set-cookie`, and `getUser()` below
+ * can rotate a session cookie onto whatever response it touches — so without
+ * this entry, a visitor who is also signed in to ReCopyFast would turn the
+ * snapshot into an uncacheable origin hit and a GoTrue round trip on a host's
+ * render path. The response depends on no session; the route reads no cookie.
+ * A prefix, because the site id is a path segment; the sibling `/api/published`
+ * and every other `/api/*` path keep the session-aware path.
+ *
  * These paths stay *in* `config.matcher`. Skipping the middleware entirely
  * would also skip the security headers below, and `/embed/recopyfast.js` is
  * executable JavaScript loaded cross-origin onto every customer site — the one
@@ -93,6 +103,7 @@ async function isUnentitled(
 function isSessionlessPath(pathname: string): boolean {
   return (
     pathname.startsWith("/embed/") ||
+    pathname.startsWith("/api/published/") ||
     pathname === "/docs/install" ||
     pathname === "/docs/install/agent-instructions.md" ||
     pathname === "/try" ||

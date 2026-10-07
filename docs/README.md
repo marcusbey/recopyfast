@@ -121,10 +121,11 @@ story and travel with its branch.
 
 Subordinate to [`architecture.md`](./architecture.md) above.
 
-| File                                                                | Contents                                                   |
-| ------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [`embed-authentication.md`](./architecture/embed-authentication.md) | Secure embed auth design — site tokens, grants, revocation |
-| [`script-consistency.md`](./architecture/script-consistency.md)     | Embed script build and consistency guarantees              |
+| File                                                                | Contents                                                                                                                         |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| [`embed-authentication.md`](./architecture/embed-authentication.md) | Secure embed auth design — site tokens, grants, revocation                                                                       |
+| [`script-consistency.md`](./architecture/script-consistency.md)     | Embed script build and consistency guarantees                                                                                    |
+| [`published-snapshot.md`](./architecture/published-snapshot.md)     | Rendering published copy in a host's own HTML — the s65a snapshot URL, response, ≤ 60 s bound, `data-rcf-id` anchoring (ADR 046) |
 
 ### `operations/` — how to run it
 

@@ -2142,6 +2142,18 @@ pagination. This is a latency fix for shipped behavior, not a new content source
 - [ ] Documentation does not claim zero flash: browser-side fetching still occurs
   after authored HTML can paint. No hardcoded source-copy sync or whole-page mask.
 
+## Story s61-stable-copy-loading — IN PROGRESS on its branch (PR #59)
+
+Full entry, research, plan and review travel on `feature/s61-stable-copy-loading`. Review:
+"Ship allowed: no" — production delivery misses its 200 ms hold. Re-pointing its head bootstrap
+to the s65a snapshot is a follow-up of s65a.
+
+## Story s62-versioned-public-content-cache — SUPERSEDED on the visitor read path by s65a (PR #61 parked)
+
+Its migration `20261005000000_versioned_public_content_cache.sql` is applied in production and
+lands on main through s65a AC 0. Merging PR #61 now requires rebasing onto s65a's public-row
+helper first; otherwise it reintroduces a second allow-list. Closing PR #61 is the owner's call.
+
 ## Story s63-release-dependency-patches — clear the existing production dependency gates
 
 Product owner approval, 2026-10-05: “ok start” to the performance/release plan, including
@@ -2177,3 +2189,144 @@ made main `719eb45` fail after s63/PR60 passed and shipped. No new dependency.
   Deployment identity and public health are verified afterward; no billing/content mutation.
 
 Embed allocation: 0 bytes. This security prerequisite stays separate from s59–s62.
+
+## Story s65a-published-copy-snapshot — a host can render published copy into its own HTML
+
+As a website owner, I can opt in to rendering ReCopyFast's published copy inside my own HTML
+(server, edge or build), so visitors see published copy first — no authored-copy flash, no
+visibility hold. The embed stays the zero-migration default, the editor and the fallback.
+
+Owner approval, 2026-10-06: "let's cook" after the architecture review. The browser-only path
+cannot meet s61's 200 ms hold (production content GET median 497–589 ms, 0/20 under 200 ms,
+cold first request 3.3 s+). Serves perimeter #4 (no layout shift), #13 (staging → publish) and
+#17 (public read for developers). Opt-in: angle #1 ("no rebuild, no API integration") stays
+true for every site that only installs the embed. We document the integration; we ship no SDK,
+build plugin or middleware into a customer's stack in this story.
+
+Complexity: 4 (public delivery boundary, CDN caching, migration-ledger repair, security ADR,
+browser proof). Dependencies: shipped staging → publish (#13), s51/ADR 041 public-delivery
+rule. Branch `feature/s65a-published-copy-snapshot`.
+
+Design in one line: an unauthenticated, page-scoped, CDN-cached read of the current published
+rows. Freshness comes from a bounded CDN lifetime, not from rebuilding on each writer, so no
+writer can be missed and no visitor can force rebuilds. There are no permanent versioned URLs.
+
+- [ ] AC 0 — `supabase/migrations/20261005000000_versioned_public_content_cache.sql` lands on
+  main byte-identical to the migration already applied in production (taken from s62), and the
+  local migration list matches the remote ledger. No other s62 file is merged by this story.
+- [ ] A public snapshot read for one site + page + language + variant returns exactly the rows
+  today's `GET /api/content/[siteId]` returns for the same page and fixture (same projection and
+  allow-list: never staging content, staging attributes, publisher identity or any private
+  column), proven by a parity test. Page-scoped only: no unauthenticated whole-site or page index.
+- [ ] The read needs no site token, origin, referrer or cookie. CORS is `*` without credentials.
+  Response headers are asserted exactly: CDN lifetime + stale-while-revalidate ≤ 60 s in total,
+  a strong ETag derived from the published rows, and no cookies set. The path is in the
+  middleware's `isSessionlessPath`: a middleware test shows no `auth.getUser()` call and no
+  `set-cookie` on it even when the request carries a session cookie.
+- [ ] Freshness: a test changes `published_content` by direct SQL (bypassing every app writer)
+  and the next origin read returns the new rows. The route has no second cache layer
+  (`export const revalidate`, `unstable_cache`, fetch cache, `stale-if-error`), asserted by a
+  test. Documented bound: ≤ 60 s after commit at our edge, stale-while-revalidate included.
+- [ ] Retraction: only the current published rows are ever served. A superseded value, a
+  deleted element and a deleted site disappear within the same ≤ 60 s bound, each with a test.
+  (Sites are hard-deleted; there is no "deactivated" state.)
+- [ ] Plan rule: public delivery never depends on the owner's plan (s51 AC 3, ADR 041). A lapsed
+  owner's snapshot keeps serving, with a test. No new exposure, no new lockout.
+- [ ] Abuse: the uncached origin is rate limited (public read: fail open, justified in a
+  comment). Malformed site ids, pages, languages or variants, unknown query parameters,
+  parameter-order and encoding variants are rejected before any database query; unknown but
+  well-formed keys get a short negative-cache response. A route test shows every non-canonical
+  form reaches the database zero times.
+- [ ] Speed: 20 fresh-connection production requests from the operator's machine (edge region
+  recorded) are all CDN hits with server wait (TTFB minus TLS) p50 ≤ 80 ms and max < 200 ms,
+  and a reused-connection sample has TTFB p50 ≤ 50 ms. Recorded beside a same-session sample of
+  today's content GET. Baseline from `/api/pricing` hits on 2026-10-06: server wait ≈ 60 ms,
+  reused connection 16–65 ms. The same operator session probes freshness end to end: one
+  publish and one element deletion are each visible / gone at the edge within ≤ 60 s.
+  Measured, not inferred from green tests.
+- [ ] No flash, proven in this repo: a Playwright fixture page renders the snapshot
+  server-side with `data-rcf-id` anchors, then loads the embed. Anchored elements show no text
+  change, and no stored `original_content` changes (the embed must not record published copy as
+  authored copy).
+- [ ] An ADR records unauthenticated published-copy delivery: why token/origin checks are
+  dropped for this read only, why there are no permanent versioned URLs (retraction), the
+  rejected options (CDN on the authenticated content GET — ineligible while
+  Authorization-bearing; Redis behind fresh authorization — s62) and s62's fate. Integrator
+  documentation states the URL format, the ≤ 60 s bound (at our edge — the host's own HTML
+  caching adds to it), `data-rcf-id` anchoring and that the embed alone is not flash-free.
+- [ ] The public-row allow-list lives in one new helper used by the snapshot route. The
+  authenticated content GET keeps its inline projection until s65c; the parity test guards
+  drift between the two. No behavior change to that GET or the embed runtime, proven by their
+  existing suites. Lint, type-check, format, build and full tests pass.
+
+Agentic notes:
+- s62 (PR #61, never entered in this backlog) is SUPERSEDED on the visitor read path by s65a.
+  Only its applied migration carries over (AC 0). PR #61 stays parked; closing it is the owner's
+  call. Port `publicRow` / `validateRows` / `PRIVATE_ROW_FIELDS` from its
+  `src/lib/content/published-content-cache.ts` into the single helper; do not merge that file.
+- Today's projection is in `src/app/api/content/[siteId]/route.ts:393-442`. Open PRs #59 and #61
+  both edit that route: s65a does not touch it (the parity test guards drift); adopting the
+  helper there is a follow-up after those PRs settle.
+- Published-row writers today: staging publish RPC (`src/app/api/staging/publish/route.ts:178`),
+  bulk import/update, v1 POST/PUT/DELETE, site DELETE, and embed discovery
+  (`route.ts:92-94`, `:637-642`, inserts rows with `published_content` set). Staging-only:
+  A/B promotion (`src/lib/ab-testing/lifecycle.ts:186-195`), version restore, styles/apply.
+  The TTL design makes this list informational, not load-bearing.
+- Element identity: the runtime honours an authored `data-rcf-id` verbatim
+  (`public/embed/recopyfast.src.js:872`); otherwise it hashes page path + structural DOM path
+  (:879), which a server cannot recompute. Integrators pin existing ids as anchors.
+- Hosting is settled in research (unauthenticated Next route behind Vercel's CDN vs Supabase
+  Storage). No Cloudflare Workers (stack rule), no new dependency without justification.
+
+Follow-ups, not this story: s65b; s65c; the aicompoz.com server integration (separate site-repo story
+and PR, replacing PR #31's script-only install as the zero-flash path); re-pointing s61's head
+bootstrap to the snapshot; server-side A/B; keeping or dropping s62's revision triggers.
+
+Embed allocation: 0 bytes.
+
+## Story s65b-snapshot-change-webhook — a host learns when to rebuild after published copy changes
+
+As a website owner whose site builds statically or caches rendered HTML for long periods, I
+receive a signed notification when published copy changes, so I can rebuild or revalidate
+instead of polling. (Hosts that revalidate on a timer need nothing beyond s65a's ≤ 60 s bound;
+this does not promise "within seconds": dispatch runs on the `*/5` cron, ADR 010.)
+
+Complexity: 4 (two existing dispatch defects fixed, new event, payload merge). Dependencies:
+s65a, outgoing webhooks (#18, ADR 010). Serves perimeter #18 ("static-site customers who must
+trigger a rebuild"). Branch `feature/s65b-snapshot-change-webhook`.
+
+- [ ] A new opt-in event `content.published` fires for the writers that change what visitors
+  see: staging publish, bulk import/update, v1 POST/PUT/DELETE and AI translate. Embed discovery
+  does not fire it (it records authored text the host already renders). Each writer has a test,
+  including the negative one. Existing subscribers receive nothing new unless they opt in.
+- [ ] Backward compatibility: a test pins every existing `content.updated` envelope and payload
+  key and type; `content.updated` keeps firing exactly where it fires today.
+- [ ] The payload carries the site id, the affected page paths merged across the coalescing
+  window (or an explicit "all pages" flag when unknown or over a cap) and the s65a URL template.
+  Delivery stays deferred, coalesced and signed, never on a writer's critical path.
+- [ ] Lost update fixed: an event recorded while a sweep is delivering the previous payload is
+  delivered in a later sweep, with a test. Today `sweepDueDispatches` clears `pending_*`
+  unconditionally after sending (`src/lib/webhooks/manager.ts:380-399`).
+- [ ] The pending-slot model carries each subscribed event type correctly: a webhook subscribed
+  to both `content.updated` and `content.published` receives each under its own label, with a test.
+- [ ] Worst-case delivery latency (cron interval + coalescing window) is verified in production
+  and documented next to s65a's bound.
+
+Agentic notes: marker `recordQualifyingEvent` (`src/lib/webhooks/manager.ts:307-346`, latest
+payload replaces earlier at :337-339; event type set once per window at :342); sweep
+(`:380-403`); only caller today `src/app/api/staging/publish/route.ts:214`; writers in
+`src/app/api/bulk/{update,import}/route.ts`, `src/app/api/v1/content/route.ts`,
+`src/app/api/ai/translate/route.ts`; cron `vercel.json:7-9`; ADR 010.
+
+Embed allocation: 0 bytes.
+
+## Story s65c-content-get-adopts-public-helper — one public projection
+
+As the maintainer, the authenticated content GET uses s65a's public-row helper, so there is
+exactly one public projection. Complexity: 1. Dependencies: s65a merged, and PRs #59/#61
+settled (both edit `src/app/api/content/[siteId]/route.ts`).
+
+- [ ] `GET /api/content/[siteId]` builds its rows with the s65a helper; its existing suite and
+  s65a's parity test pass unchanged.
+
+Embed allocation: 0 bytes.
