@@ -56,7 +56,7 @@ in ADR 046. AC 0 lands s62's applied migration byte-identical.
    against https://vercel.com/docs/caching/cache-control-headers before coding; total ≤ 60 s;
    no `stale-if-error`) → CORS via `src/lib/http/public-cors.ts`. OPTIONS is the existing 204
    preflight. No cookies read or set; no `revalidate`/`unstable_cache`/fetch cache. Service-role
-   client with the house-style comment naming ADR 046 as the single exception to the
+   client with the house-style comment naming ADR 046 as the single exception [superseded by H1: "a named exception"] to the
    `authorize*`-before-service-role rule. Tests: exact headers; no `set-cookie`; zero DB calls for
    every non-canonical form from task 3; 404 unknown site; lapsed-owner site served (no plan
    lookup at all); superseded value and deleted element absent; empty page → 200 `rows: []`;
@@ -175,7 +175,7 @@ Source: `docs/reviews/s65a-published-copy-snapshot.md`. The amended Abuse AC is 
 - [x] F4 (m2) — Integrator doc and ADR: shared rows (authored `data-rcf-id` anchors are stored
   with `page_path` NULL) are returned for every page; fix "an unknown page is 200 with rows: []",
   and note payload growth with site-wide anchors toward the 1 MiB cap.
-- [x] F5 (m4) — One-line pointers to ADR 046 in AGENTS.md "Data access" (the single exception to
+- [x] F5 (m4) — One-line pointers to ADR 046 in AGENTS.md "Data access" (the single exception [superseded by H1] to
   authorize-before-service-role) and in the header comment of `src/lib/http/public-cors.ts`.
   No behaviour change to the shared CORS helper.
 - [x] F6 (m5) — Run `scripts/__tests__/measure-published-snapshot.test.mjs` in CI next to the
