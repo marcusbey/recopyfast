@@ -101,6 +101,22 @@ Other statuses: `400` for another parameter order or set, or an invalid value (n
 response (never cached). On anything but `200`, render your authored copy — the embed will still
 apply published copy in the browser.
 
+## Request budget
+
+Only CDN misses reach our origin, and the origin allows **200 uncached requests per minute per
+client IP** (the `IP_GENERAL` preset, counted in its own `published/read` bucket, in fixed
+one-minute windows). Past that it answers `429`, with a `Retry-After` header in seconds, until
+the next window. CDN hits do not count, but every distinct page, language and variant is a miss
+the first time, and each of our deploys starts the CDN cold.
+
+- **Static builds** that fetch many pages at once: pace the requests (200 a minute is just over
+  3 a second from one IP), and on `429` wait `Retry-After` and retry instead of building that
+  page with authored copy.
+- **Hosts behind shared egress IPs** (serverless platforms where many functions leave through
+  the same addresses) share the budget with everything else sent from that IP, including
+  traffic you do not control. Retry after `Retry-After` where your render can wait; otherwise
+  render authored copy, as for any other non-`200`.
+
 ## Anchoring: `data-rcf-id`
 
 The embed matches rows to elements by id. For an element without a `data-rcf-id`, it derives the

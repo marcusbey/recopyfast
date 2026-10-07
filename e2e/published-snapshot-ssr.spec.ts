@@ -114,13 +114,17 @@ test.describe("published snapshot rendered by the host", () => {
    * actually gets.
    *
    * Refused (400, `no-store`, never edge-cached): another parameter set or
-   * order. These survive Next's re-serialization and must still cost nothing.
+   * order, and an invalid value. These survive Next's re-serialization (a
+   * value check sees the decoded value, which re-serializing cannot repair)
+   * and must still cost nothing.
    */
   const REFUSED_QUERIES: Record<string, string> = {
     reordered: "language=en&page=%2F&variant=default",
     extra: "page=%2F&language=en&variant=default&cb=1",
     duplicated: "page=%2F&page=%2F&language=en&variant=default",
     missing: "page=%2F&language=en",
+    "trailing-slash page": "page=%2Fpricing%2F&language=en&variant=default",
+    "oversized language": `page=%2F&language=${"x".repeat(65)}&variant=default`,
   };
 
   /**

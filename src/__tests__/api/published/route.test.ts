@@ -542,6 +542,13 @@ describe("refusals", () => {
       SITE_ID,
       "language=en&page=%2Fpricing&variant=default",
     ],
+    // Route-level only. These two spellings are refused when the handler is
+    // given the raw query, as here. A real Next server re-serializes the query
+    // before the handler runs, so in production they arrive as
+    // `page=%2Fpricing` and are served as the canonical key (owner decision
+    // 2026-10-07, ADR 046; asserted on `next start` by
+    // e2e/published-snapshot-ssr.spec.ts). Kept because the parser must still
+    // refuse them wherever the raw query is visible.
     ["a literal slash", SITE_ID, "page=/pricing&language=en&variant=default"],
     [
       "lowercase percent hex",

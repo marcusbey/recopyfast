@@ -6,6 +6,15 @@
  * would be its own cache entry and its own database read. These tests pin the
  * single accepted spelling and enumerate the variants that must be refused
  * before any work is done.
+ *
+ * Parser-level only for the percent-encoding spellings under "query shape"
+ * (a literal slash, lowercase hex, `%20` for `+`, `%65n` for `en`, a trailing
+ * `&`): the parser refuses them on the raw string, as here, but a real Next
+ * server re-serializes the query before the route handler runs, so in
+ * production they arrive canonical and are served as the canonical key (owner
+ * decision 2026-10-07, ADR 046; asserted on `next start` by
+ * e2e/published-snapshot-ssr.spec.ts). Parameter order, extra, repeated and
+ * missing parameters, and every value check, still refuse in production.
  */
 import {
   canonicalSnapshotQuery,

@@ -7,8 +7,9 @@
   - [ADR 002](./002-rls-tenant-boundary.md) and AGENTS.md "Data access" — adds one named
     exception to "an explicit `authorize*` call before any service-role data access": the
     snapshot read `GET /api/published/[siteId]`, and nothing else. ADR 002's body is not
-    edited; AGENTS.md "Data access" and the header of `src/lib/http/public-cors.ts` carry a
-    one-line pointer here, so a reader applying either rule finds the exception.
+    edited; AGENTS.md ("Data access" and the CORS line of "API routes") and the header of
+    `src/lib/http/public-cors.ts` carry a one-line pointer here, so a reader applying any of
+    those rules finds the exception.
 - Numbering: 043–045 are taken on the unmerged s61/s62 branches (045 is s62's
   "versioned public content cache"); expect to renumber if one of them merges first.
 

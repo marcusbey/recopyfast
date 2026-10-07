@@ -162,11 +162,13 @@ Source: `docs/reviews/s65a-published-copy-snapshot.md`. The amended Abuse AC is 
   `RCF_REQUIRE_TEST_DB=1`, the PostgREST URL and the service key, in the e2e-job step that already
   does this for `content-write-privileges`. It must fail CI if the database is unreachable, never
   pass as `[gated]`.
-- [ ] F2 (M1) — Align code comments (`published-snapshot-key.ts:12`, `route.ts:209`), ADR 046 and
+- [x] F2 (M1) — Align code comments (`published-snapshot-key.ts:12`, `route.ts:209`), ADR 046 and
   the integrator doc with the amended AC: the limiter is the abuse bound; encoding spellings are
   served canonical. Add a real-server check (Playwright `request.get` against the running app,
   inside the existing s65a spec — no new spec, count unchanged): reordered/extra/duplicate/missing
   params → 400 `no-store`; `%2F`/`%2f` page spelling → 200 with the same body and ETag as canonical.
+  Real-server half proven in CI run 37633742095 at `4966659`: the s65a spec passed on `next start`,
+  strict summary 45/45.
 - [x] F3 (m1) — ADR 046: drop "the audience is the same"; state that the site id also travels in
   webhook envelopes and dashboard URLs, so a not-yet-public site's published rows reach a wider
   audience than token holders.
@@ -181,3 +183,20 @@ Source: `docs/reviews/s65a-published-copy-snapshot.md`. The amended Abuse AC is 
 
 Interdicts unchanged. m6 (framing edits on the feature branch) is a coordinator call: kept, same
 precedent as s61; the stories changes merge with this PR.
+
+## Fix round 2 — 2026-10-07 (owner: "Fix minors, then ship")
+
+Source: the re-review in `docs/reviews/s65a-published-copy-snapshot.md` (Max severity minor, Ship allowed yes).
+
+- [x] G1 (n1) — Tick F2 above, citing CI run 37633742095 (s65a spec passed on `next start`, strict 45/45).
+- [x] G2 (n2) — In `src/__tests__/api/published/route.test.ts`, mark the "literal slash" and
+  "lowercase percent hex" refusal cases as route-level only (Next re-serializes them before the
+  handler, so production serves them canonical — see the s65a Playwright spec); same note in the
+  parser test header. Comments only; assertions unchanged.
+- [x] G3 (n3) — Add a trailing-slash page and an oversized language to the real-server refused
+  queries in `e2e/published-snapshot-ssr.spec.ts` (same test, Playwright total stays 45), so the
+  amended AC's "same refusals hold on a real `next start` server" covers value checks too.
+- [x] G4 (n4) — AGENTS.md "API routes" CORS line: add the ADR 046 exception pointer.
+- [x] G5 (n5) — `docs/architecture/published-snapshot.md`: state the uncached budget
+  (`IP_GENERAL`, 200 requests/min per IP, `published/read` bucket) and advise pacing/retry for
+  static builds and shared egress IPs.
