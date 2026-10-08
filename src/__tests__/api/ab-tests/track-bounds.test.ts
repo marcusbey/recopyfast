@@ -8,7 +8,9 @@
  * can run `checkTestCompletion` → `promoteWinner`, which stages content. So the
  * bounds are refused with 400 BEFORE any database call (the authorizer's
  * `sites` lookup included), and a conversion counts once per (visitor, test),
- * and only for a visitor with a recorded view of that test.
+ * and only for a visitor bucketed into that test or with a view of it (PR #65
+ * review D1: the view and the conversion are separate beacons and may land in
+ * either order).
  *
  * The accepted fixtures are copied from what the embed builds
  * (public/embed/recopyfast.src.js:3437-3495, visitor ids from :3238-3241): the
@@ -58,6 +60,34 @@ type Query = {
 const queries: Query[] = [];
 const recordedViews = new Set<string>();
 const recordedConversions = new Set<string>();
+/** `visitor_buckets` rows, as `<site_id>:<visitor_id>:<test_id>`. */
+const bucketRows = new Set<string>();
+
+/**
+ * A `visitor_buckets` lookup finds a row only when every filter it carries
+ * matches one: a lookup that names no site would match any site's row.
+ */
+function respondToBucketLookup(query: Query) {
+  const found = Array.from(bucketRows).some((row) => {
+    const [site, visitor, test] = row.split(":");
+    const { site_id, visitor_id, test_id } = query.filters;
+    return (
+      (site_id === undefined || site_id === site) &&
+      (visitor_id === undefined || visitor_id === visitor) &&
+      (test_id === undefined || test_id === test)
+    );
+  });
+  return { count: found ? 1 : 0, data: null, error: null };
+}
+
+/** Inserted rows are recorded, so a later request in the same test sees them. */
+function recordInsert(rows: Array<Record<string, unknown>>) {
+  for (const row of rows) {
+    const pair = `${row.visitor_id}:${row.test_id}`;
+    if (row.event_type === "view") recordedViews.add(pair);
+    if (row.event_type === "conversion") recordedConversions.add(pair);
+  }
+}
 
 function respond(query: Query) {
   if (query.table === "sites") {
@@ -75,7 +105,11 @@ function respond(query: Query) {
       error: null,
     };
   }
-  if (query.inserted) return { data: null, error: null };
+  if (query.table === "visitor_buckets") return respondToBucketLookup(query);
+  if (query.inserted) {
+    recordInsert(query.inserted);
+    return { data: null, error: null };
+  }
   // ab_test_results counts. The running total (no visitor filter) answers 0,
   // which keeps the significance check out of this suite.
   const pair = `${query.filters.visitor_id}:${query.filters.test_id}`;
@@ -171,6 +205,7 @@ beforeEach(() => {
   queries.length = 0;
   recordedViews.clear();
   recordedConversions.clear();
+  bucketRows.clear();
   (createServiceRoleClient as jest.Mock).mockImplementation(serviceClient);
   (enforceRateLimit as jest.Mock).mockResolvedValue(null);
 });
@@ -454,6 +489,13 @@ describe("POST /api/ab-tests/track — an event name the public API can send is 
       "sign\u0000up\u0007\n\u009f",
       "signup",
     ],
+    [
+      // PR #65 review D3: stored as a `\ud800` escape, Postgres jsonb refuses
+      // the row — and with it the whole beacon.
+      "a name with a lone surrogate has it replaced by U+FFFD",
+      "signup\uD800",
+      "signup�",
+    ],
   ];
 
   it.each(cases)(
@@ -560,5 +602,101 @@ describe("POST /api/ab-tests/track — one conversion per visitor per test, afte
       deduplicated: 1,
     });
     expect(insertedRows()).toHaveLength(0);
+  });
+});
+
+/**
+ * PR #65 review D1. The embed sends a view and a conversion as two separate
+ * `sendBeacon` calls (`trackImpressions`, recopyfast.src.js:3454-3475;
+ * `trackConversion`, :3478-3501), and nothing orders their arrival: a
+ * conversion can be handled before its view has committed. Requiring a
+ * recorded view dropped that conversion for good — `sendBeacon` ignores the
+ * answer. The proof of exposure is the `visitor_buckets` row the bucket route
+ * persists before it answers (bucket/[siteId]/route.ts:209-229), which the
+ * embed awaits before it can send either beacon (:958-963, :3278-3288; both
+ * track methods skip a test with no assignment, :3459-3460, :3483-3484).
+ */
+describe("POST /api/ab-tests/track — a bucketed visitor's conversion counts whatever order the beacons land in", () => {
+  const bucket = (visitorId: string, testId: string, siteId = SITE_ID) =>
+    bucketRows.add(`${siteId}:${visitorId}:${testId}`);
+
+  it("records a conversion delivered before its view, then records the view", async () => {
+    bucket(UUID_VISITOR, TESTS[0].test);
+
+    const conversion = await POST(trackRequest([conversionEvent()]));
+    const view = await POST(trackRequest([viewEvent(0)]));
+
+    await expect(conversion.json()).resolves.toEqual({
+      recorded: 1,
+      deduplicated: 0,
+    });
+    await expect(view.json()).resolves.toEqual({
+      recorded: 1,
+      deduplicated: 0,
+    });
+    expect(insertedRows()).toEqual([
+      expect.objectContaining({
+        event_type: "conversion",
+        visitor_id: UUID_VISITOR,
+        test_id: TESTS[0].test,
+      }),
+      expect.objectContaining({
+        event_type: "view",
+        visitor_id: UUID_VISITOR,
+        test_id: TESTS[0].test,
+      }),
+    ]);
+  });
+
+  it("still counts one conversion per bucketed visitor per test across requests", async () => {
+    bucket(UUID_VISITOR, TESTS[0].test);
+
+    await POST(trackRequest([conversionEvent()]));
+    const second = await POST(trackRequest([conversionEvent()]));
+
+    await expect(second.json()).resolves.toEqual({
+      recorded: 0,
+      deduplicated: 1,
+    });
+    expect(insertedRows()).toHaveLength(1);
+  });
+
+  it("does not count a conversion from a visitor with no bucket row and no view of that test", async () => {
+    // Bucketed for another test, and another visitor bucketed for this one:
+    // neither is this visitor's exposure to this test.
+    bucket(UUID_VISITOR, TESTS[1].test);
+    bucket(RCF_VISITOR, TESTS[0].test);
+
+    const response = await POST(trackRequest([conversionEvent()]));
+
+    await expect(response.json()).resolves.toEqual({
+      recorded: 0,
+      deduplicated: 1,
+    });
+    expect(insertedRows()).toHaveLength(0);
+  });
+
+  it("reads buckets only for the authorized site, after its ownership of the test is proven", async () => {
+    bucket(UUID_VISITOR, TESTS[0].test);
+
+    await POST(trackRequest([conversionEvent()]));
+
+    const tables = queries.map((query) => query.table);
+    const bucketLookups = queries.filter(
+      (query) => query.table === "visitor_buckets",
+    );
+    expect(bucketLookups).not.toHaveLength(0);
+    for (const lookup of bucketLookups) {
+      expect(lookup.filters).toEqual(
+        expect.objectContaining({
+          site_id: SITE_ID,
+          test_id: TESTS[0].test,
+          visitor_id: UUID_VISITOR,
+        }),
+      );
+    }
+    expect(tables.indexOf("ab_tests")).toBeLessThan(
+      tables.indexOf("visitor_buckets"),
+    );
   });
 });

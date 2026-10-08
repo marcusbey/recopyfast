@@ -29,6 +29,8 @@ stay. M3b: a request that loses the compare-and-set re-reads and retries while t
 bounded to 6 rounds (reviewer-proven: never more than 5 comparisons, a correct 5th guess consumes
 exactly once).
 
+PR #65 review (Devin): D1 — "shown the test" is proven by the visitor's `visitor_buckets` row for it (persisted by the bucket route, which the embed awaits before any beacon), a recorded view, or a view in the same batch, because the view and conversion beacons are separate `sendBeacon` calls that race; one conversion per visitor per test unchanged. D3 — `coerceText` replaces lone surrogates with U+FFFD before measuring. D4 — `readBoundedJson` refuses a `Content-Length` over the cap unread and otherwise stops reading the stream one chunk past it.
+
 ## Target story
 
 `docs/stories.md` → s68b. Outbound fetches never follow redirects (M1, M10); bulk find/replace is

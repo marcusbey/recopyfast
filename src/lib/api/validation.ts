@@ -51,24 +51,62 @@ export async function readJsonObject(
 }
 
 /**
+ * The body as UTF-8 text, counted as it streams in: `null` as soon as the
+ * running byte total passes `maxBytes` — the stream is cancelled and nothing
+ * more is read, so at most `maxBytes` plus one chunk is ever held. Decoded
+ * like `request.text()` (replacement characters, leading BOM dropped); the
+ * decoder's `stream` mode keeps a character split across chunks whole.
+ */
+async function readCappedText(
+  request: Request,
+  maxBytes: number,
+): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+/**
  * Read a JSON body of any shape, refusing it unparsed when it is larger than
- * `maxBytes`. Measured on the bytes actually read, never on `Content-Length`,
- * which says whatever the client wants (same reasoning as bulk/import).
+ * `maxBytes`.
+ *
+ * PR #65 review D4: this used to `await request.text()` and compare the length
+ * afterwards, so the bound was checked only once the whole body — whatever
+ * size the client chose — sat in memory. Now a declared `Content-Length` over
+ * the cap is refused before a byte is read, and otherwise the bytes are
+ * counted as they arrive and the read stops one chunk past the cap. The header
+ * only ever refuses early: a client can understate it, so the count, never the
+ * header, is what lets a body through (same reasoning as bulk/import).
  */
 export async function readBoundedJson(
   request: Request,
   maxBytes: number,
 ): Promise<ValidationResult<unknown>> {
-  let text: string;
+  const tooLarge = `Request body exceeds ${maxBytes} bytes`;
+  const declaredBytes = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    return fail(tooLarge);
+  }
+
+  let text: string | null;
   try {
-    text = await request.text();
+    text = await readCappedText(request, maxBytes);
   } catch {
     return fail("Request body could not be read");
   }
-
-  if (Buffer.byteLength(text, "utf8") > maxBytes) {
-    return fail(`Request body exceeds ${maxBytes} bytes`);
-  }
+  if (text === null) return fail(tooLarge);
 
   try {
     return { ok: true, value: JSON.parse(text) as unknown };
@@ -365,10 +403,17 @@ const TEXT_CONTROL_CHARACTERS = new RegExp(TEXT_CONTROL_PATTERN.source, "g");
  * Free text the caller may send loosely, coerced to a bounded string instead
  * of refused — the text twin of `numberOrDefault`. A string is kept; a number
  * or a boolean goes through `String()`; anything else (null, an object, an
- * array) becomes `fallback`, never "[object Object]". Control characters are
- * stripped, then the text is cut on a whole character so that, written inside
- * a JSON string, it takes at most `maxJsonBytes` UTF-8 bytes (escapes counted)
- * — the measure a byte bound on the stored JSON applies.
+ * array) becomes `fallback`, never "[object Object]". A lone UTF-16 surrogate
+ * becomes U+FFFD and control characters are stripped, then the text is cut on
+ * a whole character so that, written inside a JSON string, it takes at most
+ * `maxJsonBytes` UTF-8 bytes (escapes counted) — the measure a byte bound on
+ * the stored JSON applies.
+ *
+ * Lone surrogates (PR #65 review D3): a JS string may hold half a pair, which
+ * `JSON.stringify` writes as a `\ud800` escape — and Postgres `jsonb` refuses
+ * that escape, so one stray code unit failed the insert of every row beside
+ * it. `toWellFormed` replaces each unpaired surrogate and leaves valid pairs
+ * alone; it runs before the byte count, so the bound measures what is stored.
  */
 export function coerceText(
   raw: unknown,
@@ -383,7 +428,8 @@ export function coerceText(
 
   let kept = "";
   let bytes = 0;
-  for (const character of text.replace(TEXT_CONTROL_CHARACTERS, "")) {
+  const cleaned = text.toWellFormed().replace(TEXT_CONTROL_CHARACTERS, "");
+  for (const character of cleaned) {
     bytes += Buffer.byteLength(JSON.stringify(character), "utf8") - 2;
     if (bytes > options.maxJsonBytes) break;
     kept += character;

@@ -249,18 +249,60 @@ async function hasRecordedEvent(
 }
 
 /**
+ * Whether the bucket route assigned this visitor a variant of this test.
+ *
+ * Scoped to the AUTHORIZED site and to a test that `verifyEventsBelongToSite`
+ * has already proven is that site's (it runs before this): the service client
+ * bypasses RLS, so the filters are the tenant boundary — never a read of
+ * another site's assignments.
+ */
+async function isBucketed(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  siteId: string,
+  event: TrackEvent,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("visitor_buckets")
+    .select("id", { count: "exact", head: true })
+    .eq("site_id", siteId)
+    .eq("test_id", event.test_id)
+    .eq("visitor_id", event.visitor_id);
+
+  if (error) throw new Error(`A/B bucket lookup failed: ${error.message}`);
+  return (count ?? 0) > 0;
+}
+
+/**
  * s68b M5 (owner decision 2026-10-08): one conversion per visitor per test,
- * counted only after that visitor viewed the test.
+ * counted only after that visitor was shown the test.
  *
  * Conversions were counted as rows (lifecycle.ts:56-64) keyed on a
  * `visitor_id` the caller chooses, so one copied token could post conversions
- * until a variant "won" and `promoteWinner` staged it. Now a forged conversion
- * needs a forged view first, and counts once per forged visitor. A view in the
- * same batch counts as recorded: it is inserted with the conversion. Refused
+ * until a variant "won" and `promoteWinner` staged it. Now a conversion counts
+ * once per visitor, and only for a visitor with proof of exposure. Refused
  * conversions are reported in `deduplicated`, like repeated views.
+ *
+ * PROOF OF EXPOSURE IS THE BUCKET ROW, a recorded view, or a view in this
+ * batch (PR #65 review D1). This first shipped as "a recorded view" only — and
+ * the embed sends the view and the conversion as two separate `sendBeacon`
+ * calls (`trackImpressions`, recopyfast.src.js:3454-3475; `trackConversion`,
+ * :3478-3501). Nothing orders their arrival: a conversion handled before its
+ * view committed was refused, and `sendBeacon` never sees the answer, so the
+ * conversion was lost for good. The `visitor_buckets` row is written by
+ * `GET /api/ab-tests/bucket/[siteId]` before it answers 200 (it 500s when the
+ * write fails, bucket/[siteId]/route.ts:209-229), and the embed awaits that
+ * answer before either beacon can fire (init, :958-963; bucketVisitor,
+ * :3278-3288) — both track methods skip any test the server has not assigned
+ * (:3459-3460, :3483-3484). So the row predates every conversion the embed can
+ * send. Do not narrow this back to "a recorded view".
+ *
+ * The one embed path with no row: the bucket call failing on the network
+ * (:3306-3359) falls back to client-side assignment, and such a visitor's
+ * conversion still needs its view — recorded, or in the same batch.
  */
 async function countableConversions(
   supabase: ReturnType<typeof createServiceRoleClient>,
+  siteId: string,
   conversions: TrackEvent[],
   views: TrackEvent[],
 ): Promise<TrackEvent[]> {
@@ -277,9 +319,11 @@ async function countableConversions(
         view.visitor_id === conversion.visitor_id &&
         view.test_id === conversion.test_id,
     );
-    const viewed =
-      viewedInBatch || (await hasRecordedEvent(supabase, conversion, "view"));
-    if (!viewed) continue;
+    const exposed =
+      viewedInBatch ||
+      (await isBucketed(supabase, siteId, conversion)) ||
+      (await hasRecordedEvent(supabase, conversion, "view"));
+    if (!exposed) continue;
     if (await hasRecordedEvent(supabase, conversion, "conversion")) continue;
 
     countable.push(conversion);
@@ -458,8 +502,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Clicks are recorded as sent; conversions count once per (visitor, test)
-    // after a view (countableConversions); views are deduplicated per
-    // (visitor_id, test_id) below.
+    // for a visitor bucketed into or shown the test (countableConversions);
+    // views are deduplicated per (visitor_id, test_id) below.
     const viewEvents = events.filter((e) => e.event_type === "view");
     const clickEvents = events.filter((e) => e.event_type === "click");
     const conversionEvents = events.filter(
@@ -467,7 +511,12 @@ export async function POST(request: NextRequest) {
     );
     const eventsToInsert: TrackEvent[] = [
       ...clickEvents,
-      ...(await countableConversions(supabase, conversionEvents, viewEvents)),
+      ...(await countableConversions(
+        supabase,
+        authorizedSiteId,
+        conversionEvents,
+        viewEvents,
+      )),
     ];
 
     if (viewEvents.length > 0) {
