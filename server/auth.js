@@ -285,12 +285,26 @@ async function resolveStagingGrant(supabase, siteId, stagingToken, { userAgent }
     // case the invite form was given. TOMBSTONE — s07a review MAJOR 1, closed
     // in s68c: this compared `access.email` verbatim, so removing
     // `john@example.com` never reached a socket opened as `John@Example.com`.
-    const { data: editor } = await supabase
+    const { data: editor, error: editorError } = await supabase
       .from('site_editors')
       .select('revoked_at')
       .eq('site_id', siteId)
       .eq('email', access.email.trim().toLowerCase())
       .maybeSingle();
+
+    // Fail CLOSED, as HTTP's twin does (`isEditorRevoked`,
+    // src/lib/auth/staging-access.ts). TOMBSTONE — s68c review MAJOR 1: this
+    // destructured `data` alone, so a lookup that FAILED read as "no directory
+    // row" — and absent is not revoked. On a partial database failure a removed
+    // editor verified from the same browser was admitted to the staging room,
+    // or survived the sweep, while every HTTP route refused them. A read that
+    // did not answer "was this editor removed" has not answered "no". Pinned by
+    // the "both real validators" parity table and the integration cases
+    // "…when the directory cannot be read".
+    if (editorError) {
+      console.error('[auth] site_editors lookup failed:', editorError.message);
+      return { valid: false, error: 'Editor access could not be verified' };
+    }
 
     // Absent is not revoked: a staging link can exist without a directory row.
     // Present-and-stamped is.

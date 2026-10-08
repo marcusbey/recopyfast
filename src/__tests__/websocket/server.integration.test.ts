@@ -1511,6 +1511,53 @@ describe("revocation reaches a live socket", () => {
     expect(editor.authErrors[0]?.error).toMatch(/revoked/i);
   });
 
+  /**
+   * s68c review MAJOR 1. The `site_editors` read discarded its `error`, so a
+   * lookup that failed read as "no directory row" — and absent is not revoked.
+   * On a partial database failure a removed editor was admitted to the staging
+   * room, or survived the sweep. HTTP's twin (`isEditorRevoked`) fails closed;
+   * "was this editor removed" left unanswered is not "no" on either side.
+   */
+  it("refuses a staging socket at the handshake when the directory cannot be read", async () => {
+    db.failingReads.add("site_editors");
+
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    const handshake = track(socket);
+
+    expect(await handshake.refused()).toBe(
+      "Editor access could not be verified",
+    );
+    expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
+  });
+
+  it("drops an open staging socket within one sweep once the directory cannot be read", async () => {
+    const editor = await connectEditor();
+
+    db.failingReads.add("site_editors");
+
+    await waitFor(
+      () => editor.socket.disconnected,
+      "the sweep to drop the socket it could not re-verify",
+    );
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
+      "the server to remove the dropped socket from the staging room",
+    );
+    expect(editor.authErrors[0]?.error).toBe(
+      "Editor access could not be verified",
+    );
+  });
+
   it("applies the same rule to an edit-session grant", async () => {
     const editor = await connectEditor({ editToken: EDIT_TOKEN });
 

@@ -11,9 +11,18 @@ import {
   type StagingDeviceFingerprint,
 } from "@/lib/auth/staging-device";
 import crypto from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type StagingPermission = "view" | "edit" | "publish" | "admin";
 export type AccessType = "invite" | "link";
+
+/**
+ * Why `createStagingAccess` refuses an invite to an address the owner removed
+ * as an editor. Read by the owner in the dashboard, and matched by
+ * `POST /api/staging/access` to answer 409.
+ */
+export const REMOVED_EDITOR_INVITE_MESSAGE =
+  "This address was removed as an editor of this site. Re-add them as an editor before sending a staging invite.";
 
 // s38 removed authenticated access to the device fingerprints stored beside a
 // staging invite. A default returning/list projection asks PostgREST for those
@@ -106,6 +115,25 @@ export class StagingAccessManager {
       // For invite type, email is required
       if (params.accessType === "invite" && !params.email) {
         throw new Error("Email is required for invite-type access");
+      }
+
+      // s68c review, minor 3. Every staging validator refuses a token whose
+      // address has a revoked directory row for the site (`isEditorRevoked`
+      // here, `resolveStagingGrant` on the socket), so an invite to a removed
+      // editor used to "succeed" — row written, code e-mailed — and then be
+      // refused everywhere with a message naming no cause. Refused at issuance
+      // instead, readably: this path is signed-in and admin-only, so it is no
+      // oracle. Read through the admin's RLS client ("Site admins can view site
+      // editors"), not the service role; a failed read throws and issues
+      // nothing.
+      if (
+        await this.isEditorRevoked(
+          supabase,
+          params.siteId,
+          params.email ?? null,
+        )
+      ) {
+        throw new Error(REMOVED_EDITOR_INVITE_MESSAGE);
       }
 
       // Generate secure token
@@ -660,6 +688,9 @@ export class StagingAccessManager {
    * Only a present, stamped row refuses. A lookup that fails throws, and every
    * caller's catch refuses: an unanswered "was this editor removed" is not "no".
    *
+   * Takes the client it is handed: the validators pass the service role (the
+   * caller is a token), `createStagingAccess` the signed-in admin's RLS client.
+   *
    * `normalizeEmail` is imported lazily, as editor-access.ts imports
    * edit-sessions: editor-directory → editor-access → this module is a cycle,
    * and a static import made editor-request read `EDITOR_GRANT_HEADER` before
@@ -667,7 +698,7 @@ export class StagingAccessManager {
    * "the same person" matters more than the import style.
    */
   private static async isEditorRevoked(
-    supabase: ReturnType<typeof createServiceRoleClient>,
+    supabase: SupabaseClient,
     siteId: string,
     email: string | null,
   ): Promise<boolean> {

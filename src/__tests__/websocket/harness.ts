@@ -76,6 +76,13 @@ export class RecordingSupabase {
   readonly tables: Record<string, Row[]> = {};
   readonly writes: RecordedWrite[] = [];
   readonly reads: string[] = [];
+  /**
+   * Tables whose reads answer with a PostgREST error instead of rows — a
+   * partial database failure. A read is the one place a resolver can mistake
+   * "no answer" for "no row"; the s68c review found the socket's `site_editors`
+   * read doing exactly that (fail open) while its HTTP twin failed closed.
+   */
+  readonly failingReads = new Set<string>();
 
   constructor(seed: Record<string, Row[]> = {}) {
     for (const [table, rows] of Object.entries(seed)) {
@@ -119,6 +126,11 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     }
     return { data: null, error: null };
   };
+
+  const readFailure = async () => ({
+    data: null,
+    error: { message: "simulated read failure: connection reset" },
+  });
 
   const builder = {
     select() {
@@ -178,6 +190,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async single() {
       if (op) return settle();
+      if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       if (found.length !== 1) {
         return { data: null, error: { message: "No rows found" } };
@@ -186,6 +199,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async maybeSingle() {
       if (op) return settle();
+      if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       return { data: found.length > 0 ? { ...found[0] } : null, error: null };
     },

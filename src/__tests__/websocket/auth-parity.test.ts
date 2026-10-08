@@ -31,6 +31,7 @@ import {
   validateEditorAccess,
 } from "@/lib/auth/editor-access";
 import { hashUserAgent as hashUserAgentHttp } from "@/lib/auth/editor-crypto";
+import { StagingAccessManager } from "@/lib/auth/staging-access";
 import {
   STAGING_VERIFICATION_TTL_MS,
   checkStagingDeviceBinding as checkStagingDeviceBindingHttp,
@@ -337,6 +338,236 @@ describe("User-Agent hash parity", () => {
     // disagree about the one browser that sends nothing.
     expect(hashUserAgent(null)).toBe(hashUserAgent(""));
     expect(hashUserAgentHttp(null)).toBe(hashUserAgentHttp(""));
+  });
+});
+
+/**
+ * s68c review — the staging grant, end to end, on both sides.
+ *
+ * The rows above pin the duplicated HELPERS. What an editor actually meets is
+ * the whole validator: the row lookup, the verified flag, the device binding,
+ * the directory revocation and how each read's failure is answered. The review
+ * found the helpers agreeing while the validators did not — the socket's
+ * `site_editors` read discarded its `error`, so a failed lookup read as "no
+ * directory row" and admitted a removed editor (MAJOR 1), where HTTP's
+ * `isEditorRevoked` fails closed.
+ *
+ * So each row here is one set of in-memory tables, fed to the REAL HTTP
+ * validator (`StagingAccessManager.validateStagingAccess`, through the mocked
+ * service-role client) and to the REAL socket resolver (`resolveGrant`). The
+ * verdicts are compared to each other and to the expected admission, so the
+ * table cannot pass by both sides agreeing on "no".
+ */
+describe("staging grant parity — both real validators on the same rows", () => {
+  const SITE = "site-staging-parity";
+  const OTHER_SITE = "site-staging-elsewhere";
+  const TOKEN = "staging-token-parity";
+  const HOUR_MS = 60 * 60 * 1000;
+  const INVITEE_UA = "Mozilla/5.0 (Macintosh) Chrome/120";
+  const FORWARDEE_UA = "Mozilla/5.0 (Windows NT 10.0) Firefox/121";
+
+  interface Fixture {
+    /** Overrides on the one staging_access row. */
+    access?: Row;
+    editors?: Row[];
+    failingReads?: string[];
+    /** The User-Agent presented now; undefined sends none at all. */
+    userAgent?: string;
+  }
+
+  function ago(ms: number): string {
+    return new Date(Date.now() - ms).toISOString();
+  }
+
+  function stagingRow(overrides: Row = {}): Row {
+    return {
+      id: "access-parity",
+      token: TOKEN,
+      site_id: SITE,
+      access_type: "invite",
+      email: "john@example.com",
+      email_verified: true,
+      permissions: ["view", "edit"],
+      is_active: true,
+      revoked_at: null,
+      expires_at: new Date(Date.now() + 24 * HOUR_MS).toISOString(),
+      verified_user_agent_hash: hashUserAgentHttp(INVITEE_UA),
+      verified_at: ago(HOUR_MS),
+      ...overrides,
+    };
+  }
+
+  function removedEditor(overrides: Row = {}): Row {
+    return {
+      id: "editor-parity",
+      site_id: SITE,
+      email: "john@example.com",
+      revoked_at: ago(60 * 1000),
+      ...overrides,
+    };
+  }
+
+  function tables(fixture: Fixture): RecordingSupabase {
+    const db = new RecordingSupabase({
+      staging_access: [stagingRow(fixture.access)],
+      site_editors: fixture.editors ?? [],
+    });
+    for (const table of fixture.failingReads ?? []) {
+      db.failingReads.add(table);
+    }
+    return db;
+  }
+
+  type Verdict = { admitted: boolean; permissions?: string[] };
+
+  async function httpVerdict(fixture: Fixture): Promise<Verdict> {
+    jest
+      .mocked(createServiceRoleClient)
+      .mockReturnValue(
+        tables(fixture) as unknown as ReturnType<
+          typeof createServiceRoleClient
+        >,
+      );
+    const headers = new Headers();
+    if (fixture.userAgent !== undefined) {
+      headers.set("user-agent", fixture.userAgent);
+    }
+    const result = await StagingAccessManager.validateStagingAccess(
+      TOKEN,
+      SITE,
+      readStagingDeviceFingerprint({ headers }),
+    );
+    // `valid` alone is not admission over HTTP: an unbound or unverified token
+    // answers `{ valid: true, verified: false }` — "enter a code" — and grants
+    // nothing. The socket has no such middle state; it refuses.
+    return result.valid && result.verified
+      ? {
+          admitted: true,
+          permissions: normalizePermissionsHttp(result.permissions),
+        }
+      : { admitted: false };
+  }
+
+  async function socketVerdict(fixture: Fixture): Promise<Verdict> {
+    const grant = await resolveGrant({
+      supabase: tables(fixture),
+      siteId: SITE,
+      stagingToken: TOKEN,
+      userAgent: fixture.userAgent,
+    });
+    return grant.valid && "permissions" in grant
+      ? { admitted: true, permissions: grant.permissions }
+      : { admitted: false };
+  }
+
+  beforeEach(() => {
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const cases: Array<[string, Fixture, boolean]> = [
+    [
+      "a bound row presented by the verifying browser",
+      { userAgent: INVITEE_UA },
+      true,
+    ],
+    [
+      "a bound row presented by another browser",
+      { userAgent: FORWARDEE_UA },
+      false,
+    ],
+    [
+      "a verification 12 h + 1 s old",
+      {
+        access: { verified_at: ago(STAGING_VERIFICATION_TTL_MS + 1000) },
+        userAgent: INVITEE_UA,
+      },
+      false,
+    ],
+    [
+      "a verified row with no User-Agent hash",
+      { access: { verified_user_agent_hash: null }, userAgent: INVITEE_UA },
+      false,
+    ],
+    [
+      "a verified row with no verified_at",
+      { access: { verified_at: null }, userAgent: INVITEE_UA },
+      false,
+    ],
+    [
+      // The binding fields are left in place on purpose: with them cleared the
+      // device check refuses on its own, and a side that ignored the flag
+      // would still agree. This row is about the flag alone.
+      "an unverified row, even one carrying a device binding",
+      { access: { email_verified: false }, userAgent: INVITEE_UA },
+      false,
+    ],
+    [
+      "no User-Agent at verification and none now",
+      { access: { verified_user_agent_hash: hashUserAgentHttp(null) } },
+      true,
+    ],
+    [
+      "an invite typed John@Example.com whose editor was removed",
+      {
+        access: { email: "John@Example.com" },
+        editors: [removedEditor()],
+        userAgent: INVITEE_UA,
+      },
+      false,
+    ],
+    [
+      'an invite typed "  JOHN@EXAMPLE.COM " whose editor was removed',
+      {
+        access: { email: "  JOHN@EXAMPLE.COM " },
+        editors: [removedEditor()],
+        userAgent: INVITEE_UA,
+      },
+      false,
+    ],
+    [
+      "a removal recorded on another site",
+      {
+        editors: [removedEditor({ site_id: OTHER_SITE })],
+        userAgent: INVITEE_UA,
+      },
+      true,
+    ],
+    [
+      "a directory row that stands",
+      { editors: [removedEditor({ revoked_at: null })], userAgent: INVITEE_UA },
+      true,
+    ],
+    ["no directory row", { editors: [], userAgent: INVITEE_UA }, true],
+    [
+      "a removed editor whose site_editors read fails",
+      {
+        editors: [removedEditor()],
+        failingReads: ["site_editors"],
+        userAgent: INVITEE_UA,
+      },
+      false,
+    ],
+  ];
+
+  it.each(cases)("agrees on %s", async (_label, fixture, admitted) => {
+    const http = await httpVerdict(fixture);
+    const socket = await socketVerdict(fixture);
+
+    expect(socket).toEqual(http);
+    expect(http.admitted).toBe(admitted);
+  });
+
+  it("grants the row's permissions on both sides when admitted (guard against agreeing on 'no')", async () => {
+    const fixture = { userAgent: INVITEE_UA };
+    const expected = { admitted: true, permissions: ["view", "edit"] };
+
+    expect(await httpVerdict(fixture)).toEqual(expected);
+    expect(await socketVerdict(fixture)).toEqual(expected);
   });
 });
 
