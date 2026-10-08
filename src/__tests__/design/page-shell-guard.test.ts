@@ -127,18 +127,15 @@ const STANDALONE_H1_FILES: readonly string[] = [
 
 /**
 /**
- * Shrink-only, and every entry is s66c's: it owns everything under
- * `/dashboard/sites` and the site components (ADR 053, "Collision list"), and
- * removes a rule here when its file passes it. s66c1 rebuilt `sites/page.tsx`
- * on `PageShell` without the filter's `shadow-xs` (R1, R2, R5) and
- * `EditWebsiteButton` on the `Button` primitive (R5), and deleted
- * `SiteDetailView` with its 700-weight site name (R6). Left:
- * - `VersionTimelineItem` keeps a hover shadow and the `ring-4` / `ring-2`
- *   halos on its status dots (R5).
+ * Shrink-only, and empty since s66c1. Every entry was s66c's: s66c1 rebuilt
+ * `sites/page.tsx` on `PageShell` without the filter's `shadow-xs` (R1, R2,
+ * R5) and `EditWebsiteButton` on the `Button` primitive (R5), deleted
+ * `SiteDetailView` with its 700-weight site name (R6), and took
+ * `VersionTimelineItem`'s hover shadow and the `ring-4` / `ring-2` halos off
+ * its status dots (R5). A new entry needs a story that owns the file and
+ * says when it leaves.
  */
-const PENDING: Readonly<Record<string, readonly Rule[]>> = {
-  "src/components/dashboard/VersionTimelineItem.tsx": ["R5"],
-};
+const PENDING: Readonly<Record<string, readonly Rule[]>> = {};
 
 const CLASS_FUNCTIONS = /\b(?:cn|clsx|cx|cva|twMerge)\s*$/;
 
