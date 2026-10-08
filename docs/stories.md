@@ -2333,3 +2333,48 @@ settled (both edit `src/app/api/content/[siteId]/route.ts`).
   s65a's parity test pass unchanged.
 
 Embed allocation: 0 bytes.
+
+## Story s66-app-design-system — the app reads as one straight, aligned, responsive surface
+
+As a site owner working in the dashboard, every app page shares one flat, straight-edged layout
+system (1px borders, near-zero corner radius, one spacing scale, one page shell). The product
+looks deliberate, and the site-details / integration panel is usable at any screen width.
+
+Owner request, 2026-10-07, with a screenshot of the site-details panel: "This panel needs a serious
+redesign. and while u'r here, inspect all the application pages and improve the design. specialy
+the layout and alignement, avoid rounded corner as much as possible and keep it straight and
+clean. like 'supabase' website. make sure it's responsive." Second screenshot: the "Expires in"
+select in Share Preview Link, a rounded box with its chevron jammed against the right border.
+
+Observed defects that seed the research (from the owner's screenshots):
+
+- Site-details panel: tall empty band above the content; the snippet and the instruction lines
+  overflow the panel horizontally and are clipped (no wrap, no copy-in-place); a panel-level
+  horizontal scrollbar; nested rounded boxes inside a rounded modal.
+- Selects: the chevron touches the border; padding is uneven between text and icon.
+- Cards, chips, buttons and modals all use large radii; this conflicts with the requested look.
+
+Complexity: 5 (cross-cutting UI, every app route, visual proof at four widths). It may split at
+plan time into (a) tokens + shell + shared primitives + the site-details panel and (b) per-page
+passes. Dependencies: none. Branch `feature/s66-app-design-system`.
+
+- [ ] AC 1: the site-details / integration panel has no horizontal overflow from 320 px to
+  1920 px. The snippet is readable in full (wraps or scrolls inside its own block) and has a
+  one-click copy. There is no empty band, and there is one scroll container.
+- [ ] AC 2: one radius scale, with 0–2 px as the default for containers, inputs, buttons, chips
+  and modals. Exceptions (avatars, status dots) are listed in the plan. A test or lint guard
+  fails on large-radius classes in app surfaces.
+- [ ] AC 3: one page shell (header, content max-width, gutters) and one spacing scale are used
+  by every app page. Headings, filters, cards and tables align to the same left edge.
+- [ ] AC 4: every app page at 375, 768, 1280 and 1920 px has no page-level horizontal scroll
+  and no clipped content, proven by Playwright screenshots committed under
+  `docs/designs/s66-*`.
+- [ ] AC 5: no behaviour change. The unit suite and the existing e2e flows (register site,
+  share, edit, publish) pass unchanged.
+- [ ] AC 6: text contrast is at least WCAG AA on every new surface, and focus states are
+  visible, squared outlines.
+
+Out of scope: the marketing site (unless the plan argues otherwise and the owner agrees), and
+the embed's on-page editor UI.
+
+Embed allocation: 0 bytes.
