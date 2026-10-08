@@ -96,9 +96,9 @@ export function UsageCard({ currentUsage, plan }: UsageCardProps) {
             </div>
 
             {item.limit !== -1 && (
-              <div className="w-full bg-surface-3 rounded-full h-2">
+              <div className="w-full bg-surface-3 h-2">
                 <div
-                  className={`h-2 rounded-full transition-all ${getProgressBarColor(item.current, item.limit)}`}
+                  className={`h-2 transition-all ${getProgressBarColor(item.current, item.limit)}`}
                   style={{
                     width: `${getProgressPercentage(item.current, item.limit)}%`,
                   }}
@@ -109,7 +109,7 @@ export function UsageCard({ currentUsage, plan }: UsageCardProps) {
         ))}
       </div>
 
-      <div className="mt-6 p-4 bg-tone-info-surface rounded-lg">
+      <div className="mt-6 p-4 bg-tone-info-surface rounded-container">
         <h4 className="font-medium text-tone-info-text mb-2">
           {plan.name} plan benefits
         </h4>

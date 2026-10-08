@@ -146,7 +146,7 @@ export function ApiKeysPanel() {
         {error && (
           <p
             role="alert"
-            className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+            className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-container px-3 py-2"
           >
             {error}
           </p>
@@ -184,7 +184,7 @@ export function ApiKeysPanel() {
             {/* Shown exactly once: the server keeps only a hash, so there is no
                 way to display this again after the panel re-renders. */}
             {revealedKey && (
-              <div className="rounded-lg border border-tone-warning-border bg-tone-warning-surface p-4">
+              <div className="rounded-container border border-tone-warning-border bg-tone-warning-surface p-4">
                 <p className="mb-2 text-sm font-medium text-tone-warning-text">
                   Copy this key now — it will not be shown again.
                 </p>
@@ -208,7 +208,7 @@ export function ApiKeysPanel() {
                 {keys.map((apiKey) => (
                   <li
                     key={apiKey.id}
-                    className="flex items-center justify-between gap-3 p-4 bg-surface-1 rounded-lg"
+                    className="flex items-center justify-between gap-3 p-4 bg-surface-1 rounded-container"
                   >
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">

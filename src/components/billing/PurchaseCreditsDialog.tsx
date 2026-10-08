@@ -88,7 +88,7 @@ export function PurchaseCreditsDialog({
             </p>
           </div>
 
-          <div className="bg-surface-2 p-4 rounded-lg space-y-2">
+          <div className="bg-surface-2 p-4 rounded-container space-y-2">
             <div className="flex justify-between text-sm">
               <span>Credit packs:</span>
               <span className="tabular">{quantity}</span>

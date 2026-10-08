@@ -205,7 +205,7 @@ function LoadingRows() {
     <div className="space-y-5" role="status" aria-label="Loading trial status">
       {[0, 1].map((row) => (
         <div key={row} className="flex items-start gap-3">
-          <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+          <Skeleton className="h-9 w-9 shrink-0" />
           <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="h-4 w-48 max-w-full" />
             <Skeleton className="h-3 w-32 max-w-full" />
@@ -271,7 +271,7 @@ export function TrialStatusCard({
             </span>
           </p>
           <div
-            className="mt-2 h-2 w-full rounded-full bg-surface-3"
+            className="mt-2 h-2 w-full bg-surface-3"
             role="progressbar"
             aria-label={copy.creditsAriaLabel}
             aria-valuenow={spent}
@@ -279,7 +279,7 @@ export function TrialStatusCard({
             aria-valuemax={creditsLimit}
           >
             <div
-              className={`h-2 rounded-full transition-all ${TONE_FILL[tone]}`}
+              className={`h-2 transition-all ${TONE_FILL[tone]}`}
               style={{ width: `${percentUsed}%` }}
             />
           </div>

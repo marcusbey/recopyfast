@@ -108,10 +108,15 @@ async function boot(url: string, validate: Reply = VALID) {
   // A real navigation discards the previous page's widget; jsdom cannot, and
   // an edit-mode instance keeps a document-level click handler that would
   // answer the next page's clicks first. Lock it, as an unloaded page would be.
+  // And stop it (s67): its MutationObserver would otherwise take this page's
+  // DOM and URL for an in-app navigation and fetch them with its own token.
   const previous = (window as unknown as Record<string, unknown>).ReCopyFast as
-    | { isMutationLocked: boolean }
+    | { isMutationLocked: boolean; destroy(): void }
     | undefined;
-  if (previous) previous.isMutationLocked = true;
+  if (previous) {
+    previous.isMutationLocked = true;
+    previous.destroy();
+  }
   document.head.innerHTML = "";
   document.body.innerHTML =
     '<h1 id="headline">Original copy</h1><p>Another element</p>';

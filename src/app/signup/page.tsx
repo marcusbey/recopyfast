@@ -6,7 +6,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Code } from "lucide-react";
 import Link from "next/link";
@@ -23,7 +22,7 @@ export default function SignupPage() {
           href="/"
           className="flex items-center justify-center space-x-3 mb-8"
         >
-          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
+          <div className="w-12 h-12 bg-primary rounded-container flex items-center justify-center">
             <Code className="w-7 h-7 text-primary-foreground" />
           </div>
           <span className="font-semibold text-2xl text-foreground tracking-tight">
@@ -33,7 +32,8 @@ export default function SignupPage() {
 
         <Card>
           <CardHeader className="text-center">
-            <CardTitle>Create your account</CardTitle>
+            {/* The page's one h1 (ADR 053 §3); it was an h3 CardTitle. */}
+            <h1 className="text-page-title">Create your account</h1>
             <CardDescription>
               Get started with ReCopyFast in just a few seconds
             </CardDescription>

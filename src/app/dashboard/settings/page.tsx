@@ -203,13 +203,13 @@ export default function SettingsPage() {
               {saveError && (
                 <p
                   role="alert"
-                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-container px-3 py-2"
                 >
                   {saveError}
                 </p>
               )}
               {saveSuccess && (
-                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-md px-3 py-2">
+                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-container px-3 py-2">
                   Profile saved successfully.
                 </p>
               )}
@@ -275,13 +275,13 @@ export default function SettingsPage() {
               {notificationsError && (
                 <p
                   role="alert"
-                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+                  className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-container px-3 py-2"
                 >
                   {notificationsError}
                 </p>
               )}
               {notificationsSaved && (
-                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-md px-3 py-2">
+                <p className="text-sm text-tone-success-text bg-tone-success-surface border border-tone-success-border rounded-container px-3 py-2">
                   Preferences saved.
                 </p>
               )}

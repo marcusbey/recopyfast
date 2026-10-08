@@ -984,11 +984,19 @@ function rhythmViolations(
  * sRGB. The background is composited from the first opaque ancestor up,
  * which is what "the active nav item against its composited background"
  * means: a 12% tint over the sidebar card, not the tint alone.
+ *
+ * `property` picks what is measured against that background: the text
+ * (`color`), or a control's boundary (`borderTopColor`). A border paints over
+ * its own element's background (`background-clip: border-box`), so the same
+ * composite is what sits behind it.
  */
+type ForegroundProperty = "color" | "borderTopColor";
+
 async function compositedColors(
   target: Locator,
+  property: ForegroundProperty = "color",
 ): Promise<{ foreground: Rgb; background: Rgb }> {
-  const { foreground, background } = await target.evaluate((element) => {
+  const { foreground, background } = await target.evaluate((element, key) => {
     const canvas = document.createElement("canvas");
     canvas.width = 1;
     canvas.height = 1;
@@ -1014,9 +1022,9 @@ async function compositedColors(
     paint("#ffffff");
     layers.forEach(paint);
     const behind = read();
-    paint(getComputedStyle(element).color);
+    paint(getComputedStyle(element)[key]);
     return { foreground: read(), background: behind };
-  });
+  }, property);
 
   const toRgb = ([r = 0, g = 0, b = 0]: number[]): Rgb => ({ r, g, b, a: 1 });
   return { foreground: toRgb(foreground), background: toRgb(background) };
@@ -1079,16 +1087,459 @@ async function contrastViolations(
 
   const violations: string[] = [];
   for (const [label, target] of targets) {
-    if ((await target.count()) === 0) {
-      violations.push(`${at}: no ${label} to measure`);
-      continue;
+    const violation = await contrastViolation(at, label, target);
+    if (violation) violations.push(violation);
+  }
+  return violations;
+}
+
+/**
+ * One measured pair as a readable line, or null when it clears `minimum`. A
+ * target that is not there is a violation too: a check that measures nothing
+ * passes vacuously.
+ */
+async function contrastViolation(
+  at: string,
+  label: string,
+  target: Locator,
+  minimum: number = MIN_TEXT_CONTRAST,
+  property: ForegroundProperty = "color",
+): Promise<string | null> {
+  if ((await target.count()) === 0) return `${at}: no ${label} to measure`;
+  const { foreground, background } = await compositedColors(target, property);
+  const ratio = contrastRatio(foreground, background);
+  return ratio < minimum
+    ? `${at}: ${label} contrasts ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`
+    : null;
+}
+
+/* -------------------------------------------------------------------------
+ * s66b2 — flat, square, nothing clipped.
+ *
+ * s66b1 put every page in one frame; these checks are what jsdom cannot see
+ * inside it. The Sites status filter was a row of pills in an
+ * `overflow-x-auto` box with its scrollbar hidden: at 375 its last segments
+ * sat past the edge with nothing to say they were there, and every unit test
+ * was green. The Overview metrics and site rows lifted 1px with a shadow on
+ * hover (`.surface-interactive`), the one thing on the page that moved, and
+ * at 1024 and up the metric grid left its right third empty.
+ * ---------------------------------------------------------------------- */
+
+/**
+ * `scrollWidth` may exceed `clientWidth` by one on fractional widths
+ * (sub-pixel layout), never more for a real clip.
+ */
+const CLIP_TOLERANCE = 1;
+/** Where the Settings tabs wrap onto two rows (s66a), so must stay in their list. */
+const TABS_WIDTH: AppPageWidth = 375;
+const OVERVIEW_PAGE = "overview";
+const TABS_PAGE = "settings";
+/** The injected negative control's class, unique to this harness. */
+const CLIP_CONTROL_CLASS = "rcf-clip-control";
+
+/**
+ * Every visible element that hides content behind its own overflow box: its
+ * computed `overflow-x` is not `visible`, and its content is more than
+ * `CLIP_TOLERANCE` wider than its box. The exceptions are exactly AC 5's, and
+ * nothing else:
+ * - form controls: an <input> or <select> is its own internal scroller;
+ * - `text-overflow: ellipsis`: the clip is drawn, so it is not hidden;
+ * - `sr-only` nodes, 1 px by design;
+ * - CodeBlock's <pre>, which scrolls on purpose under its Copy button.
+ * A decorative `overflow-hidden` wrapper (a card, a progress track) is not an
+ * exception: excluding those would let a clipped filter row pass.
+ */
+async function clippedElements(page: Page): Promise<string[]> {
+  return page.evaluate((tolerance) => {
+    const FORM_CONTROLS = new Set(["INPUT", "SELECT", "TEXTAREA"]);
+    const describe = (element: Element) => {
+      const className =
+        typeof element.className === "string"
+          ? element.className.split(/\s+/).slice(0, 4).join(".")
+          : "";
+      return `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`;
+    };
+    // CodeBlock's anatomy: a header row holding the Copy button, then the
+    // <pre>. No other <pre> on the app surface sits under a button row.
+    const isCodeBlockPre = (element: Element) =>
+      element.tagName === "PRE" &&
+      element.previousElementSibling?.querySelector("button") != null;
+
+    return Array.from(document.querySelectorAll("body *"))
+      .filter((element) => {
+        if (FORM_CONTROLS.has(element.tagName)) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        if (rect.width <= 1 && rect.height <= 1) return false;
+        const style = getComputedStyle(element);
+        if (style.visibility === "hidden" || style.display === "none") {
+          return false;
+        }
+        if (style.overflowX === "visible") return false;
+        if (style.textOverflow === "ellipsis") return false;
+        if (isCodeBlockPre(element)) return false;
+        return element.scrollWidth - element.clientWidth > tolerance;
+      })
+      .map(
+        (element) =>
+          `${describe(element)} (content ${element.scrollWidth}px in a ${element.clientWidth}px box)`,
+      );
+  }, CLIP_TOLERANCE);
+}
+
+/**
+ * The clip check's negative control (plan, "the point everything turns on").
+ * It injects a row built like the old Sites status filter — pills in an
+ * `overflow-x: auto` box with `scrollbar-width: none`, wider than the box —
+ * and requires the check to report it, then removes it. A check that cannot
+ * see this row proves nothing, and the proof does not depend on s66c's page.
+ */
+async function clipCheckReportsHiddenScrollRow(page: Page): Promise<boolean> {
+  await page.evaluate((controlClass) => {
+    const host = document.querySelector("main") ?? document.body;
+    const row = document.createElement("div");
+    row.className = controlClass;
+    row.style.cssText =
+      "display:flex;gap:8px;width:160px;overflow-x:auto;scrollbar-width:none;";
+    for (const label of ["All", "Live", "Awaiting install", "Stale"]) {
+      const pill = document.createElement("span");
+      pill.textContent = label;
+      pill.style.cssText = "flex-shrink:0;white-space:nowrap;padding:4px 12px;";
+      row.appendChild(pill);
     }
-    const { foreground, background } = await compositedColors(target);
-    const ratio = contrastRatio(foreground, background);
-    if (ratio < MIN_TEXT_CONTRAST) {
-      violations.push(`${at}: ${label} contrasts ${ratio.toFixed(2)}:1`);
+    host.prepend(row);
+  }, CLIP_CONTROL_CLASS);
+  const clipped = await clippedElements(page);
+  await page.evaluate(
+    (controlClass) => document.querySelector(`.${controlClass}`)?.remove(),
+    CLIP_CONTROL_CLASS,
+  );
+  return clipped.some((entry) => entry.includes(CLIP_CONTROL_CLASS));
+}
+
+/** A computed `box-shadow`'s layers: commas outside parentheses. */
+function shadowLayers(value: string): string[] {
+  const layers: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "(") depth += 1;
+    else if (char === ")") depth -= 1;
+    else if (char === "," && depth === 0) {
+      layers.push(value.slice(start, index));
+      start = index + 1;
     }
   }
+  layers.push(value.slice(start));
+  return layers;
+}
+
+const SHADOW_COLOR =
+  /(?:rgba?|hsla?|oklab|oklch|lab|lch|color)\([^)]*\)|#[0-9a-f]{3,8}\b|transparent/i;
+
+function colorAlpha(color: string): number {
+  if (/^transparent$/i.test(color)) return 0;
+  const slash = color.match(/\/\s*([\d.]+)(%?)\s*\)$/);
+  if (slash) return Number(slash[1]) / (slash[2] ? 100 : 1);
+  const rgba = color.match(/^rgba\(([^)]*)\)$/i);
+  if (rgba) {
+    const channels = rgba[1].split(",");
+    if (channels.length === 4) return Number(channels[3]);
+  }
+  return 1;
+}
+
+/**
+ * Whether a computed `box-shadow` draws anything. Tailwind 4 writes "no
+ * shadow" as a stack of transparent, zero-length layers (`shadow-none`, the
+ * unused ring layers), so a value other than `none` is not yet a shadow: a
+ * layer counts when its colour has alpha above 0 and it has a non-zero
+ * offset, blur or spread.
+ */
+function drawsShadow(value: string): boolean {
+  if (!value || value === "none") return false;
+  return shadowLayers(value).some((layer) => {
+    const color = layer.match(SHADOW_COLOR)?.[0] ?? "currentcolor";
+    if (colorAlpha(color) === 0) return false;
+    const lengths = layer.replace(SHADOW_COLOR, " ").match(/-?[\d.]+px/g);
+    return (lengths ?? []).some((length) => parseFloat(length) !== 0);
+  });
+}
+
+/** Visible elements in `main` (itself included) that draw a shadow. */
+async function shadowedElementsInMain(page: Page): Promise<string[]> {
+  const candidates = await page.evaluate(() => {
+    const main = document.querySelector("main");
+    if (!main) return [];
+    return [main, ...Array.from(main.querySelectorAll("*"))]
+      .filter((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      })
+      .map((element) => {
+        const className =
+          typeof element.className === "string"
+            ? element.className.split(/\s+/).slice(0, 4).join(".")
+            : "";
+        return {
+          element: `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`,
+          boxShadow: getComputedStyle(element).boxShadow,
+        };
+      })
+      .filter(({ boxShadow }) => boxShadow !== "none");
+  });
+  return candidates
+    .filter(({ boxShadow }) => drawsShadow(boxShadow))
+    .map(({ element, boxShadow }) => `${element} (box-shadow ${boxShadow})`);
+}
+
+/** Waits for a hover's style change to start its transitions, then for them to end. */
+async function settleHover(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await settleTransitions(page);
+}
+
+/**
+ * Hovers `target` and reports any motion or shadow it gains. Tailwind 4's
+ * translate utilities write the individual `translate` property, not
+ * `transform`, so both are read: "never move" has to hold for either.
+ */
+async function hoverMotionViolations(
+  page: Page,
+  target: Locator,
+  label: string,
+): Promise<string[]> {
+  if ((await target.count()) === 0) return [`no ${label} to hover`];
+  await target.hover();
+  await settleHover(page);
+  const hovered = await target.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      transform: style.transform,
+      translate: style.translate,
+      boxShadow: style.boxShadow,
+    };
+  });
+  await page.mouse.move(1, 1);
+  await settleHover(page);
+
+  const violations: string[] = [];
+  if (hovered.transform !== "none") {
+    violations.push(`hovered ${label} has transform ${hovered.transform}`);
+  }
+  if (hovered.translate !== "none") {
+    violations.push(`hovered ${label} has translate ${hovered.translate}`);
+  }
+  if (drawsShadow(hovered.boxShadow)) {
+    violations.push(`hovered ${label} has box-shadow ${hovered.boxShadow}`);
+  }
+  return violations;
+}
+
+/**
+ * The rightmost Overview metric's right edge and the content's (`main`'s
+ * right minus the ≥1024 gutter), or null without a Summary grid.
+ */
+async function metricGridEdges(
+  page: Page,
+): Promise<{ metricsRight: number; contentRight: number } | null> {
+  return page.evaluate((gutter) => {
+    const summary = document.querySelector('section[aria-label="Summary"]');
+    const main = document.querySelector("main");
+    if (!summary || !main || summary.children.length === 0) return null;
+    const rights = Array.from(summary.children).map(
+      (child) => child.getBoundingClientRect().right,
+    );
+    return {
+      metricsRight: Math.max(...rights),
+      contentRight: main.getBoundingClientRect().right - gutter,
+    };
+  }, WIDE_GUTTER);
+}
+
+/** Every visible tab outside its tablist's box, and how many tabs were measured. */
+async function tabsOutsideTheirList(
+  page: Page,
+): Promise<{ measured: number; outside: string[] }> {
+  return page.evaluate((tolerance) => {
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    let measured = 0;
+    const outside: string[] = [];
+    for (const list of Array.from(
+      document.querySelectorAll('[role="tablist"]'),
+    ).filter(isVisible)) {
+      const box = list.getBoundingClientRect();
+      for (const tab of Array.from(
+        list.querySelectorAll('[role="tab"]'),
+      ).filter(isVisible)) {
+        measured += 1;
+        const rect = tab.getBoundingClientRect();
+        const inside =
+          rect.left >= box.left - tolerance &&
+          rect.right <= box.right + tolerance &&
+          rect.top >= box.top - tolerance &&
+          rect.bottom <= box.bottom + tolerance;
+        if (!inside) {
+          outside.push(
+            `"${tab.textContent?.trim()}" at ${rect.left}–${rect.right}, its list ${box.left}–${box.right}`,
+          );
+        }
+      }
+    }
+    return { measured, outside };
+  }, EDGE_TOLERANCE);
+}
+
+/** The first row of the Overview's "Your sites" panel (a link per site). */
+function firstSiteRow(page: Page): Locator {
+  return page
+    .getByRole("heading", { name: "Your sites" })
+    .locator("xpath=ancestor::*[.//li//a][1]")
+    .locator("li a")
+    .first();
+}
+
+/** WCAG 1.4.11: a control's boundary against what sits behind it. */
+const MIN_BOUNDARY_CONTRAST = 3;
+/** The page that holds the theme picker, behind its Appearance tab. */
+const THEME_PICKER_PAGE = "settings";
+
+/**
+ * s66b2 AC 6: contrast on the surfaces s66b2 repainted, which the frame's
+ * pairs above (title, description, nav, breadcrumb) never reach. Each pair
+ * is measured in the state a person meets it in:
+ * - an Overview "Your sites" row while hovered: every line of its text on
+ *   `hover:bg-surface-2`. The rows were separate cards until s66b2, and the
+ *   hover tint is new;
+ * - Settings → Appearance, pointer away: the selected theme's label on
+ *   `bg-tone-accent-surface`, and an unselected option's 1px border against
+ *   the card. That border shipped as `border-border` (`--line`, 1.45:1 on the
+ *   card): decorative strength on a control, until the s66b2 review. A control
+ *   boundary is `border-input` (design system, Borders), and needs 3:1.
+ */
+async function changedSurfaceContrastViolations(
+  page: Page,
+  appPage: AppPage,
+  theme: "dark" | "light",
+): Promise<string[]> {
+  const at = `${appPage.name} @${CONTRAST_WIDTH} ${theme}`;
+  const violations: string[] = [];
+  const record = (violation: string | null) => {
+    if (violation) violations.push(violation);
+  };
+
+  if (appPage.name === OVERVIEW_PAGE) {
+    const row = firstSiteRow(page);
+    if ((await row.count()) === 0) return [`${at}: no site row to hover`];
+    await row.hover();
+    await settleHover(page);
+    const lines = row.locator("p");
+    const count = await lines.count();
+    if (count === 0) violations.push(`${at}: no text in the hovered site row`);
+    for (let index = 0; index < count; index += 1) {
+      const line = lines.nth(index);
+      const text = (await line.textContent())?.trim() ?? "";
+      record(
+        await contrastViolation(at, `hovered site row text "${text}"`, line),
+      );
+    }
+    await page.mouse.move(1, 1);
+    await settleHover(page);
+  }
+
+  if (appPage.name === THEME_PICKER_PAGE) {
+    await page.getByRole("tab", { name: "Appearance" }).click();
+    const picker = page.getByRole("radiogroup", { name: "Theme" });
+    await page.mouse.move(1, 1);
+    await settleHover(page);
+    record(
+      await contrastViolation(
+        at,
+        "selected theme label",
+        picker.getByRole("radio", { checked: true }).locator("p").first(),
+      ),
+    );
+    record(
+      await contrastViolation(
+        at,
+        "unselected theme option's border",
+        picker.getByRole("radio", { checked: false }).first(),
+        MIN_BOUNDARY_CONTRAST,
+        "borderTopColor",
+      ),
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * s66b2's checks on one app page, as readable lines (AC 2, 4, 5): nothing
+ * clipped, no shadow at rest in `main`; on the Overview, a hovered metric and
+ * site row that stay put, and a metric grid that reaches the content's right
+ * edge at ≥1024; at 375, every tab inside its list.
+ */
+async function pagePassViolations(
+  page: Page,
+  appPage: AppPage,
+  width: AppPageWidth,
+): Promise<string[]> {
+  const at = `${appPage.name} @${width}`;
+  const violations: string[] = [];
+
+  await page.mouse.move(1, 1);
+  await settleHover(page);
+
+  for (const clipped of await clippedElements(page)) {
+    violations.push(`${at}: ${clipped} hides content`);
+  }
+  for (const shadowed of await shadowedElementsInMain(page)) {
+    violations.push(`${at}: at rest, ${shadowed}`);
+  }
+
+  if (width === TABS_WIDTH) {
+    const tabs = await tabsOutsideTheirList(page);
+    if (appPage.name === TABS_PAGE && tabs.measured === 0) {
+      violations.push(`${at}: no tabs to measure`);
+    }
+    for (const tab of tabs.outside) {
+      violations.push(`${at}: tab ${tab}`);
+    }
+  }
+
+  if (appPage.name === OVERVIEW_PAGE) {
+    const metric = page
+      .getByRole("region", { name: "Summary" })
+      .getByRole("link")
+      .first();
+    for (const violation of [
+      ...(await hoverMotionViolations(page, metric, "metric")),
+      ...(await hoverMotionViolations(page, firstSiteRow(page), "site row")),
+    ]) {
+      violations.push(`${at}: ${violation}`);
+    }
+
+    if (width >= SIDEBAR_BREAKPOINT) {
+      const edges = await metricGridEdges(page);
+      if (!edges) {
+        violations.push(`${at}: no Summary metric grid`);
+      } else if (!isNear(edges.metricsRight, edges.contentRight)) {
+        violations.push(
+          `${at}: the rightmost metric ends at x=${edges.metricsRight}, the content at ${edges.contentRight}`,
+        );
+      }
+    }
+  }
+
   return violations;
 }
 
@@ -1132,6 +1583,17 @@ test.describe("s66b app pages", () => {
           headingLefts.push([appPage.name, result.headingLeft]);
         }
 
+        // s66b2: flat, nothing clipped, the grid and the tabs (AC 2, 4, 5).
+        violations.push(...(await pagePassViolations(page, appPage, width)));
+        if (
+          appPage.name === OVERVIEW_PAGE &&
+          !(await clipCheckReportsHiddenScrollRow(page))
+        ) {
+          violations.push(
+            `${appPage.name} @${width}: the clip check missed an injected hidden-scrollbar row (negative control)`,
+          );
+        }
+
         if (width === CONTRAST_WIDTH) {
           for (const theme of ["dark", "light"] as const) {
             await applyTheme(page, theme);
@@ -1139,6 +1601,8 @@ test.describe("s66b app pages", () => {
             await settleTransitions(page);
             violations.push(
               ...(await contrastViolations(page, appPage, theme)),
+              // s66b2 AC 6: the repainted surfaces, in both themes.
+              ...(await changedSurfaceContrastViolations(page, appPage, theme)),
             );
           }
         }
@@ -1156,6 +1620,107 @@ test.describe("s66b app pages", () => {
             .map(([name, left]) => `${name} ${left}`)
             .join(", ")}`,
         );
+      }
+
+      expect(violations).toEqual([]);
+    });
+  }
+});
+
+/**
+ * The four app pages outside the frame (ADR 053 §3): signed out, each a
+ * centred `max-w-md` column with its one h1 in `.text-page-title`. `/login`,
+ * `/signup` and `/auth/error` had none — `CardTitle` is an h3 — so a screen
+ * reader landing there found no page title at all.
+ */
+interface StandalonePage {
+  path: string;
+  /** Capture file stem. */
+  name: string;
+}
+
+const STANDALONE_PAGES: readonly StandalonePage[] = [
+  { path: "/login", name: "login" },
+  { path: "/signup", name: "signup" },
+  { path: "/auth/error", name: "auth-error" },
+  { path: "/edit", name: "edit" },
+];
+
+/**
+ * s66b2 AC 6 on a standalone page: its h1 (now `.text-page-title`, was an h3
+ * `CardTitle`) and the description right under it, on whatever surface they
+ * sit on (the card, or the page on /edit). On all four pages the description
+ * is the h1's next sibling, a <p>.
+ */
+async function standaloneContrastViolations(
+  page: Page,
+  standalone: StandalonePage,
+  theme: "dark" | "light",
+): Promise<string[]> {
+  const at = `${standalone.name} @${CONTRAST_WIDTH} ${theme}`;
+  const violations: string[] = [];
+  for (const [label, target] of [
+    ["h1", page.locator("h1").first()],
+    ["description", page.locator("h1 + p").first()],
+  ] as const) {
+    const violation = await contrastViolation(at, label, target);
+    if (violation) violations.push(violation);
+  }
+  return violations;
+}
+
+test.describe("s66b standalone pages", () => {
+  test.setTimeout(120_000);
+
+  for (const width of APP_PAGE_WIDTHS) {
+    // Playwright's `page` fixture is a fresh browser context per test, with
+    // no cookies or storage: these pages are measured signed out.
+    test(`standalone pages @${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+      await page.emulateMedia({ colorScheme: "dark" });
+
+      const violations: string[] = [];
+      for (const standalone of STANDALONE_PAGES) {
+        const at = `${standalone.name} @${width}`;
+        await page.goto(standalone.path);
+        await page.waitForLoadState("networkidle");
+        await capture(S66B_CAPTURE_ROOT, page, `${standalone.name}-${width}`, {
+          fullPage: true,
+        });
+
+        const { headings, pageOverflow } = await measureFrame(page);
+        if (headings.length !== 1) {
+          violations.push(
+            `${at}: ${headings.length} visible h1s (${headings.map((heading) => `"${heading.text}"`).join(", ")}), expected 1`,
+          );
+        } else if (
+          headings[0].fontSize !== "24px" ||
+          headings[0].fontWeight !== "600"
+        ) {
+          violations.push(
+            `${at}: the h1 is ${headings[0].fontSize}/${headings[0].fontWeight}, expected 24px/600 (.text-page-title)`,
+          );
+        }
+        if (pageOverflow > 0) {
+          violations.push(`${at}: page scrolls sideways by ${pageOverflow}px`);
+        }
+        for (const clipped of await clippedElements(page)) {
+          violations.push(`${at}: ${clipped} hides content`);
+        }
+
+        if (width === CONTRAST_WIDTH) {
+          for (const theme of ["dark", "light"] as const) {
+            await applyTheme(page, theme);
+            await page.mouse.move(1, 1);
+            await settleTransitions(page);
+            violations.push(
+              ...(await standaloneContrastViolations(page, standalone, theme)),
+            );
+          }
+          // The emulated scheme outlives the navigation: the next page is
+          // measured and captured dark, as every other width is.
+          await page.emulateMedia({ colorScheme: "dark" });
+        }
       }
 
       expect(violations).toEqual([]);

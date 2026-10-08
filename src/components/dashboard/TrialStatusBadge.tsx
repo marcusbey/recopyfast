@@ -75,7 +75,7 @@ export function TrialStatusBadge() {
   return (
     <Link
       href="/dashboard/billing"
-      className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      className="rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <StatusBadge
         className={isFoundingOffer ? "tabular" : undefined}

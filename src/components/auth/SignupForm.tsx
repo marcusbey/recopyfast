@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { IconTile } from "@/components/ui/icon-tile";
 import { Loader2, Mail, User } from "lucide-react";
 import { getAuthErrorMessage, logAuthError } from "./auth-errors";
 
@@ -59,9 +60,9 @@ export function SignupForm({ onSwitchToLogin }: SignupFormProps) {
   if (success) {
     return (
       <div className="text-center space-y-4">
-        <div className="w-16 h-16 bg-tone-success-surface rounded-full flex items-center justify-center mx-auto">
-          <Mail className="w-8 h-8 text-tone-success-text" />
-        </div>
+        <IconTile tone="success" size="lg" className="mx-auto flex">
+          <Mail />
+        </IconTile>
         <div className="space-y-2">
           <h3 className="text-lg font-semibold text-foreground">
             Check your email

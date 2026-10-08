@@ -13,15 +13,18 @@
  * - the tokens: `--radius-control` ≤ 2 px and `--radius-container` = 0 in
  *   `@theme inline`;
  * - a scan of every app-surface file (see ./app-surface.ts) for the legacy
- *   scale, against a per-file baseline of today's offenders that may only
- *   shrink. s66b empties it. `src/components/ui/**` and the two redesigned
- *   panels hold zero from s66a.
+ *   scale. Every file holds zero.
  *
- * Regenerate the baseline (only ever to lower it) with
- * `RCF_WRITE_RADIUS_BASELINE=1 npx jest src/__tests__/design/radius-guard`.
+ * s66a started the scan against `radius-baseline.json`, a per-file count of
+ * that day's offenders that could only shrink, split between s66b (the app
+ * pages) and s66c (the site pages). Each emptied its half, and the owner
+ * decided that whichever of s66b2 and s66c merged last deletes the file once
+ * it is empty (2026-10-08). s66c1 merged last: the baseline is gone, and a
+ * new offence has no allowance to hide in. Do not bring a baseline back to
+ * land one; square the component instead (ADR 050).
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   REPO_ROOT,
@@ -36,16 +39,9 @@ import {
   stripComments,
 } from "./app-surface";
 
-const BASELINE_PATH = path.join(__dirname, "radius-baseline.json");
+/** Where the retired per-file allowance lived (s66a to s66c1). */
+const RETIRED_BASELINE = path.join(__dirname, "radius-baseline.json");
 const GLOBALS_CSS = path.join(REPO_ROOT, "src/app/globals.css");
-
-/** Files that must hold zero offences, so they never enter the baseline. */
-const MUST_BE_ZERO = [
-  /^src\/components\/ui\//,
-  /^src\/components\/dashboard\/SiteRegistrationModal\.tsx$/,
-  /^src\/components\/dashboard\/ShareSiteDialog\.tsx$/,
-  /^src\/components\/dashboard\/ShareLinkCard\.tsx$/,
-];
 
 const AVATAR = "src/components/ui/avatar.tsx";
 
@@ -162,8 +158,6 @@ function findRadiusOffences(source: string, file: string): RadiusOffence[] {
   return offences;
 }
 
-type Baseline = Record<string, number>;
-
 function currentCounts(): Map<string, RadiusOffence[]> {
   const counts = new Map<string, RadiusOffence[]>();
   for (const file of appSurfaceFiles()) {
@@ -171,20 +165,6 @@ function currentCounts(): Map<string, RadiusOffence[]> {
     if (offences.length > 0) counts.set(file, offences);
   }
   return counts;
-}
-
-function readBaseline(): Baseline {
-  return JSON.parse(readFileSync(BASELINE_PATH, "utf8")) as Baseline;
-}
-
-if (process.env.RCF_WRITE_RADIUS_BASELINE === "1") {
-  const counts = currentCounts();
-  const baseline: Baseline = {};
-  for (const [file, offences] of counts) {
-    if (MUST_BE_ZERO.some((pattern) => pattern.test(file))) continue;
-    baseline[file] = offences.length;
-  }
-  writeFileSync(BASELINE_PATH, `${JSON.stringify(baseline, null, 2)}\n`);
 }
 
 function themeToken(css: string, name: string): string | null {
@@ -248,39 +228,18 @@ describe("radius tokens (ADR 050)", () => {
 });
 
 describe("radius scan of the app surface", () => {
-  it("finds no offence beyond a file's baseline", () => {
-    const baseline = readBaseline();
-    const report: string[] = [];
-    for (const [file, offences] of currentCounts()) {
-      const allowed = baseline[file] ?? 0;
-      if (offences.length <= allowed) continue;
-      report.push(
-        `${file}: ${offences.length} offences, baseline ${allowed}`,
-        ...offences.map(
-          (offence) =>
-            `  ${file}:${offence.line} ${offence.rule} \`${offence.token}\``,
-        ),
-      );
-    }
+  it("finds no radius offence in any app-surface file", () => {
+    const report = [...currentCounts()].flatMap(([file, offences]) =>
+      offences.map(
+        (offence) =>
+          `${file}:${offence.line} ${offence.rule} \`${offence.token}\``,
+      ),
+    );
     expect(report).toEqual([]);
   });
 
-  it("only ever shrinks: a file below its baseline must lower it", () => {
-    const counts = currentCounts();
-    const stale = Object.entries(readBaseline())
-      .filter(([file, allowed]) => (counts.get(file)?.length ?? 0) < allowed)
-      .map(
-        ([file, allowed]) =>
-          `${file}: baseline ${allowed}, now ${counts.get(file)?.length ?? 0} — lower the entry in radius-baseline.json (delete it at 0)`,
-      );
-    expect(stale).toEqual([]);
-  });
-
-  it("holds ui/** and the two redesigned panels at zero", () => {
-    const entries = Object.keys(readBaseline()).filter((file) =>
-      MUST_BE_ZERO.some((pattern) => pattern.test(file)),
-    );
-    expect(entries).toEqual([]);
+  it("has no baseline left to grandfather an offence", () => {
+    expect(existsSync(RETIRED_BASELINE)).toBe(false);
   });
 });
 

@@ -128,7 +128,9 @@ export function ContentElementCard({
     ].some((value) => value.length > CLAMP_THRESHOLD);
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
+    // Flat: a static panel casts no shadow, at rest or on hover (s66b2;
+    // design system, Surfaces and elevation). It grew `shadow-md` on hover.
+    <Card>
       <CardContent className="p-0">
         {/* Header */}
         <div className="border-b border-border p-4">
@@ -202,7 +204,7 @@ export function ContentElementCard({
               onClick={() => setExpanded(!expanded)}
               aria-expanded={expanded}
               aria-controls={bodyId}
-              className="flex items-center gap-1 rounded text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="flex items-center gap-1 rounded-control text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               {expanded ? (
                 <>
