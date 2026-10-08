@@ -1,3 +1,4 @@
+import { useLayoutEffect } from "react";
 import {
   act,
   fireEvent,
@@ -490,7 +491,11 @@ describe("SiteProvider credentials", () => {
     expect(screen.queryByText(admin.siteToken!)).not.toBeInTheDocument();
   });
 
-  it("immediately clears same-site credentials after permission loss and ignores a late rotation", async () => {
+  // Renamed in the s66c1 review (m2): its assertions run after the effects
+  // have flushed, so it cannot tell "in the same render" from "one render
+  // later". The commit-level proof is "clears the credentials in the very
+  // commit that loses install access" below.
+  it("clears same-site credentials after permission loss and ignores a late rotation", async () => {
     let resolveRegeneration!: (response: Response) => void;
     const pendingRegeneration = new Promise<Response>((resolve) => {
       resolveRegeneration = resolve;
@@ -543,6 +548,164 @@ describe("SiteProvider credentials", () => {
         screen.queryByRole("button", { name: /regenerate snippet/i }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  /**
+   * s66c1 review m2 — the first-render guard (`displayedCredentials`), proved
+   * at commit time. Every other test reads the screen after React has run the
+   * scope's effects, by which point the effect has already put the right
+   * credentials in state; removing the guard left them all green. This log is
+   * written in a layout effect, which runs on each commit before any passive
+   * effect, so it records exactly what reached the screen in the render that
+   * changed the record.
+   */
+  interface CommittedCredentials {
+    siteId: string;
+    recordToken?: string;
+    shownToken?: string;
+    shownSnippet?: string;
+  }
+
+  function CommitLog({ log }: { log: CommittedCredentials[] }) {
+    const { site, credentials } = useSiteContext();
+    useLayoutEffect(() => {
+      log.push({
+        siteId: site.id,
+        recordToken: site.siteToken,
+        shownToken: credentials.siteToken,
+        shownSnippet: credentials.embedScript,
+      });
+    });
+    return null;
+  }
+
+  const showsToken = (entry: CommittedCredentials, token: string) =>
+    entry.shownToken === token || Boolean(entry.shownSnippet?.includes(token));
+
+  it("clears the credentials in the very commit that loses install access", async () => {
+    let hasLostAccess = false;
+    respond({
+      sites: () =>
+        hasLostAccess
+          ? mockSites.map((site) =>
+              site.id === admin.id
+                ? { ...site, siteToken: undefined, embedScript: undefined }
+                : site,
+            )
+          : mockSites,
+    });
+    const log: CommittedCredentials[] = [];
+    render(
+      <SiteProvider siteId={admin.id}>
+        <CommitLog log={log} />
+        <CredentialProbe />
+      </SiteProvider>,
+    );
+    await screen.findByText(admin.siteToken!);
+
+    hasLostAccess = true;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh site" }));
+    });
+
+    const afterLoss = log.filter((entry) => entry.recordToken === undefined);
+    expect(afterLoss.length).toBeGreaterThan(0);
+    expect(
+      afterLoss.filter((entry) => showsToken(entry, admin.siteToken!)),
+    ).toEqual([]);
+  });
+
+  // The layout's `key` remounts the provider on a site change; this is the
+  // guard for the day the router keeps it mounted (ADR 052 "Watch"), so the
+  // provider is re-rendered here without a key.
+  it("never commits the site it left's credentials under another site, even kept mounted", async () => {
+    const other = mockSites[1];
+    respond();
+    const log: CommittedCredentials[] = [];
+    const view = render(
+      <SiteProvider siteId={admin.id}>
+        <CommitLog log={log} />
+      </SiteProvider>,
+    );
+    await waitFor(() =>
+      expect(log.some((entry) => showsToken(entry, admin.siteToken!))).toBe(
+        true,
+      ),
+    );
+
+    view.rerender(
+      <SiteProvider siteId={other.id}>
+        <CommitLog log={log} />
+      </SiteProvider>,
+    );
+    await waitFor(() =>
+      expect(log[log.length - 1].shownToken).toBe(other.siteToken),
+    );
+
+    const forOther = log.filter((entry) => entry.siteId === other.id);
+    expect(forOther.length).toBeGreaterThan(0);
+    expect(
+      forOther.filter((entry) => showsToken(entry, admin.siteToken!)),
+    ).toEqual([]);
+  });
+
+  /**
+   * s66c1 review m3 — the late-rotation check in `regenerateSnippet`. A
+   * rotation requested on one site and answered after the owner moved to
+   * another (provider kept mounted, as above) belongs to the first site only.
+   * Nothing else catches it: by then the scope has adopted the new site, and
+   * the first-render guard trusts its state for that site.
+   */
+  it("ignores a rotation that answers after the site changed", async () => {
+    const other = mockSites[1];
+    let resolveRegeneration!: (response: Response) => void;
+    const pendingRegeneration = new Promise<Response>((resolve) => {
+      resolveRegeneration = resolve;
+    });
+    respond({ regenerate: () => pendingRegeneration });
+
+    const view = render(
+      <SiteProvider siteId={admin.id}>
+        <CredentialProbe />
+      </SiteProvider>,
+    );
+    await screen.findByText(admin.siteToken!);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+
+    view.rerender(
+      <SiteProvider siteId={other.id}>
+        <CredentialProbe />
+      </SiteProvider>,
+    );
+    expect(await screen.findByText(other.siteToken!)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveRegeneration({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          siteToken: "late-token-for-the-first-site",
+          embedScript:
+            '<script data-site-token="late-token-for-the-first-site"></script>',
+        }),
+      } as Response);
+      await pendingRegeneration;
+    });
+    // The rotation has been handled once the button is offered again.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /regenerate snippet/i }),
+      ).toBeEnabled(),
+    );
+
+    expect(
+      screen.queryByText(/late-token-for-the-first-site/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(other.siteToken!)).toBeInTheDocument();
+    expect(screen.getByText(other.embedScript!)).toBeInTheDocument();
   });
 
   it("keeps the current credentials visible when regeneration fails", async () => {

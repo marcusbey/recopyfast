@@ -19,6 +19,18 @@ import { useCallback, useState } from "react";
 
 export type EditSessionPermission = "view" | "edit" | "publish" | "admin";
 
+/**
+ * What an owner's "Edit website" has always sent from a site's own controls
+ * (the Sites row, its menu, the site header): their permissions without
+ * `view`.
+ *
+ * It lives here, beside the request it shapes, rather than in the site
+ * header's hook: the Sites row imported it from there, which pulled the
+ * header, VersionHistoryPanel and SiteProvider into the Sites list for a
+ * two-item array (s66c1 review m5).
+ */
+export const OWNER_EDIT_PERMISSIONS: ["edit", "admin"] = ["edit", "admin"];
+
 export interface EditSessionRequest {
   siteId: string;
   permissions: readonly EditSessionPermission[];

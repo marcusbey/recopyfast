@@ -239,3 +239,31 @@ describe("SiteRow", () => {
     expect(screen.queryByText("Views")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * s66c1 review m5. The row needs one constant from the site pages, the
+ * permissions an owner's "Edit website" sends, and it used to import it from
+ * the site header's hook. That pulled the header, VersionHistoryPanel and the
+ * SiteProvider into the Sites list's module graph, for a two-item array. The
+ * constant lives with the edit-session hook the row already uses; each
+ * module below throws if the row reaches it.
+ */
+describe("SiteRow's imports", () => {
+  it("keeps the site page's header, history and provider out of the Sites list", () => {
+    const sitePageOnly = [
+      "../site/useSitePageShell",
+      "../VersionHistoryPanel",
+      "../site/SiteProvider",
+    ];
+
+    jest.isolateModules(() => {
+      for (const modulePath of sitePageOnly) {
+        jest.doMock(modulePath, () => {
+          throw new Error(`SiteRow imported ${modulePath}`);
+        });
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      expect(() => require("../SiteRow")).not.toThrow();
+    });
+  });
+});

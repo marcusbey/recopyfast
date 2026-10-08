@@ -1,7 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ShareSiteDialog } from "../ShareSiteDialog";
 import type { Site } from "@/types";
@@ -261,5 +262,102 @@ describe("ShareSiteDialog (s66c1)", () => {
     expect(
       await screen.findByRole("link", { name: "See preview links" }),
     ).toHaveAttribute("href", "/dashboard/sites/site-1/people");
+  });
+});
+
+/**
+ * s66c1 review m4. People & access keeps this dialog mounted and only flips
+ * `open`, so whatever the last opening left behind (a refusal, a success
+ * banner, a half-typed address) used to be waiting in the next one. Each
+ * opening starts on an empty form with no message, as AddEditorDialog does.
+ */
+describe("ShareSiteDialog reopened", () => {
+  function ReopenableDialog() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open share dialog
+        </button>
+        <ShareSiteDialog open={open} onOpenChange={setOpen} site={mockSite} />
+      </>
+    );
+  }
+
+  const closeAndReopen = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Open share dialog" }));
+    return screen.findByRole("dialog");
+  };
+
+  const expectEmptyForm = (dialog: HTMLElement) => {
+    expect(within(dialog).getByLabelText("Email address")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Label (optional)")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Expires in")).toHaveValue("7");
+    expect(permission("View")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
+    expect(permission("Publish")).not.toBeChecked();
+    expect(permission("Admin")).not.toBeChecked();
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("shows no error from the last opening, on an empty form", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "This address was removed as an editor." }),
+    });
+    const user = userEvent.setup();
+    render(<ReopenableDialog />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.selectOptions(screen.getByLabelText("Expires in"), "30");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This address was removed as an editor.",
+    );
+
+    const dialog = await closeAndReopen(user);
+
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("This address was removed as an editor."),
+    ).not.toBeInTheDocument();
+    expectEmptyForm(dialog);
+  });
+
+  it("shows no success banner from the last opening, on an empty form", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(<ReopenableDialog />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.selectOptions(screen.getByLabelText("Expires in"), "30");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+
+    const dialog = await closeAndReopen(user);
+
+    expect(
+      within(dialog).queryByText("Invite sent successfully!"),
+    ).not.toBeInTheDocument();
+    expectEmptyForm(dialog);
   });
 });

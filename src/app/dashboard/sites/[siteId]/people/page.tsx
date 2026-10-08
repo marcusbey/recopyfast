@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Link2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -115,12 +115,26 @@ interface AccessOptionProps {
   action: React.ReactNode;
 }
 
+/**
+ * One way to give access: its eyebrow, the one line that says when to use
+ * it, and its one button. The block is a group named by its eyebrow, so a
+ * screen reader entering it hears "Ongoing access" before the button, and
+ * the line and the button cannot drift into different blocks unnoticed
+ * (s66c1 review m1: swapping the two explainers left every test green).
+ */
 function AccessOption({ icon, eyebrow, explainer, action }: AccessOptionProps) {
+  const eyebrowId = useId();
   return (
-    <Card className="flex flex-col gap-3 p-4 sm:px-6 sm:py-5">
+    <Card
+      role="group"
+      aria-labelledby={eyebrowId}
+      className="flex flex-col gap-3 p-4 sm:px-6 sm:py-5"
+    >
       <div className="flex items-center gap-3">
         <IconTile>{icon}</IconTile>
-        <p className="text-eyebrow">{eyebrow}</p>
+        <p id={eyebrowId} className="text-eyebrow">
+          {eyebrow}
+        </p>
       </div>
       <p className="flex-1 text-sm text-muted-foreground">{explainer}</p>
       <div>{action}</div>

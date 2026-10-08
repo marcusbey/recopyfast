@@ -152,6 +152,43 @@ describe("the Settings page", () => {
     expect(deleteCalls()[0][0]).toBe(`/api/sites/${SITE_ID}`);
   });
 
+  /**
+   * s66c1 review m6. `router.replace` is in flight after the DELETE succeeds,
+   * and the dialog is still on screen until the page leaves. The button used
+   * to come back enabled in that window: a second tap sent another DELETE,
+   * which the route refuses for a site that no longer exists, and the dialog
+   * flashed that refusal while the page was leaving.
+   */
+  it("keeps the confirmation disabled once the site is deleted, so a second tap sends nothing", async () => {
+    const user = userEvent.setup();
+    renderWithSite(<SiteSettingsPage />);
+
+    await user.click(
+      within(screen.getByRole("region", { name: "Danger zone" })).getByRole(
+        "button",
+        { name: "Delete site" },
+      ),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Delete site?" });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Delete site" }),
+    );
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith("/dashboard/sites"),
+    );
+
+    // The confirming button, whatever it now reads: still on screen, because
+    // the mocked router never leaves the page.
+    const confirm = within(dialog).getByRole("button", {
+      name: /delete site|deleting/i,
+    });
+    await user.click(confirm);
+
+    expect(deleteCalls()).toHaveLength(1);
+    expect(confirm).toBeDisabled();
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps the creator-only refusal inside the dialog", async () => {
     respond({
       deleteResponse: jsonResponse(

@@ -7,14 +7,9 @@ import type { PageShellProps } from "@/components/ui/page-shell";
 import { StatusBadge, resolveSiteStatus } from "@/components/ui/status-badge";
 import EditWebsiteButton from "@/components/dashboard/EditWebsiteButton";
 import { VersionHistoryPanel } from "@/components/dashboard/VersionHistoryPanel";
+import { OWNER_EDIT_PERMISSIONS } from "@/hooks/useEditSession";
 import { useSiteContext } from "./SiteProvider";
 import { SiteSubnav } from "./SiteSubnav";
-
-/**
- * What an owner's "Edit website" has always sent from a site's own controls
- * (the Sites row, its menu, this header): their permissions without `view`.
- */
-export const OWNER_EDIT_PERMISSIONS: ["edit", "admin"] = ["edit", "admin"];
 
 function externalSiteUrl(domain: string): string {
   return domain.startsWith("http") ? domain : `https://${domain}`;

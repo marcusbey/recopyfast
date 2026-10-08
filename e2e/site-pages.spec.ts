@@ -267,11 +267,14 @@ test.describe("s66c1 site pages", () => {
         await capture(page, `${name}-${width}`);
         const { pageOverflow, overflowing } = await measureContent(page);
         if (pageOverflow > 0) {
-          violations.push(`${name} @${width}: page scrolls by ${pageOverflow}px`);
+          violations.push(
+            `${name} @${width}: page scrolls by ${pageOverflow}px`,
+          );
         }
         violations.push(
           ...overflowing.map(
-            (element) => `${name} @${width}: ${element} passes the content edge`,
+            (element) =>
+              `${name} @${width}: ${element} passes the content edge`,
           ),
         );
       }
@@ -386,6 +389,15 @@ test.describe("s66c1 site pages", () => {
    * ADR 052 "Watch", in a browser: the layout keys the provider by site, so
    * moving from site A to site B remounts it. Site A's token must not appear
    * on any of site B's pages, at any point the test can see.
+   *
+   * Every move is a click on an in-app link (s66c1 review m7), the way an
+   * owner moves: the router, not a fresh document, decides what stays
+   * mounted. It used to `page.goto` the list, a full load that builds a new
+   * provider whatever the router would have kept, so it could not see a
+   * client-side remount problem at all. A marker on `window` proves no move
+   * reloaded the page. The `key` itself is proved in Jest (SiteProvider.test,
+   * "shows none of the first site's token in the render that switches
+   * sites").
    */
   test("moving from one site to another never shows the first site's token", async ({
     page,
@@ -404,6 +416,11 @@ test.describe("s66c1 site pages", () => {
     };
     await routeSites(page, [siteA, siteB]);
     await signIn(page, 1280);
+    await expectOn(page, "/dashboard/sites", "Sites");
+    await page.evaluate(() => {
+      (window as Window & { __rcfSameDocument?: boolean }).__rcfSameDocument =
+        true;
+    });
     const tokenA = page.getByText(siteA.siteToken, { exact: true });
 
     await page.getByRole("link", { name: siteA.name, exact: true }).click();
@@ -415,7 +432,11 @@ test.describe("s66c1 site pages", () => {
     await expectOn(page, `/dashboard/sites/${siteA.id}/install`, siteA.name);
     await expect(tokenA).toBeVisible();
 
-    await page.goto("/dashboard/sites");
+    await page
+      .getByRole("navigation", { name: "Breadcrumb" })
+      .getByRole("link", { name: "Sites", exact: true })
+      .click();
+    await expectOn(page, "/dashboard/sites", "Sites");
     await page.getByRole("link", { name: siteB.name, exact: true }).click();
     await page.waitForURL(
       (url) => url.pathname === `/dashboard/sites/${siteB.id}`,
@@ -434,5 +455,13 @@ test.describe("s66c1 site pages", () => {
       page.getByText(siteB.siteToken, { exact: true }),
     ).toBeVisible();
     await expect(tokenA).toHaveCount(0);
+
+    expect(
+      await page.evaluate(
+        () =>
+          (window as Window & { __rcfSameDocument?: boolean })
+            .__rcfSameDocument === true,
+      ),
+    ).toBe(true);
   });
 });

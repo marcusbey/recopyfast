@@ -364,6 +364,52 @@ describe("SitesPage", () => {
     });
   });
 
+  // s66c1 review m6: the confirmation stays disabled after a delete succeeds,
+  // until the dialog goes away. The list keeps one dialog mounted for every
+  // row, so the next site's confirmation must start enabled again.
+  it("lets a second site be deleted after the first", async () => {
+    const user = userEvent.setup();
+    render(<SitesPage />);
+    const deleteRequests = () =>
+      (global.fetch as jest.Mock).mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === "DELETE",
+      );
+
+    await user.click(
+      within(await screen.findByTestId("site-card-site-1")).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
+    await user.click(
+      within(
+        await screen.findByRole("dialog", { name: "Delete site?" }),
+      ).getByRole("button", { name: "Delete site" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("site-card-site-1")).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      within(screen.getByTestId("site-card-site-2")).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    const confirm = within(
+      await screen.findByRole("dialog", { name: "Delete site?" }),
+    ).getByRole("button", { name: "Delete site" });
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("site-card-site-2")).not.toBeInTheDocument(),
+    );
+    expect(deleteRequests().map(([url]) => url)).toEqual([
+      "/api/sites/site-1",
+      "/api/sites/site-2",
+    ]);
+  });
+
   it("draws no empty band under the delete confirmation when there is no error", async () => {
     render(<SitesPage />);
     const card = await screen.findByTestId("site-card-site-1");

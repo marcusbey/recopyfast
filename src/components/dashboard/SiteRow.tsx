@@ -28,10 +28,9 @@ import {
   siteStatuses,
   type SiteStatus,
 } from "@/components/ui/status-badge";
-import { useEditSession } from "@/hooks/useEditSession";
+import { OWNER_EDIT_PERMISSIONS, useEditSession } from "@/hooks/useEditSession";
 import EditWebsiteButton from "./EditWebsiteButton";
 import { sitePageHref } from "./site/SiteSubnav";
-import { OWNER_EDIT_PERMISSIONS } from "./site/useSitePageShell";
 
 /**
  * One site on the Sites list (s66c1 AC 3). It replaces `SiteCard`.

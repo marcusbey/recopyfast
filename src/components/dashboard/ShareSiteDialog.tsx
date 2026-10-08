@@ -61,6 +61,8 @@ type Permission = "view" | "edit" | "publish" | "admin";
 
 const DEFAULT_GRANT: readonly Permission[] = ["view"];
 
+const DEFAULT_EXPIRY_DAYS = 7;
+
 const EXPIRY_OPTIONS = [
   { value: 1, label: "1 day" },
   { value: 7, label: "7 days" },
@@ -99,8 +101,27 @@ export function ShareSiteDialog({
   const [permissions, setPermissions] = useState<Permission[]>([
     ...DEFAULT_GRANT,
   ]);
-  const [expiresInDays, setExpiresInDays] = useState(7);
+  const [expiresInDays, setExpiresInDays] = useState(DEFAULT_EXPIRY_DAYS);
   const [label, setLabel] = useState("");
+  const [wasOpen, setWasOpen] = useState(open);
+
+  // Each opening starts on an empty form with no message (s66c1 review m4).
+  // People & access keeps this dialog mounted and only flips `open`, so a
+  // refusal, a success banner or a half-typed address from the last opening
+  // was still on screen in the next one, describing an invite that had not
+  // been sent yet. Cleared on opening, not on closing, so the closing dialog
+  // does not blank out while it animates away (the AddEditorDialog pattern).
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setError(null);
+      setSuccess(null);
+      setEmail("");
+      setLabel("");
+      setPermissions([...DEFAULT_GRANT]);
+      setExpiresInDays(DEFAULT_EXPIRY_DAYS);
+    }
+  }
 
   const handleCreateLink = async () => {
     if (!email) {

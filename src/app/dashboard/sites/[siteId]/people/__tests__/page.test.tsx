@@ -106,6 +106,39 @@ describe("the People & access page", () => {
     expect(within(section).getByText("One-off review")).toBeInTheDocument();
   });
 
+  /**
+   * s66c1 review m1. Both explainers on the page is not the owner's answer:
+   * "which one to use and when" is answered only if each line sits with its
+   * own button. Swapping them would put the expiring-link sentence over Add
+   * editor, and every assertion above would still pass.
+   */
+  it("pairs each explainer with its own button, one option each", () => {
+    renderWithSite(<SitePeoplePage />);
+
+    const buttonsIn = (option: HTMLElement) =>
+      within(option)
+        .getAllByRole("button")
+        .map((button) => button.textContent);
+
+    const ongoing = within(accessSection()).getByRole("group", {
+      name: "Ongoing access",
+    });
+    expect(within(ongoing).getByText(ADD_EDITOR_EXPLAINER)).toBeInTheDocument();
+    expect(
+      within(ongoing).queryByText(SHARE_EXPLAINER),
+    ).not.toBeInTheDocument();
+    expect(buttonsIn(ongoing)).toEqual(["Add editor"]);
+
+    const oneOff = within(accessSection()).getByRole("group", {
+      name: "One-off review",
+    });
+    expect(within(oneOff).getByText(SHARE_EXPLAINER)).toBeInTheDocument();
+    expect(
+      within(oneOff).queryByText(ADD_EDITOR_EXPLAINER),
+    ).not.toBeInTheDocument();
+    expect(buttonsIn(oneOff)).toEqual(["Share preview link"]);
+  });
+
   it("lists editors and preview links, each under a heading with its count", async () => {
     renderWithSite(<SitePeoplePage />);
 

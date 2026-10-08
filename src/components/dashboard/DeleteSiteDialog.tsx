@@ -44,6 +44,19 @@ export function DeleteSiteDialog({
 }: DeleteSiteDialogProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shownSiteId, setShownSiteId] = useState(site?.id ?? null);
+
+  // Opening for a site re-arms the confirmation. A successful delete leaves
+  // it disabled on purpose (below), and the Sites list keeps this one dialog
+  // mounted for every row, so the next site's confirmation starts fresh.
+  const siteId = site?.id ?? null;
+  if (siteId !== shownSiteId) {
+    setShownSiteId(siteId);
+    if (siteId) {
+      setIsDeleting(false);
+      setError(null);
+    }
+  }
 
   const close = () => {
     if (isDeleting) return;
@@ -67,11 +80,16 @@ export function DeleteSiteDialog({
         throw new Error(errData.error ?? "Failed to delete site");
       }
 
+      // Still deleting, as far as the owner is concerned, until the caller
+      // takes the dialog away. On a site's Danger zone that is
+      // `router.replace` to Sites, which is in flight with the dialog still on
+      // screen; re-enabling the button there let a second tap send another
+      // DELETE for a site that no longer exists and flash its refusal (s66c1
+      // review m6). The next opening re-arms it.
       onDeleted(site.id);
     } catch (err) {
       console.error("Error deleting site:", err);
       setError(err instanceof Error ? err.message : "Failed to delete site");
-    } finally {
       setIsDeleting(false);
     }
   };
