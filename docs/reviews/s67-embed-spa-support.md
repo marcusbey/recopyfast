@@ -54,5 +54,30 @@ Production proof (AC 1, 6, 10 — Task 10 after deploy); E1–E5 on `next start`
 Owner standing rule: fix majors (and cheap minors) before shipping. Findings 1–8 go to a fix run; the widget has
 0 bytes of headroom, so every added byte must be funded in the same branch or the run stops and reports.
 
+## Re-review after fix `d9feb63` (fresh reviewer, 2026-10-08)
+
+Findings 1–8 closed (7 partly: see minor 1). Full jest 323 suites / 4,242 tests, type-check green; a fresh
+build is byte-identical to the committed artifact at 45,860 / 33,089 (ceilings only went down); the funding
+rewrites are behaviour-preserving. e2e E1–E5 green; E2 goes red at the new in-place step when only the stale
+branch is reverted. Mutations bite except the form-save line (minor 1).
+
+New findings:
+
+- A (major) — `recopyfast.src.js:3930` with `dropEntry` `:3703-3706`: on a route change `checkRoute` restores
+  authored copy on elements the embed had written; those writes are a text-only batch, and while `stale` that
+  batch alone now schedules the rescan 200 ms later. With the Navigation API, an applied edit on the page
+  being left, and a router that renders > 200 ms after `pushState` with no DOM change in between: the old
+  page shows the new page's published copy before the new page renders, the new page's first frame is
+  authored for up to 200 ms, and discovery reports the old page's text as the new page's authored copy —
+  stored permanently (`ignoreDuplicates`, `content/[siteId]/route.ts:641`). ADR 049:138-141 understates it.
+  Fix: the embed's own restore records must not count as a stale batch (e.g. `observer.takeRecords()` after
+  the restore loop, aware it also drops pending host records), funded within the ceilings; jest case; ADR.
+- minor 1 — `:5426`: the form save sets `written` to the placeholder but `dropEntry` compares `.value`, so it
+  never matches; the comment at `:4850-4857` overclaims.
+- minor 2 — leftovers: `e2e/realtime-parity.spec.ts:166` ("never set"), `scripts/build-embed.mjs:674`
+  ("fallback"), a non-failing "Authored headline" assertion in `site-token-refusal.test.ts`.
+
+Orchestrator: A + minors 1–2 go to a fix run (owner's standing rule).
+
 Max severity: major
 Ship allowed: yes

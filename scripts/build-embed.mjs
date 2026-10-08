@@ -215,14 +215,30 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  closures in checkRoute, applyRows and the discovery report
  *                  timer written as arrows, the observer's immediate rescan as
  *                  `return self.rescan()`
- *   45860 / 33089  measured after the review fix — the new ceilings
+ *   45860 / 33089  measured after the review fix — the ceilings until the
+ *                  re-review fix
+ *   +22 / +21      re-review fix (docs/reviews/s67-embed-spa-support.md,
+ *                  finding A, minor 1): the Navigation API handler hands the
+ *                  host's pending records to the observer callback, then
+ *                  discards the embed's own restores; an empty batch schedules
+ *                  no rescan; the form save records the field's value
+ *   −30 / −29      funded in the branch, inside s67's own code, no behaviour
+ *                  change: one stamp lookup per scanned element instead of
+ *                  two, the row index built with for...of, the observer
+ *                  created and attached in one expression, loadRows' apply
+ *                  closure as an arrow, applyRow's empty-copy check reordered,
+ *                  writeText's walker advanced in one place, destroy clearing
+ *                  the polling interval with clearTimeout
+ *   45852 / 33081  measured after the re-review fix — the new ceilings
  *
  * Gross against a funded floor (main with every deletion above and none of the
- * SPA work, measured 45037 / 32248): +823 / +841, final, review fix included.
- * build-size-gate.test.ts pins the same pair and quotes the same gross.
+ * SPA work, measured 45037 / 32248): +815 / +833, final, review and re-review
+ * fixes included. Every re-review funding line is s67 code, so the floor does
+ * not move. build-size-gate.test.ts pins the same pair and quotes the same
+ * gross.
  */
-const MAX_BUNDLE_GZ = 45860;
-const MAX_WIDGET_GZ = 33089;
+const MAX_BUNDLE_GZ = 45852;
+const MAX_WIDGET_GZ = 33081;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
@@ -663,6 +679,10 @@ async function main() {
   // 174 KB on disk and 46 KB on the wire: raw byte savings land at roughly a
   // tenth of their size after gzip, and every byte estimate made in raw KB on
   // this file has been wrong by that factor.
+  //
+  // `socket`, not `fallback` (s67 re-review): the standalone socket.io build
+  // is the gate's transport measure and a pinned public URL. The widget never
+  // loads it; s67 deleted the loader that did.
   console.log(
     [
       `source   ${path.relative(ROOT, SOURCE)}  ${formatKb(sourceBytes)}`,
@@ -671,7 +691,7 @@ async function main() {
       `bundle   ${path.relative(ROOT, BUNDLE_OUT)}  ${formatKb(bundleBytes)}` +
         ` (widget ${formatKb(Buffer.byteLength(widget))}` +
         ` + socket.io-client ${socketVersion} ${formatKb(Buffer.byteLength(socketIo))})`,
-      `fallback ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
+      `socket   ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
       formatGzLine(measured, ceilings),
     ].join("\n"),
   );

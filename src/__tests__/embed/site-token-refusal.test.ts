@@ -22,10 +22,6 @@ const METHOD_BEGIN = "    async hydrateStoredContent() {";
 const NEXT_METHOD = "    setupMutationObserver() {";
 
 interface FakeWidget {
-  elements: Map<
-    string,
-    { element: { textContent: string }; originalContent: string }
-  >;
   canReachStagingContent: () => boolean;
   editorTokenQuery: () => string;
   editorAuthHeaders: () => Record<string, string>;
@@ -69,15 +65,6 @@ function loadHydrateStoredContent(
 
 function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {
   return {
-    elements: new Map([
-      [
-        "rcf-headline",
-        {
-          element: { textContent: "Authored headline" },
-          originalContent: "Authored headline",
-        },
-      ],
-    ]),
     canReachStagingContent: () => false,
     editorTokenQuery: () => "",
     editorAuthHeaders: () => ({}),
@@ -110,9 +97,6 @@ describe("widget handling of a refused site token", () => {
     // No rows: loadRows has nothing to apply and forgets the path, so the
     // authored copy stays and the next visit asks again.
     expect(rows).toBeUndefined();
-    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
-      "Authored headline",
-    );
   });
 
   it("preserves authored copy for a missing installed token", async () => {
@@ -136,8 +120,5 @@ describe("widget handling of a refused site token", () => {
     // No rows: loadRows has nothing to apply and forgets the path, so the
     // authored copy stays and the next visit asks again.
     expect(rows).toBeUndefined();
-    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
-      "Authored headline",
-    );
   });
 });

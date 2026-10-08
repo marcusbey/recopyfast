@@ -746,7 +746,7 @@
     let first = element.firstChild;
     while (first && first.nodeType !== 3 /* TEXT_NODE */) first = first.nextSibling;
     const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
-    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    for (let node; (node = walker.nextNode());) {
       if (node !== first && node.nodeValue) node.nodeValue = '';
     }
     if (first) first.nodeValue = text;
@@ -2660,9 +2660,11 @@
         // this, every rescan recomputed the structural id and the selector of
         // every element on the page — 1.3–1.4 s per rescan for 3,005
         // candidates at 4× CPU, and a rescan every ~1.3 s on a live page pins
-        // the main thread (research, "Scan cost").
-        const mapped = self.elements.get(element.getAttribute('data-rcf-id'));
-        if (mapped && mapped.element === element) return;
+        // the main thread (research, "Scan cost"). The same lookup decides the
+        // page path below (one lookup, not two: s67 re-review, byte funding).
+        const stampedId = element.getAttribute('data-rcf-id');
+        const stamped = self.elements.get(stampedId);
+        if (stamped && stamped.element === element) return;
         if (self.shouldSkipElement(element)) return;
 
         // An <img> is identified by its source, not by text content.
@@ -2673,8 +2675,6 @@
         // Deterministic — see computeStableElementId. The same element yields
         // the same id on every load, which is what lets saved content find its
         // way back onto the page.
-        const stampedId = element.getAttribute('data-rcf-id');
-        const stamped = self.elements.get(stampedId);
         const pagePath = stamped ? stamped.path : stampedId === null ? path : null;
         const elementId = computeStableElementId(element);
         element.setAttribute('data-rcf-id', elementId);
@@ -3677,6 +3677,14 @@
      * frame; a batch that only changes text (a param route reusing its
      * components) schedules the debounced rescan; an edit click rescans too.
      *
+     * The authored-copy restores below are DOM writes, so the observer sees
+     * them. Reached from an observer batch or an edit click, they trail a
+     * host change that has already been handled, and only re-arm the same
+     * debounce. Reached from the Navigation API, inside `pushState`, they
+     * would be a text-only batch of their own, before the router has
+     * rendered: that handler discards them (setupMutationObserver; s67
+     * re-review, finding A).
+     *
      * The row load is not awaited, so its rejection is caught here: a throw
      * while applying rows would otherwise be an `unhandledrejection` on the
      * host page (non-negotiable 4; s67 review, finding 6).
@@ -3719,7 +3727,6 @@
      * is forgotten so the next visit to that path asks again.
      */
     loadRows() {
-      const self = this;
       const path = this.pagePath;
       const cache = this.rows || (this.rows = {});
       if (!cache[path]) {
@@ -3728,14 +3735,14 @@
           return index;
         });
       }
-      return cache[path].then(function(index) {
-        if (path !== self.pagePath) return;
-        self.index = index;
-        self.rowsPath = path;
-        self.applyRows();
+      return cache[path].then((index) => {
+        if (path !== this.pagePath) return;
+        this.index = index;
+        this.rowsPath = path;
+        this.applyRows();
         // Discovery waited for these rows (sendContentMap). init reports for
         // itself, after the socket is up; a route change reports here.
-        if (self.isInitialized) self.sendContentMap();
+        if (this.isInitialized) this.sendContentMap();
       });
     }
 
@@ -3770,7 +3777,7 @@
       // Blanking the page is the one outcome worth guarding against, and an
       // empty string here means every stored column was null — a data gap,
       // not somebody deliberately publishing nothing.
-      if (typeof content !== 'string' || content === '') return;
+      if (!content || typeof content !== 'string') return;
       // AC 4 (owner decision 2): published copy wins over a host re-render, up
       // to 10 text writes per element per page view. A second enforcer — machine
       // translation, an i18n layer, another A/B tool — then converges on its
@@ -3868,8 +3875,7 @@
       // discovery is only worth a write when the page shows something absent
       // from it. The rows themselves are indexed by id for loadRows' cache.
       const index = {};
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      for (const row of rows) {
         if (row && row.element_id) {
           this.serverKnownElementIds.add(row.element_id);
           index[row.element_id] = row;
@@ -3900,7 +3906,7 @@
      */
     setupMutationObserver() {
       const self = this;
-      this.observer = new MutationObserver(function(records) {
+      const onRecords = function(records) {
         try {
           self.checkRoute();
           let added = false;
@@ -3924,10 +3930,11 @@
           // text changes only: the route change unstamped its elements and
           // nothing ever rescanned them — 0 mapped, its published copy never
           // applied. Any batch while stale now schedules the rescan. Debounced,
-          // not at once: such a batch can be nothing but the embed's own
-          // authored-copy restores (checkRoute), delivered before the router
-          // has rendered the new page.
-          if (added || self.stale) {
+          // not at once: the batch can be host text that is not the new page
+          // (a ticker, a loading label) arriving before the router renders.
+          // An empty batch — the Navigation API handler's, when the host had
+          // nothing pending — is no host change at all.
+          if (added || self.stale && records.length) {
             clearTimeout(self.rescanTimer);
             self.firstChange = self.firstChange || Date.now();
             self.rescanTimer = setTimeout(function() {
@@ -3936,17 +3943,40 @@
             }, Math.min(200, self.firstChange + 1000 - Date.now()));
           }
         } catch (error) {}
-      });
-      this.observer.observe(document.body, OBSERVED);
+      };
+      (this.observer = new MutationObserver(onRecords)).observe(document.body, OBSERVED);
 
       // Every same-document navigation, by anyone, including routers that
       // captured `pushState` before this script ran (Chromium 102+, Safari
       // 26.2, Firefox 2026). Older browsers rely on the batch check above.
+      //
+      //
+      // TOMBSTONE (s67 re-review, finding A). This handler used to call
+      // checkRoute and stop. The route change's authored-copy restores then
+      // reached the observer as a text-only batch of their own, and any batch
+      // while stale schedules the rescan: a router rendering more than 200 ms
+      // after `pushState` had the old page scanned under the new path first —
+      // the new page's published copy on the old page, an authored first
+      // frame, and the old page's text reported as the new page's authored
+      // copy, kept for good (the upsert ignores duplicates).
+      //
+      // So the embed's own writes are discarded with `takeRecords`. That call
+      // takes every undelivered record, the host's too, so the host's go
+      // first: taken and delivered now, as one batch, through the callback,
+      // which runs the path check (and its restores) before reading them. A
+      // router that renders, then pushes, has its whole new page there, and
+      // it is still mapped at once. What the callback wrote is then
+      // discarded. On an entry change that keeps the path (`replaceState`, a
+      // query or hash change) the check does nothing and the host's records
+      // are handled in this task instead of the next microtask: the same
+      // writes, before paint. The callback catches everything itself
+      // (non-negotiable 4).
       const navigation = window.navigation;
       if (navigation && navigation.addEventListener) {
         this.navigation = navigation;
-        this.onNavigate = function() {
-          try { self.checkRoute(); } catch (error) {}
+        this.onNavigate = () => {
+          onRecords(this.observer.takeRecords());
+          this.observer.takeRecords();
         };
         navigation.addEventListener('currententrychange', this.onNavigate);
       }
@@ -4854,7 +4884,14 @@
         // page with it as authored copy (s65a's invariant). `originalContent`
         // stays the authored text; `written` is what checkRoute's restore
         // compares with, exactly as for a row the embed applied. Same in the
-        // image and form saves.
+        // image save. The form save records the field's value, which is what
+        // dropEntry compares for an input (getElementText); it recorded the
+        // placeholder, which never matched (s67 re-review, minor 1). No test
+        // reaches it, because no page does: the scan maps no input, textarea
+        // or select (its selector has none) and a button goes to the inline
+        // editor, so startFormEdit finds no entry for the field and returns.
+        // Only an author who gives a field the same data-rcf-id as a mapped
+        // element opens the popover, on that other element's entry.
         if (textChanged) {
           writeText(element, newContent);
           elementData.written = newContent;
@@ -5423,7 +5460,8 @@
         element.placeholder = placeholderInput.value;
         element.value = valueInput.value;
 
-        elementData.written = placeholderInput.value;
+        // dropEntry compares the value (getElementText); see the text save.
+        elementData.written = valueInput.value;
 
         element.classList.add('rcf-updated');
         setTimeout(function() {
@@ -5743,9 +5781,11 @@
       }
       // Everything the widget left running (s67): a rescan already scheduled
       // would otherwise stamp and report a page it was told to leave alone.
+      // clearTimeout clears the polling interval too: timeouts and intervals
+      // share one list of active timers (HTML), and the repeat gzips smaller.
       clearTimeout(this.rescanTimer);
       clearTimeout(this.reportTimer);
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       if (this.onNavigate) this.navigation.removeEventListener('currententrychange', this.onNavigate);
       this.elements.clear();
 

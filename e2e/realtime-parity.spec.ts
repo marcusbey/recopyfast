@@ -163,8 +163,10 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
 
     await page.goto(`${FIXTURE_URL}/legacy`, { waitUntil: "networkidle" });
 
-    // The attribute is absent, so `window.RECOPYFAST_WS` is never set and the
-    // widget takes its early return before any realtime bootstrap runs.
+    // The attribute is absent, so `window.RECOPYFAST_WS` is `null` (since s67
+    // the widget writes the endpoint it resolved back to that global, and
+    // there is none) and the widget takes its early return before any
+    // realtime bootstrap runs.
     expect(await page.evaluate(() => window.RECOPYFAST_WS)).toBeFalsy();
     expect(observed.socketAttempts).toEqual([]);
 

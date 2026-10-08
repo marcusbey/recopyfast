@@ -752,6 +752,168 @@ describe("AC 3 — a route change is a page load for the embed", () => {
     },
   );
 
+  // Re-review finding A (2026-10-08, after d9feb63). With the Navigation API,
+  // the route change puts back the authored copy the embed had written on the
+  // page being left. Those writes are a text-only batch, and any batch while
+  // stale scheduled the rescan: 200 ms later, before a slow router had
+  // rendered, the old page was scanned under the new path. The old page showed
+  // the new page's published copy, the new page's first frame was authored,
+  // and discovery filed the old page's text under the new page's ids — for
+  // good (the upsert ignores duplicates).
+  describe("a router that renders after the path changed, with the Navigation API", () => {
+    const shell = (page: string) =>
+      `<main id="outlet"><h1>${page} title</h1><p>${page} body text</p></main>`;
+
+    /**
+     * Boots on /a with its headline edited and published, after learning the
+     * ids a full load of /b gives its headline and paragraph.
+     */
+    async function bootOnEditedA() {
+      const navigation = new EventTarget();
+      Object.defineProperty(window, "navigation", {
+        configurable: true,
+        value: navigation,
+      });
+      window.history.replaceState(null, "", "/b");
+      document.body.innerHTML = shell("B");
+      await boot();
+      const b = { h1: stampOf("#outlet h1"), p: stampOf("#outlet p") };
+      widget().destroy();
+      delete (window as unknown as Record<string, unknown>).ReCopyFast;
+
+      window.history.replaceState(null, "", "/a");
+      document.body.innerHTML = shell("A");
+      const recorded = await boot({
+        rows: (pagePath) =>
+          pagePath === "/a"
+            ? [
+                {
+                  element_id: stampOf("#outlet h1"),
+                  original_content: "A title",
+                  current_content: "A title, published",
+                },
+              ]
+            : pagePath === "/b"
+              ? [
+                  {
+                    element_id: b.h1,
+                    original_content: "B title",
+                    current_content: "B title, published",
+                  },
+                ]
+              : [],
+      });
+      expect(document.querySelector("#outlet h1")!.textContent).toBe(
+        "A title, published",
+      );
+      const leave = () => {
+        history.pushState(null, "", "/b");
+        navigation.dispatchEvent(new Event("currententrychange"));
+      };
+      return { b, recorded, leave };
+    }
+
+    function reportedUnderB(recorded: Recorded[]) {
+      return discoveryBodies(recorded)
+        .flatMap((body) => Object.entries(body))
+        .filter(([, entry]) => entry.page_path === "/b");
+    }
+
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    });
+
+    it("rescans nothing before a render 600 ms later, gives that render's first frame /b's published copy, and never reports /a's text under /b", async () => {
+      const { b, recorded, leave } = await bootOnEditedA();
+      const oldHeadline = document.querySelector("#outlet h1")!;
+      const oldBody = document.querySelector("#outlet p")!;
+
+      useFakeTimers();
+      leave();
+      await flushMicrotasks();
+      await advance(500);
+
+      // The page being left: its authored copy back, nothing re-identified.
+      expect(pagePaths(recorded)).toEqual(["/a", "/b"]);
+      expect(oldHeadline.textContent).toBe("A title");
+      expect(oldHeadline.hasAttribute("data-rcf-id")).toBe(false);
+      expect(oldBody.hasAttribute("data-rcf-id")).toBe(false);
+      expect(widget().elements.size).toBe(0);
+
+      const headline = document.createElement("h1");
+      headline.textContent = "B title";
+      const body = document.createElement("p");
+      body.textContent = "B body text";
+      document.getElementById("outlet")!.replaceChildren(headline, body);
+      await flushMicrotasks();
+
+      // The render's own batch: no timer has run since it.
+      expect(headline.getAttribute("data-rcf-id")).toBe(b.h1);
+      expect(headline.textContent).toBe("B title, published");
+
+      await advance(1000);
+      const reported = reportedUnderB(recorded);
+      expect(
+        reported.filter(([, entry]) => entry.content.startsWith("A ")),
+      ).toEqual([]);
+      expect(
+        reported.filter(([id]) => id === b.p).map(([, entry]) => entry.content),
+      ).toEqual(["B body text"]);
+    });
+
+    it("still rescans a text-only route render that comes 600 ms later", async () => {
+      const { b, recorded, leave } = await bootOnEditedA();
+      const headline = document.querySelector("#outlet h1")!;
+      const body = document.querySelector("#outlet p")!;
+
+      useFakeTimers();
+      leave();
+      await flushMicrotasks();
+      await advance(500);
+      expect(headline.textContent).toBe("A title");
+      expect(headline.hasAttribute("data-rcf-id")).toBe(false);
+
+      // A param route reusing its components: text changes, no added node.
+      headline.firstChild!.nodeValue = "B title";
+      body.firstChild!.nodeValue = "B body text";
+      await flushMicrotasks();
+      await advance(1000);
+
+      expect(headline.getAttribute("data-rcf-id")).toBe(b.h1);
+      expect(headline.textContent).toBe("B title, published");
+      expect(body.getAttribute("data-rcf-id")).toBe(b.p);
+      const reported = reportedUnderB(recorded);
+      expect(
+        reported.filter(([, entry]) => entry.content.startsWith("A ")),
+      ).toEqual([]);
+      expect(
+        reported.filter(([id]) => id === b.p).map(([, entry]) => entry.content),
+      ).toEqual(["B body text"]);
+    });
+
+    // What happens to the host's own records still waiting for the observer
+    // when the route change is heard: they are the host's, so they still
+    // count. A router that renders and THEN calls pushState (page.js does) has
+    // its whole new page waiting there; dropping it with the embed's restores
+    // would leave the page unmapped until something else mutated.
+    it("maps at once a page the router rendered before calling pushState", async () => {
+      const { b, leave } = await bootOnEditedA();
+
+      useFakeTimers();
+      const headline = document.createElement("h1");
+      headline.textContent = "B title";
+      const body = document.createElement("p");
+      body.textContent = "B body text";
+      document.getElementById("outlet")!.replaceChildren(headline, body);
+      leave();
+      await flushMicrotasks();
+
+      expect(headline.getAttribute("data-rcf-id")).toBe(b.h1);
+      expect(headline.textContent).toBe("B title, published");
+      expect(body.getAttribute("data-rcf-id")).toBe(b.p);
+    });
+  });
+
   it("hears a Navigation API route change that touched no DOM", async () => {
     const navigation = new EventTarget();
     Object.defineProperty(window, "navigation", {

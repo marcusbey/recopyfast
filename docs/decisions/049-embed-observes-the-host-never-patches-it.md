@@ -75,9 +75,27 @@ observation and in-place writes, and it enforces only what a human edited.
     its components and React writes a lone text child with `nodeValue`, so the new page
     arrives without a single added node. Before the review fix (finding 1, 2026-10-08) such
     a route was never rescanned: its elements stayed unstamped and its published copy was
-    never applied. Debounced rather than immediate, because such a batch can be nothing but
-    the embed's own authored-copy restores, delivered before the router has rendered;
+    never applied. Debounced rather than immediate, because such a batch can be host text
+    that is not the new page (a ticker, a loading label) arriving before the router renders;
   - an edit click rescans too.
+- **The embed's own restores are not a batch** (re-review finding A, 2026-10-08). The
+  authored-copy restores a path change makes are DOM writes. Reached through the Navigation
+  API, inside `pushState`, they used to reach the observer as a text-only batch of their
+  own, which scheduled the rescan 200 ms later. With an applied edit on the page being left,
+  a router rendering more than 200 ms after `pushState` had the old page scanned under the
+  new path. The Navigation API handler now discards them with `takeRecords()`. That call
+  takes every undelivered record, the host's too, so the handler takes the host's pending
+  records first and delivers them through the observer callback, which runs the path check
+  and its restores before reading them. Only then does it discard what is left, which is
+  only what the embed wrote:
+  - a router that renders and then calls `pushState` still has its new page rescanned at
+    once;
+  - on an entry change that keeps the path, the host's records are only handled in the
+    same task instead of the next microtask.
+
+  On the other two paths, the restores trail a host change that has already been handled:
+  a path change seen in an observer batch, or at an edit click, which rescans at once. They
+  only re-arm the same debounce, and are left alone.
 - **What the cap counts.** It counts every text write the embed makes to the element in the
   page view, the first apply included: at most 10 in total. A host that keeps writing wins
   from its tenth write-back onwards.
@@ -135,10 +153,24 @@ observation and in-place writes, and it enforces only what a human edited.
   - A route change that mutates no DOM, on any browser: the new page's elements are
     re-identified at the next observer batch of any kind (debounced unless it adds nodes) or
     at the next edit click (see the amendment above).
-  - A router that renders more than a second after the path changed, on a page that keeps
-    changing meanwhile (a ticker): the debounced rescan can run before the new page exists
-    and file the old page's elements under the new path for that interval. The new page's
-    own render corrects it at its next batch.
+  - A host change between the path change and the router's render. The embed cannot tell
+    such a batch from the new page, so it takes it as the new page:
+    - a batch that adds nodes (a spinner, a skeleton) is rescanned at once;
+    - a text-only batch (a ticker, a loading label) schedules the rescan 200 ms after the
+      last such change, and never more than 1,000 ms after the first. A router that renders
+      later than that loses the race.
+
+    When it happens, the old page's elements are stamped under the new path. The new path's
+    edited rows apply to the old page's structural twins, so the old page shows the new
+    page's published copy until the router renders. Discovery reports the old page's text
+    as authored copy under the new page's ids. The server keeps that text for good, because
+    the upsert ignores duplicates (`src/app/api/content/[siteId]/route.ts`), so the
+    dashboard lists those elements with the old page's text. Rendering does not undo any of
+    this. The router's batch no longer finds the page stale: nodes it replaces are mapped by
+    the debounced rescan, so the first frame is authored for up to 200 ms, and nodes it
+    reuses in place keep their stamps. Until finding A's fix, with the Navigation API, the
+    embed's own restores were such a batch on every page with an applied edit, with no host
+    change at all. Now only the host's own changes trigger it.
   - The lazy-loader case, where an edited image's `src` is swapped by attribute and no
     attribute observer exists. This is a known gap.
   - `applyImageSource` still removes `<picture><source>` nodes. That is the same hazard class
