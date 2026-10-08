@@ -1,5 +1,5 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s66a-app-design-tokens-and-panels
 
