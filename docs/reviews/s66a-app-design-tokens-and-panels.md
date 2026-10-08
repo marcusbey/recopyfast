@@ -67,5 +67,24 @@ failed" for 2 s (WCAG 2.5.3 label-in-name; the live region carries the announcem
 
 M1 (major) remains pending: the e2e harness's first run against real Supabase is the PR's E2E job.
 
-Max severity: major
+## M1 resolved by CI (2026-10-08)
+
+PR #67 CI run 37779659815, E2E job: all 11 `app-layout.spec.ts` tests ran against the real Supabase stack
+(site-registered panel and Share preview link at 320/375/768/1280/1920; app CSS borders, popover, contrast,
+focus) — 0 failed, 0 skipped, 0 flaky — alongside the existing 45 flows on the new dialog structure.
+
+## PR #67 bot review (Devin) and fix `7f8e674`, verified by a fresh reviewer (2026-10-08)
+
+- Step 2's title is platform-aware (`stepTitle` per recipe in `install-recipes.ts`; Next.js "Load it after the
+  page has hydrated"; the tab resets on close).
+- Tab lists never overflow: grid overrides removed from BulkOperations, login, AuthModal and
+  DomainVerification; `tabs-guard.test.ts` fails on grid/inline-grid/grid-cols-*/flex-nowrap on a TabsList.
+- Long site names wrap (`min-w-0 [overflow-wrap:anywhere]`).
+
+Mutations on all three turn tests red. Full jest 350 suites / 4,460 tests, type-check green.
+
+Remaining minors: the Copy button's label-in-name nit during its 2 s state; the new step-title and long-name
+behaviours are covered by unit tests only (no e2e case).
+
+Max severity: minor
 Ship allowed: yes

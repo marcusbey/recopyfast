@@ -3,6 +3,9 @@ validated: yes
 ---
 # Plan — Story s66a-app-design-tokens-and-panels
 
+> Owner decision (2026-10-08, card titles): "Accept 16px everywhere" — CardTitle is 16 px on app and
+> marketing surfaces (404, error page, blog index); the AuthModal title follows the same dialog-title rule.
+
 Branch: `feature/s66a-app-design-tokens-and-panels`. It was renamed from
 `feature/s66-app-design-system` and already carries the s66 stories and research commits.
 Worktree: `.omx/worktrees/s66-app-design-system`; every gate runs there, never at the repo root.
