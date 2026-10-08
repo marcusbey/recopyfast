@@ -132,5 +132,19 @@ errors, `format:check` clean, Playwright `--list` 78.
 
 Follow-up: a refused automatic clipboard copy after creation no longer reports the created link as failed (`ShareSiteDialog` shows "Link created — copy it with the Copy link button.", refetches the list and keeps Copy link; red-then-green in `ShareSiteDialog.test.tsx`), and ADR 052 gains an Amendment recording D1's `permission` field as the story's one sanctioned API addition (run interdicts in `stories.md` and both plans updated to match).
 
-Max severity: major
+## Verification of `28dbab0`, `57862a1`, `75a241a` (fresh reviewer, 2026-10-08)
+
+D1 secure: `GET /api/sites` returns only the caller's own grant per site (read with `.eq("user_id", user.id)`,
+matched by `site_id`; auth path unchanged); `createEditSession` still re-reads the live grant and refuses
+anything higher, so the field grants nothing. Mapping admin/publish/edit/view verified in header, row and ⋮
+menu (mutations: constant admin → 2 red, edit → owner set → 4 red, viewer gets the button → 4 red). D2: no
+listed link renders Copy; "Copy link" uses the creation response's URL (mutation → 2 red). D3: every sync
+guard has a biting test; the documented limit can only leave a snippet stale until the next poll, never wrong.
+Clipboard: a refused copy never reports the created link as failed (mutation → red). ADR 052 amendment and
+docs match the code. Full jest 372 suites / 4,837 tests, type-check green; `--list` 78.
+
+Minors: the API visibility test covers one site per grant (no multi-site/multi-user case); a failed manual
+"Copy link" shows a red error beside the green "Link created" (accurate, slightly noisy).
+
+Max severity: minor
 Ship allowed: yes
