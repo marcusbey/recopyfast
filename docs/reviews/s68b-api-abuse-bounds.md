@@ -81,5 +81,28 @@ and local resolver/undici error messages. Full jest 328 suites / 4,275 tests, ty
 New minor: a lone surrogate sent by the caller in `event_name` is stored as given (a `jsonb` insert may reject
 it; untested; not a regression).
 
+## PR #65 bot review (Devin) and fix `3bda4cd`, verified by a fresh reviewer (2026-10-08)
+
+- D1 (red) early conversions dropped when the conversion beacon beat its view beacon: fixed. A conversion now
+  counts if the visitor has a `visitor_buckets` row for the test (site-scoped to the authorized id, read after
+  ownership is verified), a recorded view, or a view in the same batch. The embed awaits bucketing before any
+  view or conversion beacon. Residual: on a bucket network failure the embed assigns locally (no row), so that
+  visitor's conversion still needs its view. Forgery cost is unchanged (bucket rows need the site token and
+  share the per-site cap).
+- D2 (yellow) concurrent conversions can double-count: deferred to `s69-security-lows` (needs a partial unique
+  index — a migration this story excludes). Disclosed in the PR.
+- D3 (yellow) a lone surrogate failed the `jsonb` insert of the whole beacon: fixed (`toWellFormed()` in
+  `coerceText`; CI Node 20+).
+- D4 (yellow) body cap applied after buffering: fixed (`Content-Length` refused early, stream read with a running
+  count, cancelled past the cap). This also closes original minor 7.
+- `jest.setup.js`: the global `next/server` mock now exposes a stream body, as the real `NextRequest` does; no
+  suite depended on a string body.
+
+Mutations (bucket check, site filter, `toWellFormed`, early refusal, stream cap) each turn tests red. Full jest
+329 suites / 4,289 tests, type-check green.
+
+New minors: no test for an already-consumed body in `readBoundedJson`; the Vercel runtime Node version is not
+visible from the repo (CI uses 20; `toWellFormed` needs 20+). Still open: 3, 6, 8, 9.
+
 Max severity: minor
 Ship allowed: yes
