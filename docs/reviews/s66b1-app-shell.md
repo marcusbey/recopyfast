@@ -51,5 +51,25 @@ Owner standing rule: fix majors and cheap minors before shipping. M-1, M-2, m-2,
 (`scrollbar-gutter: stable` on `html`, decided by the orchestrator as low-risk) go to a fix run; M-3 is resolved
 by the PR's E2E job; m-5 goes in the PR body.
 
-Max severity: major
+## Verification of fix `43267c5` (fresh reviewer, 2026-10-08)
+
+M-1, M-2 and m-2..m-7 fixed; each mutation turns a test red (billing wrapper, no-plan heading size, copy module
+"use client", Analytics loading, empty activation section, filter selects, shell gap). m-8 left as a logged
+follow-up — the reasoning holds (a reserved gutter makes react-remove-scroll-bar add body margin-right on every
+Radix scroll lock). Full jest 357 suites / 4,598 tests, type-check green.
+
+## M-3 resolved by CI (2026-10-08)
+
+PR #70 CI run 37822702057, E2E job: 60 passed, 0 failed/skipped/flaky, including "s66b app pages" @375, @768,
+@1280, @1920 against the real Supabase stack (header 56, no sideways scroll, one h1, left edge per width,
+section edges, gap/actions rhythm, contrast in both themes).
+
+## PR #70 bot review (Devin) and fix `10e5d16`
+
+Devin (yellow): the dashboard `loading.tsx` and `error.tsx` fallbacks replace the routed page, so no PageShell
+and no h1 while a route is pending or after a throw. Fixed: both render through `PageShell` ("Loading…",
+"Something went wrong") with one h1; the page-shell guard now requires `<PageShell` in dashboard fallbacks
+(red on the old files); 4 new tests. Full jest 358 suites / 4,604 tests green.
+
+Max severity: minor
 Ship allowed: yes
