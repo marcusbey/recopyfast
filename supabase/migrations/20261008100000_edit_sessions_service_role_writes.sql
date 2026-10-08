@@ -46,14 +46,16 @@
 --   3. Grants `service_role` its DML explicitly — issuance, revoke, extend and
 --      removal now lean on it. Idempotent where it already holds it.
 --   4. Deactivates every active row the new validator would refuse: no holder
---      (`user_id` NULL — the old e2e seeds wrote those), a lifetime past
---      24 h from `created_at` (a directly inserted 2099 row), a `created_at`
---      more than 5 minutes in the future (review M1: the holder could write
---      it too, and a row dated 2099 had a negative age that never reached the
---      ceiling — the validator's skew tolerance is the same 5 minutes), or
---      permissions above the holder's live direct grant. A legitimate row
---      always has a holder, `expires_at <= created_at + 24 h` (create caps one
---      grant at 24 h, extend stops at the absolute 24 h ceiling), a
+--      (`user_id` NULL — the old e2e seeds wrote those), no `created_at`
+--      (review n1: nullable, and as writable by the holder), a lifetime past
+--      24 h from `created_at` (a directly inserted 2099 row) beyond 5 minutes
+--      of clock skew (review m5), a `created_at` more than 5 minutes in the
+--      future (review M1: the holder could write it too, and a row dated 2099
+--      had a negative age that never reached the ceiling — the validator's
+--      skew tolerance is the same 5 minutes), or permissions above the
+--      holder's live direct grant. A legitimate row always has a holder,
+--      `expires_at <= created_at + 24 h` give or take the skew (create caps
+--      one grant at 24 h, extend stops at the absolute 24 h ceiling), a
 --      database-stamped `created_at` and permissions within the level it was
 --      issued under. A legitimate admin since demoted or removed IS
 --      deactivated — correct under ADR 047. `revoked_at` is kept when already
@@ -93,13 +95,22 @@ GRANT SELECT ON public.edit_sessions TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.edit_sessions TO service_role;
 
 -- 4. Retire every session the validator would now refuse.
+--    CLOCK SKEW TOLERANCE = 5 minutes, the validator's CREATED_AT_CLOCK_SKEW_MS
+--    (src/lib/auth/editor-access.ts). It appears twice below; keep both equal.
+--    On `created_at`: the database stamps it, so a date further ahead was
+--    written, not stamped (review M1). On the lifetime: `expires_at` is
+--    computed from the APPLICATION's clock, so a full 24 h grant from an app
+--    clock slightly ahead lands just past `created_at + 24 h` (review m5).
+--    A NULL `created_at` cannot be dated, so it cannot be bounded: every date
+--    clause is NULL for it, never true, hence its own clause (review n1).
 UPDATE public.edit_sessions s
    SET is_active = false,
        revoked_at = COALESCE(s.revoked_at, now())
  WHERE s.is_active
    AND (
      s.user_id IS NULL
-     OR s.expires_at > s.created_at + interval '24 hours'
+     OR s.created_at IS NULL
+     OR s.expires_at > s.created_at + interval '24 hours' + interval '5 minutes'
      OR s.created_at > now() + interval '5 minutes'
      OR NOT EXISTS (
        SELECT 1

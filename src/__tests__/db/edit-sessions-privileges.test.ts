@@ -23,8 +23,9 @@
  * policy, revokes every write privilege from PUBLIC, `anon` and
  * `authenticated` (SELECT from PUBLIC and `anon` too), keeps `authenticated`
  * SELECT under the own-rows policy, and deactivates every active row the
- * validator would now refuse (no holder, a lifetime past 24 h, a `created_at`
- * more than 5 min in the future, or permissions above the holder's live grant).
+ * validator would now refuse (no holder, no `created_at`, a lifetime past 24 h
+ * beyond 5 min of clock skew, a `created_at` more than 5 min in the future, or
+ * permissions above the holder's live grant).
  *
  * WHAT THIS PROVES, AND HOW.
  * - The catalogue: table AND column privileges (ADR 033 — a column grant is a
@@ -372,7 +373,7 @@ describeDb(
         });
       });
 
-      test("the migration deactivates a session created more than 5 min in the future, never one within the skew (review M1)", async () => {
+      test("the migration deactivates a session created more than 5 min in the future or never dated, never one within the skew (review M1, n1)", async () => {
         const migrationSql = readFileSync(MIGRATION_FILE, "utf8");
 
         await withClient(async (client) => {
@@ -396,10 +397,27 @@ describeDb(
               return row.id;
             };
 
+            // Review n1: `created_at` is nullable, and the holder could write
+            // NULL too. Every date clause is then NULL, never true, so the row
+            // survived the data step — while the HTTP validator refuses it.
+            const plantUndated = async (): Promise<string> => {
+              const {
+                rows: [row],
+              } = await client.query<{ id: string }>(
+                `INSERT INTO public.edit_sessions
+                   (site_id, user_id, token, permissions, created_at, expires_at)
+                 VALUES ($1, $2, $3, '{edit}', NULL, now() + interval '12 hours')
+                 RETURNING id`,
+                [siteId, editorId, newToken()],
+              );
+              return row.id;
+            };
+
             const rogue = {
               // The review's row: dated decades ahead, it never expired.
               decadesAhead: await plantCreatedAhead("73 years"),
               justPastSkew: await plantCreatedAhead("6 minutes"),
+              neverDated: await plantUndated(),
             };
             const withinSkew = await plantCreatedAhead("4 minutes");
 
@@ -425,7 +443,62 @@ describeDb(
             ).toEqual({
               [rogue.decadesAhead]: { isActive: false, isRevoked: true },
               [rogue.justPastSkew]: { isActive: false, isRevoked: true },
+              [rogue.neverDated]: { isActive: false, isRevoked: true },
               [withinSkew]: { isActive: true, isRevoked: false },
+            });
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+      });
+
+      test("the migration tolerates the same 5 min of clock skew on the 24 h lifetime, never more (review m5)", async () => {
+        const migrationSql = readFileSync(MIGRATION_FILE, "utf8");
+
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            // The database stamps `created_at`; the application computes
+            // `expires_at` from its own clock. A full 24 h grant issued by an
+            // app clock 2 min ahead lands 2 min past `created_at + 24 h`.
+            const plantLifetime = async (lifetime: string): Promise<string> => {
+              const {
+                rows: [row],
+              } = await client.query<{ id: string }>(
+                `INSERT INTO public.edit_sessions
+                   (site_id, user_id, token, permissions, created_at, expires_at)
+                 VALUES ($1, $2, $3, '{edit}', now(), now() + $4::interval)
+                 RETURNING id`,
+                [siteId, editorId, newToken(), lifetime],
+              );
+              return row.id;
+            };
+
+            const withinSkew = await plantLifetime("24 hours 2 minutes");
+            const pastSkew = await plantLifetime("24 hours 6 minutes");
+
+            await client.query(migrationSql);
+
+            const { rows } = await client.query<{
+              id: string;
+              is_active: boolean;
+              is_revoked: boolean;
+            }>(
+              `SELECT id, is_active, revoked_at IS NOT NULL AS is_revoked
+               FROM public.edit_sessions WHERE id = ANY($1::uuid[])`,
+              [[withinSkew, pastSkew]],
+            );
+
+            expect(
+              Object.fromEntries(
+                rows.map((row) => [
+                  row.id,
+                  { isActive: row.is_active, isRevoked: row.is_revoked },
+                ]),
+              ),
+            ).toEqual({
+              [withinSkew]: { isActive: true, isRevoked: false },
+              [pastSkew]: { isActive: false, isRevoked: true },
             });
           } finally {
             await client.query("ROLLBACK");
