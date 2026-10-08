@@ -1,7 +1,11 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s66b-app-page-layout (Part 1: s66b1-app-shell · Part 2: s66b2-app-page-passes)
+
+> Owner decisions (2026-10-08): plan validated with the split (s66b1 first; s66b2 after s66b1 merges, in
+> parallel with s66c). "Analytics Dashboard" becomes "Analytics". Whichever of s66b2 / s66c merges last
+> deletes `radius-baseline.json` once it is empty.
 
 Branches:
 - Part 1: `feature/s66b1-app-shell`. This worktree's `feature/s66b-app-page-layout` is renamed at
