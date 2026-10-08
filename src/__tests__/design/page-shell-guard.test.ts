@@ -36,8 +36,8 @@
  *   only. The s66b2 review widened the rule to all of these.
  * - R6 weight (s66b2 AC 3): no `font-bold`, `font-extrabold` or
  *   `font-black`. The app's hierarchy is 400 / 500 / 600; Analytics set its
- *   figures at 700. `SiteDetailView` (s66c, pending) still sets the site
- *   name at 700.
+ *   figures at 700, and s66c1's deleted `SiteDetailView` set the site name
+ *   at 700.
  * - R7 1px (s66b2 AC 4, review): no box border wider than 1px. UpgradeDialog's
  *   plan tiles and ThemePicker's options marked the selection with
  *   `border-2`; a selection is the accent border, the accent surface and a
@@ -126,22 +126,16 @@ const STANDALONE_H1_FILES: readonly string[] = [
 ];
 
 /**
- * Shrink-only, and every entry is s66c's: it owns everything under
- * `/dashboard/sites` and the site components (ADR 053, "Collision list"), and
- * removes a rule here when its file passes it:
- * - `sites/page.tsx` moves onto `PageShell` (R1, R2), and its status filter
- *   drops the `shadow-xs` on the selected segment (R5);
- * - `EditWebsiteButton` keeps `shadow-sm` on two static boxes, and
- *   `VersionTimelineItem` a hover shadow and, since the review widened R5,
- *   the `ring-4` / `ring-2` halos on its status dots (R5);
- * - `SiteDetailView` sets the site name at 700 (R6).
+/**
+ * Shrink-only, and empty since s66c1. Every entry was s66c's: s66c1 rebuilt
+ * `sites/page.tsx` on `PageShell` without the filter's `shadow-xs` (R1, R2,
+ * R5) and `EditWebsiteButton` on the `Button` primitive (R5), deleted
+ * `SiteDetailView` with its 700-weight site name (R6), and took
+ * `VersionTimelineItem`'s hover shadow and the `ring-4` / `ring-2` halos off
+ * its status dots (R5). A new entry needs a story that owns the file and
+ * says when it leaves.
  */
-const PENDING: Readonly<Record<string, readonly Rule[]>> = {
-  "src/app/dashboard/sites/page.tsx": ["R1", "R2", "R5"],
-  "src/components/dashboard/EditWebsiteButton.tsx": ["R5"],
-  "src/components/dashboard/VersionTimelineItem.tsx": ["R5"],
-  "src/components/dashboard/SiteDetailView.tsx": ["R6"],
-};
+const PENDING: Readonly<Record<string, readonly Rule[]>> = {};
 
 const CLASS_FUNCTIONS = /\b(?:cn|clsx|cx|cva|twMerge)\s*$/;
 
@@ -491,6 +485,11 @@ describe("page-shell guard (ADR 053)", () => {
       "src/app/dashboard/content/page.tsx",
       "src/app/dashboard/settings/page.tsx",
       "src/app/dashboard/sites/page.tsx",
+      // s66c1: a site's four subpages (ADR 052).
+      "src/app/dashboard/sites/[siteId]/page.tsx",
+      "src/app/dashboard/sites/[siteId]/install/page.tsx",
+      "src/app/dashboard/sites/[siteId]/people/page.tsx",
+      "src/app/dashboard/sites/[siteId]/settings/page.tsx",
       "src/app/dashboard/teams/page.tsx",
     ]) {
       expect(pages).toContain(page);

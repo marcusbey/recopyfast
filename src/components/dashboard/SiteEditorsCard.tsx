@@ -21,41 +21,34 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { AlertCircle, Loader2, Lock, Users } from "lucide-react";
 import {
-  AlertCircle,
-  CheckCircle2,
-  Copy,
-  Loader2,
-  Lock,
-  Users,
-} from "lucide-react";
-import Link from "next/link";
-import { InviteEditorForm } from "./InviteEditorForm";
+  EditorNoticePanel,
+  NETWORK_ERROR,
+  readActionFailure,
+  type EditorNotice,
+} from "./AddEditorDialog";
 import { SiteEditorRow, type SiteEditorSummary } from "./SiteEditorRow";
-import type { EditorPermission } from "@/lib/auth/editor-access";
 
 /**
- * Enrolment for `site_editors` — the durable allowlist that decides whose email
- * address may request a sign-in code for this site.
+ * The site's editors: `site_editors`, the durable allowlist that decides whose
+ * email address may request a sign-in code for this site.
  *
- * This is a different concept from the staging share link next to it. A share
- * writes `staging_access`, which is a time-boxed token for one preview session;
- * an editor is a standing permission that survives devices and sessions. Before
- * this card existed nothing in the product wrote a `site_editors` row at all,
- * so every invited person asked for a code and silently received nothing.
- *
- * The permission vocabulary is the one in `@/lib/auth/editor-access`. Only the
- * type is imported: that module reaches the service-role Supabase client, which
- * must not be pulled into a client bundle, and the widening rule it implements
- * is applied server-side on the way in.
+ * s66c1 made it list-only: rows, resend, remove and the previously removed.
+ * Enrolment moved to `AddEditorDialog`, opened by People & access's "Add
+ * editor" (and by the activation checklist), so the product has one form for
+ * it instead of two identical ones under two names. This is a different
+ * concept from the preview links listed beside it: a share writes
+ * `staging_access`, a time-boxed token for one review; an editor is a standing
+ * permission that survives devices and sessions.
  */
 
 interface SiteEditorsCardProps {
   siteId: string;
   siteName: string;
   onEditorChange?: () => void;
-  inviteFormAutoFocus?: boolean;
-  inviteDefaultPermissions?: readonly EditorPermission[];
+  /** Changes when an editor was just added elsewhere: load the list again. */
+  reloadKey?: number;
 }
 
 type LoadState =
@@ -63,77 +56,6 @@ type LoadState =
   | { status: "forbidden"; message: string }
   | { status: "error"; message: string }
   | { status: "ready"; editors: SiteEditorSummary[] };
-
-type Notice =
-  | {
-      kind: "invited";
-      email: string;
-      hubUrl: string;
-      invitationEmailSent: boolean;
-      action: "invite" | "resend";
-    }
-  | { kind: "removed"; email: string; devicesSignedOut: number };
-
-const NETWORK_ERROR =
-  "Could not reach the server. Check your connection and try again.";
-
-/** Machine codes the route returns, in the words a site owner can act on. */
-const ERROR_MESSAGES: Record<string, string> = {
-  unauthorized: "Your session has expired. Sign in again to manage editors.",
-  forbidden: "You need admin permission on this site to manage editors.",
-  not_found: "That editor no longer exists.",
-  invalid_request: "That request was not valid.",
-  invalid_permissions: "Choose at least one permission.",
-  server_error: "Something went wrong on our end. Please try again.",
-};
-
-/**
- * A refused action, and whether the remedy is billing rather than retrying.
- *
- * `upgradeRequired` is what separates "this went wrong" from "you have spent
- * what you bought". Showing the second as a red error would be a lie about
- * whose fault it is and would leave the owner retrying a button that is working
- * exactly as intended.
- */
-interface ActionFailure {
-  message: string;
-  upgradeRequired: boolean;
-}
-
-/**
- * The route answers with a machine code in `error` and, where there is anything
- * a person can do about it, human text in `message`. Prefer the latter, then a
- * translation of the code, and only then a status-qualified fallback — printing
- * a bare `server_error` at a customer is not an error message.
- */
-async function readActionFailure(
-  response: Response,
-  fallback: string,
-): Promise<ActionFailure> {
-  try {
-    const body: unknown = await response.json();
-    const { error, message, upgradeRequired } = (body ?? {}) as {
-      error?: unknown;
-      message?: unknown;
-      upgradeRequired?: unknown;
-    };
-
-    const text =
-      typeof message === "string" && message
-        ? message
-        : typeof error === "string" && ERROR_MESSAGES[error]
-          ? ERROR_MESSAGES[error]
-          : `${fallback} (${response.status})`;
-
-    return { message: text, upgradeRequired: upgradeRequired === true };
-  } catch {
-    // Non-JSON body — fall through to the status-qualified fallback.
-    return {
-      message: `${fallback} (${response.status})`,
-      upgradeRequired: false,
-    };
-  }
-}
 
 /** The same parse where only the prose is wanted. */
 async function readEditorsError(
@@ -143,32 +65,14 @@ async function readEditorsError(
   return (await readActionFailure(response, fallback)).message;
 }
 
-/**
- * The hub URL is built from our own env var, but it is still a string arriving
- * over the wire, so only http(s) and root-relative forms become a link.
- */
-function editorHubHref(hubUrl: string): string | null {
-  if (hubUrl.startsWith("/")) return hubUrl;
-  try {
-    const { protocol } = new URL(hubUrl);
-    return protocol === "https:" || protocol === "http:" ? hubUrl : null;
-  } catch {
-    return null;
-  }
-}
-
 export function SiteEditorsCard({
   siteId,
   siteName,
   onEditorChange,
-  inviteFormAutoFocus = false,
-  inviteDefaultPermissions,
+  reloadKey = 0,
 }: SiteEditorsCardProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(
-    null,
-  );
+  const [notice, setNotice] = useState<EditorNotice | null>(null);
 
   const [revokeTarget, setRevokeTarget] = useState<SiteEditorSummary | null>(
     null,
@@ -217,56 +121,11 @@ export function SiteEditorsCard({
     }
   }, [siteId]);
 
+  // `reloadKey` is a dependency on purpose: People & access bumps it after
+  // "Add editor" succeeds, so the new row appears without a page reload.
   useEffect(() => {
     loadEditors();
-  }, [loadEditors]);
-
-  const handleInvite = useCallback(
-    async (
-      email: string,
-      permissions: EditorPermission[],
-    ): Promise<boolean> => {
-      setActionFailure(null);
-      setNotice(null);
-
-      try {
-        const response = await fetch("/api/editor/editors", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ siteId, email, permissions }),
-        });
-
-        if (!response.ok) {
-          setActionFailure(
-            await readActionFailure(response, "Could not add that editor"),
-          );
-          return false;
-        }
-
-        const data: {
-          editor?: { email?: string };
-          hubUrl?: string;
-          invitationEmailSent?: boolean;
-        } = await response.json();
-
-        setNotice({
-          kind: "invited",
-          email: data.editor?.email ?? email,
-          hubUrl: typeof data.hubUrl === "string" ? data.hubUrl : "",
-          invitationEmailSent: data.invitationEmailSent === true,
-          action: "invite",
-        });
-        await loadEditors();
-        onEditorChange?.();
-        return true;
-      } catch (error) {
-        console.error("Failed to add site editor:", error);
-        setActionFailure({ message: NETWORK_ERROR, upgradeRequired: false });
-        return false;
-      }
-    },
-    [siteId, loadEditors, onEditorChange],
-  );
+  }, [loadEditors, reloadKey]);
 
   const openRevokeConfirm = (editor: SiteEditorSummary) => {
     setRevokeError(null);
@@ -274,7 +133,6 @@ export function SiteEditorsCard({
   };
 
   const handleResend = async (editor: SiteEditorSummary) => {
-    setActionFailure(null);
     setNotice(null);
     setResendState({ editorId: editor.id, pending: true, error: null });
 
@@ -348,7 +206,6 @@ export function SiteEditorsCard({
       }
 
       const data: { grantsRevoked?: number } = await response.json();
-      setActionFailure(null);
       setNotice({
         kind: "removed",
         email: revokeTarget.email,
@@ -379,58 +236,34 @@ export function SiteEditorsCard({
   return (
     <Card className="border-border">
       <CardHeader>
-        <CardTitle>Editors</CardTitle>
+        <CardTitle>
+          {state.status === "ready"
+            ? `Editors · ${activeEditors.length}`
+            : "Editors"}
+        </CardTitle>
         <CardDescription>
           People who can edit {siteName} by email, without a ReCopyFast account.
           They sign in at the editor hub with a one-time code.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {notice && <NoticePanel notice={notice} />}
-
-        {actionFailure &&
-          (actionFailure.upgradeRequired ? (
-            // A seat limit is not a malfunction. It gets the warning tone and a
-            // route to the thing that actually resolves it, rather than a red
-            // box inviting the owner to press the button again.
-            <div
-              role="alert"
-              className="flex flex-col gap-2 rounded-md border border-tone-warning-border bg-tone-warning-surface px-3 py-2 text-sm text-tone-warning-text"
-            >
-              <p>{actionFailure.message}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="self-start"
-                asChild
-              >
-                <Link href="/dashboard/billing">View plans</Link>
-              </Button>
-            </div>
-          ) : (
-            <p
-              role="alert"
-              className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
-            >
-              {actionFailure.message}
-            </p>
-          ))}
+        {notice && <EditorNoticePanel notice={notice} />}
 
         {state.status === "loading" && (
           <div className="space-y-2" role="status" aria-label="Loading editors">
             {Array.from({ length: 2 }, (_, index) => (
               <div
                 key={index}
-                className="space-y-3 rounded-lg border border-border p-4"
+                className="space-y-3 rounded-container border border-border p-4"
               >
                 <div className="flex items-center gap-3">
-                  <Skeleton className="h-8 w-8 rounded-full" />
+                  <Skeleton className="h-7 w-7" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-48" />
                     <Skeleton className="h-3 w-32" />
                   </div>
                 </div>
-                <Skeleton className="h-5 w-32 rounded-full" />
+                <Skeleton className="h-5 w-32" />
               </div>
             ))}
           </div>
@@ -450,7 +283,7 @@ export function SiteEditorsCard({
         )}
 
         {state.status === "forbidden" && (
-          <div className="flex items-start gap-3 rounded-lg border border-border bg-surface-1 p-4">
+          <div className="flex items-start gap-3 rounded-container border border-border bg-surface-1 p-4">
             <Lock
               className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
               aria-hidden="true"
@@ -474,7 +307,7 @@ export function SiteEditorsCard({
                 title="No editors yet"
                 description={`Nobody outside your account can edit ${siteName}. Add someone by the email address they already use.`}
                 steps={[
-                  "Add their email address below.",
+                  "Choose Add editor above.",
                   "They open the editor hub and request a sign-in code.",
                   "The code arrives by email and signs that device in.",
                 ]}
@@ -517,12 +350,6 @@ export function SiteEditorsCard({
                 </ul>
               </div>
             )}
-
-            <InviteEditorForm
-              onInvite={handleInvite}
-              autoFocus={inviteFormAutoFocus}
-              initialPermissions={inviteDefaultPermissions}
-            />
           </>
         )}
       </CardContent>
@@ -558,7 +385,7 @@ export function SiteEditorsCard({
             {revokeError && (
               <p
                 role="alert"
-                className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
+                className="rounded-container border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
               >
                 {revokeError}
               </p>
@@ -597,94 +424,5 @@ export function SiteEditorsCard({
         </DialogContent>
       </Dialog>
     </Card>
-  );
-}
-
-/** Delivery confirmation or the manual handoff that keeps a mail outage soft. */
-function NoticePanel({ notice }: { notice: Notice }) {
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
-    "idle",
-  );
-
-  if (notice.kind === "removed") {
-    const { devicesSignedOut } = notice;
-    return (
-      <p
-        role="status"
-        className="flex items-start gap-2 rounded-md border border-tone-success-border bg-tone-success-surface px-3 py-2 text-sm text-tone-success-text"
-      >
-        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        <span>
-          Removed {notice.email}.{" "}
-          {devicesSignedOut === 0
-            ? "They had no signed-in devices."
-            : `${devicesSignedOut} device ${
-                devicesSignedOut === 1 ? "session" : "sessions"
-              } signed out.`}
-        </span>
-      </p>
-    );
-  }
-
-  const href = editorHubHref(notice.hubUrl);
-
-  const copyHubLink = async () => {
-    if (!href) return;
-    try {
-      await navigator.clipboard.writeText(href);
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
-  };
-
-  return (
-    <div
-      role="status"
-      className="flex items-start gap-2 rounded-md border border-tone-success-border bg-tone-success-surface px-3 py-2 text-sm text-tone-success-text"
-    >
-      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <div className="space-y-1">
-        {notice.invitationEmailSent ? (
-          <p>We emailed {notice.email} an invitation.</p>
-        ) : (
-          <>
-            <p>
-              {notice.action === "resend"
-                ? `We could not resend the invitation email to ${notice.email}. They still have access.`
-                : `${notice.email} can now edit this site.`}
-            </p>
-            <p>
-              No invitation email was sent. Ask them to open{" "}
-              {href ? (
-                <a
-                  href={href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium underline underline-offset-2"
-                >
-                  the editor hub
-                </a>
-              ) : (
-                <span className="font-medium">the editor hub</span>
-              )}{" "}
-              and request a sign-in code.
-            </p>
-            {href && (
-              <div className="flex items-center gap-2 pt-1">
-                <Button variant="outline" size="sm" onClick={copyHubLink}>
-                  <Copy className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
-                  Copy link
-                </Button>
-                {copyState === "copied" && <span>Link copied.</span>}
-                {copyState === "failed" && (
-                  <span role="alert">Could not copy link.</span>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
   );
 }

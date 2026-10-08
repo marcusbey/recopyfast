@@ -138,8 +138,8 @@ App type scale — use the utility, not ad-hoc sizes:
 
 Display sizes get negative tracking; small labels get positive tracking. **No 700 anywhere in
 the app**: rule R6 of `src/__tests__/design/page-shell-guard.test.ts` keeps `font-bold`,
-`font-extrabold` and `font-black` off the app surface (in code, s66b2). Its one pending file is
-s66c's `SiteDetailView`.
+`font-extrabold` and `font-black` off the app surface (in code, s66b2). Nothing is pending:
+s66c1 deleted `SiteDetailView`, the last file at 700.
 
 The research proposed a 13px "small" size. It is not adopted, because Tailwind's scale has no
 13px step and every meta string in the app already uses `text-xs`. The only 13px text is code,
@@ -163,10 +163,9 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
   - no `rounded-[n]` above 2px;
   - no inline `borderRadius` / `border-radius`.
 
-  `src/__tests__/design/radius-guard.test.ts` enforces this from s66a, with a shrink-only
-  baseline of today's offenders. s66b emptied its share (s66b2); the entries left are s66c's
-  site components, and whichever of s66b2 and s66c merges last deletes the baseline and makes
-  the guard zero-tolerance.
+  `src/__tests__/design/radius-guard.test.ts` enforces this from s66a. Its shrink-only
+  baseline is gone: s66b2 and s66c1 each emptied their share, and s66c1, merging last, deleted
+  it. The guard is zero-tolerance.
 - **Nesting reads through borders and surface steps, not radius.** This replaces the
   2026-08-16 rule "container softer than its contents" on app surfaces.
 - **Not exceptions** (they become square): circles around icons (use `IconTile`), progress bars,

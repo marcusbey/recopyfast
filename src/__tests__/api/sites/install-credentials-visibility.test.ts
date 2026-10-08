@@ -156,3 +156,32 @@ describe("GET /api/sites — install credentials", () => {
     expect(response.status).toBe(401);
   });
 });
+
+/**
+ * PR #72 review (D1). "Edit website" asked every member for the owner's
+ * session (`["edit","admin"]`), and `createEditSession` refuses anything
+ * beyond the caller's live grant (ADR 047): an `edit` member could see a
+ * site and never open it. The dashboard can only ask for what the member
+ * holds if the list says what that is. The value is the caller's own row,
+ * nobody else's, and it grants nothing: the session route still checks it.
+ */
+describe("GET /api/sites — the caller's own grant", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    mockGetUser.mockResolvedValue({ data: { user: { id: USER_ID } } });
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each(["admin", "edit", "view"])(
+    "tells a member holding %s their own grant",
+    async (permission) => {
+      installTables(permission);
+
+      const body = await listSites();
+
+      expect(body.sites[0].permission).toBe(permission);
+    },
+  );
+});

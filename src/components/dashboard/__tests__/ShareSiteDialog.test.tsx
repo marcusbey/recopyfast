@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ShareSiteDialog } from "../ShareSiteDialog";
@@ -19,8 +20,9 @@ const mockSite: Site = {
 };
 
 /**
- * The dialog fetches its active-share list on open and shows a spinner until it
- * settles; leaving that in flight makes every later query race the state update.
+ * s66c1: the dialog is create-only — the active links moved onto People &
+ * access (PreviewLinksList) — so it no longer fetches on open, and a test
+ * waits for its form instead of a list request. Any request now is a create.
  */
 const mockActiveLinksFetch = () => {
   (global.fetch as jest.Mock).mockResolvedValue({
@@ -32,7 +34,7 @@ const mockActiveLinksFetch = () => {
 const renderDialog = async () => {
   const user = userEvent.setup();
   render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
-  await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+  await screen.findByLabelText("Email address");
   return user;
 };
 
@@ -73,9 +75,9 @@ describe("ShareSiteDialog permission toggles", () => {
   it("announces which permissions are granted, not just colours them", async () => {
     await renderDialog();
 
-    // view + edit is the default grant the dialog submits.
+    // s66c1 AC 6: a preview link is view-only unless the owner allows more.
     expect(permission("View")).toBeChecked();
-    expect(permission("Edit")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
     expect(permission("Publish")).not.toBeChecked();
     expect(permission("Admin")).not.toBeChecked();
 
@@ -112,6 +114,7 @@ describe("ShareSiteDialog permission toggles", () => {
 
     // Radio semantics would have cleared View and Edit here; the group has to
     // stay multi-select because that is what the invite request sends.
+    await user.click(permission("Edit"));
     await user.click(permission("Publish"));
     await user.click(permission("Admin"));
 
@@ -177,5 +180,311 @@ describe("ShareSiteDialog (s66a)", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Email is required for email invites");
     expect(alert).toHaveClass("rounded-container");
+  });
+});
+
+/**
+ * s66c1 AC 6 — one of the two ways to give someone access, and it says which.
+ */
+describe("ShareSiteDialog (s66c1)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveLinksFetch();
+  });
+
+  it("describes itself in the ONE-OFF REVIEW words", async () => {
+    await renderDialog();
+
+    expect(
+      screen.getByText(
+        "For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.",
+      ),
+    ).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("sends the grant chosen, then resets it to view only", async () => {
+    const onCreated = jest.fn();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        onCreated={onCreated}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(permission("Edit"));
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(
+      JSON.parse((init as RequestInit).body as string).permissions,
+    ).toEqual(["view", "edit"]);
+    expect(permission("View")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("links a sent invite to the site's preview links when asked to", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        manageHref="/dashboard/sites/site-1/people"
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByRole("link", { name: "See preview links" }),
+    ).toHaveAttribute("href", "/dashboard/sites/site-1/people");
+  });
+});
+
+/**
+ * PR #72 review (D2). The link's secret token exists on screen exactly once:
+ * in the creation response. `GET /api/staging/access` omits it on purpose, so
+ * the list cannot copy a working link, and the one place that can is here.
+ */
+describe("ShareSiteDialog after a link is created", () => {
+  const STAGING_URL =
+    "https://example.com?rcf_staging=1&rcf_token=the-real-secret-token";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // The refusal test below replaces user-event's clipboard stub with a
+  // rejecting spy; it must not outlive that test.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("offers Copy link, copying the URL the creation response carried", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        emailDelivered: true,
+        access: { id: "33333333-3333-4333-8333-333333333333" },
+        stagingUrl: STAGING_URL,
+        token: "the-real-secret-token",
+      }),
+    });
+    const user = userEvent.setup();
+    const clipboardWrite = jest.spyOn(navigator.clipboard, "writeText");
+    render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    await user.click(await screen.findByRole("button", { name: "Copy link" }));
+
+    expect(clipboardWrite).toHaveBeenLastCalledWith(STAGING_URL);
+    expect(await navigator.clipboard.readText()).toBe(STAGING_URL);
+  });
+
+  /**
+   * PR #72 review follow-up. The automatic copy after creation runs after an
+   * await, outside the click's user activation, so a browser may refuse it
+   * (permission denied, insecure context). That refusal used to land in the
+   * creation's catch: the dialog showed "Write permission denied." as if the
+   * link had not been created, never listed it, kept the form filled in, and
+   * invited the owner to create a second link for the same person.
+   */
+  it("reports a created link as created when the automatic copy is refused", async () => {
+    const onCreated = jest.fn();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        emailDelivered: true,
+        access: { id: "33333333-3333-4333-8333-333333333333" },
+        stagingUrl: STAGING_URL,
+        token: "the-real-secret-token",
+      }),
+    });
+    const user = userEvent.setup();
+    // userEvent.setup() installs its clipboard stub; the refusal goes on it.
+    const clipboardWrite = jest
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(
+        new DOMException("Write permission denied.", "NotAllowedError"),
+      );
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        onCreated={onCreated}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText(
+        "Link created — copy it with the Copy link button.",
+      ),
+    ).toBeInTheDocument();
+    expect(clipboardWrite).toHaveBeenCalledWith(STAGING_URL);
+    expect(
+      screen.getByRole("button", { name: "Copy link" }),
+    ).toBeInTheDocument();
+    for (const alert of screen.getAllByRole("alert")) {
+      expect(alert).not.toHaveTextContent(/fail|denied|could not|try again/i);
+    }
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Email address")).toHaveValue("");
+  });
+
+  it("offers no Copy link when the response carried no link", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Copy link" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * s66c1 review m4. People & access keeps this dialog mounted and only flips
+ * `open`, so whatever the last opening left behind (a refusal, a success
+ * banner, a half-typed address) used to be waiting in the next one. Each
+ * opening starts on an empty form with no message, as AddEditorDialog does.
+ */
+describe("ShareSiteDialog reopened", () => {
+  function ReopenableDialog() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open share dialog
+        </button>
+        <ShareSiteDialog open={open} onOpenChange={setOpen} site={mockSite} />
+      </>
+    );
+  }
+
+  const closeAndReopen = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole("button", { name: "Open share dialog" }));
+    return screen.findByRole("dialog");
+  };
+
+  const expectEmptyForm = (dialog: HTMLElement) => {
+    expect(within(dialog).getByLabelText("Email address")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Label (optional)")).toHaveValue("");
+    expect(within(dialog).getByLabelText("Expires in")).toHaveValue("7");
+    expect(permission("View")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
+    expect(permission("Publish")).not.toBeChecked();
+    expect(permission("Admin")).not.toBeChecked();
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("shows no error from the last opening, on an empty form", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "This address was removed as an editor." }),
+    });
+    const user = userEvent.setup();
+    render(<ReopenableDialog />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.selectOptions(screen.getByLabelText("Expires in"), "30");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This address was removed as an editor.",
+    );
+
+    const dialog = await closeAndReopen(user);
+
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("This address was removed as an editor."),
+    ).not.toBeInTheDocument();
+    expectEmptyForm(dialog);
+  });
+
+  it("shows no success banner from the last opening, on an empty form", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(<ReopenableDialog />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.selectOptions(screen.getByLabelText("Expires in"), "30");
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+
+    const dialog = await closeAndReopen(user);
+
+    expect(
+      within(dialog).queryByText("Invite sent successfully!"),
+    ).not.toBeInTheDocument();
+    expectEmptyForm(dialog);
   });
 });

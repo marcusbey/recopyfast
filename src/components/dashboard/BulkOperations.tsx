@@ -470,7 +470,9 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
             <TabsTrigger value="export">Export</TabsTrigger>
             <TabsTrigger value="import">Import</TabsTrigger>
             <TabsTrigger value="batch">Batch Update</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
+            {/* s66c1: "History" also named the version history in the site
+                header. This is the import and export log. */}
+            <TabsTrigger value="history">Operation history</TabsTrigger>
           </TabsList>
 
           <TabsContent value="import" className="space-y-4">
@@ -510,7 +512,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     type="file"
                     accept={`.${importFormat},.txt`}
                     onChange={handleFileUpload}
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    className="mt-1 w-full rounded-control border border-input bg-card px-3 py-2 text-sm"
                   />
                   {importFile && (
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -626,7 +628,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     six it never mentioned — and `original_content` was one of
                     them, the column the site falls back to serving when
                     `published_content` is null. */}
-                <div className="rounded-lg border border-border bg-surface-1 p-4">
+                <div className="rounded-container border border-border bg-surface-1 p-4">
                   <p className="text-sm font-medium text-foreground">
                     What&apos;s in the file
                   </p>
@@ -768,7 +770,10 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
 
               <div className="space-y-4">
                 {batchOperations.map((operation, index) => (
-                  <div key={index} className="p-4 border rounded-lg space-y-3">
+                  <div
+                    key={index}
+                    className="p-4 border rounded-container space-y-3"
+                  >
                     <div className="flex justify-between items-center">
                       <h4 className="font-medium">Operation {index + 1}</h4>
                       {batchOperations.length > 1 && (
@@ -918,7 +923,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                     operations.map((operation) => (
                       <div
                         key={operation.id}
-                        className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
+                        className="flex items-center justify-between p-4 bg-surface-1 rounded-container"
                       >
                         <div className="flex items-center gap-3">
                           {getStatusIcon(operation.status)}
@@ -1122,7 +1127,7 @@ function ImportReport({
         // Semantic table composed from tokens: there is no `Table` primitive,
         // and one story is not where a shared one gets invented (design system
         // gap 8).
-        <div className="overflow-x-auto rounded-lg border border-border">
+        <div className="overflow-x-auto rounded-container border border-border">
           <table className="w-full text-sm">
             <thead className="bg-surface-1 text-left text-muted-foreground">
               <tr>

@@ -199,6 +199,15 @@ export async function GET(request: NextRequest) {
           last_mismatch_domain: site.last_mismatch_domain ?? null,
           last_mismatch_at: site.last_mismatch_at ?? null,
           stats,
+          // The caller's own grant on this site, and only theirs (PR #72
+          // review, D1). "Edit website" asked every member for the owner's
+          // session, `["edit","admin"]`, and `createEditSession` refuses
+          // anything beyond the live grant (ADR 047), so an `edit` member
+          // could see a site and never open it. The dashboard now asks for
+          // what this says the member holds. It is a label, not a
+          // capability: the session route reads `site_permissions` again
+          // and refuses an elevation whatever a client sends.
+          permission: permission?.permission,
           ...(canInstall ? { siteToken, embedScript } : {}),
         };
       }),

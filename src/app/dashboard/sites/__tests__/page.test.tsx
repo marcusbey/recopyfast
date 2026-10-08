@@ -1,5 +1,4 @@
 import {
-  act,
   render,
   screen,
   fireEvent,
@@ -25,30 +24,33 @@ jest.mock("@/components/layout/Header", () => ({
   Header: () => <div data-testid="header">Header</div>,
 }));
 
-jest.mock("@/components/dashboard/SiteCard", () => ({
-  SiteCard: ({ site, onViewDetails, onEdit, onDelete }: any) => (
-    <div data-testid={`site-card-${site.id}`}>
-      <p>{site.name}</p>
-      <p>{site.domain}</p>
-      <button onClick={() => onViewDetails(site.id)}>View Details</button>
-      <button onClick={() => onEdit(site.id)}>Edit</button>
-      <button onClick={() => onDelete(site.id)}>Delete</button>
-    </div>
-  ),
-}));
-
-jest.mock("@/components/dashboard/SiteDetailView", () => ({
-  SiteDetailView: ({ site, userId }: any) => (
-    <div data-testid="site-detail-view" data-user-id={userId}>
-      {site.name}
-    </div>
-  ),
-}));
+/*
+ * s66c1: SiteCard (and the SiteDetailView it opened in place) became
+ * SiteRow. The mock renders the real row, so the name link is the real one,
+ * inside a test id the list assertions below find it by, with a direct
+ * Delete trigger so a test can reach the page's confirmation without driving
+ * the row's menu (SiteRow.test.tsx drives the menu itself).
+ */
+jest.mock("@/components/dashboard/SiteRow", () => {
+  const actual = jest.requireActual<
+    typeof import("@/components/dashboard/SiteRow")
+  >("@/components/dashboard/SiteRow");
+  return {
+    SiteRow: (props: any) => (
+      <div data-testid={`site-card-${props.site.id}`}>
+        <actual.SiteRow {...props} />
+        <button onClick={() => props.onDelete(props.site.id)}>Delete</button>
+      </div>
+    ),
+  };
+});
 
 // Mock fetch
 global.fetch = jest.fn();
 
 describe("SitesPage", () => {
+  // The signed-in user owns each site: `permission` is their own grant, as
+  // `GET /api/sites` reports it (PR #72 review, D1).
   const mockSites = [
     {
       id: "site-1",
@@ -57,6 +59,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-01T00:00:00Z",
       updated_at: "2024-01-15T00:00:00Z",
       status: "live",
+      permission: "admin",
       stats: {
         edits_count: 10,
         views: 100,
@@ -70,6 +73,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-02T00:00:00Z",
       updated_at: "2024-01-16T00:00:00Z",
       status: "awaiting-install",
+      permission: "admin",
       stats: {
         edits_count: 5,
         views: 50,
@@ -83,6 +87,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-03T00:00:00Z",
       updated_at: "2024-01-17T00:00:00Z",
       status: "stale",
+      permission: "admin",
       stats: {
         edits_count: 0,
         views: 0,
@@ -183,104 +188,27 @@ describe("SitesPage", () => {
     });
   });
 
-  /**
-   * AC 3 — "the dashboard reflects the flip within 10 seconds while the page
-   * stays open, with no manual refresh".
-   *
-   * The moment this exists for is the owner pasting the snippet into another
-   * tab and coming back. Watching a card that says "awaiting install" while
-   * their script is already reporting is the whole failure this story removes,
-   * and telling them to hit reload is not an answer — they do not know whether
-   * anything changed.
-   *
-   * Polling stops the instant it has nothing to watch for. A site that is live
-   * or stale is not going to flip while they look at it, and an unbounded timer
-   * on an open dashboard tab is a request every few seconds, forever.
+  /*
+   * The install poll moved to SiteProvider with the site itself (ADR 052):
+   * its four tests are in
+   * src/components/dashboard/site/__tests__/SiteProvider.test.tsx. This page
+   * no longer polls at all.
    */
-  describe("waiting for the install to be detected", () => {
-    beforeEach(() => {
-      jest.useFakeTimers();
-    });
-
-    afterEach(() => {
-      jest.useRealTimers();
-    });
-
-    const openSite = async (testId: string) => {
+  it("never polls: the list is read once", async () => {
+    jest.useFakeTimers();
+    try {
       render(<SitesPage />);
-
-      const card = await screen.findByTestId(testId);
-      fireEvent.click(within(card).getByText("View Details"));
-      await screen.findByTestId("site-detail-view");
-    };
-
-    it("keeps checking while an awaiting-install site is open", async () => {
-      await openSite("site-card-site-2");
-      const callsAfterOpen = (global.fetch as jest.Mock).mock.calls.length;
-
-      await act(async () => {
-        jest.advanceTimersByTime(10_000);
-      });
-
-      expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(
-        callsAfterOpen,
-      );
-    });
-
-    it("stops checking once the site reports itself live", async () => {
-      await openSite("site-card-site-2");
-
-      (global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          sites: mockSites.map((site) =>
-            site.id === "site-2" ? { ...site, status: "live" } : site,
-          ),
-        }),
-      });
-
-      await act(async () => {
-        jest.advanceTimersByTime(10_000);
-      });
-      const callsAfterFlip = (global.fetch as jest.Mock).mock.calls.length;
-
-      await act(async () => {
-        jest.advanceTimersByTime(60_000);
-      });
-
-      expect((global.fetch as jest.Mock).mock.calls.length).toBe(
-        callsAfterFlip,
-      );
-    });
-
-    it("does not poll for a site that is already live", async () => {
-      await openSite("site-card-site-1");
-      const callsAfterOpen = (global.fetch as jest.Mock).mock.calls.length;
-
-      await act(async () => {
-        jest.advanceTimersByTime(60_000);
-      });
-
-      expect((global.fetch as jest.Mock).mock.calls.length).toBe(
-        callsAfterOpen,
-      );
-    });
-
-    it("stops checking when the owner goes back to the list", async () => {
-      await openSite("site-card-site-2");
-
-      fireEvent.click(screen.getByText("Back to Sites"));
       await screen.findByTestId("site-card-site-2");
-      const callsAfterClose = (global.fetch as jest.Mock).mock.calls.length;
+      const callsAfterLoad = (global.fetch as jest.Mock).mock.calls.length;
 
-      await act(async () => {
-        jest.advanceTimersByTime(60_000);
-      });
+      jest.advanceTimersByTime(60_000);
 
       expect((global.fetch as jest.Mock).mock.calls.length).toBe(
-        callsAfterClose,
+        callsAfterLoad,
       );
-    });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("searches sites by name or domain", async () => {
@@ -346,49 +274,35 @@ describe("SitesPage", () => {
     });
   });
 
-  it("navigates to site detail view when clicking View Details", async () => {
+  // Replaces "navigates to site detail view" and "returns to sites list from
+  // detail view": a site has its own URL now (ADR 052), so the row's name is
+  // a link to it and nothing on this page swaps in place.
+  it("links each site's name to its own page", async () => {
     render(<SitesPage />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
-    });
-
-    const viewButton = screen.getAllByText("View Details")[0];
-    fireEvent.click(viewButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("site-detail-view")).toBeInTheDocument();
-      expect(screen.getByText("Back to Sites")).toBeInTheDocument();
-    });
+    const row = await screen.findByTestId("site-card-site-1");
+    expect(
+      within(row).getByRole("link", { name: "Example Site 1" }),
+    ).toHaveAttribute("href", "/dashboard/sites/site-1");
   });
 
-  it("returns to sites list from detail view", async () => {
+  it("has no View Details and no Edit Website dialog anywhere", async () => {
     render(<SitesPage />);
+    await screen.findByTestId("site-card-site-1");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
-    });
+    expect(screen.queryByText(/view details/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Back to Sites")).not.toBeInTheDocument();
 
-    // Navigate to detail view
-    const viewButton = screen.getAllByText("View Details")[0];
-    fireEvent.click(viewButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("site-detail-view")).toBeInTheDocument();
-      expect(screen.getByTestId("site-detail-view")).toHaveAttribute(
-        "data-user-id",
-        "test-user-id",
-      );
-    });
-
-    // Click back button
-    const backButton = screen.getByText("Back to Sites");
-    fireEvent.click(backButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("site-card-site-1")).toBeInTheDocument();
-      expect(screen.queryByTestId("site-detail-view")).not.toBeInTheDocument();
-    });
+    // The row's Edit website opens a tab, never a dialog on this page.
+    const open = jest.spyOn(window, "open").mockReturnValue(null);
+    const row = screen.getByTestId("site-card-site-1");
+    fireEvent.click(within(row).getByRole("button", { name: /edit website/i }));
+    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+    open.mockRestore();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: /edit website/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("handles API errors gracefully", async () => {
@@ -453,6 +367,52 @@ describe("SitesPage", () => {
       expect(screen.getByTestId("site-card-site-2")).toBeInTheDocument();
       expect(screen.getByTestId("site-card-site-3")).toBeInTheDocument();
     });
+  });
+
+  // s66c1 review m6: the confirmation stays disabled after a delete succeeds,
+  // until the dialog goes away. The list keeps one dialog mounted for every
+  // row, so the next site's confirmation must start enabled again.
+  it("lets a second site be deleted after the first", async () => {
+    const user = userEvent.setup();
+    render(<SitesPage />);
+    const deleteRequests = () =>
+      (global.fetch as jest.Mock).mock.calls.filter(
+        ([, init]) => (init as RequestInit | undefined)?.method === "DELETE",
+      );
+
+    await user.click(
+      within(await screen.findByTestId("site-card-site-1")).getByRole(
+        "button",
+        { name: "Delete" },
+      ),
+    );
+    await user.click(
+      within(
+        await screen.findByRole("dialog", { name: "Delete site?" }),
+      ).getByRole("button", { name: "Delete site" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("site-card-site-1")).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      within(screen.getByTestId("site-card-site-2")).getByRole("button", {
+        name: "Delete",
+      }),
+    );
+    const confirm = within(
+      await screen.findByRole("dialog", { name: "Delete site?" }),
+    ).getByRole("button", { name: "Delete site" });
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("site-card-site-2")).not.toBeInTheDocument(),
+    );
+    expect(deleteRequests().map(([url]) => url)).toEqual([
+      "/api/sites/site-1",
+      "/api/sites/site-2",
+    ]);
   });
 
   it("draws no empty band under the delete confirmation when there is no error", async () => {

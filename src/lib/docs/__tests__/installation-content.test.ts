@@ -123,4 +123,19 @@ describe("installation documentation content", () => {
       /(?:sk|pk)_(?:live|test)_[A-Za-z0-9]+/,
     );
   });
+
+  // s66c1 AC 7: the guide names the dashboard as it now is. "View Details"
+  // (the in-place detail view) and "Invite a client" (the Editors card under
+  // a third name) are gone from the product.
+  it("names the site pages and actions the dashboard actually has", () => {
+    const guideText = JSON.stringify(INSTALLATION_GUIDE);
+
+    expect(guideText).not.toMatch(/View Details/);
+    expect(guideText).not.toMatch(/Invite a client/);
+    expect(guideText).not.toMatch(/View install snippet/);
+    expect(guideText).toContain("Open site page");
+    expect(guideText).toContain("Install");
+    expect(guideText).toContain("People & access");
+    expect(guideText).toContain("Add editor");
+  });
 });

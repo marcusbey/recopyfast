@@ -2500,112 +2500,284 @@ Not in this story:
 
 Embed allocation: 0 bytes.
 
-## Story s66c-site-page-and-access — one page per site, and one clear way to give someone access
+## Story s66c-site-page-and-access — one page per site, and one clear way to give someone access (split proposed: s66c1 / s66c2)
 
-Split from `s66-app-design-system` at research (§ Information architecture). The owner added
-this on 2026-10-07: "https://www.recopyfa.st/dashboard/sites is overwhelming. have multiple levels
-of settings. and invite a client, and editors are confusing. which one to use and when ?"
+Split from `s66-app-design-system` at research (§ Information architecture).
 
-As a site owner, each site has its own page with three tabs: Install, People & access and
-Settings. The People & access tab offers exactly two actions, and each says what it is for, so I
-know which one to use.
-
-What research found:
-- "View Details" swaps the Sites page for an 11-card view held in component state, with no URL.
-  It is about 4,400 px tall at 1280 and shows the install snippet three times.
-- Two access mechanisms appear under three labels, and their forms are field-for-field
-  identical:
-  - "Add editor" (`site_editors`, durable);
-  - "Invite a client" (the same `SiteEditorsCard`, in a dialog);
-  - "Share preview link" (`staging_access`, expiring).
-- The card's "Settings" button starts an edit session. Delete is only reachable through a kebab
-  menu that appears on hover, so a touch screen cannot reach it.
+Owner requests, verbatim:
+- 2026-10-07: "https://www.recopyfa.st/dashboard/sites is overwelming. have multiple levels of
+  settings. and invite a client, and editors are confusing. which one to use and when ?"
+- 2026-10-08, with a screenshot of the card's "Settings" button and the "Edit Website" dialog it
+  opens: "also i told u this page https://www.recopyfa.st/dashboard/sites is overwelming. u need
+  to have subpages to it. steps for user with advanve or quick setting."
 
 Owner decisions, 2026-10-08:
-- One URL per site, replacing the in-place "View Details" swap, with tabs Install /
-  People & access / Settings.
+- One URL per site, replacing the in-place "View Details" swap.
 - One people section with exactly two clearly labelled actions:
-  - "Add editor": durable; the editor edits and publishes on the live site.
-  - "Share preview link": temporary; for viewing unpublished changes; view-only by default.
-- "Invite a client" is removed. The activation checklist opens the same Add editor flow under
-  the same name.
-- The card's misleading "Settings" button is renamed, and Delete is reachable without hover.
-- This story may change routes and label-pinning tests. Its ACs say which tests change and why.
+  - "Add editor": durable. The editor can edit and publish on the live site and signs in with a
+    one-time code.
+  - "Share preview link": temporary. It is for viewing unpublished changes and is view-only by
+    default.
+- "Invite a client" is removed. The activation checklist opens the same Add editor flow under the
+  same name.
+- The card's misleading "Settings" button is renamed ("Edit website").
+- Delete can be reached without hover.
+- The Sites page gets lighter: fewer actions per card.
+- Second message: real subpages; a guided "quick" setup for new sites; a separate "advanced"
+  settings page; the "Edit Website" button and dialog brought onto the s66a design system.
 
-Complexity: 4. A new route replaces component-state navigation, the information architecture
-spans six components, and label-pinning tests change; there is no API or data change.
-Dependencies: s66a merged (underline Tabs, CodeBlock, the Dialog structure, NativeSelect, the
-radius guard, the layout harness). Ships before s66b. Branch `feature/s66c-site-page-and-access`.
+What research found (re-verified at design on `origin/main` `d4dae46`):
+- **The detail view.** "View Details" swaps the Sites page for an 11-card view held in component
+  state, with no URL. It is about 4,400 px tall at 1280 and shows the install snippet three times.
+- **Two access mechanisms under three labels, with field-for-field identical forms:**
+  - "Add editor" (`site_editors`, durable);
+  - "Invite a client" (the same `SiteEditorsCard`, inside a dialog);
+  - "Share preview link" (`staging_access`, an emailed invite that expires).
+- **The card's "Settings" button starts an edit session.** It goes through a dialog whose raw
+  `EditWebsiteButton` is pill-shaped, opens the tab only after `await` (so pop-up blockers catch
+  it), and injects an emerald DOM toast.
+- **Delete sits behind a hover-only kebab** (`SiteCard.tsx:107`), so touch cannot reach it.
+- **`GET /api/sites` is not RLS-scoped.** It uses the service client with an explicit
+  `site_permissions.user_id = session user` filter (`src/app/api/sites/route.ts:26-29, :46-51`).
+  It returns install credentials to admins only (`:169-181`) and never computes views (`:156`).
+- **Renaming a site or changing its domain has no API.** `src/app/api/sites/[siteId]/route.ts`
+  exports only `DELETE`, and only the creator may delete (`:43-48`).
+- **The install guide names the old labels:** `src/lib/docs/installation-content.ts:118-119`,
+  `:216` ("View Details") and `:226` ("Invite a client").
 
-- [ ] **AC 1 — One URL per site.** `/dashboard/sites/[siteId]` renders the site page: an h1 with
-  the site name, the domain, its `StatusBadge`, and the header actions "Open editor" and
-  "Version history".
-  - The tab is part of the URL (`?tab=install|people|settings`). Install is the default while
-    the site awaits install; People & access is the default otherwise.
-  - "View Details" on a Sites card is a link to that URL, with no in-place swap, and browser Back
-    returns to Sites.
-  - An id the owner cannot see renders the not-found state, never another account's data. The
-    page reads the RLS-scoped `GET /api/sites`.
+**Proposed split** (design and plan: `docs/designs/s66c-site-page-and-access.md`,
+`docs/plans/s66c-site-page-and-access.md`, [ADR 052](./decisions/052-site-subpages-share-one-site-record.md)):
 
-  Proved by a new page test and by the layout harness (navigate, then Back).
-- [ ] **AC 2 — Install tab.** The install snippet appears exactly once on the page, in one
-  CodeBlock with Copy. The platform recipes, the site token (Copy, Regenerate) and domain
-  verification follow it. The setup checklist (until install completes) and the stats row sit
-  above the tabs. Proved by a test: the page renders exactly one element whose text contains
-  `data-site-token`.
-- [ ] **AC 3 — People & access tab.** It has exactly two actions, "Add editor" and "Share
-  preview link", each with a one-line explainer:
-  - Add editor: "For someone who keeps editing this site. They sign in on the editor page with a
-    code sent to their email, and can edit and publish on your live site until you remove them."
-  - Share preview link: "For a one-off review of unpublished changes. The link stops working
-    after the time you choose."
+| Story | Scope | Size |
+|---|---|---|
+| `s66c1-site-pages` | The site's subpages with real URLs, the light Sites list, People & access with exactly two actions, the advanced Settings page, "Edit website" on the design system, labels and docs copy | 10 tasks |
+| `s66c2-quick-setup` | The guided quick setup on the site Overview, which replaces the activation checklist and ends Live; per-site API keys in advanced Settings | 6 tasks |
 
-  Below the actions, the editors list and the active preview links each sit under their own
-  heading. A new preview link defaults to View only; edit and publish need an explicit choice.
-  Proved by a test that the tab has exactly these two action buttons, and by
-  `ShareSiteDialog.test.tsx` asserting the default grant is `["view"]`.
-- [ ] **AC 4 — "Invite a client" is gone.** The label appears nowhere in the app. The activation
-  checklist's step is labelled "Add editor" and opens the same Add editor form as the People &
-  access tab: one component, the same endpoint. The checklist keeps today's View + Edit + Publish
-  preset as the form's starting value, because that step exists to get a client publishing (s35).
-- [ ] **AC 5 — Sites card.** Labels:
-  - The button that starts an edit session is labelled "Open editor" (the same
-    `/api/edit-sessions/create` call).
-  - The "Edit Website" dialog title and the checklist's "Open site in edit mode" become "Open
-    editor" too.
+Order: **s66b1-app-shell first** (it ships `PageShell`, ADR 053). Then s66c1 runs in parallel with
+s66b2-app-page-passes; they touch different files. s66c2 follows s66c1. Whichever of s66c1 and
+s66b2 merges second rebases the four shared files:
+- `e2e/app-layout.spec.ts`, plus the Playwright count in `playwright.config.ts` and `ci.yml`;
+- `src/__tests__/design/radius-baseline.json`;
+- `docs/design-system.md`;
+- this file.
 
-  The card's ⋮ menu is visible without hover (opacity 1 at rest, keyboard reachable). It holds
-  Open site page, Open editor, Share preview link and Delete site. In the harness at 375 px, the
-  ⋮ is visible and Delete is reachable by taps alone.
-- [ ] **AC 6 — Settings tab.** It contains:
-  - the name and domain, read-only (changing them needs an API: separate story);
-  - webhooks;
-  - content import/export, with its log labelled "Import/export log" (the content timeline is
-    "Version history");
-  - a Danger zone with Delete site (the same `DELETE /api/sites/[siteId]` and the same
-    confirmation).
-- [ ] **AC 7 — Tests that change, and why.** The PR names each one:
-  - `src/app/dashboard/sites/__tests__/page.test.tsx` and `teams-moved-notice.test.tsx`: the
-    in-place `site-detail-view` and "Back to Sites" become a link to the site URL;
-  - `SiteCard.test.tsx`: "Settings" becomes "Open editor", the menu is visible without hover,
-    and "Delete Site" becomes "Delete site";
-  - `SiteDetailView.test.tsx`: sections move into tabs, and "Embed Script" / "Copy Embed Script"
-    collapse into the single Install CodeBlock (the copied string is still asserted exactly);
-  - `ActivationChecklist.test.tsx`: "Invite a client" becomes "Add editor";
-  - `ShareSiteDialog.test.tsx`: the default grant becomes View only.
+No API, data or embed change in either: `git diff main...HEAD -- src/app/api supabase public/embed server`
+is empty. Embed allocation: 0 bytes. One sanctioned exception, in s66c1: `GET /api/sites` returns the
+caller's own `permission` (PR #72 review D1, ADR 052 Amendment).
 
-  No other existing test changes. The e2e flows (register, share, edit, publish) pass unchanged.
-- [ ] **AC 8 — No API, data or embed change.**
-  `git diff main...HEAD -- src/app/api supabase public/embed server` is empty. The layout
-  harness covers the site page's three tabs at 375, 768, 1280 and 1920 px with no page-level
-  horizontal scroll and no clipping, and the new files pass the radius guard with zero
-  offenders.
-
-Not in this story:
+Not in s66c1 or s66c2:
 - renaming a site or changing its domain (needs `PATCH /api/sites/[siteId]`, which changes which
-  origin `authorizeSiteRequest` accepts on a live install: separate API story);
-- retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (dead-code chore);
-- the page shell and titles (s66b).
+  origin `authorizeSiteRequest` accepts on a live install: a separate API story);
+- returning the caller's role from `GET /api/sites` so Delete can be hidden from admins who did
+  not create the site (an API follow-up; today the 403 shows in the dialog);
+- computing page views;
+- retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (a dead-code chore);
+- removing the account-level Settings › API Keys tab (s66b decides once s66c2 gives keys a
+  per-site home).
+
+## Story s66c1-site-pages — every site has its own pages, and one clear way to give someone access
+
+As a site owner, the Sites page is a short list. Each site opens on its own URL with four
+subpages: Overview, Install, People & access and Settings. On People & access I see exactly two
+ways to give someone access, and each says when to use it.
+
+Complexity: 4. Dependencies: **s66b1-app-shell merged** (`PageShell`, the page-shell guard, ADR
+053), and s66a merged. Branch `feature/s66c1-site-pages`; today this is
+`feature/s66c-site-page-and-access`, renamed on split validation. Decision: ADR 052.
+
+- [ ] **AC 1 — Subpages with real URLs.**
+  - `/dashboard/sites/[siteId]` (Overview), `/install`, `/people` and `/settings` each render
+    through `PageShell`:
+    - `title` is the site name, the page's only h1;
+    - `meta` is its `StatusBadge`;
+    - `description` is the domain as an external link;
+    - `actions` are "Edit website" and "Version history";
+    - `nav` is `SiteSubnav`: four links with exact hrefs, the current one `aria-current="page"`.
+  - Navigating between subpages pushes history, so Back and Forward walk them and Back from
+    Overview returns to Sites.
+  - An id missing from the signed-in user's `GET /api/sites` response renders "Site not found"
+    with a link back to Sites, and no other account's data. That route filters `site_permissions`
+    by the session user.
+  - A failed fetch renders a destructive Alert with Try again, never "not found".
+  - Loading is a skeleton.
+
+  Proved by the new `src/app/dashboard/sites/[siteId]/__tests__/layout.test.tsx` and by the new
+  `e2e/site-pages.spec.ts` (navigate, Back, Forward, at 375 and 1280).
+- [ ] **AC 2 — One site record (ADR 052).** `SiteProvider`, keyed by `siteId` in the site layout,
+  fetches `GET /api/sites` once per visit and shares the site with every subpage.
+  - While the site awaits install it re-polls every 5 s. It stops once the site is live and when
+    the owner leaves the site.
+  - A regenerated snippet replaces the snippet and token on every subpage at once.
+  - A refresh that returns the site without install credentials clears them in the same render.
+  - A rotation that resolves after the site changed is ignored.
+  - Re-rendering with another `siteId` shows none of the first site's token.
+
+  Proved by the new `src/components/dashboard/site/__tests__/SiteProvider.test.tsx`. The four poll
+  tests move there from `sites/__tests__/page.test.tsx:200-284`, and the credential tests from
+  `SiteDetailView.test.tsx:298-516`. Their assertions are unchanged.
+- [ ] **AC 3 — A light Sites list.** One bordered list, one row per site. A row holds:
+  - the name, as a link to the site's Overview;
+  - the domain;
+  - the `StatusBadge` and "Last edited …";
+  - one primary action: "Continue setup" (a link to the Overview) while the site awaits install,
+    "Edit website" otherwise;
+  - a ⋮ menu, visible at rest, named "Open menu for <name>", reachable by keyboard. It holds Open
+    site page, Edit website, Share preview link and Delete site.
+
+  No hover-only control remains: the copy-domain button is gone. No in-place detail view or "View
+  Details" remains. The page renders through `PageShell` and leaves the page-shell guard's
+  pending list.
+
+  Proved by the new `SiteRow.test.tsx` (it replaces `SiteCard.test.tsx`), by
+  `sites/__tests__/page.test.tsx`, and by `e2e/site-pages.spec.ts` at 375: ⋮ is visible, and
+  Delete is reached by taps alone, with the DELETE fulfilled by `page.route`.
+- [ ] **AC 4 — Edit website.** One `EditWebsiteButton`, built on the s66a `Button`
+  (`rounded-control`; no pill, no DOM toast, no confirmation dialog), over a `useEditSession`
+  hook extracted from `ActivationChecklist`:
+  - it opens the tab synchronously on click;
+  - it POSTs `/api/edit-sessions/create` with `durationHours: 2` and the permissions the
+    caller's own grant allows (PR #72 review D1, ADR 052 amendment): from the row, the menu and
+    the header an admin sends `["edit","admin"]`, a publish member `["edit","publish"]`, an edit
+    member `["edit"]`, and a viewer gets no Edit website; the checklist sends `["edit","publish"]`;
+  - it navigates only to an http(s) URL on the registered host.
+
+  A blocked pop-up or a refused request closes the tab and shows an inline destructive Alert. The
+  "Edit Website" dialog and the "Settings" and "Open site in edit mode" labels are gone.
+
+  Proved by the new `EditWebsiteButton.test.tsx` and `useEditSession.test.ts`.
+  `ActivationChecklist.test.tsx:393-480` (the open-tab, host-check and pop-up tests) passes with
+  only its button name changed.
+- [ ] **AC 5 — Install.**
+  - The install snippet appears **exactly once** on the page, in every install state: a
+    `CodeBlock` labelled HTML whose "Copy snippet" copies the exact `embedScript`. Live and stale
+    no longer hide it behind "View install snippet".
+  - The `SiteInstallationCard` status, mismatch warning and checking alert follow it, then the
+    platform recipes (text only).
+  - Then "Site token": a `CodeBlock` with "Copy site token", and "Regenerate snippet" with the
+    same confirmation and the same POST.
+  - A member without install credentials sees "Only this site's admins can see its install
+    snippet." instead of the placeholder `YOUR_SITE_TOKEN` snippet.
+
+  Proved by the new `install/__tests__/page.test.tsx` (exactly one element whose text contains
+  `data-site-token`; the copied string is exact) and by `SiteInstallationCard.test.tsx`.
+- [ ] **AC 6 — People & access.** It has exactly two action buttons, each with its explainer:
+  - "Add editor": "For someone who keeps editing this site. They sign in with a code sent to their
+    email and keep access until you remove them."
+  - "Share preview link": "For a one-off review of unpublished changes. View only unless you allow
+    more, and the link stops working after the time you choose."
+
+  Below them come "Editors" (`SiteEditorsCard`, now list-only: rows, resend, remove, previously
+  removed) and "Preview links" (the new `PreviewLinksList`: `ShareLinkCard` rows with copy and
+  revoke), each under its own heading with a count. Each list refetches after its action.
+
+  - "Add editor" opens the new `AddEditorDialog`: `InviteEditorForm`, `POST /api/editor/editors`,
+    default View+Edit. After success, the dialog shows the delivery notice or the editor-hub
+    fallback, then "Done".
+  - "Share preview link" opens `ShareSiteDialog`, now **create-only**. Its default grant is
+    **`["view"]`**, and it resets to `["view"]` after each send. The s68c 409 (removed editor)
+    shows in its Alert.
+  - A member who is not an admin sees both actions disabled, with "Only this site's admins can
+    give access."
+
+  Proved by the new `people/__tests__/page.test.tsx` (exactly these two action buttons), the new
+  `AddEditorDialog.test.tsx` (the enrolment tests move there from `SiteEditorsCard.test.tsx`), the
+  new `PreviewLinksList.test.tsx`, and `ShareSiteDialog.test.tsx` (the default grant is
+  `["view"]`).
+- [ ] **AC 7 — "Invite a client" is gone.**
+  - The checklist step is labelled "Add editor" and opens `AddEditorDialog` with today's
+    View+Edit+Publish preset (s35).
+  - Its edit action is "Edit website".
+  - `/docs/install` names "Open site page / Install / People & access / Add editor".
+  - The teams-moved notice points at People & access.
+  - `git grep -n "Invite a client" -- src ':!**/__tests__/**'` matches only tombstone comments.
+
+  Proved by `ActivationChecklist.test.tsx`, by new assertions in
+  `src/lib/docs/__tests__/installation-content.test.ts`, and by `teams-moved-notice.test.tsx`.
+- [ ] **AC 8 — Settings (advanced).**
+  - The page opens with "Advanced settings. You don't need any of these to start editing."
+  - General: name and domain, read-only, then "Renaming a site or changing its domain isn't
+    available yet."
+  - Domain ownership (`DomainVerification`, moved from the detail view).
+  - Webhooks.
+  - Content import and export. Its "History" tab is renamed "Operation history", so the word no
+    longer means two things.
+  - A Danger zone with Delete site: the same `DELETE /api/sites/[siteId]` and the same
+    confirmation, titled "Delete site?" in sentence case. Success replaces the URL with
+    `/dashboard/sites`. The creator-only 403 shows in the dialog.
+
+  Proved by the new `settings/__tests__/page.test.tsx`. `BulkOperations.test.tsx:506,516,527`
+  passes unchanged: `/history/i` still matches.
+- [ ] **AC 9 — Overview and entry points.**
+  - The Overview shows the relabelled checklist, then three metrics (Edits, Content elements, Last
+    activity), then Site details (Created, Last updated, Site ID with Copy). "Page views" is
+    dropped because `GET /api/sites` never computes it.
+  - The registration success panel gains "Open site page", which goes to the new site's Overview.
+  - The dashboard's "Your sites" rows link to their own site page.
+  - The breadcrumb reads "Dashboard › Sites › Site › People & access": a UUID segment reads "Site".
+    `Breadcrumbs.tsx` is s66b-owned; s66c1 makes only this change, and the second to merge
+    rebases.
+
+  Proved by the new Overview page test, a new assertion in `SiteRegistrationModal.test.tsx`, and
+  new cases in `Breadcrumbs.test.tsx`.
+- [ ] **AC 10 — Tests that change, radius at zero, and gates.** The PR names each changed test
+  with its reason:
+  - `sites/__tests__/page.test.tsx`:
+    - the `SiteCard` mock (`:28-38`) becomes a `SiteRow` mock;
+    - the `SiteDetailView` mock (`:40-46`) is removed;
+    - the poll tests (`:200-284`) move to `SiteProvider.test`;
+    - "View Details" / "Back to Sites" (`:349-392`) become a row-link href assertion.
+  - `teams-moved-notice.test.tsx`: the mocks (`:35-45`), and `/Share panel/i` (`:90`) becomes
+    `/People & access/i`.
+  - `SiteCard.test.tsx` becomes `SiteRow.test.tsx`:
+    - the metrics (`:57-62`, `:174-182`) are removed;
+    - View Details / Settings (`:70-86`) become the link and "Edit website";
+    - "Delete Site" (`:96`) becomes "Delete site";
+    - the hover copy-domain test (`:102-126`) is removed.
+  - `SiteDetailView.test.tsx` is split across the provider, Install, Settings and Overview
+    tests:
+    - "Embed Script" / "Copy Embed Script" (`:139`, `:189`, `:330-351`) become the single "Copy
+      snippet";
+    - "Site Token" (`:207-212`, `:534`) becomes "Site token";
+    - the quick stats (`:120-127`) lose Page views;
+    - `onClose` (`:566-585`) is removed.
+  - `SiteInstallationCard.test.tsx`:
+    - "keeps the snippet available but out of the way" (`:151-160`) becomes: the snippet is shown
+      when live;
+    - `findByText("Copied")` (`:102`) becomes a role query, because `CodeBlock` also announces
+      "Copied" in its live region.
+  - `SiteEditorsCard.test.tsx`: the enrolment tests (`:117`, `:165-239`, `:374-557`) move to
+    `AddEditorDialog.test.tsx`.
+  - `ActivationChecklist.test.tsx`:
+    - "Invite a client" becomes "Add editor" (`:141`, `:147`, `:160`, `:322`, `:378`);
+    - "Open … in edit mode" becomes "Edit website: …" (`:150`, `:161`, `:404-476`);
+    - the `SiteEditorsCard` mock (`:9-25`) becomes an `AddEditorDialog` mock.
+  - `ShareSiteDialog.test.tsx`:
+    - the default grant becomes `["view"]` (`:76-80`, `:110-122`);
+    - `renderDialog` (`:25-37`) no longer waits for a list fetch.
+  - `e2e/app-layout.spec.ts`:
+    - `openShareDialog` (`:296-301`) opens from People & access;
+    - the long-label check moves to the page list;
+    - `/Create a shareable link/` (`:550`) becomes the new description;
+    - the share-icon visibility check (`:505-508`) becomes the row ⋮.
+
+  No other existing test changes. The e2e flows (register, share, edit, publish) pass.
+
+  Gates:
+  - The 14 s66c-owned files in `radius-baseline.json` (49 offences) reach zero and leave the
+    baseline: `sites/page.tsx`, `ActivationChecklist`, `BulkOperations`, `DomainVerification`,
+    `EditWebsiteButton`, `InviteEditorForm`, `SiteDetailView`, `SiteEditorRow`, `SiteEditorsCard`,
+    `SiteInstallationCard`, `VersionHistoryPanel`, `VersionPreviewDialog`, `VersionTimelineItem`
+    and `WebhooksPanel`.
+  - New files have zero offences, and every new `sites/**` page passes the page-shell guard.
+  - `e2e/site-pages.spec.ts` finds no page-level horizontal scroll and no descendant past its
+    container on any subpage or the list, at 375 and 1280. The Playwright contract (`56`, in
+    three places) rises by exactly its test count.
+  - `git diff main...HEAD -- src/app/api supabase public/embed server` is empty, save one
+    sanctioned addition (PR #72 review D1, 2026-10-08; ADR 052 Amendment): `GET /api/sites` returns
+    each site's `permission`, the caller's own grant. It only chooses what "Edit website" asks for
+    (admin → `["edit","admin"]`, publish → `["edit","publish"]`, edit → `["edit"]`, view → no
+    button); the session route re-reads the live grant and refuses anything higher (s68a,
+    ADR 047), so the field grants nothing.
 
 > Hand-off from s66b2 (2026-10-08): s66b2 left `radius-baseline.json` holding only this story's
 > 14 entries. If s66c merges last, it deletes the baseline once empty and makes
@@ -2618,6 +2790,58 @@ Not in this story:
 > entry together with the file, in the same change: the guard fails on an entry whose file is
 > gone and names it. When a pending file passes its rule, the shrink-only check fails until the
 > rule is removed from its entry.
+
+Embed allocation: 0 bytes.
+
+## Story s66c2-quick-setup — a new site is walked to Live, and advanced settings hold the rest
+
+As a site owner with a new site, its Overview walks me through three steps until the site is
+Live, and picks up where I left off. Everything optional lives on the site's Settings page.
+
+Complexity: 3. Dependencies: s66c1 merged. Branch `feature/s66c2-quick-setup`.
+
+- [ ] **AC 1 — Quick setup replaces the activation checklist.** One component, `QuickSetup`,
+  replaces `ActivationChecklist`. It keeps the same `useSiteActivation` data, the same dismissal
+  endpoint, and the same loading and error states. It has three steps:
+  1. "Site added": always done.
+  2. "Install the snippet": a `CodeBlock` "Copy snippet", the line "Paste it just before
+     `</body>`…", a link to Install, and a live status row. The row flips from "Waiting for the
+     first page view…" to "Installed…" on the provider's poll, with no reload. The step is done
+     when activation says `installed` or the site is no longer awaiting install.
+  3. "Start editing": "Edit website", which stays disabled until step 2 is done, or "Add editor",
+     which opens `AddEditorDialog` with View+Edit+Publish. The step is done when `invited` or
+     `published`.
+
+  The current step is expanded. The header reads "Step N of 3". Progress comes from the server
+  only, so leaving and returning resumes at the first incomplete step. The step markers reuse the
+  registration panel's `InstallStep`, extracted to `components/dashboard/InstallStep.tsx`.
+
+  Proved by `QuickSetup.test.tsx`, which replaces `ActivationChecklist.test.tsx` (its assertions
+  are carried over where the behaviour stays).
+- [ ] **AC 2 — Done means Live.**
+  - When the site is live, the header reads "Setup complete — <name> is live" in the success tone.
+  - Step 3 stays offered until it is done or the owner chooses "Hide quick setup" (persisted, as
+    today). Then the panel is gone.
+  - This replaces s35's single completion card ("installed + invited + published").
+
+  Proved by `QuickSetup.test.tsx`.
+- [ ] **AC 3 — Dashboard Overview: one row per unfinished site.** Each row reads
+  "<name> · Step 2 of 3: Install the snippet" with a "Continue setup" link to the site Overview.
+  It replaces a full checklist per site. Proved by `src/app/dashboard/__tests__/page.activation.test.tsx`
+  (its mock and its count assertion change).
+- [ ] **AC 4 — New sites land in quick setup.** "Open site page" on the registration panel and
+  "Continue setup" on a Sites row both land on the Overview with step 2 active. Proved by
+  `e2e/site-pages.spec.ts` (the register and activation responses are fulfilled by `page.route`)
+  at 375 and 1280.
+- [ ] **AC 5 — Per-site API keys in advanced Settings.** `ApiKeysPanel` takes an optional
+  `siteId`; with it, the site selector is hidden and the keys are that site's. The site's Settings
+  page shows it between Domain ownership and Webhooks. Account Settings keeps its tab; s66b
+  decides its fate. Proved by a new `ApiKeysPanel.test.tsx`.
+- [ ] **AC 6 — Gates.**
+  - No API, data or embed diff.
+  - New files have zero radius offences and pass the page-shell guard.
+  - The quick-setup e2e passes at 375 and 1280, and the Playwright contract rises by exactly its
+    count.
 
 Embed allocation: 0 bytes.
 

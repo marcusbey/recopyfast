@@ -352,7 +352,7 @@ export default function DashboardPage() {
                   return (
                     <li key={site.id}>
                       <Link
-                        href="/dashboard/sites"
+                        href={`/dashboard/sites/${site.id}`}
                         className="flex items-center gap-3 px-6 py-3.5 transition-colors duration-200 ease-out hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         <IconTile>

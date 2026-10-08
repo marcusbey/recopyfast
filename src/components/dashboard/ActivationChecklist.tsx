@@ -5,25 +5,16 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardCopy,
-  ExternalLink,
-  Loader2,
   UserPlus,
 } from "lucide-react";
 import { useSiteActivation } from "@/hooks/useSiteActivation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveSiteStatus, StatusBadge } from "@/components/ui/status-badge";
-import { SiteEditorsCard } from "./SiteEditorsCard";
+import { AddEditorDialog } from "./AddEditorDialog";
+import EditWebsiteButton from "./EditWebsiteButton";
 
 interface ActivationChecklistProps {
   siteId: string;
@@ -40,29 +31,6 @@ const completeStatus = {
   description: "This activation step is complete.",
 };
 
-function registeredHostname(domain: string): string | null {
-  try {
-    return new URL(domain.includes("://") ? domain : `https://${domain}`)
-      .hostname;
-  } catch {
-    return null;
-  }
-}
-
-function validEditUrl(value: unknown, domain: string): string | null {
-  if (typeof value !== "string") return null;
-  const registered = registeredHostname(domain);
-  if (!registered) return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
-    if (url.hostname.toLowerCase() !== registered.toLowerCase()) return null;
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 export function ActivationChecklist({
   siteId,
   siteName,
@@ -75,7 +43,6 @@ export function ActivationChecklist({
   const [inviteOpen, setInviteOpen] = useState(false);
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [openingEdit, setOpeningEdit] = useState(false);
   const activationSurfaceRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const isComplete = Boolean(data?.installed && data.invited && data.published);
@@ -102,52 +69,6 @@ export function ActivationChecklist({
     }
   };
 
-  const handleEdit = async () => {
-    // Browsers associate popup permission with the synchronous click. Opening
-    // only after the network round trip loses that activation and turns a
-    // healthy edit-session response into a blocked popup.
-    const popup = window.open("about:blank", "_blank");
-    if (!popup) {
-      setActionError("Allow popups for ReCopyFast, then try again.");
-      return;
-    }
-    popup.opener = null;
-    setOpeningEdit(true);
-    setActionError(null);
-    try {
-      const response = await fetch("/api/edit-sessions/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          siteId,
-          permissions: ["edit", "publish"],
-          durationHours: 2,
-        }),
-      });
-      const body: { editUrl?: unknown; error?: unknown } =
-        await response.json();
-      if (!response.ok) {
-        throw new Error(
-          typeof body.error === "string"
-            ? body.error
-            : "Could not open edit mode",
-        );
-      }
-      const editUrl = validEditUrl(body.editUrl, domain);
-      if (!editUrl)
-        throw new Error("The server did not return a valid edit link.");
-
-      popup.location.href = editUrl;
-    } catch (caught) {
-      popup.close();
-      setActionError(
-        caught instanceof Error ? caught.message : "Could not open edit mode",
-      );
-    } finally {
-      setOpeningEdit(false);
-    }
-  };
-
   const openInvite = () => {
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
     setInviteOpen(true);
@@ -169,40 +90,39 @@ export function ActivationChecklist({
             </Button>
           ),
         },
+        // s66c1: "Invite a client" was the Editors card under a third name.
+        // The step is now the same "Add editor" People & access offers, with
+        // the checklist's View+Edit+Publish preset (s35).
         {
-          label: "Invite a client",
+          label: "Add editor",
           complete: data.invited,
           action: (
             <Button
               size="sm"
-              aria-label={`Invite a client to ${siteName}`}
+              aria-label={`Add editor to ${siteName}`}
               onClick={openInvite}
             >
-              <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
-              Invite a client
+              <UserPlus aria-hidden="true" />
+              Add editor
             </Button>
           ),
         },
+        // The one "Edit website" control, with the checklist's own body: it
+        // asks for publish, because the step it completes is a publish. A
+        // refusal reads with the checklist's other messages, above the steps:
+        // drawn by the button, it sat inside the step's row beside "Not yet"
+        // (s66c1 pre-PR fix).
         {
           label: "An edit published",
           complete: data.published,
           action: (
-            <Button
+            <EditWebsiteButton
+              site={{ id: siteId, domain, name: siteName }}
+              userPermissions={["edit", "publish"]}
+              onErrorChange={setActionError}
               size="sm"
-              aria-label={`Open ${siteName} in edit mode`}
-              onClick={() => void handleEdit()}
-              disabled={openingEdit}
-            >
-              {openingEdit ? (
-                <Loader2
-                  className="mr-2 h-4 w-4 animate-spin"
-                  aria-hidden="true"
-                />
-              ) : (
-                <ExternalLink className="mr-2 h-4 w-4" aria-hidden="true" />
-              )}
-              Open site in edit mode
-            </Button>
+              aria-label={`Edit website: ${siteName}`}
+            />
           ),
         },
       ]
@@ -298,7 +218,7 @@ export function ActivationChecklist({
                 {steps.map((step) => (
                   <li
                     key={step.label}
-                    className="flex flex-col gap-3 rounded-lg border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-3 rounded-container border border-border p-4 sm:flex-row sm:items-center sm:justify-between"
                   >
                     <span className="text-sm font-medium text-foreground">
                       {step.label}
@@ -324,38 +244,25 @@ export function ActivationChecklist({
       {/* Keep this dialog outside every activation-state branch. The invite
           itself can complete the checklist, and a background refetch can fail;
           neither event may discard the delivery notice or manual hub link. */}
-      <Dialog open={inviteOpen} onOpenChange={(open) => setInviteOpen(open)}>
-        <DialogContent
-          className="max-w-2xl"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            const previous = previouslyFocusedRef.current;
-            // Completion removes the invite button while the dialog is open.
-            // In that case focus returns to the replacement Live/error region
-            // instead of falling through to the document body.
-            if (previous?.isConnected) previous.focus();
-            else activationSurfaceRef.current?.focus();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>Invite a client</DialogTitle>
-            <DialogDescription>
-              Add the person who will edit and publish {siteName}.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            <SiteEditorsCard
-              siteId={siteId}
-              siteName={siteName}
-              inviteFormAutoFocus
-              inviteDefaultPermissions={["view", "edit", "publish"]}
-              onEditorChange={() => {
-                void refetch();
-              }}
-            />
-          </DialogBody>
-        </DialogContent>
-      </Dialog>
+      <AddEditorDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        siteId={siteId}
+        siteName={siteName}
+        defaultPermissions={["view", "edit", "publish"]}
+        onAdded={() => {
+          void refetch();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const previous = previouslyFocusedRef.current;
+          // Completion removes the invite button while the dialog is open.
+          // In that case focus returns to the replacement Live/error region
+          // instead of falling through to the document body.
+          if (previous?.isConnected) previous.focus();
+          else activationSurfaceRef.current?.focus();
+        }}
+      />
     </>
   );
 }

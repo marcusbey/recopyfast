@@ -314,7 +314,7 @@ export function DomainVerification({
               <p className="text-sm text-muted-foreground">
                 Add this TXT record at the root of your domain&apos;s DNS zone:
               </p>
-              <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface-1 p-3">
+              <div className="flex items-center justify-between gap-3 rounded-container border border-border bg-surface-1 p-3">
                 <code className="break-all font-mono text-sm text-foreground">
                   {instructions.record}
                 </code>
@@ -338,12 +338,12 @@ export function DomainVerification({
             <div className="mt-3 space-y-3">
               <p className="text-sm text-muted-foreground">
                 Upload this file so it is served at{" "}
-                <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
+                <code className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-xs">
                   https://{newDomain || "yourdomain.com"}/.well-known/
                   {instructions.filename}
                 </code>
               </p>
-              <div className="rounded-lg border border-border bg-surface-1 p-3">
+              <div className="rounded-container border border-border bg-surface-1 p-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <span className="break-all font-mono text-sm text-foreground">
                     {instructions.filename}
@@ -363,7 +363,7 @@ export function DomainVerification({
                     Download
                   </Button>
                 </div>
-                <pre className="overflow-x-auto rounded bg-card p-2 text-xs text-foreground">
+                <pre className="overflow-x-auto rounded-container bg-card p-2 text-xs text-foreground">
                   {instructions.content}
                 </pre>
               </div>
@@ -510,7 +510,7 @@ export function DomainVerification({
                       same function the server checks against.
                     */}
                     {!verification.isVerified && !expired && (
-                      <div className="mt-3 space-y-2 rounded-lg border border-border bg-surface-1 p-3">
+                      <div className="mt-3 space-y-2 rounded-container border border-border bg-surface-1 p-3">
                         {verification.verificationMethod === "file" && (
                           <p className="text-xs text-muted-foreground">
                             Serve at{" "}
