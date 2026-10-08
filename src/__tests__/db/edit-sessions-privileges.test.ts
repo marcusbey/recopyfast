@@ -6,7 +6,7 @@
  * s68a — only the service role writes `edit_sessions` (ADR 047, H1).
  *
  * WHAT BROKE. `edit_sessions` is a bearer credential, and the routes that
- * accept one (staging publish, staging content, edit-board history, AI
+ * accept one (staging publish, staging content, staging validate, AI
  * suggest, edit-session extend and validate) used to grant exactly the
  * permissions written inside the row. The row was writable by its own holder:
  * "Users can create edit sessions for sites they have access to"
@@ -23,8 +23,8 @@
  * policy, revokes every write privilege from PUBLIC, `anon` and
  * `authenticated` (SELECT from PUBLIC and `anon` too), keeps `authenticated`
  * SELECT under the own-rows policy, and deactivates every active row the
- * validator would now refuse (no holder, a lifetime past 24 h, or permissions
- * above the holder's live grant).
+ * validator would now refuse (no holder, a lifetime past 24 h, a `created_at`
+ * more than 5 min in the future, or permissions above the holder's live grant).
  *
  * WHAT THIS PROVES, AND HOW.
  * - The catalogue: table AND column privileges (ADR 033 — a column grant is a
@@ -366,6 +366,67 @@ describeDb(
             // Third: an operator retry after an uncertain connection result.
             await client.query(migrationSql);
             expect(await stateOf()).toEqual(expected);
+          } finally {
+            await client.query("ROLLBACK");
+          }
+        });
+      });
+
+      test("the migration deactivates a session created more than 5 min in the future, never one within the skew (review M1)", async () => {
+        const migrationSql = readFileSync(MIGRATION_FILE, "utf8");
+
+        await withClient(async (client) => {
+          await client.query("BEGIN");
+          try {
+            // `expires_at` 12 h after `created_at`: inside the 24 h lifetime,
+            // so only the future `created_at` can retire these rows.
+            const plantCreatedAhead = async (
+              ahead: string,
+            ): Promise<string> => {
+              const {
+                rows: [row],
+              } = await client.query<{ id: string }>(
+                `INSERT INTO public.edit_sessions
+                   (site_id, user_id, token, permissions, created_at, expires_at)
+                 VALUES ($1, $2, $3, '{edit}', now() + $4::interval,
+                         now() + $4::interval + interval '12 hours')
+                 RETURNING id`,
+                [siteId, editorId, newToken(), ahead],
+              );
+              return row.id;
+            };
+
+            const rogue = {
+              // The review's row: dated decades ahead, it never expired.
+              decadesAhead: await plantCreatedAhead("73 years"),
+              justPastSkew: await plantCreatedAhead("6 minutes"),
+            };
+            const withinSkew = await plantCreatedAhead("4 minutes");
+
+            await client.query(migrationSql);
+
+            const { rows } = await client.query<{
+              id: string;
+              is_active: boolean;
+              is_revoked: boolean;
+            }>(
+              `SELECT id, is_active, revoked_at IS NOT NULL AS is_revoked
+               FROM public.edit_sessions WHERE id = ANY($1::uuid[])`,
+              [[...Object.values(rogue), withinSkew]],
+            );
+
+            expect(
+              Object.fromEntries(
+                rows.map((row) => [
+                  row.id,
+                  { isActive: row.is_active, isRevoked: row.is_revoked },
+                ]),
+              ),
+            ).toEqual({
+              [rogue.decadesAhead]: { isActive: false, isRevoked: true },
+              [rogue.justPastSkew]: { isActive: false, isRevoked: true },
+              [withinSkew]: { isActive: true, isRevoked: false },
+            });
           } finally {
             await client.query("ROLLBACK");
           }

@@ -30,12 +30,6 @@ export interface CreateEditSessionParams {
   userAgent?: string;
 }
 
-export interface ValidateEditSessionParams {
-  token: string;
-  siteId: string;
-  ipAddress?: string;
-}
-
 /**
  * Absolute ceiling on how long one edit session may live, measured from when it
  * was first issued — not from the last extension.
@@ -44,8 +38,8 @@ export interface ValidateEditSessionParams {
  * bound, /api/edit-sessions/extend could be called every 23 hours forever, so a
  * token that leaked once (the editUrl lands in browser history, a shared screen,
  * a pasted link) stayed valid indefinitely. The session token carries no origin
- * binding, no device binding, and its IP check deliberately does not reject, so
- * elapsed time is the only thing that reliably retires it.
+ * binding, no device binding and no IP check, so elapsed time is the only thing
+ * that reliably retires it.
  */
 export const MAX_SESSION_LIFETIME_HOURS = 24;
 
@@ -136,69 +130,7 @@ export class EditSessionManager {
     }
   }
 
-  /**
-   * Validate an edit session token
-   */
-  static async validateEditSession(
-    params: ValidateEditSessionParams,
-  ): Promise<EditSession | null> {
-    try {
-      const supabase = createServiceRoleClient();
-
-      // Find active session
-      const { data: session, error } = await supabase
-        .from("edit_sessions")
-        .select(
-          `
-          *,
-          sites!inner(id, domain),
-          profiles!inner(id, email, full_name)
-        `,
-        )
-        .eq("token", params.token)
-        .eq("site_id", params.siteId)
-        .eq("is_active", true)
-        .gte("expires_at", new Date().toISOString())
-        .single();
-
-      if (error || !session) {
-        return null;
-      }
-
-      // Optional IP validation (can be disabled for mobile/dynamic IPs)
-      if (
-        params.ipAddress &&
-        session.ip_address &&
-        session.ip_address !== params.ipAddress
-      ) {
-        console.warn(
-          `IP mismatch for edit session ${session.id}: expected ${session.ip_address}, got ${params.ipAddress}`,
-        );
-        // Don't reject for now, just log
-      }
-
-      // Update last used timestamp
-      await supabase
-        .from("edit_sessions")
-        .update({ last_used_at: new Date().toISOString() })
-        .eq("id", session.id);
-
-      return {
-        id: session.id,
-        site_id: session.site_id,
-        user_id: session.user_id,
-        token: session.token,
-        expires_at: new Date(session.expires_at),
-        permissions: session.permissions,
-        ip_address: session.ip_address,
-        user_agent: session.user_agent,
-        created_at: new Date(session.created_at),
-      };
-    } catch (error) {
-      console.error("Error validating edit session:", error);
-      return null;
-    }
-  }
+  // TOMBSTONE (s68a review m3): `validateEditSession` had no caller and still trusted the row's own `permissions` and `expires_at` (no live grant, no 24 h ceiling) — the H1 trap waiting for a caller; validate through `validateEditSessionAccess` in editor-access.ts.
 
   /**
    * Revoke an edit session

@@ -40,6 +40,7 @@ expects to be live (production has one owner):
 ```sql
 SELECT count(*) AS would_deactivate FROM public.edit_sessions s
  WHERE s.is_active AND (s.user_id IS NULL OR s.expires_at > s.created_at + interval '24 hours'
+   OR s.created_at > now() + interval '5 minutes'
    OR NOT EXISTS (SELECT 1 FROM public.site_permissions p
                    WHERE p.site_id = s.site_id AND p.user_id = s.user_id
                      AND (p.permission = 'admin'
@@ -120,7 +121,8 @@ SELECT 'write policy', c.relname || ' :: ' || pol.polname
                     WHERE pg_get_userbyid(r) IN ('anon', 'authenticated')))
 UNION ALL
 SELECT 'live rogue session', s.id::text FROM public.edit_sessions s
- WHERE s.is_active AND (s.user_id IS NULL OR s.expires_at > s.created_at + interval '24 hours')
+ WHERE s.is_active AND (s.user_id IS NULL OR s.expires_at > s.created_at + interval '24 hours'
+                         OR s.created_at > now() + interval '5 minutes')
 UNION ALL
 SELECT 'definer exec', p.proname || ' -> ' ||
        CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.grantee) END

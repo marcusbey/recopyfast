@@ -2399,7 +2399,7 @@ rewrite policy (`20260801200000:956-968`) sit beside it. The definer-function gu
 - [x] Removing a member deactivates their edit sessions for that site (scoped by site and user).
   Test: `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`.
 - [x] Edit sessions are issued only through the service role, after the caller's grant is read
-  under their own session. Test: `src/__tests__/api/edit-sessions/create-token-leak.test.ts`
+  under their own session. Test: `src/__tests__/api/edit-sessions/create-service-role.test.ts`
   (insert on the service client, never the user client).
 - [ ] Migration `20261008100000_edit_sessions_service_role_writes.sql`: PUBLIC/`anon`/`authenticated`
   hold no write privilege or write policy on `edit_sessions`, `anon` no SELECT; an `edit` member's

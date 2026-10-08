@@ -416,6 +416,14 @@ async function validateStagingEditorAccess(
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
+ * How far ahead of this server's clock a session's `created_at` may sit and
+ * still be believed: the database stamps it, and two clocks drift. Beyond
+ * this, the date was written, not stamped. Migration 20261008100000's data
+ * step uses the same 5 minutes.
+ */
+const CREATED_AT_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
  * The edit-session principal. The session row carries NO authority of its own
  * (ADR 047): what its bearer may do is the holder's LIVE direct
  * `site_permissions` row for this site, read here on every validation, and the
@@ -444,9 +452,10 @@ const HOUR_MS = 60 * 60 * 1000;
  * `admin` row — as it already does first-party. Do not widen the intersection
  * to "fix" that.
  *
- * Every refusal — no holder, no live row, past the lifetime ceiling, an empty
- * intersection — answers the one message this function always returned, so
- * the response is no oracle for "member removed" versus "token wrong".
+ * Every refusal — no holder, no live row, past the lifetime ceiling, created in
+ * the future, an empty intersection — answers the one message this function
+ * always returned, so the response is no oracle for "member removed" versus
+ * "token wrong".
  */
 async function validateEditSessionAccess(
   siteId: string,
@@ -481,11 +490,21 @@ async function validateEditSessionAccess(
   // Written as "not within", not "beyond": a `created_at` that does not parse
   // (or a constant a test double left undefined) makes the comparison NaN,
   // and NaN must refuse — a session that cannot be dated cannot be bounded.
+  //
+  // The lower bound is review M1 (s68a). `created_at` was as writable by the
+  // holder as `expires_at`: a row dated 2099 had a negative age, passed the
+  // ceiling, and never expired. A future `created_at` past the skew tolerance
+  // is refused like any other undatable session.
   const { MAX_SESSION_LIFETIME_HOURS } = await import(
     "@/lib/auth/edit-sessions"
   );
   const ageMs = Date.now() - new Date(session.created_at).getTime();
-  if (!(ageMs <= MAX_SESSION_LIFETIME_HOURS * HOUR_MS)) {
+  if (
+    !(
+      ageMs >= -CREATED_AT_CLOCK_SKEW_MS &&
+      ageMs <= MAX_SESSION_LIFETIME_HOURS * HOUR_MS
+    )
+  ) {
     return refused;
   }
 

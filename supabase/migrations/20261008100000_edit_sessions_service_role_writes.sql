@@ -3,7 +3,7 @@
 -- ============================================================
 -- THE INCIDENT (H1). An edit session is a bearer credential: whoever presents
 -- `body.editToken` or `?rcf_edit_token=` is treated as its holder, and every
--- route that accepts one (staging publish, staging content, edit-board history,
+-- route that accepts one (staging publish, staging content, staging validate,
 -- AI suggest, edit-session extend and validate) used to grant exactly the
 -- permissions written INSIDE the row. The row was writable by its own holder:
 --
@@ -47,13 +47,17 @@
 --      removal now lean on it. Idempotent where it already holds it.
 --   4. Deactivates every active row the new validator would refuse: no holder
 --      (`user_id` NULL — the old e2e seeds wrote those), a lifetime past
---      24 h from `created_at` (a directly inserted 2099 row), or permissions
---      above the holder's live direct grant. A legitimate row always has a
---      holder, `expires_at <= created_at + 24 h` (create caps one grant at
---      24 h, extend stops at the absolute 24 h ceiling) and permissions within
---      the level it was issued under. A legitimate admin since demoted or
---      removed IS deactivated — correct under ADR 047. `revoked_at` is kept
---      when already set, so a retry does not rewrite history.
+--      24 h from `created_at` (a directly inserted 2099 row), a `created_at`
+--      more than 5 minutes in the future (review M1: the holder could write
+--      it too, and a row dated 2099 had a negative age that never reached the
+--      ceiling — the validator's skew tolerance is the same 5 minutes), or
+--      permissions above the holder's live direct grant. A legitimate row
+--      always has a holder, `expires_at <= created_at + 24 h` (create caps one
+--      grant at 24 h, extend stops at the absolute 24 h ceiling), a
+--      database-stamped `created_at` and permissions within the level it was
+--      issued under. A legitimate admin since demoted or removed IS
+--      deactivated — correct under ADR 047. `revoked_at` is kept when already
+--      set, so a retry does not rewrite history.
 --   5. Asserts the end state (postcondition): the push aborts, in its
 --      transaction, if any write grant, column write grant or write policy
 --      for a web principal survives.
@@ -96,6 +100,7 @@ UPDATE public.edit_sessions s
    AND (
      s.user_id IS NULL
      OR s.expires_at > s.created_at + interval '24 hours'
+     OR s.created_at > now() + interval '5 minutes'
      OR NOT EXISTS (
        SELECT 1
          FROM public.site_permissions p

@@ -26,7 +26,8 @@ import { validateEditorAccess } from "../editor-access";
 jest.mock("@/lib/supabase/service");
 
 const SITE_ID = "site-1";
-const HOUR_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
 const REFUSED = {
   valid: false,
   error: "Invalid or expired edit session",
@@ -75,6 +76,30 @@ const tables: Record<string, Row[]> = {
       token: "edit-row-admin-holder",
       user_id: "admin",
       permissions: ["edit"],
+    }),
+    // (f) review M1: `created_at` is as writable as `expires_at` was. Dated
+    // 2099 with a 12 h `expires_at`, the age is negative and passed the
+    // ceiling; the session then never expired.
+    session({
+      token: "created-in-2099",
+      user_id: "editor",
+      permissions: ["edit"],
+      created_at: "2099-01-01T00:00:00.000Z",
+      expires_at: "2099-01-01T12:00:00.000Z",
+    }),
+    // ...and just past the 5 min skew tolerance, so a looser bound goes red.
+    session({
+      token: "created-6-min-ahead",
+      user_id: "editor",
+      permissions: ["edit"],
+      created_at: new Date(Date.now() + 6 * MINUTE_MS).toISOString(),
+    }),
+    // (g) a fresh session from a database clock running a little ahead
+    session({
+      token: "created-4-min-ahead",
+      user_id: "editor",
+      permissions: ["edit"],
+      created_at: new Date(Date.now() + 4 * MINUTE_MS).toISOString(),
     }),
   ],
   site_permissions: [
@@ -168,5 +193,17 @@ describe("an edit session grants at most its holder's live grant (ADR 047)", () 
     expect(result.valid).toBe(true);
     expect(result.access?.permissions).toEqual(["view", "edit"]);
     expect(result.access?.userId).toBe("admin");
+  });
+
+  it("(f) refuses a session whose created_at is in the future beyond the 5 min skew tolerance", async () => {
+    await expect(validate("created-in-2099")).resolves.toEqual(REFUSED);
+    await expect(validate("created-6-min-ahead")).resolves.toEqual(REFUSED);
+  });
+
+  it("(g) guard: accepts a fresh session whose created_at is up to 5 min ahead (clock skew)", async () => {
+    const result = await validate("created-4-min-ahead");
+
+    expect(result.valid).toBe(true);
+    expect(result.access?.permissions).toEqual(["view", "edit"]);
   });
 });
