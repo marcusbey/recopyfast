@@ -17,6 +17,15 @@ Plan validated by the owner, with the recommended defaults:
 - The staging-invite email keeps the admin-chosen label, HTML-escaped and capped at 80
   characters.
 
+## Plan amendment (2026-10-08, review major 1)
+
+M5 must not refuse a conversion the public `trackConversion(eventName, value)` API can send today:
+a finite numeric string is coerced to a number; a non-numeric, non-finite, negative or > 1,000,000
+value is replaced by the default `1` instead of refusing the event (the column is never read for
+decisions, `lifecycle.ts:74`). All other M5 bounds stay. M3b: a request that loses the compare-and-set
+re-reads and retries while the code is live, bounded to 6 rounds (reviewer-proven: never more than 5
+comparisons, a correct 5th guess consumes exactly once).
+
 ## Target story
 
 `docs/stories.md` → s68b. Outbound fetches never follow redirects (M1, M10); bulk find/replace is

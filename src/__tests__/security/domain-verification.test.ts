@@ -557,17 +557,27 @@ describe("Domain Verification", () => {
       expect(result.error).toContain("does not declare the verification code");
     });
 
-    it("should handle HTTP errors", async () => {
+    /**
+     * Review minor 4: a non-3xx failure echoed `HTTP <status>: <statusText>`.
+     * Between the address check and the fetch, a domain the admin controls can
+     * re-resolve elsewhere (DNS rebinding), so that status line told them what
+     * answered there. The failure is a fixed message carrying nothing from it.
+     */
+    it("refuses an error answer with a fixed message that echoes nothing from the upstream status line", async () => {
       (global.fetch as jest.Mock).mockResolvedValue({
         ok: false,
-        status: 404,
-        statusText: "Not Found",
+        status: 503,
+        statusText: "Service Unavailable from internal-admin",
       });
 
       const result = await verifyDomainFile("example.com", "code123");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("HTTP 404");
+      expect(result.error).toBe(
+        "Verification file could not be fetched from the domain.",
+      );
+      expect(JSON.stringify(result)).not.toContain("internal-admin");
+      expect(JSON.stringify(result)).not.toContain("503");
     });
 
     it("should handle network errors", async () => {

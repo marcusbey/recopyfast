@@ -3,12 +3,12 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
+  numberOrDefault,
   optionalBoundedString,
   optionalMetadata,
   optionalPlainText,
   readBoundedJson,
   requireEnum,
-  requireFiniteNumber,
   requirePlainText,
   requireUuid,
   type ValidationResult,
@@ -53,7 +53,8 @@ interface TrackEvent {
  * customer's page markup; it took any number of events, stored `value` and
  * `metadata` as sent, and 500'd on a malformed id only after reaching the
  * database. Everything below is refused with a 400 BEFORE any database call —
- * the authorizer's `sites` lookup included.
+ * the authorizer's `sites` lookup included — except `value`, which is coerced
+ * to the default rather than refused (see validateEvent).
  *
  * Each bound is set against what the embed actually sends
  * (public/embed/recopyfast.src.js:3437-3495): one event per active test, a
@@ -65,6 +66,8 @@ interface TrackEvent {
 const MAX_TRACK_BODY_BYTES = 64 * 1024;
 const MAX_EVENTS_PER_BATCH = 50;
 const MAX_EVENT_VALUE = 1_000_000;
+/** What the embed itself sends for a conversion without a value (`value || 1`). */
+const DEFAULT_EVENT_VALUE = 1;
 const MAX_EVENT_METADATA_BYTES = 1024;
 /** Flat only: the object, then primitive values (see optionalMetadata). */
 const MAX_EVENT_METADATA_DEPTH = 2;
@@ -102,15 +105,19 @@ function validateEvent(raw: unknown): ValidationResult<TrackEvent> {
   });
   if (!sessionId.ok) return sessionId;
 
-  let value = 1;
-  if (body.value !== undefined && body.value !== null) {
-    const checked = requireFiniteNumber(body, "value", {
-      min: 0,
-      max: MAX_EVENT_VALUE,
-    });
-    if (!checked.ok) return checked;
-    value = checked.value;
-  }
+  // Review major 1 (plan amendment 2026-10-08): `value` is the one field that
+  // is coerced, never refused. It comes from the host page through the public
+  // `window.recopyfast.trackConversion(eventName, value)` (recopyfast.src.js
+  // :6255 → :3492 `value: value || 1`), so a string, a negative or a huge
+  // number is an ordinary integrator call, not an attack — and refusing it 400'd
+  // the whole beacon (one event per active test), which `sendBeacon` ignores:
+  // every conversion in it was silently lost. Nothing decides on this column
+  // (lifecycle.ts:74), so an unusable value is stored as the default 1.
+  const value = numberOrDefault(body, "value", {
+    min: 0,
+    max: MAX_EVENT_VALUE,
+    fallback: DEFAULT_EVENT_VALUE,
+  });
 
   const metadata = optionalMetadata(body, "metadata", {
     maxBytes: MAX_EVENT_METADATA_BYTES,

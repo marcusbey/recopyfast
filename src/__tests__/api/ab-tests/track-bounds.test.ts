@@ -251,16 +251,6 @@ describe("POST /api/ab-tests/track — refuses out-of-bounds input before the da
     ["a non-UUID variant_id", withField("variant_id", "variant-1")],
     ["a non-UUID site_id", withField("site_id", "site-1")],
     ["an unknown event_type", withField("event_type", "purchase")],
-    ["a non-number value", withField("value", "1")],
-    [
-      "a non-finite value",
-      JSON.stringify(withField("value", 0)).replace(
-        '"value":0',
-        '"value":1e400',
-      ),
-    ],
-    ["a negative value", withField("value", -1)],
-    ["a value over 1,000,000", withField("value", 1_000_001)],
     ["array metadata", withField("metadata", ["signup"])],
     ["string metadata", withField("metadata", "signup")],
     ["metadata deeper than 2", withField("metadata", { a: { b: { c: 1 } } })],
@@ -331,6 +321,98 @@ describe("POST /api/ab-tests/track — refuses out-of-bounds input before the da
   });
 });
 
+/**
+ * Review major 1 (plan amendment 2026-10-08). `window.recopyfast
+ * .trackConversion(eventName, value)` is a public API: whatever the host page
+ * passes lands as `value: value || 1` (recopyfast.src.js:3492, :6255), in one
+ * beacon carrying one event per active test. Refusing an odd `value` with 400
+ * threw away the whole beacon — `sendBeacon` ignores the answer, so every
+ * conversion in it was lost without a trace. The column is never read for a
+ * decision (lifecycle.ts:74), so an odd value is stored as the default instead.
+ */
+describe("POST /api/ab-tests/track — a conversion value the public API can send is stored, never refused", () => {
+  /** The beacon `trackConversion(eventName, value)` sends: one event per active test. */
+  function trackConversionBeacon(eventName: string, value: unknown) {
+    return TESTS.map(({ test, variant }) => ({
+      site_id: SITE_ID,
+      test_id: test,
+      variant_id: variant,
+      visitor_id: UUID_VISITOR,
+      event_type: "conversion",
+      value: value || 1,
+      metadata: { event_name: eventName },
+      geo_country: null,
+      geo_region: null,
+    }));
+  }
+
+  const cases: Array<[string, unknown, number]> = [
+    [
+      "a finite numeric string is coerced",
+      trackConversionBeacon("purchase", "49.99"),
+      49.99,
+    ],
+    [
+      "a value over 1,000,000 becomes 1",
+      trackConversionBeacon("purchase", 1_500_000),
+      1,
+    ],
+    [
+      "a numeric string over 1,000,000 becomes 1",
+      trackConversionBeacon("purchase", "2000000"),
+      1,
+    ],
+    ["a negative value becomes 1", trackConversionBeacon("purchase", -5), 1],
+    [
+      "a non-numeric string becomes 1",
+      trackConversionBeacon("purchase", "lots"),
+      1,
+    ],
+    [
+      "a non-number, non-string value becomes 1",
+      trackConversionBeacon("purchase", { amount: 5 }),
+      1,
+    ],
+    [
+      "a non-finite value becomes 1",
+      JSON.stringify(trackConversionBeacon("purchase", 7)).replaceAll(
+        '"value":7',
+        '"value":1e400',
+      ),
+      1,
+    ],
+  ];
+
+  it.each(cases)(
+    "%s, and the beacon answers 2xx",
+    async (_name, body, storedValue) => {
+      for (const { test } of TESTS) {
+        recordedViews.add(`${UUID_VISITOR}:${test}`);
+      }
+
+      const response = await POST(trackRequest(body));
+
+      expect(response.status).toBeGreaterThanOrEqual(200);
+      expect(response.status).toBeLessThan(300);
+      await expect(response.json()).resolves.toEqual({
+        recorded: TESTS.length,
+        deduplicated: 0,
+      });
+      const rows = insertedRows();
+      expect(rows).toHaveLength(TESTS.length);
+      for (const row of rows) {
+        expect(row).toEqual(
+          expect.objectContaining({
+            event_type: "conversion",
+            value: storedValue,
+            metadata: { event_name: "purchase" },
+          }),
+        );
+      }
+    },
+  );
+});
+
 describe("POST /api/ab-tests/track — one conversion per visitor per test, after a view", () => {
   it("does not record a second conversion for the same visitor and test", async () => {
     recordedViews.add(`${UUID_VISITOR}:${TESTS[0].test}`);
@@ -358,6 +440,38 @@ describe("POST /api/ab-tests/track — one conversion per visitor per test, afte
       deduplicated: 1,
     });
     expect(insertedRows()).toHaveLength(1);
+  });
+
+  /**
+   * Review minor 5: a first-time visitor's view and conversion can share one
+   * request, and nothing is recorded for them yet. The view in the batch is the
+   * proof of viewing — the conversion must not be dropped for want of a stored
+   * row that this very insert is about to create.
+   */
+  it("records a conversion whose view arrives in the same batch", async () => {
+    const response = await POST(
+      trackRequest([viewEvent(0), conversionEvent()]),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      recorded: 2,
+      deduplicated: 0,
+    });
+    expect(insertedRows()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event_type: "view",
+          visitor_id: UUID_VISITOR,
+          test_id: TESTS[0].test,
+        }),
+        expect.objectContaining({
+          event_type: "conversion",
+          visitor_id: UUID_VISITOR,
+          test_id: TESTS[0].test,
+        }),
+      ]),
+    );
   });
 
   it("does not record a conversion from a visitor with no recorded view of the test", async () => {

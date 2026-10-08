@@ -118,6 +118,7 @@ async function chargeAttempt(
 ): Promise<"charged" | "charged_last" | "spent" | "error"> {
   let attempts = record.attempts;
 
+  // Bound: MAX_CODE_ATTEMPTS + 1 = 6 rounds per request, and at most 5 charges (so ≤ 5 comparisons) ever land per code.
   for (let round = 0; round <= MAX_CODE_ATTEMPTS; round++) {
     if (attempts >= MAX_CODE_ATTEMPTS) return "spent";
 

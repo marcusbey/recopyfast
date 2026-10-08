@@ -332,6 +332,33 @@ export function requireFiniteNumber(
   return { ok: true, value: raw };
 }
 
+/**
+ * A number the caller may send loosely, replaced by `fallback` instead of
+ * refused. For a field whose refusal costs more than a wrong value: a 400
+ * throws away the whole request, and some callers — a `sendBeacon` — never see
+ * the answer. A finite number, or a non-blank string that parses to one, inside
+ * [min, max] is kept; anything else (absent included) becomes `fallback`.
+ */
+export function numberOrDefault(
+  body: Record<string, unknown>,
+  field: string,
+  options: { min: number; max: number; fallback: number },
+): number {
+  const raw = body[field];
+  let parsed = Number.NaN;
+  if (typeof raw === "number") parsed = raw;
+  if (typeof raw === "string" && raw.trim() !== "") parsed = Number(raw);
+
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < options.min ||
+    parsed > options.max
+  ) {
+    return options.fallback;
+  }
+  return parsed;
+}
+
 function hasForbiddenKeys(
   value: unknown,
   depth: number,

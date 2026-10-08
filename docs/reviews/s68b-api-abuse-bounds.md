@@ -1,0 +1,52 @@
+# Review — s68b-api-abuse-bounds
+
+Reviewer: fresh-context `reviewer` subagent, 2026-10-08. Diff: `git diff origin/main...feature/s68b-api-abuse-bounds`
+(merge-base `659778e`; code commit `404947c`).
+
+## Verdict summary
+
+M1, M10, M2, M3a/M3b, M4 and M6 hold. M3b's bounded-retry deviation is proven correct: N concurrent guesses
+never exceed 5 comparisons and a correct 5th guess consumes exactly once (argument + 1,500-trial randomized
+stress probe). Full jest 328 suites / 4,262 tests, type-check, type-check:build, build, build:embed --check
+green. Every disabled guard turned a test red except one equivalent mutant (M4 track) and one untested branch
+(minor 5).
+
+## Findings
+
+### Major
+
+1. `src/app/api/ab-tests/track/route.ts:67,106-113` — conversions from the public
+   `window.recopyfast.trackConversion(eventName, value)` (`recopyfast.src.js:6255`, `:3492` `value: value || 1`)
+   are now refused when `value` is a numeric string, > 1,000,000 or negative. The whole beacon (one event per
+   active test) gets a 400 that `sendBeacon` ignores → conversions silently lost. Before, they were recorded
+   (`value` is DECIMAL). `value` is never read (`lifecycle.ts:74`). Contradicts the AC "accepts what the embed
+   sends today" and plan risk #1. Fix via plan amendment: coerce finite numeric strings, and store the default
+   instead of refusing an out-of-range or non-numeric value.
+
+### Minor
+
+2. `editor-verification.ts:111-165` — bounded-retry deviation is correct but not recorded in the plan; up to 12
+   round trips per guess.
+3. `domains/verify/route.ts:300-318` — no fail-closed IP guard before `getUser` (ADR 037 step 1); pre-existing.
+4. `domain-verification.ts:226` — a non-3xx failure still echoes `HTTP <status>: <statusText>` (rebinding window,
+   now limited to 3 / 5 min / user); a fixed message would close it.
+5. `track/route.ts:217` — "view in the same batch counts as viewed" branch untested (0 red when disabled).
+6. `track/route.ts:204-230` — conversion dedupe is check-then-insert without a unique constraint (best-effort;
+   say so in the PR).
+7. `validation.ts:64` — `readBoundedJson` reads the whole body before the 64 KB check (platform cap 4.5 MB).
+8. Branch scope carries s68a/s68c docs and ADR 047 (accepted, scope s68a).
+9. Reshaped fixture ids in four existing suites + two editor suites must be called out in the PR.
+
+## Not verified
+
+Real-Postgres M3b suite (CI DB step only; docker down); Next's patched fetch keeping `redirect: "manual"` on
+Vercel; domain verification end to end; real embed traffic against the new validators; email rendering;
+Redis/Upstash limiter behaviour.
+
+## Orchestrator note
+
+Owner standing rule: fix majors before shipping. Major 1 + minors 2, 4, 5 go back to the implementer
+(plan amended 2026-10-08), then a focused re-review updates this verdict.
+
+Max severity: major
+Ship allowed: yes

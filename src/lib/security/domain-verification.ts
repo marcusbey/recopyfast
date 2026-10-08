@@ -205,8 +205,8 @@ export async function verifyDomainFile(
       signal: AbortSignal.timeout(10000), // 10 second timeout
       // s68b M10. The guard above vetted this host only. Following a redirect
       // let a domain the admin controls point our fetch anywhere, and the
-      // `HTTP <status>: <statusText>` reply below told them what answered — a
-      // probe of internal hosts. A redirect is refused with a fixed message
+      // `HTTP <status>: <statusText>` reply we used to give told them what
+      // answered — a probe of internal hosts. A redirect is refused with a fixed message
       // that carries nothing from the upstream response.
       redirect: "manual",
     });
@@ -220,11 +220,16 @@ export async function verifyDomainFile(
       };
     }
 
+    // Review minor 4: this used to answer `HTTP <status>: <statusText>` (and
+    // the status in `details`, which PUT /api/domains/verify returns). The
+    // host can re-resolve between the guard and this fetch (DNS rebinding), so
+    // that line reported what answered at an address of the admin's choosing.
+    // Fixed message, nothing from the upstream status line.
     if (!response.ok) {
       return {
         success: false,
-        error: `HTTP ${response.status}: ${response.statusText}`,
-        details: { url, status: response.status },
+        error: "Verification file could not be fetched from the domain.",
+        details: { url },
       };
     }
 
