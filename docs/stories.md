@@ -100,7 +100,24 @@ stories are not each asserting the same ceiling and silently competing for it:
 | Impressions (`s09`) | ≤ 2,000 |
 | A/B bucketing (`s11`) | ≤ 2,000 |
 | Reserve | ≤ 2,000 |
+| SPA support (`s67`), paid in-branch | ≤ +850 gross, net ≤ 0 |
 | **Total ceiling** | **30,000** |
+
+A row marked "paid in-branch" adds nothing to the total. Its gross bytes are funded by deletions
+in the same branch, and both build ceilings then ratchet down to the size measured on that
+branch.
+
+`s67` is funded by three changes. Values are bundle / widget, `zlib` level 9, measured in
+research.
+- Build-time CSS minification of the five `style.textContent` literals: −494 / −525. This
+  pre-empts part of `s06c-embed-shrink`.
+- Deleting the unreachable socket.io fallback loader: −290 / −287.
+- Deleting the `rcf-editable` class, which nothing reads: −28 / −29.
+
+Together that is −812 / −841. If the branch is still over afterwards, the second-line reserve
+is the uncalled `assessReadability` method plus `getEditingColors` (−41 / −38). PR #59 does not
+spend those. If the branch is over even after the reserve, it stops and asks the owner, and the
+ceilings never move up.
 
 ---
 
@@ -2146,7 +2163,8 @@ pagination. This is a latency fix for shipped behavior, not a new content source
 
 Full entry, research, plan and review travel on `feature/s61-stable-copy-loading`. Review:
 "Ship allowed: no" — production delivery misses its 200 ms hold. Re-pointing its head bootstrap
-to the s65a snapshot is a follow-up of s65a.
+to the s65a snapshot is a follow-up of s65a. Sequencing (owner decision, 2026-10-08): s67 merges
+first, and #59 rebases onto s67's embed `init` and rows cache. See s67 Dependencies.
 
 ## Story s62-versioned-public-content-cache — SUPERSEDED on the visitor read path by s65a (PR #61 parked)
 
@@ -2851,6 +2869,193 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
   - Lint, type-check, format, build and the full suite pass.
 
 Embed allocation: 0 bytes.
+
+## Story s67-embed-spa-support — the plain snippet works on any site, including single-page apps
+
+As a site owner whose site renders in the browser (React, Vite, Vue, Svelte, any client
+router), I paste the plain snippet before `</body>` and every page is editable and shows
+published copy, both on first load and after in-app navigation, with no site-specific code.
+
+Owner decision, 2026-10-07, after the openflows.ai install: "Fix embed and don't hardcod
+anything. out solution shoul work on any website using the script." No host-side workaround:
+openflows.ai keeps the plain snippet as the real-world proof.
+
+Evidence: openflows.ai production on 2026-10-08, plain snippet (marcusbey/openflows-ai#3),
+headless Chromium.
+
+- `/` and `/fr`: the embed's first scan runs at about 385 ms and finds 0 candidates. React has
+  rendered 335 candidates by 671 ms. The body `MutationObserver` is attached at about
+  1,230 ms, at the end of the async init chain (`setupMutationObserver`, after
+  hydrate, A/B and socket), so it never sees React's render and never rescans. The page ends
+  with 0 editable elements and published copy is never applied. A manual
+  `window.ReCopyFast.scanForContent()` finds 212.
+- `/blog`: 94 elements are found, only because posts arrive after the observer is attached.
+- Devin review on openflows-ai#3, confirmed in code: `hydrateStoredContent()` fetches
+  page-scoped rows once (`page_path`). After a client-side route change, the rescan reports
+  the new elements but never fetches or applies that route's published copy.
+- Related gaps to confirm in research: the observer only watches `childList`, so text set
+  via `characterData` (i18n, frameworks updating text nodes) is missed. The debounce has no
+  max wait, so continuous mutation postpones a rescan indefinitely. A framework re-render
+  can write authored copy back over applied published copy.
+
+Owner decisions, 2026-10-08, on the research's open questions
+(`docs/research/s67-embed-spa-support.md`). The owner accepted every recommended default:
+
+1. Rows nobody edited stop overwriting page text. Only a row with an actual human edit is
+   applied. Accepted loss: rows created by the API create call (`POST /api/v1/content` stores
+   `original_content = published_content`) no longer write text. Making that call store
+   `original_content = null` is a follow-up, not s67.
+2. On an edited element, published copy wins over any host re-render, capped at 10 rewrites
+   per element per page view.
+3. Hash-route sites (`/#/route`) are out of scope. The install guide documents the limitation
+   and the workaround.
+4. s67 merges before PR #59 (s61), and #59 rebases afterwards.
+5. AC 9 is restated: the embed patches no host global. It wraps no history method, and it
+   detects route changes with a path check on DOM mutation plus the Navigation API event
+   where the browser has one.
+
+Added to scope, 2026-10-08, from security review finding M8 (deferred into s67 because it is
+embed startup configuration): `window.RECOPYFAST_API` / `window.RECOPYFAST_WS` DOM clobbering
+(`public/embed/recopyfast.src.js:23-36`). See AC 12.
+
+Complexity: 4 (embed startup ordering, history integration, re-render races, byte budget,
+fixture and production proof). Dependencies: none to build it. Sequencing (owner decision 4,
+2026-10-08): s67 merges before PR #59 (s61), which also edits embed startup. #59 rebases onto
+s67's `init` and rows-cache shape afterwards. Its late-swap policy against s67's model is
+decided at that rebase. Branch `feature/s67-embed-spa-support`.
+
+- [ ] AC 1, late render: content rendered at any time after the script starts is scanned. On
+  openflows.ai `/` with the plain snippet, editable elements are > 0 within 2 s of render
+  settling.
+- [x] AC 2, late elements get published copy: an element found by any rescan receives its
+  published row from the page rows already fetched, without a refetch, within one rescan
+  cycle. Only edited rows write text (AC 11).
+  Evidence: `embed-spa.test.ts` ("applies a late element's edited row without a second GET"); e2e `embed-spa` E1.
+- [x] AC 3, route change: when the normalized page path changes (`pushState`,
+  `replaceState`, `popstate`), the embed fetches that page's rows once and applies them. New
+  ids use the new path. Elements that persist across routes keep working. A change of query
+  or hash only does not refetch. Hash-route sites (`/#/route`) are out of scope (owner
+  decision 3). `/docs/install` states the limitation and the workaround: switch the router to
+  history mode, or give each route's elements an author-written, unique `data-rcf-id`.
+  Evidence: `embed-spa.test.ts` (AC 3 block: one GET per path, none on revisit or query/hash change, ids equal to a full load, authored restore, Navigation API, a node added before `pushState` in the render's task, edit-click check, mid-fetch `replaceState`); e2e E1, E2; `/docs/install` SPA section (`installation-content.test.ts`).
+- [x] AC 4, framework re-render (owner decision 2): if the host rewrites an element that has
+  an edited row, whatever text it writes, published copy is applied again. The cap is 10
+  writes per element per page view, where one in-app route visit counts as one page view.
+  The embed's own writes never trigger a loop.
+  Evidence: `embed-spa.test.ts` (AC 4 block: synchronous re-apply via `textContent`, `nodeValue` and unrelated text, 10-write cap, no self-loop); e2e E1 (no frame shows authored copy after the host write-back), E3.
+- [x] AC 5, no starvation: continuous DOM mutation cannot postpone a rescan beyond a bounded
+  max wait.
+  Evidence: `embed-spa.test.ts` ("rescans within 1,000 ms under a 100 ms ticker").
+- [ ] AC 6, static and SSR sites unchanged: the existing embed unit and e2e suites stay green.
+  Existing tests change only in the ways `docs/plans/s67-embed-spa-support.md` lists
+  (harness teardown, one config setup, the install guide's SPA wording, the e2e count), and
+  the PR states each change. aicompoz.com keeps server-rendered copy in first paint, with 0
+  swaps.
+- [x] AC 7, edit mode across navigation: an invited editor keeps the edit session after
+  in-app navigation, and newly rendered elements are editable.
+  Evidence: `embed-spa.test.ts` (AC 7 block); e2e E5.
+- [x] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
+  this branch, because raising a ceiling is a defect.
+  Evidence: 45,841 / 33,073 gz after the review, re-review, verification and PR #69 review fixes (D2, D3; D1 deferred to `s67b-nested-edit-composition`), ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +804 / +825 against the funded floor.
+- [x] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
+  host page. The embed patches no host global: `history.pushState` and
+  `history.replaceState` keep their identity. Route changes are detected by a path check on
+  each DOM mutation batch, plus the Navigation API `currententrychange` event where the
+  browser has it.
+  Evidence: `embed-spa.test.ts` (AC 9 block: history identity, own globals, throwing navigation path; throwing observer callback); `embed-startup-config.test.ts`; e2e E1 (history identity, 0 page errors).
+- [ ] AC 10, proof: a framework-free SPA fixture (renders after a delay, navigates with
+  `pushState`, re-renders text) runs in CI e2e. In production on openflows.ai with the
+  plain snippet, edit and publish on `/` and on a route reached by in-app navigation; both
+  show published copy, on load and after navigation.
+- [x] AC 11, edited rows only (owner decision 1): a row whose current copy equals its
+  `original_content` never writes page text. A row with no `original_content` counts as
+  edited. Attribute rows (`href`, `alt`) apply as before.
+  Evidence: `embed-spa.test.ts` (AC 11 block); e2e E1 (the unedited ticker row is never written).
+- [x] AC 12, startup configuration cannot be clobbered (M8):
+  - `window.RECOPYFAST_API` and `window.RECOPYFAST_WS` are honoured only when they are
+    strings whose origin equals the origin of the embed script's own `src`.
+  - Anything else is ignored, whether it is an element from DOM clobbering or a cross-origin
+    string. The endpoint then comes from `data-api-url` / `data-ws-url`. For the API only, it
+    is otherwise derived from `script.src`. There is still no derived WebSocket URL.
+  - A unit test proves it, and it is paid within the s67 allocation.
+  Evidence: `embed-startup-config.test.ts` ("startup endpoints (M8)").
+- [x] AC 13, host-safe writes: writing copy never replaces or removes a node the host
+  rendered. A React 19 app whose edited element later re-renders structurally (a conditional
+  text removed, an element inserted before the text) keeps running: no `NotFoundError`, and
+  the root does not unmount.
+  Evidence: `embed-react-writes.test.tsx` (R1c, R1d, text-node identity, copy in the direct text node beside a `<span>`, `<svg>` kept, no write on a matching DOM); e2e E3, E4.
+
+Follow-ups, not this story: the comment above the Navigation API handler in
+`public/embed/recopyfast.src.js` (about :3962-3964) says the callback's own writes are
+"discarded" with `takeRecords`; when the observer's own delivery runs first, they are passed to
+the callback instead (harmless, verification minor 1). Correct it with the next embed change: a
+comment edit changes the artifact's `@generated-from-sha256` line, so s67 ships the verified
+build as is.
+
+Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
+this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
+
+## Story s67b-nested-edit-composition — STUB (backlog)
+
+Owner decision, 2026-10-08, on the PR #69 fix run's byte overrun: **"Ship D2+D3 now, D1 as
+follow-up"**. D2 (A/B markers leave with the route) and D3 (null-prototype row index) shipped
+with s67. This story is D1. There is no research or plan until the owner schedules it.
+
+**Evidence: PR #69 bot review (Devin), D1, red** (`docs/reviews/s67-embed-spa-support.md`).
+A parent and a mapped descendant both have edited rows (`<h1>Buy <span>now</span></h1>`).
+Writing the parent (`writeText`) blanks the child's text, and the child's re-apply changes the
+parent's aggregate text. The observer re-applies each in turn until both hit the 10-write cap.
+One edit ends missing or mixed, and the host wins every later write-back. The bug is new with
+s67's reapply-on-overwrite. The fix run reproduced it in the `embed-spa.test.ts` harness: 30
+writes on that `h1` during boot.
+
+**Rule designed in the fix run (implemented and tested, not shipped).**
+- An element owns every text node beneath it, except those inside a descendant whose own copy
+  the embed applied in this page view. Such a descendant is a mapped element with a recorded
+  write: an edited row, a realtime update, a variant or an editor save. A write goes into the
+  owned text nodes only. The re-apply check, discovery, the Edit Board and the editor read
+  only the owned text.
+- "Has applied copy", not "is mapped". Protecting every stamped descendant breaks rows saved
+  on main that hold the parent's whole text: `<h1>Build faster with <span>AI</span></h1>`
+  edited once would render "…AIAI".
+- Spacing. The outer element owns `"Buy "` with its trailing space, so its row must be
+  `"Shop "`. A row of `"Shop"` renders "Shoptoday". So the editor reads and saves the owned
+  text untrimmed around such a descendant.
+- The restore on a route change ignores the rule and writes over the whole element. The
+  authored copy was recorded with the child's words inside it, and restoring only the owned
+  part gave "Buy nownow". Consequence: when a persistent parent and child are both edited, the
+  parent shows its whole authored text after navigation, and the child stays blank until the
+  host re-renders it.
+- Editor: on an outer element with such a descendant, text typed inside the descendant belongs
+  to the descendant, and the outer save does not keep it.
+- Tests that went red then green: the `h1` settles on "Shop today" in at most 3 writes, a
+  rescan writes nothing, and 12 alternating host write-backs are each undone in place; the
+  route-change restore, reported under the new path; the editor saves the outer element's
+  own copy ("Sell ").
+
+**Cost.** Measured in the fix run, D1 with D2+D3 built to 45,932 / 33,162 gz: +89 / +89 over
+the ceilings in force then (45,843 / 33,073). D1's own share over D2+D3 is +87 / +84:
+- the rule's core: +63 / +63;
+- the restore over the whole element: about +11 / +5;
+- the editor: about +12 / +12;
+- the identity check: +2 / +3.
+
+Behaviour-preserving micro-funding found about −10 at most. Re-measure against the ceilings in
+force when this story is planned (45,841 / 33,073 after s67).
+
+**Funding options measured against the D1+D2+D3 build.** Each one changes shipped behaviour,
+so each is the owner's call:
+- Drop discovery coalescing entirely (the 10 s spacing, the trailing report, the
+  10-per-page-view cap): −94 / −94, which fits. It brings back the research's risk of a live
+  feed hitting the 100/min discovery limit.
+- Keep the 10 s spacing, drop the trailing report and the cap: −70 / −70.
+- Drop only the 10-per-page-view cap: −21 / −19.
+- Stop observing shadow roots: −14 / −15.
+- A different rule, "outer edit wins": an inner element yields while its parent shows applied
+  copy. It costs +36 / +38 on top of D2+D3, against D1's +87 / +84. It is untested, and it
+  renders "Shop " rather than "Shop today".
+
+**Embed allocation:** TBD.
 
 ## s68 — security hardening (split into s68a / s68b / s68c)
 
