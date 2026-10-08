@@ -2607,6 +2607,18 @@ Not in this story:
 - retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (dead-code chore);
 - the page shell and titles (s66b).
 
+> Hand-off from s66b2 (2026-10-08): s66b2 left `radius-baseline.json` holding only this story's
+> 14 entries. If s66c merges last, it deletes the baseline once empty and makes
+> `radius-guard.test.ts` zero-tolerance (owner decision in the s66b plan). s66b2 also added
+> rules R5 (flat), R6 (no 700) and R7 (1px borders) to `page-shell-guard.test.ts`, with this
+> story's offenders pending, shrink-only: `sites/page.tsx` [R1, R2, R5],
+> `EditWebsiteButton.tsx` [R5], `VersionTimelineItem.tsx` [R5: the hover shadow and, since the
+> s66b2 review widened R5 to rings, the `ring-4` / `ring-2` halos on its status dots],
+> `SiteDetailView.tsx` [R6]. When s66c deletes or renames a pending file, it deletes the PENDING
+> entry together with the file, in the same change: the guard fails on an entry whose file is
+> gone and names it. When a pending file passes its rule, the shrink-only check fails until the
+> rule is removed from its entry.
+
 Embed allocation: 0 bytes.
 
 ## Story s66b-app-page-layout — every app page shares one shell, one title and one left edge
@@ -2803,7 +2815,20 @@ Complexity: 3. It is many files, but mostly class-level changes, against guards 
 exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
 `feature/s66b2-app-page-passes`.
 
-- [ ] **AC 1 — Radius at zero on s66b's files.** Each of the 28 s66b2-owned baseline files
+> Execute, 2026-10-08: AC 1–6 are implemented. AC 1 and AC 3 are proved by source guards and
+> ticked. `standalone pages @375/@768/@1280/@1920` ran red, then green, against `next start`
+> (signed out, no Supabase needed). `app pages @w` (clip check and its negative control, rest
+> and hover shadows, the metric grid, the tabs) has not run: no local Supabase, so CI's E2E job
+> is its first run. Tick AC 2, 4, 5 and 6 when that job is green. The radius baseline holds
+> only s66c's 14 entries, so the guard is not flipped here (AC 1, second branch).
+>
+> Review fix, 2026-10-08 (`docs/reviews/s66b2-app-page-passes.md`): AC 6's contrast is measured
+> on the changed surfaces in both themes (hovered Overview row, ThemePicker's selected label and
+> option boundary, the standalone h1 and description); ThemePicker's options take `border-input`;
+> R5 reads every shadow, ring and hover movement, and Card is exempt in `elevated` only; R7 pins
+> 1px borders. Same Playwright count (64).
+
+- [x] **AC 1 — Radius at zero on s66b's files.** Each of the 28 s66b2-owned baseline files
   (listed in the plan; 63 offences) has zero radius offences, and its entry is deleted. The only
   `rounded-full` left is the rule's own exceptions: `Avatar`, status dots of 8 px or less, and
   spinners. `UserMenu` uses the `Avatar` primitive and keeps the classes
@@ -2827,7 +2852,7 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
     shrink-only);
   - the harness: no element in `main` has a `box-shadow` at rest, and a hovered Overview metric
     and site row keep `transform: none` and `box-shadow: none`.
-- [ ] **AC 3 — No 700 in the app.** No `font-bold`, `font-extrabold` or `font-black` on the app
+- [x] **AC 3 — No 700 in the app.** No `font-bold`, `font-extrabold` or `font-black` on the app
   surface: the nine in `AnalyticsDashboard` and the rest become `font-semibold`. Proved by a new
   rule in `page-shell-guard.test.ts` (pending: `SiteDetailView.tsx`, s66c, shrink-only).
 - [ ] **AC 4 — Page passes.**
@@ -2844,7 +2869,8 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
   - at ≥1024, the rightmost metric's right edge equals the content's right edge (± 0.5);
   - at 375, every tab trigger lies inside the `tablist`'s box;
 
-  and by the radius guard.
+  by the radius guard (square), and by R7 in `page-shell-guard.test.ts` (no box border over 1px,
+  so `border-2` cannot come back; added at review). The radius guard reads radius only.
 - [ ] **AC 5 — Nothing clipped, standalone pages included.** On Overview, Content, Analytics,
   Settings and Billing, and on new signed-out harness tests
   `standalone pages @375/@768/@1280/@1920` for `/login`, `/signup`, `/auth/error` and `/edit`
@@ -2854,8 +2880,9 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
     its `clientWidth`. Form controls, `text-overflow: ellipsis`, `sr-only` elements and a
     `CodeBlock` `pre` are excepted.
 
-  Each standalone page has exactly one h1 in `.text-page-title`, a square logo tile, and
-  `IconTile`s in place of circles. With `RCF_LAYOUT_SCREENSHOTS=1`, the harness writes every
+  Each standalone page has exactly one h1 in `.text-page-title`, a square logo tile where the
+  page has one (`/login` and `/signup`; `/auth/error` and `/edit` have none), and `IconTile`s in
+  place of circles. With `RCF_LAYOUT_SCREENSHOTS=1`, the harness writes every
   page at the four widths to `docs/designs/s66b-app-page-layout/after/`, with fixture data only.
 - [ ] **AC 6 — No behaviour change.**
   - The unit suite and the e2e flows pass. No route or label changes.
@@ -2867,6 +2894,20 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
     surface (harness).
   - `docs/design-system.md` statuses for s66b flip to "in code".
   - Lint, type-check, format, build and the full suite pass.
+
+Embed allocation: 0 bytes.
+
+## Story s66d-design-system-gaps — STUB (backlog, not planned)
+
+Logged at the s66b2 review, 2026-10-08: three Spacing rows of `docs/design-system.md` have a spec
+and no story (s66b scoped them out). One line each; no research or plan until the owner schedules
+it.
+
+- [ ] Panel (`Card`) padding 16 below 640 (24 from 640 is in code). Row "Panel (`Card`)
+  padding".
+- [ ] Panel toolbar row: 48 tall, with a `border-b`. Row "Panel toolbar row".
+- [ ] Table header / row: 36 / 44, `px-4`. There is no `Table` primitive (gap 8, "No `Table`
+  primitive"), so this starts with whether a third screen needs one. Row "Table header / row".
 
 Embed allocation: 0 bytes.
 

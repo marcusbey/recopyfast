@@ -47,7 +47,7 @@ export function InvoiceHistoryCard({ invoices }: InvoiceHistoryCardProps) {
           {invoices.map((invoice) => (
             <div
               key={invoice.id}
-              className="flex items-center justify-between p-3 border rounded-lg"
+              className="flex items-center justify-between p-3 border rounded-container"
             >
               <div>
                 <div className="flex items-center gap-3 mb-1">

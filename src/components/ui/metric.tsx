@@ -87,9 +87,13 @@ function MetricBody({
         </IconTile>
       )}
 
+      {/* Still, like the metric around it. The arrow slid 1px up and right
+          on the link's hover (`group-hover:-translate-y-px
+          group-hover:translate-x-px`) after s66b2 had taken the lift off the
+          card: the last thing on the Overview that moved (s66b2 review, R5). */}
       {!Icon && href && (
         <ArrowUpRight
-          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out group-hover:-translate-y-px group-hover:translate-x-px"
+          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
       )}
@@ -114,12 +118,16 @@ export function Metric(props: MetricProps) {
     );
   }
 
+  // Flat, like Card `interactive`: a linked metric says it is a link with its
+  // border colour alone. It used `.surface-interactive`, marketing's 1px lift
+  // and `shadow-md` on hover, which made the Overview's metrics the one thing
+  // on the page that moved (s66b2; design system, Surfaces and elevation).
   return (
     <Link
       href={href}
       className={cn(
         shell,
-        "group surface-interactive",
+        "group transition-colors duration-200 ease-out hover:border-primary/40",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       )}
     >

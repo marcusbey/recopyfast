@@ -319,7 +319,12 @@ Starts from `main` with Part 1 merged. Before task 1:
 
 ## Tasks (ordered)
 
-1. [ ] **New proofs first (red).**
+1. [x] **New proofs first (red).**
+   - Execution note (2026-10-08): guard red on `metric.tsx`, Overview rows, `ContentElementCard`
+     and `AnalyticsDashboard`'s 8 remaining `font-bold` (the 9th, the old h2, left in s66b1).
+     `standalone pages @w` run red against `next start` (no Supabase needed): login, signup and
+     auth error have no h1. `app pages @w` written, not run (no local Supabase); CI's E2E job is
+     its first run. The clip negative control and the shadow detector were probed in a browser.
    - `page-shell-guard.test.ts` gains three rules, each with self-tests:
      - **R5 flat.** No `surface-interactive`, `hover:shadow-*`, `group-hover:shadow-*`,
        `transition-shadow` or `hover:-translate-y-*` on the app surface. A static
@@ -345,7 +350,7 @@ Starts from `main` with Part 1 merged. Before task 1:
    - Contract +4.
    - Red today: `metric.tsx`, Overview rows, `ContentElementCard`, `AnalyticsDashboard`'s 9
      `font-bold`, the Overview grid, and the auth pages' missing h1.
-2. [ ] **Overview, and its error and loading frames (AC 1, 2, 4).**
+2. [x] **Overview, and its error and loading frames (AC 1, 2, 4).**
    - **Test first:** delete the baseline entries for `dashboard/page.tsx`, `loading.tsx`,
      `error.tsx`, `TrialStatusBadge.tsx` and `ErrorBoundary.tsx`.
    - **Then:**
@@ -360,7 +365,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - `error.tsx` uses an `IconTile` (danger), and its dev code box is `rounded-container`;
      - `ErrorBoundary`'s box is square.
    - `page.activation.test.tsx` and `TrialStatusBadge.test.tsx` pass unchanged.
-3. [ ] **Billing internals (AC 1, 4).**
+3. [x] **Billing internals (AC 1, 4).**
    - **Test first:** delete the remaining billing entries (`BillingDashboard`,
      `billing/page`, `CreditBalanceCard`, `InvoiceHistoryCard`, `LifetimeOfferCard`,
      `PaymentMethodsCard`, `PurchaseCreditsDialog`, `TrialStatusCard`, `UpgradeDialog`,
@@ -374,7 +379,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - the `TrialStatusCard` skeleton is square.
    - All `components/billing/__tests__/*` pass unchanged. `TrialStatusCard.test.tsx:246-272`
      pins button variants only.
-4. [ ] **Content, Analytics and Settings internals (AC 1, 2, 3, 4).**
+4. [x] **Content, Analytics and Settings internals (AC 1, 2, 3, 4).**
    - **Test first:** delete the entries for `content/page`, `ContentElementCard`,
      `AnalyticsDashboard`, `settings/page`, `ApiKeysPanel` and `ThemePicker`. R5 and R6 are
      already red.
@@ -390,7 +395,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - Settings: the four feedback paragraphs are `rounded-container`;
      - `ApiKeysPanel`: square;
      - `ThemePicker`: square, `border-2` becomes a 1px border, selected as the option toggle.
-5. [ ] **Standalone pages (AC 1, 5).**
+5. [x] **Standalone pages (AC 1, 5).**
    - **Test first:** delete the entries for `login/page`, `signup/page`, `auth/error/page`,
      `LoginForm`, `SignupForm`, `EditorSignIn` and `UserMenu`. The standalone harness tests are
      red from task 1.
@@ -406,6 +411,11 @@ Starts from `main` with Part 1 merged. Before task 1:
    - `LoginForm.test.tsx`, `SignupForm.test.tsx`, `EditorSignIn.test.tsx` and
      `session-management.test.tsx` pass unchanged.
 6. [ ] **Close-out (AC 1, 5, 6).**
+   - Execution note (2026-10-08): the baseline is not `{}` (s66c's 14 entries remain), so the guard
+     is unchanged and s66c's story carries the hand-off. Design-system statuses and s66b2's AC 1
+     and AC 3 done; gates green. Captures committed for the four standalone pages only (`next
+     start`, signed out). The app-page captures and the green `app pages @w` run wait for a
+     Supabase stack (CI's E2E job is the first run; it uploads no images).
    - If `radius-baseline.json` is now `{}`:
      - delete it;
      - make `radius-guard.test.ts` zero-tolerance: "finds no offence on the app surface";
@@ -477,6 +487,9 @@ whether it proves anything.
 | `src/__tests__/design/globals-css.test.ts` | 1 | one new `it` (`.text-page-title`); existing pins untouched | AC 1 |
 | `e2e/app-layout.spec.ts` | 1, 2 | capture root parameterised; two new describes (8 tests) | AC 2–5 / AC 2, 4, 5 |
 | `playwright.config.ts`, `.github/workflows/ci.yml` | 1, 2 | expected count +4 each | strict contract |
+| `src/__tests__/design/page-shell-guard.test.ts` | 2 (review) | R5 widened, R7 added (new self-tests); Card leaves the whole-file shadow list, so "allows a static shadow on what floats" iterates four files, and Card has its own test; the existence test collects and names missing files (was one anonymous `toBe(true)` per file) | review minors 4, 5, 7 |
+| `src/components/settings/__tests__/ThemePicker.test.tsx` | 2 (review) | new, 2 tests | review major 2 |
+| `e2e/app-layout.spec.ts` | 2 (review) | contrast pairs added inside `app pages @w` and `standalone pages @w` (count unchanged); `contrastViolations` reads through a shared `contrastViolation`, whose message adds "(needs N:1)" | review major 1 |
 
 **Checked, and they do not change:**
 - `Breadcrumbs.test.tsx:113` (last crumb `font-medium text-foreground`);
@@ -492,3 +505,51 @@ whether it proves anything.
 - `LoginForm`, `SignupForm` and `EditorSignIn` tests.
 
 No test pins "Analytics Dashboard" (grep across `src` and `e2e`).
+
+## Review fixes (Part 2 — `docs/reviews/s66b2-app-page-passes.md`, max severity major, ship allowed)
+
+Fix run, test-first, on `feature/s66b2-app-page-passes`. Findings 1–8 and 11; finding 9 (app-page
+captures) stays CI's, finding 10 is process only.
+
+1. [x] **Major 1 — AC 6's contrast clause is measured.** `e2e/app-layout.spec.ts`, inside the
+   existing tests (count stays 64): `app pages @1280`, dark and light, measures every line of a
+   hovered Overview site row on `hover:bg-surface-2` (≥ 4.5), Settings → Appearance's selected
+   label on `bg-tone-accent-surface` (≥ 4.5) and an unselected option's border against the card
+   (≥ 3); `standalone pages @1280` measures each page's h1 and the description under it in both
+   themes. `compositedColors` takes the property to measure (`color` or `borderTopColor`).
+   Evidence: the standalone run is green against `next start`, and with the threshold raised to
+   21 it reported all 16 pairs (dark/light differ, so the theme switch is real; lowest 5.85:1,
+   /edit's description in light). `app pages @w` needs a Supabase stack, so its pairs were probed
+   with the built CSS on a signed-out page: selected label 11.63 / 14.96, hovered row text ≥ 7.05
+   / 5.38, unselected boundary 1.45 / 1.34 with `border-border` (red) and 3.07 / 3.28 with
+   `border-input` (green). CI's E2E job is the first full run.
+2. [x] **Major 2 — ThemePicker's unselected option is a control boundary (`border-input`).**
+   New `src/components/settings/__tests__/ThemePicker.test.tsx` (2 tests) red on `border-border`,
+   green on `border-input hover:border-foreground/40` (design system, Controls: option toggle).
+3. [x] **Minor 4 — R5 reads every shadow, ring and hover motion; Card's exemption is `elevated` only.**
+   18 new "fires" self-tests and a Card test, red first: the bare `shadow`, `shadow-2xs`,
+   `shadow-[…]`, `shadow-(…)`, `inset-shadow-*`, a ring outside `focus*:` (`ring`, `ring-1`,
+   `ring-[3px]`, `inset-ring-2`, `hover:ring-2`, `data-[…]:ring-2`), and hover movement
+   (`[group-]hover:` translate on either axis or scale). Five new quiet cases pin colours,
+   `*-none`, focus rings, `ring-0`/`ring-inset` and non-hover movement. `CLASS_TOKEN` keeps a
+   `[…]`/`(…)` group inside its token, or an arbitrary value was split on its commas. Card leaves
+   `FLOATING_SHADOW_FILES` for `FLOATING_SHADOW_VARIANTS` (`elevated` only; a mutation adding
+   `shadow-sm` to `interactive` goes red). Real offenders: `ui/metric.tsx:92`'s arrow
+   (`group-hover:-translate-y-px group-hover:translate-x-px`), fixed (the arrow is still). In s66c
+   files the wider rule also finds `VersionTimelineItem.tsx:48-49` (`ring-4`, `ring-2`), already
+   under its R5 entry: no new PENDING entry.
+4. [x] **Minor 5 — a guard pins "no `border-2`".** New R7 (no box border over 1px, all round or
+   on an axis; one-side accents — the Tabs underline, Content's quote stripe — are outside it),
+   6 fires and 5 quiet self-tests, red first. Zero offenders; restoring `border-2` in
+   `UpgradeDialog.tsx:250` and `ThemePicker.tsx` turns it red on both. `docs/stories.md` AC 4
+   now names R7 rather than the radius guard as the proof.
+5. [x] **Minor 6 — the three "no story yet" rows have a backlog stub.** `s66d-design-system-gaps
+   — STUB` in `docs/stories.md`; the three Spacing rows point at it.
+6. [x] **Minor 7 — the s66c hand-off and the existence assertion name the file.** The existence
+   test collects missing files and names each (probed with a bogus entry); it also covers the
+   R5 exemption files. The hand-off note says to delete the PENDING entry with the file, and
+   lists the rings and R7.
+7. [x] **Minor 8 — AC 5: "a square logo tile where the page has one".** `/login` and `/signup`
+   have one; `/auth/error` and `/edit` do not.
+8. [x] **Nit 11 — the R6 header comment does not overclaim.** It now says `SiteDetailView`
+   (pending, s66c) still sets the site name at 700.

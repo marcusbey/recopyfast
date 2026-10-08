@@ -26,9 +26,27 @@
  *   outside the frame.
  * - R4: no `container` utility on the app surface. `dashboard/layout.tsx`
  *   owns width and gutters; a page container is how Billing drifted.
+ * - R5 flat (s66b2 AC 2): no `surface-interactive`, `transition-shadow`, no
+ *   shadow on hover and no movement on hover (translate on either axis, or
+ *   scale), `group-hover:` included. A static shadow (the bare `shadow`, the
+ *   scale from `2xs`, arbitrary and inset ones) only on what floats: the
+ *   dialog, menu and Select primitives, the version-history sheet, Card's
+ *   `elevated` variant and no other part of Card, and the layout's skip link
+ *   while `focus:`. A ring draws a box-shadow, so it is allowed on focus
+ *   only. The s66b2 review widened the rule to all of these.
+ * - R6 weight (s66b2 AC 3): no `font-bold`, `font-extrabold` or
+ *   `font-black`. The app's hierarchy is 400 / 500 / 600; Analytics set its
+ *   figures at 700. `SiteDetailView` (s66c, pending) still sets the site
+ *   name at 700.
+ * - R7 1px (s66b2 AC 4, review): no box border wider than 1px. UpgradeDialog's
+ *   plan tiles and ThemePicker's options marked the selection with
+ *   `border-2`; a selection is the accent border, the accent surface and a
+ *   tick (design system, Borders).
  *
  * Offenders that another story owns sit in PENDING, which may only shrink:
- * an entry whose file already passes its rule fails here until it is removed.
+ * an entry whose file already passes its rule fails here until it is removed,
+ * and an entry whose file is gone fails by name. A story that deletes or
+ * renames a pending file deletes its entry in the same change.
  *
  * The scan reads code, not comments or string contents. The house style is
  * long comments that quote the very tags they forbid, and
@@ -46,10 +64,37 @@ import {
   stripComments,
 } from "./app-surface";
 
-type Rule = "R1" | "R2" | "R3" | "R4";
+type Rule = "R1" | "R2" | "R3" | "R4" | "R5" | "R6" | "R7";
 
 const PAGE_SHELL_FILE = "src/components/ui/page-shell.tsx";
 const PAGE_HEADER_FILE = "src/components/ui/page-header.tsx";
+const CARD_FILE = "src/components/ui/card.tsx";
+
+/**
+ * R5: the only files a static shadow may sit in, because each draws a surface
+ * that floats over the page — a dialog, a menu, Select content, the
+ * version-history sheet.
+ */
+const FLOATING_SHADOW_FILES: readonly string[] = [
+  "src/components/ui/dialog.tsx",
+  "src/components/ui/dropdown-menu.tsx",
+  "src/components/ui/select.tsx",
+  "src/components/dashboard/VersionHistoryPanel.tsx",
+];
+
+/**
+ * R5: a primitive whose floating surface is one variant, not the whole file.
+ * The static shadow may sit only in the string that is that cva key's value
+ * (an unquoted key). Card was exempt as a whole file until the s66b2 review,
+ * so a `shadow-sm` added to `interactive`, `default` or a CardHeader would
+ * have passed; only `elevated` floats.
+ */
+const FLOATING_SHADOW_VARIANTS: Readonly<Record<string, string>> = {
+  [CARD_FILE]: "elevated",
+};
+
+/** R5: the skip link's `focus:shadow-md`, drawn only while it is focused. */
+const FOCUS_SHADOW_FILE = "src/app/dashboard/layout.tsx";
 
 /** Routed pages, outside the private `_ab-tests` folder (not a route). */
 const DASHBOARD_PAGE = /^src\/app\/dashboard\/(?:(?!_)[^/]+\/)*page\.tsx$/;
@@ -81,12 +126,21 @@ const STANDALONE_H1_FILES: readonly string[] = [
 ];
 
 /**
- * Shrink-only. `sites/page.tsx` is s66c's: it owns everything under
- * `/dashboard/sites` and removes this entry when the site pages move onto
- * `PageShell`.
+ * Shrink-only, and every entry is s66c's: it owns everything under
+ * `/dashboard/sites` and the site components (ADR 053, "Collision list"), and
+ * removes a rule here when its file passes it:
+ * - `sites/page.tsx` moves onto `PageShell` (R1, R2), and its status filter
+ *   drops the `shadow-xs` on the selected segment (R5);
+ * - `EditWebsiteButton` keeps `shadow-sm` on two static boxes, and
+ *   `VersionTimelineItem` a hover shadow and, since the review widened R5,
+ *   the `ring-4` / `ring-2` halos on its status dots (R5);
+ * - `SiteDetailView` sets the site name at 700 (R6).
  */
 const PENDING: Readonly<Record<string, readonly Rule[]>> = {
-  "src/app/dashboard/sites/page.tsx": ["R1", "R2"],
+  "src/app/dashboard/sites/page.tsx": ["R1", "R2", "R5"],
+  "src/components/dashboard/EditWebsiteButton.tsx": ["R5"],
+  "src/components/dashboard/VersionTimelineItem.tsx": ["R5"],
+  "src/components/dashboard/SiteDetailView.tsx": ["R6"],
 };
 
 const CLASS_FUNCTIONS = /\b(?:cn|clsx|cx|cva|twMerge)\s*$/;
@@ -174,7 +228,138 @@ function isClassContext(blanked: string, literalStart: number): boolean {
   return false;
 }
 
-/** R2, R3 and R4 for one source file. Pure, so the rules self-test. */
+/**
+ * One class-like token: split on whitespace, quotes and the punctuation of a
+ * `${…}` expression, so `${isOn ? "shadow-lg" : ""}` yields `shadow-lg`. A
+ * `[…]` or `(…)` group stays inside its token, so an arbitrary value such as
+ * `shadow-[0_1px_2px_rgba(0,0,0,0.1)]` or `shadow-(--panel)` is read whole:
+ * split on its parentheses and commas, it was invisible to R5.
+ */
+const CLASS_TOKEN = /(?:[^\s"'`{}()[\]$,;]+|\[[^\]\s"'`]*\]|\([^)\s"'`]*\))+/g;
+/**
+ * A shadow that draws, outer or inset: the bare `shadow`, the scale from
+ * `2xs`, an arbitrary value or a custom property. A colour
+ * (`shadow-black/5`) or `*-none` draws nothing on its own.
+ */
+const STATIC_SHADOW =
+  /^(?:inset-)?shadow(?:-(?:2xs|xs|sm|md|lg|xl|2xl|\[.+\]|\(.+\)))?(?:\/\S+)?$/;
+const ANY_SHADOW = /^(?:inset-)?shadow(?:-.+)?$/;
+/**
+ * A ring that draws, outer or inset: the bare `ring`, a width from 1, an
+ * arbitrary length or a `length:` property. Tailwind paints it with
+ * box-shadow, so on anything but focus it is a shadow by another name. A
+ * colour (`ring-ring`), `ring-offset-*`, `ring-inset` and `ring-0` draw
+ * nothing on their own.
+ */
+const DRAWN_RING =
+  /^(?:inset-)?ring(?:-(?:[1-9]\d*|\[[\d.]+(?:px|rem|em)\]|\(length:[^)]+\)))?$/;
+/** Movement on either axis: a lift, a drop, a slide or a scale. */
+const MOTION = /^-?(?:translate|scale)-/;
+/** `focus:`, `focus-visible:`, `focus-within:`, and their group / peer forms. */
+const FOCUS_VARIANT = /^(?:group-|peer-)?focus(?:-visible|-within)?(?:\/|$)/;
+const HEAVY_WEIGHTS: ReadonlySet<string> = new Set([
+  "font-bold",
+  "font-extrabold",
+  "font-black",
+]);
+/**
+ * R7: a box border wider than 1px, all round or on an axis (`border-2`,
+ * `border-x-2`, `border-[3px]`). One side alone is an accent, not a heavier
+ * box, and stays outside the rule: the active tab's 2px underline (design
+ * system, Controls: Tabs) and Content's quote stripe.
+ */
+const THICK_BOX_BORDER =
+  /^border(?:-[xy])?-(?:[2-9]|[1-9]\d+|\[(?:[2-9]|[1-9]\d+)(?:\.\d+)?px\])$/;
+
+/**
+ * A class token's variants and its utility, split on the colons outside
+ * brackets: `sm:hover:shadow-md` is `[sm, hover]` and `shadow-md`.
+ */
+function splitClassToken(token: string): {
+  variants: string[];
+  utility: string;
+} {
+  const variants: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < token.length; index += 1) {
+    const char = token[index];
+    if (char === "[") depth += 1;
+    else if (char === "]") depth = Math.max(0, depth - 1);
+    else if (char === ":" && depth === 0) {
+      variants.push(token.slice(start, index));
+      start = index + 1;
+    }
+  }
+  return { variants, utility: token.slice(start).replace(/^!/, "") };
+}
+
+/**
+ * R5 for one class token, or null. Static panels cast no shadow and never
+ * move (design system, Surfaces and elevation). On the Overview,
+ * `.surface-interactive` lifted every metric and site row 1px with a
+ * `shadow-md` on hover, the one thing on the page that moved, and Content's
+ * cards grew a shadow on hover. A static shadow belongs to what floats only.
+ *
+ * The s66b2 review widened it to everything that draws the same thing under
+ * another name: the bare `shadow`, `shadow-2xs`, arbitrary and inset shadows,
+ * a ring anywhere but on focus, and any movement on hover, the group's
+ * included (the linked Metric's arrow slid up and right on hover).
+ * `isFloatingLiteral` is true inside a primitive's floating variant (Card
+ * `elevated`).
+ */
+function flatnessDetail(
+  token: string,
+  file: string,
+  isFloatingLiteral = false,
+): string | null {
+  const { variants, utility } = splitClassToken(token);
+  const isHover = variants.some((variant) =>
+    /^(?:group-)?hover(?:\/|$)/.test(variant),
+  );
+
+  if (utility === "surface-interactive") {
+    return "`surface-interactive` (marketing's hover lift and shadow)";
+  }
+  if (utility === "transition-shadow") {
+    return "`transition-shadow` (a shadow that animates in)";
+  }
+  if (isHover && ANY_SHADOW.test(utility)) {
+    return `\`${token}\` (a shadow on hover)`;
+  }
+  if (isHover && MOTION.test(utility)) {
+    return `\`${token}\` (movement on hover)`;
+  }
+  if (
+    DRAWN_RING.test(utility) &&
+    !variants.some((variant) => FOCUS_VARIANT.test(variant))
+  ) {
+    return `\`${token}\` (a ring, which is a shadow, outside focus)`;
+  }
+  if (STATIC_SHADOW.test(utility) && !isHover) {
+    if (FLOATING_SHADOW_FILES.includes(file) || isFloatingLiteral) return null;
+    if (file === FOCUS_SHADOW_FILE && variants.includes("focus")) return null;
+    return `\`${token}\` (a static shadow on something that does not float)`;
+  }
+  return null;
+}
+
+/**
+ * Whether a literal is the value of the file's floating cva variant, read
+ * from the unquoted key in front of it: `elevated: "shadow-md"`.
+ */
+function isFloatingVariantLiteral(
+  file: string,
+  blanked: string,
+  literalStart: number,
+): boolean {
+  const key = FLOATING_SHADOW_VARIANTS[file];
+  if (!key) return false;
+  const head = blanked.slice(0, literalStart);
+  return head.match(/([A-Za-z_$][\w$]*)\s*:\s*$/)?.[1] === key;
+}
+
+/** R2 to R6 for one source file. Pure, so the rules self-test. */
 function findOffences(file: string, source: string): Offence[] {
   const code = stripComments(source);
   const { blanked, literals } = scanLiterals(code);
@@ -213,6 +398,37 @@ function findOffences(file: string, source: string): Offence[] {
         line: lineAt(code, literal.start),
         detail: "`container` utility (the layout owns width and gutters)",
       });
+    }
+  }
+
+  // R5 and R6 read every token of every literal, not only class contexts:
+  // their utilities are not English words (unlike `container`), and a class
+  // list is as often a variable, a cva variant or a ternary inside a template
+  // literal as it is a `className=` string.
+  for (const literal of literals) {
+    const isFloating = isFloatingVariantLiteral(file, blanked, literal.start);
+    for (const match of literal.content.matchAll(CLASS_TOKEN)) {
+      const token = match[0];
+      const line = lineAt(code, literal.start + 1 + (match.index ?? 0));
+      const flat = flatnessDetail(token, file, isFloating);
+      if (flat) offences.push({ file, rule: "R5", line, detail: flat });
+      const { utility } = splitClassToken(token);
+      if (HEAVY_WEIGHTS.has(utility)) {
+        offences.push({
+          file,
+          rule: "R6",
+          line,
+          detail: `\`${token}\` (700 or more; the app's heaviest weight is 600)`,
+        });
+      }
+      if (THICK_BOX_BORDER.test(utility)) {
+        offences.push({
+          file,
+          rule: "R7",
+          line,
+          detail: `\`${token}\` (a box border over 1px; a selection is the accent border and a tick)`,
+        });
+      }
     }
   }
 
@@ -291,18 +507,28 @@ describe("page-shell guard (ADR 053)", () => {
     );
   });
 
-  it("names delegates, redirects and standalone pages that exist", () => {
-    for (const file of [
+  // Named, not a bare `toBe(true)`: s66c deletes and renames files that sit
+  // in PENDING, and an anonymous failure there sent the reader hunting for
+  // which entry had outlived its file (s66b2 review).
+  it("names delegates, redirects, standalone pages and pending files that exist", () => {
+    const missing = [
       ...Object.keys(DELEGATES),
       ...Object.values(DELEGATES),
       ...REDIRECT_PAGES,
       ...STANDALONE_H1_FILES,
       ...Object.keys(PENDING),
+      ...FLOATING_SHADOW_FILES,
+      ...Object.keys(FLOATING_SHADOW_VARIANTS),
+      FOCUS_SHADOW_FILE,
       PAGE_SHELL_FILE,
       PAGE_HEADER_FILE,
-    ]) {
-      expect(existsSync(path.join(REPO_ROOT, file))).toBe(true);
-    }
+    ]
+      .filter((file) => !existsSync(path.join(REPO_ROOT, file)))
+      .map(
+        (file) =>
+          `${file} does not exist: delete or rename its entry in page-shell-guard.test.ts with the file`,
+      );
+    expect(missing).toEqual([]);
   });
 
   // An exemption that outlives the redirect would let a real page ship with
@@ -459,7 +685,9 @@ describe("page-shell rules (self-test)", () => {
 
   describe("R3 one h1", () => {
     it.each([
-      '<h1 className="text-3xl font-bold">Settings</h1>',
+      // s66b2: was `font-bold`, which R6 now reports as well; the composed
+      // case is pinned under R6.
+      '<h1 className="text-3xl font-semibold">Settings</h1>',
       "<h1>Content</h1>",
     ])("fires on %s", (source) => {
       expect(rulesOf(source)).toEqual(["R3"]);
@@ -511,6 +739,153 @@ describe("page-shell rules (self-test)", () => {
       "// Billing nested a container mx-auto px-4",
       "const containerRef = useRef(null);",
       '<div data-container="x" />',
+    ])("stays quiet on %s", (source) => {
+      expect(rulesOf(source)).toEqual([]);
+    });
+  });
+
+  describe("R5 flat", () => {
+    it.each([
+      '<Link className="surface-interactive flex items-center" />',
+      '<Card className="hover:shadow-md" />',
+      '<div className="group-hover:shadow-lg" />',
+      '<div className="group-hover/row:shadow-sm" />',
+      '<Card className="transition-shadow" />',
+      '<div className="hover:-translate-y-0.5" />',
+      '<div className="sm:hover:-translate-y-1" />',
+      '<div className="shadow-sm border bg-card" />',
+      'const tile = cn("p-4", isOn && "shadow-md");',
+      '<div className={`p-6 ${isOn ? "shadow-lg" : ""}`} />',
+      '<a className="focus:shadow-md" />',
+      // s66b2 review: every utility that draws a shadow, not only the scale.
+      '<div className="shadow border" />',
+      '<div className="shadow-2xs" />',
+      '<div className="shadow-[0_1px_2px_rgba(0,0,0,0.1)]" />',
+      '<div className="shadow-(--panel-shadow)" />',
+      '<div className="inset-shadow-sm" />',
+      '<div className="inset-shadow-[0_1px_rgba(0,0,0,0.05)]" />',
+      // A ring is a box-shadow too: only a focus indicator may draw one.
+      '<div className="ring-1 ring-border" />',
+      '<div className="ring" />',
+      '<div className="ring-[3px] ring-primary" />',
+      '<div className="inset-ring-2" />',
+      '<div className="hover:ring-2" />',
+      '<div className="data-[state=on]:ring-2" />',
+      // Any hover movement, the group's included: a lift, a drop, a scale.
+      '<svg className="group-hover:-translate-y-px" />',
+      '<div className="group-hover/row:-translate-y-0.5" />',
+      '<div className="hover:translate-y-1" />',
+      '<svg className="group-hover:translate-x-px" />',
+      '<div className="hover:scale-105" />',
+      '<img className="group-hover:scale-110" />',
+    ])("fires on %s", (source) => {
+      expect(rulesOf(source)).toEqual(["R5"]);
+    });
+
+    it.each([
+      '<div className="shadow-none" />',
+      '<button className="transition-[color,box-shadow] active:translate-y-px" />',
+      '<Search className="absolute left-3 top-1/2 -translate-y-1/2" />',
+      '<Card className="hover:border-primary/40 hover:bg-surface-2" />',
+      "// it used surface-interactive and hover:shadow-md",
+      "const toast = `box-shadow: 0 10px 25px rgba(0,0,0,0.1);`;",
+      // A shadow or ring colour draws nothing alone; a focus ring is the
+      // focus indicator (design system, Motion and focus).
+      '<div className="shadow-black/5 inset-shadow-none" />',
+      '<a className="focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background" />',
+      '<input className="focus:ring-2 focus:ring-ring" />',
+      '<div className="focus-within:ring-2 ring-0 ring-inset" />',
+      '<div className="data-[side=bottom]:translate-y-1 active:scale-95" />',
+    ])("stays quiet on %s", (source) => {
+      expect(rulesOf(source)).toEqual([]);
+    });
+
+    it("allows Card's static shadow in its `elevated` variant only", () => {
+      expect(rulesOf('elevated: "shadow-md",', CARD_FILE)).toEqual([]);
+      expect(rulesOf('interactive: "shadow-sm",', CARD_FILE)).toEqual(["R5"]);
+      expect(rulesOf('<div className="shadow-md" />', CARD_FILE)).toEqual([
+        "R5",
+      ]);
+      expect(
+        rulesOf('elevated: "shadow-md",', "src/components/dashboard/X.tsx"),
+      ).toEqual(["R5"]);
+    });
+
+    it("allows a static shadow on what floats, and the skip link's focus: one", () => {
+      for (const file of FLOATING_SHADOW_FILES) {
+        expect(rulesOf('<div className="shadow-md" />', file)).toEqual([]);
+      }
+      expect(
+        rulesOf('<a className="sr-only focus:shadow-md" />', FOCUS_SHADOW_FILE),
+      ).toEqual([]);
+      expect(rulesOf('<a className="shadow-md" />', FOCUS_SHADOW_FILE)).toEqual(
+        ["R5"],
+      );
+      expect(
+        rulesOf(
+          '<div className="hover:shadow-md" />',
+          FLOATING_SHADOW_FILES[0],
+        ),
+      ).toEqual(["R5"]);
+    });
+
+    it("reports the line of the token, not of the string", () => {
+      const offences = findOffences(
+        "src/components/dashboard/X.tsx",
+        'const c = cn(\n  "p-4",\n  `border\n   shadow-md`,\n);',
+      );
+      expect(offences.map((offence) => offence.line)).toEqual([4]);
+    });
+  });
+
+  describe("R6 weight", () => {
+    it.each([
+      '<p className="text-3xl font-bold text-foreground" />',
+      '<p className="font-extrabold" />',
+      '<p className="font-black" />',
+      '<p className="md:font-bold" />',
+      '<p className={`text-4xl ${big ? "font-bold" : ""}`} />',
+    ])("fires on %s", (source) => {
+      expect(rulesOf(source)).toEqual(["R6"]);
+    });
+
+    it.each([
+      '<p className="font-semibold" />',
+      '<p className="font-medium" />',
+      "{/* font-bold was 700 */}",
+      "const WEIGHT = 700;",
+    ])("stays quiet on %s", (source) => {
+      expect(rulesOf(source)).toEqual([]);
+    });
+
+    it("reports both rules on the old Settings title (a stray h1 at 700)", () => {
+      expect(
+        rulesOf('<h1 className="text-3xl font-bold">Settings</h1>'),
+      ).toEqual(["R3", "R6"]);
+    });
+  });
+
+  describe("R7 1px", () => {
+    it.each([
+      // UpgradeDialog's plan tiles and ThemePicker's options until s66b2.
+      '<button className="p-6 border-2 rounded-control text-left" />',
+      '<button className={`border-2 p-4 ${isOn ? "border-primary" : "border-border"}`} />',
+      'const tile = cn("p-4", isOn && "border-2 border-primary");',
+      '<div className="md:border-4" />',
+      '<div className="border-x-2" />',
+      '<div className="border-[3px]" />',
+    ])("fires on %s", (source) => {
+      expect(rulesOf(source)).toEqual(["R7"]);
+    });
+
+    it.each([
+      '<div className="border border-input" />',
+      '<div className="border-0 border-[1px]" />',
+      // One side is an accent, not a thicker box: the active tab's underline
+      // (design system, Controls: Tabs) and a quote stripe.
+      '<button className="-mb-px border-b-2 border-transparent data-[state=active]:border-primary" />',
+      '<div className="border-l-2 pl-3" />',
+      "// the tiles were `border-2` until s66b2",
     ])("stays quiet on %s", (source) => {
       expect(rulesOf(source)).toEqual([]);
     });

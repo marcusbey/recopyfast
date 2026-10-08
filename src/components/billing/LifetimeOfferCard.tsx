@@ -141,7 +141,7 @@ export function LifetimeOfferCard({
       )}
 
       <div className="space-y-4">
-        <div className="rounded-lg bg-tone-accent-surface p-4 text-center">
+        <div className="rounded-container bg-tone-accent-surface p-4 text-center">
           <div className="text-3xl font-semibold text-primary tabular">
             ${product.price}
           </div>

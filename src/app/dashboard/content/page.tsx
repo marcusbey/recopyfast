@@ -16,6 +16,7 @@ import {
   type ContentElement,
 } from "@/components/dashboard/ContentElementCard";
 import { ContentFilterBar } from "@/components/dashboard/ContentFilterBar";
+import { IconTile } from "@/components/ui/icon-tile";
 import { PageShell } from "@/components/ui/page-shell";
 
 interface Site {
@@ -321,12 +322,9 @@ export default function ContentPage() {
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-tone-danger-surface">
-                <FileText
-                  className="h-8 w-8 text-tone-danger-text"
-                  aria-hidden="true"
-                />
-              </div>
+              <IconTile tone="danger" size="lg" className="mx-auto mb-4 flex">
+                <FileText aria-hidden="true" />
+              </IconTile>
               <h3 className="mb-2 text-lg font-semibold text-foreground">
                 Failed to load content
               </h3>
@@ -364,12 +362,9 @@ export default function ContentPage() {
           <Card>
             <CardContent className="py-12">
               <div className="text-center">
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-                  <FileText
-                    className="h-8 w-8 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </div>
+                <IconTile size="lg" className="mx-auto mb-4 flex">
+                  <FileText aria-hidden="true" />
+                </IconTile>
                 <h3 className="mb-2 text-lg font-semibold text-foreground">
                   No content found
                 </h3>

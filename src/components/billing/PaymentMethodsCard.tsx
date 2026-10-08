@@ -125,7 +125,7 @@ export function PaymentMethodsCard({
               pending?.id === pm.id && pending.kind === "remove";
 
             return (
-              <div key={pm.id} className="p-3 border rounded-lg">
+              <div key={pm.id} className="p-3 border rounded-container">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="flex items-center gap-2">

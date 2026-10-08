@@ -8,7 +8,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Code } from "lucide-react";
@@ -25,7 +24,7 @@ export default function LoginPage() {
           href="/"
           className="flex items-center justify-center space-x-3 mb-8"
         >
-          <div className="w-12 h-12 bg-primary rounded-xl flex items-center justify-center">
+          <div className="w-12 h-12 bg-primary rounded-container flex items-center justify-center">
             <Code className="w-7 h-7 text-primary-foreground" />
           </div>
           <span className="font-semibold text-2xl text-foreground tracking-tight">
@@ -35,7 +34,9 @@ export default function LoginPage() {
 
         <Card>
           <CardHeader className="text-center">
-            <CardTitle>Welcome back</CardTitle>
+            {/* The page's one h1 (ADR 053 §3). It was a CardTitle, an h3, so
+                the page had no title for a screen reader to land on. */}
+            <h1 className="text-page-title">Welcome back</h1>
             <CardDescription>
               Sign in to your account or create a new one to get started
             </CardDescription>

@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Settings, LogOut, LayoutDashboard } from "lucide-react";
 import Link from "next/link";
 
@@ -23,10 +24,15 @@ export function UserMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-          <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-semibold">
-            {userInitial}
-          </div>
+        {/* The control is square (`rounded-control`), so its focus ring is
+            square; only the Avatar inside it is round (ADR 050's one
+            avatar exception). It was a round button around a round div. */}
+        <Button variant="ghost" size="icon" className="relative">
+          <Avatar>
+            <AvatarFallback className="bg-primary font-semibold text-primary-foreground">
+              {userInitial}
+            </AvatarFallback>
+          </Avatar>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-56" align="end" forceMount>

@@ -74,7 +74,7 @@ export function CreditBalanceCard({
       </div>
 
       <div className="space-y-4">
-        <div className="text-center p-4 bg-tone-accent-surface rounded-lg">
+        <div className="text-center p-4 bg-tone-accent-surface rounded-container">
           <div className="text-3xl font-semibold text-primary tabular">
             {balance}
           </div>
@@ -82,18 +82,18 @@ export function CreditBalanceCard({
         </div>
 
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div className="text-center p-3 bg-surface-1 rounded">
+          <div className="text-center p-3 bg-surface-1 rounded-container">
             <div className="font-semibold tabular">{totalPurchased}</div>
             <div className="text-muted-foreground">Total purchased</div>
           </div>
-          <div className="text-center p-3 bg-surface-1 rounded">
+          <div className="text-center p-3 bg-surface-1 rounded-container">
             <div className="font-semibold tabular">{totalConsumed}</div>
             <div className="text-muted-foreground">Total used</div>
           </div>
         </div>
 
         {balance < LOW_BALANCE_THRESHOLD && (
-          <div className="p-3 bg-tone-warning-surface border border-tone-warning-border rounded-lg">
+          <div className="p-3 bg-tone-warning-surface border border-tone-warning-border rounded-container">
             <div className="flex items-center text-tone-warning-text">
               <svg
                 className="w-4 h-4 mr-2"
