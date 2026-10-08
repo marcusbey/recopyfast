@@ -41,19 +41,21 @@ jest.mock("@/lib/security/rate-limiter", () => {
 
 import { POST as postTrack } from "@/app/api/ab-tests/track/route";
 
-const SITE_A = "11111111-1111-1111-1111-111111111111";
-const SITE_B = "22222222-2222-2222-2222-222222222222";
+// v4-shaped ids, as gen_random_uuid() produces: since s68b (M5)
+// `ab-tests/track` refuses any id `requireUuid` rejects, before the database.
+const SITE_A = "11111111-1111-4111-8111-111111111111";
+const SITE_B = "22222222-2222-4222-8222-222222222222";
 const API_KEY_A = "site-a-api-key";
 const ORIGIN_A = "https://tenant-a.example";
 
 /** A test that belongs to site A — the caller's own. */
-const TEST_A = "33333333-3333-3333-3333-333333333333";
-const VARIANT_A_CONTROL = "44444444-4444-4444-4444-444444444444";
+const TEST_A = "33333333-3333-4333-8333-333333333333";
+const VARIANT_A_CONTROL = "44444444-4444-4444-8444-444444444444";
 
 /** A test that belongs to site B — the victim's. */
-const TEST_B = "55555555-5555-5555-5555-555555555555";
-const VARIANT_B_CONTROL = "66666666-6666-6666-6666-666666666666";
-const VARIANT_B_TREATMENT = "77777777-7777-7777-7777-777777777777";
+const TEST_B = "55555555-5555-4555-8555-555555555555";
+const VARIANT_B_CONTROL = "66666666-6666-4666-8666-666666666666";
+const VARIANT_B_TREATMENT = "77777777-7777-4777-8777-777777777777";
 
 interface QueryResult {
   data?: unknown;

@@ -97,6 +97,22 @@ describe("Playwright CI contract", () => {
     expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
   });
 
+  it("runs the editor-code attempt proof by name, with the database and PostgREST required", () => {
+    // s68b M3: the compare-and-set charge rests on PostgREST reporting zero
+    // rows to the loser of a conditional UPDATE. `npm test` records the DB
+    // suite as "[gated]"; only a step that names it runs it.
+    const suite = "src/__tests__/db/editor-code-attempts.test.ts";
+    const steps = workflow.split(/^(?=\s+- name: )/m);
+    const step = steps.find((candidate) => candidate.includes(suite));
+
+    expect(step).toBeDefined();
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(step).toContain('RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"');
+    expect(step).toContain(
+      'RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY"',
+    );
+  });
+
   it("runs the snapshot measurement tooling test beside the Stripe tooling test", () => {
     // s65a review m5: `node --test` files are not Jest suites, so `npm test`
     // never collects them. A script test that no CI step names guards nothing.

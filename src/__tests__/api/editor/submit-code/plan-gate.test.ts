@@ -103,7 +103,8 @@ import {
   PLAN_ENDED_MESSAGE,
 } from "@/lib/billing/owner-can-edit";
 
-const SITE_ID = "site-1";
+// A real UUID: since s68b (M3) a malformed `siteId` is a 400 before the limiter.
+const SITE_ID = "5f0c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
 const EMAIL = "bob@example.com";
 
 const mockConsumeCode = consumeVerificationCode as jest.MockedFunction<

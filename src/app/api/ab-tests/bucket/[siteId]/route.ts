@@ -38,13 +38,16 @@ export async function GET(
       );
     }
 
+    let authorizedSiteId: string;
     try {
-      await authorizeSiteRequest({
+      ({
+        site: { id: authorizedSiteId },
+      } = await authorizeSiteRequest({
         siteId,
         token,
         origin: request.headers.get("origin"),
         referer: request.headers.get("referer"),
-      });
+      }));
     } catch (authError) {
       return withCors(
         NextResponse.json(
@@ -69,10 +72,17 @@ export async function GET(
     // 1000/min: one call per visitor per page view, and the widget persists the
     // assignment, so a real site sits far below it. A refusal costs the visitor
     // their variant for that load, not the page.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_KEY_DEFAULT",
       endpoint: "ab-tests/bucket",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "A/B bucketing rate limit exceeded for this site.",
