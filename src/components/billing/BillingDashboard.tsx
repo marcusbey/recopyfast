@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PageShell } from "@/components/ui/page-shell";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SubscriptionCard } from "./SubscriptionCard";
 import { PaymentMethodsCard } from "./PaymentMethodsCard";
 import { InvoiceHistoryCard } from "./InvoiceHistoryCard";
@@ -13,6 +15,7 @@ import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
 import { TrialStatusCard } from "./TrialStatusCard";
+import { BILLING_PAGE_COPY } from "./billing-page-copy";
 import {
   LifetimeOfferCard,
   resolveLifetimeOffers,
@@ -91,247 +94,274 @@ export function BillingDashboard({
     router.refresh();
   }, [fetchDashboardData, router]);
 
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="animate-pulse space-y-6">
-          <div className="h-8 bg-surface-2 rounded w-1/4"></div>
-          {/* In the shape of the two rows that may be about to arrive, so a
-              trialling account's page does not jump when they do. */}
-          <TrialStatusCard trial={null} isLoading />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-48 bg-surface-2 rounded-lg"></div>
+  // One frame for all five states (s66b1, ADR 053). Every state used to
+  // return its own `container mx-auto px-4 py-8` inside the layout's column,
+  // which put Billing's title 16px right of every other page's, and only the
+  // ready state carried the page title at all. The state now picks the body
+  // (and, when ready, the header actions); `PageShell` draws the rest once.
+  const renderState = (): {
+    body: ReactNode;
+    actions?: ReactNode;
+  } => {
+    if (loading) {
+      return {
+        body: (
+          <>
+            {/* In the shape of the two rows that may be about to arrive, so a
+                trialling account's page does not jump when they do. */}
+            <TrialStatusCard trial={null} isLoading />
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {[...Array(6)].map((_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
+            </div>
+          </>
+        ),
+      };
+    }
+
+    if (error) {
+      return {
+        body: (
+          <Card className="p-6 text-center">
+            <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
+              Error loading billing data
+            </h2>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <Button onClick={fetchDashboardData}>Try again</Button>
+          </Card>
+        ),
+      };
+    }
+
+    // Both branches above cover the null case; this narrows the type and
+    // keeps a future refactor from rendering an empty dashboard silently.
+    if (!dashboardData) {
+      return { body: null };
+    }
+
+    // The plan in force counts lifetime entitlements, not just subscriptions, so
+    // it comes from the server rather than from the subscription row. Null means
+    // the account has not paid; there is no free plan for it to be on.
+    const currentPlan = dashboardData.effectivePlanId;
+    const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
+
+    // Credits confer no plan, so their holder lands here too. Since s51 they buy
+    // nothing on their own either: AI spend happens only inside editing, and
+    // editing needs a plan. The balance is kept, not forfeited, and works again
+    // once a plan is chosen — which is what this panel has to say, rather than
+    // promising AI features a credit alone no longer unlocks.
+    const creditBalance = dashboardData.creditWallet?.balance ?? 0;
+    const holdsCredits = creditBalance > 0;
+
+    // Lifetime Pro is a way *in* for an account with no plan and a way *out* of a
+    // subscription for one that has one, so it is resolved before the unentitled
+    // branch below and offered in both.
+    const lifetimeOffers = resolveLifetimeOffers(
+      dashboardData.catalogue,
+      lifetimeGrant,
+      currentPlan,
+    ).filter(
+      (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
+    );
+    // `subscription` only ever holds a live row (see getUserSubscription), so its
+    // presence is exactly "something is still billing this card every month".
+    const hasLiveSubscription = Boolean(dashboardData.subscription);
+
+    // This is the whole page for an account with no plan. Every other dashboard
+    // route redirects a wholly unentitled session here (see src/middleware.ts),
+    // so it has to stand on its own rather than assume the reader arrived by
+    // choice.
+    // Being unentitled has more than one story behind it, and the reader knows
+    // which one is theirs. Someone whose 14-day trial just ran out is not
+    // "choosing a plan to continue" — they used the product, it worked, and the
+    // thing they most need to hear is that their site did not go down with the
+    // trial. Credits outrank it: a credit holder who also trialled once still has
+    // something spendable, and that is the more useful fact.
+    const hasExpiredTrial = dashboardData.everTrialed && !holdsCredits;
+    // s47a: an ended founding offer is an ended trial (it was the account's one
+    // trial row), but it was 90 days of Pro, not 14 — so it says so.
+    const expiredTrialCopy = dashboardData.endedOfferId
+      ? ENDED_FOUNDING_OFFER_COPY
+      : ENDED_TRIAL_COPY;
+
+    if (currentPlan === null) {
+      return {
+        body: (
+          <>
+            {/* Left-aligned on the page's edge, and an h2: the page's one h1
+                is the shell's "Billing & subscription", in this state too.
+                At the panel-title scale (`.text-title`), never the h1's: it
+                kept `text-2xl` (24/600) at first, and every unentitled
+                account read two stacked page titles (s66b1 review M-2). */}
+            <Card className="max-w-lg p-8 text-center">
+              <h2 className="mb-2 text-title">
+                {holdsCredits
+                  ? "You're on credits"
+                  : hasExpiredTrial
+                    ? expiredTrialCopy.heading
+                    : "Choose a plan to continue"}
+              </h2>
+              <p className="mb-6 text-muted-foreground">
+                {holdsCredits
+                  ? `You have ${creditBalance.toLocaleString("en-US")} credits, which are kept and work again once you choose a plan. AI credits come with a plan, and so do sites, collaborators and A/B testing.`
+                  : hasExpiredTrial
+                    ? expiredTrialCopy.body
+                    : "ReCopyFast needs an active subscription before your sites and editors become available. AI credits come with a plan."}
+              </p>
+              <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
+                {hasExpiredTrial ? "Upgrade to Pro" : "See plans"}
+              </Button>
+            </Card>
+
+            <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
+
+            {lifetimeOffers.map((product) => (
+              <div key={product.id} className="max-w-lg">
+                <LifetimeOfferCard
+                  product={product}
+                  hasLiveSubscription={hasLiveSubscription}
+                  availability={foundingAgencyAvailability}
+                />
+              </div>
             ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  if (error) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="p-6 text-center">
-          <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
-            Error loading billing data
-          </h2>
-          <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={fetchDashboardData}>Try again</Button>
-        </Card>
-      </div>
-    );
-  }
-
-  // Both early returns above cover the null case; this narrows the type and
-  // keeps a future refactor from rendering an empty dashboard silently.
-  if (!dashboardData) {
-    return null;
-  }
-
-  // The plan in force counts lifetime entitlements, not just subscriptions, so
-  // it comes from the server rather than from the subscription row. Null means
-  // the account has not paid; there is no free plan for it to be on.
-  const currentPlan = dashboardData.effectivePlanId;
-  const plan = findSubscriptionPlan(dashboardData.catalogue, currentPlan);
-
-  // Credits confer no plan, so their holder lands here too. Since s51 they buy
-  // nothing on their own either: AI spend happens only inside editing, and
-  // editing needs a plan. The balance is kept, not forfeited, and works again
-  // once a plan is chosen — which is what this panel has to say, rather than
-  // promising AI features a credit alone no longer unlocks.
-  const creditBalance = dashboardData.creditWallet?.balance ?? 0;
-  const holdsCredits = creditBalance > 0;
-
-  // Lifetime Pro is a way *in* for an account with no plan and a way *out* of a
-  // subscription for one that has one, so it is resolved before the unentitled
-  // branch below and offered in both.
-  const lifetimeOffers = resolveLifetimeOffers(
-    dashboardData.catalogue,
-    lifetimeGrant,
-    currentPlan,
-  ).filter(
-    (product) => agencyCheckoutEnabled || product.id !== "lifetime_agency",
-  );
-  // `subscription` only ever holds a live row (see getUserSubscription), so its
-  // presence is exactly "something is still billing this card every month".
-  const hasLiveSubscription = Boolean(dashboardData.subscription);
-
-  // This is the whole page for an account with no plan. Every other dashboard
-  // route redirects a wholly unentitled session here (see src/middleware.ts),
-  // so it has to stand on its own rather than assume the reader arrived by
-  // choice.
-  // Being unentitled has more than one story behind it, and the reader knows
-  // which one is theirs. Someone whose 14-day trial just ran out is not
-  // "choosing a plan to continue" — they used the product, it worked, and the
-  // thing they most need to hear is that their site did not go down with the
-  // trial. Credits outrank it: a credit holder who also trialled once still has
-  // something spendable, and that is the more useful fact.
-  const hasExpiredTrial = dashboardData.everTrialed && !holdsCredits;
-  // s47a: an ended founding offer is an ended trial (it was the account's one
-  // trial row), but it was 90 days of Pro, not 14 — so it says so.
-  const expiredTrialCopy = dashboardData.endedOfferId
-    ? ENDED_FOUNDING_OFFER_COPY
-    : ENDED_TRIAL_COPY;
-
-  if (currentPlan === null) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="mx-auto max-w-lg p-8 text-center">
-          <h1 className="mb-2 text-2xl font-semibold">
-            {holdsCredits
-              ? "You're on credits"
-              : hasExpiredTrial
-                ? expiredTrialCopy.heading
-                : "Choose a plan to continue"}
-          </h1>
-          <p className="mb-6 text-muted-foreground">
-            {holdsCredits
-              ? `You have ${creditBalance.toLocaleString("en-US")} credits, which are kept and work again once you choose a plan. AI credits come with a plan, and so do sites, collaborators and A/B testing.`
-              : hasExpiredTrial
-                ? expiredTrialCopy.body
-                : "ReCopyFast needs an active subscription before your sites and editors become available. AI credits come with a plan."}
-          </p>
-          <Button size="lg" onClick={() => setShowUpgradeDialog(true)}>
-            {hasExpiredTrial ? "Upgrade to Pro" : "See plans"}
-          </Button>
-        </Card>
-
-        <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
-
-        {lifetimeOffers.map((product) => (
-          <div key={product.id} className="mx-auto mt-6 max-w-lg">
-            <LifetimeOfferCard
-              product={product}
-              hasLiveSubscription={hasLiveSubscription}
-              availability={foundingAgencyAvailability}
+            <UpgradeDialog
+              open={showUpgradeDialog}
+              onOpenChange={setShowUpgradeDialog}
+              currentPlan={null}
+              hasSubscription={hasLiveSubscription}
+              catalogue={dashboardData.catalogue}
+              lifetimeOffers={lifetimeOffers}
+              foundingAgencyAvailability={foundingAgencyAvailability}
+              agencyCheckoutEnabled={agencyCheckoutEnabled}
+              onSuccess={handleSubscriptionUpdate}
             />
-          </div>
-        ))}
+          </>
+        ),
+      };
+    }
 
-        <UpgradeDialog
-          open={showUpgradeDialog}
-          onOpenChange={setShowUpgradeDialog}
-          currentPlan={null}
-          hasSubscription={hasLiveSubscription}
-          catalogue={dashboardData.catalogue}
-          lifetimeOffers={lifetimeOffers}
-          foundingAgencyAvailability={foundingAgencyAvailability}
-          agencyCheckoutEnabled={agencyCheckoutEnabled}
-          onSuccess={handleSubscriptionUpdate}
-        />
-      </div>
-    );
-  }
+    if (!plan) {
+      return {
+        body: (
+          <Card className="p-6 text-center">
+            <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
+              Plan catalogue unavailable
+            </h2>
+            <p className="text-muted-foreground mb-4">
+              We could not load the plan you are on. Please try again.
+            </p>
+            <Button onClick={fetchDashboardData}>Try again</Button>
+          </Card>
+        ),
+      };
+    }
 
-  if (!plan) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <Card className="p-6 text-center">
-          <h2 className="text-xl font-semibold text-tone-danger-text mb-2">
-            Plan catalogue unavailable
-          </h2>
-          <p className="text-muted-foreground mb-4">
-            We could not load the plan you are on. Please try again.
-          </p>
-          <Button onClick={fetchDashboardData}>Try again</Button>
-        </Card>
-      </div>
-    );
-  }
+    // A plan held through a permanent grant and billed by no subscription has no
+    // monthly price. A lifetime owner still running out a lower subscription's
+    // paid period is billed for that plan, not this one, so it counts too.
+    const isPlanHeldForLife =
+      lifetimeGrant.kind === "granted" &&
+      lifetimeGrant.planIds.includes(plan.id) &&
+      dashboardData.subscription?.plan_id !== plan.id;
 
-  // A plan held through a permanent grant and billed by no subscription has no
-  // monthly price. A lifetime owner still running out a lower subscription's
-  // paid period is billed for that plan, not this one, so it counts too.
-  const isPlanHeldForLife =
-    lifetimeGrant.kind === "granted" &&
-    lifetimeGrant.planIds.includes(plan.id) &&
-    dashboardData.subscription?.plan_id !== plan.id;
-
-  return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-display">Billing & subscription</h1>
-          <p className="text-muted-foreground mt-2">
-            Manage your subscription, payment methods, and billing information
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+    return {
+      actions: (
+        <>
           <Badge variant="default" className="text-sm">
             {currentPlan.toUpperCase()} PLAN
           </Badge>
           <Button onClick={() => setShowUpgradeDialog(true)}>
             Change plan
           </Button>
-        </div>
-      </div>
-
-      {/* Above the banner, because for someone still inside their trial this
-          is the fact that governs everything below it. It renders nothing when
-          `trial` is null — which covers a paying customer, an account that
-          never trialled, and a payload that failed to load. */}
-      <TrialStatusCard
-        trial={dashboardData.trial}
-        // s47a: the founding offer card's action row. A plain trial ignores both.
-        creditPack={dashboardData.catalogue.creditPack}
-        onChoosePlan={() => setShowUpgradeDialog(true)}
-      />
-
-      <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <div className="lg:col-span-2 space-y-6">
-          <SubscriptionCard
-            subscription={dashboardData.subscription}
-            plan={plan}
-            isLifetime={isPlanHeldForLife}
-            // The allowance the server resolved for this account, not the
-            // catalogue row's: they differ for a lifetime Founding Agency owner
-            // (ADR 038).
-            monthlyCredits={dashboardData.creditWallet?.included ?? null}
-            onUpdate={handleSubscriptionUpdate}
-          />
-          <PaymentMethodsCard
-            paymentMethods={dashboardData.paymentMethods}
-            onUpdate={handleSubscriptionUpdate}
-          />
-          <InvoiceHistoryCard invoices={dashboardData.invoices} />
-        </div>
-
-        <div className="space-y-6">
-          <CreditBalanceCard
-            wallet={dashboardData.creditWallet}
-            recentTransactions={dashboardData.recentTransactions}
+        </>
+      ),
+      body: (
+        <>
+          {/* Above the banner, because for someone still inside their trial
+              this is the fact that governs everything below it. It renders
+              nothing when `trial` is null — which covers a paying customer,
+              an account that never trialled, and a payload that failed to
+              load. */}
+          <TrialStatusCard
+            trial={dashboardData.trial}
+            // s47a: the founding offer card's action row. A plain trial ignores both.
             creditPack={dashboardData.catalogue.creditPack}
+            onChoosePlan={() => setShowUpgradeDialog(true)}
           />
-          <UsageCard currentUsage={dashboardData.currentUsage} plan={plan} />
-          {lifetimeOffers.map((product) => (
-            <LifetimeOfferCard
-              key={product.id}
-              product={product}
-              hasLiveSubscription={hasLiveSubscription}
-              availability={foundingAgencyAvailability}
-            />
-          ))}
-        </div>
-      </div>
 
-      <UpgradeDialog
-        open={showUpgradeDialog}
-        onOpenChange={setShowUpgradeDialog}
-        // A running trial or founding offer confers the plan without owning
-        // it: that plan must stay buyable, and there is nothing to change in
-        // place (PR #49 review, finding 1). `trial` is only set while nothing
-        // is billed and no permanent grant exists (the dashboard route).
-        currentPlan={dashboardData.trial ? null : currentPlan}
-        hasSubscription={hasLiveSubscription}
-        catalogue={dashboardData.catalogue}
-        lifetimeOffers={lifetimeOffers}
-        foundingAgencyAvailability={foundingAgencyAvailability}
-        agencyCheckoutEnabled={agencyCheckoutEnabled}
-        onSuccess={handleSubscriptionUpdate}
-      />
-    </div>
+          <CheckoutStatusBanner onReconciled={handleSubscriptionUpdate} />
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div className="lg:col-span-2 space-y-6">
+              <SubscriptionCard
+                subscription={dashboardData.subscription}
+                plan={plan}
+                isLifetime={isPlanHeldForLife}
+                // The allowance the server resolved for this account, not the
+                // catalogue row's: they differ for a lifetime Founding Agency owner
+                // (ADR 038).
+                monthlyCredits={dashboardData.creditWallet?.included ?? null}
+                onUpdate={handleSubscriptionUpdate}
+              />
+              <PaymentMethodsCard
+                paymentMethods={dashboardData.paymentMethods}
+                onUpdate={handleSubscriptionUpdate}
+              />
+              <InvoiceHistoryCard invoices={dashboardData.invoices} />
+            </div>
+
+            <div className="space-y-6">
+              <CreditBalanceCard
+                wallet={dashboardData.creditWallet}
+                recentTransactions={dashboardData.recentTransactions}
+                creditPack={dashboardData.catalogue.creditPack}
+              />
+              <UsageCard
+                currentUsage={dashboardData.currentUsage}
+                plan={plan}
+              />
+              {lifetimeOffers.map((product) => (
+                <LifetimeOfferCard
+                  key={product.id}
+                  product={product}
+                  hasLiveSubscription={hasLiveSubscription}
+                  availability={foundingAgencyAvailability}
+                />
+              ))}
+            </div>
+          </div>
+
+          <UpgradeDialog
+            open={showUpgradeDialog}
+            onOpenChange={setShowUpgradeDialog}
+            // A running trial or founding offer confers the plan without owning
+            // it: that plan must stay buyable, and there is nothing to change in
+            // place (PR #49 review, finding 1). `trial` is only set while nothing
+            // is billed and no permanent grant exists (the dashboard route).
+            currentPlan={dashboardData.trial ? null : currentPlan}
+            hasSubscription={hasLiveSubscription}
+            catalogue={dashboardData.catalogue}
+            lifetimeOffers={lifetimeOffers}
+            foundingAgencyAvailability={foundingAgencyAvailability}
+            agencyCheckoutEnabled={agencyCheckoutEnabled}
+            onSuccess={handleSubscriptionUpdate}
+          />
+        </>
+      ),
+    };
+  };
+
+  const { body, actions } = renderState();
+
+  return (
+    <PageShell
+      title={BILLING_PAGE_COPY.title}
+      description={BILLING_PAGE_COPY.description}
+      actions={actions}
+    >
+      {body}
+    </PageShell>
   );
 }

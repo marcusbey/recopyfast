@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>s66b — App page layout (reference mockup)</title>
+<!-- Reference mockup for docs/designs/s66b-app-page-layout.md.
+     NOT production code: Execute builds with src/components/ui/* (PageShell, PageHeader,
+     Card, Metric, NativeSelect, Input, Tabs, Badge, StatusBadge, IconTile, Button).
+     Token values are the DARK values of src/app/globals.css. Fixture data only: the account is
+     "Ada", domains end in .example, there is no token and no email address anywhere.
+     The only external request is Google Fonts, for the app's own two faces. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:dark;
+  /* globals.css, dark side of light-dark() */
+  --canvas:hsl(200 18% 7%);
+  --card:hsl(200 15% 10%);
+  --surface-1:hsl(200 18% 8%);
+  --surface-2:hsl(200 14% 14%);
+  --surface-3:hsl(200 13% 18%);
+  --fg:hsl(200 22% 96%);
+  --muted:hsl(200 12% 68%);
+  --primary:hsl(174 48% 58%);
+  --on-primary:hsl(200 30% 8%);
+  --line:hsl(200 12% 21%);            /* border: decorative */
+  --line-strong:hsl(200 10% 40%);     /* input: control boundary */
+  --n-s:hsl(200 12% 17%);--n-t:hsl(200 12% 76%);--n-l:hsl(200 12% 26%);
+  --i-s:hsl(206 44% 18%);--i-t:hsl(204 78% 76%);--i-l:hsl(206 40% 30%);
+  --s-s:hsl(166 40% 15%);--s-t:hsl(162 60% 70%);--s-l:hsl(166 36% 27%);
+  --w-s:hsl(30 44% 17%);--w-t:hsl(42 84% 68%);--w-l:hsl(32 40% 29%);
+  --a-s:hsl(178 38% 16%);--a-t:hsl(176 52% 70%);--a-l:hsl(178 34% 28%);
+  /* ADR 050 */
+  --radius-container:0px;
+  --radius-control:2px;
+  --font-sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  /* annotation ink for this mockup only (tone-warning-text); never UI */
+  --spec:hsl(42 84% 68%);
+}
+*,*::before,*::after{box-sizing:border-box;border-color:var(--line)}
+html,body{margin:0}
+body{background:var(--canvas);color:var(--fg);font:400 14px/20px var(--font-sans);
+  font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p{margin:0}
+a{color:inherit;text-decoration:none}
+.i{width:16px;height:16px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i18{width:18px;height:18px}
+.mono{font-family:var(--font-mono)}
+.tab{font-variant-numeric:tabular-nums}
+.eyebrow{font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted)}
+.muted{color:var(--muted)}
+.xs{font-size:12px;line-height:16px}
+
+/* ---------- the mockup's own page ---------- */
+.doc{max-width:1360px;margin:0 auto;padding:32px 32px 96px}
+@media (max-width:639px){.doc{padding:24px 16px 64px}}
+.doc>h1{font:600 24px/32px var(--font-sans);letter-spacing:-.015em}
+.lede{color:var(--muted);max-width:76ch;margin-top:8px}
+.sec{margin-top:56px;padding-top:24px;border-top:1px solid var(--line)}
+.sec>h2{font:600 16px/24px var(--font-sans)}
+.sec>.lede{margin-top:4px}
+.frames{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;margin-top:20px}
+.scroll-x{max-width:100%;overflow-x:auto}
+.cap{display:flex;gap:12px;align-items:baseline;margin-bottom:8px}
+.cap b{font-weight:600}
+.cap .mono{font-size:12px;color:var(--muted)}
+.notes{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:12px;line-height:18px;max-width:720px}
+.notes li{margin:2px 0}
+.spec{color:var(--spec);font:500 11px/14px var(--font-mono)}
+table.t{border-collapse:collapse;margin-top:16px;font-size:13px}
+table.t th,table.t td{border:1px solid var(--line);padding:8px 12px;text-align:left}
+table.t th{background:var(--surface-1);font-weight:600}
+
+/* ---------- app frame ---------- */
+.frame{position:relative;background:var(--canvas);border:1px solid var(--line-strong);overflow:hidden;flex-shrink:0}
+.w1280{width:1280px}
+.w375{width:375px}
+.frame::after{content:"";position:absolute;left:0;right:0;bottom:0;height:56px;
+  background:linear-gradient(transparent,var(--canvas));pointer-events:none}
+.app{display:grid;grid-template-columns:256px minmax(0,1fr);height:100%}
+.w375 .app{grid-template-columns:minmax(0,1fr)}
+.w375 .side{display:none}
+.side{background:var(--card);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:100%}
+.brand{height:56px;flex-shrink:0;display:flex;align-items:center;gap:10px;padding:0 20px;border-bottom:1px solid var(--line)}
+.brand .tile{width:28px;height:28px;display:grid;place-items:center;background:var(--primary);color:var(--on-primary);font:600 11px/1 var(--font-sans);letter-spacing:-.01em}
+.brand b{font:600 15px/1 var(--font-sans);letter-spacing:-.015em}
+.nav{flex:1;padding:16px 12px}
+.nav .eyebrow{padding:0 12px;margin:0 0 8px}
+.nav .grp+.grp{margin-top:24px}
+.item{position:relative;display:flex;align-items:center;gap:12px;min-height:40px;padding:8px 10px 8px 12px;color:var(--muted)}
+.item+.item{margin-top:2px}
+.item.on{background:color-mix(in oklab,var(--primary) 12%,transparent);color:var(--primary);font-weight:500}
+.item.on::before{content:"";position:absolute;left:0;top:10px;height:20px;width:2px;background:var(--primary)}
+.plan{margin:12px;border:1px solid var(--line);background:var(--surface-1);padding:12px}
+.plan p+p{margin-top:4px;font-weight:500}
+.hdr{height:56px;background:var(--card);border-bottom:1px solid var(--line)}
+.hdr-in{max-width:1180px;margin:0 auto;height:100%;padding:0 32px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.w375 .hdr-in{padding:0 16px}
+.crumbs{display:flex;align-items:center;gap:8px;color:var(--muted);min-width:0;white-space:nowrap}
+.crumbs .cur{color:var(--fg);font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.menu-btn{width:40px;height:40px;display:grid;place-items:center;border-radius:var(--radius-control);color:var(--fg);margin-right:4px}
+.avatar{width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:var(--surface-2);font-weight:600}
+.main{position:relative;max-width:1180px;margin:0 auto;padding:32px}
+.w375 .main{padding:24px 16px}
+
+/* left-edge annotation */
+.edge{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--spec);opacity:.7;pointer-events:none}
+.edge span{position:absolute;top:6px;left:4px;white-space:nowrap}
+
+/* ---------- PageShell / PageHeader ---------- */
+.shell{display:flex;flex-direction:column;gap:24px}
+.w375 .shell{gap:16px}
+.ph{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:24px;
+  grid-template-areas:"eb eb" "title actions" "desc desc"}
+.w375 .ph{grid-template-columns:minmax(0,1fr);grid-template-areas:"eb" "title" "desc" "actions"}
+.ph .eyebrow{grid-area:eb;margin-bottom:6px}
+.ph .trow{grid-area:title;display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;min-height:40px;min-width:0}
+.ph h1{font:600 24px/32px var(--font-sans);letter-spacing:-.015em;overflow-wrap:anywhere}
+.ph .desc{grid-area:desc;color:var(--muted);max-width:65ch;margin-top:4px}
+.ph .acts{grid-area:actions;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.w375 .ph .acts{margin-top:12px}
+
+/* ---------- primitives (s66a shapes) ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;
+  border-radius:var(--radius-control);font:500 14px/1 var(--font-sans);white-space:nowrap;border:1px solid transparent}
+.btn-p{background:var(--primary);color:var(--on-primary)}
+.btn-o{border-color:var(--line-strong);color:var(--fg);background:transparent}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid;border-radius:var(--radius-control);font:500 12px/1 var(--font-sans);white-space:nowrap}
+.b-n{background:var(--n-s);color:var(--n-t);border-color:var(--n-l)}
+.b-i{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.b-s{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.b-a{background:var(--a-s);color:var(--a-t);border-color:var(--a-l)}
+.b-solid{background:var(--primary);color:var(--on-primary);border-color:var(--primary)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}   /* the radius exception */
+.dot-ring{width:6px;height:6px;border-radius:50%;border:1px dashed currentColor}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-container)}
+.card-h{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:20px 24px 16px}
+.card-h h2,.card-h h3{font:600 16px/24px var(--font-sans)}
+.card-b{padding:0 24px 24px}
+.w375 .card-h{padding:16px 16px 12px}.w375 .card-b{padding:0 16px 16px}
+.tile{width:36px;height:36px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);color:var(--fg);flex-shrink:0}
+.tile.lg{width:44px;height:44px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field+.field{margin-top:16px}
+.field label{font-weight:500}
+.input,.select{height:40px;display:flex;align-items:center;padding:0 12px;background:var(--card);
+  border:1px solid var(--line-strong);border-radius:var(--radius-control);color:var(--fg);min-width:0}
+.input.dis{background:color-mix(in oklab,var(--surface-2) 60%,transparent);color:var(--muted)}
+.select{position:relative;padding-right:36px}
+.select .i{position:absolute;right:12px;top:12px;color:var(--muted)}
+.tabs{display:flex;flex-wrap:wrap;align-items:flex-end;column-gap:16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.tabs span{display:inline-flex;align-items:center;gap:6px;height:40px;margin-bottom:-1px;border-bottom:2px solid transparent;padding:0 2px;font-weight:500;white-space:nowrap}
+.tabs span.on{border-color:var(--primary);color:var(--fg)}
+.placeholder{border:1px dashed var(--spec);padding:14px 16px;color:var(--spec);font:500 12px/16px var(--font-mono)}
+
+/* ---------- Overview ---------- */
+.mgrid{display:grid;gap:12px}
+.w1280 .mgrid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.w1280 .mgrid .lead{grid-row:span 3}
+.w1280 .mgrid .sub{grid-column:span 2}
+.metric{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:16px 20px}
+.metric.lead{padding:24px}
+.metric .v{font:600 24px/1 var(--font-sans);letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums}
+.metric.lead .v{font-size:40px}
+.metric .h{margin-top:6px;font-size:12px;color:var(--muted)}
+.list>a{display:flex;align-items:center;gap:12px;padding:14px 24px;border-top:1px solid var(--line)}
+.w375 .list>a{padding:12px 16px}
+.list>a:hover{background:var(--surface-2)}
+.list .nm{display:flex;align-items:center;gap:8px;min-width:0}
+.list .nm b{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .dm{font:400 12px/16px var(--font-mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list .rt{text-align:right;flex-shrink:0}
+.w375 .list .rt{display:none}
+
+/* ---------- Analytics ---------- */
+.filters{display:flex;flex-wrap:wrap;gap:8px}
+.w1280 .filters .select{width:256px}
+.w1280 .filters .input{width:160px}
+.w375 .filters .select{flex:1 1 100%}
+.w375 .filters .input{flex:1 1 0}
+.agrid{display:grid;gap:16px}
+.w1280 .agrid.c4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.w1280 .agrid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.am{display:flex;justify-content:space-between;align-items:center;padding:20px 24px}
+.am .v{font:600 24px/32px var(--font-sans);font-variant-numeric:tabular-nums}
+.hue-i{color:var(--i-t)}.hue-s{color:var(--s-t)}.hue-w{color:var(--w-t)}.hue-a{color:var(--a-t)}
+.chart{height:150px;display:flex;align-items:flex-end;gap:6px;padding-top:12px}
+.chart i{flex:1;background:color-mix(in oklab,var(--primary) 55%,transparent)}
+
+/* ---------- Billing ---------- */
+.bgrid{display:grid;gap:24px}
+.w1280 .bgrid{grid-template-columns:minmax(0,2fr) minmax(0,1fr);align-items:start}
+.w375 .bgrid{gap:16px}
+.col{display:flex;flex-direction:column;gap:24px}
+.w375 .col{gap:16px}
+.feat{list-style:none;padding:0;margin:12px 0 0}
+.feat li{display:flex;gap:8px;align-items:center;color:var(--muted)}
+.feat li+li{margin-top:6px}
+.feat .i{color:var(--primary)}
+.hero{background:var(--a-s);border:1px solid var(--a-l);padding:16px;text-align:center}
+.hero b{display:block;font:600 24px/32px var(--font-sans);color:var(--a-t);font-variant-numeric:tabular-nums}
+.pair{display:grid;grid-template-columns:1fr 1fr;margin-top:12px;border:1px solid var(--line)}
+.pair div{padding:12px;text-align:center;background:var(--surface-1)}
+.pair div+div{border-left:1px solid var(--line)}
+.bar{height:8px;background:var(--surface-3);margin-top:8px}
+.bar i{display:block;height:100%;width:20%;background:var(--primary)}
+.info{margin-top:16px;padding:16px;background:var(--i-s);border:1px solid var(--i-l);color:var(--i-t)}
+.empty{padding:24px 0 8px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+  <symbol id="menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+  <symbol id="home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></symbol>
+  <symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></symbol>
+  <symbol id="hist" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></symbol>
+  <symbol id="zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+  <symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="dl" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.5 12.5L21 2M16 7l3 3"/></symbol>
+  <symbol id="palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="8" cy="10" r="1"/><circle cx="12" cy="7" r="1"/><circle cx="16" cy="10" r="1"/></symbol>
+  <symbol id="grid" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M14 3H6v18h12V7zM14 3v4h4"/></symbol>
+  <symbol id="chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M3 20h18"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="cardi" viewBox="0 0 24 24"><path d="M2 5h20v14H2zM2 10h20"/></symbol>
+  <symbol id="eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6"/></symbol>
+  <symbol id="pen" viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z"/></symbol>
+  <symbol id="act" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+  <symbol id="cal" viewBox="0 0 24 24"><path d="M3 5h18v16H3zM3 10h18M8 3v4M16 3v4"/></symbol>
+</svg>
+
+
+<div class="doc">
+  <p class="eyebrow">s66b · design reference</p>
+  <h1>Every app page: one frame, one title, one left edge</h1>
+  <p class="lede">The page frame is the dashboard layout (width, gutters, 56&nbsp;px header, sidebar)
+    plus one <span class="mono">PageShell</span> per page (title, rhythm, sections), per ADR&nbsp;053.
+    Dark theme, real token values, square containers and 2&nbsp;px controls (ADR&nbsp;050).
+    The dashed yellow line in each frame is the page's left edge: every header, filter row and panel
+    starts on it. <b>s66b1</b> lands the frame and the titles; <b>s66b2</b> flattens what is inside.
+    Everything under <span class="mono">/dashboard/sites</span> is s66c's.</p>
+
+  <!-- ===================================================== FRAME -->
+  <section class="sec">
+    <h2>1 · The frame and PageShell (s66b1)</h2>
+    <p class="lede">One owner per concern: the layout sets width and gutters; PageShell sets the title row
+      and the vertical rhythm. Its direct children are the sections.</p>
+    <table class="t">
+      <tr><th>Width</th><th>Sidebar</th><th>Gutter</th><th>Content left = every h1's left</th><th>Rhythm (header→section, section→section)</th></tr>
+      <tr><td>375</td><td>off-canvas</td><td>16</td><td class="mono">16</td><td>16</td></tr>
+      <tr><td>768</td><td>off-canvas</td><td>24</td><td class="mono">24</td><td>24</td></tr>
+      <tr><td>1280</td><td>256</td><td>32</td><td class="mono">288</td><td>24</td></tr>
+      <tr><td>1920</td><td>256</td><td>32</td><td class="mono">530 · column 1180 centred in 1664</td><td>24</td></tr>
+    </table>
+    <div class="frames">
+      <div>
+        <div class="cap"><b>PageHeader anatomy, ≥640</b><span class="mono">header[data-page-header]</span></div>
+        <div class="card" style="width:720px;padding:24px">
+          <div class="ph">
+            <p class="eyebrow">Eyebrow (optional)</p>
+            <div class="trow"><h1>Page title</h1><span class="badge b-s"><span class="dot"></span>meta slot</span></div>
+            <p class="desc">Description: one line of orientation, 14/20 muted. A ReactNode, so s66c can put the site's domain here.</p>
+            <div class="acts"><span class="btn btn-o">Secondary</span><span class="btn btn-p"><svg class="i"><use href="#plus"/></svg>Primary</span></div>
+          </div>
+          <div class="tabs" style="margin-top:16px"><span class="on">nav slot</span><span>s66c sub-pages</span><span>underline</span></div>
+          <p class="spec" style="margin-top:12px">h1 .text-page-title 24/32 600 −0.015em · title row min-h 40, centred with the 40px actions · desc 4px below · nav 16px below · first section 24px below (16 &lt;640)</p>
+        </div>
+      </div>
+      <div>
+        <div class="cap"><b>PageHeader anatomy, &lt;640</b><span class="mono">actions wrap under the description</span></div>
+        <div class="card w375" style="padding:16px">
+          <div class="ph">
+            <p class="eyebrow">Eyebrow</p>
+            <div class="trow"><h1>Page title</h1><span class="badge b-s"><span class="dot"></span>meta</span></div>
+            <p class="desc">Description, wrapping as it needs to.</p>
+            <div class="acts"><span class="btn btn-o">Secondary</span><span class="btn btn-p">Primary</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="cap"><b>1920 schematic, ¼ scale</b><span class="mono">the 1180 column centres</span></div>
+        <div style="position:relative;width:480px;height:150px;border:1px solid var(--line-strong);background:var(--canvas)">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:64px;background:var(--card);border-right:1px solid var(--line)"></div>
+          <div style="position:absolute;left:64px;right:0;top:0;height:14px;background:var(--card);border-bottom:1px solid var(--line)"></div>
+          <div style="position:absolute;left:124.5px;width:295px;top:24px;bottom:12px;border:1px dashed var(--muted)"></div>
+          <div style="position:absolute;left:132.5px;width:279px;top:32px;height:10px;background:var(--surface-3)"></div>
+          <div style="position:absolute;left:132.5px;width:279px;top:52px;bottom:20px;background:var(--card);border:1px solid var(--line)"></div>
+          <span class="spec" style="position:absolute;left:68px;bottom:2px">256 + 242 + 32 = 530</span>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li>Header 56, opaque <span class="mono">bg-card</span>, no blur, 1px rule. The sidebar's brand row is 56 with its own rule, so both read as one band.</li>
+      <li>Sidebar items, the 2px active rail, the plan box and the brand tile are square. The tile's "RF" is 600, not 700.</li>
+      <li>Below 1024: the menu button sits at <span class="mono">left-4 sm:left-6 top-2</span>, over the header's 40px spacer, centred in 56. The overlay is <span class="mono">bg-foreground/40</span> with no blur.</li>
+      <li>The account avatar stays round (the Avatar exception). Its button is <span class="mono">rounded-control</span>, so the focus ring is square.</li>
+    </ul>
+  </section>
+
+  <!-- ===================================================== OVERVIEW -->
+  <section class="sec">
+    <h2>2 · Overview <span class="mono muted" style="font-size:12px">/dashboard</span></h2>
+    <p class="lede">s66b1: PageShell (eyebrow, greeting, Trial badge + Add site). s66b2: the metric grid fills its width
+      (lead 1/3 spanning three rows, the three others 2/3), metrics are flat, and "Your sites" is one panel of divided rows.</p>
+    <div class="frames">
+      <div class="scroll-x"><div class="cap"><b>1280</b><span class="mono">h1 left = 288</span></div>
+      <div class="frame w1280" style="height:930px"><div class="app">
+        <aside class="side">
+          <div class="brand"><span class="tile">RF</span><b>ReCopyFast</b></div>
+          <nav class="nav">
+            <div class="grp"><p class="eyebrow">Workspace</p>
+              <a class="item on"><svg class="i i18"><use href="#grid"/></svg>Overview</a>
+              <a class="item"><svg class="i i18"><use href="#globe"/></svg>Sites</a>
+              <a class="item"><svg class="i i18"><use href="#file"/></svg>Content</a>
+              <a class="item"><svg class="i i18"><use href="#chart"/></svg>Analytics</a></div>
+            <div class="grp"><p class="eyebrow">Account</p>
+              <a class="item"><svg class="i i18"><use href="#gear"/></svg>Settings</a>
+              <a class="item"><svg class="i i18"><use href="#cardi"/></svg>Billing</a></div>
+          </nav>
+          <div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div>
+        </aside>
+        <div style="min-width:0">
+          <div class="hdr"><div class="hdr-in"><div class="crumbs"></div><span class="avatar">A</span></div></div>
+          <main class="main">
+            <span class="edge" style="left:32px"><span class="spec">288</span></span>
+            <div class="shell">
+              <header class="ph">
+                <p class="eyebrow">Overview</p>
+                <div class="trow"><h1>Welcome back, Ada</h1></div>
+                <p class="desc">Every site you have connected, and what has changed on them.</p>
+                <div class="acts"><span class="badge b-i tab">Trial · 9 days left</span><span class="btn btn-p"><svg class="i"><use href="#plus"/></svg>Add site</span></div>
+              </header>
+              <div class="placeholder">Quick setup (ActivationChecklist → stepper) is s66c's. It renders here as a section on the same left edge.</div>
+              <section class="mgrid">
+                <a class="card metric lead"><div><p class="eyebrow">Connected sites</p><p class="v">3</p><p class="h">2 of 3 have sent content</p></div><span class="tile lg"><svg class="i i18"><use href="#globe"/></svg></span></a>
+                <a class="card metric sub"><div><p class="eyebrow">Total edits</p><p class="v">47</p></div><span class="tile"><svg class="i"><use href="#hist"/></svg></span></a>
+                <a class="card metric sub"><div><p class="eyebrow">AI suggestions</p><p class="v">128</p><p class="h">Last 30 days</p></div><span class="tile"><svg class="i"><use href="#zap"/></svg></span></a>
+                <a class="card metric sub"><div><p class="eyebrow">Last edit</p><p class="v">2 hours ago</p></div><span class="tile"><svg class="i"><use href="#clock"/></svg></span></a>
+              </section>
+              <section class="card">
+                <div class="card-h"><div><h2>Your sites</h2><p class="muted" style="margin-top:4px">Most recently connected first.</p></div><span class="btn btn-o btn-sm">Manage<svg class="i"><use href="#arrow"/></svg></span></div>
+                <div class="list">
+                  <a><span class="tile"><svg class="i"><use href="#globe"/></svg></span><div style="flex:1;min-width:0"><div class="nm"><b>Acme marketing</b><span class="badge b-s"><span class="dot"></span>Live</span></div><p class="dm">acme.example</p></div><div class="rt"><p class="tab">12 edits</p><p class="xs muted">2 hours ago</p></div></a>
+                  <a><span class="tile"><svg class="i"><use href="#globe"/></svg></span><div style="flex:1;min-width:0"><div class="nm"><b>Client blog</b><span class="badge b-n"><span class="dot-ring"></span>Awaiting install</span></div><p class="dm">client-blog.example</p></div><div class="rt"><p class="tab">0 edits</p><p class="xs muted">No edits yet</p></div></a>
+                  <a><span class="tile"><svg class="i"><use href="#globe"/></svg></span><div style="flex:1;min-width:0"><div class="nm"><b>Studio portfolio</b><span class="badge b-s"><span class="dot"></span>Live</span></div><p class="dm">studio.example</p></div><div class="rt"><p class="tab">35 edits</p><p class="xs muted">3 days ago</p></div></a>
+                </div>
+              </section>
+            </div>
+          </main>
+        </div>
+      </div></div></div>
+
+      <div><div class="cap"><b>375</b><span class="mono">h1 left = 16</span></div>
+      <div class="frame w375" style="height:1180px"><div class="app"><div style="min-width:0">
+        <div class="hdr"><div class="hdr-in"><div class="crumbs"><span class="menu-btn"><svg class="i i18"><use href="#menu"/></svg></span></div><span class="avatar">A</span></div></div>
+        <main class="main">
+          <span class="edge" style="left:16px"><span class="spec">16</span></span>
+          <div class="shell">
+            <header class="ph">
+              <p class="eyebrow">Overview</p>
+              <div class="trow"><h1>Welcome back, Ada</h1></div>
+              <p class="desc">Every site you have connected, and what has changed on them.</p>
+              <div class="acts"><span class="badge b-i tab">Trial · 9 days left</span><span class="btn btn-p"><svg class="i"><use href="#plus"/></svg>Add site</span></div>
+            </header>
+            <div class="placeholder">Quick setup: s66c</div>
+            <section class="mgrid">
+              <a class="card metric lead"><div><p class="eyebrow">Connected sites</p><p class="v">3</p><p class="h">2 of 3 have sent content</p></div><span class="tile lg"><svg class="i i18"><use href="#globe"/></svg></span></a>
+              <a class="card metric"><div><p class="eyebrow">Total edits</p><p class="v">47</p></div><span class="tile"><svg class="i"><use href="#hist"/></svg></span></a>
+              <a class="card metric"><div><p class="eyebrow">AI suggestions</p><p class="v">128</p><p class="h">Last 30 days</p></div><span class="tile"><svg class="i"><use href="#zap"/></svg></span></a>
+              <a class="card metric"><div><p class="eyebrow">Last edit</p><p class="v">2 hours ago</p></div><span class="tile"><svg class="i"><use href="#clock"/></svg></span></a>
+            </section>
+            <section class="card">
+              <div class="card-h"><div><h2>Your sites</h2><p class="muted" style="margin-top:4px">Most recently connected first.</p></div><span class="btn btn-o btn-sm">Manage<svg class="i"><use href="#arrow"/></svg></span></div>
+              <div class="list">
+                <a><span class="tile"><svg class="i"><use href="#globe"/></svg></span><div style="flex:1;min-width:0"><div class="nm"><b>Acme marketing</b><span class="badge b-s"><span class="dot"></span>Live</span></div><p class="dm">acme.example</p></div></a>
+                <a><span class="tile"><svg class="i"><use href="#globe"/></svg></span><div style="flex:1;min-width:0"><div class="nm"><b>Client blog</b><span class="badge b-n"><span class="dot-ring"></span>Awaiting install</span></div><p class="dm">client-blog.example</p></div></a>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div></div></div></div>
+    </div>
+    <ul class="notes">
+      <li>The lead metric keeps its 40px value; subordinates are 24/600 (<span class="mono">.text-metric</span>). Linked metrics change only their border colour on hover: no lift, no shadow (<span class="mono">.surface-interactive</span> leaves the app).</li>
+      <li>Site rows are full-bleed inside the panel, separated by 1px rules, with hover <span class="mono">bg-surface-2</span>. No box inside the box.</li>
+      <li><span class="mono">loading.tsx</span> draws the same grid as square skeleton blocks.</li>
+    </ul>
+  </section>
+
+  <!-- ===================================================== ANALYTICS -->
+  <section class="sec">
+    <h2>3 · Analytics <span class="mono muted" style="font-size:12px">/dashboard/analytics</span></h2>
+    <p class="lede">s66b1: the h2 "Analytics Dashboard" becomes the page's h1 "Analytics" (the one listed label change). The exports move to the header actions,
+      and the filters get a wrapping row of their own, which is what removes the 3&nbsp;px overflow at 1280. The dates are the Input primitive.
+      s66b2: values 24/600 (was 700), square bars and insets. The icon hues are unchanged (out of scope).</p>
+    <div class="frames">
+      <div class="scroll-x"><div class="cap"><b>1280</b><span class="mono">no page-level horizontal scroll</span></div>
+      <div class="frame w1280" style="height:900px"><div class="app">
+        <aside class="side">
+          <div class="brand"><span class="tile">RF</span><b>ReCopyFast</b></div>
+          <nav class="nav">
+            <div class="grp"><p class="eyebrow">Workspace</p>
+              <a class="item"><svg class="i i18"><use href="#grid"/></svg>Overview</a>
+              <a class="item"><svg class="i i18"><use href="#globe"/></svg>Sites</a>
+              <a class="item"><svg class="i i18"><use href="#file"/></svg>Content</a>
+              <a class="item on"><svg class="i i18"><use href="#chart"/></svg>Analytics</a></div>
+            <div class="grp"><p class="eyebrow">Account</p>
+              <a class="item"><svg class="i i18"><use href="#gear"/></svg>Settings</a>
+              <a class="item"><svg class="i i18"><use href="#cardi"/></svg>Billing</a></div>
+          </nav>
+          <div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div>
+        </aside>
+        <div style="min-width:0">
+          <div class="hdr"><div class="hdr-in"><div class="crumbs"><svg class="i"><use href="#home"/></svg>Dashboard<svg class="i"><use href="#chev"/></svg><span class="cur">Analytics</span></div><span class="avatar">A</span></div></div>
+          <main class="main">
+            <span class="edge" style="left:32px"><span class="spec">288</span></span>
+            <div class="shell">
+              <header class="ph">
+                <div class="trow"><h1>Analytics</h1></div>
+                <p class="desc">Monitor your site performance and user engagement</p>
+                <div class="acts"><span class="btn btn-o btn-sm"><svg class="i"><use href="#dl"/></svg>JSON</span><span class="btn btn-o btn-sm"><svg class="i"><use href="#dl"/></svg>CSV</span></div>
+              </header>
+              <div class="filters" role="group" aria-label="Analytics filters">
+                <span class="select">All Sites<svg class="i"><use href="#down"/></svg></span>
+                <span class="input tab" style="justify-content:space-between">2026-09-08<svg class="i muted"><use href="#cal"/></svg></span>
+                <span class="input tab" style="justify-content:space-between">2026-10-08<svg class="i muted"><use href="#cal"/></svg></span>
+              </div>
+              <div class="agrid c4">
+                <div class="card am"><div><p class="muted">Total Sites</p><p class="v">3</p></div><svg class="i i18 hue-i" style="width:28px;height:28px"><use href="#globe"/></svg></div>
+                <div class="card am"><div><p class="muted">Active Users</p><p class="v">0</p></div><svg class="i hue-s" style="width:28px;height:28px"><use href="#users"/></svg></div>
+                <div class="card am"><div><p class="muted">Page Views</p><p class="v">0</p></div><svg class="i hue-a" style="width:28px;height:28px"><use href="#eye"/></svg></div>
+                <div class="card am"><div><p class="muted">Content Edits</p><p class="v">47</p></div><svg class="i hue-w" style="width:28px;height:28px"><use href="#pen"/></svg></div>
+              </div>
+              <div class="agrid c3">
+                <div class="card am"><div><p class="muted">Avg Load Time</p><p class="v">0ms</p></div><svg class="i hue-i"><use href="#clock"/></svg></div>
+                <div class="card am"><div><p class="muted">Avg Edit Time</p><p class="v">0ms</p></div><svg class="i hue-s"><use href="#act"/></svg></div>
+                <div class="card am"><div><p class="muted">Conversion Rate</p><p class="v">0.0%</p></div><svg class="i hue-a"><use href="#trend"/></svg></div>
+              </div>
+              <div class="tabs"><span class="on">Trends</span><span>Top Sites</span><span>Performance</span></div>
+              <div class="agrid c3">
+                <div class="card"><div class="card-h"><h3>Page Views Trend</h3></div><div class="card-b"><p class="xs muted">Last 30 days</p><div class="chart"><i style="height:20%"></i><i style="height:35%"></i><i style="height:28%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:61%"></i></div></div></div>
+                <div class="card"><div class="card-h"><h3>Content Edits Trend</h3></div><div class="card-b"><p class="xs muted">Last 30 days</p><div class="chart"><i style="height:10%"></i><i style="height:25%"></i><i style="height:60%"></i><i style="height:42%"></i><i style="height:30%"></i><i style="height:55%"></i><i style="height:80%"></i></div></div></div>
+                <div class="card"><div class="card-h"><h3>Active Users Trend</h3></div><div class="card-b"><p class="xs muted">Last 30 days</p><div class="chart"><i style="height:5%"></i><i style="height:12%"></i><i style="height:9%"></i><i style="height:22%"></i><i style="height:18%"></i><i style="height:26%"></i><i style="height:31%"></i></div></div></div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div></div></div>
+
+      <div><div class="cap"><b>375</b><span class="mono">filters wrap; dates share a row</span></div>
+      <div class="frame w375" style="height:900px"><div class="app"><div style="min-width:0">
+        <div class="hdr"><div class="hdr-in"><div class="crumbs"><span class="menu-btn"><svg class="i i18"><use href="#menu"/></svg></span><svg class="i"><use href="#home"/></svg><svg class="i"><use href="#chev"/></svg><span class="cur">Analytics</span></div><span class="avatar">A</span></div></div>
+        <main class="main">
+          <span class="edge" style="left:16px"><span class="spec">16</span></span>
+          <div class="shell">
+            <header class="ph">
+              <div class="trow"><h1>Analytics</h1></div>
+              <p class="desc">Monitor your site performance and user engagement</p>
+              <div class="acts"><span class="btn btn-o btn-sm"><svg class="i"><use href="#dl"/></svg>JSON</span><span class="btn btn-o btn-sm"><svg class="i"><use href="#dl"/></svg>CSV</span></div>
+            </header>
+            <div class="filters">
+              <span class="select">All Sites<svg class="i"><use href="#down"/></svg></span>
+              <span class="input tab">2026-09-08</span>
+              <span class="input tab">2026-10-08</span>
+            </div>
+            <div class="agrid">
+              <div class="card am"><div><p class="muted">Total Sites</p><p class="v">3</p></div><svg class="i hue-i" style="width:28px;height:28px"><use href="#globe"/></svg></div>
+              <div class="card am"><div><p class="muted">Active Users</p><p class="v">0</p></div><svg class="i hue-s" style="width:28px;height:28px"><use href="#users"/></svg></div>
+              <div class="card am"><div><p class="muted">Page Views</p><p class="v">0</p></div><svg class="i hue-a" style="width:28px;height:28px"><use href="#eye"/></svg></div>
+              <div class="card am"><div><p class="muted">Content Edits</p><p class="v">47</p></div><svg class="i hue-w" style="width:28px;height:28px"><use href="#pen"/></svg></div>
+            </div>
+          </div>
+        </main>
+      </div></div></div></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== SETTINGS -->
+  <section class="sec">
+    <h2>4 · Settings <span class="mono muted" style="font-size:12px">/dashboard/settings</span></h2>
+    <p class="lede">s66b1: PageShell replaces the local 30/700 header. The underline Tabs are the first section. At 375 they wrap
+      onto two rows (s66a behaviour), and every trigger lies inside the list's box, none hidden behind a scrollbar.
+      s66b2: the feedback boxes, the API keys rows and the theme tiles are square, and the tiles drop <span class="mono">border-2</span>. Labels are unchanged.</p>
+    <div class="frames">
+      <div class="scroll-x"><div class="cap"><b>1280</b></div>
+      <div class="frame w1280" style="height:760px"><div class="app">
+        <aside class="side">
+          <div class="brand"><span class="tile">RF</span><b>ReCopyFast</b></div>
+          <nav class="nav">
+            <div class="grp"><p class="eyebrow">Workspace</p>
+              <a class="item"><svg class="i i18"><use href="#grid"/></svg>Overview</a>
+              <a class="item"><svg class="i i18"><use href="#globe"/></svg>Sites</a>
+              <a class="item"><svg class="i i18"><use href="#file"/></svg>Content</a>
+              <a class="item"><svg class="i i18"><use href="#chart"/></svg>Analytics</a></div>
+            <div class="grp"><p class="eyebrow">Account</p>
+              <a class="item on"><svg class="i i18"><use href="#gear"/></svg>Settings</a>
+              <a class="item"><svg class="i i18"><use href="#cardi"/></svg>Billing</a></div>
+          </nav>
+          <div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div>
+        </aside>
+        <div style="min-width:0">
+          <div class="hdr"><div class="hdr-in"><div class="crumbs"><svg class="i"><use href="#home"/></svg>Dashboard<svg class="i"><use href="#chev"/></svg><span class="cur">Settings</span></div><span class="avatar">A</span></div></div>
+          <main class="main">
+            <span class="edge" style="left:32px"><span class="spec">288</span></span>
+            <div class="shell">
+              <header class="ph"><div class="trow"><h1>Settings</h1></div><p class="desc">Manage your account and preferences</p></header>
+              <div>
+                <div class="tabs"><span class="on"><svg class="i"><use href="#user"/></svg>Profile</span><span><svg class="i"><use href="#bell"/></svg>Notifications</span><span><svg class="i"><use href="#shield"/></svg>Security</span><span><svg class="i"><use href="#key"/></svg>API Keys</span><span><svg class="i"><use href="#palette"/></svg>Appearance</span></div>
+                <div class="card" style="margin-top:16px">
+                  <div class="card-h"><div><h3>Profile Information</h3><p class="muted" style="margin-top:4px">Update your personal information and email</p></div></div>
+                  <div class="card-b">
+                    <div class="field"><label>Full Name</label><span class="input">Ada Example</span></div>
+                    <div class="field"><label>Email Address</label><span class="input dis">ada@example.com</span><span class="xs muted">Email cannot be changed here. Contact support if needed.</span></div>
+                    <div class="field"><label>Company</label><span class="input">Example Studio</span></div>
+                    <div style="margin-top:20px"><span class="btn btn-p">Save Changes</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div></div></div>
+
+      <div><div class="cap"><b>375</b><span class="mono">tabs wrap, 3 + 2, nothing clipped</span></div>
+      <div class="frame w375" style="height:640px"><div class="app"><div style="min-width:0">
+        <div class="hdr"><div class="hdr-in"><div class="crumbs"><span class="menu-btn"><svg class="i i18"><use href="#menu"/></svg></span><svg class="i"><use href="#home"/></svg><svg class="i"><use href="#chev"/></svg><span class="cur">Settings</span></div><span class="avatar">A</span></div></div>
+        <main class="main">
+          <span class="edge" style="left:16px"><span class="spec">16</span></span>
+          <div class="shell">
+            <header class="ph"><div class="trow"><h1>Settings</h1></div><p class="desc">Manage your account and preferences</p></header>
+            <div>
+              <div class="tabs"><span class="on"><svg class="i"><use href="#user"/></svg>Profile</span><span><svg class="i"><use href="#bell"/></svg>Notifications</span><span><svg class="i"><use href="#shield"/></svg>Security</span><span><svg class="i"><use href="#key"/></svg>API Keys</span><span><svg class="i"><use href="#palette"/></svg>Appearance</span></div>
+              <div class="card" style="margin-top:16px">
+                <div class="card-h"><div><h3>Profile Information</h3><p class="muted" style="margin-top:4px">Update your personal information and email</p></div></div>
+                <div class="card-b">
+                  <div class="field"><label>Full Name</label><span class="input">Ada Example</span></div>
+                  <div class="field"><label>Email Address</label><span class="input dis">ada@example.com</span></div>
+                  <div style="margin-top:20px"><span class="btn btn-p">Save Changes</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div></div></div></div>
+    </div>
+  </section>
+
+  <!-- ===================================================== BILLING -->
+  <section class="sec">
+    <h2>5 · Billing <span class="mono muted" style="font-size:12px">/dashboard/billing</span></h2>
+    <p class="lede">s66b1: no <span class="mono">container</span>, so the h1 moves 16&nbsp;px left onto the shared edge. One PageShell covers all five states and the Suspense fallback.
+      In the no-plan state its card is left-aligned with an h2. s66b2: the inner insets, tiles, progress tracks and the benefits box are square, each keeping its tone surface.
+      The emoji and the "PRO PLAN" copy stay (out of scope).</p>
+    <div class="frames">
+      <div class="scroll-x"><div class="cap"><b>1280</b><span class="mono">h1 left = 288 (was 304)</span></div>
+      <div class="frame w1280" style="height:960px"><div class="app">
+        <aside class="side">
+          <div class="brand"><span class="tile">RF</span><b>ReCopyFast</b></div>
+          <nav class="nav">
+            <div class="grp"><p class="eyebrow">Workspace</p>
+              <a class="item"><svg class="i i18"><use href="#grid"/></svg>Overview</a>
+              <a class="item"><svg class="i i18"><use href="#globe"/></svg>Sites</a>
+              <a class="item"><svg class="i i18"><use href="#file"/></svg>Content</a>
+              <a class="item"><svg class="i i18"><use href="#chart"/></svg>Analytics</a></div>
+            <div class="grp"><p class="eyebrow">Account</p>
+              <a class="item"><svg class="i i18"><use href="#gear"/></svg>Settings</a>
+              <a class="item on"><svg class="i i18"><use href="#cardi"/></svg>Billing</a></div>
+          </nav>
+          <div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div>
+        </aside>
+        <div style="min-width:0">
+          <div class="hdr"><div class="hdr-in"><div class="crumbs"><svg class="i"><use href="#home"/></svg>Dashboard<svg class="i"><use href="#chev"/></svg><span class="cur">Billing</span></div><span class="avatar">A</span></div></div>
+          <main class="main">
+            <span class="edge" style="left:32px"><span class="spec">288</span></span>
+            <div class="shell">
+              <header class="ph">
+                <div class="trow"><h1>Billing &amp; subscription</h1></div>
+                <p class="desc">Manage your subscription, payment methods, and billing information</p>
+                <div class="acts"><span class="badge b-solid">PRO PLAN</span><span class="btn btn-p">Change plan</span></div>
+              </header>
+              <div class="bgrid">
+                <div class="col">
+                  <div class="card"><div class="card-h"><div><h3>Current subscription</h3><p class="muted" style="margin-top:4px">Up to 5 websites, all features, +$5 per additional website</p></div><span class="badge b-n">Free</span></div>
+                    <div class="card-b"><p style="font-weight:500">Pro plan</p><p style="font:600 20px/28px var(--font-sans);color:var(--primary)">Lifetime access</p>
+                      <ul class="feat"><li><svg class="i"><use href="#check"/></svg>Up to 5 websites</li><li><svg class="i"><use href="#check"/></svg>Click-to-edit interface</li><li><svg class="i"><use href="#check"/></svg>Full version history</li></ul></div></div>
+                  <div class="card"><div class="card-h"><h3>Payment methods</h3><span class="btn btn-o btn-sm">Add new card</span></div><div class="card-b"><p class="empty">No payment methods added yet</p></div></div>
+                  <div class="card"><div class="card-h"><h3>Invoice history</h3></div><div class="card-b"><p class="empty">No invoices yet</p></div></div>
+                </div>
+                <div class="col">
+                  <div class="card"><div class="card-h"><div><h3>AI credits</h3><p class="muted" style="margin-top:4px">Pay-per-use for AI features</p></div><span class="btn btn-p btn-sm">Buy credits</span></div>
+                    <div class="card-b"><div class="hero"><b>500</b><span class="xs">Available credits</span></div>
+                      <div class="pair"><div><b class="tab">0</b><p class="xs muted">Total purchased</p></div><div><b class="tab">0</b><p class="xs muted">Total used</p></div></div></div></div>
+                  <div class="card"><div class="card-h"><h3>Current usage</h3></div>
+                    <div class="card-b"><div style="display:flex;justify-content:space-between"><span>Websites</span><span class="badge b-a tab">1 / 5</span></div><div class="bar"><i></i></div>
+                      <div class="info"><p style="font-weight:600">Pro plan benefits</p><p class="xs" style="margin-top:6px">5 websites · AI features included · 5 collaborators per site</p></div></div></div>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div></div></div>
+
+      <div><div class="cap"><b>375</b></div>
+      <div class="frame w375" style="height:960px"><div class="app"><div style="min-width:0">
+        <div class="hdr"><div class="hdr-in"><div class="crumbs"><span class="menu-btn"><svg class="i i18"><use href="#menu"/></svg></span><svg class="i"><use href="#home"/></svg><svg class="i"><use href="#chev"/></svg><span class="cur">Billing</span></div><span class="avatar">A</span></div></div>
+        <main class="main">
+          <span class="edge" style="left:16px"><span class="spec">16</span></span>
+          <div class="shell">
+            <header class="ph">
+              <div class="trow"><h1>Billing &amp; subscription</h1></div>
+              <p class="desc">Manage your subscription, payment methods, and billing information</p>
+              <div class="acts"><span class="badge b-solid">PRO PLAN</span><span class="btn btn-p">Change plan</span></div>
+            </header>
+            <div class="bgrid">
+              <div class="col">
+                <div class="card"><div class="card-h"><div><h3>Current subscription</h3><p class="muted" style="margin-top:4px">Up to 5 websites, all features</p></div><span class="badge b-n">Free</span></div>
+                  <div class="card-b"><p style="font-weight:500">Pro plan</p><p style="font:600 20px/28px var(--font-sans);color:var(--primary)">Lifetime access</p></div></div>
+                <div class="card"><div class="card-h"><div><h3>AI credits</h3></div><span class="btn btn-p btn-sm">Buy credits</span></div>
+                  <div class="card-b"><div class="hero"><b>500</b><span class="xs">Available credits</span></div>
+                    <div class="pair"><div><b class="tab">0</b><p class="xs muted">Total purchased</p></div><div><b class="tab">0</b><p class="xs muted">Total used</p></div></div></div></div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div></div></div></div>
+    </div>
+    <ul class="notes">
+      <li>No-plan state (not drawn): the same header with no actions, then a <span class="mono">max-w-lg</span> card on the left edge. Its heading ("Choose a plan to continue" / "You're on credits") is an h2, which tests still find by role and name.</li>
+    </ul>
+  </section>
+</div>
+</body>
+</html>

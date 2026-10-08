@@ -224,7 +224,7 @@ export function TrialStatusCard({
 }: TrialStatusCardProps) {
   if (isLoading) {
     return (
-      <Card variant="outline" className="mb-6 p-6">
+      <Card variant="outline" className="p-6">
         <LoadingRows />
       </Card>
     );
@@ -248,7 +248,7 @@ export function TrialStatusCard({
     : trialCopy(trial, isExhausted);
 
   return (
-    <Card variant="outline" className="mb-6 space-y-5 p-6">
+    <Card variant="outline" className="space-y-5 p-6">
       <div className="flex items-start gap-3">
         <IconTile tone={timeTone(daysRemaining)}>
           <Clock aria-hidden="true" />

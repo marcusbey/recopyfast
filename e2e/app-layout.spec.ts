@@ -48,31 +48,40 @@ const FIXTURE_EMBED_SCRIPT = buildEmbedScript({
 const LONG_LINK_LABEL =
   "Client review: homepage hero, pricing tables and footer copy";
 
-const CAPTURE_ROOT = path.join(
+/**
+ * Each story writes its evidence beside its own design doc, so a later
+ * story's captures never overwrite the set an earlier review judged.
+ */
+const S66A_CAPTURE_ROOT = path.join(
   process.cwd(),
   "docs/designs/s66a-app-design-tokens-and-panels",
+);
+const S66B_CAPTURE_ROOT = path.join(
+  process.cwd(),
+  "docs/designs/s66b-app-page-layout",
 );
 const MAX_CAPTURE_BYTES = 400 * 1024;
 const MAX_CAPTURE_HEIGHT = 4_400;
 
 /**
- * `RCF_LAYOUT_SCREENSHOTS=1` writes the evidence set into `after/`;
- * `RCF_LAYOUT_SCREENSHOTS=before` writes the same set into `before/`, which is
- * how the pre-change captures were taken. Unset, nothing is written: CI runs
- * these as assertions only.
+ * `RCF_LAYOUT_SCREENSHOTS=1` writes the evidence set into `<root>/after/`;
+ * `RCF_LAYOUT_SCREENSHOTS=before` writes the same set into `<root>/before/`,
+ * which is how the pre-change captures were taken. Unset, nothing is written:
+ * CI runs these as assertions only.
  */
-function captureDirectory(): string | null {
+function captureDirectory(root: string): string | null {
   const flag = process.env.RCF_LAYOUT_SCREENSHOTS;
   if (!flag || flag === "0") return null;
-  return path.join(CAPTURE_ROOT, flag === "before" ? "before" : "after");
+  return path.join(root, flag === "before" ? "before" : "after");
 }
 
 async function capture(
+  root: string,
   page: Page,
   name: string,
   options: { fullPage?: boolean } = {},
 ): Promise<void> {
-  const directory = captureDirectory();
+  const directory = captureDirectory(root);
   if (!directory) return;
 
   mkdirSync(directory, { recursive: true });
@@ -447,7 +456,7 @@ test.describe("s66a app layout harness", () => {
       await dialog.getByRole("button", { name: "Register Site" }).click();
       await expect(dialog.getByText(/data-site-token=/)).toBeVisible();
 
-      await capture(page, `site-registered-${width}`);
+      await capture(S66A_CAPTURE_ROOT, page, `site-registered-${width}`);
       const measurement = await measureDialog(page);
 
       expectContainedDialog(measurement);
@@ -463,7 +472,7 @@ test.describe("s66a app layout harness", () => {
       await signIn(page, width);
 
       await openShareDialog(page);
-      await capture(page, `share-preview-link-${width}`);
+      await capture(S66A_CAPTURE_ROOT, page, `share-preview-link-${width}`);
       const measurement = await measureDialog(page);
 
       expectContainedDialog(measurement);
@@ -481,7 +490,7 @@ test.describe("s66a app layout harness", () => {
    * be wrong" 2), captured first so a red run still leaves its evidence.
    */
   async function captureDashboardPages(page: Page): Promise<void> {
-    if (!captureDirectory()) return;
+    if (!captureDirectory(S66A_CAPTURE_ROOT)) return;
     for (const [route, name] of [
       ["/dashboard", "dashboard-1280"],
       ["/dashboard/sites", "sites-1280"],
@@ -491,7 +500,7 @@ test.describe("s66a app layout harness", () => {
       await page.goto(route);
       await applyTheme(page, "dark");
       await page.waitForLoadState("networkidle");
-      await capture(page, name, { fullPage: true });
+      await capture(S66A_CAPTURE_ROOT, page, name, { fullPage: true });
     }
   }
 
@@ -569,4 +578,575 @@ test.describe("s66a app layout harness", () => {
       await expectSquareFocus(page, firstTab);
     }
   });
+});
+
+/* -------------------------------------------------------------------------
+ * s66b1 — one frame, one title, one left edge (ADR 053).
+ *
+ * Before s66b1 every app page titled itself: `.text-display` on Overview,
+ * a 30/700 h1 on Content and Settings, an h2 and no h1 at all on Analytics,
+ * and a second `container mx-auto px-4` on Billing that put its title 16 px
+ * right of every other page. Each was a convention nobody had to follow, and
+ * jsdom could not have caught any of it: it computes no layout. These tests
+ * measure the frame in a real browser at the four widths the owner asked
+ * for. "One left edge" is the contract the whole story turns on, so it is
+ * measured on every direct child of `[data-page-shell]`, not only on the h1.
+ * ---------------------------------------------------------------------- */
+
+const APP_PAGE_WIDTHS = [375, 768, 1280, 1920] as const;
+type AppPageWidth = (typeof APP_PAGE_WIDTHS)[number];
+
+/** Header and sidebar brand row are one 56 px band (design system, Shell). */
+const APP_HEADER_HEIGHT = 56;
+/** The layout's gutter at ≥1024 (`lg:px-8`). */
+const WIDE_GUTTER = 32;
+const SIDEBAR_BREAKPOINT = 1024;
+/** Tailwind's `sm`: where the shell's gap and the header's layout change. */
+const SM_BREAKPOINT = 640;
+/**
+ * `PageShell`'s rhythm (design system, Shell): header to first section, 24px
+ * from 640 up and 16px below.
+ */
+const SHELL_GAP = { narrow: 16, wide: 24 } as const;
+/** Sub-pixel rounding, never a real misalignment. */
+const EDGE_TOLERANCE = 0.5;
+const CONTRAST_WIDTH: AppPageWidth = 1280;
+const MIN_TEXT_CONTRAST = 4.5;
+
+/**
+ * The content's left edge, from the 256 px sidebar and the 16 / 24 / 32
+ * gutters. 1920 has no constant: the 1180 px column centres in whatever width
+ * the scrollbar leaves (530 with overlay scrollbars, 522.5 with a classic
+ * 15 px one), so its edge is read from `main` instead.
+ */
+const EXPECTED_CONTENT_LEFT: Record<AppPageWidth, number | "main"> = {
+  375: 16,
+  768: 24,
+  1280: 288,
+  1920: "main",
+};
+
+interface AppPage {
+  path: string;
+  /** Capture file stem. */
+  name: string;
+  /** The sidebar item that carries `aria-current="page"` on this route. */
+  navLabel: string;
+  /** The page's description, rendered by `PageShell` under the h1. */
+  description: string;
+  /**
+   * Renders header actions in every state the harness can meet, so their
+   * absence is a failure. Billing has them in its ready state only; where
+   * they render, they are checked all the same.
+   */
+  hasActions: boolean;
+}
+
+const APP_PAGES: readonly AppPage[] = [
+  {
+    path: "/dashboard",
+    name: "overview",
+    navLabel: "Overview",
+    description: "Every site you have connected, and what has changed on them.",
+    hasActions: true,
+  },
+  {
+    path: "/dashboard/content",
+    name: "content",
+    navLabel: "Content",
+    description: "Manage all editable content across your sites",
+    hasActions: false,
+  },
+  {
+    path: "/dashboard/analytics",
+    name: "analytics",
+    navLabel: "Analytics",
+    description: "Monitor your site performance and user engagement",
+    hasActions: true,
+  },
+  {
+    path: "/dashboard/settings",
+    name: "settings",
+    navLabel: "Settings",
+    description: "Manage your account and preferences",
+    hasActions: false,
+  },
+  {
+    path: "/dashboard/billing",
+    name: "billing",
+    navLabel: "Billing",
+    description:
+      "Manage your subscription, payment methods, and billing information",
+    hasActions: false,
+  },
+];
+
+/** Never the current page on any route above, so always an inactive item. */
+const INACTIVE_NAV_LABEL = "Sites";
+
+interface HeadingMeasurement {
+  text: string;
+  left: number;
+  fontSize: string;
+  fontWeight: string;
+  insidePageHeader: boolean;
+}
+
+interface FrameMeasurement {
+  headerHeight: number | null;
+  headerBottom: number | null;
+  /** The sidebar brand row's bottom (the sidebar is off-canvas below 1024). */
+  brandBottom: number | null;
+  /** `documentElement.scrollWidth - clientWidth`. */
+  pageOverflow: number;
+  /** Every visible h1 in the document. */
+  headings: HeadingMeasurement[];
+  /** `main`'s left plus the ≥1024 gutter. */
+  mainContentLeft: number | null;
+  /**
+   * The visible element children of `[data-page-shell]`, or null when no
+   * shell exists. "Visible" is wider than 1 px and taller than 0: it drops
+   * exactly what is not a section — a closed dialog root renders nothing or
+   * portals to <body>, a live region or `sr-only` node is at most 1 px, and
+   * a banner that renders `null` is not an element at all.
+   */
+  shellChildren: Array<{ element: string; left: number }> | null;
+  /**
+   * `[data-page-header]`'s bottom to the top of the first visible section
+   * after it: the shell's gap as drawn. Null without a header or a section.
+   */
+  headerToFirstSection: number | null;
+  /**
+   * `PageHeader`'s grid areas, found by name (`grid-row-start` computes to
+   * the area's name), so the check reads the header's own layout contract
+   * rather than its class list. Null for an area the page does not render.
+   */
+  headerAreas: {
+    title: { top: number; bottom: number } | null;
+    description: { top: number; bottom: number } | null;
+    actions: { top: number; bottom: number } | null;
+  };
+}
+
+async function measureFrame(page: Page): Promise<FrameMeasurement> {
+  return page.evaluate((gutter) => {
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = getComputedStyle(element);
+      return style.visibility !== "hidden" && style.display !== "none";
+    };
+    const describe = (element: Element) => {
+      const className =
+        typeof element.className === "string"
+          ? element.className.split(/\s+/).slice(0, 3).join(".")
+          : "";
+      return `${element.tagName.toLowerCase()}${className ? `.${className}` : ""}`;
+    };
+
+    const html = document.documentElement;
+    const header = document.querySelector("[data-app-header]");
+    const brand = document.querySelector("[data-sidebar-brand]");
+    const main = document.querySelector("main");
+    const shell = document.querySelector("[data-page-shell]");
+
+    const headings = Array.from(document.querySelectorAll("h1"))
+      .filter(isVisible)
+      .map((heading) => {
+        const style = getComputedStyle(heading);
+        return {
+          text: heading.textContent?.trim() ?? "",
+          left: heading.getBoundingClientRect().left,
+          fontSize: style.fontSize,
+          fontWeight: style.fontWeight,
+          insidePageHeader: heading.closest("[data-page-header]") !== null,
+        };
+      });
+
+    const isSection = (child: Element) =>
+      isVisible(child) && child.getBoundingClientRect().width > 1;
+
+    const shellChildren = shell
+      ? Array.from(shell.children)
+          .filter(isSection)
+          .map((child) => ({
+            element: describe(child),
+            left: child.getBoundingClientRect().left,
+          }))
+      : null;
+
+    const pageHeader = shell?.querySelector(":scope > [data-page-header]");
+    const firstSection = pageHeader
+      ? Array.from(shell?.children ?? [])
+          .slice(Array.from(shell?.children ?? []).indexOf(pageHeader) + 1)
+          .find(isSection)
+      : undefined;
+    const headerToFirstSection =
+      pageHeader && firstSection
+        ? firstSection.getBoundingClientRect().top -
+          pageHeader.getBoundingClientRect().bottom
+        : null;
+
+    const area = (name: string) => {
+      const element = pageHeader
+        ? Array.from(pageHeader.children).find(
+            (child) =>
+              isVisible(child) && getComputedStyle(child).gridRowStart === name,
+          )
+        : undefined;
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    };
+
+    return {
+      headerHeight: header ? header.getBoundingClientRect().height : null,
+      headerBottom: header ? header.getBoundingClientRect().bottom : null,
+      brandBottom: brand ? brand.getBoundingClientRect().bottom : null,
+      pageOverflow: html.scrollWidth - html.clientWidth,
+      headings,
+      mainContentLeft: main ? main.getBoundingClientRect().left + gutter : null,
+      shellChildren,
+      headerToFirstSection,
+      headerAreas: {
+        title: area("title"),
+        description: area("description"),
+        actions: area("actions"),
+      },
+    };
+  }, WIDE_GUTTER);
+}
+
+const isNear = (actual: number, expected: number) =>
+  Math.abs(actual - expected) <= EDGE_TOLERANCE;
+
+/**
+ * Every way one page breaks the frame contract, as readable lines, so a red
+ * run reports all five pages at once instead of stopping at the first.
+ * Returns the h1's left x too, for the across-pages check.
+ */
+function frameViolations(
+  appPage: AppPage,
+  width: AppPageWidth,
+  frame: FrameMeasurement,
+): { violations: string[]; headingLeft: number | null } {
+  const at = `${appPage.name} @${width}`;
+  const violations: string[] = [];
+
+  if (frame.headerHeight === null || frame.headerBottom === null) {
+    violations.push(`${at}: no [data-app-header]`);
+  } else {
+    if (!isNear(frame.headerHeight, APP_HEADER_HEIGHT)) {
+      violations.push(
+        `${at}: header is ${frame.headerHeight}px tall, expected ${APP_HEADER_HEIGHT}`,
+      );
+    }
+    if (width >= SIDEBAR_BREAKPOINT) {
+      if (frame.brandBottom === null) {
+        violations.push(`${at}: no [data-sidebar-brand]`);
+      } else if (!isNear(frame.brandBottom, frame.headerBottom)) {
+        violations.push(
+          `${at}: sidebar brand row ends at ${frame.brandBottom}, header at ${frame.headerBottom}`,
+        );
+      }
+    }
+  }
+
+  if (frame.pageOverflow > 0) {
+    violations.push(`${at}: page scrolls sideways by ${frame.pageOverflow}px`);
+  }
+
+  if (frame.headings.length !== 1) {
+    violations.push(
+      `${at}: ${frame.headings.length} visible h1s (${frame.headings.map((heading) => `"${heading.text}"`).join(", ")}), expected 1`,
+    );
+  }
+  const heading = frame.headings[0];
+  if (!heading) return { violations, headingLeft: null };
+
+  if (!heading.insidePageHeader) {
+    violations.push(`${at}: the h1 is not inside [data-page-header]`);
+  }
+  if (heading.fontSize !== "24px" || heading.fontWeight !== "600") {
+    violations.push(
+      `${at}: the h1 is ${heading.fontSize}/${heading.fontWeight}, expected 24px/600`,
+    );
+  }
+
+  const expectedLeft = EXPECTED_CONTENT_LEFT[width];
+  const contentLeft =
+    expectedLeft === "main" ? frame.mainContentLeft : expectedLeft;
+  if (contentLeft === null) {
+    violations.push(`${at}: no <main> to read the content edge from`);
+  } else if (!isNear(heading.left, contentLeft)) {
+    violations.push(
+      `${at}: the h1 starts at x=${heading.left}, expected ${contentLeft}`,
+    );
+  }
+
+  if (frame.shellChildren === null) {
+    violations.push(`${at}: no [data-page-shell]`);
+  } else {
+    // At least the header and one section: a page that wrapped every
+    // section in one extra div would pass the edge check below vacuously.
+    if (frame.shellChildren.length < 2) {
+      violations.push(
+        `${at}: [data-page-shell] has ${frame.shellChildren.length} visible children, expected at least 2`,
+      );
+    }
+    for (const child of frame.shellChildren) {
+      if (!isNear(child.left, heading.left)) {
+        violations.push(
+          `${at}: shell child ${child.element} starts at x=${child.left}, the h1 at ${heading.left}`,
+        );
+      }
+    }
+  }
+
+  violations.push(...rhythmViolations(appPage, width, frame));
+
+  return { violations, headingLeft: heading.left };
+}
+
+const centre = (box: { top: number; bottom: number }) =>
+  (box.top + box.bottom) / 2;
+
+/**
+ * The shell's vertical contract, as drawn (s66b1 review m-2). jsdom pins the
+ * classes (`page-shell.test.tsx`); only a browser shows the result:
+ * - the header to the first section is 24px from 640 up and 16px below;
+ * - header actions sit centred on the title row from 640 up, and in their
+ *   own row under the description below it. They used to sit on the bottom
+ *   of the whole block, and at 768 a two-line description pushed the button
+ *   down and away from the title it acts on.
+ */
+function rhythmViolations(
+  appPage: AppPage,
+  width: AppPageWidth,
+  frame: FrameMeasurement,
+): string[] {
+  const at = `${appPage.name} @${width}`;
+  const violations: string[] = [];
+  const isWide = width >= SM_BREAKPOINT;
+
+  // No section at all is already reported as "fewer than 2 children".
+  if (frame.headerToFirstSection !== null) {
+    const expectedGap = isWide ? SHELL_GAP.wide : SHELL_GAP.narrow;
+    if (!isNear(frame.headerToFirstSection, expectedGap)) {
+      violations.push(
+        `${at}: header to first section is ${frame.headerToFirstSection}px, expected ${expectedGap}`,
+      );
+    }
+  }
+
+  const { title, description, actions } = frame.headerAreas;
+  if (!actions) {
+    if (appPage.hasActions) violations.push(`${at}: no header actions`);
+    return violations;
+  }
+
+  if (isWide) {
+    if (!title) {
+      violations.push(`${at}: no title row to centre the actions on`);
+    } else if (!isNear(centre(actions), centre(title))) {
+      violations.push(
+        `${at}: actions centred at y=${centre(actions)}, the title row at y=${centre(title)}`,
+      );
+    }
+  } else if (!description) {
+    violations.push(`${at}: no description to place the actions under`);
+  } else if (actions.top < description.bottom - EDGE_TOLERANCE) {
+    violations.push(
+      `${at}: actions start at y=${actions.top}, above the description's bottom at y=${description.bottom}`,
+    );
+  }
+
+  return violations;
+}
+
+/**
+ * The text colour of `target` and the colour actually behind it, both
+ * resolved by the browser itself on a 1×1 canvas. Tailwind 4 writes
+ * `bg-primary/12` as a `color-mix()`, which computes to an oklab colour no
+ * string parser here understands; the canvas converts any CSS colour to
+ * sRGB. The background is composited from the first opaque ancestor up,
+ * which is what "the active nav item against its composited background"
+ * means: a 12% tint over the sidebar card, not the tint alone.
+ */
+async function compositedColors(
+  target: Locator,
+): Promise<{ foreground: Rgb; background: Rgb }> {
+  const { foreground, background } = await target.evaluate((element) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("No 2D canvas context to resolve colours.");
+    const paint = (color: string) => {
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+    };
+    const read = () => Array.from(context.getImageData(0, 0, 1, 1).data);
+
+    const layers: string[] = [];
+    for (let node: Element | null = element; node; node = node.parentElement) {
+      const color = getComputedStyle(node).backgroundColor;
+      layers.unshift(color);
+      context.clearRect(0, 0, 1, 1);
+      paint(color);
+      if (read()[3] === 255) break;
+    }
+
+    context.clearRect(0, 0, 1, 1);
+    // What a browser paints behind a root that sets no background.
+    paint("#ffffff");
+    layers.forEach(paint);
+    const behind = read();
+    paint(getComputedStyle(element).color);
+    return { foreground: read(), background: behind };
+  });
+
+  const toRgb = ([r = 0, g = 0, b = 0]: number[]): Rgb => ({ r, g, b, a: 1 });
+  return { foreground: toRgb(foreground), background: toRgb(background) };
+}
+
+function contrastRatio(foreground: Rgb, background: Rgb): number {
+  const a = luminance(foreground);
+  const b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+/** Waits out colour transitions (nav items fade over 200 ms) after a theme switch. */
+async function settleTransitions(page: Page): Promise<void> {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation instanceof CSSTransition)
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+}
+
+async function contrastViolations(
+  page: Page,
+  appPage: AppPage,
+  theme: "dark" | "light",
+): Promise<string[]> {
+  const at = `${appPage.name} @${CONTRAST_WIDTH} ${theme}`;
+  const sidebar = page.getByRole("navigation", { name: "Dashboard" });
+  const targets: Array<[string, Locator]> = [
+    ["h1", page.locator("[data-page-header] h1").first()],
+    [
+      "description",
+      page
+        .locator("[data-page-header]")
+        .getByText(appPage.description, { exact: true })
+        .first(),
+    ],
+    [
+      "inactive nav item",
+      sidebar.getByRole("link", { name: INACTIVE_NAV_LABEL, exact: true }),
+    ],
+    [
+      "active nav item",
+      sidebar.locator('a[aria-current="page"]', {
+        hasText: appPage.navLabel,
+      }),
+    ],
+  ];
+  // The overview is the breadcrumb root: it renders no trail there.
+  if (appPage.path !== "/dashboard") {
+    targets.push([
+      "breadcrumb",
+      page
+        .getByRole("navigation", { name: "Breadcrumb" })
+        .getByRole("link", { name: "Dashboard", exact: true }),
+    ]);
+  }
+
+  const violations: string[] = [];
+  for (const [label, target] of targets) {
+    if ((await target.count()) === 0) {
+      violations.push(`${at}: no ${label} to measure`);
+      continue;
+    }
+    const { foreground, background } = await compositedColors(target);
+    const ratio = contrastRatio(foreground, background);
+    if (ratio < MIN_TEXT_CONTRAST) {
+      violations.push(`${at}: ${label} contrasts ${ratio.toFixed(2)}:1`);
+    }
+  }
+  return violations;
+}
+
+test.describe("s66b app pages", () => {
+  test.describe.configure({ mode: "serial" });
+  test.setTimeout(120_000);
+
+  let supabase: SupabaseClient | null = null;
+  const owner = createLayoutOwnerFixture();
+
+  test.beforeAll(async () => {
+    supabase = createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E");
+    await seedLayoutOwner(supabase, owner);
+  });
+
+  test.afterAll(async () => {
+    if (supabase) await deleteLayoutOwner(supabase, owner);
+  });
+
+  for (const width of APP_PAGE_WIDTHS) {
+    test(`app pages @${width}`, async ({ page }) => {
+      if (!supabase) throw new Error("Layout harness client is not ready.");
+      await page.setViewportSize({ width, height: VIEWPORT_HEIGHT });
+      await page.emulateMedia({ colorScheme: "dark" });
+      await signInAsLayoutOwner(page, supabase, owner, "/dashboard");
+
+      const violations: string[] = [];
+      const headingLefts: Array<[string, number]> = [];
+
+      for (const appPage of APP_PAGES) {
+        await page.goto(appPage.path);
+        await page.waitForLoadState("networkidle");
+        await capture(S66B_CAPTURE_ROOT, page, `${appPage.name}-${width}`, {
+          fullPage: true,
+        });
+
+        const frame = await measureFrame(page);
+        const result = frameViolations(appPage, width, frame);
+        violations.push(...result.violations);
+        if (result.headingLeft !== null) {
+          headingLefts.push([appPage.name, result.headingLeft]);
+        }
+
+        if (width === CONTRAST_WIDTH) {
+          for (const theme of ["dark", "light"] as const) {
+            await applyTheme(page, theme);
+            await page.mouse.move(1, 1);
+            await settleTransitions(page);
+            violations.push(
+              ...(await contrastViolations(page, appPage, theme)),
+            );
+          }
+        }
+      }
+
+      // One left edge per width: the same x on every page, not five values
+      // that each happen to be within tolerance of a constant.
+      const lefts = headingLefts.map(([, left]) => left);
+      if (
+        lefts.length > 0 &&
+        Math.max(...lefts) - Math.min(...lefts) > EDGE_TOLERANCE
+      ) {
+        violations.push(
+          `@${width}: the h1 starts at different x across pages: ${headingLefts
+            .map(([name, left]) => `${name} ${left}`)
+            .join(", ")}`,
+        );
+      }
+
+      expect(violations).toEqual([]);
+    });
+  }
 });

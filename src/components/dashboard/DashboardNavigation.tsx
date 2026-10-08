@@ -153,7 +153,7 @@ export function DashboardNavigation({
         aria-current={active ? "page" : undefined}
         aria-disabled={!accessible || undefined}
         className={cn(
-          "group relative flex min-h-10 items-center gap-3 rounded-md py-2 pl-3 pr-2.5 text-sm",
+          "group relative flex min-h-10 items-center gap-3 rounded-container py-2 pl-3 pr-2.5 text-sm",
           "transition-[color,background-color] duration-200 ease-out",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
           active
@@ -174,7 +174,7 @@ export function DashboardNavigation({
             competing with the label, and it does not shift the row. */}
         <span
           className={cn(
-            "absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-r-full bg-primary transition-opacity duration-200 ease-out",
+            "absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 bg-primary transition-opacity duration-200 ease-out",
             active ? "opacity-100" : "opacity-0",
           )}
           aria-hidden="true"
@@ -195,11 +195,14 @@ export function DashboardNavigation({
 
   return (
     <>
-      {/* Mobile Menu Button */}
+      {/* Mobile Menu Button. Fixed over the header's 40px spacer, which sits
+          on the header's own gutter (16, then 24 from 640): `left-4` alone
+          drifted 8px off it between 640 and 1023. `top-2` centres the 40px
+          button in the 56px header. */}
       <Button
         variant="ghost"
         size="icon"
-        className="fixed left-4 top-4 z-50 lg:hidden"
+        className="fixed left-4 top-2 z-50 sm:left-6 lg:hidden"
         onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         aria-expanded={isMobileMenuOpen}
         aria-controls={sidebarId}
@@ -214,10 +217,11 @@ export function DashboardNavigation({
         </span>
       </Button>
 
-      {/* Mobile Overlay — tinted with the surface hue, not flat black. */}
+      {/* Mobile Overlay — tinted with the surface hue, not flat black, and
+          never blurred (design system, Surfaces: "Overlay: no blur"). */}
       {isMobileMenuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-[2px] lg:hidden"
+          className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
           aria-hidden="true"
         />
@@ -236,14 +240,18 @@ export function DashboardNavigation({
         )}
       >
         <div className="flex h-full flex-col">
-          {/* Wordmark */}
-          <div className="flex h-16 shrink-0 items-center px-5">
+          {/* Wordmark. 56px with its rule, the same band as the app header,
+              so the two bottom rules read as one line across the top. */}
+          <div
+            data-sidebar-brand
+            className="flex h-14 shrink-0 items-center border-b border-border px-5"
+          >
             <Link
               href="/dashboard"
-              className="flex items-center gap-2.5 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+              className="flex items-center gap-2.5 rounded-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
             >
               <span
-                className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-[0.6875rem] font-bold tracking-tight text-primary-foreground"
+                className="flex h-7 w-7 items-center justify-center rounded-container bg-primary text-[0.6875rem] font-semibold tracking-tight text-primary-foreground"
                 aria-hidden="true"
               >
                 RF
@@ -270,7 +278,7 @@ export function DashboardNavigation({
 
           {/* Plan */}
           <div className="shrink-0 p-3">
-            <div className="rounded-lg border border-border bg-surface-1 p-3">
+            <div className="rounded-container border border-border bg-surface-1 p-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-eyebrow">Plan</p>
