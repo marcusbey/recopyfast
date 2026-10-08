@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -95,7 +96,7 @@ export function VersionPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Version {version.versionNumber} Preview
@@ -106,7 +107,7 @@ export function VersionPreviewDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <DialogBody className="space-y-6">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -221,7 +222,7 @@ export function VersionPreviewDialog({
               )}
             </>
           )}
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   );

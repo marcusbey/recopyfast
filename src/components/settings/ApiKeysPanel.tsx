@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Badge } from "@/components/ui/badge";
 import { Key, Trash2, Loader2 } from "lucide-react";
 import { useSites } from "@/hooks/useSites";
@@ -164,21 +165,20 @@ export function ApiKeysPanel() {
           <>
             <div className="space-y-2">
               <Label htmlFor={siteSelectId}>Site</Label>
-              <select
+              <NativeSelect
                 id={siteSelectId}
                 value={selectedSiteId}
                 onChange={(e) => {
                   setSelectedSiteId(e.target.value);
                   setRevealedKey(null);
                 }}
-                className="w-full px-3 py-2 border border-input rounded-md text-sm bg-transparent"
               >
                 {sites.map((site) => (
                   <option key={site.id} value={site.id}>
                     {site.name || site.domain}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
 
             {/* Shown exactly once: the server keeps only a hash, so there is no

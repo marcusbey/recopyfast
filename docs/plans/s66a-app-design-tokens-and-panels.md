@@ -34,7 +34,7 @@ The acceptance criteria are AC 1–10 in the story.
 Each task starts with the failing test it names. A task ends with that test and every existing
 suite green, except where a task says a guard stays red until a named later task.
 
-1. [ ] **Authenticated layout harness (RED on today's code).**
+1. [x] **Authenticated layout harness (RED on today's code).**
    - **Files.** New `e2e/app-layout.spec.ts`, plus `e2e/support/owner-session.ts` for the seeding
      and sign-in helpers.
    - **Gating.** Gate on `createLocalServiceRoleClient("RUN_RECOPYFAST_CORE_E2E")`, as
@@ -95,7 +95,7 @@ suite green, except where a task says a guard stays red until a named later task
      - the marketing pages that import `ui/*`: `/` (Header), `/docs/install`, one `/blog/<slug>`,
        a 404, and `/try`, at 1280 and 375, with `npx playwright screenshot` or a throwaway script
        in the scratchpad. Use no new spec, so the contract stays 56; cap each at 4,400 CSS px tall.
-2. [ ] **Design guards (RED).**
+2. [x] **Design guards (RED).**
    - **Shared helper**, `src/__tests__/design/app-surface.ts`:
      - **Scanned roots:** `src/app/{dashboard,settings,login,signup,auth,edit}` and
        `src/components/{ui,dashboard,auth,settings,billing,shared}`, excluding `__tests__`.
@@ -131,7 +131,7 @@ suite green, except where a task says a guard stays red until a named later task
    - **When they go green.** The radius-guard tokens in task 3; the radius scan (ui/** and the
      two panels at zero) in tasks 4, 5 and 6 and fully at task 9; dialog-structure in task 6;
      native-select in task 5. Commit nothing until the suite is green (one story commit, AGENTS.md).
-3. [ ] **Tokens and global CSS.**
+3. [x] **Tokens and global CSS.**
    - **Tests first.**
      - `src/__tests__/design/globals-css.test.ts`, by plain text parsing:
        - no unlayered `*` rule sets `border-color`;
@@ -156,7 +156,7 @@ suite green, except where a task says a guard stays red until a named later task
      - `src/lib/utils/cn.ts`: `extendTailwindMerge({ extend: { theme: { radius: ["control",
        "container"] } } })`. Confirm the v3 option name against the tailwind-merge docs
        (Context7) before coding.
-4. [ ] **Square, flat primitives.**
+4. [x] **Square, flat primitives.**
    - **Tests first (RED), existing tests edited and named in the PR:**
      - `card.test.tsx:39,55`: `rounded-xl` becomes `rounded-container`.
      - `card.test.tsx:43`: `shadow-sm` becomes "no `shadow-` class".
@@ -182,7 +182,7 @@ suite green, except where a task says a guard stays red until a named later task
      - `tabs.tsx`: underline per the design system.
    - **Must pass unchanged:** the suites that render Tabs (`LoginForm.test.tsx`, settings,
      `SiteInstallationCard.test.tsx`), because roles and names are unchanged.
-5. [ ] **Selects and menus.**
+5. [x] **Selects and menus.**
    - **Tests first:**
      - New `native-select.test.tsx`:
        - `<Label htmlFor>` resolves to the `<select>`;
@@ -201,7 +201,7 @@ suite green, except where a task says a guard stays red until a named later task
      and `ApiKeysPanel.tsx:167`. Re-grep first. `native-select-guard` goes green.
    - **Must pass unchanged:** `BulkOperations.test.tsx` (`selectOptions` at `:301`),
      `ShareSiteDialog.test.tsx` and `WebhooksPanel.test.tsx`.
-6. [ ] **Dialog root cause, all 12 call sites.**
+6. [x] **Dialog root cause, all 12 call sites.**
    - **Tests first:** `dialog.test.tsx` gains:
      - `DialogContent` has `flex flex-col overflow-hidden` and no `overflow-y-auto` or `grid`;
      - `DialogBody` is exported and carries `overflow-y-auto min-h-0 flex-1` and `[&>*]:min-w-0`;
@@ -231,7 +231,7 @@ suite green, except where a task says a guard stays red until a named later task
      `SiteDetailView.test.tsx`, `sites/__tests__/page.test.tsx`,
      `SiteRegistrationModal.test.tsx` and `ShareSiteDialog.test.tsx` as they stand before tasks
      8 and 9).
-7. [ ] **CodeBlock primitive.**
+7. [x] **CodeBlock primitive.**
    - **Tests first:** new `code-block.test.tsx`:
      - it renders `value`;
      - by default the `<pre>` has `whitespace-pre-wrap` and `[overflow-wrap:anywhere]`;
@@ -241,7 +241,7 @@ suite green, except where a task says a guard stays red until a named later task
      - with fake timers, "Copied" shows for 2,000 ms and then "Copy";
      - a rejected write shows "Copy failed", never "Copied", and selects the `<pre>` contents.
    - **Implement** `ui/code-block.tsx` with props `value`, `label`, `wrap = true`; root `min-w-0`.
-8. [ ] **Site-registered panel.**
+8. [x] **Site-registered panel.**
    - **Tests first (RED), edits named in the PR:** in `SiteRegistrationModal.test.tsx`:
      - `/Site Registered Successfully!/i` (×9) becomes `/Site registered/i`;
      - `/^Copied!$/` (×2) becomes `/^Copied$/`;
@@ -261,7 +261,7 @@ suite green, except where a task says a guard stays red until a named later task
    - **Implement** per `docs/designs/s66a-…md` § 1. The form-state copy and behaviour are
      unchanged.
    - **Green:** the harness's 5 registration tests go green.
-9. [ ] **Share preview link dialog.**
+9. [x] **Share preview link dialog.**
    - **Tests first:**
      - `ShareSiteDialog.test.tsx` keeps every existing assertion and gains:
        - the title "Share preview link" and the button "Create link";
@@ -277,7 +277,7 @@ suite green, except where a task says a guard stays red until a named later task
      changes them).
    - **Green:** the harness's 5 share tests go green, and the radius baseline holds zero for
      ui/** and both panels.
-10. [ ] **Evidence and gates.**
+10. [x] **Evidence and gates.**
     - **Captures.** Run the harness with `RCF_LAYOUT_SCREENSHOTS=1` to write `after/`. Capture
       the marketing "after" set the same way as in task 1. Compare before with after, and
       record in the PR anything that changed beyond the accepted side effect. Squared

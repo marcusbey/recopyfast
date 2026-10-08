@@ -19,6 +19,7 @@ import { StatusBadge, type StatusTone } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 import { MAX_IMPORT_BYTES, MAX_IMPORT_LABEL } from "@/lib/bulk/constants";
 import {
   BulkOperation,
@@ -488,20 +489,17 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="import-format">Format</Label>
-                  {/* Native select: there is no `Select` primitive in
-                      `src/components/ui/` — recorded as gap 6 in the design
-                      system, to be built once, not freelanced here. */}
-                  <select
+                  <NativeSelect
                     id="import-format"
                     value={importFormat}
                     onChange={(e) =>
                       setImportFormat(e.target.value as "json" | "csv")
                     }
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    wrapperClassName="mt-1"
                   >
                     <option value="json">JSON</option>
                     <option value="csv">CSV</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div>
@@ -605,18 +603,18 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="export-format">Format</Label>
-                  <select
+                  <NativeSelect
                     id="export-format"
                     value={exportFormat}
                     onChange={(e) =>
                       setExportFormat(e.target.value as "json" | "csv" | "xml")
                     }
-                    className="mt-1 w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                    wrapperClassName="mt-1"
                   >
                     <option value="json">JSON</option>
                     <option value="csv">CSV</option>
                     <option value="xml">XML</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 {/* Always shown: what is in the file is not data-dependent, and
@@ -802,7 +800,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
 
                       <div>
                         <Label>Operation</Label>
-                        <select
+                        <NativeSelect
                           value={operation.operation}
                           onChange={(e) =>
                             updateBatchOperation(
@@ -811,13 +809,12 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
                               e.target.value,
                             )
                           }
-                          className="w-full px-3 py-2 border border-input rounded-md"
                         >
                           <option value="find_replace">Find & Replace</option>
                           <option value="append">Append</option>
                           <option value="prepend">Prepend</option>
                           <option value="set">Set Content</option>
-                        </select>
+                        </NativeSelect>
                       </div>
 
                       {operation.operation === "find_replace" ? (

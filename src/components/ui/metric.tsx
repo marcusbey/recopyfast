@@ -101,7 +101,7 @@ export function Metric(props: MetricProps) {
   const { href, className, emphasis = "default" } = props;
 
   const shell = cn(
-    "block h-full rounded-xl border border-border bg-card",
+    "block h-full rounded-container border border-border bg-card",
     emphasis === "lead" ? "p-6" : "px-5 py-4",
     className,
   );

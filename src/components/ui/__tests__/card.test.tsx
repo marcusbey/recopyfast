@@ -36,11 +36,37 @@ describe("Card Components", () => {
       render(<Card data-testid="card">Content</Card>);
 
       const card = screen.getByTestId("card");
-      expect(card.className).toContain("rounded-xl");
+      // s66a (ADR 050): containers are square and flat. Was `rounded-xl` and
+      // `shadow-sm`; a static panel no longer casts a shadow.
+      expect(card.className).toContain("rounded-container");
       expect(card.className).toContain("border");
       expect(card.className).toContain("bg-card");
       expect(card.className).toContain("text-card-foreground");
-      expect(card.className).toContain("shadow-sm");
+      expect(card.className).not.toMatch(/(^|\s)shadow-/);
+    });
+
+    it("should not lift or cast a shadow in the interactive variant", () => {
+      render(
+        <Card variant="interactive" data-testid="card">
+          Content
+        </Card>,
+      );
+
+      const card = screen.getByTestId("card");
+      // s66a: hover changes the border colour only (design system, Card).
+      expect(card.className).not.toMatch(/translate-y/);
+      expect(card.className).not.toMatch(/(^|\s|:)shadow-/);
+      expect(card.className).toContain("hover:border-primary/40");
+    });
+
+    it("should keep the elevated variant's shadow for floating surfaces", () => {
+      render(
+        <Card variant="elevated" data-testid="card">
+          Content
+        </Card>,
+      );
+
+      expect(screen.getByTestId("card").className).toContain("shadow-md");
     });
 
     it("should merge custom className with default classes", () => {
@@ -52,7 +78,7 @@ describe("Card Components", () => {
 
       const card = screen.getByTestId("card");
       expect(card.className).toContain("custom-class");
-      expect(card.className).toContain("rounded-xl");
+      expect(card.className).toContain("rounded-container");
     });
 
     it("should forward HTML attributes", () => {
@@ -153,7 +179,7 @@ describe("Card Components", () => {
       // by the contrast/typography checks, not here.
       expect(title.tagName).toBe("H3");
       expect(title).toHaveTextContent("Title");
-      expect(title.className).toContain("text-xl");
+      expect(title.className).toContain("text-base");
       expect(title.className).toContain("font-semibold");
     });
 
@@ -166,7 +192,7 @@ describe("Card Components", () => {
 
       const title = screen.getByTestId("title");
       expect(title.className).toContain("custom-title");
-      expect(title.className).toContain("text-xl");
+      expect(title.className).toContain("text-base");
     });
 
     it("should forward ref correctly", () => {

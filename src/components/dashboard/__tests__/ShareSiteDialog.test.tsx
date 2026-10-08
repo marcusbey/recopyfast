@@ -133,3 +133,49 @@ describe("ShareSiteDialog permission toggles", () => {
     ).toBeInTheDocument();
   });
 });
+
+/**
+ * s66a, design § 2. The dialog overflowed at 375 px and its "Expires in"
+ * select drew the browser chevron against the border (the owner's second
+ * screenshot). The layout is proved in a real browser by
+ * e2e/app-layout.spec.ts; these pin the copy and the classes that carry it.
+ */
+describe("ShareSiteDialog (s66a)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveLinksFetch();
+  });
+
+  it("is titled in sentence case, and creates with Create link", async () => {
+    await renderDialog();
+    expect(
+      screen.getByRole("heading", { name: "Share preview link" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Create link" }),
+    ).toBeInTheDocument();
+  });
+
+  it("draws the permission toggles with a 1px border", async () => {
+    await renderDialog();
+    for (const option of within(permissionsGroup()).getAllByRole("checkbox")) {
+      expect(option.className).not.toContain("border-2");
+      expect(option).toHaveClass("rounded-control");
+    }
+  });
+
+  it("marks a granted toggle with the accent border", async () => {
+    await renderDialog();
+    expect(permission("View")).toHaveClass("border-primary");
+    expect(permission("Publish")).not.toHaveClass("border-primary");
+  });
+
+  it("reports feedback through Alert", async () => {
+    const user = await renderDialog();
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Email is required for email invites");
+    expect(alert).toHaveClass("rounded-container");
+  });
+});

@@ -125,7 +125,7 @@ export function VersionHistoryPanel({
     <>
       {/* Backdrop — Escape provides the keyboard equivalent of clicking it. */}
       <div
-        className="fixed inset-0 z-40 bg-black/40 transition-opacity"
+        className="fixed inset-0 z-40 bg-foreground/40 transition-opacity"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -136,7 +136,7 @@ export function VersionHistoryPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-card shadow-2xl duration-300 animate-in slide-in-from-right"
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-md duration-300 animate-in slide-in-from-right"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border p-4">

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -174,7 +176,7 @@ export function UpgradeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6">
+        <DialogBody className="space-y-6">
           {error && (
             <Alert className="border-tone-danger-border bg-tone-danger-surface">
               <p className="text-tone-danger-text">{error}</p>
@@ -358,25 +360,23 @@ export function UpgradeDialog({
               • Card details are handled entirely by Stripe — we never see them
             </p>
           </div>
+        </DialogBody>
 
-          <div className="flex gap-3 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isBusy}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleSubmit}
-              disabled={isBusy || currentPlan === selectedPlan}
-              className="flex-1"
-            >
-              {submitLabel()}
-            </Button>
-          </div>
-        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isBusy}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={isBusy || currentPlan === selectedPlan}
+          >
+            {submitLabel()}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

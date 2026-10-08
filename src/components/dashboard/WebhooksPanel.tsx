@@ -23,8 +23,11 @@ import {
 } from "@/components/ui/select";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { Webhook, WebhookDelivery, WebhookDeliveryStatus } from "@/types";
@@ -482,21 +485,25 @@ export function WebhooksPanel({ siteId }: WebhooksPanelProps) {
           onInteractOutside={(event) => event.preventDefault()}
           onPointerDownOutside={(event) => event.preventDefault()}
         >
-          <DialogTitle>Your webhook signing secret</DialogTitle>
-          <DialogDescription>
-            Use this to verify that a delivery really came from RecopyFast.
-          </DialogDescription>
-          <Alert variant="warning">
-            <AlertTitle>This is shown once</AlertTitle>
-            <AlertDescription>
-              Copy it now and store it somewhere safe. It is never displayed
-              again — if you lose it, create a new webhook.
-            </AlertDescription>
-          </Alert>
-          <code className="block break-all rounded-md bg-surface-1 p-3 font-mono text-sm">
-            {revealedSecret}
-          </code>
-          <div className="flex flex-wrap justify-end gap-2">
+          <DialogHeader>
+            <DialogTitle>Your webhook signing secret</DialogTitle>
+            <DialogDescription>
+              Use this to verify that a delivery really came from RecopyFast.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogBody>
+            <Alert variant="warning">
+              <AlertTitle>This is shown once</AlertTitle>
+              <AlertDescription>
+                Copy it now and store it somewhere safe. It is never displayed
+                again — if you lose it, create a new webhook.
+              </AlertDescription>
+            </Alert>
+            <code className="block break-all rounded-md bg-surface-1 p-3 font-mono text-sm">
+              {revealedSecret}
+            </code>
+          </DialogBody>
+          <DialogFooter>
             <Button variant="ghost" size="sm" onClick={handleCopySecret}>
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -508,7 +515,7 @@ export function WebhooksPanel({ siteId }: WebhooksPanelProps) {
             >
               Done — I&apos;ve saved it
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>

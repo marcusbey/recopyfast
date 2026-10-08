@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -509,12 +510,14 @@ export function SiteDetailView({ site, userId }: SiteDetailViewProps) {
             </DialogDescription>
           </DialogHeader>
 
-          {regenerateError && (
-            <Alert variant="destructive">
-              <AlertTitle>Snippet was not regenerated</AlertTitle>
-              <AlertDescription>{regenerateError}</AlertDescription>
-            </Alert>
-          )}
+          <DialogBody>
+            {regenerateError && (
+              <Alert variant="destructive">
+                <AlertTitle>Snippet was not regenerated</AlertTitle>
+                <AlertDescription>{regenerateError}</AlertDescription>
+              </Alert>
+            )}
+          </DialogBody>
 
           <DialogFooter>
             <Button

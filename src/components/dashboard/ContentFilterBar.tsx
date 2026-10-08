@@ -2,6 +2,7 @@
 
 import { useId } from "react";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Search } from "lucide-react";
 
 interface Site {
@@ -21,10 +22,6 @@ interface ContentFilterBarProps {
   onStatusChange: (status: ContentStatusFilter) => void;
   sites: Site[];
 }
-
-/** Matches the Input primitive so the row reads as one control group. */
-const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 md:w-auto";
 
 export function ContentFilterBar({
   searchQuery,
@@ -65,11 +62,10 @@ export function ContentFilterBar({
         <label htmlFor={siteId} className="sr-only">
           Filter by site
         </label>
-        <select
+        <NativeSelect
           id={siteId}
           value={selectedSiteId || ""}
           onChange={(e) => onSiteChange(e.target.value || null)}
-          className={selectClassName}
         >
           <option value="">All Sites</option>
           {sites.map((site) => (
@@ -77,7 +73,7 @@ export function ContentFilterBar({
               {site.name || site.domain}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
 
       {/* Status Filter */}
@@ -85,19 +81,18 @@ export function ContentFilterBar({
         <label htmlFor={statusId} className="sr-only">
           Filter by status
         </label>
-        <select
+        <NativeSelect
           id={statusId}
           value={selectedStatus}
           onChange={(e) =>
             onStatusChange(e.target.value as ContentStatusFilter)
           }
-          className={selectClassName}
         >
           <option value="all">All Status</option>
           <option value="original">Original</option>
           <option value="edited">Edited</option>
           <option value="pending">Pending</option>
-        </select>
+        </NativeSelect>
       </div>
     </div>
   );
