@@ -14,7 +14,10 @@
  *
  * - R1 adoption: every routed `src/app/dashboard/**\/page.tsx` renders
  *   `<PageShell`, itself or through one listed delegate. A page that only
- *   redirects is exempt, and only while it still calls `redirect(`.
+ *   redirects is exempt, and only while it still calls `redirect(`. The
+ *   segment's `loading.tsx` and `error.tsx` render it too: Next draws each in
+ *   place of the page, inside the layout, so without one a pending route or a
+ *   thrown page showed no title.
  * - R2: `<PageHeader` is rendered by `ui/page-shell.tsx` and nowhere else. A
  *   second header outside the shell adds a second h1 that R3 cannot see,
  *   because the `<h1` is written inside `page-header.tsx`.
@@ -50,6 +53,13 @@ const PAGE_HEADER_FILE = "src/components/ui/page-header.tsx";
 
 /** Routed pages, outside the private `_ab-tests` folder (not a route). */
 const DASHBOARD_PAGE = /^src\/app\/dashboard\/(?:(?!_)[^/]+\/)*page\.tsx$/;
+
+/**
+ * The segment's fallbacks: what Next renders in place of a page while it is
+ * pending (`loading.tsx`) or after it throws (`error.tsx`).
+ */
+const DASHBOARD_FALLBACK =
+  /^src\/app\/dashboard\/(?:(?!_)[^/]+\/)*(?:loading|error)\.tsx$/;
 
 /** A page that renders through one component, which then owns the frame. */
 const DELEGATES: Readonly<Record<string, string>> = {
@@ -238,8 +248,12 @@ function dashboardPages(): string[] {
   return appSurfaceFiles().filter((file) => DASHBOARD_PAGE.test(file));
 }
 
+function dashboardFallbacks(): string[] {
+  return appSurfaceFiles().filter((file) => DASHBOARD_FALLBACK.test(file));
+}
+
 function allOffences(): Offence[] {
-  const adoption = dashboardPages()
+  const adoption = [...dashboardPages(), ...dashboardFallbacks()]
     .map((page) => adoptionOffence(page, readSource))
     .filter((offence): offence is Offence => offence !== null);
   const source = appSurfaceFiles().flatMap((file) =>
@@ -266,6 +280,15 @@ describe("page-shell guard (ADR 053)", () => {
       expect(pages).toContain(page);
     }
     expect(pages.some((page) => page.includes("/_ab-tests/"))).toBe(false);
+  });
+
+  it("finds the segment's loading and error fallbacks", () => {
+    expect(dashboardFallbacks()).toEqual(
+      expect.arrayContaining([
+        "src/app/dashboard/loading.tsx",
+        "src/app/dashboard/error.tsx",
+      ]),
+    );
   });
 
   it("names delegates, redirects and standalone pages that exist", () => {
@@ -388,6 +411,24 @@ describe("page-shell rules (self-test)", () => {
         false,
       );
       expect(DASHBOARD_PAGE.test("src/app/dashboard/layout.tsx")).toBe(false);
+    });
+
+    it("matches the segment fallbacks only", () => {
+      for (const file of [
+        "src/app/dashboard/loading.tsx",
+        "src/app/dashboard/error.tsx",
+        "src/app/dashboard/sites/[id]/error.tsx",
+      ]) {
+        expect(DASHBOARD_FALLBACK.test(file)).toBe(true);
+      }
+      for (const file of [
+        "src/app/dashboard/_ab-tests/loading.tsx",
+        "src/app/dashboard/global-error.tsx",
+        "src/app/dashboard/layout.tsx",
+        "src/app/dashboard/page.tsx",
+      ]) {
+        expect(DASHBOARD_FALLBACK.test(file)).toBe(false);
+      }
     });
   });
 

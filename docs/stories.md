@@ -2772,6 +2772,11 @@ Branch `feature/s66b1-app-shell` (this design's worktree branch,
     shell values as in code. ADR 053 is merged.
   - Lint, type-check, format, build and the full suite pass.
 
+Follow-up (review m-8): scrollbar-gutter: stable deferred — with a reserved gutter,
+react-remove-scroll-bar adds body margin-right on Radix scroll lock, shifting layout on
+classic-scrollbar systems; fix options: compensate via --removed-body-scroll-bar-size /
+data-scroll-locked margin reset, modal={false}, or reserve the gutter on the scroll container only.
+
 Embed allocation: 0 bytes.
 
 ## Story s66b2-app-page-passes — flat, square, nothing clipped
