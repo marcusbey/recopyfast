@@ -16,8 +16,13 @@
  * The Next.js recipe used to say that a root-layout tag completed installation.
  * On aicompoz.com the document-level widget remained mounted across client
  * navigation, while analytics could inspect credential-bearing editor URLs
- * before the widget removed their query values. Keep those checks explicit;
- * the widget does not expose a complete SPA teardown/reinitialization contract.
+ * before the widget removed their query values. Keep those checks explicit.
+ *
+ * s67 (ADR 049, owner decision 3): the widget now follows History API route
+ * changes on its own, and hash routes are not supported. The card used to
+ * say the widget had no complete lifecycle for client-side route changes;
+ * after s67 that contradicted /docs/install. The SPA wording here must keep
+ * matching src/lib/docs/installation-content.ts.
  */
 
 export type InstallRecipeId = "wordpress" | "nextjs" | "html";
@@ -48,7 +53,7 @@ export const installRecipes: readonly InstallRecipe[] = [
     location:
       'For React or Next.js, load the generated tag after the page has hydrated. In Next.js, next/script with strategy="afterInteractive" is one option; preserve every generated attribute and value.',
     notes:
-      "The widget has no complete lifecycle for client-side route changes. Verify direct loads, internal navigation, Back, reload, and returning to an edited page; a root layout or one-time script load does not complete SPA integration. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_edit_token, rcf_staging, or rcf_token. Use full-document navigation only when appropriate.",
+      "The widget follows client-side route changes made with the History API (links, Back and Forward in a history-mode router): each in-app navigation loads that page's published copy and makes its newly rendered elements editable. Hash routes (/#/route) are not supported; switch the router to history mode, or give each route's elements a unique author-written data-rcf-id. Verify a full page load and an in-app navigation, then Back, reload, and returning to an edited page. Before the widget loads on editor-entry URLs, ensure analytics and session-replay scripts cannot read rcf_handoff, rcf_edit_token, rcf_staging, or rcf_token.",
   },
   {
     id: "html",

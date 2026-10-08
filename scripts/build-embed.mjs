@@ -204,14 +204,25 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *   −40 / −40      second-line reserve: the uncalled assessReadability method
  *                  and the getEditingColors wrapper
  *   −7 / −7        rows/index left unset in the constructor
- *   45866 / 33092  measured on the branch — the new ceilings
+ *   45866 / 33092  measured on the branch at 05d2025 — the ceilings until the
+ *                  review fix
+ *   +8 / +7        review fix (docs/reviews/s67-embed-spa-support.md, findings
+ *                  1, 4, 5, 6): a text-only route render schedules the debounced
+ *                  rescan, the route-change row load is caught, editor saves
+ *                  record `written` and keep `originalContent`, the Edit Board
+ *                  preview reads getElementText
+ *   −14 / −10      funded in the branch, no behaviour change: the `self`
+ *                  closures in checkRoute, applyRows and the discovery report
+ *                  timer written as arrows, the observer's immediate rescan as
+ *                  `return self.rescan()`
+ *   45860 / 33089  measured after the review fix — the new ceilings
  *
  * Gross against a funded floor (main with every deletion above and none of the
- * SPA work, measured 45037 / 32248): +829 / +844. build-size-gate.test.ts pins
- * the same pair.
+ * SPA work, measured 45037 / 32248): +823 / +841, final, review fix included.
+ * build-size-gate.test.ts pins the same pair and quotes the same gross.
  */
-const MAX_BUNDLE_GZ = 45866;
-const MAX_WIDGET_GZ = 33092;
+const MAX_BUNDLE_GZ = 45860;
+const MAX_WIDGET_GZ = 33089;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

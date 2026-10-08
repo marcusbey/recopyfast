@@ -38,19 +38,25 @@ describe("install recipes", () => {
   });
 
   /**
-   * The widget does not expose a complete teardown/reinitialization lifecycle.
-   * A root-layout tag can remain mounted across client navigation and therefore
-   * cannot be described as a complete SPA installation.
+   * s67 (owner decision 3, 2026-10-08): the plain snippet follows History API
+   * route changes; hash routes are not supported. The dashboard card says what
+   * /docs/install says (src/lib/docs/installation-content.ts) — it used to say
+   * the widget had no complete lifecycle for client-side route changes, which
+   * s67 made false. Each site still verifies a full load and an in-app
+   * navigation.
    */
   it("requires React and Next.js integrations to verify hydration and navigation", () => {
     const recipe = getInstallRecipe("nextjs") as InstallRecipe;
     const guidance = `${recipe.location} ${recipe.notes ?? ""}`;
 
     expect(guidance).toMatch(/after (?:the page has )?hydrat(?:e|ed|ion)/i);
-    expect(guidance).toMatch(/client-side route changes/i);
-    expect(guidance).toMatch(/internal navigation/i);
+    expect(guidance).toMatch(/follows client-side route changes/i);
+    expect(guidance).toContain("Hash routes (/#/route) are not supported");
+    expect(guidance).toMatch(/switch the router to history mode/i);
+    expect(guidance).toMatch(/full page load and an in-app navigation/i);
     expect(guidance).toMatch(/back/i);
     expect(guidance).toMatch(/reload/i);
+    expect(guidance).not.toMatch(/no complete lifecycle|teardown/i);
     expect(guidance).not.toMatch(/seamless|works automatically/i);
   });
 

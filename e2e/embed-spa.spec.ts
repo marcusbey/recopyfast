@@ -29,7 +29,8 @@ import {
  *   E1  framework-free SPA: late render, pushState navigation, Back, query and
  *       hash changes, a host write-back, a ticker, bounded discovery, history
  *       left unpatched, no page error (AC 1–5, 9, 11);
- *   E2  the same SPA with the Navigation API removed (AC 3 on older browsers);
+ *   E2  the same SPA with the Navigation API removed (AC 3 on older browsers),
+ *       and a route render that only rewrites text in place (review finding 1);
  *   E3  React 19 client render: the NotFoundError crash regression (AC 13);
  *   E4  React 19 server render: no crash after hydration, and stamping before
  *       hydration logs no React error (AC 6, 13);
@@ -448,7 +449,7 @@ test.describe("the plain snippet on single-page apps (s67)", () => {
     }
   });
 
-  test("E2: without the Navigation API, navigation and Back still fetch each path once", async ({
+  test("E2: without the Navigation API, navigation, Back and a text-only route render get their page's copy, each path fetched once", async ({
     browser,
   }) => {
     const { context, page, log, errors } = await openSpa(browser, {
@@ -470,6 +471,25 @@ test.describe("the plain snippet on single-page apps (s67)", () => {
       await expect(headline).toHaveText(ABOUT_PUBLISHED);
       await page.goBack();
       await expect(headline).toHaveText(HOME_PUBLISHED);
+
+      // Review finding 1: a param route reuses its components, so the new
+      // page arrives as text changes on the same nodes — no added node. The
+      // headline must still be re-identified under the new path and get its
+      // published copy (from the cache: no new GET). Only after the fixture's
+      // one-shot write-back AND the debounced rescan it schedules (its
+      // `textContent` assignment adds a node): that pending rescan, firing
+      // after the click, would re-identify the page by itself and hide the gap.
+      await page.waitForFunction(
+        () =>
+          (window as unknown as { __writeBack?: boolean }).__writeBack === true,
+      );
+      await page.waitForTimeout(500);
+      await page.click("a[data-in-place]");
+      await expect(headline).toHaveText(ABOUT_PUBLISHED);
+      await expect(headline).toHaveAttribute(
+        "data-rcf-id",
+        learned[ABOUT].headline,
+      );
       await page.waitForTimeout(300);
 
       expect(log.contentGets).toEqual([HOME, ABOUT]);

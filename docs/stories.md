@@ -2438,7 +2438,7 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
   Evidence: `embed-spa.test.ts` (AC 7 block); e2e E5.
 - [x] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
   this branch, because raising a ceiling is a defect.
-  Evidence: 45,866 / 33,092 gz, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +829 / +844 against the funded floor.
+  Evidence: 45,860 / 33,089 gz after the review fix, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +823 / +841 against the funded floor.
 - [x] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
   host page. The embed patches no host global: `history.pushState` and
   `history.replaceState` keep their identity. Route changes are detected by a path check on

@@ -16,6 +16,10 @@ import { renderToString } from "react-dom/server";
  *               authored headline back with `textContent` one second after it
  *               rendered. Each of those is a way the embed lost published copy
  *               on openflows.ai (docs/research/s67-embed-spa-support.md).
+ *               A third link (`data-in-place`) navigates the way a param route
+ *               does: `pushState`, then the SAME headline and lead get the new
+ *               page's text through `nodeValue` — text changes, no added node
+ *               (s67 review, finding 1).
  *   - `/react/` React 19 rendering on the client, flushed synchronously BEFORE
  *               the snippet runs, so the embed writes into nodes React owns.
  *   - `/ssr/`   React 19 server-rendered with `renderToString`, then hydrated
@@ -194,7 +198,7 @@ function spaPage(appUrl: string): string {
     `
     <header id="site-header">
       <p class="tagline">${TAGLINE}</p>
-      <nav><a href="/spa/" data-nav>Home</a> <a href="/spa/about" data-nav>About</a></nav>
+      <nav><a href="/spa/" data-nav>Home</a> <a href="/spa/about" data-nav>About</a> <a href="/spa/about/" data-nav data-in-place>About, in place</a></nav>
     </header>
     <main id="outlet"></main>
     <footer><span id="clock">tick 0</span></footer>
@@ -212,6 +216,11 @@ function spaPage(appUrl: string): string {
         lead.textContent = copy.lead;
         outlet.replaceChildren(headline, lead);
       }
+      function renderInPlace() {
+        var copy = current();
+        document.querySelector("#outlet h1").firstChild.nodeValue = copy.headline;
+        document.querySelector("#outlet p").firstChild.nodeValue = copy.lead;
+      }
       setTimeout(function () {
         render();
         setTimeout(function () {
@@ -225,7 +234,8 @@ function spaPage(appUrl: string): string {
         if (!link) return;
         event.preventDefault();
         history.pushState(null, "", link.getAttribute("href"));
-        render();
+        if (link.hasAttribute("data-in-place")) renderInPlace();
+        else render();
       });
       window.addEventListener("popstate", render);
       var tick = 0;

@@ -684,6 +684,74 @@ describe("AC 3 — a route change is a page load for the embed", () => {
     expect(byId("shared-footer").textContent).toBe("Published footer");
   });
 
+  // Review finding 1 (2026-10-08). A param route (`/blog/:slug`) reuses its
+  // components, and React writes a single text child with `nodeValue`, so the
+  // new page arrives as text changes only — no added node. The route change
+  // unstamped the page-scoped elements and nothing ever rescanned them: 0
+  // mapped elements, and /blog/b's published row never applied.
+  it.each([
+    ["without the Navigation API", false],
+    ["with the Navigation API", true],
+  ])(
+    "rescans a route render that only rewrites text in place (%s)",
+    async (_label, withNavigationApi) => {
+      const navigation = new EventTarget();
+      if (withNavigationApi) {
+        Object.defineProperty(window, "navigation", {
+          configurable: true,
+          value: navigation,
+        });
+      }
+      const post = (slug: string) =>
+        `<main id="outlet"><h1>Post ${slug} title</h1><p>Post ${slug} body</p></main>`;
+      try {
+        // The id a full load of /blog/b gives its headline, learned from the embed.
+        window.history.replaceState(null, "", "/blog/b");
+        document.body.innerHTML = post("B");
+        await boot();
+        const postBId = stampOf("#outlet h1");
+        widget().destroy();
+        delete (window as unknown as Record<string, unknown>).ReCopyFast;
+
+        window.history.replaceState(null, "", "/blog/a");
+        document.body.innerHTML = post("A");
+        const recorded = await boot({
+          rows: (pagePath) =>
+            pagePath === "/blog/b"
+              ? [
+                  {
+                    element_id: postBId,
+                    original_content: "Post B title",
+                    current_content: "Post B title, published",
+                  },
+                ]
+              : [],
+        });
+        const headline = document.querySelector("#outlet h1")!;
+        const body = document.querySelector("#outlet p")!;
+        expect(headline.getAttribute("data-rcf-id")).not.toBe(postBId);
+
+        useFakeTimers();
+        history.pushState(null, "", "/blog/b");
+        if (withNavigationApi) {
+          navigation.dispatchEvent(new Event("currententrychange"));
+        }
+        headline.firstChild!.nodeValue = "Post B title";
+        body.firstChild!.nodeValue = "Post B body";
+        await flushMicrotasks();
+        await advance(1000);
+
+        expect(pagePaths(recorded)).toEqual(["/blog/a", "/blog/b"]);
+        expect(headline.getAttribute("data-rcf-id")).toBe(postBId);
+        expect(headline.textContent).toBe("Post B title, published");
+        expect(body.getAttribute("data-rcf-id")).toMatch(/^rcf-/);
+        expect(widget().elements.size).toBeGreaterThan(0);
+      } finally {
+        delete (window as unknown as Record<string, unknown>).navigation;
+      }
+    },
+  );
+
   it("hears a Navigation API route change that touched no DOM", async () => {
     const navigation = new EventTarget();
     Object.defineProperty(window, "navigation", {
@@ -793,6 +861,31 @@ describe("AC 9 — degrades, never breaks, patches nothing", () => {
       "RECOPYFAST_WS",
     ];
     expect(added.filter((key) => !allowed.includes(key))).toEqual([]);
+  });
+
+  // Review finding 6 (2026-10-08). checkRoute started the new path's row load
+  // and dropped its promise: a throw while applying the rows was an
+  // `unhandledrejection` on the host page.
+  it("keeps a throwing route-change row load away from the host: no unhandled rejection", async () => {
+    spaShell();
+    renderPage("Home");
+    await boot();
+    jest
+      .spyOn(widget() as unknown as { applyRows(): void }, "applyRows")
+      .mockImplementation(() => {
+        throw new Error("boom");
+      });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await navigate("/about", "About");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(unhandled).toEqual([]);
   });
 
   it("keeps a throwing navigation path away from the host", async () => {
@@ -962,6 +1055,122 @@ describe("AC 7 — edit mode across an in-app navigation", () => {
     await flushMicrotasks();
 
     expect(footer.textContent).toBe("Saved footer");
+  });
+
+  // Review finding 5 (2026-10-08). A save used to overwrite the entry's
+  // authored copy with the saved one and never record it as the embed's
+  // write, so on the next in-app page the persistent element kept the saved
+  // copy (nothing to restore) and was discovered with it as authored copy
+  // (s65a's invariant).
+  it("puts the authored copy back on a persistent element saved on the previous page, and reports that copy", async () => {
+    const recorded = await bootEditor();
+    const tagline = document.querySelector(".tagline") as HTMLElement;
+    // The click handler's own entry point, called directly: earlier tests in
+    // this file leave destroyed edit-mode instances whose document click
+    // listeners would open THEIR editor on this element first.
+    (
+      widget() as unknown as { startInlineEdit(element: Element): void }
+    ).startInlineEdit(tagline);
+    expect(tagline.getAttribute("contenteditable")).toBe("true");
+    tagline.textContent = "Tagline saved on home";
+    (document.querySelector(".rcf-btn-save") as HTMLButtonElement).click();
+    await settle();
+    expect(recorded.filter((request) => request.method === "PUT")).toHaveLength(
+      1,
+    );
+    expect(tagline.textContent).toBe("Tagline saved on home");
+
+    await navigate("/about", "About");
+
+    expect(tagline.textContent).toBe("Persistent tagline");
+    const aboutId = tagline.getAttribute("data-rcf-id")!;
+    expect(widget().elements.get(aboutId)!.path).toBe("/about");
+    const reported = discoveryBodies(recorded)
+      .flatMap((body) => Object.entries(body))
+      .filter(([id]) => id === aboutId)
+      .map(([, entry]) => entry.content);
+    expect(reported).toEqual(["Persistent tagline"]);
+  });
+
+  it("does the same for a persistent image saved on the previous page", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?rcf_staging=1&rcf_token=test_spa_editor",
+    );
+    spaShell();
+    const logo = document.createElement("img");
+    logo.setAttribute("src", "/authored-logo.png");
+    Object.defineProperties(logo, {
+      offsetWidth: { configurable: true, value: 100 },
+      offsetHeight: { configurable: true, value: 100 },
+    });
+    document.getElementById("site-header")!.appendChild(logo);
+    renderPage("Home");
+    const recorded = await boot();
+    (
+      widget() as unknown as { openImageEditor(element: Element): void }
+    ).openImageEditor(logo);
+    (
+      document.querySelector(".rcf-modal .rcf-modal-input") as HTMLInputElement
+    ).value = "https://cdn.example.test/saved-logo.png";
+    (
+      document.querySelector(".rcf-modal-btn-success") as HTMLButtonElement
+    ).click();
+    await settle();
+    expect(logo.getAttribute("src")).toBe(
+      "https://cdn.example.test/saved-logo.png",
+    );
+
+    await navigate("/about", "About");
+
+    expect(logo.getAttribute("src")).toBe("/authored-logo.png");
+    const aboutId = logo.getAttribute("data-rcf-id")!;
+    expect(widget().elements.get(aboutId)!.path).toBe("/about");
+    const reported = discoveryBodies(recorded)
+      .flatMap((body) => Object.entries(body))
+      .filter(([id]) => id === aboutId)
+      .map(([, entry]) => entry.content);
+    expect(reported).toEqual(["/authored-logo.png"]);
+  });
+
+  // Review finding 4 (2026-10-08). The card read `textContent ||
+  // originalContent`: an image has no text, so its card showed the first-seen
+  // authored src instead of the published one the page shows.
+  it("shows an image's published source on its Edit Board card", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/?rcf_staging=1&rcf_token=test_spa_editor",
+    );
+    document.body.innerHTML = `<img data-rcf-id="hero-image" src="/authored-hero.jpg" alt="Hero">`;
+    Object.defineProperties(document.querySelector("img")!, {
+      offsetWidth: { configurable: true, value: 100 },
+      offsetHeight: { configurable: true, value: 100 },
+    });
+    await boot({
+      rows: () => [
+        {
+          element_id: "hero-image",
+          original_content: "/authored-hero.jpg",
+          current_content: "/published-hero.jpg",
+        },
+      ],
+    });
+    expect(byId("hero-image").getAttribute("src")).toBe("/published-hero.jpg");
+
+    (
+      document.querySelector("#rcf-edit-board-btn") as HTMLButtonElement
+    ).click();
+    await settle();
+
+    const card = Array.from(document.querySelectorAll(".rcf-eb-card")).find(
+      (candidate) =>
+        candidate.querySelector(".rcf-eb-card-title")!.textContent === "IMG",
+    )!;
+    expect(card.querySelector(".rcf-eb-card-desc")!.textContent).toBe(
+      "/published-hero.jpg",
+    );
   });
 
   it("re-applies a realtime update's copy after a later host write-back", async () => {

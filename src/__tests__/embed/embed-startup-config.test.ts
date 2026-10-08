@@ -191,6 +191,26 @@ describe("startup endpoints (M8)", () => {
     ).toBe(CDN_API);
   });
 
+  // Review finding 3 (2026-10-08). Every clobber above uses a cross-origin
+  // href, which the origin check alone already refuses, so nothing proved the
+  // `typeof value === 'string'` half. An element whose href is on the script's
+  // own origin — a page path the attacker's markup points at — passes the
+  // origin check; only the type check keeps it out.
+  it("ignores an element clobbering window.RECOPYFAST_API with a same-origin href", async () => {
+    installScriptTag({});
+    clobber("RECOPYFAST_API", "https://cdn.rcf.test/uploads/attacker");
+    const urls = installFetch();
+
+    new Function(WIDGET_SOURCE)();
+    await settle();
+
+    expectAllRequestsTo(urls, CDN_API);
+    expect(urls.filter((url) => url.includes("/uploads/"))).toEqual([]);
+    expect(
+      (window as unknown as { RECOPYFAST_API: unknown }).RECOPYFAST_API,
+    ).toBe(CDN_API);
+  });
+
   it("ignores a cross-origin string global", async () => {
     installScriptTag({});
     (window as unknown as { RECOPYFAST_API: string }).RECOPYFAST_API =

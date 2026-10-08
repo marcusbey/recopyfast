@@ -29,8 +29,7 @@ interface FakeWidget {
   canReachStagingContent: () => boolean;
   editorTokenQuery: () => string;
   editorAuthHeaders: () => Record<string, string>;
-  applyContentToElement: jest.Mock;
-  hydrateStoredContent: () => Promise<void>;
+  hydrateStoredContent: () => Promise<Record<string, unknown> | undefined>;
 }
 
 function loadHydrateStoredContent(
@@ -82,7 +81,6 @@ function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {
     canReachStagingContent: () => false,
     editorTokenQuery: () => "",
     editorAuthHeaders: () => ({}),
-    applyContentToElement: jest.fn(),
     hydrateStoredContent: loadHydrateStoredContent(fetch, warn),
   };
 }
@@ -100,7 +98,7 @@ describe("widget handling of a refused site token", () => {
     const warn = jest.fn();
     const widget = makeWidget(fetch, warn);
 
-    await widget.hydrateStoredContent();
+    const rows = await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
@@ -109,7 +107,9 @@ describe("widget handling of a refused site token", () => {
     expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
-    expect(widget.applyContentToElement).not.toHaveBeenCalled();
+    // No rows: loadRows has nothing to apply and forgets the path, so the
+    // authored copy stays and the next visit asks again.
+    expect(rows).toBeUndefined();
     expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
       "Authored headline",
     );
@@ -127,13 +127,15 @@ describe("widget handling of a refused site token", () => {
     const warn = jest.fn();
     const widget = makeWidget(fetch, warn);
 
-    await widget.hydrateStoredContent();
+    const rows = await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
-    expect(widget.applyContentToElement).not.toHaveBeenCalled();
+    // No rows: loadRows has nothing to apply and forgets the path, so the
+    // authored copy stays and the next visit asks again.
+    expect(rows).toBeUndefined();
     expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
       "Authored headline",
     );

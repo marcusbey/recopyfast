@@ -3191,14 +3191,13 @@
       // would have locked discovery for the whole site. The first report of a
       // page view goes at once; later ones at most once per 10 s (one trailing
       // report picks up everything found meanwhile) and at most 10 per page view.
-      const self = this;
       const wait = this.lastReport + 10000 - Date.now();
       if (this.reports > 9) return;
       if (wait > 0) {
         if (!this.reportTimer) {
-          this.reportTimer = setTimeout(function() {
-            self.reportTimer = 0;
-            try { self.sendContentMap(); } catch (error) {}
+          this.reportTimer = setTimeout(() => {
+            this.reportTimer = 0;
+            try { this.sendContentMap(); } catch (error) {}
           }, wait);
         }
         return;
@@ -3675,21 +3674,25 @@
      * would file the old page's elements under the new path. `stale` makes the
      * next observer batch that adds nodes rescan at once, in the microtask the
      * render runs in, so a cached route paints published copy in its first
-     * frame; an edit click rescans too.
+     * frame; a batch that only changes text (a param route reusing its
+     * components) schedules the debounced rescan; an edit click rescans too.
+     *
+     * The row load is not awaited, so its rejection is caught here: a throw
+     * while applying rows would otherwise be an `unhandledrejection` on the
+     * host page (non-negotiable 4; s67 review, finding 6).
      */
     checkRoute() {
       const path = normalizedPagePath();
       if (path === this.pagePath) return;
-      const self = this;
       this.pagePath = path;
       this.stale = true;
       this.reports = this.lastReport = 0;
-      this.elements.forEach(function(data, id) {
+      this.elements.forEach((data, id) => {
         if (!data.path) data.writes = 0;
-        else if (!data.element.getAttribute('data-rcf-editing')) self.dropEntry(data, id);
+        else if (!data.element.getAttribute('data-rcf-editing')) this.dropEntry(data, id);
       });
       // Before init's first fetch, init fetches for the path it finds.
-      if (this.rows) this.loadRows();
+      if (this.rows) this.loadRows().catch(function() {});
     }
 
     /**
@@ -3737,8 +3740,7 @@
     }
 
     applyRows() {
-      const self = this;
-      this.elements.forEach(function(data, id) { self.applyRow(data, id); });
+      this.elements.forEach((data, id) => this.applyRow(data, id));
     }
 
     /**
@@ -3913,12 +3915,19 @@
           });
           // The first batch that adds nodes after a route change is the new
           // page: map it now, before it paints (see checkRoute).
-          if (added && self.stale) {
-            self.rescan();
-            return;
-          }
+          if (added && self.stale) return self.rescan();
           // 200 ms after the last change, never more than 1,000 ms after the first.
-          if (added) {
+          //
+          // TOMBSTONE (s67 review, finding 1). Only added nodes used to get
+          // here. A param route (`/blog/:slug`) reuses its components, and React
+          // writes a lone text child with `nodeValue`, so that page arrives as
+          // text changes only: the route change unstamped its elements and
+          // nothing ever rescanned them — 0 mapped, its published copy never
+          // applied. Any batch while stale now schedules the rescan. Debounced,
+          // not at once: such a batch can be nothing but the embed's own
+          // authored-copy restores (checkRoute), delivered before the router
+          // has rendered the new page.
+          if (added || self.stale) {
             clearTimeout(self.rescanTimer);
             self.firstChange = self.firstChange || Date.now();
             self.rescanTimer = setTimeout(function() {
@@ -4838,9 +4847,17 @@
           return;
         }
 
+        // TOMBSTONE (s67 review, finding 5). Saves used to overwrite
+        // `originalContent` with the saved copy and never record the write.
+        // A persistent element (a header tagline) edited, then left by an
+        // in-app navigation, kept the saved copy and was discovered on the next
+        // page with it as authored copy (s65a's invariant). `originalContent`
+        // stays the authored text; `written` is what checkRoute's restore
+        // compares with, exactly as for a row the embed applied. Same in the
+        // image and form saves.
         if (textChanged) {
           writeText(element, newContent);
-          elementData.originalContent = newContent;
+          elementData.written = newContent;
         }
         for (const f of fieldInputs) {
           if (f.input.value !== f.initial) f.def.set(element, values[f.def.key]);
@@ -5213,7 +5230,7 @@
           element.style.backgroundImage = 'url("' + newSrc + '")';
         }
 
-        elementData.originalContent = newSrc;
+        elementData.written = newSrc;
 
         element.classList.add('rcf-updated');
         setTimeout(function() {
@@ -5406,7 +5423,7 @@
         element.placeholder = placeholderInput.value;
         element.value = valueInput.value;
 
-        elementData.originalContent = placeholderInput.value;
+        elementData.written = placeholderInput.value;
 
         element.classList.add('rcf-updated');
         setTimeout(function() {
@@ -6179,10 +6196,12 @@
 
           const cardDesc = document.createElement('div');
           cardDesc.className = 'rcf-eb-card-desc';
-          // What the element says now. originalContent is the authored text
-          // discovery reports and no longer follows applied copy (s67); it is
-          // only the fallback for an element with no text (an image, an input).
-          const live = data.element.textContent || data.originalContent;
+          // What the element shows now: its text, its image source or its
+          // value. originalContent is the authored copy discovery reports and
+          // no longer follows applied copy (s67), so an image card read from it
+          // showed the first-seen src, not the published one (s67 review,
+          // finding 4).
+          const live = self.rcf.getElementText(data.element);
           cardDesc.textContent = live.substring(0, 100) + (live.length > 100 ? '...' : '');
 
           cardContent.appendChild(cardTitle);
