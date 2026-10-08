@@ -2333,3 +2333,65 @@ settled (both edit `src/app/api/content/[siteId]/route.ts`).
   s65a's parity test pass unchanged.
 
 Embed allocation: 0 bytes.
+
+## Story s67-embed-spa-support — the plain snippet works on any site, including single-page apps
+
+As a site owner whose site renders in the browser (React, Vite, Vue, Svelte, any client
+router), I paste the plain snippet before `</body>` and every page is editable and shows
+published copy, both on first load and after in-app navigation, with no site-specific code.
+
+Owner decision, 2026-10-07, after the openflows.ai install: "Fix embed and don't hardcod
+anything. out solution shoul work on any website using the script." No host-side workaround:
+openflows.ai keeps the plain snippet as the real-world proof.
+
+Evidence: openflows.ai production on 2026-10-08, plain snippet (marcusbey/openflows-ai#3),
+headless Chromium.
+
+- `/` and `/fr`: the embed's first scan runs at about 385 ms and finds 0 candidates. React has
+  rendered 335 candidates by 671 ms. The body `MutationObserver` is attached at about
+  1,230 ms, at the end of the async init chain (`setupMutationObserver`, after
+  hydrate, A/B and socket), so it never sees React's render and never rescans. The page ends
+  with 0 editable elements and published copy is never applied. A manual
+  `window.ReCopyFast.scanForContent()` finds 212.
+- `/blog`: 94 elements are found, only because posts arrive after the observer is attached.
+- Devin review on openflows-ai#3, confirmed in code: `hydrateStoredContent()` fetches
+  page-scoped rows once (`page_path`). After a client-side route change, the rescan reports
+  the new elements but never fetches or applies that route's published copy.
+- Related gaps to confirm in research: the observer only watches `childList`, so text set
+  via `characterData` (i18n, frameworks updating text nodes) is missed. The debounce has no
+  max wait, so continuous mutation postpones a rescan indefinitely. A framework re-render
+  can write authored copy back over applied published copy.
+
+Complexity: 4 (embed startup ordering, history integration, re-render races, byte budget,
+fixture and production proof). Dependencies: none. Coordinate with PR #59 (s61), which also
+edits embed startup. Branch `feature/s67-embed-spa-support`.
+
+- [ ] AC 1, late render: content rendered at any time after the script starts is scanned. On
+  openflows.ai `/` with the plain snippet, editable elements are > 0 within 2 s of render
+  settling.
+- [ ] AC 2, late elements get published copy: an element found by any rescan receives its
+  published row from the page rows already fetched, without a refetch, within one rescan
+  cycle.
+- [ ] AC 3, route change: when the normalized page path changes (`pushState`,
+  `replaceState`, `popstate`), the embed fetches that page's rows once and applies them. New
+  ids use the new path. Elements that persist across routes keep working. A change of query
+  or hash only does not refetch.
+- [ ] AC 4, framework re-render: if the host rewrites an element back to authored copy after
+  published copy was applied, published copy is applied again. The embed's own writes never
+  trigger a loop.
+- [ ] AC 5, no starvation: continuous DOM mutation cannot postpone a rescan beyond a bounded
+  max wait.
+- [ ] AC 6, static and SSR sites unchanged: the existing embed unit and e2e suites stay green.
+  aicompoz.com keeps server-rendered copy in first paint, with 0 swaps.
+- [ ] AC 7, edit mode across navigation: an invited editor keeps the edit session after
+  in-app navigation, and newly rendered elements are editable.
+- [ ] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
+  this branch, because raising a ceiling is a defect.
+- [ ] AC 9, degrades and never breaks: no uncaught exception reaches the host page. Wrapped
+  history methods always call through and survive other libraries wrapping them too.
+- [ ] AC 10, proof: a framework-free SPA fixture (renders after a delay, navigates with
+  `pushState`, re-renders text) runs in CI e2e. In production on openflows.ai with the
+  plain snippet, edit and publish on `/` and on a route reached by in-app navigation; both
+  show published copy, on load and after navigation.
+
+Embed allocation: set at plan, paid within the existing ceiling.
