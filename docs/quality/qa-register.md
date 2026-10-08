@@ -70,15 +70,22 @@
 > `20260813140000_site_permissions_delete_per_row` (the A-4 per-row DELETE fix) applied immediately
 > afterwards, confirming the `granted_by` fold-in.
 >
-> ### One migration still blocked, deliberately
+> ### `20260809120000` — status as of 2026-10-08 (s68a)
 >
-> `20260809120000_lock_down_definer_functions` fails on `function update_site_analytics() does not
-> exist`. That belongs to the **analytics-alignment trio** (`20260731005000/006000/007000`), which
-> also aborted. It is not a matter of creating the function: a plpgsql body is not name-resolved at
-> creation, so creating it alone yields a function that creates cleanly and **raises at call time**,
-> because the trio also never added the `site_analytics` / `user_activity_logs` columns its body
-> writes. That repair is in progress as a separate migration. A blocked REVOKE is an acceptable
-> state; a function that raises at call time is not.
+> This block used to say `20260809120000_lock_down_definer_functions` was still blocked (on
+> `update_site_analytics()`). That claim had no current evidence behind it and is withdrawn. What is
+> known, from the owner's read-only production SQL of 2026-10-08: the **catalogue** is already in the
+> state that migration intends — no `SECURITY DEFINER` function in `public` is executable by `anon`
+> or PUBLIC, and `authenticated` executes only the three RLS predicates
+> (`user_has_site_permission(uuid, text[])`, `user_is_team_member(uuid)`,
+> `user_has_team_role(uuid, text[])`).
+>
+> Whether the file is recorded in the **ledger** (`supabase_migrations.schema_migrations`) is
+> **unknown — see step 0 of [`docs/operations/edit-session-authority.md`](../operations/edit-session-authority.md)**.
+> If it is missing, the s68a dry run lists it and the owner decided (2026-10-08) to apply it in the
+> same push: it only re-issues revokes. From s68a on, the invariant no longer depends on any one
+> file having run: `20261008110000_converge_replay_privileges.sql` asserts it at apply time and
+> aborts the push otherwise, and CI runs `function-grants.test.ts` against both replays.
 
 > ## ✅ APPLIED 2026-08-17 — nine of the eleven unapplied migrations are now in production
 >

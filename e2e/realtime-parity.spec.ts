@@ -429,8 +429,12 @@ test.describe("realtime parity on a non-RecopyFast fixture", () => {
 
     await seedPayingOwner(client);
 
+    // s68a (ADR 047): a session grants at most its holder's live grant, so it
+    // names the owner seeded just above. A session with no `user_id` is
+    // refused by the validator now.
     const { error: editError } = await client.from("edit_sessions").insert({
       site_id: siteId,
+      user_id: ownerId,
       token: editToken,
       permissions: ["view", "edit", "publish"],
       expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),

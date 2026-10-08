@@ -22,6 +22,11 @@ const BOOTSTRAP = path.join(
 );
 const REQUIRED_MIGRATION = "20260925120000_sites_api_key_column_grants.sql";
 const REVISION_MIGRATION = "20261005000000_versioned_public_content_cache.sql";
+// s68a (ADR 047): both carry a data step or a postcondition, so a retry after
+// an uncertain connection result must converge rather than raise.
+const EDIT_SESSIONS_MIGRATION =
+  "20261008100000_edit_sessions_service_role_writes.sql";
+const CONVERGENCE_MIGRATION = "20261008110000_converge_replay_privileges.sql";
 const isPreFixProof = process.argv.includes("--pre-fix-proof");
 
 function run(command, args, options = {}) {
@@ -165,7 +170,12 @@ try {
   // Forward migrations must converge if an operator retries after an uncertain
   // connection result. Apply the security migration a second time explicitly.
   if (!isPreFixProof) {
-    for (const migration of [REQUIRED_MIGRATION, REVISION_MIGRATION]) {
+    for (const migration of [
+      REQUIRED_MIGRATION,
+      REVISION_MIGRATION,
+      EDIT_SESSIONS_MIGRATION,
+      CONVERGENCE_MIGRATION,
+    ]) {
       run(
         psql,
         [...psqlArgs, "--file", path.join(MIGRATIONS_DIR, migration)],
@@ -182,6 +192,13 @@ try {
       "--runInBand",
       "src/__tests__/db/column-privileges.test.ts",
       "src/__tests__/db/public-content-revision.test.ts",
+      // s68a: the definer-function and RLS invariants were only ever run by
+      // hand; a plain Jest run turns them into a passing "[gated]" line. Named
+      // here, under RCF_REQUIRE_TEST_DB=1, they gate every replay.
+      "src/__tests__/db/function-grants.test.ts",
+      "src/__tests__/db/rls-policies.test.ts",
+      "src/__tests__/db/edit-sessions-privileges.test.ts",
+      "src/__tests__/db/replay-privilege-convergence.test.ts",
     ],
     {
       env: {

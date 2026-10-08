@@ -276,6 +276,11 @@ jobs:
       # local PostgREST. Before the s65a review it was named by no step, so
       # every CI run recorded its "[gated]" placeholder instead.
       #
+      # s68a (ADR 047): edit_sessions takes no web-principal write (a real
+      # GoTrue JWT is refused by PostgREST), the replay-only self-escalation
+      # policies are gone, and the definer-function and RLS invariants run
+      # against the Supabase CLI replay — named, not "[gated]".
+      #
       # s68b (M3): the editor-code attempt charge is a compare-and-set through
       # PostgREST; 20 concurrent wrong guesses must land exactly five charges
       # and burn the code. Only the real PostgREST can say whether the loser of
@@ -291,6 +296,10 @@ jobs:
             npx jest --runInBand \
               src/__tests__/db/content-write-privileges.test.ts \
               src/__tests__/db/published-snapshot-freshness.test.ts \
+              src/__tests__/db/function-grants.test.ts \
+              src/__tests__/db/rls-policies.test.ts \
+              src/__tests__/db/edit-sessions-privileges.test.ts \
+              src/__tests__/db/replay-privilege-convergence.test.ts \
               src/__tests__/db/editor-code-attempts.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres

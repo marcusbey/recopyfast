@@ -28,7 +28,7 @@ escalation that is live in production (owner's read-only SQL, 2026-10-08):
   (`src/lib/auth/editor-access.ts:416-457`) returns `normalizePermissions(session.permissions)`
   and nothing else. `POST /api/staging/publish` (`src/app/api/staging/publish/route.ts:106-138`)
   then asks `requireEditorPermission(access, "publish")` of exactly those permissions. So does
-  every other route that accepts an edit token: staging content, edit-board history, AI suggest,
+  every other route that accepts an edit token: staging content, staging validate, AI suggest,
   edit-session extend and validate.
 
 So an `edit` member publishes to the live site by presenting a self-minted `admin` session with no

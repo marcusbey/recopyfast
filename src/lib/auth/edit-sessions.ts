@@ -30,12 +30,6 @@ export interface CreateEditSessionParams {
   userAgent?: string;
 }
 
-export interface ValidateEditSessionParams {
-  token: string;
-  siteId: string;
-  ipAddress?: string;
-}
-
 /**
  * Absolute ceiling on how long one edit session may live, measured from when it
  * was first issued — not from the last extension.
@@ -44,8 +38,8 @@ export interface ValidateEditSessionParams {
  * bound, /api/edit-sessions/extend could be called every 23 hours forever, so a
  * token that leaked once (the editUrl lands in browser history, a shared screen,
  * a pasted link) stayed valid indefinitely. The session token carries no origin
- * binding, no device binding, and its IP check deliberately does not reject, so
- * elapsed time is the only thing that reliably retires it.
+ * binding, no device binding and no IP check, so elapsed time is the only thing
+ * that reliably retires it.
  */
 export const MAX_SESSION_LIFETIME_HOURS = 24;
 
@@ -92,8 +86,16 @@ export class EditSessionManager {
       );
       const expiresAt = new Date(Date.now() + duration * 60 * 60 * 1000);
 
-      // Create session record
-      const { data: session, error } = await supabase
+      // Inserted with the SERVICE client, after the checks above ran under the
+      // caller's own RLS client (which is what proves who they are and what
+      // they hold). Only the service role writes `edit_sessions` (ADR 047,
+      // migration 20261008100000): the INSERT policy that used to let this run
+      // as the user constrained who inserted, never what, and an `edit` member
+      // used it to mint an `admin` session expiring in 2099 that published to
+      // the live site (H1). Moving this back to the user client fails on the
+      // migrated schema with 42501 — it is not a simplification.
+      const service = createServiceRoleClient();
+      const { data: session, error } = await service
         .from("edit_sessions")
         .insert({
           site_id: params.siteId,
@@ -128,69 +130,7 @@ export class EditSessionManager {
     }
   }
 
-  /**
-   * Validate an edit session token
-   */
-  static async validateEditSession(
-    params: ValidateEditSessionParams,
-  ): Promise<EditSession | null> {
-    try {
-      const supabase = createServiceRoleClient();
-
-      // Find active session
-      const { data: session, error } = await supabase
-        .from("edit_sessions")
-        .select(
-          `
-          *,
-          sites!inner(id, domain),
-          profiles!inner(id, email, full_name)
-        `,
-        )
-        .eq("token", params.token)
-        .eq("site_id", params.siteId)
-        .eq("is_active", true)
-        .gte("expires_at", new Date().toISOString())
-        .single();
-
-      if (error || !session) {
-        return null;
-      }
-
-      // Optional IP validation (can be disabled for mobile/dynamic IPs)
-      if (
-        params.ipAddress &&
-        session.ip_address &&
-        session.ip_address !== params.ipAddress
-      ) {
-        console.warn(
-          `IP mismatch for edit session ${session.id}: expected ${session.ip_address}, got ${params.ipAddress}`,
-        );
-        // Don't reject for now, just log
-      }
-
-      // Update last used timestamp
-      await supabase
-        .from("edit_sessions")
-        .update({ last_used_at: new Date().toISOString() })
-        .eq("id", session.id);
-
-      return {
-        id: session.id,
-        site_id: session.site_id,
-        user_id: session.user_id,
-        token: session.token,
-        expires_at: new Date(session.expires_at),
-        permissions: session.permissions,
-        ip_address: session.ip_address,
-        user_agent: session.user_agent,
-        created_at: new Date(session.created_at),
-      };
-    } catch (error) {
-      console.error("Error validating edit session:", error);
-      return null;
-    }
-  }
+  // TOMBSTONE (s68a review m3): `validateEditSession` had no caller and still trusted the row's own `permissions` and `expires_at` (no live grant, no 24 h ceiling) — the H1 trap waiting for a caller; validate through `validateEditSessionAccess` in editor-access.ts.
 
   /**
    * Revoke an edit session
@@ -275,29 +215,7 @@ export class EditSessionManager {
     }
   }
 
-  /**
-   * Clean up expired sessions
-   */
-  static async cleanupExpiredSessions(): Promise<number> {
-    try {
-      const supabase = await createClient();
-
-      const { count, error } = await supabase
-        .from("edit_sessions")
-        .update({ is_active: false })
-        .lt("expires_at", new Date().toISOString())
-        .eq("is_active", true);
-
-      if (error) {
-        throw new Error(`Failed to cleanup expired sessions: ${error.message}`);
-      }
-
-      return count || 0;
-    } catch (error) {
-      console.error("Error cleaning up expired sessions:", error);
-      return 0;
-    }
-  }
+  // TOMBSTONE (s68a): `cleanupExpiredSessions` had no caller and ran on the user client, where `edit_sessions` has no UPDATE policy — it silently updated nothing; expiry is enforced at validation instead.
 
   /**
    * Generate a cryptographically secure token

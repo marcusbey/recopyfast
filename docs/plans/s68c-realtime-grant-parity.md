@@ -45,7 +45,8 @@ a revoked `site_editors` row.
    sweep. GREEN: `server/auth.js:195-206` compares `access.email.trim().toLowerCase()`.
 4. [ ] **Edit-session authority parity (ADR 047).** RED: parity rows for the intersection
    (`{admin}` row + live `edit` → `[view, edit]`; no live row → refused; NULL `user_id` → refused;
-   `created_at` 25 h ago → refused) against s68a's HTTP validator; integration: an edit-session
+   `created_at` 25 h ago → refused; `created_at` more than 5 min in the future → refused;
+   `created_at` NULL → refused) against s68a's HTTP validator; integration: an edit-session
    socket whose holder's `site_permissions` row is deleted is dropped within one sweep. GREEN in
    `resolveEditSessionGrant` (`server/auth.js:219-241`): one `site_permissions` read by `site_id` +
    `user_id`, intersection with `normalizePermissions`, 24 h lifetime from `created_at`.

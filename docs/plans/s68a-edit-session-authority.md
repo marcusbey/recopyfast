@@ -28,7 +28,7 @@ Each task starts with the test that must fail first. "Replay" = the bare PG14 da
 `node scripts/run-db-invariants.mjs` builds (`RCF_POSTGRES_BIN=/usr/local/opt/postgresql@14/bin`
 locally); "Supabase stack" = `npx supabase start`.
 
-1. [ ] **Edit-session privileges suite (RED).** New `src/__tests__/db/edit-sessions-privileges.test.ts`
+1. [x] **Edit-session privileges suite (RED).** New `src/__tests__/db/edit-sessions-privileges.test.ts`
    (`describeDb`), modelled on `content-write-privileges.test.ts:216-347`:
    - catalogue: PUBLIC, `anon`, `authenticated` hold no INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER
      on `edit_sessions` (table **and** `has_any_column_privilege`), `anon`/PUBLIC hold no SELECT, and
@@ -45,7 +45,7 @@ locally); "Supabase stack" = `npx supabase start`.
    - PostgREST half (skipped to a "[gated]" test only when `RCF_TEST_POSTGREST_URL` is absent, as
      `:348`): an `edit` member's GoTrue JWT `POST /rest/v1/edit_sessions` is refused and no row exists.
    Fails today: the INSERT succeeds and the grants exist.
-2. [ ] **Migration `supabase/migrations/20261008100000_edit_sessions_service_role_writes.sql` (GREEN).**
+2. [x] **Migration `supabase/migrations/20261008100000_edit_sessions_service_role_writes.sql` (GREEN).**
    Header comment in house style (the H1 exploit, the replay proof, ADR 047, deploy order). Body:
    `DROP POLICY IF EXISTS "Users can create edit sessions for sites they have access to"`;
    `REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON public.edit_sessions FROM PUBLIC, anon, authenticated`;
@@ -56,7 +56,7 @@ locally); "Supabase stack" = `npx supabase start`.
    EXISTS (<direct grant of the holder whose level covers every permission in the row>))`;
    postcondition `DO` block raising if any write grant/column grant/write policy for web principals
    remains. Task 1 green on the replay and the Supabase stack.
-3. [ ] **Replay-convergence suite (RED).** New `src/__tests__/db/replay-privilege-convergence.test.ts`,
+3. [x] **Replay-convergence suite (RED).** New `src/__tests__/db/replay-privilege-convergence.test.ts`,
    role-switched SQL, reproducing the research's three replay exploits as refusals:
    stranger `INSERT team_members (role 'owner')` → refused; invitee `UPDATE team_invitations SET
    role='manager', team_id=<other>` → 0 rows / refused, while a team manager's UPDATE still lands;
@@ -65,7 +65,7 @@ locally); "Supabase stack" = `npx supabase start`.
    (`20260813140000`) still exists. Plus a negative control for the postcondition of task 4: inside
    a rolled-back transaction create a `SECURITY DEFINER` function, `GRANT EXECUTE … TO anon`, run
    the postcondition block (extracted from the migration file between marker comments) → it raises.
-4. [ ] **Migration `supabase/migrations/20261008110000_converge_replay_privileges.sql` (GREEN).**
+4. [x] **Migration `supabase/migrations/20261008110000_converge_replay_privileges.sql` (GREEN).**
    `DROP POLICY IF EXISTS` for "Team managers can add members", "Team managers can update members",
    "Team managers can remove members" (team_members), "Site admins can grant site permissions",
    "Site admins can update site permissions" (site_permissions) and "Invitees and managers can
@@ -76,14 +76,14 @@ locally); "Supabase stack" = `npx supabase start`.
    `-- END …` markers: the `function-grants.test.ts` invariant in SQL (no definer function in
    `public` executable by PUBLIC/`anon`; `authenticated` only on the three identities at
    `function-grants.test.ts:81-85`), raising with the offender list.
-5. [ ] **CI enforces the invariants on both replays.** `scripts/run-db-invariants.mjs`: add
+5. [x] **CI enforces the invariants on both replays.** `scripts/run-db-invariants.mjs`: add
    `function-grants.test.ts`, `rls-policies.test.ts`, `edit-sessions-privileges.test.ts`,
    `replay-privilege-convergence.test.ts` to the jest list (`:181-197`) and re-apply both new
    migrations in the convergence loop (`:166-176`). `.github/workflows/ci.yml` e2e job: add the
    four files to the `RCF_REQUIRE_TEST_DB=1` step at `:278-288` (it already exports the PostgREST
    URL and keys). Proof: run the runner once with the DB stopped mid-way or with a wrong URL and
    see it fail (record in the PR), then green.
-6. [ ] **Authority at validation (RED → GREEN).** New `src/lib/auth/__tests__/edit-session-authority.test.ts`
+6. [x] **Authority at validation (RED → GREEN).** New `src/lib/auth/__tests__/edit-session-authority.test.ts`
    against `validateEditorAccess({ token: { kind: "edit-session", … } })` with a fake service
    client: (a) row `{admin}` + live `edit` → permissions `[view, edit]`; (b) no live row → invalid
    401 "Invalid or expired edit session"; (c) NULL `user_id` → same 401; (d) `created_at` 25 h ago,
@@ -95,12 +95,12 @@ locally); "Supabase stack" = `npx supabase start`.
    `site_permissions (permission)` by `site_id` + `session.user_id`; intersection via
    `normalizePermissions`; lifetime from `MAX_SESSION_LIFETIME_HOURS`; tombstone comment naming
    H1 and ADR 047. Update the mocked suites listed in research "Traps" (declared in the PR).
-7. [ ] **Issuance through the service role.** RED in `src/__tests__/api/edit-sessions/create-token-leak.test.ts`
+7. [x] **Issuance through the service role.** RED in `src/__tests__/api/edit-sessions/create-token-leak.test.ts`
    (or a new `create-service-role.test.ts`): the insert happens on the service client; the user
    client is used only for `getUser` and the `site_permissions` read. GREEN in
    `edit-sessions.ts:59-130`. Delete `cleanupExpiredSessions` (no caller, silently non-functional
    under RLS) with a one-line tombstone.
-8. [ ] **Removal revokes.** RED: new `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`
+8. [x] **Removal revokes.** RED: new `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`
    — after a successful DELETE, the service client updates `edit_sessions` `is_active=false,
    revoked_at` filtered by `site_id` **and** `user_id = targetPermission.user_id`; a team-row
    delete (`user_id` null) issues no session update; a failing session update is logged and the
