@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>s70 — Changes (reference mockup)</title>
+<!-- Reference mockup for docs/designs/s70-content-changes.md.
+     NOT production code: Execute builds with src/components/ui/* and PageShell.
+     Token values are the DARK values of src/app/globals.css; square containers (0px), 2px controls,
+     flat panels, 1px borders (ADR 050, design-system.md s66a revision).
+     Fixture data only: every domain ends in .example, every address in @example.com.
+     Every frame is rendered from the one FIXTURE object below, so 1280 and 375 cannot drift.
+     No network request except the app's fonts. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:dark;
+  /* globals.css, dark side of light-dark() */
+  --canvas:hsl(200 18% 7%);
+  --card:hsl(200 15% 10%);
+  --popover:var(--card);
+  --surface-1:hsl(200 18% 8%);
+  --surface-2:hsl(200 14% 14%);
+  --surface-3:hsl(200 13% 18%);
+  --fg:hsl(200 22% 96%);
+  --muted:hsl(200 12% 68%);
+  --primary:hsl(174 48% 58%);
+  --on-primary:hsl(200 30% 8%);
+  --line:hsl(200 12% 21%);
+  --line-strong:hsl(200 10% 40%);
+  --danger:hsl(358 62% 62%);
+  --on-danger:hsl(200 30% 8%);
+  --n-s:hsl(200 12% 17%);--n-t:hsl(200 12% 76%);--n-l:hsl(200 12% 26%);
+  --i-s:hsl(206 44% 18%);--i-t:hsl(204 78% 76%);--i-l:hsl(206 40% 30%);
+  --s-s:hsl(166 40% 15%);--s-t:hsl(162 60% 70%);--s-l:hsl(166 36% 27%);
+  --w-s:hsl(30 44% 17%);--w-t:hsl(42 84% 68%);--w-l:hsl(32 40% 29%);
+  --d-s:hsl(358 40% 19%);--d-t:hsl(4 84% 76%);--d-l:hsl(358 36% 31%);
+  --a-s:hsl(178 38% 16%);--a-t:hsl(176 52% 70%);--a-l:hsl(178 34% 28%);
+  --shadow-a:hsl(200 55% 2% / .34);
+  --shadow-b:hsl(200 55% 2% / .46);
+  --shadow-md:0 2px 4px -1px var(--shadow-a),0 4px 10px -2px var(--shadow-b);
+  --radius-container:0px;
+  --radius-control:2px;
+  --font-sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  --spec:hsl(42 84% 68%); /* annotation ink, this mockup only */
+}
+*,*::before,*::after{box-sizing:border-box;border-color:var(--line)}
+html,body{margin:0}
+body{background:var(--canvas);color:var(--fg);font:400 14px/20px var(--font-sans);
+  font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1;-webkit-font-smoothing:antialiased}
+a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+h1,h2,h3,p{margin:0}
+ul{list-style:none;margin:0;padding:0}
+.i{width:16px;height:16px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i-12{width:12px;height:12px}.i-14{width:14px;height:14px}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.mono{font-family:var(--font-mono)}
+.tab-num{font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- mockup chrome ---------- */
+.page{max-width:1400px;margin:0 auto;padding:32px 32px 96px}
+@media (max-width:639px){.page{padding:24px 16px 64px}}
+.eyebrow{font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted)}
+.ptitle{font:600 24px/32px var(--font-sans);letter-spacing:-.015em}
+.lede{color:var(--muted);max-width:80ch;margin-top:8px}
+.sec{margin-top:56px;padding-top:24px;border-top:1px solid var(--line)}
+.sec-h{margin-bottom:20px}
+.sec-h p{color:var(--muted);max-width:80ch;margin-top:6px}
+.frames{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}
+.scroll-x{max-width:100%;overflow-x:auto}
+.cap{display:flex;gap:12px;align-items:baseline;margin-bottom:8px}
+.cap .m{font:500 12px/16px var(--font-mono);color:var(--muted)}
+.notes{margin:12px 0 0;padding-left:18px;color:var(--muted);font-size:12px;line-height:18px;max-width:72ch;list-style:disc}
+.notes li{margin:2px 0}
+.spec{color:var(--spec);font:500 11px/14px var(--font-mono)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:16px;color:var(--muted);font-size:12px}
+
+/* ---------- device frames ---------- */
+.device{border:1px solid var(--line);background:var(--canvas);flex-shrink:0;position:relative}
+.d1280{width:1280px}.d1024{width:1024px}.d375{width:375px}
+.app{display:flex;min-height:560px}
+.side{width:256px;flex-shrink:0;border-right:1px solid var(--line);background:var(--card);padding:0 12px 16px;display:flex;flex-direction:column;gap:2px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:600;height:56px;padding:0 8px;margin:0 -12px 8px;padding-left:20px;border-bottom:1px solid var(--line)}
+.mark{width:28px;height:28px;display:grid;place-items:center;background:var(--primary);color:var(--on-primary);font:600 12px/1 var(--font-mono)}
+.side-g{padding:16px 8px 6px}
+.side-i{display:flex;align-items:center;gap:12px;height:40px;padding:0 10px;color:var(--muted);border-left:2px solid transparent}
+.side-i.act{color:var(--primary);background:var(--a-s);border-left-color:var(--primary)}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:56px;display:flex;align-items:center;gap:12px;padding:0 32px;border-bottom:1px solid var(--line);background:var(--card)}
+.d375 .top{padding:0 16px}
+.crumbs{display:flex;align-items:center;gap:8px;min-width:0;flex:1;color:var(--muted);white-space:nowrap;overflow:hidden}
+.crumbs .cur{color:var(--fg);font-weight:500}
+.avatar{width:36px;height:36px;border-radius:9999px;background:var(--surface-2);display:grid;place-items:center;font-weight:600;flex-shrink:0}
+.main{padding:32px;flex:1;min-width:0}
+.d375 .main{padding:24px 16px}
+
+/* ---------- PageShell ---------- */
+.shell{display:flex;flex-direction:column;gap:24px;max-width:1180px}
+.d375 .shell{gap:16px}
+.ph{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 24px}
+.ph-txt{min-width:0}
+.ph-title{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.ph h1{font:600 24px/32px var(--font-sans);letter-spacing:-.015em}
+.ph .desc{color:var(--muted);margin-top:4px}
+.ph-act{display:flex;flex-wrap:wrap;gap:8px}
+.d375 .ph-act{width:100%}
+.subnav{display:flex;flex-wrap:wrap;column-gap:16px;border-bottom:1px solid var(--line);margin-top:-8px}
+.subnav a{height:40px;display:inline-flex;align-items:center;padding:0 2px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted);font-weight:500;white-space:nowrap}
+.subnav a:hover{color:var(--fg);text-decoration:none}
+.subnav a[aria-current="page"]{color:var(--fg);border-bottom-color:var(--primary)}
+
+/* ---------- controls ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;
+  border:1px solid transparent;border-radius:var(--radius-control);font:500 14px/1 var(--font-sans);
+  white-space:nowrap;cursor:pointer;color:var(--fg);background:transparent;text-decoration:none;
+  transition:background-color .16s var(--ease-out),border-color .16s var(--ease-out),color .16s var(--ease-out)}
+.btn:hover{text-decoration:none}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--canvas),0 0 0 4px var(--primary)}
+.btn-default{background:var(--primary);color:var(--on-primary)}
+.btn-default:hover{background:hsl(174 48% 58% / .9)}
+.btn-outline{border-color:var(--line-strong);background:var(--card)}
+.btn-outline:hover{background:var(--surface-2)}
+.btn-ghost:hover{background:var(--surface-2)}
+.btn-destructive{background:var(--danger);color:var(--on-danger)}
+.btn-sm{height:32px;padding:0 12px;font-size:12px;gap:6px}
+.btn-icon-sm{width:32px;height:32px;padding:0}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.input{display:block;width:100%;height:40px;padding:0 12px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-control);background:var(--card);color:var(--fg);font:400 14px/20px var(--font-sans)}
+.input::placeholder{color:var(--muted)}
+.inwrap{position:relative}
+.inwrap .i{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.inwrap .input{padding-left:40px}
+.nsel{position:relative}
+.nsel select{appearance:none;-webkit-appearance:none;padding:0 36px 0 12px;cursor:pointer}
+.nsel .chev{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.filters{display:flex;flex-wrap:wrap;gap:8px}
+.filters .grow{flex:1 1 12rem;min-width:12rem}
+.filters .fsel{flex:0 0 auto;min-width:11rem}
+.d375 .filters .fsel{flex:1 1 100%}
+.result{font-size:12px;line-height:16px;color:var(--muted);margin-top:-12px}
+.d375 .result{margin-top:-8px}
+
+/* ---------- Badge / StatusBadge ---------- */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 7px;border:1px solid transparent;
+  border-radius:var(--radius-control);font:500 12px/16px var(--font-sans);white-space:nowrap}
+.b-neutral{background:var(--n-s);color:var(--n-t);border-color:var(--n-l)}
+.b-success{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.b-warning{background:var(--w-s);color:var(--w-t);border-color:var(--w-l)}
+.b-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.dot{width:6px;height:6px;border-radius:9999px;background:currentColor}
+
+/* ---------- Card, Alert, Menu, Skeleton, Empty ---------- */
+.card{border:1px solid var(--line);background:var(--card);border-radius:var(--radius-container)}
+.alert{display:flex;gap:12px;padding:12px 16px;border:1px solid;border-radius:var(--radius-container);align-items:flex-start}
+.alert .i{margin-top:2px}
+.al-danger{background:var(--d-s);color:var(--d-t);border-color:var(--d-l)}
+.alert .a-body{flex:1;min-width:0}
+.alert .a-t{font-weight:600}
+.menu{background:var(--popover);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md);padding:4px;min-width:220px;position:absolute;z-index:3}
+.menu-i{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:var(--radius-control);font-size:14px;cursor:default;white-space:nowrap}
+.menu-i:hover,.menu-i.hl{background:var(--surface-2)}
+.menu-i.danger{color:var(--d-t)}
+.menu-sep{height:1px;background:var(--line);margin:4px -4px}
+.sk{display:block;background:var(--surface-2);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.55}}
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:48px 24px;gap:8px}
+.tile{width:40px;height:40px;display:grid;place-items:center;background:var(--surface-2);color:var(--muted);margin-bottom:8px}
+.empty .e-t{font-weight:600}
+.empty .e-d{color:var(--muted);max-width:44ch}
+.empty .btn{margin-top:8px}
+
+/* ---------- the Changes list (s70b) ---------- */
+.panel{container-type:inline-size;border:1px solid var(--line);background:var(--card);border-radius:var(--radius-container)}
+.site-h{min-height:48px;display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;padding:8px 8px 8px 16px;border-bottom:1px solid var(--line)}
+.site-h h2{font:600 14px/20px var(--font-sans)}
+.site-h .dom{font:400 12px/16px var(--font-mono);color:var(--muted)}
+.site-h .counts{display:flex;gap:6px}
+.site-h .sp{margin-left:auto}
+.band{min-height:36px;display:flex;align-items:center;gap:8px;padding:0 16px;background:var(--surface-1);border-bottom:1px solid var(--line)}
+.band h3{font:500 14px/20px var(--font-sans)}
+.band .path{font:400 12px/16px var(--font-mono);color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.band .n{margin-left:auto;font-size:12px;color:var(--muted)}
+.band .note{font-size:12px;color:var(--muted)}
+.band h3,.band .n{white-space:nowrap}
+.row{display:grid;align-items:center;column-gap:12px;min-height:44px;padding:4px 8px 4px 8px;border-bottom:1px solid var(--line);
+  grid-template-columns:32px 96px minmax(9rem,1.1fr) minmax(0,2fr) 11rem auto 32px;
+  grid-template-areas:"exp st loc txt who open more"}
+li:last-child>.row:not(.is-open){border-bottom:0}
+.row.is-open{background:var(--surface-2)}
+.r-exp{grid-area:exp}.r-st{grid-area:st}.r-loc{grid-area:loc}.r-txt{grid-area:txt}.r-who{grid-area:who}.r-open{grid-area:open}.r-more{grid-area:more;position:relative}
+.r-loc{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-txt{color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.r-txt .q{color:var(--muted)}
+.r-who{font-size:12px;line-height:16px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-exp .i{transition:transform .16s var(--ease-out)}
+.is-open .r-exp .i{transform:rotate(90deg)}
+.thumb{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.thumb .ph-img{width:32px;height:24px;flex-shrink:0;background:linear-gradient(135deg,var(--surface-3),var(--surface-2));border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+.thumb .fn{font:400 12px/16px var(--font-mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container (max-width:720px){
+  .row{grid-template-columns:32px auto minmax(0,1fr) 32px;
+    grid-template-areas:"exp st loc more" ". txt txt txt" ". who who open";
+    row-gap:4px;padding:10px 8px 12px}
+  .r-txt{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .r-open{justify-self:end}
+  .site-h .sp{margin-left:0}
+  .site-h .counts{order:3;width:100%}
+  .band{flex-wrap:wrap;padding:8px 16px;row-gap:0}
+  .band .note{order:3;flex-basis:100%}
+}
+.detail{border-bottom:1px solid var(--line);background:var(--surface-1);padding:12px 16px 16px 52px;display:grid;gap:16px}
+@container (max-width:720px){.detail{padding:12px 16px 16px}}
+.cmp{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:12px}
+.cmp>div{min-width:0;border:1px solid var(--line);background:var(--card);padding:10px 12px}
+.cmp .v{margin-top:4px;overflow-wrap:anywhere}
+.cmp .draft{border-color:var(--w-l)}
+.cmp .same{font-size:12px;color:var(--muted);margin-top:6px}
+.acts{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.acts .why{font-size:12px;color:var(--muted)}
+.hist h4{margin:0 0 8px;font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted)}
+.hist li{display:grid;grid-template-columns:8px minmax(0,1fr);column-gap:10px;padding:6px 0;border-top:1px solid var(--line)}
+.hist li:first-child{border-top:0;padding-top:0}
+.hist .hd{width:6px;height:6px;border-radius:9999px;background:var(--line-strong);margin-top:7px}
+.hist .h-t{font-size:12px;line-height:18px;color:var(--muted)}
+.hist .h-t b{color:var(--fg);font-weight:500}
+.hist .h-v{font-size:13px;line-height:18px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere}
+details.tech summary{list-style:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--muted)}
+details.tech summary::-webkit-details-marker{display:none}
+details.tech[open] summary .i{transform:rotate(90deg)}
+details.tech dl{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:4px 12px;margin:8px 0 0;font-size:12px}
+details.tech dt{color:var(--muted)}
+details.tech dd{margin:0;font-family:var(--font-mono);background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-control);overflow-wrap:anywhere}
+.more-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.more-row .m{font-size:12px;color:var(--muted)}
+
+/* ---------- dialog ---------- */
+.stage{position:relative;background:var(--canvas);border:1px solid var(--line);overflow:hidden}
+.stage .ghost{position:absolute;inset:0;padding:24px;display:grid;gap:12px;align-content:start}
+.stage .ghost i{display:block;height:44px;border:1px solid var(--line);background:var(--card)}
+.stage .veil{position:absolute;inset:0;background:hsl(200 22% 96% / .4)}
+.stage-desk{width:760px;padding:56px 40px;min-height:520px}
+.stage-phone{width:375px;height:720px}
+.dlg{position:relative;z-index:1;display:flex;flex-direction:column;overflow:hidden;background:var(--card);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md)}
+.dlg-448{width:448px;max-width:100%;margin:0 auto}
+.dlg-x{position:absolute;top:16px;right:16px;width:24px;height:24px;display:grid;place-items:center;background:none;border:0;color:var(--muted);border-radius:var(--radius-control)}
+.dlg-h{padding:20px 48px 16px 24px}
+.dlg-t{font:600 16px/24px var(--font-sans)}
+.dlg-d{margin-top:4px;color:var(--muted)}
+.dlg-b{padding:0 24px 20px;display:grid;gap:12px;overflow-y:auto}
+.dlg-b>*{min-width:0}
+.blk{border:1px solid var(--line);background:var(--surface-1);padding:10px 12px}
+.blk .v{margin-top:4px;overflow-wrap:anywhere}
+.dlg-f{border-top:1px solid var(--line);padding:12px 24px;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:92%;border-width:1px 0 0}
+.sheet .dlg-h{padding:16px 48px 12px 16px}
+.sheet .dlg-b{padding:0 16px 16px}
+.sheet .dlg-f{padding:12px 16px;flex-direction:column-reverse;align-items:stretch}
+.sheet .dlg-f .btn{width:100%}
+
+/* ---------- anatomy annotations ---------- */
+.anat{position:relative;padding-top:28px}
+.anat .tag{position:absolute;top:0;font:500 11px/14px var(--font-mono);color:var(--spec);white-space:nowrap}
+.anat .tick{position:absolute;top:14px;height:12px;border-left:1px solid var(--spec)}
+table.spec-t{border-collapse:collapse;font-size:13px;width:100%;max-width:960px}
+table.spec-t th,table.spec-t td{border-bottom:1px solid var(--line);text-align:left;padding:8px 12px;vertical-align:top}
+table.spec-t th{font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted);background:var(--surface-1)}
+table.spec-t td.mono{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-dash" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3"/><rect width="7" height="5" x="14" y="3"/><rect width="7" height="9" x="14" y="12"/><rect width="7" height="5" x="3" y="16"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5"/><path d="M2 10h20"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.4 3.6a2.1 2.1 0 1 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+  </defs>
+</svg>
+
+<div class="page">
+  <p class="eyebrow">s70 · reference mockup · not production code</p>
+  <h1 class="ptitle">Changes — what changed on your sites, page by page</h1>
+  <p class="lede">Design for <span class="mono">s70b-changes-page</span> (sections A–E) and
+    <span class="mono">s70c-site-content-tab</span> (section F). Read with
+    <span class="mono">docs/designs/s70-content-changes.md</span>. Dark tokens of
+    <span class="mono">globals.css</span>; square containers, 2&nbsp;px controls, flat panels. The list
+    layout switches at a 720&nbsp;px panel width (a 768&nbsp;px viewport without the sidebar).</p>
+  <div class="legend">
+    <span><span class="badge b-warning"><svg class="i i-12"><use href="#i-clock"/></svg>Pending</span> saved as a draft, not live</span>
+    <span><span class="badge b-success"><svg class="i i-12"><use href="#i-upload"/></svg>Published</span> live, different from the original</span>
+    <span><span class="badge b-neutral"><svg class="i i-12"><use href="#i-file"/></svg>Original</span> only under “All text”</span>
+    <span class="spec">annotation ink (mockup only)</span>
+  </div>
+
+  <section class="sec" id="a">
+    <div class="sec-h"><p class="eyebrow">A · global page · 1280</p>
+      <p>Default filter “Changes” (pending + published). One panel per site, page bands inside, newest change first.
+        The first row is expanded: compare, actions, history, technical details. Rows never show an element id or a selector.</p></div>
+    <div class="scroll-x"><div class="device d1280" id="frame-a"></div></div>
+    <ul class="notes">
+      <li>No call to <span class="mono">GET /api/sites</span>; one <span class="mono">GET /api/content/changes?state=changes</span> returns sites, the first 50 rows and the three counts.</li>
+      <li>Northwind Docs is an <b>edit</b> grant: no “who” (history is admin-only by RLS), no Publish; Revert saves a draft.</li>
+      <li>⋮ is visible at rest on every row; its menu is shown open on the Pricing “Button” row.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="b">
+    <div class="sec-h"><p class="eyebrow">B · global page · 375</p>
+      <p>Filters stack, rows stack (status and location, then the text on two lines, then who/when and Open). The pending hero button is expanded: Draft, Live now, Original stacked; Publish and Discard visible at rest.</p></div>
+    <div class="frames">
+      <div><div class="cap"><span class="eyebrow">375 · top</span></div><div class="device d375" id="frame-b"></div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="c">
+    <div class="sec-h"><p class="eyebrow">C · row anatomy and readable locations</p>
+      <p>One 44&nbsp;px line at ≥ 768 (grid <span class="mono">32px 96px minmax(9rem,1.1fr) minmax(0,2fr) 11rem auto 32px</span>); three lines below. The page is in the band, so the row's location is place · element.</p></div>
+    <div class="scroll-x"><div class="device d1024" style="padding:40px 32px 32px" id="frame-c"></div></div>
+    <div style="margin-top:24px" class="scroll-x">
+      <table class="spec-t" id="loc-table"></table>
+    </div>
+  </section>
+
+  <section class="sec" id="d">
+    <div class="sec-h"><p class="eyebrow">D · states (content area, 1024 frame)</p>
+      <p>Loading keeps the filters usable. Empty is never an error, and an error is never empty. “All text” adds the Original rows and pages 50 at a time.</p></div>
+    <div class="frames" id="frame-d"></div>
+  </section>
+
+  <section class="sec" id="e">
+    <div class="sec-h"><p class="eyebrow">E · revert to original</p>
+      <p>Never one click. The dialog shows what is live and what it goes back to. “Revert and publish” only with publish rights; without them the primary is “Save as draft”. Below 640 it is the bottom sheet.</p></div>
+    <div class="frames">
+      <div><div class="cap"><span class="eyebrow">desktop · Dialog 448</span></div><div class="stage stage-desk" id="dlg-desk"></div></div>
+      <div><div class="cap"><span class="eyebrow">375 · bottom sheet · request failed</span></div><div class="stage stage-phone" id="dlg-phone"></div></div>
+    </div>
+    <ul class="notes">
+      <li>Save as draft → <span class="mono">PUT /api/staging/content/&lt;site&gt; {elementId, content: original, language, variant}</span>.</li>
+      <li>Revert and publish → the same PUT, then <span class="mono">POST /api/staging/publish {siteId, elementIds:[elementId]}</span>. Both existing routes (ADR 042 path, plan gate).</li>
+      <li>A refusal stays inside the dialog with the server's words (402 “plan ended” included). Success closes it and the row changes state in place.</li>
+    </ul>
+  </section>
+
+  <section class="sec" id="f">
+    <div class="sec-h"><p class="eyebrow">F · site tab · /dashboard/sites/&lt;id&gt;/content (s70c)</p>
+      <p>The site frame (title, status, domain, Edit website, Version history) with Content second in the subnav. No site select, no site header: the panel starts with the page bands. At 375 the five links wrap onto two lines, never clipped.</p></div>
+    <div class="scroll-x"><div class="device d1280" id="frame-f1"></div></div>
+    <div class="frames" style="margin-top:32px">
+      <div><div class="cap"><span class="eyebrow">375</span></div><div class="device d375" id="frame-f2"></div></div>
+      <div><div class="cap"><span class="eyebrow">375 · no changes on this site yet</span></div><div class="device d375" id="frame-f3"></div></div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ===== one fixture, every frame ===== */
+const NOW = "2026-10-08";
+const FIXTURE = {
+  counts: { pending: 3, published: 6, original: 1239 },
+  sites: [
+    { id: "s1", name: "Acme Studio", domain: "acme.example", grant: "admin", status: "Live",
+      pages: [
+        { label: "Homepage", path: "/", rows: [
+          { id: "r1", state: "published", loc: "Hero · Main heading", type: "h1",
+            original: "Copy changes without a developer", live: "Ship copy changes in minutes, not sprints",
+            who: "ana@example.com", when: "2 h ago", whenFull: "8 Oct 2026, 14:05",
+            elementId: "rcf-1gom2eazz3g", selector: "#root > main > section.hero > h1",
+            history: [
+              { a: "Published", who: "ana@example.com", at: "8 Oct 2026, 14:05", v: "Ship copy changes in minutes, not sprints" },
+              { a: "Draft saved", who: "ana@example.com", at: "8 Oct 2026, 13:58", v: "Ship copy changes in minutes, not sprints" },
+              { a: "Draft saved", who: "sam@example.com", at: "7 Oct 2026, 10:12", v: "Ship copy in minutes" },
+              { a: "Discovered", who: null, at: "28 Sep 2026", v: null } ] },
+          { id: "r2", state: "pending", loc: "Hero · Button", type: "button",
+            original: "Start free trial", live: "Start free trial", draft: "Start your 14-day trial",
+            who: "sam@example.com", when: "25 min ago", whenFull: "8 Oct 2026, 15:40",
+            elementId: "rcf-v6di4rh42g", selector: "#root > main > section.hero > div.actions > button:nth-child(1)",
+            history: [
+              { a: "Draft saved", who: "sam@example.com", at: "8 Oct 2026, 15:40", v: "Start your 14-day trial" },
+              { a: "Discovered", who: null, at: "28 Sep 2026", v: null } ] },
+          { id: "r3", state: "published", loc: "Hero · Paragraph", type: "p",
+            original: "ReCopyFast lets your team edit the words on your site.",
+            live: "Your team edits the words on your site. Developers keep shipping features.",
+            who: "ana@example.com", when: "yesterday", whenFull: "7 Oct 2026, 09:20",
+            elementId: "rcf-t2e2dmuv2h", selector: "#root > main > section.hero > p" } ] },
+        { label: "Pricing", path: "/pricing", rows: [
+          { id: "r4", state: "published", loc: "Heading", type: "h2",
+            original: "Pricing", live: "Simple pricing for every team",
+            who: "ana@example.com", when: "3 days ago", whenFull: "5 Oct 2026, 11:02",
+            elementId: "rcf-20ocfyq5in4", selector: "#pricing > header > h2" },
+          { id: "r5", state: "pending", loc: "Button", type: "button", menuOpen: true,
+            original: "Choose Pro", live: "Choose Pro", draft: "Start with Pro",
+            who: "sam@example.com", when: "1 h ago", whenFull: "8 Oct 2026, 15:05",
+            elementId: "rcf-lr2vlhxvk0", selector: "#pricing > div.grid > div:nth-child(2) > button" } ] },
+        { label: "Every page", path: null, rows: [
+          { id: "r6", state: "published", loc: "Footer tagline", type: "p",
+            original: "Made with care", live: "Made in Lisbon, shipped everywhere",
+            who: "ana@example.com", when: "5 days ago", whenFull: "3 Oct 2026, 17:44",
+            elementId: "footer-tagline", selector: "[data-rcf-id=\"footer-tagline\"]" } ] } ] },
+    { id: "s2", name: "Northwind Docs", domain: "docs.northwind.example", grant: "edit", status: "Live",
+      pages: [
+        { label: "Getting started", path: "/getting-started", rows: [
+          { id: "r7", state: "pending", loc: "List item", type: "li",
+            original: "Paste the snippet in your head tag", live: "Paste the snippet in your head tag",
+            draft: "Paste the snippet just before </body>",
+            who: null, when: "3 h ago", whenFull: "8 Oct 2026, 13:31",
+            elementId: "rcf-1w2a7y89hxn", selector: "#__next > main > article > ol > li:nth-child(2)" },
+          { id: "r8", state: "published", loc: "Main heading", type: "h1",
+            original: "Getting started", live: "Get started in five minutes",
+            who: null, when: "6 days ago", whenFull: "2 Oct 2026, 08:15",
+            elementId: "rcf-ik1ednkdne", selector: "#__next > main > article > h1" } ] },
+        { label: "Changelog", path: "/changelog", rows: [
+          { id: "r9", state: "published", loc: "Header · Image", type: "img",
+            original: "https://cdn.northwind.example/img/logo.png", live: "https://cdn.northwind.example/img/logo-2026.png",
+            who: null, when: "6 days ago", whenFull: "2 Oct 2026, 08:02",
+            elementId: "rcf-12v7zi61en4", selector: "#__next > header > a > img" } ] } ] } ]
+};
+
+/* ===== helpers ===== */
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const ic = (n, c = "") => `<svg class="i ${c}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+const STATE = {
+  pending:   { label: "Pending",   tone: "b-warning", icon: "clock" },
+  published: { label: "Published", tone: "b-success", icon: "upload" },
+  original:  { label: "Original",  tone: "b-neutral", icon: "file" } };
+const badge = (s) => `<span class="badge ${STATE[s].tone}">${ic(STATE[s].icon, "i-12")}${STATE[s].label}</span>`;
+const canPublish = (g) => g === "admin" || g === "publish";
+const canEdit = (g) => g !== "view";
+const shown = (r) => r.state === "pending" ? r.draft : r.state === "published" ? r.live : r.original;
+const isImg = (r) => r.type === "img";
+const fileName = (u) => u.split("/").pop();
+
+function valueHtml(r, v) {
+  if (isImg(r)) return `<span class="thumb"><span class="ph-img">${ic("image", "i-12")}</span><span class="fn">${esc(fileName(v))}</span></span>`;
+  return esc(v);
+}
+function rowText(r) {
+  if (isImg(r)) return valueHtml(r, shown(r));
+  return `<span title="${esc(shown(r))}">${esc(shown(r))}</span>`;
+}
+function whoWhen(r, site) {
+  const who = r.who && site.grant === "admin" ? `${esc(r.who)} · ` : "";
+  return `<span title="${esc(r.whenFull)}">${who}${esc(r.when)}</span>`;
+}
+function pageUrl(site, page) { return `https://${site.domain}${page.path ?? "/"}`; }
+
+function menuHtml(r, site) {
+  const items = [
+    `<div class="menu-i">${ic("ext")}Open on page</div>`,
+    canEdit(site.grant) ? `<div class="menu-i">${ic("pencil")}Edit on page</div>` : "",
+    `<div class="menu-i hl">${ic("history")}Compare and history</div>`];
+  const writes = [];
+  if (r.state === "published" && canEdit(site.grant)) writes.push(`<div class="menu-i">${ic("undo")}Revert to original</div>`);
+  if (r.state === "pending" && canEdit(site.grant)) writes.push(`<div class="menu-i danger">${ic("x")}Discard draft</div>`);
+  return `<div class="menu" style="right:0;top:36px" role="menu">${items.join("")}${writes.length ? `<div class="menu-sep"></div>${writes.join("")}` : ""}</div>`;
+}
+
+function detailHtml(r, site, page) {
+  const cols = [];
+  if (r.state === "pending") cols.push(`<div class="draft"><p class="eyebrow">Draft</p><div class="v">${valueHtml(r, r.draft)}</div></div>`);
+  cols.push(`<div><p class="eyebrow">Live now</p><div class="v">${valueHtml(r, r.live)}</div></div>`);
+  cols.push(`<div><p class="eyebrow">Original</p><div class="v">${valueHtml(r, r.original)}</div></div>`);
+  const acts = [];
+  if (r.state === "pending" && canPublish(site.grant)) acts.push(`<button class="btn btn-default btn-sm">${ic("upload", "i-14")}Publish</button>`);
+  if (r.state === "pending" && canEdit(site.grant)) acts.push(`<button class="btn btn-ghost btn-sm">${ic("x", "i-14")}Discard draft</button>`);
+  if (r.state === "published" && canEdit(site.grant)) acts.push(`<button class="btn btn-outline btn-sm">${ic("undo", "i-14")}Revert to original</button>`);
+  if (canEdit(site.grant)) acts.push(`<button class="btn btn-ghost btn-sm">${ic("pencil", "i-14")}Edit on page</button>`);
+  if (r.state === "pending" && !canPublish(site.grant)) acts.push(`<span class="why">Publishing needs publish rights on this site.</span>`);
+  let hist = "";
+  if (site.grant !== "admin") {
+    hist = `<div class="hist"><h4>History</h4><ul><li><span class="hd"></span><div><p class="h-t">Only this site's admins can see who changed what.</p></div></li><li><span class="hd"></span><div><p class="h-t"><b>Discovered</b> · 28 Sep 2026</p></div></li></ul></div>`;
+  } else if (r.history) {
+    hist = `<div class="hist"><h4>History</h4><ul>${r.history.map((h) => `<li><span class="hd"></span><div><p class="h-t"><b>${esc(h.a)}</b>${h.who ? ` · ${esc(h.who)}` : ""} · ${esc(h.at)}</p>${h.v ? `<p class="h-v">${esc(h.v)}</p>` : ""}</div></li>`).join("")}</ul></div>`;
+  }
+  return `<div class="detail" role="region" aria-label="Compare and history: ${esc(r.loc)}">
+    <div class="cmp">${cols.join("")}</div>
+    <div class="acts">${acts.join("")}</div>
+    ${hist}
+    <details class="tech"><summary>${ic("chev-r", "i-12")}Technical details</summary>
+      <dl><dt>Element id</dt><dd>${esc(r.elementId)}</dd><dt>Selector</dt><dd>${esc(r.selector)}</dd><dt>Page</dt><dd>${esc(page.path ?? "every page (shared id)")}</dd></dl></details>
+  </div>`;
+}
+
+function rowHtml(r, site, page, opts) {
+  const open = opts.expanded === r.id;
+  const showMenu = opts.menu && r.menuOpen;
+  return `<li><div class="row${open ? " is-open" : ""}">
+    <button class="btn btn-ghost btn-icon-sm r-exp" aria-expanded="${open}" aria-label="Compare and history: ${esc(r.loc)}">${ic("chev-r")}</button>
+    <span class="r-st">${badge(r.state)}</span>
+    <span class="r-loc" title="${esc(r.loc)}">${esc(r.loc)}</span>
+    <span class="r-txt">${rowText(r)}</span>
+    <span class="r-who">${whoWhen(r, site)}</span>
+    <a class="btn btn-ghost btn-sm r-open" href="#" aria-label="Open ${esc(r.loc)} on ${esc(site.domain)}${esc(page.path ?? "/")} in a new tab">Open${ic("ext", "i-12")}</a>
+    <span class="r-more"><button class="btn btn-ghost btn-icon-sm" aria-haspopup="menu" aria-label="More actions for ${esc(r.loc)}">${ic("more")}</button>${showMenu ? menuHtml(r, site) : ""}</span>
+  </div>${open ? detailHtml(r, site, page) : ""}</li>`;
+}
+
+function bandHtml(page, n) {
+  const path = page.path === null
+    ? `<span class="note">shared by every page (data-rcf-id)</span>`
+    : `<span class="path">${esc(page.path)}</span>`;
+  return `<div class="band"><h3>${esc(page.label)}</h3>${path}<span class="n tab-num">${n} ${n === 1 ? "change" : "changes"}</span></div>`;
+}
+
+function sitePanel(site, opts) {
+  const pend = site.pages.flatMap((p) => p.rows).filter((r) => r.state === "pending").length;
+  const pub = site.pages.flatMap((p) => p.rows).filter((r) => r.state === "published").length;
+  const head = opts.siteHeader === false ? "" : `<div class="site-h"><h2>${esc(site.name)}</h2><span class="dom">${esc(site.domain)}</span>
+    <span class="counts">${pend ? `<span class="badge b-warning">${pend} pending</span>` : ""}${pub ? `<span class="badge b-success">${pub} published</span>` : ""}</span>
+    <a class="btn btn-ghost btn-sm sp" href="#">Site page${ic("chev-r", "i-12")}</a></div>`;
+  const pages = site.pages.map((p) => {
+    const rows = opts.extraOriginal && p.path === "/" ? [...p.rows, ...opts.extraOriginal] : p.rows;
+    return `${bandHtml(p, rows.length)}<ul>${rows.map((r) => rowHtml(r, site, p, opts)).join("")}</ul>`;
+  }).join("");
+  return `<section class="panel" aria-label="${esc(site.name)}">${head}${pages}</section>`;
+}
+
+function filtersHtml(opts) {
+  const c = opts.counts === undefined ? FIXTURE.counts : opts.counts;
+  const total = c ? c.pending + c.published : 0;
+  const n = (x) => (c ? ` (${x.toLocaleString("en-US")})` : "");
+  const site = opts.siteSelect === false ? "" : `<div class="nsel fsel"><label class="sr" for="fs-${opts.k}">Site</label><select class="input" id="fs-${opts.k}"><option>All sites</option>${FIXTURE.sites.map((s) => `<option>${esc(s.name)}</option>`).join("")}</select>${ic("chev-d", "chev")}</div>`;
+  const sel = opts.state || "changes";
+  const opt = (v, l) => `<option${v === sel ? " selected" : ""}>${l}</option>`;
+  return `<div class="filters" role="search">
+    <div class="inwrap grow">${ic("search")}<label class="sr" for="q-${opts.k}">Search text or page</label><input class="input" id="q-${opts.k}" type="search" placeholder="Search text or page" value="${esc(opts.q || "")}"></div>
+    ${site}
+    <div class="nsel fsel"><label class="sr" for="st-${opts.k}">Status</label><select class="input" id="st-${opts.k}">
+      ${opt("changes", `Changes${n(total)}`)}${opt("pending", `Pending${n(c ? c.pending : 0)}`)}${opt("published", `Published${n(c ? c.published : 0)}`)}${opt("all", `All text${n(c ? total + c.original : 0)}`)}</select>${ic("chev-d", "chev")}</div>
+  </div>`;
+}
+
+function shellHead(title, desc) {
+  return `<div class="ph"><div class="ph-txt"><h1>${esc(title)}</h1><p class="desc">${esc(desc)}</p></div></div>`;
+}
+
+function appFrame(width, crumbs, body, active = "Changes") {
+  const narrow = width === 375;
+  const nav = (label, icon) => `<a class="side-i${label === active ? " act" : ""}" href="#"${label === active ? ' aria-current="page"' : ""}>${ic(icon)}${label}</a>`;
+  const side = narrow ? "" : `<nav class="side" aria-label="Main"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div>
+    <p class="side-g eyebrow">Workspace</p>${nav("Overview", "dash")}${nav("Sites", "globe")}${nav("Changes", "list")}${nav("Analytics", "chart")}
+    <p class="side-g eyebrow">Account</p>${nav("Settings", "gear")}${nav("Billing", "card")}</nav>`;
+  const menuBtn = narrow ? `<button class="btn btn-ghost btn-icon-sm" aria-label="Open menu">${ic("menu")}</button>` : "";
+  return `<div class="app">${side}<div class="col"><header class="top">${menuBtn}<nav class="crumbs" aria-label="Breadcrumb">${crumbs}</nav><span class="avatar">A</span></header>
+    <main class="main"><div class="shell" data-page-shell>${body}</div></main></div></div>`;
+}
+
+const crumbsGlobal = `<span>Dashboard</span><span>/</span><span class="cur">Changes</span>`;
+
+/* ===== A: global page 1280 ===== */
+(function () {
+  const c = FIXTURE.counts;
+  const body = shellHead("Changes", "What changed on your sites, page by page.")
+    + filtersHtml({ k: "a" })
+    + `<p class="result" aria-live="polite">${c.pending + c.published} changes on ${FIXTURE.sites.length} sites</p>`
+    + FIXTURE.sites.map((s) => sitePanel(s, { expanded: "r1", menu: true })).join("");
+  document.getElementById("frame-a").innerHTML = appFrame(1280, crumbsGlobal, body);
+})();
+
+/* ===== B: global page 375 ===== */
+(function () {
+  const c = FIXTURE.counts;
+  const body = shellHead("Changes", "What changed on your sites, page by page.")
+    + filtersHtml({ k: "b" })
+    + `<p class="result" aria-live="polite">${c.pending + c.published} changes on ${FIXTURE.sites.length} sites</p>`
+    + sitePanel(FIXTURE.sites[0], { expanded: "r2" });
+  document.getElementById("frame-b").innerHTML = appFrame(375, crumbsGlobal, body);
+})();
+
+/* ===== C: anatomy ===== */
+(function () {
+  const site = FIXTURE.sites[0], page = site.pages[0], r = page.rows[0];
+  const tags = [
+    ["expand", 10], ["status", 74], ["location (place · element)", 162], ["text that matters for the state", 336],
+    ["who · when", 643], ["Open ↗", 843], ["more, at rest", 900] ];
+  const anat = `<div class="anat">${tags.map(([t, x]) => `<span class="tag" style="left:${x}px">${t}</span><span class="tick" style="left:${x + 4}px"></span>`).join("")}
+    <section class="panel">${bandHtml(page, 3)}<ul>${rowHtml(r, site, page, {})}${rowHtml(page.rows[1], site, page, {})}</ul></section></div>
+    <p class="spec" style="margin-top:12px">band 36 · bg-surface-1 · h3 14/500 + path mono 12 · row min 44 · px-4 · border-b · text truncates, full string in title</p>
+    <div style="margin-top:28px;width:375px"><div class="cap"><span class="eyebrow">the same row below 720 px of panel</span></div>
+      <section class="panel">${bandHtml(page, 3)}<ul>${rowHtml(page.rows[2], site, page, {})}</ul></section></div>`;
+  document.getElementById("frame-c").innerHTML = anat;
+  const rows = [
+    ["/", "#root > main > section.hero > h1", "h1", "rcf-…", "Homepage", "Hero · Main heading"],
+    ["/pricing", "#pricing > div.grid > div:nth-child(2) > button", "button", "rcf-…", "Pricing", "Button  (place “Pricing” dropped: same as the page)"],
+    ["/", "body > header > nav > a:nth-child(3)", "a", "rcf-…", "Homepage", "Navigation · Link"],
+    ["/", "#root > main > div.cta > button > span", "span", "rcf-…", "Homepage", "Call to action · Button label"],
+    ["NULL", "[data-rcf-id=\"footer-tagline\"]", "p", "footer-tagline", "Every page", "Footer tagline (author id wins)"],
+    ["/blog/how-we-ship", "article > p:nth-child(4)", "p", "rcf-…", "Blog › How we ship", "Paragraph"],
+    ["/docs/a/b/c", "#__next > main > h2", "h2", "rcf-…", "… › B › C", "Heading  (framework root #__next skipped)"] ];
+  document.getElementById("loc-table").innerHTML = `<thead><tr><th>page_path</th><th>selector</th><th>type</th><th>element_id</th><th>Band</th><th>Row location</th></tr></thead>
+    <tbody>${rows.map((x) => `<tr><td class="mono">${esc(x[0])}</td><td class="mono">${esc(x[1])}</td><td class="mono">${esc(x[2])}</td><td class="mono">${esc(x[3])}</td><td>${esc(x[4])}</td><td>${esc(x[5])}</td></tr>`).join("")}</tbody>`;
+})();
+
+/* ===== D: states ===== */
+(function () {
+  const frame = (cap, inner) => `<div><div class="cap"><span class="eyebrow">${cap}</span></div><div class="scroll-x"><div class="device d1024"><div class="main"><div class="shell" data-page-shell>${shellHead("Changes", "What changed on your sites, page by page.")}${inner}</div></div></div></div></div>`;
+  const skRow = () => `<div class="row" aria-hidden="true"><span class="sk" style="width:16px;height:16px;justify-self:center"></span><span class="sk" style="width:72px;height:18px"></span><span class="sk" style="width:70%;height:12px"></span><span class="sk" style="width:85%;height:12px"></span><span class="sk" style="width:80%;height:10px"></span><span class="sk" style="width:48px;height:12px"></span><span class="sk" style="width:16px;height:16px;justify-self:center"></span></div>`;
+  const loading = filtersHtml({ k: "d1", counts: null }) + `<p class="result">Loading changes…</p><section class="panel" role="status" aria-label="Loading changes">
+    <div class="site-h"><span class="sk" style="width:140px;height:14px"></span><span class="sk" style="width:110px;height:10px"></span></div>
+    <div class="band"><span class="sk" style="width:90px;height:12px"></span></div>${Array.from({ length: 6 }, skRow).join("")}</section>`;
+  const none = filtersHtml({ k: "d2" }) + `<section class="panel"><div class="empty"><span class="tile">${ic("file")}</span><p class="e-t">No changes yet.</p><p class="e-d">Text you or your editors change shows up here, grouped by page.</p><button class="btn btn-outline btn-sm">Show all text</button></div></section>`;
+  const noSites = `<section class="panel"><div class="empty"><span class="tile">${ic("globe")}</span><p class="e-t">Add a site to see its changes here.</p><p class="e-d">Install the snippet on a site and every change made to its text will be listed on this page.</p><a class="btn btn-default btn-sm" href="#">Add site</a></div></section>`;
+  const nomatch = filtersHtml({ k: "d3", q: "pricng", counts: { pending: 0, published: 0, original: 0 } }) + `<p class="result" aria-live="polite">0 changes match “pricng”</p><section class="panel"><div class="empty" style="padding:32px 24px"><p class="e-t">Nothing matches “pricng”.</p><button class="btn btn-ghost btn-sm">Clear search</button></div></section>`;
+  const error = filtersHtml({ k: "d4" }) + `<div class="alert al-danger" role="alert">${ic("alert")}<div class="a-body"><p class="a-t">Changes could not be loaded.</p><p>The server did not answer (503). Nothing on your sites changed.</p></div><button class="btn btn-outline btn-sm">Try again</button></div>`;
+  const s = FIXTURE.sites[0];
+  const extra = [
+    { id: "o1", state: "original", loc: "Hero · Text", type: "span", original: "No credit card needed", live: "No credit card needed", who: null, when: "28 Sep", whenFull: "28 Sep 2026, 09:01", elementId: "rcf-…", selector: "…" },
+    { id: "o2", state: "original", loc: "Navigation · Link", type: "a", original: "Docs", live: "Docs", who: null, when: "28 Sep", whenFull: "28 Sep 2026, 09:01", elementId: "rcf-…", selector: "…" },
+    { id: "o3", state: "original", loc: "Features · Heading", type: "h2", original: "Everything your copy needs", live: "Everything your copy needs", who: null, when: "28 Sep", whenFull: "28 Sep 2026, 09:01", elementId: "rcf-…", selector: "…" } ];
+  const c = FIXTURE.counts;
+  const all = filtersHtml({ k: "d5", state: "all" }) + `<p class="result" aria-live="polite">Showing 50 of ${(c.pending + c.published + c.original).toLocaleString("en-US")} text elements</p>`
+    + sitePanel({ ...s, pages: [s.pages[0]] }, { extraOriginal: extra })
+    + `<div class="more-row"><button class="btn btn-outline btn-sm">Show 50 more</button><span class="m">Showing 50 of ${(c.pending + c.published + c.original).toLocaleString("en-US")}</span></div>`;
+  document.getElementById("frame-d").innerHTML =
+    frame("loading", loading) + frame("no changes yet (sites exist)", none) + frame("no sites", noSites)
+    + frame("no match", nomatch) + frame("error — never rendered as empty", error) + frame("“All text” filter: Original rows, paged", all);
+})();
+
+/* ===== E: revert dialog ===== */
+(function () {
+  const r = FIXTURE.sites[0].pages[0].rows[0];
+  const ghost = `<div class="ghost">${"<i></i>".repeat(9)}</div><div class="veil"></div>`;
+  const body = `<div class="blk"><p class="eyebrow">Live now</p><p class="v">${esc(r.live)}</p></div><div class="blk"><p class="eyebrow">Original</p><p class="v">${esc(r.original)}</p></div>`;
+  document.getElementById("dlg-desk").innerHTML = ghost + `<div class="dlg dlg-448" role="dialog" aria-modal="true" aria-labelledby="dt1">
+    <button class="dlg-x" aria-label="Close">${ic("x")}</button>
+    <div class="dlg-h"><p class="dlg-t" id="dt1">Revert to the original text?</p><p class="dlg-d">Hero · Main heading on Homepage, acme.example</p></div>
+    <div class="dlg-b">${body}</div>
+    <div class="dlg-f"><button class="btn btn-ghost">Cancel</button><button class="btn btn-outline">Save as draft</button><button class="btn btn-default">Revert and publish</button></div></div>`;
+  const r7 = FIXTURE.sites[1].pages[0].rows[1];
+  document.getElementById("dlg-phone").innerHTML = ghost + `<div class="dlg sheet" role="dialog" aria-modal="true" aria-labelledby="dt2">
+    <button class="dlg-x" aria-label="Close">${ic("x")}</button>
+    <div class="dlg-h"><p class="dlg-t" id="dt2">Revert to the original text?</p><p class="dlg-d">Main heading on Getting started, docs.northwind.example</p></div>
+    <div class="dlg-b"><div class="alert al-danger" role="alert">${ic("alert")}<div class="a-body"><p class="a-t">Not reverted.</p><p>This site's plan has ended. Ask the site owner to renew, then try again.</p></div></div>
+      <div class="blk"><p class="eyebrow">Live now</p><p class="v">${esc(r7.live)}</p></div><div class="blk"><p class="eyebrow">Original</p><p class="v">${esc(r7.original)}</p></div>
+      <p style="font-size:12px;color:var(--muted)">It goes live when someone with publish rights publishes it.</p></div>
+    <div class="dlg-f"><button class="btn btn-ghost">Cancel</button><button class="btn btn-default">Save as draft</button></div></div>`;
+})();
+
+/* ===== F: site tab ===== */
+(function () {
+  const s = FIXTURE.sites[0];
+  const crumbs = `<span>Dashboard</span><span>/</span><span>Sites</span><span>/</span><span>Site</span><span>/</span><span class="cur">Content</span>`;
+  const head = (narrow) => `<div class="ph"><div class="ph-txt"><div class="ph-title"><h1>${esc(s.name)}</h1><span class="badge b-success"><span class="dot"></span>Live</span></div>
+      <p class="desc"><a href="#">${esc(s.domain)} ${ic("ext", "i-12")}</a></p></div>
+      <div class="ph-act"><button class="btn btn-default${narrow ? " btn-sm" : ""}">${ic("pencil", "i-14")}Edit website</button><button class="btn btn-outline${narrow ? " btn-sm" : ""}">${ic("history", "i-14")}Version history</button></div></div>
+    <nav class="subnav" aria-label="Site"><a href="#">Overview</a><a href="#" aria-current="page">Content</a><a href="#">Install</a><a href="#">People &amp; access</a><a href="#">Settings</a></nav>`;
+  const pend = 2, pub = 4;
+  const siteCounts = { pending: 2, published: 4, original: 611 };
+  const body = (narrow, k) => head(narrow) + filtersHtml({ k, siteSelect: false, counts: siteCounts })
+    + `<p class="result" aria-live="polite">${pend + pub} changes on ${esc(s.name)}</p>`
+    + sitePanel(s, { siteHeader: false, expanded: narrow ? null : "r1" });
+  document.getElementById("frame-f1").innerHTML = appFrame(1280, crumbs, body(false, "f1"), "Sites");
+  document.getElementById("frame-f2").innerHTML = appFrame(375, crumbs, body(true, "f2"), "Sites");
+  const empty = head(true) + filtersHtml({ k: "f3", siteSelect: false, counts: { pending: 0, published: 0, original: 142 } })
+    + `<section class="panel"><div class="empty"><span class="tile">${ic("file")}</span><p class="e-t">No changes on Acme Studio yet.</p><p class="e-d">Open the site in edit mode and change any text; it shows up here, grouped by page.</p><button class="btn btn-default btn-sm">${ic("pencil", "i-14")}Edit website</button><button class="btn btn-ghost btn-sm">Show all text</button></div></section>`;
+  document.getElementById("frame-f3").innerHTML = appFrame(375, crumbs, empty, "Sites");
+})();
+</script>
+</body>
+</html>
