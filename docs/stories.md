@@ -100,7 +100,24 @@ stories are not each asserting the same ceiling and silently competing for it:
 | Impressions (`s09`) | ≤ 2,000 |
 | A/B bucketing (`s11`) | ≤ 2,000 |
 | Reserve | ≤ 2,000 |
+| SPA support (`s67`), paid in-branch | ≤ +850 gross, net ≤ 0 |
 | **Total ceiling** | **30,000** |
+
+A row marked "paid in-branch" adds nothing to the total. Its gross bytes are funded by deletions
+in the same branch, and both build ceilings then ratchet down to the size measured on that
+branch.
+
+`s67` is funded by three changes. Values are bundle / widget, `zlib` level 9, measured in
+research.
+- Build-time CSS minification of the five `style.textContent` literals: −494 / −525. This
+  pre-empts part of `s06c-embed-shrink`.
+- Deleting the unreachable socket.io fallback loader: −290 / −287.
+- Deleting the `rcf-editable` class, which nothing reads: −28 / −29.
+
+Together that is −812 / −841. If the branch is still over afterwards, the second-line reserve
+is the uncalled `assessReadability` method plus `getEditingColors` (−41 / −38). PR #59 does not
+spend those. If the branch is over even after the reserve, it stops and asks the owner, and the
+ceilings never move up.
 
 ---
 
@@ -2146,7 +2163,8 @@ pagination. This is a latency fix for shipped behavior, not a new content source
 
 Full entry, research, plan and review travel on `feature/s61-stable-copy-loading`. Review:
 "Ship allowed: no" — production delivery misses its 200 ms hold. Re-pointing its head bootstrap
-to the s65a snapshot is a follow-up of s65a.
+to the s65a snapshot is a follow-up of s65a. Sequencing (owner decision, 2026-10-08): s67 merges
+first, and #59 rebases onto s67's embed `init` and rows cache. See s67 Dependencies.
 
 ## Story s62-versioned-public-content-cache — SUPERSEDED on the visitor read path by s65a (PR #61 parked)
 
@@ -2362,36 +2380,82 @@ headless Chromium.
   max wait, so continuous mutation postpones a rescan indefinitely. A framework re-render
   can write authored copy back over applied published copy.
 
+Owner decisions, 2026-10-08, on the research's open questions
+(`docs/research/s67-embed-spa-support.md`). The owner accepted every recommended default:
+
+1. Rows nobody edited stop overwriting page text. Only a row with an actual human edit is
+   applied. Accepted loss: rows created by the API create call (`POST /api/v1/content` stores
+   `original_content = published_content`) no longer write text. Making that call store
+   `original_content = null` is a follow-up, not s67.
+2. On an edited element, published copy wins over any host re-render, capped at 10 rewrites
+   per element per page view.
+3. Hash-route sites (`/#/route`) are out of scope. The install guide documents the limitation
+   and the workaround.
+4. s67 merges before PR #59 (s61), and #59 rebases afterwards.
+5. AC 9 is restated: the embed patches no host global. It wraps no history method, and it
+   detects route changes with a path check on DOM mutation plus the Navigation API event
+   where the browser has one.
+
+Added to scope, 2026-10-08, from security review finding M8 (deferred into s67 because it is
+embed startup configuration): `window.RECOPYFAST_API` / `window.RECOPYFAST_WS` DOM clobbering
+(`public/embed/recopyfast.src.js:23-36`). See AC 12.
+
 Complexity: 4 (embed startup ordering, history integration, re-render races, byte budget,
-fixture and production proof). Dependencies: none. Coordinate with PR #59 (s61), which also
-edits embed startup. Branch `feature/s67-embed-spa-support`.
+fixture and production proof). Dependencies: none to build it. Sequencing (owner decision 4,
+2026-10-08): s67 merges before PR #59 (s61), which also edits embed startup. #59 rebases onto
+s67's `init` and rows-cache shape afterwards. Its late-swap policy against s67's model is
+decided at that rebase. Branch `feature/s67-embed-spa-support`.
 
 - [ ] AC 1, late render: content rendered at any time after the script starts is scanned. On
   openflows.ai `/` with the plain snippet, editable elements are > 0 within 2 s of render
   settling.
 - [ ] AC 2, late elements get published copy: an element found by any rescan receives its
   published row from the page rows already fetched, without a refetch, within one rescan
-  cycle.
+  cycle. Only edited rows write text (AC 11).
 - [ ] AC 3, route change: when the normalized page path changes (`pushState`,
   `replaceState`, `popstate`), the embed fetches that page's rows once and applies them. New
   ids use the new path. Elements that persist across routes keep working. A change of query
-  or hash only does not refetch.
-- [ ] AC 4, framework re-render: if the host rewrites an element back to authored copy after
-  published copy was applied, published copy is applied again. The embed's own writes never
-  trigger a loop.
+  or hash only does not refetch. Hash-route sites (`/#/route`) are out of scope (owner
+  decision 3). `/docs/install` states the limitation and the workaround: switch the router to
+  history mode, or give each route's elements an author-written, unique `data-rcf-id`.
+- [ ] AC 4, framework re-render (owner decision 2): if the host rewrites an element that has
+  an edited row, whatever text it writes, published copy is applied again. The cap is 10
+  writes per element per page view, where one in-app route visit counts as one page view.
+  The embed's own writes never trigger a loop.
 - [ ] AC 5, no starvation: continuous DOM mutation cannot postpone a rescan beyond a bounded
   max wait.
 - [ ] AC 6, static and SSR sites unchanged: the existing embed unit and e2e suites stay green.
-  aicompoz.com keeps server-rendered copy in first paint, with 0 swaps.
+  Existing tests change only in the ways `docs/plans/s67-embed-spa-support.md` lists
+  (harness teardown, one config setup, the install guide's SPA wording, the e2e count), and
+  the PR states each change. aicompoz.com keeps server-rendered copy in first paint, with 0
+  swaps.
 - [ ] AC 7, edit mode across navigation: an invited editor keeps the edit session after
   in-app navigation, and newly rendered elements are editable.
 - [ ] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
   this branch, because raising a ceiling is a defect.
-- [ ] AC 9, degrades and never breaks: no uncaught exception reaches the host page. Wrapped
-  history methods always call through and survive other libraries wrapping them too.
+- [ ] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
+  host page. The embed patches no host global: `history.pushState` and
+  `history.replaceState` keep their identity. Route changes are detected by a path check on
+  each DOM mutation batch, plus the Navigation API `currententrychange` event where the
+  browser has it.
 - [ ] AC 10, proof: a framework-free SPA fixture (renders after a delay, navigates with
   `pushState`, re-renders text) runs in CI e2e. In production on openflows.ai with the
   plain snippet, edit and publish on `/` and on a route reached by in-app navigation; both
   show published copy, on load and after navigation.
+- [ ] AC 11, edited rows only (owner decision 1): a row whose current copy equals its
+  `original_content` never writes page text. A row with no `original_content` counts as
+  edited. Attribute rows (`href`, `alt`) apply as before.
+- [ ] AC 12, startup configuration cannot be clobbered (M8):
+  - `window.RECOPYFAST_API` and `window.RECOPYFAST_WS` are honoured only when they are
+    strings whose origin equals the origin of the embed script's own `src`.
+  - Anything else is ignored, whether it is an element from DOM clobbering or a cross-origin
+    string. The endpoint then comes from `data-api-url` / `data-ws-url`. For the API only, it
+    is otherwise derived from `script.src`. There is still no derived WebSocket URL.
+  - A unit test proves it, and it is paid within the s67 allocation.
+- [ ] AC 13, host-safe writes: writing copy never replaces or removes a node the host
+  rendered. A React 19 app whose edited element later re-renders structurally (a conditional
+  text removed, an element inserted before the text) keeps running: no `NotFoundError`, and
+  the root does not unmount.
 
-Embed allocation: set at plan, paid within the existing ceiling.
+Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
+this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
