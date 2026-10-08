@@ -162,7 +162,7 @@ jobs:
   # constructing a service-role client, so changing only this workflow cannot
   # point them at production. The strict reporter makes skipped/flaky/missing
   # tests a failure and writes the only uploaded artifact: a credential-free
-  # summary with the exact expected 64-test count.
+  # summary with the exact expected 69-test count.
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
@@ -212,7 +212,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p test-results
-          printf '%s\n' '{"contract":"not-run","expected":64,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
+          printf '%s\n' '{"contract":"not-run","expected":69,"total":0,"passed":0,"failed":0,"skipped":0,"flaky":0,"tests":[]}' > test-results/playwright-summary.json
           chmod 600 test-results/playwright-summary.json
 
       - name: Set up Node.js 20
@@ -353,7 +353,7 @@ jobs:
       - name: Build production app
         run: npm run build
 
-      - name: Run all 64 Playwright tests (blocking)
+      - name: Run all 69 Playwright tests (blocking)
         run: |
           set -euo pipefail
           ws_log="$RUNNER_TEMP/recopyfast-ws.log"
@@ -395,14 +395,14 @@ jobs:
           );
           if (
             report.contract !== "passed" ||
-            report.expected !== 64 ||
-            report.total !== 64 ||
-            report.passed !== 64 ||
+            report.expected !== 69 ||
+            report.total !== 69 ||
+            report.passed !== 69 ||
             report.failed !== 0 ||
             report.skipped !== 0 ||
             report.flaky !== 0
           ) {
-            throw new Error("Playwright did not produce the required clean 64-test summary.");
+            throw new Error("Playwright did not produce the required clean 69-test summary.");
           }
           NODE
 

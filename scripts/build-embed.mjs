@@ -10,7 +10,10 @@
  * Layout:
  *   public/embed/recopyfast.src.js         source of truth, readable, hand-edited
  *   public/embed/recopyfast.js             build output — what customers load
- *   public/embed/socket.io-client.min.js   standalone socket.io, same-origin fallback
+ *   public/embed/socket.io-client.min.js   standalone socket.io: the size gate's
+ *                                          measure of the transport, and a pinned
+ *                                          public URL (middleware-matcher.test.ts).
+ *                                          The widget no longer loads it (s67).
  *
  * The source keeps the `.src.js` suffix so the artifact can own the public
  * `/embed/recopyfast.js` URL that is already baked into every issued embed
@@ -175,8 +178,88 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *
  * build-size-gate.test.ts pins the same pair.
  */
-const MAX_BUNDLE_GZ = 45880;
-const MAX_WIDGET_GZ = 33120;
+/*
+ * RATCHETED DOWN 2026-10-08 (s67-embed-spa-support), from 45880 / 33120.
+ *
+ * SPA support had an allocation of ≤ +850 gross on each measurement and net ≤ 0
+ * (docs/stories.md § Byte budget), with 0 bytes of headroom, so it paid in the
+ * branch. Deltas measured in sequence on the branch (gzip deltas do not add
+ * exactly; each line is the step's own measurement):
+ *
+ *   45880 / 33120  ceilings before s67 = measured on main at 659778e
+ *   −805 / −838    funding: the CSS inside the five style literals minified at
+ *                  build time (minifyStyleLiterals above — this pre-empts part
+ *                  of s06c-embed-shrink, which must not count it again); the
+ *                  unreachable socket.io fallback loader and its factory helper
+ *                  deleted; the unread `rcf-editable` class deleted
+ *   +8 / +13       M8: startup endpoints cannot be clobbered
+ *   +99 / +103     in-place text writes (the React NotFoundError crash)
+ *   +119 / +126    per-path rows cache, edited rows only, variant precedence
+ *   +557 / +557    early bounded observer, write cap, rescans that skip mapped
+ *                  nodes and prune detached ones, shadow roots, one instance
+ *                  per page, destroy(), route change without patching,
+ *                  authored restore, discovery gating and coalescing (the old
+ *                  discovery fingerprint folded into the known-id claims)
+ *   +55 / +58      edit mode: saves and realtime updates refresh the cached row
+ *   −40 / −40      second-line reserve: the uncalled assessReadability method
+ *                  and the getEditingColors wrapper
+ *   −7 / −7        rows/index left unset in the constructor
+ *   45866 / 33092  measured on the branch at 05d2025 — the ceilings until the
+ *                  review fix
+ *   +8 / +7        review fix (docs/reviews/s67-embed-spa-support.md, findings
+ *                  1, 4, 5, 6): a text-only route render schedules the debounced
+ *                  rescan, the route-change row load is caught, editor saves
+ *                  record `written` and keep `originalContent`, the Edit Board
+ *                  preview reads getElementText
+ *   −14 / −10      funded in the branch, no behaviour change: the `self`
+ *                  closures in checkRoute, applyRows and the discovery report
+ *                  timer written as arrows, the observer's immediate rescan as
+ *                  `return self.rescan()`
+ *   45860 / 33089  measured after the review fix — the ceilings until the
+ *                  re-review fix
+ *   +22 / +21      re-review fix (docs/reviews/s67-embed-spa-support.md,
+ *                  finding A, minor 1): the Navigation API handler hands the
+ *                  host's pending records to the observer callback, then
+ *                  discards the embed's own restores; an empty batch schedules
+ *                  no rescan; the form save records the field's value
+ *   −30 / −29      funded in the branch, inside s67's own code, no behaviour
+ *                  change: one stamp lookup per scanned element instead of
+ *                  two, the row index built with for...of, the observer
+ *                  created and attached in one expression, loadRows' apply
+ *                  closure as an arrow, applyRow's empty-copy check reordered,
+ *                  writeText's walker advanced in one place, destroy clearing
+ *                  the polling interval with clearTimeout
+ *   45852 / 33081  measured after the re-review fix — the ceilings until the
+ *                  verification fix
+ *   +13 / +14      verification fix (docs/reviews/s67-embed-spa-support.md,
+ *                  finding B): the Navigation API's path check runs in the
+ *                  microtask after the navigation, through the observer
+ *                  callback, then discards the embed's own writes; a destroy()
+ *                  in the same task cancels it
+ *   −22 / −22      funded in the branch, inside s67's own code, no behaviour
+ *                  change: writeText finds the element's first direct text
+ *                  node during its text-node walk instead of a sibling scan
+ *                  before it
+ *   45843 / 33073  measured after the verification fix — the ceilings until
+ *                  the PR #69 review fix
+ *   +2 / +5        PR #69 review fix (docs/reviews/s67-embed-spa-support.md,
+ *                  D2, D3): a route change drops the A/B markers with the
+ *                  entry, applyVariants writes through applyContentToElement,
+ *                  the row index is Object.create(null). D1 (nested edits,
+ *                  +89 / +89 measured) is deferred to s67b
+ *   −4 / −5        funded in the branch, inside s67's own code, no behaviour
+ *                  change: dropEntry reads data.element once, loadRows' cache
+ *                  closure as an arrow
+ *   45841 / 33073  measured after the PR #69 review fix — the new ceilings
+ *
+ * Gross against a funded floor (main with every deletion above and none of the
+ * SPA work, measured 45037 / 32248): +804 / +825, final, review, re-review,
+ * verification and PR #69 review fixes included. Every funding line since the
+ * review is s67 code, so the floor does not move. build-size-gate.test.ts pins
+ * the same pair and quotes the same gross.
+ */
+const MAX_BUNDLE_GZ = 45841;
+const MAX_WIDGET_GZ = 33073;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.
@@ -284,14 +367,94 @@ function injectRules(source, rules) {
   );
 }
 
+/**
+ * The widget's stylesheets: every `textContent = \`…\`` template literal. The
+ * style-literal test (src/__tests__/embed/style-literal-comments.test.ts) reads
+ * the source with the same shape.
+ */
+const STYLE_LITERAL = /(textContent\s*=\s*)`([^`]*)`/g;
+const MIN_STYLE_LITERALS = 5;
+
+/**
+ * The widget's own syntax floor. The CSS minifier gets the same target: esbuild
+ * applies no CSS lowering for an `es` target, so it prints what the source
+ * already uses. The one form it introduces is the 8-digit hex colour
+ * (`rgba(0,0,0,.5)` → `#00000080`), supported from Chrome 62, Firefox 49 and
+ * Safari 10 — older than every engine that runs es2018.
+ */
+const WIDGET_TARGET = ["es2018"];
+
+/**
+ * Minify the CSS inside each style literal before the widget is minified.
+ *
+ * s67-embed-spa-support. These literals are strings, so esbuild's JS minifier
+ * cannot touch them: every newline and the twelve spaces of indentation in
+ * front of each declaration shipped to every visitor of every customer site.
+ * Minifying them measured −494 / −525 gz (bundle / widget), the largest of the
+ * three items that fund SPA support. It pre-empts part of the never-built
+ * `s06c-embed-shrink`; that story should not count these bytes twice.
+ *
+ * Refuses rather than guesses:
+ *   - fewer than five literals means the source changed shape under this
+ *     transform, and a silent no-op would quietly hand the bytes back;
+ *   - `${`, `\` or a backtick in a literal or in its minified CSS. With none of
+ *     the three, a template literal's raw text equals its cooked value, so
+ *     writing the minified CSS back between backticks cannot change what the
+ *     browser receives, and no escaping question exists. None of today's five
+ *     literals contains any of them.
+ */
+async function minifyStyleLiterals(esbuild, source) {
+  const literals = Array.from(source.matchAll(STYLE_LITERAL));
+
+  if (literals.length < MIN_STYLE_LITERALS) {
+    throw new Error(
+      `recopyfast.src.js has ${literals.length} style literals, expected at least ` +
+        `${MIN_STYLE_LITERALS}. minifyStyleLiterals no longer matches the source.`,
+    );
+  }
+
+  const minified = await Promise.all(
+    literals.map(async (match) => {
+      const css = match[2];
+      const { code } = await esbuild.transform(css, {
+        loader: "css",
+        minify: true,
+        target: WIDGET_TARGET,
+      });
+      const output = code.trim();
+
+      for (const text of [css, output]) {
+        if (/\$\{|\\|`/.test(text)) {
+          throw new Error(
+            "A style literal in recopyfast.src.js (or its minified CSS) contains " +
+              "`${`, `\\` or a backtick, so its raw and cooked values may differ. " +
+              "minifyStyleLiterals refuses to rewrite it.",
+          );
+        }
+      }
+
+      return output;
+    }),
+  );
+
+  let index = 0;
+  return source.replace(
+    STYLE_LITERAL,
+    (_match, assignment) => `${assignment}\`${minified[index++]}\``,
+  );
+}
+
 /** The widget itself. No bundling: it is a self-contained classic-script IIFE. */
 async function buildWidget(esbuild, source) {
-  const result = await esbuild.transform(source, {
-    minify: true,
-    target: ["es2018"],
-    loader: "js",
-    legalComments: "none",
-  });
+  const result = await esbuild.transform(
+    await minifyStyleLiterals(esbuild, source),
+    {
+      minify: true,
+      target: WIDGET_TARGET,
+      loader: "js",
+      legalComments: "none",
+    },
+  );
 
   return result.code;
 }
@@ -537,6 +700,10 @@ async function main() {
   // 174 KB on disk and 46 KB on the wire: raw byte savings land at roughly a
   // tenth of their size after gzip, and every byte estimate made in raw KB on
   // this file has been wrong by that factor.
+  //
+  // `socket`, not `fallback` (s67 re-review): the standalone socket.io build
+  // is the gate's transport measure and a pinned public URL. The widget never
+  // loads it; s67 deleted the loader that did.
   console.log(
     [
       `source   ${path.relative(ROOT, SOURCE)}  ${formatKb(sourceBytes)}`,
@@ -545,7 +712,7 @@ async function main() {
       `bundle   ${path.relative(ROOT, BUNDLE_OUT)}  ${formatKb(bundleBytes)}` +
         ` (widget ${formatKb(Buffer.byteLength(widget))}` +
         ` + socket.io-client ${socketVersion} ${formatKb(Buffer.byteLength(socketIo))})`,
-      `fallback ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
+      `socket   ${path.relative(ROOT, SOCKET_OUT)}  ${formatKb(Buffer.byteLength(socketIo))}`,
       formatGzLine(measured, ceilings),
     ].join("\n"),
   );

@@ -22,15 +22,10 @@ const METHOD_BEGIN = "    async hydrateStoredContent() {";
 const NEXT_METHOD = "    setupMutationObserver() {";
 
 interface FakeWidget {
-  elements: Map<
-    string,
-    { element: { textContent: string }; originalContent: string }
-  >;
   canReachStagingContent: () => boolean;
   editorTokenQuery: () => string;
   editorAuthHeaders: () => Record<string, string>;
-  applyContentToElement: jest.Mock;
-  hydrateStoredContent: () => Promise<void>;
+  hydrateStoredContent: () => Promise<Record<string, unknown> | undefined>;
 }
 
 function loadHydrateStoredContent(
@@ -70,19 +65,9 @@ function loadHydrateStoredContent(
 
 function makeWidget(fetch: jest.Mock, warn: jest.Mock): FakeWidget {
   return {
-    elements: new Map([
-      [
-        "rcf-headline",
-        {
-          element: { textContent: "Authored headline" },
-          originalContent: "Authored headline",
-        },
-      ],
-    ]),
     canReachStagingContent: () => false,
     editorTokenQuery: () => "",
     editorAuthHeaders: () => ({}),
-    applyContentToElement: jest.fn(),
     hydrateStoredContent: loadHydrateStoredContent(fetch, warn),
   };
 }
@@ -100,7 +85,7 @@ describe("widget handling of a refused site token", () => {
     const warn = jest.fn();
     const widget = makeWidget(fetch, warn);
 
-    await widget.hydrateStoredContent();
+    const rows = await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
@@ -109,10 +94,9 @@ describe("widget handling of a refused site token", () => {
     expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
-    expect(widget.applyContentToElement).not.toHaveBeenCalled();
-    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
-      "Authored headline",
-    );
+    // No rows: loadRows has nothing to apply and forgets the path, so the
+    // authored copy stays and the next visit asks again.
+    expect(rows).toBeUndefined();
   });
 
   it("preserves authored copy for a missing installed token", async () => {
@@ -127,15 +111,14 @@ describe("widget handling of a refused site token", () => {
     const warn = jest.fn();
     const widget = makeWidget(fetch, warn);
 
-    await widget.hydrateStoredContent();
+    const rows = await widget.hydrateStoredContent();
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalledWith(
       expect.stringContaining("regenerate your snippet in the dashboard"),
     );
-    expect(widget.applyContentToElement).not.toHaveBeenCalled();
-    expect(widget.elements.get("rcf-headline")?.element.textContent).toBe(
-      "Authored headline",
-    );
+    // No rows: loadRows has nothing to apply and forgets the path, so the
+    // authored copy stays and the next visit asks again.
+    expect(rows).toBeUndefined();
   });
 });

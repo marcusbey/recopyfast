@@ -51,27 +51,40 @@ describe("installation documentation content", () => {
     );
   });
 
+  // s67 (owner decision, 2026-10-08): the plain snippet follows History API
+  // route changes, so "no complete lifecycle" is no longer true and must not
+  // be told to anyone. Hash routes stay unsupported, with the workaround.
   it("keeps the approved SPA and analytics constraints in both handoff formats", () => {
     const guideText = JSON.stringify(INSTALLATION_GUIDE);
 
     for (const requiredText of [
       "after the page has hydrated",
-      "does not provide a complete lifecycle",
+      "follows client-side route changes",
+      "Hash routes (/#/route) are not supported",
+      "switch the router to history mode",
+      "author-written, unique data-rcf-id",
+      "Verify a full page load and an in-app navigation",
       "rcf_handoff",
       "A Referrer-Policy header alone",
     ]) {
       expect(guideText).toContain(requiredText);
     }
+    expect(guideText).not.toContain("does not provide a complete lifecycle");
 
-    expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain(
+    for (const requiredText of [
       "inspect hydration and navigation first",
-    );
-    expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain(
-      "no complete SPA teardown/reinitialization contract",
-    );
-    expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain("rcf_handoff");
-    expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain(
+      "History-mode routers work with the plain snippet",
+      "Hash routes (/#/route) are not supported",
+      "switch the router to history mode",
+      "unique author-written data-rcf-id",
+      "Verify a full page load and an in-app navigation",
+      "rcf_handoff",
       "A referrer header alone is insufficient",
+    ]) {
+      expect(AGENT_INSTALLATION_INSTRUCTIONS).toContain(requiredText);
+    }
+    expect(AGENT_INSTALLATION_INSTRUCTIONS).not.toContain(
+      "no complete SPA teardown/reinitialization contract",
     );
   });
 
