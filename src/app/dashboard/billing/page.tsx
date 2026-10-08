@@ -4,6 +4,8 @@ import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import { isAgencyCheckoutEnabled } from "@/lib/stripe/plans";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
+import { BILLING_PAGE_COPY } from "@/components/billing/billing-page-copy";
+import { TrialStatusCard } from "@/components/billing/TrialStatusCard";
 import { PageShell } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
@@ -91,19 +93,26 @@ async function readFoundingAgencyAvailability(): Promise<FoundingAgencyAvailabil
 }
 
 export default function BillingPage() {
+  // No wrapper of its own (ADR 053: never wrap PageShell). This was a
+  // `min-h-screen bg-surface-1` div: once the page container went (s66b1) it
+  // drew a darker band flush at the content's edge and forced ~120px of empty
+  // scroll on short states. The layout owns the canvas; the frame is the
+  // page's outermost element, in the fallback and after the hand-off alike.
   return (
-    <div className="min-h-screen bg-surface-1">
+    <>
       <Suspense
         fallback={
           // The same frame BillingDashboard renders in its own loading state,
-          // so the title does not jump when the client takes over (s66b1,
-          // ADR 053). The copy is repeated rather than imported: this is a
-          // server component, and a constant exported from that "use client"
-          // module would arrive here as a client reference, not a string.
+          // header and body, so nothing moves when the client takes over
+          // (s66b1, ADR 053). The copy comes from a plain module both sides
+          // import; the trial skeleton is here because the client's loading
+          // state opens with it, and without it the body shifted down on
+          // hand-off (s66b1 review m-4).
           <PageShell
-            title="Billing & subscription"
-            description="Manage your subscription, payment methods, and billing information"
+            title={BILLING_PAGE_COPY.title}
+            description={BILLING_PAGE_COPY.description}
           >
+            <TrialStatusCard trial={null} isLoading />
             <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
               {[...Array(6)].map((_, i) => (
                 <Skeleton key={i} className="h-48" />
@@ -114,6 +123,6 @@ export default function BillingPage() {
       >
         <BillingDashboardSection />
       </Suspense>
-    </div>
+    </>
   );
 }

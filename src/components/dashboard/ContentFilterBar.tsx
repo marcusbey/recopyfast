@@ -38,7 +38,9 @@ export function ContentFilterBar({
 
   // A wrapping row on the page's left edge (design system, Shell: "Filter
   // row"). Search takes what is left and never shrinks below 12rem; the
-  // selects wrap under it rather than squeezing it.
+  // selects wrap under it rather than squeezing it. Below 640 each select
+  // takes the full row (s66b design §4): at its content width it left a
+  // ragged right edge that lined up with nothing (s66b1 review m-7).
   return (
     <div className="flex flex-wrap gap-2">
       {/* Search */}
@@ -61,7 +63,7 @@ export function ContentFilterBar({
       </div>
 
       {/* Site Filter */}
-      <div className="md:min-w-[150px]">
+      <div className="w-full sm:w-auto md:min-w-[150px]">
         <label htmlFor={siteId} className="sr-only">
           Filter by site
         </label>
@@ -80,7 +82,7 @@ export function ContentFilterBar({
       </div>
 
       {/* Status Filter */}
-      <div className="md:min-w-[120px]">
+      <div className="w-full sm:w-auto md:min-w-[120px]">
         <label htmlFor={statusId} className="sr-only">
           Filter by status
         </label>

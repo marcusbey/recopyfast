@@ -41,7 +41,45 @@ const sites = Array.from({ length: 7 }, (_, index) => ({
     : {}),
 }));
 
+function respondWithSites(list: unknown[]): void {
+  global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === "string" ? input : String(input);
+    return {
+      ok: true,
+      json: async () =>
+        url === "/api/sites"
+          ? { sites: list }
+          : { currentUsage: { aiUsage: 0 } },
+    } as Response;
+  }) as typeof fetch;
+}
+
 describe("dashboard activation integration", () => {
+  /*
+   * s66b1 review m-6. The section rendered whenever the sites had loaded,
+   * empty or not. Empty, it is still a flex item of `[data-page-shell]`, so
+   * the shell's gap was drawn twice above the summary for every account with
+   * no installable site: the zero-site account, the one the page most needs
+   * to look finished for.
+   */
+  it.each([
+    ["has no sites", [], "No sites connected yet"],
+    ["has no site with an install script", [{ ...sites[6] }], "Site 7"],
+  ])(
+    "renders no empty checklist section when the account %s",
+    async (_case, list, readyText) => {
+      respondWithSites(list);
+
+      render(<DashboardPage />);
+
+      // The sites have loaded: the section's own condition is now decided.
+      expect(await screen.findByText(readyText)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "Activation checklists" }),
+      ).toBeNull();
+    },
+  );
+
   it("renders a checklist for every admin site beyond the five recent rows", async () => {
     global.fetch = jest.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : String(input);

@@ -109,6 +109,23 @@ describe("PageShell", () => {
     ).toBe(shell);
   });
 
+  /*
+   * The rhythm is the shell's: 24px between the header and each section,
+   * 16px below 640 (design system, Shell). The layout harness measures the
+   * drawn gap; this pins the classes that draw it, so a changed gap turns
+   * something red without a browser (s66b1 review m-2: `gap-8` passed every
+   * jsdom test).
+   */
+  it("spaces the header and sections 16px apart, 24px from 640 up, and nothing else", () => {
+    const { shell } = renderEverySlot();
+
+    const gapClasses = Array.from(shell.classList).filter((token) =>
+      /^(?:[a-z0-9]+:)*(?:gap|space-[xy])-/.test(token),
+    );
+    expect(gapClasses.sort()).toEqual(["gap-4", "sm:gap-6"]);
+    expect(shell).toHaveClass("flex", "flex-col");
+  });
+
   it("renders no empty wrapper for a slot that is not set", () => {
     render(<PageShell title="Content" />);
 

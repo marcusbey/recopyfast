@@ -165,6 +165,17 @@ export default function DashboardPage() {
     [sites],
   );
 
+  const installableSites = useMemo(
+    () =>
+      sites.filter(
+        (site): site is DashboardSite & { embedScript: string } =>
+          typeof site.embedScript === "string" &&
+          site.embedScript.length > 0 &&
+          typeof site.siteToken === "string",
+      ),
+    [sites],
+  );
+
   // Fires when the site row exists, not when the dialog closes, so the summary
   // behind the success screen is already right. The modal closes itself.
   const handleSiteRegistrationSuccess = () => {
@@ -190,25 +201,21 @@ export default function DashboardPage() {
         </>
       }
     >
-      {sitesState === "ready" && user && (
+      {/* Only when there is a checklist to show. An empty section is still a
+          flex item of the shell, so its gap was drawn twice above the summary
+          for every account with no installable site (s66b1 review m-6). */}
+      {sitesState === "ready" && user && installableSites.length > 0 && (
         <section aria-label="Activation checklists" className="space-y-4">
-          {sites
-            .filter(
-              (site): site is DashboardSite & { embedScript: string } =>
-                typeof site.embedScript === "string" &&
-                site.embedScript.length > 0 &&
-                typeof site.siteToken === "string",
-            )
-            .map((site) => (
-              <ActivationChecklist
-                key={`${user.id}:${site.id}`}
-                siteId={site.id}
-                siteName={site.name}
-                domain={site.domain}
-                embedScript={site.embedScript}
-                userId={user.id}
-              />
-            ))}
+          {installableSites.map((site) => (
+            <ActivationChecklist
+              key={`${user.id}:${site.id}`}
+              siteId={site.id}
+              siteName={site.name}
+              domain={site.domain}
+              embedScript={site.embedScript}
+              userId={user.id}
+            />
+          ))}
         </section>
       )}
 

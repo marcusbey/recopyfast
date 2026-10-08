@@ -601,6 +601,13 @@ const APP_HEADER_HEIGHT = 56;
 /** The layout's gutter at ≥1024 (`lg:px-8`). */
 const WIDE_GUTTER = 32;
 const SIDEBAR_BREAKPOINT = 1024;
+/** Tailwind's `sm`: where the shell's gap and the header's layout change. */
+const SM_BREAKPOINT = 640;
+/**
+ * `PageShell`'s rhythm (design system, Shell): header to first section, 24px
+ * from 640 up and 16px below.
+ */
+const SHELL_GAP = { narrow: 16, wide: 24 } as const;
 /** Sub-pixel rounding, never a real misalignment. */
 const EDGE_TOLERANCE = 0.5;
 const CONTRAST_WIDTH: AppPageWidth = 1280;
@@ -627,6 +634,12 @@ interface AppPage {
   navLabel: string;
   /** The page's description, rendered by `PageShell` under the h1. */
   description: string;
+  /**
+   * Renders header actions in every state the harness can meet, so their
+   * absence is a failure. Billing has them in its ready state only; where
+   * they render, they are checked all the same.
+   */
+  hasActions: boolean;
 }
 
 const APP_PAGES: readonly AppPage[] = [
@@ -635,24 +648,28 @@ const APP_PAGES: readonly AppPage[] = [
     name: "overview",
     navLabel: "Overview",
     description: "Every site you have connected, and what has changed on them.",
+    hasActions: true,
   },
   {
     path: "/dashboard/content",
     name: "content",
     navLabel: "Content",
     description: "Manage all editable content across your sites",
+    hasActions: false,
   },
   {
     path: "/dashboard/analytics",
     name: "analytics",
     navLabel: "Analytics",
     description: "Monitor your site performance and user engagement",
+    hasActions: true,
   },
   {
     path: "/dashboard/settings",
     name: "settings",
     navLabel: "Settings",
     description: "Manage your account and preferences",
+    hasActions: false,
   },
   {
     path: "/dashboard/billing",
@@ -660,6 +677,7 @@ const APP_PAGES: readonly AppPage[] = [
     navLabel: "Billing",
     description:
       "Manage your subscription, payment methods, and billing information",
+    hasActions: false,
   },
 ];
 
@@ -693,6 +711,21 @@ interface FrameMeasurement {
    * a banner that renders `null` is not an element at all.
    */
   shellChildren: Array<{ element: string; left: number }> | null;
+  /**
+   * `[data-page-header]`'s bottom to the top of the first visible section
+   * after it: the shell's gap as drawn. Null without a header or a section.
+   */
+  headerToFirstSection: number | null;
+  /**
+   * `PageHeader`'s grid areas, found by name (`grid-row-start` computes to
+   * the area's name), so the check reads the header's own layout contract
+   * rather than its class list. Null for an area the page does not render.
+   */
+  headerAreas: {
+    title: { top: number; bottom: number } | null;
+    description: { top: number; bottom: number } | null;
+    actions: { top: number; bottom: number } | null;
+  };
 }
 
 async function measureFrame(page: Page): Promise<FrameMeasurement> {
@@ -730,17 +763,41 @@ async function measureFrame(page: Page): Promise<FrameMeasurement> {
         };
       });
 
+    const isSection = (child: Element) =>
+      isVisible(child) && child.getBoundingClientRect().width > 1;
+
     const shellChildren = shell
       ? Array.from(shell.children)
-          .filter(
-            (child) =>
-              isVisible(child) && child.getBoundingClientRect().width > 1,
-          )
+          .filter(isSection)
           .map((child) => ({
             element: describe(child),
             left: child.getBoundingClientRect().left,
           }))
       : null;
+
+    const pageHeader = shell?.querySelector(":scope > [data-page-header]");
+    const firstSection = pageHeader
+      ? Array.from(shell?.children ?? [])
+          .slice(Array.from(shell?.children ?? []).indexOf(pageHeader) + 1)
+          .find(isSection)
+      : undefined;
+    const headerToFirstSection =
+      pageHeader && firstSection
+        ? firstSection.getBoundingClientRect().top -
+          pageHeader.getBoundingClientRect().bottom
+        : null;
+
+    const area = (name: string) => {
+      const element = pageHeader
+        ? Array.from(pageHeader.children).find(
+            (child) =>
+              isVisible(child) && getComputedStyle(child).gridRowStart === name,
+          )
+        : undefined;
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { top: rect.top, bottom: rect.bottom };
+    };
 
     return {
       headerHeight: header ? header.getBoundingClientRect().height : null,
@@ -750,6 +807,12 @@ async function measureFrame(page: Page): Promise<FrameMeasurement> {
       headings,
       mainContentLeft: main ? main.getBoundingClientRect().left + gutter : null,
       shellChildren,
+      headerToFirstSection,
+      headerAreas: {
+        title: area("title"),
+        description: area("description"),
+        actions: area("actions"),
+      },
     };
   }, WIDE_GUTTER);
 }
@@ -840,7 +903,65 @@ function frameViolations(
     }
   }
 
+  violations.push(...rhythmViolations(appPage, width, frame));
+
   return { violations, headingLeft: heading.left };
+}
+
+const centre = (box: { top: number; bottom: number }) =>
+  (box.top + box.bottom) / 2;
+
+/**
+ * The shell's vertical contract, as drawn (s66b1 review m-2). jsdom pins the
+ * classes (`page-shell.test.tsx`); only a browser shows the result:
+ * - the header to the first section is 24px from 640 up and 16px below;
+ * - header actions sit centred on the title row from 640 up, and in their
+ *   own row under the description below it. They used to sit on the bottom
+ *   of the whole block, and at 768 a two-line description pushed the button
+ *   down and away from the title it acts on.
+ */
+function rhythmViolations(
+  appPage: AppPage,
+  width: AppPageWidth,
+  frame: FrameMeasurement,
+): string[] {
+  const at = `${appPage.name} @${width}`;
+  const violations: string[] = [];
+  const isWide = width >= SM_BREAKPOINT;
+
+  // No section at all is already reported as "fewer than 2 children".
+  if (frame.headerToFirstSection !== null) {
+    const expectedGap = isWide ? SHELL_GAP.wide : SHELL_GAP.narrow;
+    if (!isNear(frame.headerToFirstSection, expectedGap)) {
+      violations.push(
+        `${at}: header to first section is ${frame.headerToFirstSection}px, expected ${expectedGap}`,
+      );
+    }
+  }
+
+  const { title, description, actions } = frame.headerAreas;
+  if (!actions) {
+    if (appPage.hasActions) violations.push(`${at}: no header actions`);
+    return violations;
+  }
+
+  if (isWide) {
+    if (!title) {
+      violations.push(`${at}: no title row to centre the actions on`);
+    } else if (!isNear(centre(actions), centre(title))) {
+      violations.push(
+        `${at}: actions centred at y=${centre(actions)}, the title row at y=${centre(title)}`,
+      );
+    }
+  } else if (!description) {
+    violations.push(`${at}: no description to place the actions under`);
+  } else if (actions.top < description.bottom - EDGE_TOLERANCE) {
+    violations.push(
+      `${at}: actions start at y=${actions.top}, above the description's bottom at y=${description.bottom}`,
+    );
+  }
+
+  return violations;
 }
 
 /**

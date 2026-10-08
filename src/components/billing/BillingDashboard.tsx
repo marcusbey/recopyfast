@@ -15,6 +15,7 @@ import { UsageCard } from "./UsageCard";
 import { UpgradeDialog } from "./UpgradeDialog";
 import { CheckoutStatusBanner } from "./CheckoutStatusBanner";
 import { TrialStatusCard } from "./TrialStatusCard";
+import { BILLING_PAGE_COPY } from "./billing-page-copy";
 import {
   LifetimeOfferCard,
   resolveLifetimeOffers,
@@ -23,10 +24,6 @@ import {
 import { findSubscriptionPlan } from "@/lib/stripe/plan-types";
 import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import type { BillingDashboardData } from "@/types/billing";
-
-const BILLING_TITLE = "Billing & subscription";
-const BILLING_DESCRIPTION =
-  "Manage your subscription, payment methods, and billing information";
 
 /** What the no-plan panel says once the account's one trial has ended. */
 const ENDED_TRIAL_COPY = {
@@ -193,9 +190,12 @@ export function BillingDashboard({
         body: (
           <>
             {/* Left-aligned on the page's edge, and an h2: the page's one h1
-                is the shell's "Billing & subscription", in this state too. */}
+                is the shell's "Billing & subscription", in this state too.
+                At the panel-title scale (`.text-title`), never the h1's: it
+                kept `text-2xl` (24/600) at first, and every unentitled
+                account read two stacked page titles (s66b1 review M-2). */}
             <Card className="max-w-lg p-8 text-center">
-              <h2 className="mb-2 text-2xl font-semibold">
+              <h2 className="mb-2 text-title">
                 {holdsCredits
                   ? "You're on credits"
                   : hasExpiredTrial
@@ -357,8 +357,8 @@ export function BillingDashboard({
 
   return (
     <PageShell
-      title={BILLING_TITLE}
-      description={BILLING_DESCRIPTION}
+      title={BILLING_PAGE_COPY.title}
+      description={BILLING_PAGE_COPY.description}
       actions={actions}
     >
       {body}

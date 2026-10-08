@@ -13,7 +13,7 @@
  *
  * The layout harness sees only the ready state; the per-state count is here.
  */
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AnalyticsDashboard } from "@/components/dashboard/AnalyticsDashboard";
 import type { AnalyticsDashboardData, Site } from "@/types";
@@ -90,15 +90,58 @@ describe("AnalyticsDashboard frame", () => {
 
   // The route no longer returns its own titleless spinner while it fetches
   // the site list; it hands that state down instead.
-  it("renders one h1 while the page is still loading its sites", async () => {
-    mockAnalytics(() => json(READY));
-    render(<AnalyticsDashboard sites={[]} isLoadingSites />);
+  //
+  // The analytics request settles first here, on purpose. Asserted straight
+  // after render, the skeleton is there anyway (the analytics are loading
+  // too), so the test passed with `|| isLoadingSites` deleted (s66b1 review
+  // m-3). Only once the analytics are in does the skeleton prove the sites
+  // are what holds it.
+  it("renders one h1 and keeps the skeleton while the page is still loading its sites", async () => {
+    let respond: (response: Response) => void = () => {};
+    mockAnalytics(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    let markBodyRead: () => void = () => {};
+    const bodyRead = new Promise<void>((resolve) => {
+      markBodyRead = resolve;
+    });
+    const response = {
+      ok: true,
+      status: 200,
+      json: async () => {
+        markBodyRead();
+        return READY;
+      },
+    } as unknown as Response;
 
+    const { rerender } = render(
+      <AnalyticsDashboard sites={[]} isLoadingSites />,
+    );
     expectOneAnalyticsTitle();
+
+    await act(async () => {
+      respond(response);
+      await bodyRead;
+      // Let the component's continuation after `response.json()` run.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(
-      await screen.findByRole("status", { name: "Loading analytics" }),
+      screen.getByRole("status", { name: "Loading analytics" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Total Sites")).toBeNull();
+    expectOneAnalyticsTitle();
+
+    // Control: the data really had arrived. Once the sites are in, it shows
+    // at once, with no second request, so the skeleton above was held by
+    // `isLoadingSites` alone.
+    rerender(<AnalyticsDashboard sites={SITES} />);
+    expect(screen.getByText("Total Sites")).toBeInTheDocument();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it("renders one h1 when the analytics cannot be loaded", async () => {

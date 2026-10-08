@@ -1,6 +1,7 @@
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BillingDashboard } from "../BillingDashboard";
+import { BILLING_PAGE_COPY } from "../billing-page-copy";
 import type { BillingDashboardData } from "@/types/billing";
 
 /**
@@ -124,6 +125,23 @@ describe("BillingDashboard frame", () => {
     expectOneBillingFrame();
   });
 
+  // The page's Suspense fallback paints the same header from the same module
+  // (billing/__tests__/page.test.tsx), so the hand-off moves nothing.
+  it("titles its loading frame from the copy the server fallback shares", () => {
+    (global.fetch as jest.Mock).mockReturnValue(new Promise(() => {}));
+    renderDashboard();
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: BILLING_PAGE_COPY.title }),
+    ).toBeInTheDocument();
+    expect(document.querySelector("[data-page-header]")).toHaveTextContent(
+      BILLING_PAGE_COPY.description,
+    );
+    expect(
+      screen.getByRole("status", { name: "Loading trial status" }),
+    ).toBeInTheDocument();
+  });
+
   it("renders one h1 when the billing data cannot be loaded", async () => {
     (global.fetch as jest.Mock).mockResolvedValue({ ok: false });
     renderDashboard();
@@ -145,6 +163,24 @@ describe("BillingDashboard frame", () => {
       }),
     ).toBeInTheDocument();
     expectOneBillingFrame();
+  });
+
+  /*
+   * s66b1 review M-2: the h2 kept `text-2xl font-semibold` (24/600), the h1's
+   * own size, so every unentitled account read two stacked page titles. A
+   * heading inside a panel is the design system's panel title, `.text-title`.
+   */
+  it("sets the no-plan panel heading at the panel-title scale, not the page title's", async () => {
+    respondWith(payload({ effectivePlanId: null }));
+    renderDashboard();
+
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Choose a plan to continue",
+    });
+    expect(heading).toHaveClass("text-title");
+    expect(heading).not.toHaveClass("text-2xl");
+    expect(heading).not.toHaveClass("text-page-title");
   });
 
   it("renders one h1 when the plan in force is missing from the catalogue", async () => {
