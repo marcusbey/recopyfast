@@ -66,7 +66,7 @@ Every task starts with the test that must fail. "Provider stub" means a render i
 `src/components/dashboard/site/__tests__/site-context-fixture.tsx`, created in Task 1. Pages never
 take the site as a prop.
 
-1. [ ] **SiteProvider: the record, not-found, errors, the install poll.**
+1. [x] **SiteProvider: the record, not-found, errors, the install poll.**
    - RED, the new `src/components/dashboard/site/__tests__/SiteProvider.test.tsx`:
      - (a) with `/api/sites` mocked to three sites, `useSiteContext()` gives the matching site;
      - (b) an id not in the list renders `PageShell` titled "Site not found", a link to
@@ -90,7 +90,7 @@ take the site as a prop.
 
      The poll keeps the tombstone comment from `sites/page.tsx:271-301` (why five seconds, why
      only while awaiting install, why those dependencies).
-2. [ ] **SiteProvider: credentials and regeneration.**
+2. [x] **SiteProvider: credentials and regeneration.**
    - RED, in `SiteProvider.test.tsx`: move `SiteDetailView.test.tsx:298-516` there, assertions
      unchanged:
      - every displayed credential is replaced after a rotation;
@@ -106,7 +106,7 @@ take the site as a prop.
    - GREEN: move `SiteDetailView.tsx:103-234` (`credentials`, `credentialSiteId`,
      `latestSelection`, `displayedCredentials`, `handleRegenerateSnippet`) into the provider,
      with its comments. A successful rotation then calls `refetch()`.
-3. [ ] **Edit website on the design system.**
+3. [x] **Edit website on the design system.**
    - RED:
      - the new `src/hooks/__tests__/useEditSession.test.ts`, ported from
        `ActivationChecklist.test.tsx:393-480`:
@@ -131,7 +131,7 @@ take the site as a prop.
        so `ActivationChecklist.test.tsx` **must pass unchanged**: that is the proof the
        extraction changed no behaviour.
    - Radius: `EditWebsiteButton` → 0.
-4. [ ] **The site frame: header, subnav, states, breadcrumb.**
+4. [x] **The site frame: header, subnav, states, breadcrumb.**
    - RED:
      - the new `src/app/dashboard/sites/[siteId]/__tests__/layout.test.tsx`. With a provider stub
        and `usePathname` mocked per case, each of the four pages renders:
@@ -160,7 +160,7 @@ take the site as a prop.
      - the label map in `Breadcrumbs.tsx`.
    - Radius: `VersionHistoryPanel`, `VersionPreviewDialog`, `VersionTimelineItem` → 0. Their
      overlay and sheet are otherwise untouched (design-system gap 12 stays open).
-5. [ ] **Install.**
+5. [x] **Install.**
    - RED:
      - the new `install/__tests__/page.test.tsx`:
        - in each of awaiting / live / stale, exactly one element's text contains
@@ -183,7 +183,7 @@ take the site as a prop.
      - `install/page.tsx`: the regenerated Alert, `SiteInstallationCard`, and the Site token
        `Card`. The regenerate `Dialog` moves from `SiteDetailView.tsx:493-552` with its copy.
    - Radius: `SiteInstallationCard` → 0.
-6. [ ] **People & access: editors, and the checklist's Add editor.**
+6. [x] **People & access: editors, and the checklist's Add editor.**
    - RED:
      - the new `src/components/dashboard/__tests__/AddEditorDialog.test.tsx` receives the
        enrolment tests from `SiteEditorsCard.test.tsx` (`:117`, `:165-239`, `:374-557`). The only
@@ -219,7 +219,7 @@ take the site as a prop.
        View+Edit+Publish), and its edit action renders `EditWebsiteButton` (body
        `["edit","publish"]`).
    - Radius: `SiteEditorsCard`, `SiteEditorRow`, `InviteEditorForm`, `ActivationChecklist` → 0.
-7. [ ] **People & access: preview links and the page.**
+7. [x] **People & access: preview links and the page.**
    - RED:
      - the new `src/components/dashboard/__tests__/PreviewLinksList.test.tsx`:
        - it lists from `GET /api/staging/access?siteId=`;
@@ -248,7 +248,7 @@ take the site as a prop.
      - `ShareSiteDialog` becomes create-only: its list and fetch are removed; it gains
        `onCreated?` and `manageHref?` (the "See preview links" link used from the Sites row);
      - `people/page.tsx`.
-8. [ ] **Settings (advanced) and Delete.**
+8. [x] **Settings (advanced) and Delete.**
    - RED, the new `settings/__tests__/page.test.tsx`:
      - the intro line;
      - name and domain read-only, with the "isn't available yet" note;
@@ -265,7 +265,7 @@ take the site as a prop.
      - `settings/page.tsx`;
      - the tab label in `BulkOperations.tsx:473`.
    - Radius: `DomainVerification`, `WebhooksPanel`, `BulkOperations` → 0.
-9. [ ] **Overview, the light list, the entry points; retire the detail view.**
+9. [x] **Overview, the light list, the entry points; retire the detail view.**
    - RED:
      - the new `src/components/dashboard/__tests__/SiteRow.test.tsx`, from
        `SiteCard.test.tsx`'s surviving cases (`:44-55`, `:64-68`, `:128-172`):

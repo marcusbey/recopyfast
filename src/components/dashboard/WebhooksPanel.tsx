@@ -438,7 +438,7 @@ export function WebhooksPanel({ siteId }: WebhooksPanelProps) {
                       return (
                         <li
                           key={delivery.id}
-                          className="rounded-lg bg-surface-1 p-3"
+                          className="rounded-container bg-surface-1 p-3"
                         >
                           <div className="flex flex-wrap items-center gap-2">
                             <StatusBadge status={definition} />
@@ -499,7 +499,7 @@ export function WebhooksPanel({ siteId }: WebhooksPanelProps) {
                 again — if you lose it, create a new webhook.
               </AlertDescription>
             </Alert>
-            <code className="block break-all rounded-md bg-surface-1 p-3 font-mono text-sm">
+            <code className="block break-all rounded-container bg-surface-1 p-3 font-mono text-sm">
               {revealedSecret}
             </code>
           </DialogBody>

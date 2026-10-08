@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
+import Link from "next/link";
 import {
   Dialog,
   DialogBody,
@@ -23,6 +24,7 @@ import {
   type InstallStepTitle,
 } from "@/lib/sites/install-recipes";
 import { Loader2, AlertCircle, ExternalLink } from "lucide-react";
+import { sitePageHref } from "@/components/dashboard/site/SiteSubnav";
 
 interface SiteRegistrationModalProps {
   isOpen: boolean;
@@ -450,6 +452,17 @@ export function SiteRegistrationModal({
                   className="max-sm:w-full"
                 >
                   Close
+                </Button>
+                {/* s66c1: the new site has its own page (ADR 052), where its
+                    Overview walks the install. Leaving the dialog for it is a
+                    navigation, so the dialog closes with it. */}
+                <Button asChild className="max-sm:w-full">
+                  <Link
+                    href={sitePageHref(registrationResult.site.id)}
+                    onClick={handleClose}
+                  >
+                    Open site page
+                  </Link>
                 </Button>
               </div>
             </DialogFooter>

@@ -81,13 +81,12 @@ const STANDALONE_H1_FILES: readonly string[] = [
 ];
 
 /**
- * Shrink-only. `sites/page.tsx` is s66c's: it owns everything under
- * `/dashboard/sites` and removes this entry when the site pages move onto
- * `PageShell`.
+ * Shrink-only, and empty since s66c1: `sites/page.tsx`, its last entry, now
+ * renders through `PageShell`, and so does every page under
+ * `/dashboard/sites/[siteId]`. A new entry needs a story that owns the file
+ * and says when it leaves.
  */
-const PENDING: Readonly<Record<string, readonly Rule[]>> = {
-  "src/app/dashboard/sites/page.tsx": ["R1", "R2"],
-};
+const PENDING: Readonly<Record<string, readonly Rule[]>> = {};
 
 const CLASS_FUNCTIONS = /\b(?:cn|clsx|cx|cva|twMerge)\s*$/;
 
@@ -275,6 +274,11 @@ describe("page-shell guard (ADR 053)", () => {
       "src/app/dashboard/content/page.tsx",
       "src/app/dashboard/settings/page.tsx",
       "src/app/dashboard/sites/page.tsx",
+      // s66c1: a site's four subpages (ADR 052).
+      "src/app/dashboard/sites/[siteId]/page.tsx",
+      "src/app/dashboard/sites/[siteId]/install/page.tsx",
+      "src/app/dashboard/sites/[siteId]/people/page.tsx",
+      "src/app/dashboard/sites/[siteId]/settings/page.tsx",
       "src/app/dashboard/teams/page.tsx",
     ]) {
       expect(pages).toContain(page);

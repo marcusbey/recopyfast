@@ -99,7 +99,11 @@ describe("SiteInstallationCard", () => {
           EMBED_SCRIPT,
         );
       });
-      expect(await screen.findByText("Copied")).toBeInTheDocument();
+      // The CodeBlock announces "Copied" in its live region as well, so the
+      // confirmation is read off the button itself (s66c1).
+      expect(
+        await screen.findByRole("button", { name: /copy snippet/i }),
+      ).toHaveTextContent("Copied");
     });
 
     it("says the check is automatic, so nobody waits on us", () => {
@@ -148,16 +152,15 @@ describe("SiteInstallationCard", () => {
       expect(screen.getByText(/editing is on/i)).toBeInTheDocument();
     });
 
-    it("keeps the snippet available but out of the way", () => {
+    // s66c1 AC 5: the Install page is itself the disclosure, so a live
+    // site's snippet is shown, once, with no "View install snippet" step.
+    it("shows the snippet when live, with no disclosure to open", () => {
       render(<SiteInstallationCard site={liveSite} />);
 
-      expect(screen.queryByText(EMBED_SCRIPT)).not.toBeInTheDocument();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /view install snippet/i }),
-      );
-
       expect(screen.getByText(EMBED_SCRIPT)).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /view install snippet/i }),
+      ).not.toBeInTheDocument();
     });
   });
 

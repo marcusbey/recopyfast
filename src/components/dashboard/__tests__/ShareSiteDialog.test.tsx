@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ShareSiteDialog } from "../ShareSiteDialog";
 import type { Site } from "@/types";
@@ -19,8 +19,9 @@ const mockSite: Site = {
 };
 
 /**
- * The dialog fetches its active-share list on open and shows a spinner until it
- * settles; leaving that in flight makes every later query race the state update.
+ * s66c1: the dialog is create-only — the active links moved onto People &
+ * access (PreviewLinksList) — so it no longer fetches on open, and a test
+ * waits for its form instead of a list request. Any request now is a create.
  */
 const mockActiveLinksFetch = () => {
   (global.fetch as jest.Mock).mockResolvedValue({
@@ -32,7 +33,7 @@ const mockActiveLinksFetch = () => {
 const renderDialog = async () => {
   const user = userEvent.setup();
   render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
-  await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+  await screen.findByLabelText("Email address");
   return user;
 };
 
@@ -73,9 +74,9 @@ describe("ShareSiteDialog permission toggles", () => {
   it("announces which permissions are granted, not just colours them", async () => {
     await renderDialog();
 
-    // view + edit is the default grant the dialog submits.
+    // s66c1 AC 6: a preview link is view-only unless the owner allows more.
     expect(permission("View")).toBeChecked();
-    expect(permission("Edit")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
     expect(permission("Publish")).not.toBeChecked();
     expect(permission("Admin")).not.toBeChecked();
 
@@ -112,6 +113,7 @@ describe("ShareSiteDialog permission toggles", () => {
 
     // Radio semantics would have cleared View and Edit here; the group has to
     // stay multi-select because that is what the invite request sends.
+    await user.click(permission("Edit"));
     await user.click(permission("Publish"));
     await user.click(permission("Admin"));
 
@@ -177,5 +179,87 @@ describe("ShareSiteDialog (s66a)", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Email is required for email invites");
     expect(alert).toHaveClass("rounded-container");
+  });
+});
+
+/**
+ * s66c1 AC 6 — one of the two ways to give someone access, and it says which.
+ */
+describe("ShareSiteDialog (s66c1)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockActiveLinksFetch();
+  });
+
+  it("describes itself in the ONE-OFF REVIEW words", async () => {
+    await renderDialog();
+
+    expect(
+      screen.getByText(
+        "For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.",
+      ),
+    ).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("sends the grant chosen, then resets it to view only", async () => {
+    const onCreated = jest.fn();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        onCreated={onCreated}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(permission("Edit"));
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(
+      JSON.parse((init as RequestInit).body as string).permissions,
+    ).toEqual(["view", "edit"]);
+    expect(permission("View")).toBeChecked();
+    expect(permission("Edit")).not.toBeChecked();
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("links a sent invite to the site's preview links when asked to", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        manageHref="/dashboard/sites/site-1/people"
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByRole("link", { name: "See preview links" }),
+    ).toHaveAttribute("href", "/dashboard/sites/site-1/people");
   });
 });

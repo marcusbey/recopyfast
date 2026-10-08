@@ -9,6 +9,29 @@ interface BreadcrumbItem {
   href: string;
 }
 
+/**
+ * s66c1: a site's pages live at `/dashboard/sites/<uuid>/…`. A UUID is not a
+ * label anyone can read, so the site segment reads "Site"; `people` reads as
+ * its page is titled. These two are the only labels that are not the segment
+ * title-cased.
+ */
+const SITE_ID_SEGMENT =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SEGMENT_LABELS: Readonly<Record<string, string>> = {
+  people: "People & access",
+};
+
+function segmentLabel(segment: string): string {
+  if (SITE_ID_SEGMENT.test(segment)) return "Site";
+  return (
+    SEGMENT_LABELS[segment] ??
+    segment
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ")
+  );
+}
+
 export function Breadcrumbs() {
   const pathname = usePathname();
 
@@ -24,10 +47,7 @@ export function Breadcrumbs() {
       for (let i = 1; i < paths.length; i++) {
         const path = paths[i];
         const href = `/dashboard/${paths.slice(1, i + 1).join("/")}`;
-        const label = path
-          .split("-")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" ");
+        const label = segmentLabel(path);
 
         breadcrumbs.push({ label, href });
       }

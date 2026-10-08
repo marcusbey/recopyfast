@@ -40,23 +40,24 @@ export function VersionTimelineItem({
 
   return (
     <div className="relative flex gap-4">
-      {/* Timeline connector */}
+      {/* Timeline connector. The dot is 8px, the size a status dot may stay
+          round at (design system, Radius); the connector is centred on it. */}
       <div className="flex flex-col items-center">
         <div
-          className={`h-3 w-3 rounded-full ${
+          className={`h-2 w-2 rounded-full ${
             isFirst
               ? "bg-success ring-4 ring-tone-success-surface"
               : "bg-muted-foreground/40 ring-2 ring-muted"
           }`}
         />
         {!isLast && (
-          <div className="absolute left-[5px] top-4 h-full w-0.5 bg-border" />
+          <div className="absolute left-[3px] top-4 h-full w-0.5 bg-border" />
         )}
       </div>
 
       {/* Content */}
       <div className="flex-1 pb-6">
-        <div className="rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-md">
+        <div className="rounded-container border border-border bg-card p-4 transition-shadow hover:shadow-md">
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div>

@@ -3,22 +3,15 @@
 import { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { SiteCard, SiteStatus } from "@/components/dashboard/SiteCard";
-import { SiteDetailView } from "@/components/dashboard/SiteDetailView";
+import { DeleteSiteDialog } from "@/components/dashboard/DeleteSiteDialog";
+import { ShareSiteDialog } from "@/components/dashboard/ShareSiteDialog";
 import { SiteRegistrationModal } from "@/components/dashboard/SiteRegistrationModal";
-import EditWebsiteButton from "@/components/dashboard/EditWebsiteButton";
+import { SiteRow } from "@/components/dashboard/SiteRow";
+import type { SiteRecord } from "@/components/dashboard/site/SiteProvider";
+import { sitePageHref } from "@/components/dashboard/site/SiteSubnav";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +20,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PageHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { SiteStatus } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils/cn";
 import {
   Globe,
@@ -36,23 +30,9 @@ import {
   Search,
   SearchX,
   ArrowUpDown,
-  Loader2,
   AlertCircle,
   X,
 } from "lucide-react";
-import type { Site } from "@/types";
-
-interface SiteWithStats extends Site {
-  stats?: {
-    edits_count?: number;
-    views?: number;
-    content_elements_count?: number;
-    last_activity?: string;
-  };
-  status?: SiteStatus;
-  embedScript?: string;
-  siteToken?: string;
-}
 
 type SortOption = "name" | "date" | "activity";
 type FilterOption = "all" | SiteStatus;
@@ -69,15 +49,6 @@ const STATUS_FILTERS: ReadonlyArray<{ value: FilterOption; label: string }> = [
   { value: "stale", label: "Stale" },
 ];
 
-/**
- * How often an open `awaiting-install` site re-checks itself.
- *
- * AC 3 gives this ten seconds; five leaves room for the request itself, so the
- * owner who pasted the snippet in another tab sees the card turn over inside
- * the promise rather than exactly on it.
- */
-const INSTALL_POLL_INTERVAL_MS = 5000;
-
 const SORT_LABELS: Record<SortOption, string> = {
   name: "Name",
   date: "Date added",
@@ -91,17 +62,25 @@ const SORT_LABELS: Record<SortOption, string> = {
  */
 const TEAMS_MOVED_NOTICE = "teams-moved";
 
+/**
+ * Sites: a light list, one row per site (s66c1 AC 3).
+ *
+ * Until s66c1 this page also was each site's detail view: "View Details"
+ * swapped it, in component state, for an 11-card page about 4,400 px tall,
+ * with no URL — Back left the dashboard, and nothing could link to a site. A
+ * site now has its own pages under `/dashboard/sites/<id>` (ADR 052), so this
+ * page lists, filters, and hands off. It no longer polls either: the install
+ * poll moved with the site to `SiteProvider`.
+ */
 export default function SitesPage() {
   const { user } = useAuth();
   const searchParams = useSearchParams();
-  const [sites, setSites] = useState<SiteWithStats[]>([]);
+  const [sites, setSites] = useState<SiteRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("date");
   const [filterBy, setFilterBy] = useState<FilterOption>("all");
-  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Modal state
   const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
@@ -111,14 +90,9 @@ export default function SitesPage() {
   // nothing worth persisting and nothing to clean up if they never dismiss it.
   const [isTeamsNoticeDismissed, setIsTeamsNoticeDismissed] = useState(false);
 
-  // Delete confirmation dialog state
+  // The row menu's two dialogs, each for one site at a time.
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  // Edit dialog state
-  const [editTargetSite, setEditTargetSite] = useState<SiteWithStats | null>(
-    null,
-  );
+  const [shareTargetId, setShareTargetId] = useState<string | null>(null);
 
   // Fetch sites
   const fetchSites = async () => {
@@ -192,50 +166,12 @@ export default function SitesPage() {
     return result;
   }, [sites, searchQuery, sortBy, filterBy]);
 
-  // Handlers
-  const handleViewDetails = (siteId: string) => {
-    setSelectedSiteId(siteId);
-  };
+  const deleteTarget = sites.find((site) => site.id === deleteTargetId) ?? null;
+  const shareTarget = sites.find((site) => site.id === shareTargetId) ?? null;
 
-  const handleEdit = (siteId: string) => {
-    const site = sites.find((s) => s.id === siteId) ?? null;
-    setEditTargetSite(site);
-  };
-
-  const handleDeleteRequest = (siteId: string) => {
-    setDeleteError(null);
-    setDeleteTargetId(siteId);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteTargetId) return;
-
-    try {
-      setIsDeleting(true);
-      setDeleteError(null);
-      const response = await fetch(`/api/sites/${deleteTargetId}`, {
-        method: "DELETE",
-      });
-
-      if (!response.ok) {
-        const data: unknown = await response.json();
-        const errData = data as { error?: string };
-        throw new Error(errData.error ?? "Failed to delete site");
-      }
-
-      setSites((prev) => prev.filter((site) => site.id !== deleteTargetId));
-      if (selectedSiteId === deleteTargetId) {
-        setSelectedSiteId(null);
-      }
-      setDeleteTargetId(null);
-    } catch (err) {
-      console.error("Error deleting site:", err);
-      setDeleteError(
-        err instanceof Error ? err.message : "Failed to delete site",
-      );
-    } finally {
-      setIsDeleting(false);
-    }
+  const handleDeleted = (siteId: string) => {
+    setSites((prev) => prev.filter((site) => site.id !== siteId));
+    setDeleteTargetId(null);
   };
 
   /**
@@ -249,10 +185,6 @@ export default function SitesPage() {
   const handleRegistrationSuccess = () => {
     void fetchSites();
   };
-
-  const selectedSite = selectedSiteId
-    ? sites.find((site) => site.id === selectedSiteId)
-    : null;
 
   const isTeamsMovedNoticeVisible =
     !isTeamsNoticeDismissed &&
@@ -268,70 +200,17 @@ export default function SitesPage() {
     };
   }, [sites]);
 
-  /**
-   * AC 3 — the card turns green by itself while the owner watches it.
-   *
-   * The flip is a server-side event: the embed script's first authorized report
-   * writes `sites.status`, and nothing pushes that to an open tab. The moment
-   * this exists for is the owner pasting the snippet in another tab and coming
-   * back — telling them to reload is not an answer, because they cannot know
-   * whether anything changed.
-   *
-   * Only while an `awaiting-install` site is on screen. A live or stale site
-   * has nothing to watch for, and an unbounded timer on a dashboard somebody
-   * leaves open is a request every few seconds until they close the laptop.
-   * Deselecting or unmounting clears it for the same reason. No new endpoint:
-   * this re-runs the list fetch the page already makes.
-   */
-  useEffect(() => {
-    if (!selectedSite || selectedSite.status !== "awaiting-install") return;
-
-    const timer = setInterval(() => {
-      void fetchSites();
-    }, INSTALL_POLL_INTERVAL_MS);
-
-    return () => clearInterval(timer);
-    // `fetchSites` and `selectedSite` are deliberately not dependencies:
-    // both are rebuilt on every render (the first is a plain function, the
-    // second a `find` over freshly-set state), so depending on either would
-    // tear down and re-arm the timer on each poll — which is a timer that never
-    // fires. The identity that matters is which site is open and what state it
-    // is in, and that is what is listed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSite?.id, selectedSite?.status]);
-
-  // If viewing site details
-  if (selectedSite) {
-    return (
-      <div>
-        <div className="mb-6">
-          <Button variant="outline" onClick={() => setSelectedSiteId(null)}>
-            <X className="w-4 h-4 mr-2" />
-            Back to Sites
-          </Button>
-        </div>
-        <SiteDetailView
-          site={selectedSite}
-          userId={user?.id}
-          onClose={() => setSelectedSiteId(null)}
-        />
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Sites"
-        description="Every domain you have connected to ReCopyFast."
-        actions={
-          <Button onClick={() => setIsRegistrationModalOpen(true)}>
-            <Plus aria-hidden="true" />
-            Add site
-          </Button>
-        }
-      />
-
+    <PageShell
+      title="Sites"
+      description="Every domain you have connected to ReCopyFast."
+      actions={
+        <Button onClick={() => setIsRegistrationModalOpen(true)}>
+          <Plus aria-hidden="true" />
+          Add site
+        </Button>
+      }
+    >
       {/* Driven by the query param alone, so it needs no fetch and renders in
           every state of the list below — including the empty one. An owner
           redirected off /dashboard/teams may have no sites at all and still
@@ -341,8 +220,8 @@ export default function SitesPage() {
           <div className="flex-1">
             <AlertTitle>Team management has moved</AlertTitle>
             <AlertDescription>
-              Invite people to edit a site from that site&apos;s Share panel —
-              open a site below and use Share.
+              Invite people to edit a site from that site&apos;s People &amp;
+              access page — open a site below and choose People &amp; access.
             </AlertDescription>
           </div>
           <Button
@@ -358,10 +237,12 @@ export default function SitesPage() {
 
       {/* These were four metric cards. They never were metrics — clicking one
           filtered the list. Presented as a segmented filter they say what they
-          actually do, and the counts still read at a glance. */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          actually do, and the counts still read at a glance. The filter wraps
+          (design system, Shell: a filter never hides options behind a hidden
+          scrollbar); at 375 it used to clip behind one. */}
+      <div className="flex flex-wrap gap-2">
         <div
-          className="flex items-center gap-1 overflow-x-auto rounded-lg border border-border bg-surface-2 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex flex-wrap items-center gap-1 rounded-container border border-border bg-surface-1 p-[3px]"
           role="group"
           aria-label="Filter sites by status"
         >
@@ -374,18 +255,18 @@ export default function SitesPage() {
                 onClick={() => setFilterBy(option.value)}
                 aria-pressed={selected}
                 className={cn(
-                  "flex shrink-0 items-center gap-2 rounded-md px-3 py-1.5 text-sm",
-                  "transition-[color,background-color,box-shadow] duration-200 ease-out",
+                  "flex h-8 shrink-0 items-center gap-2 rounded-control px-2.5 text-sm",
+                  "transition-[color,background-color] duration-200 ease-out",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   selected
-                    ? "bg-card font-medium text-foreground shadow-xs"
+                    ? "bg-card font-medium text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {option.label}
                 <span
                   className={cn(
-                    "tabular rounded-full px-1.5 py-0.5 text-[0.6875rem] font-semibold",
+                    "tabular rounded-control px-1.5 py-0.5 text-[0.6875rem] font-semibold",
                     selected
                       ? "bg-surface-3 text-foreground"
                       : "bg-card/60 text-muted-foreground",
@@ -398,7 +279,7 @@ export default function SitesPage() {
           })}
         </div>
 
-        <div className="flex flex-1 gap-2">
+        <div className="flex min-w-[12rem] flex-1 gap-2">
           <div className="relative flex-1">
             <Search
               className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -444,37 +325,26 @@ export default function SitesPage() {
 
       {/* Content Area */}
       {loading ? (
-        // Cards, not a spinner: the grid keeps its shape while it fills.
-        <div
-          className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3"
+        // Rows, not a spinner: the list keeps its shape while it fills.
+        <ul
+          className="rounded-container border border-border bg-card"
           role="status"
           aria-label="Loading sites"
         >
           {Array.from({ length: 3 }, (_, index) => (
-            <div
+            <li
               key={index}
-              className="space-y-4 rounded-xl border border-border p-5"
+              className="flex min-h-16 items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
             >
-              <div className="flex items-start gap-3">
-                <Skeleton className="h-11 w-11 rounded-xl" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-3 w-24" />
-                </div>
+              <Skeleton className="h-9 w-9" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-3 w-28" />
               </div>
-              <Skeleton className="h-5 w-20 rounded-full" />
-              <div className="grid grid-cols-3 gap-3 border-t border-border pt-4">
-                {Array.from({ length: 3 }, (_, i) => (
-                  <div key={i} className="space-y-2">
-                    <Skeleton className="h-5 w-10" />
-                    <Skeleton className="h-2.5 w-12" />
-                  </div>
-                ))}
-              </div>
-              <Skeleton className="h-8 w-full" />
-            </div>
+              <Skeleton className="hidden h-8 w-28 md:block" />
+            </li>
           ))}
-        </div>
+        </ul>
       ) : error ? (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />
@@ -531,17 +401,18 @@ export default function SitesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        // One bordered panel of ruled rows: there is no Table primitive
+        // (design-system gap 8).
+        <ul className="divide-y divide-border rounded-container border border-border bg-card">
           {filteredAndSortedSites.map((site) => (
-            <SiteCard
+            <SiteRow
               key={site.id}
               site={site}
-              onViewDetails={handleViewDetails}
-              onEdit={handleEdit}
-              onDelete={handleDeleteRequest}
+              onDelete={setDeleteTargetId}
+              onShare={setShareTargetId}
             />
           ))}
-        </div>
+        </ul>
       )}
 
       {/* Site Registration Modal */}
@@ -551,94 +422,26 @@ export default function SitesPage() {
         onSuccess={handleRegistrationSuccess}
       />
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
-        open={deleteTargetId !== null}
+      <DeleteSiteDialog
+        site={deleteTarget}
         onOpenChange={(open) => {
-          if (!open) {
-            setDeleteTargetId(null);
-            setDeleteError(null);
-          }
+          if (!open) setDeleteTargetId(null);
         }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete Site</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete this site? This action cannot be
-              undone and will remove all associated data.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {deleteError && (
-              <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
-                {deleteError}
-              </p>
-            )}
-          </DialogBody>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setDeleteTargetId(null);
-                setDeleteError(null);
-              }}
-              disabled={isDeleting}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDeleteConfirm}
-              disabled={isDeleting}
-            >
-              {isDeleting ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete Site"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onDeleted={handleDeleted}
+      />
 
-      {/* Edit Website Dialog */}
-      <Dialog
-        open={editTargetSite !== null}
-        onOpenChange={(open) => {
-          if (!open) setEditTargetSite(null);
-        }}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Edit Website</DialogTitle>
-            <DialogDescription>
-              Start an edit session for{" "}
-              <span className="font-medium">{editTargetSite?.name}</span>. This
-              opens your site with in-line editing enabled.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {editTargetSite && (
-              <div className="flex justify-end">
-                <EditWebsiteButton
-                  site={{
-                    id: editTargetSite.id,
-                    domain: editTargetSite.domain,
-                    name: editTargetSite.name,
-                  }}
-                  userPermissions={["edit", "admin"]}
-                  variant="primary"
-                  size="md"
-                />
-              </div>
-            )}
-          </DialogBody>
-        </DialogContent>
-      </Dialog>
-    </div>
+      {/* Create-only: the site's links are listed on its People & access
+          page, which the success message links to. */}
+      {shareTarget && (
+        <ShareSiteDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setShareTargetId(null);
+          }}
+          site={shareTarget}
+          manageHref={sitePageHref(shareTarget.id, "people")}
+        />
+      )}
+    </PageShell>
   );
 }

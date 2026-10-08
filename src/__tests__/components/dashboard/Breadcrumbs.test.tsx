@@ -114,6 +114,36 @@ describe("Breadcrumbs", () => {
     });
   });
 
+  /**
+   * s66c1 AC 9: a site's pages live at `/dashboard/sites/<uuid>/…`. The UUID
+   * is not a label anyone can read, so it reads "Site", and `people` reads
+   * as its page is titled. Only these two labels change (Breadcrumbs is
+   * s66b's; s66c1 owns only this map).
+   */
+  describe("Site pages", () => {
+    const SITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    it("reads a site id segment as Site", () => {
+      mockUsePathname.mockReturnValue(`/dashboard/sites/${SITE_ID}`);
+      render(<Breadcrumbs />);
+
+      expect(screen.getByText("Site")).toHaveAttribute("aria-current", "page");
+      expect(screen.queryByText(SITE_ID)).not.toBeInTheDocument();
+    });
+
+    it("reads Dashboard › Sites › Site › People & access", () => {
+      mockUsePathname.mockReturnValue(`/dashboard/sites/${SITE_ID}/people`);
+      render(<Breadcrumbs />);
+
+      const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+      expect(trail).toHaveTextContent("DashboardSitesSitePeople & access");
+      expect(screen.getByRole("link", { name: "Site" })).toHaveAttribute(
+        "href",
+        `/dashboard/sites/${SITE_ID}`,
+      );
+    });
+  });
+
   describe("Formatting", () => {
     it("should capitalize single-word paths", () => {
       mockUsePathname.mockReturnValue("/dashboard/settings");

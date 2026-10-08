@@ -6,37 +6,55 @@ import { useSiteActivation } from "@/hooks/useSiteActivation";
 jest.mock("@/hooks/useSiteActivation", () => ({
   useSiteActivation: jest.fn(),
 }));
-jest.mock("../SiteEditorsCard", () => ({
-  SiteEditorsCard: ({
-    onEditorChange,
-    inviteFormAutoFocus,
-    inviteDefaultPermissions,
+/*
+ * s66c1: the checklist's step opens the same AddEditorDialog as People &
+ * access (it used to wrap the whole SiteEditorsCard in an "Invite a client"
+ * dialog). The mock stands in for that dialog: open or not, the preset it was
+ * given, its success callback, and a Close that hands focus back the way the
+ * real dialog's `onCloseAutoFocus` does.
+ */
+jest.mock("../AddEditorDialog", () => ({
+  AddEditorDialog: ({
+    open,
+    onOpenChange,
+    onAdded,
+    defaultPermissions,
+    onCloseAutoFocus,
   }: {
-    onEditorChange?: () => void;
-    inviteFormAutoFocus?: boolean;
-    inviteDefaultPermissions?: string[];
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onAdded?: () => void;
+    defaultPermissions?: string[];
+    onCloseAutoFocus?: (event: Event) => void;
   }) => {
     const React = jest.requireActual<typeof import("react")>("react");
     const [noticeVisible, setNoticeVisible] = React.useState(false);
+    if (!open) return null;
     return (
       <div
-        data-auto-focus={String(inviteFormAutoFocus)}
-        data-default-permissions={inviteDefaultPermissions?.join(",")}
+        role="dialog"
+        data-default-permissions={defaultPermissions?.join(",")}
       >
         <button
           onClick={() => {
             setNoticeVisible(true);
-            onEditorChange?.();
+            onAdded?.();
           }}
         >
           Complete invitation
         </button>
-        <button onClick={() => onEditorChange?.()}>
-          Revoke publish editor
-        </button>
+        <button onClick={() => onAdded?.()}>Revoke publish editor</button>
         {noticeVisible && (
           <p>No invitation email was sent. Copy the editor hub link.</p>
         )}
+        <button
+          onClick={() => {
+            onOpenChange(false);
+            onCloseAutoFocus?.(new Event("focus"));
+          }}
+        >
+          Close
+        </button>
       </div>
     );
   },
@@ -138,16 +156,16 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     expect(screen.getByText("Install detected")).toBeInTheDocument();
-    expect(screen.getAllByText("Invite a client")).toHaveLength(2);
+    expect(screen.getAllByText("Add editor")).toHaveLength(2);
     expect(screen.getByText("An edit published")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Copy snippet for Client Site" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Invite a client to Client Site" }),
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Get Client Site publishing" }),
@@ -157,8 +175,8 @@ describe("ActivationChecklist", () => {
 
   it.each([
     ["installed", "Copy snippet for Client Site"],
-    ["invited", "Invite a client to Client Site"],
-    ["published", "Open Client Site in edit mode"],
+    ["invited", "Add editor to Client Site"],
+    ["published", "Edit website: Client Site"],
   ])("removes the %s action after real progress completes", (fact, action) => {
     mockUseSiteActivation.mockReturnValue(
       activation({
@@ -319,17 +337,12 @@ describe("ActivationChecklist", () => {
       });
 
     await user.click(
-      screen.getByRole("button", { name: "Invite a client to Client Site" }),
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
     );
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(
-      screen.getByRole("dialog").querySelector('[data-auto-focus="true"]'),
-    ).not.toBeNull();
-    expect(
-      screen
-        .getByRole("dialog")
-        .querySelector('[data-default-permissions="view,edit,publish"]'),
-    ).not.toBeNull();
+    expect(await screen.findByRole("dialog")).toHaveAttribute(
+      "data-default-permissions",
+      "view,edit,publish",
+    );
     await user.click(
       screen.getByRole("button", { name: "Complete invitation" }),
     );
@@ -375,7 +388,7 @@ describe("ActivationChecklist", () => {
     });
 
     await user.click(
-      screen.getByRole("button", { name: "Invite a client to Client Site" }),
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
     );
     await user.click(
       screen.getByRole("button", { name: "Complete invitation" }),
@@ -401,7 +414,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     );
 
     expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
@@ -424,7 +437,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     );
 
     expect(window.open).toHaveBeenCalledWith("about:blank", "_blank");
@@ -451,7 +464,7 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     );
 
     expect(await screen.findByText(/valid edit link/i)).toBeInTheDocument();
@@ -468,12 +481,12 @@ describe("ActivationChecklist", () => {
     renderChecklist();
 
     await user.click(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     );
 
-    expect(await screen.findByText(/allow popups/i)).toBeInTheDocument();
+    expect(await screen.findByText(/allow pop-ups/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Open Client Site in edit mode" }),
+      screen.getByRole("button", { name: "Edit website: Client Site" }),
     ).toBeInTheDocument();
   });
 });

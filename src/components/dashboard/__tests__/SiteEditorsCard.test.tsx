@@ -7,6 +7,11 @@ import { expectNoEmptyBodyBand } from "@/__tests__/helpers/dialog-body";
  * These tests drive the card the way a site owner does, because the defect this
  * component fixes was never that the endpoint was wrong — it was that nothing
  * called it. A test asserting a button exists would reproduce exactly that.
+ *
+ * s66c1: the card is list-only. Its enrolment form moved into
+ * `AddEditorDialog`, and the enrolment tests moved with it
+ * (AddEditorDialog.test.tsx). The list, resend, remove and forbidden tests
+ * stay here.
  */
 
 const SITE_ID = "site-1";
@@ -114,18 +119,17 @@ describe("SiteEditorsCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("focuses the invite email when the form mounts after loading", async () => {
+  // s66c1 AC 6: the form is no longer under the list; the page's "Add
+  // editor" action above it is.
+  it("points an empty list at the Add editor action above it", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }));
 
-    render(
-      <SiteEditorsCard
-        siteId={SITE_ID}
-        siteName={SITE_NAME}
-        inviteFormAutoFocus
-      />,
-    );
+    renderCard();
 
-    expect(await screen.findByLabelText(/editor email/i)).toHaveFocus();
+    expect(
+      await screen.findByText("Choose Add editor above."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/editor email/i)).not.toBeInTheDocument();
   });
 
   it("surfaces a failed load and retries it on demand", async () => {
@@ -160,81 +164,6 @@ describe("SiteEditorsCard", () => {
     expect(
       await screen.findByText(/Something went wrong on our end/),
     ).toBeInTheDocument();
-  });
-
-  it("enrols an editor, shows them in the list, and confirms the invitation email", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          editor: { id: grace.id, email: grace.email, permissions: ["view"] },
-          hubUrl: "https://app.recopyfast.com/edit",
-          invitationEmailSent: true,
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    // The row is the proof the enrolment happened, not the toast.
-    expect(await screen.findByText(grace.email)).toBeInTheDocument();
-
-    const [postUrl, postInit] = callsWithMethod("POST")[0];
-    expect(postUrl).toBe("/api/editor/editors");
-    expect(JSON.parse((postInit as RequestInit).body as string)).toEqual({
-      siteId: SITE_ID,
-      email: grace.email,
-      permissions: ["view", "edit"],
-    });
-
-    expect(
-      screen.getByText(`We emailed ${grace.email} an invitation.`),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /copy link/i }),
-    ).not.toBeInTheDocument();
-
-    // Form cleared, ready for the next address.
-    expect(screen.getByLabelText(/editor email/i)).toHaveValue("");
-  });
-
-  it("keeps manual hub instructions and copies the link when email delivery fails", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({
-          ok: true,
-          editor: { id: grace.id, email: grace.email, permissions: ["view"] },
-          hubUrl: "https://app.recopyfast.com/edit",
-          invitationEmailSent: false,
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
-
-    renderCard();
-    await screen.findByText("No editors yet");
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    expect(
-      await screen.findByText(/No invitation email was sent/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: /the editor hub/i }),
-    ).toHaveAttribute("href", "https://app.recopyfast.com/edit");
-
-    await user.click(screen.getByRole("button", { name: /copy link/i }));
-    expect(await navigator.clipboard.readText()).toBe(
-      "https://app.recopyfast.com/edit",
-    );
-    expect(await screen.findByText("Link copied.")).toBeInTheDocument();
   });
 
   it("resends an invitation with a pending state and reports success", async () => {
@@ -369,190 +298,6 @@ describe("SiteEditorsCard", () => {
       await screen.findByText(/No invitation email was sent/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /copy link/i })).toBeEnabled();
-  });
-
-  it("sends the permissions the owner actually picked", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({ ok: true, editor: { email: grace.email }, hubUrl: "" }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: "Publish" }));
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    await waitFor(() => expect(callsWithMethod("POST")).toHaveLength(1));
-    const [, postInit] = callsWithMethod("POST")[0];
-    expect(
-      JSON.parse((postInit as RequestInit).body as string).permissions,
-    ).toEqual(["view", "edit", "publish"]);
-  });
-
-  it("preselects Publish only when the caller requests the activation default", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse({ ok: true, editor: { email: grace.email }, hubUrl: "" }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [grace] }));
-
-    render(
-      <SiteEditorsCard
-        siteId={SITE_ID}
-        siteName={SITE_NAME}
-        inviteDefaultPermissions={["view", "edit", "publish"]}
-      />,
-    );
-    await screen.findByText("No editors yet");
-
-    expect(screen.getByRole("button", { name: "Publish" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    await waitFor(() => expect(callsWithMethod("POST")).toHaveLength(1));
-    const [, postInit] = callsWithMethod("POST")[0];
-    expect(
-      JSON.parse((postInit as RequestInit).body as string).permissions,
-    ).toEqual(["view", "edit", "publish"]);
-  });
-
-  it("keeps the typed address when the invite is rejected", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            error: "Rate limit exceeded",
-            message: "Too many invites. Please try again shortly.",
-          },
-          429,
-        ),
-      );
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Too many invites. Please try again shortly.",
-    );
-    // Retyping a rejected address is a needless punishment.
-    expect(screen.getByLabelText(/editor email/i)).toHaveValue(grace.email);
-    expect(screen.getByText("No editors yet")).toBeInTheDocument();
-  });
-
-  it("renders a seat-limit refusal as a billing matter, not a malfunction", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            error: "seat_limit",
-            message:
-              "You've used all 5 seats on your Pro plan for this site. Editors and collaborators share the same allowance — remove one, or upgrade for more.",
-            upgradeRequired: true,
-            currentLimit: 5,
-            maxLimit: 5,
-          },
-          403,
-        ),
-      );
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("all 5 seats on your Pro plan");
-    // Which limit, and what actually resolves it. Retrying the button does not.
-    expect(
-      within(alert).getByRole("link", { name: /view plans/i }),
-    ).toHaveAttribute("href", "/dashboard/billing");
-    expect(screen.getByLabelText(/editor email/i)).toHaveValue(grace.email);
-  });
-
-  it("tells a plan with no seats at all apart from a plan that has run out", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(
-        jsonResponse(
-          {
-            error: "seat_limit",
-            message:
-              "Your Starter plan does not include collaborator seats. Upgrade to invite editors or collaborators to this site.",
-            upgradeRequired: true,
-            currentLimit: 0,
-            maxLimit: 0,
-          },
-          403,
-        ),
-      );
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(
-      "Your Starter plan does not include collaborator seats",
-    );
-    expect(alert).not.toHaveTextContent("used all");
-    expect(
-      within(alert).getByRole("link", { name: /view plans/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("keeps an ordinary failure red and offers no upgrade path", async () => {
-    const user = userEvent.setup();
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }))
-      .mockResolvedValueOnce(jsonResponse({ error: "server_error" }, 500));
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: /add editor/i }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/Something went wrong on our end/);
-    expect(
-      within(alert).queryByRole("link", { name: /view plans/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("refuses to submit an enrolment with no permissions", async () => {
-    const user = userEvent.setup();
-    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, editors: [] }));
-
-    renderCard();
-    await screen.findByText("No editors yet");
-
-    await user.type(screen.getByLabelText(/editor email/i), grace.email);
-    await user.click(screen.getByRole("button", { name: "View" }));
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-
-    expect(screen.getByRole("button", { name: /add editor/i })).toBeDisabled();
-    expect(callsWithMethod("POST")).toHaveLength(0);
   });
 
   it("warns how many devices a removal signs out before removing anyone", async () => {

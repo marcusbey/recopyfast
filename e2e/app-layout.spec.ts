@@ -302,11 +302,20 @@ async function routeShareList(page: Page): Promise<void> {
   );
 }
 
-async function openShareDialog(page: Page): Promise<Locator> {
-  await page.locator('button[title="Share preview link"]').first().click();
+/**
+ * s66c1: the dialog is create-only and opens from the site's People & access
+ * page, where the links it used to list now are. The 60-character label is
+ * therefore checked on that page's list, before the dialog opens.
+ */
+async function openShareDialog(page: Page, siteId: string): Promise<Locator> {
+  await page.goto(`/dashboard/sites/${siteId}/people`);
+  await expect(page.getByText(LONG_LINK_LABEL)).toBeVisible();
+  await page
+    .getByRole("region", { name: "Give someone access" })
+    .getByRole("button", { name: "Share preview link" })
+    .click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText(LONG_LINK_LABEL)).toBeVisible();
   return dialog;
 }
 
@@ -471,7 +480,7 @@ test.describe("s66a app layout harness", () => {
       await routeShareList(page);
       await signIn(page, width);
 
-      await openShareDialog(page);
+      await openShareDialog(page, owner.siteId);
       await capture(S66A_CAPTURE_ROOT, page, `share-preview-link-${width}`);
       const measurement = await measureDialog(page);
 
@@ -512,8 +521,10 @@ test.describe("s66a app layout harness", () => {
     for (const theme of ["dark", "light"] as const) {
       await page.goto("/dashboard/sites");
       await applyTheme(page, theme);
+      // s66c1: the share icon moved into the row's menu, which is visible at
+      // rest (no hover on touch).
       await expect(
-        page.locator('button[title="Share preview link"]').first(),
+        page.getByRole("button", { name: "Open menu for E2E layout site" }),
       ).toBeVisible();
 
       // AC 4b: the sort menu is opaque.
@@ -527,7 +538,8 @@ test.describe("s66a app layout harness", () => {
       await page.keyboard.press("Escape");
       await expect(menu).toBeHidden();
 
-      const dialog = await openShareDialog(page);
+      const dialog = await openShareDialog(page, owner.siteId);
+      await applyTheme(page, theme);
       const lineStrong = await resolveToken(page, "--line-strong");
       const surfaceCard = await resolveToken(page, "--surface-card");
 
@@ -556,7 +568,7 @@ test.describe("s66a app layout harness", () => {
         .getByText("Permissions", { exact: true })
         .evaluate((element) => getComputedStyle(element).color);
       const mutedText = await dialog
-        .getByText(/Create a shareable link/)
+        .getByText(/For a one-off review of unpublished changes/)
         .evaluate((element) => getComputedStyle(element).color);
       expect(contrast(bodyText, dialogBackground)).toBeGreaterThanOrEqual(4.5);
       expect(contrast(mutedText, dialogBackground)).toBeGreaterThanOrEqual(4.5);

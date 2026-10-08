@@ -510,6 +510,14 @@ describe("SiteRegistrationModal", () => {
       expect(screen.getByText(installRecipes[0].location)).toBeInTheDocument();
     });
 
+    // s66c1 AC 9: the new site has its own page now; the panel leads there.
+    it("leads to the new site's own page with Open site page", async () => {
+      await registerSite();
+      expect(
+        screen.getByRole("link", { name: "Open site page" }),
+      ).toHaveAttribute("href", "/dashboard/sites/test-site-123");
+    });
+
     it("links the installation guide in a new tab", async () => {
       await registerSite();
       const guide = screen.getByRole("link", { name: "Installation guide" });

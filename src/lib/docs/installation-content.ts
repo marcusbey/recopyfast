@@ -115,8 +115,8 @@ export const INSTALLATION_GUIDE: InstallationGuideContent = {
     title: "1. Copy your site's snippet",
     steps: [
       "Sign in to ReCopyFast and open Sites.",
-      "Add your website, or choose View Details on an existing site.",
-      "In Installation, select Copy snippet. On an installed site, select View install snippet first if needed.",
+      "Add your website, then choose Open site page; for an existing site, choose its name.",
+      "Open Install and select Copy snippet.",
       "Copy the complete snippet from that site. Do not use another site's snippet or the placeholder example below.",
     ],
     hostnameGuidance:
@@ -213,7 +213,7 @@ export const INSTALLATION_GUIDE: InstallationGuideContent = {
       "Open the published URL on the registered hostname.",
       "Check that the original page still renders and its links and forms work.",
       "Confirm exactly one widget script loads. If it is blocked, inspect browser network and Content Security Policy errors.",
-      "Return to Sites, choose View Details, then Installation. It should move from awaiting installation to live after the widget reports. The dashboard checks automatically; its status is not a substitute for testing edits.",
+      "Return to Sites, choose the site's name, then Install. It should move from awaiting installation to live after the widget reports. The dashboard checks automatically; its status is not a substitute for testing edits.",
       "Repeat on another installed path if you installed across multiple pages.",
     ],
     cspGuidance:
@@ -223,7 +223,7 @@ export const INSTALLATION_GUIDE: InstallationGuideContent = {
     id: "invite",
     title: "5. Invite someone and test a real edit",
     steps: [
-      "In the site's activation checklist, choose Invite a client.",
+      "On the site's People & access page, choose Add editor.",
       "Enter their email and give them edit and publish if they should make public changes. Editing without publish permission only supports the actions their permissions allow.",
       "For someone already invited, use Resend invite rather than creating another entry.",
       "The recipient opens the editor hub at https://www.recopyfa.st/edit, enters the invited email, and verifies the emailed code themselves. They do not need to create an owner account to be an invited editor.",

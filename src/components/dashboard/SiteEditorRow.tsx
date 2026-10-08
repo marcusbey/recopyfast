@@ -2,6 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconTile } from "@/components/ui/icon-tile";
 import { Eye, Edit, Upload, Shield, Trash2, Mail, Loader2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -69,15 +70,15 @@ export function SiteEditorRow({
   return (
     <li
       className={cn(
-        "rounded-lg border border-border bg-surface-1 p-4",
+        "rounded-container border border-border bg-surface-1 p-4",
         isRevoked && "opacity-60",
       )}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-start gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-tone-info-surface">
-            <Mail className="h-4 w-4 text-tone-info-text" aria-hidden="true" />
-          </div>
+          <IconTile tone="info" size="sm">
+            <Mail aria-hidden="true" />
+          </IconTile>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="truncate font-medium text-foreground">
@@ -89,8 +90,8 @@ export function SiteEditorRow({
           </div>
         </div>
 
-        {/* A removed editor has nothing left to remove. Re-inviting the same
-            address through the form above is what restores them. */}
+        {/* A removed editor has nothing left to remove. Adding the same
+            address again (People & access, Add editor) restores them. */}
         {!isRevoked && (
           <div className="flex shrink-0 items-center gap-1">
             <Button

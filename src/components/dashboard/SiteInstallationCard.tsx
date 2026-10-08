@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle2, Copy } from "lucide-react";
+import { Info } from "lucide-react";
 import Link from "next/link";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { CodeBlock } from "@/components/ui/code-block";
 import { IconTile } from "@/components/ui/icon-tile";
 import {
   StatusBadge,
@@ -29,6 +29,17 @@ import { installRecipes } from "@/lib/sites/install-recipes";
  * tone and the body change. That sameness is what makes the flip legible — the
  * owner is watching one shape change, not being handed a different screen.
  *
+ * THE SNIPPET, EXACTLY ONCE (s66c1 AC 5). It used to be repeated inside every
+ * recipe tab, and hidden behind "View install snippet" once the site was live;
+ * the old detail view showed it twice more besides. After "Regenerate snippet"
+ * a stale copy in a less visible place is a dead snippet an owner can paste.
+ * It is now one `CodeBlock` above the recipes, in every state: the Install
+ * page is itself the disclosure. The recipes say where to paste it, as text.
+ *
+ * A member without install credentials (`GET /api/sites` mints them for admins
+ * only) sees the status and a note. The `YOUR_SITE_TOKEN` placeholder snippet
+ * they used to be shown could never work.
+ *
  * Purely presentational. The status arrives already resolved from
  * `GET /api/sites`, which calls `resolveEffectiveSiteStatus` once per site;
  * nothing here recomputes the staleness window, and nothing here gates
@@ -50,9 +61,6 @@ interface SiteInstallationCardProps {
   site: SiteInstallationCardSite;
 }
 
-/** How long the copy button keeps saying "Copied". */
-const COPY_CONFIRMATION_MS = 2000;
-
 function relativeTime(value?: string | null): string | null {
   if (!value) return null;
 
@@ -62,62 +70,13 @@ function relativeTime(value?: string | null): string | null {
   return formatDistanceToNow(parsed, { addSuffix: true });
 }
 
-interface SnippetProps {
-  embedScript: string;
-}
-
-/**
- * The snippet and its copy control.
- *
- * The confirmation is the button's own label swapping for two seconds. The
- * design system has no toast or transient-feedback primitive (its own gap #1),
- * and this is exactly the case that needs one — the owner has to know the click
- * registered before they leave for another tab. Swapping the label fills the
- * gap without inventing a primitive beside `src/components/ui/`, and it is the
- * pattern the Embed Script card on this same page already uses.
- */
-function InstallSnippet({ embedScript }: SnippetProps) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(embedScript);
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPY_CONFIRMATION_MS);
-  };
-
+/** Where the snippet goes, per stack (AC 5 of s02): text only. */
+function WhereToPaste() {
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-surface-1 p-4">
-        <code className="break-all font-mono text-sm text-foreground">
-          {embedScript}
-        </code>
-      </div>
-      <Button variant="outline" size="sm" onClick={handleCopy}>
-        {copied ? (
-          <>
-            <CheckCircle2 className="mr-2 h-4 w-4" aria-hidden="true" />
-            Copied
-          </>
-        ) : (
-          <>
-            <Copy className="mr-2 h-4 w-4" aria-hidden="true" />
-            Copy snippet
-          </>
-        )}
-      </Button>
-    </div>
-  );
-}
-
-/** The `awaiting-install` body: where the snippet goes, per stack (AC 5). */
-function InstallInstructions({ embedScript }: SnippetProps) {
-  return (
-    <div className="space-y-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Add this snippet to your site
-      </p>
+      <p className="text-eyebrow">Where to paste it</p>
       <Tabs defaultValue={installRecipes[0].id}>
-        <TabsList>
+        <TabsList aria-label="Platform">
           {installRecipes.map((recipe) => (
             <TabsTrigger key={recipe.id} value={recipe.id}>
               {recipe.label}
@@ -130,7 +89,6 @@ function InstallInstructions({ embedScript }: SnippetProps) {
             {recipe.notes && (
               <p className="text-sm text-muted-foreground">{recipe.notes}</p>
             )}
-            <InstallSnippet embedScript={embedScript} />
           </TabsContent>
         ))}
       </Tabs>
@@ -138,26 +96,11 @@ function InstallInstructions({ embedScript }: SnippetProps) {
   );
 }
 
-/** `live` and `stale` lead with the state; the snippet is one click away. */
-function SnippetDisclosure({ embedScript }: SnippetProps) {
-  const [open, setOpen] = useState(false);
-
-  if (!open) {
-    return (
-      <Button variant="link" size="sm" onClick={() => setOpen(true)}>
-        View install snippet
-      </Button>
-    );
-  }
-
-  return <InstallSnippet embedScript={embedScript} />;
-}
-
 export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
   const status = site.status ?? "awaiting-install";
   const definition = resolveSiteStatus(status);
   const Glyph = definition.icon;
-  const embedScript = site.embedScript ?? "";
+  const embedScript = site.embedScript;
 
   const liveSince = relativeTime(site.live_at);
   const lastReport = relativeTime(site.last_reported_at);
@@ -195,20 +138,6 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
           </Alert>
         )}
 
-        {status === "awaiting-install" && (
-          <>
-            <InstallInstructions embedScript={embedScript} />
-            <Alert variant="info">
-              <AlertTitle>Checking automatically</AlertTitle>
-              <AlertDescription>
-                This card updates itself within 10 seconds of the first page
-                view on {site.domain}. No refresh needed, and nothing here is
-                waiting on us.
-              </AlertDescription>
-            </Alert>
-          </>
-        )}
-
         {status === "live" && (
           <>
             <p className="text-sm text-muted-foreground">
@@ -221,7 +150,6 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
                 Last report {lastReport}.
               </p>
             )}
-            <SnippetDisclosure embedScript={embedScript} />
           </>
         )}
 
@@ -236,8 +164,36 @@ export function SiteInstallationCard({ site }: SiteInstallationCardProps) {
                 and nothing here has been switched off.
               </AlertDescription>
             </Alert>
-            <SnippetDisclosure embedScript={embedScript} />
           </>
+        )}
+
+        {embedScript ? (
+          <>
+            <CodeBlock
+              value={embedScript}
+              label="HTML"
+              copyLabel="Copy snippet"
+            />
+            <WhereToPaste />
+          </>
+        ) : (
+          <Alert variant="info">
+            <Info className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription>
+              Only this site&apos;s admins can see its install snippet.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {status === "awaiting-install" && (
+          <Alert variant="info">
+            <AlertTitle>Checking automatically</AlertTitle>
+            <AlertDescription>
+              This card updates itself within 10 seconds of the first page view
+              on {site.domain}. No refresh needed, and nothing here is waiting
+              on us.
+            </AlertDescription>
+          </Alert>
         )}
 
         <Button asChild variant="link" size="sm" className="h-auto px-0">

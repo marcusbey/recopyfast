@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import {
   Dialog,
   DialogBody,
@@ -25,17 +26,40 @@ import {
   Shield,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { ShareLinkCard, type ShareLink } from "./ShareLinkCard";
 import type { Site } from "@/types";
 import { cn } from "@/lib/utils/cn";
+
+/**
+ * "Share preview link": an emailed invite to review unpublished changes,
+ * written to `staging_access` and expiring on its own (s66c1 AC 6).
+ *
+ * Create-only since s66c1. The active links it used to list under its form
+ * moved to People & access (`PreviewLinksList`), with their fetch and revoke.
+ * The dialog is one of exactly two ways to give someone access, so it opens
+ * by saying which one it is (the ONE-OFF REVIEW explainer), and it grants
+ * View only unless the owner ticks more: a review link that could publish by
+ * default was the same power as an editor under a temporary name.
+ */
+
+export const SHARE_PREVIEW_EXPLAINER =
+  "For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.";
 
 interface ShareSiteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  site: Site;
+  site: Pick<Site, "id" | "domain" | "name">;
+  /** A link now exists: the caller refetches its list. */
+  onCreated?: () => void;
+  /**
+   * Where this site's links are managed. Set when the dialog opens away from
+   * that list (the Sites row menu), so a success can point at it.
+   */
+  manageHref?: string;
 }
 
 type Permission = "view" | "edit" | "publish" | "admin";
+
+const DEFAULT_GRANT: readonly Permission[] = ["view"];
 
 const EXPIRY_OPTIONS = [
   { value: 1, label: "1 day" },
@@ -59,9 +83,9 @@ export function ShareSiteDialog({
   open,
   onOpenChange,
   site,
+  onCreated,
+  manageHref,
 }: ShareSiteDialogProps) {
-  const [activeLinks, setActiveLinks] = useState<ShareLink[]>([]);
-  const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -73,40 +97,10 @@ export function ShareSiteDialog({
   // sends type "invite".
   const [email, setEmail] = useState("");
   const [permissions, setPermissions] = useState<Permission[]>([
-    "view",
-    "edit",
+    ...DEFAULT_GRANT,
   ]);
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [label, setLabel] = useState("");
-
-  const fetchActiveLinks = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch(`/api/staging/access?siteId=${site.id}`);
-      const data = await res.json();
-
-      if (!res.ok || !data.success) {
-        // Swallowing this left the dialog showing "no active links" when the
-        // request had actually failed, hiding shares that do exist.
-        throw new Error(data.error || `Failed to load shares (${res.status})`);
-      }
-
-      setActiveLinks(data.accessList ?? []);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load active shares",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [site.id]);
-
-  useEffect(() => {
-    if (open) {
-      fetchActiveLinks();
-    }
-  }, [open, fetchActiveLinks]);
 
   const handleCreateLink = async () => {
     if (!email) {
@@ -155,44 +149,17 @@ export function ShareSiteDialog({
         setSuccess("Invite sent successfully!");
       }
 
-      // Reset form
+      // Reset form. The grant goes back to View only after every send, so
+      // the next reviewer never inherits the last one's Edit or Publish.
       setEmail("");
       setLabel("");
-      setPermissions(["view", "edit"]);
+      setPermissions([...DEFAULT_GRANT]);
 
-      // Refresh list
-      await fetchActiveLinks();
+      onCreated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create link");
     } finally {
       setCreating(false);
-    }
-  };
-
-  const handleCopyLink = async (link: ShareLink) => {
-    const siteUrl = site.domain.startsWith("http")
-      ? site.domain
-      : `https://${site.domain}`;
-    const stagingUrl = `${siteUrl}?rcf_staging=1&rcf_token=${link.token || link.id}`;
-
-    try {
-      await navigator.clipboard.writeText(stagingUrl);
-    } catch (err) {
-      console.error("Failed to copy:", err);
-    }
-  };
-
-  const handleRevokeLink = async (link: ShareLink) => {
-    try {
-      const res = await fetch(`/api/staging/access?accessId=${link.id}`, {
-        method: "DELETE",
-      });
-
-      if (res.ok) {
-        setActiveLinks((prev) => prev.filter((l) => l.id !== link.id));
-      }
-    } catch (err) {
-      console.error("Failed to revoke:", err);
     }
   };
 
@@ -207,10 +174,7 @@ export function ShareSiteDialog({
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Share preview link</DialogTitle>
-          <DialogDescription>
-            Create a shareable link for others to preview and collaborate on
-            your site.
-          </DialogDescription>
+          <DialogDescription>{SHARE_PREVIEW_EXPLAINER}</DialogDescription>
         </DialogHeader>
 
         <DialogBody className="space-y-4">
@@ -235,7 +199,8 @@ export function ShareSiteDialog({
               swap, so nothing announced them as toggles and nothing said which
               ones were on. They are a checkbox group rather than the radiogroup
               used in UpgradeDialog and ThemePicker because several permissions
-              hold at once — the default grant is view + edit — and radio
+              can hold at once — View is the default, Edit and Publish are a
+              tick away — and radio
               semantics would tell a screen reader the opposite, that choosing
               one clears the others. A checkbox group is also the pattern that
               needs no roving tabindex: every option stays in the tab order, and
@@ -288,6 +253,9 @@ export function ShareSiteDialog({
                 },
               )}
             </div>
+            <p className="text-xs text-muted-foreground">
+              Edit and publish let the reviewer change unpublished copy.
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -323,43 +291,23 @@ export function ShareSiteDialog({
           {success && (
             <Alert variant="success">
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              <AlertDescription>{success}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Active links.
-              The loading branch used to be nested inside `activeLinks.length > 0`,
-              so it could only render when the list was already populated — i.e.
-              never on first open. The spinner now gates the section itself. */}
-          {(loading || activeLinks.length > 0) && (
-            <section className="space-y-3 border-t border-border pt-5">
-              <h3 className="text-eyebrow">
-                {loading
-                  ? "Active links"
-                  : `Active links · ${activeLinks.length}`}
-              </h3>
-              <div className="space-y-2">
-                {loading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : (
-                  activeLinks.map((link) => (
-                    <ShareLinkCard
-                      key={link.id}
-                      link={link}
-                      onCopy={handleCopyLink}
-                      onRevoke={handleRevokeLink}
-                    />
-                  ))
+              <AlertDescription className="space-y-1">
+                <p>{success}</p>
+                {manageHref && (
+                  <Link
+                    href={manageHref}
+                    className="font-medium underline underline-offset-2"
+                  >
+                    See preview links
+                  </Link>
                 )}
-              </div>
-            </section>
+              </AlertDescription>
+            </Alert>
           )}
         </DialogBody>
 
         {/* The footer holds the actions so they stay put while the body
-            scrolls past the list of active links. */}
+            scrolls. */}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
