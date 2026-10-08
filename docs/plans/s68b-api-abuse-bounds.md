@@ -1,5 +1,5 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s68b-api-abuse-bounds
 
@@ -7,6 +7,15 @@ Branch: `feature/s68b-api-abuse-bounds`
 Research: `docs/research/s68b-api-abuse-bounds.md` — read it first; this plan does not repeat it.
 Decision: [ADR 048](../decisions/048-bulk-find-replace-is-literal-only.md) (drafted on the s68
 planning branch; it travels with this story).
+
+## Owner decisions (2026-10-08)
+
+Plan validated by the owner, with the recommended defaults:
+
+- A/B: one conversion per visitor per test, counted only after that visitor viewed the test.
+- Regex find/replace is removed entirely (ADR 048); nothing in the product uses it.
+- The staging-invite email keeps the admin-chosen label, HTML-escaped and capped at 80
+  characters.
 
 ## Target story
 

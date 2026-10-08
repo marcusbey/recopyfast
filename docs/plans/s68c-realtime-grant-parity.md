@@ -1,10 +1,14 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s68c-realtime-grant-parity
 
 Branch: `feature/s68c-realtime-grant-parity`, from `main` **after s68a merges** (ADR 047, e2e seeds).
 Research: `docs/research/s68c-realtime-grant-parity.md` — read it first; this plan does not repeat it.
+
+## Owner decisions (2026-10-08)
+
+Plan validated by the owner. Runs after s68a merges.
 
 ## Target story
 

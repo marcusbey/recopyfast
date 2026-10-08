@@ -1,5 +1,5 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s68a-edit-session-authority
 
@@ -7,6 +7,11 @@ Branch: `feature/s68a-edit-session-authority`
 Research: `docs/research/s68a-edit-session-authority.md` — read it first; this plan does not repeat it.
 Decision: [ADR 047](../decisions/047-edit-session-authority-is-the-live-grant.md) (drafted on the
 s68 planning branch; it travels with this story).
+
+## Owner decisions (2026-10-08)
+
+Plan validated by the owner. Open question 1 resolved: if production's migration ledger lacks
+`20260809120000`, apply it in the same push as the new migrations (it only re-issues revokes).
 
 ## Target story
 
