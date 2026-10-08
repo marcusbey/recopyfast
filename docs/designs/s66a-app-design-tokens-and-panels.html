@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>s66a — App design tokens and panels (reference mockup)</title>
+<!-- Reference mockup for docs/designs/s66a-app-design-tokens-and-panels.md.
+     NOT production code: Execute builds with src/components/ui/*.
+     Token values are the DARK values of src/app/globals.css. No real token anywhere:
+     every site token is the placeholder •••, every id the zero UUID. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:dark;
+  /* globals.css, dark side of light-dark() */
+  --canvas:hsl(200 18% 7%);
+  --card:hsl(200 15% 10%);
+  --popover:var(--card);              /* --color-popover, added in s66a */
+  --surface-1:hsl(200 18% 8%);
+  --surface-2:hsl(200 14% 14%);
+  --surface-3:hsl(200 13% 18%);
+  --fg:hsl(200 22% 96%);
+  --muted:hsl(200 12% 68%);
+  --primary:hsl(174 48% 58%);
+  --on-primary:hsl(200 30% 8%);
+  --line:hsl(200 12% 21%);            /* border: decorative */
+  --line-strong:hsl(200 10% 40%);     /* input: control boundary, 3.09:1 */
+  --danger:hsl(358 62% 62%);
+  --on-danger:hsl(200 30% 8%);
+  --n-s:hsl(200 12% 17%);--n-t:hsl(200 12% 76%);--n-l:hsl(200 12% 26%);
+  --i-s:hsl(206 44% 18%);--i-t:hsl(204 78% 76%);--i-l:hsl(206 40% 30%);
+  --s-s:hsl(166 40% 15%);--s-t:hsl(162 60% 70%);--s-l:hsl(166 36% 27%);
+  --w-s:hsl(30 44% 17%);--w-t:hsl(42 84% 68%);--w-l:hsl(32 40% 29%);
+  --d-s:hsl(358 40% 19%);--d-t:hsl(4 84% 76%);--d-l:hsl(358 36% 31%);
+  --a-s:hsl(178 38% 16%);--a-t:hsl(176 52% 70%);--a-l:hsl(178 34% 28%);
+  --shadow-a:hsl(200 55% 2% / .34);
+  --shadow-b:hsl(200 55% 2% / .46);
+  --shadow-md:0 2px 4px -1px var(--shadow-a),0 4px 10px -2px var(--shadow-b);
+  /* ADR 049: the app radius scale is two tokens */
+  --radius-container:0px;
+  --radius-control:2px;
+  --font-sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  /* annotation ink for this mockup only (tone-warning-text); never UI */
+  --spec:hsl(42 84% 68%);
+}
+*,*::before,*::after{box-sizing:border-box;border-color:var(--line)}
+html,body{margin:0}
+body{background:var(--canvas);color:var(--fg);font:400 14px/20px var(--font-sans);
+  font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1;-webkit-font-smoothing:antialiased}
+a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+h1,h2,h3,p{margin:0}
+.i{width:16px;height:16px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i-12{width:12px;height:12px}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ---------- page chrome of the mockup itself ---------- */
+.page{max-width:1240px;margin:0 auto;padding:32px 32px 80px}
+@media (max-width:1023px){.page{padding:24px 24px 64px}}
+@media (max-width:639px){.page{padding:24px 16px 48px}}
+.eyebrow{font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted)}
+.ptitle{font:600 24px/32px var(--font-sans);letter-spacing:-.015em}
+.lede{color:var(--muted);max-width:72ch;margin-top:8px}
+.sec{margin-top:56px;padding-top:24px;border-top:1px solid var(--line)}
+.sec-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 24px;margin-bottom:20px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:16px;color:var(--muted);font-size:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border:1px solid var(--line-strong);display:inline-block}
+.frames{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}
+.scroll-x{max-width:100%;overflow-x:auto}
+.frames>.scroll-x{width:min-content}
+.cap{display:flex;gap:12px;align-items:baseline;margin-bottom:8px}
+.cap .mono{font:500 12px/16px var(--font-mono);color:var(--muted)}
+.notes{margin-top:12px;color:var(--muted);font-size:12px;line-height:18px;max-width:640px}
+.notes li{margin:2px 0}
+.spec{color:var(--spec);font:500 11px/14px var(--font-mono)}
+
+/* ---------- fake app behind the veil ---------- */
+.stage{position:relative;background:var(--canvas);border:1px solid var(--line);overflow:hidden}
+.stage .app{position:absolute;inset:0;display:grid;grid-template-columns:150px 1fr}
+.stage .app .side{border-right:1px solid var(--line);padding:16px 12px;display:grid;align-content:start;gap:10px}
+.stage .app .side i{display:block;height:10px;background:var(--surface-2)}
+.stage .app .main{display:grid;grid-template-rows:56px 1fr}
+.stage .app .hdr{border-bottom:1px solid var(--line)}
+.stage .app .grid{padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-content:start}
+.stage .app .grid i{display:block;height:120px;border:1px solid var(--line);background:var(--card)}
+.stage .veil{position:absolute;inset:0;background:hsl(200 22% 96% / .4)} /* bg-foreground/40 */
+.stage-desk{width:720px;padding:40px}
+.stage-phone{width:375px;height:780px}
+.stage-phone .app{grid-template-columns:1fr}
+.stage-phone .app .side{display:none}
+.stage-phone .app .grid{grid-template-columns:1fr}
+
+/* ---------- Dialog (s66a) ---------- */
+.dlg{position:relative;z-index:1;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md)}
+.dlg-640{width:640px;max-width:100%;margin:0 auto}
+.dlg-512{width:512px;max-width:100%;margin:0 auto}
+.dlg-x{position:absolute;top:16px;right:16px;width:24px;height:24px;display:grid;place-items:center;
+  background:none;border:0;color:var(--muted);border-radius:var(--radius-control);cursor:pointer}
+.dlg-x:hover{color:var(--fg)}
+.dlg-h{flex-shrink:0;padding:20px 48px 16px 24px;text-align:left}
+.dlg-t{font:600 16px/24px var(--font-sans)}
+.dlg-d{margin-top:4px;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.dlg-b{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 24px 20px}
+.dlg-b>*{min-width:0}
+.dlg-f{flex-shrink:0;border-top:1px solid var(--line);padding:12px 24px;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+/* bottom sheet below 640 */
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:92%;border-width:1px 0 0}
+.sheet .dlg-h{padding:16px 48px 12px 16px}
+.sheet .dlg-b{padding:0 16px 16px}
+.sheet .dlg-f{padding:12px 16px;flex-direction:column-reverse;align-items:stretch}
+.sheet .dlg-f .btn{width:100%}
+
+/* ---------- Button ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;
+  border:1px solid transparent;border-radius:var(--radius-control);font:500 14px/1 var(--font-sans);
+  white-space:nowrap;cursor:pointer;color:var(--fg);background:transparent;
+  transition:background-color .16s var(--ease-out),border-color .16s var(--ease-out),color .16s var(--ease-out)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible,.btn.is-focus{outline:none;box-shadow:0 0 0 2px var(--canvas),0 0 0 4px var(--primary)}
+.btn-default{background:var(--primary);color:var(--on-primary)}
+.btn-default:hover{background:hsl(174 48% 58% / .9)}
+.btn-outline{border-color:var(--line-strong);background:var(--card)}
+.btn-outline:hover{background:var(--surface-2)}
+.btn-secondary{background:var(--surface-2)}
+.btn-secondary:hover{background:hsl(200 14% 14% / .8)}
+.btn-ghost:hover{background:var(--surface-2)}
+.btn-destructive{background:var(--danger);color:var(--on-danger)}
+.btn-link{color:var(--primary);height:auto;padding:0}
+.btn-link:hover{text-decoration:underline}
+.btn-sm{height:32px;padding:0 12px;font-size:12px}
+.btn-lg{height:48px;padding:0 24px;font-size:15px}
+.btn-xl{height:56px;padding:0 32px;font-size:16px}
+.btn-icon{width:40px;padding:0}
+.btn-icon-sm{width:32px;height:32px;padding:0}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.btn-danger-ghost{color:var(--d-t)}
+.btn-danger-ghost:hover{background:var(--d-s)}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Form controls ---------- */
+.label{display:block;font:500 14px/20px var(--font-sans);margin-bottom:6px}
+.field+.field{margin-top:16px}
+.help{margin-top:6px;font-size:12px;line-height:16px;color:var(--muted)}
+.help.err{color:var(--d-t)}
+.input{display:block;width:100%;height:40px;padding:0 12px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-control);background:var(--card);color:var(--fg);font:400 14px/20px var(--font-sans);
+  transition:border-color .2s var(--ease-out),box-shadow .2s var(--ease-out)}
+.input::placeholder{color:var(--muted)}
+.input:hover,.input.is-hover{border-color:hsl(200 22% 96% / .4)}
+.input:focus-visible,.input.is-focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px var(--canvas),0 0 0 4px var(--primary)}
+.input[disabled]{background:var(--surface-2);opacity:.6;cursor:not-allowed}
+.input.is-error{border-color:var(--danger)}
+textarea.input{height:auto;min-height:80px;padding:8px 12px;resize:vertical}
+.nsel{position:relative}
+.nsel select{appearance:none;-webkit-appearance:none;padding:0 36px 0 12px;cursor:pointer}
+.nsel .chev{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}
+
+/* ---------- Badge ---------- */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border:1px solid transparent;
+  border-radius:var(--radius-control);font:500 12px/16px var(--font-sans);white-space:nowrap}
+.b-default{background:var(--primary);color:var(--on-primary)}
+.b-secondary{background:var(--surface-2)}
+.b-outline{border-color:var(--line)}
+.b-destructive{background:var(--danger);color:var(--on-danger)}
+.b-neutral{background:var(--n-s);color:var(--n-t);border-color:var(--n-l)}
+.b-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.b-success{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.b-warning{background:var(--w-s);color:var(--w-t);border-color:var(--w-l)}
+.b-danger{background:var(--d-s);color:var(--d-t);border-color:var(--d-l)}
+.b-accent{background:var(--a-s);color:var(--a-t);border-color:var(--a-l)}
+.dot{width:6px;height:6px;border-radius:9999px;background:currentColor} /* status dot: radius exception */
+
+/* ---------- Tabs (underline) ---------- */
+.tabs{display:flex;flex-wrap:wrap;column-gap:16px;border-bottom:1px solid var(--line)}
+.tab{height:40px;padding:0 2px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;border-radius:0;
+  background:none;color:var(--muted);font:500 14px/1 var(--font-sans);cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--fg)}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--primary)}
+.tab:focus-visible,.tab.is-focus{outline:2px solid var(--primary);outline-offset:2px}
+.tabpanel{padding-top:12px}
+.tabpanel[hidden]{display:none}
+
+/* ---------- Card, Alert, Menu ---------- */
+.card{border:1px solid var(--line);background:var(--card);border-radius:var(--radius-container)}
+.card-h{padding:20px 24px 16px}
+.card-t{font:600 16px/24px var(--font-sans)}
+.card-d{color:var(--muted);margin-top:4px}
+.card-c{padding:0 24px 20px}
+.card-toolbar{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 24px;border-bottom:1px solid var(--line)}
+.card.interactive{cursor:pointer;transition:border-color .2s var(--ease-out)}
+.card.interactive:hover{border-color:hsl(174 48% 58% / .4)}
+.alert{display:flex;gap:12px;padding:12px 16px;border:1px solid;border-radius:var(--radius-container)}
+.alert .i{margin-top:2px}
+.al-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.al-success{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.al-danger{background:var(--d-s);color:var(--d-t);border-color:var(--d-l)}
+.menu{background:var(--popover);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md);padding:4px;min-width:200px}
+.menu-i{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:var(--radius-control);font-size:14px;cursor:default}
+.menu-i:hover,.menu-i.hl{background:var(--surface-2)}
+.menu-i .ck{width:16px;display:inline-grid;place-items:center}
+.menu-sep{height:1px;background:var(--line);margin:4px -4px}
+
+/* ---------- CodeBlock (new in s66a) ---------- */
+.cb{border:1px solid var(--line);background:var(--surface-1);border-radius:var(--radius-container);min-width:0}
+.cb-bar{height:40px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 4px 0 16px;border-bottom:1px solid var(--line)}
+.cb pre{margin:0;padding:12px 16px;font:400 13px/20px var(--font-mono);color:var(--fg);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.cb.nowrap pre{white-space:pre;overflow-x:auto;overflow-wrap:normal}
+.cb .m{color:var(--muted)}
+.ic{font:400 12px/16px var(--font-mono);background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-control);overflow-wrap:anywhere}
+
+/* ---------- Site-registered panel parts ---------- */
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:20px}
+.step{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px}
+.step-n{width:24px;height:24px;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface-1);
+  font:500 12px/1 var(--font-sans);font-variant-numeric:tabular-nums;color:var(--muted)}
+.step-t{font:600 14px/24px var(--font-sans);margin-bottom:8px}
+.recipe p+p{margin-top:6px}
+.recipe .note{color:var(--muted);font-size:12px;line-height:18px}
+.dl{display:grid;grid-template-columns:112px minmax(0,1fr);margin:12px 0 0;border-top:1px solid var(--line)}
+.dl dt,.dl dd{margin:0;padding:8px 0;border-bottom:1px solid var(--line)}
+.dl dt{color:var(--muted)}
+.sheet .dl{grid-template-columns:minmax(0,1fr)}
+.sheet .dl dt{border-bottom:0;padding-bottom:0}
+.sheet .dl dd{padding-top:2px}
+details.ex{margin-top:12px}
+details.ex summary{list-style:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--fg);font-weight:500}
+details.ex summary::-webkit-details-marker{display:none}
+details.ex summary .i{transition:transform .16s var(--ease-out)}
+details.ex[open] summary .i{transform:rotate(90deg)}
+details.ex .cb{margin-top:8px}
+.foot-meta{margin-right:auto;display:flex;align-items:center;gap:8px;min-width:0}
+.foot-meta .id{font:400 12px/16px var(--font-mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
+.sheet .foot-meta{margin:0}
+.ext{display:inline-flex;align-items:center;gap:4px;font-weight:500}
+
+/* ---------- Share dialog parts ---------- */
+.perms{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.perm{height:40px;width:100%;display:flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-control);background:transparent;color:var(--muted);font:500 14px/1 var(--font-sans);cursor:pointer;text-align:left}
+.perm:hover{color:var(--fg)}
+.perm[aria-checked="true"]{border-color:var(--primary);background:var(--a-s);color:var(--a-t)}
+.perm .tick{margin-left:auto;visibility:hidden}
+.perm[aria-checked="true"] .tick{visibility:visible}
+.divider{height:1px;background:var(--line);margin:20px 0}
+.links{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:12px}
+.lc{border:1px solid var(--line);background:var(--surface-1);border-radius:var(--radius-container);padding:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0}
+.lc-top{display:flex;align-items:flex-start;gap:12px}
+.tile{width:32px;height:32px;display:grid;place-items:center;flex-shrink:0;border-radius:var(--radius-container)}
+.tile-info{background:var(--i-s);color:var(--i-t)}
+.lc-main{flex:1;min-width:0}
+.lc-title{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lc-meta,.lc-perms{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;line-height:16px;color:var(--muted)}
+.lc-meta{margin-top:2px}
+.lc-perms{padding-left:44px}
+.lc-act{display:flex;gap:4px;flex-shrink:0}
+
+/* ---------- spec callout for the select inset ---------- */
+.callout{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;margin-top:24px}
+.callout .box{position:relative;padding:28px 0 64px}
+.dim{position:absolute;height:9px;border:1px solid var(--spec);border-top:0}
+.dim.top{border-top:1px solid var(--spec);border-bottom:0}
+.dim-l{position:absolute;color:var(--spec);font:500 11px/14px var(--font-mono);white-space:nowrap}
+.before{height:40px;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 16px;background:var(--card)}
+
+/* ---------- primitives sheet ---------- */
+.sheetgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:16px}
+.spec-card>.card-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:16px 20px 12px}
+.spec-card>.card-c{padding:0 20px 20px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.row+.row{margin-top:12px}
+.stack>*+*{margin-top:12px}
+.tok{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.tok .t{border:1px solid var(--line)}
+.tok .t .chip{height:56px;border-bottom:1px solid var(--line)}
+.tok .t div.k{padding:8px 10px;font-size:12px;line-height:16px}
+.tok .t div.k b{display:block;font:500 12px/16px var(--font-mono);color:var(--fg)}
+.tok .t div.k span{color:var(--muted)}
+.typerow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:4px 16px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line)}
+.typerow .k{font:400 12px/16px var(--font-mono);color:var(--muted)}
+.anatomy{display:grid;border:1px solid var(--line);background:var(--card)}
+.anatomy>div{padding:10px 16px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.anatomy>div+div{border-top:1px solid var(--line)}
+.anatomy .body{background:var(--surface-1);min-height:96px;align-items:flex-start}
+@media (max-width:639px){.typerow{grid-template-columns:1fr}.dl{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="chevr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="eye" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="edit" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/></symbol>
+  <symbol id="upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8 12 3 7 8"/><path d="M12 3v12"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+  <symbol id="dashed" viewBox="0 0 24 24"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></symbol>
+  <symbol id="ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="load" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></symbol>
+  <symbol id="sort" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+</svg>
+
+<main class="page">
+  <p class="eyebrow">Design reference · not production code · dark theme</p>
+  <h1 class="ptitle" style="margin-top:8px">s66a — App design tokens and panels</h1>
+  <p class="lede">The redesigned site-registered panel and Share preview link dialog, and the
+    primitives they are built from. Every value comes from <code class="ic">docs/design-system.md</code>
+    (s66a revision). Containers are square, controls have 2&nbsp;px corners, borders are 1&nbsp;px, and
+    only floating surfaces cast a shadow. Every dialog has a single scroll container: its body.</p>
+  <div class="legend">
+    <span><i class="sw" style="border-radius:0"></i>rounded-container · 0</span>
+    <span><i class="sw" style="border-radius:2px"></i>rounded-control · 2px</span>
+    <span><i class="sw" style="border-color:var(--line)"></i>border · --line (decorative)</span>
+    <span><i class="sw"></i>input · --line-strong (3.09:1)</span>
+    <span class="spec">amber = annotation, not UI</span>
+  </div>
+
+  <!-- ===================================================================== -->
+  <section class="sec" aria-labelledby="s1">
+    <div class="sec-h">
+      <h2 id="s1" class="ptitle">1 · Site-registered panel</h2>
+      <span class="eyebrow">SiteRegistrationModal, success state</span>
+    </div>
+    <div class="frames">
+      <!-- desktop -->
+      <div class="scroll-x">
+        <div class="cap"><span class="eyebrow">1280 · dialog 640</span><span class="mono">max-w-[40rem]</span></div>
+        <div class="stage stage-desk">
+          <div class="app" aria-hidden="true"><div class="side"><i></i><i></i><i></i><i></i></div><div class="main"><div class="hdr"></div><div class="grid"><i></i><i></i><i></i></div></div></div>
+          <div class="veil" aria-hidden="true"></div>
+          <div class="dlg dlg-640" role="dialog" aria-labelledby="reg-t">
+            <button class="dlg-x" aria-label="Close"><svg class="i"><use href="#x"/></svg></button>
+            <div class="dlg-h">
+              <h2 class="dlg-t" id="reg-t">Site registered</h2>
+              <p class="dlg-d"><span>Example site</span><span aria-hidden="true">·</span><span>example.com</span>
+                <span class="badge b-neutral"><svg class="i i-12"><use href="#dashed"/></svg>Awaiting install</span></p>
+            </div>
+            <div class="dlg-b" data-scroll="the only scroll container">
+              <ol class="steps">
+                <li class="step"><span class="step-n">1</span><div>
+                  <h3 class="step-t">Copy the snippet</h3>
+                  <div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span>
+                    <button class="btn btn-outline btn-sm js-copy"><svg class="i"><use href="#copy"/></svg><span>Copy</span></button></div>
+<pre><span class="m">&lt;script src=</span>"https://www.recopyfa.st/embed/recopyfast.js"<span class="m"> data-site-id=</span>"00000000-0000-4000-8000-000000000000"<span class="m"> data-site-token=</span>"•••"<span class="m"> data-api-url=</span>"https://www.recopyfa.st/api"<span class="m"> data-ws-url=</span>"wss://recopyfast-ws.fly.dev"<span class="m">&gt;&lt;/script&gt;</span></pre></div>
+                </div></li>
+                <li class="step"><span class="step-n">2</span><div>
+                  <h3 class="step-t">Paste it before <code class="ic">&lt;/body&gt;</code></h3>
+                  <div class="tabs js-tabs" role="tablist" aria-label="Platform">
+                    <button class="tab" role="tab" aria-selected="true">WordPress</button>
+                    <button class="tab" role="tab" aria-selected="false">Next.js</button>
+                    <button class="tab" role="tab" aria-selected="false">Plain HTML</button>
+                  </div>
+                  <div class="tabpanel recipe" role="tabpanel"><p>Paste it into your theme's footer.php, immediately before the closing <code class="ic">&lt;/body&gt;</code> tag.</p><p class="note">No access to theme files? A header-and-footer snippet plugin drops it in the same place, and survives theme updates.</p></div>
+                  <div class="tabpanel recipe" role="tabpanel" hidden><p>For React or Next.js, load the generated tag after the page has hydrated. In Next.js, <code class="ic">next/script</code> with <code class="ic">strategy="afterInteractive"</code> is one option; preserve every generated attribute and value.</p><p class="note">The widget has no complete lifecycle for client-side route changes. Verify direct loads, internal navigation, Back, reload, and returning to an edited page.</p></div>
+                  <div class="tabpanel recipe" role="tabpanel" hidden><p>Paste it before the closing <code class="ic">&lt;/body&gt;</code> tag of every page you want to be editable.</p><p class="note">Sharing one footer include across pages means pasting it once; otherwise each page needs its own copy.</p></div>
+                </div></li>
+                <li class="step"><span class="step-n">3</span><div>
+                  <h3 class="step-t">Open your site — text is editable by itself</h3>
+                  <p class="m" style="color:var(--muted)">The widget finds headings, paragraphs, list items, table cells, labels, buttons and images by itself — no markup changes.</p>
+                  <dl class="dl">
+                    <dt>Exclude</dt><dd><code class="ic">data-rcf-ignore</code></dd>
+                    <dt>Opt in</dt><dd><code class="ic">data-rcf-content</code></dd>
+                    <dt>Opt in a link</dt><dd><code class="ic">class="rcf-editable-link"</code></dd>
+                  </dl>
+                  <p style="color:var(--muted);margin-top:8px">Links are skipped on purpose, so nobody can rewrite your navigation by accident.</p>
+                  <details class="ex"><summary><svg class="i"><use href="#chevr"/></svg>Show example</summary>
+                    <div class="cb nowrap"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm js-copy"><svg class="i"><use href="#copy"/></svg><span>Copy</span></button></div>
+<pre>&lt;h1&gt;Edited automatically&lt;/h1&gt;
+&lt;p data-rcf-ignore&gt;Never editable&lt;/p&gt;
+&lt;div data-rcf-content&gt;Opt this container in&lt;/div&gt;
+&lt;a href="/pricing" class="rcf-editable-link"&gt;Opt this link in&lt;/a&gt;</pre></div>
+                  </details>
+                </div></li>
+              </ol>
+            </div>
+            <div class="dlg-f">
+              <div class="foot-meta"><span class="eyebrow">Site ID</span><span class="id">00000000-0000-4000-8000-000000000000</span></div>
+              <a class="ext" href="#" onclick="return false">Installation guide<svg class="i i-12"><use href="#ext"/></svg></a>
+              <button class="btn btn-default">Close</button>
+            </div>
+          </div>
+        </div>
+        <ul class="notes">
+          <li>The title sits at the top: no centred icon and no empty band. Name, domain and status share one line and wrap when narrow.</li>
+          <li>The snippet wraps inside its block, and Copy stays visible in the label bar (never hover-only). It copies <code class="ic">embedScript</code> byte for byte.</li>
+          <li>Step 2 reuses <code class="ic">installRecipes</code>, the same source <code class="ic">SiteInstallationCard</code> uses.</li>
+          <li>The footer replaces "Need help? Visit your site dashboard" and the "Go to Site Dashboard" button, which only closed the dialog.</li>
+        </ul>
+      </div>
+
+      <!-- 375 -->
+      <div class="scroll-x">
+        <div class="cap"><span class="eyebrow">375 · bottom sheet</span><span class="mono">max-h 92dvh · body scrolls</span></div>
+        <div class="stage stage-phone">
+          <div class="app" aria-hidden="true"><div class="main"><div class="hdr"></div><div class="grid"><i></i><i></i></div></div></div>
+          <div class="veil" aria-hidden="true"></div>
+          <div class="dlg sheet" role="dialog" aria-labelledby="reg-t2">
+            <button class="dlg-x" aria-label="Close"><svg class="i"><use href="#x"/></svg></button>
+            <div class="dlg-h">
+              <h2 class="dlg-t" id="reg-t2">Site registered</h2>
+              <p class="dlg-d"><span>Example site</span><span aria-hidden="true">·</span><span>example.com</span>
+                <span class="badge b-neutral"><svg class="i i-12"><use href="#dashed"/></svg>Awaiting install</span></p>
+            </div>
+            <div class="dlg-b">
+              <ol class="steps">
+                <li class="step"><span class="step-n">1</span><div>
+                  <h3 class="step-t">Copy the snippet</h3>
+                  <div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span>
+                    <button class="btn btn-outline btn-sm js-copy"><svg class="i"><use href="#copy"/></svg><span>Copy</span></button></div>
+<pre><span class="m">&lt;script src=</span>"https://www.recopyfa.st/embed/recopyfast.js"<span class="m"> data-site-id=</span>"00000000-0000-4000-8000-000000000000"<span class="m"> data-site-token=</span>"•••"<span class="m"> data-api-url=</span>"https://www.recopyfa.st/api"<span class="m"> data-ws-url=</span>"wss://recopyfast-ws.fly.dev"<span class="m">&gt;&lt;/script&gt;</span></pre></div>
+                </div></li>
+                <li class="step"><span class="step-n">2</span><div>
+                  <h3 class="step-t">Paste it before <code class="ic">&lt;/body&gt;</code></h3>
+                  <div class="tabs js-tabs" role="tablist" aria-label="Platform">
+                    <button class="tab" role="tab" aria-selected="true">WordPress</button>
+                    <button class="tab" role="tab" aria-selected="false">Next.js</button>
+                    <button class="tab" role="tab" aria-selected="false">Plain HTML</button>
+                  </div>
+                  <div class="tabpanel recipe" role="tabpanel"><p>Paste it into your theme's footer.php, immediately before the closing <code class="ic">&lt;/body&gt;</code> tag.</p><p class="note">No access to theme files? A header-and-footer snippet plugin drops it in the same place.</p></div>
+                  <div class="tabpanel recipe" role="tabpanel" hidden><p>Load the generated tag after the page has hydrated; preserve every attribute.</p></div>
+                  <div class="tabpanel recipe" role="tabpanel" hidden><p>Paste it before <code class="ic">&lt;/body&gt;</code> on every page you want editable.</p></div>
+                </div></li>
+                <li class="step"><span class="step-n">3</span><div>
+                  <h3 class="step-t">Open your site — text is editable by itself</h3>
+                  <dl class="dl">
+                    <dt>Exclude</dt><dd><code class="ic">data-rcf-ignore</code></dd>
+                    <dt>Opt in</dt><dd><code class="ic">data-rcf-content</code></dd>
+                    <dt>Opt in a link</dt><dd><code class="ic">class="rcf-editable-link"</code></dd>
+                  </dl>
+                  <details class="ex"><summary><svg class="i"><use href="#chevr"/></svg>Show example</summary>
+                    <div class="cb nowrap"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm js-copy"><svg class="i"><use href="#copy"/></svg><span>Copy</span></button></div>
+<pre>&lt;h1&gt;Edited automatically&lt;/h1&gt;
+&lt;p data-rcf-ignore&gt;Never editable&lt;/p&gt;
+&lt;div data-rcf-content&gt;Opt this container in&lt;/div&gt;
+&lt;a href="/pricing" class="rcf-editable-link"&gt;Opt this link in&lt;/a&gt;</pre></div>
+                  </details>
+                </div></li>
+              </ol>
+            </div>
+            <div class="dlg-f">
+              <button class="btn btn-default">Close</button>
+              <a class="ext" href="#" onclick="return false">Installation guide<svg class="i i-12"><use href="#ext"/></svg></a>
+              <div class="foot-meta"><span class="eyebrow">Site ID</span><span class="id">00000000-0000-4000-8000-000000000000</span></div>
+            </div>
+          </div>
+        </div>
+        <ul class="notes">
+          <li>Full width and anchored to the bottom, with a top border only and 16&nbsp;px paddings.</li>
+          <li>The header and footer stay put while the body scrolls. Close spans the full width.</li>
+          <li>Nothing is wider than the sheet. The snippet wraps; the example scrolls inside its own block.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="sec" aria-labelledby="s2">
+    <div class="sec-h">
+      <h2 id="s2" class="ptitle">2 · Share preview link</h2>
+      <span class="eyebrow">ShareSiteDialog + ShareLinkCard</span>
+    </div>
+    <div class="frames">
+      <div class="scroll-x">
+        <div class="cap"><span class="eyebrow">1280 · dialog 512</span><span class="mono">default width</span></div>
+        <div class="stage stage-desk" style="width:592px">
+          <div class="app" aria-hidden="true"><div class="side"><i></i><i></i><i></i></div><div class="main"><div class="hdr"></div><div class="grid"><i></i><i></i></div></div></div>
+          <div class="veil" aria-hidden="true"></div>
+          <div class="dlg dlg-512 js-share" role="dialog" aria-labelledby="sh-t"></div>
+        </div>
+      </div>
+      <div class="scroll-x">
+        <div class="cap"><span class="eyebrow">375 · bottom sheet</span><span class="mono">2 fixture links</span></div>
+        <div class="stage stage-phone">
+          <div class="app" aria-hidden="true"><div class="main"><div class="hdr"></div><div class="grid"><i></i><i></i></div></div></div>
+          <div class="veil" aria-hidden="true"></div>
+          <div class="dlg sheet js-share" role="dialog" aria-labelledby="sh-t"></div>
+        </div>
+      </div>
+    </div>
+
+    <template id="share-tpl">
+      <button class="dlg-x" aria-label="Close"><svg class="i"><use href="#x"/></svg></button>
+      <div class="dlg-h">
+        <h2 class="dlg-t">Share preview link</h2>
+        <p class="dlg-d">Create a shareable link for others to preview and collaborate on your site.</p>
+      </div>
+      <div class="dlg-b">
+        <div class="field"><label class="label">Email address</label><input class="input" type="email" placeholder="collaborator@example.com"></div>
+        <div class="field"><span class="label">Permissions</span>
+          <div class="perms" role="group" aria-label="Permissions">
+            <button class="perm js-perm" role="checkbox" aria-checked="true"><svg class="i"><use href="#eye"/></svg>View<svg class="i tick"><use href="#ok"/></svg></button>
+            <button class="perm js-perm" role="checkbox" aria-checked="true"><svg class="i"><use href="#edit"/></svg>Edit<svg class="i tick"><use href="#ok"/></svg></button>
+            <button class="perm js-perm" role="checkbox" aria-checked="false"><svg class="i"><use href="#upload"/></svg>Publish<svg class="i tick"><use href="#ok"/></svg></button>
+            <button class="perm js-perm" role="checkbox" aria-checked="false"><svg class="i"><use href="#shield"/></svg>Admin<svg class="i tick"><use href="#ok"/></svg></button>
+          </div>
+        </div>
+        <div class="field"><label class="label">Expires in</label>
+          <div class="nsel"><select class="input"><option>1 day</option><option selected>7 days</option><option>14 days</option><option>30 days</option></select><svg class="i chev"><use href="#chev"/></svg></div>
+        </div>
+        <div class="field"><label class="label">Label (optional)</label><input class="input" placeholder="e.g., Client review v2"></div>
+        <div class="divider"></div>
+        <p class="eyebrow">Active links · 2</p>
+        <div class="links">
+          <div class="lc">
+            <div class="lc-top"><span class="tile tile-info"><svg class="i"><use href="#mail"/></svg></span>
+              <div class="lc-main"><p class="lc-title">Client review — homepage and pricing copy, second round</p>
+                <p class="lc-meta"><span>Expires Oct 14</span><span class="badge b-warning">Pending</span></p></div>
+              <div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link"><svg class="i"><use href="#copy"/></svg></button><button class="btn btn-ghost btn-icon-sm btn-danger-ghost" aria-label="Revoke this share"><svg class="i"><use href="#trash"/></svg></button></div>
+            </div>
+            <div class="lc-perms"><span class="badge b-outline"><svg class="i i-12"><use href="#eye"/></svg>View</span><span class="badge b-outline"><svg class="i i-12"><use href="#edit"/></svg>Edit</span></div>
+          </div>
+          <div class="lc">
+            <div class="lc-top"><span class="tile tile-info"><svg class="i"><use href="#mail"/></svg></span>
+              <div class="lc-main"><p class="lc-title">anna.longname-reviewer@example.com</p>
+                <p class="lc-meta"><span>Expired</span><span class="badge b-danger">Expired</span></p></div>
+              <div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link" disabled><svg class="i"><use href="#copy"/></svg></button><button class="btn btn-ghost btn-icon-sm btn-danger-ghost" aria-label="Revoke this share"><svg class="i"><use href="#trash"/></svg></button></div>
+            </div>
+            <div class="lc-perms"><span class="badge b-outline"><svg class="i i-12"><use href="#eye"/></svg>View</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="dlg-f"><button class="btn btn-outline">Cancel</button><button class="btn btn-default">Create link</button></div>
+    </template>
+
+    <h3 class="card-t" style="margin-top:32px">Expires in — the chevron inset</h3>
+    <div class="callout">
+      <div>
+        <p class="eyebrow" style="margin-bottom:8px">Today (owner's screenshot)</p>
+        <div class="box"><div class="before"><span>7 days</span><svg class="i"><use href="#chev"/></svg></div>
+          <p class="help">12px radius; the browser's own chevron sits about 6px from the border; the border renders as <code class="ic">--line</code> (1.45:1).</p></div>
+      </div>
+      <div>
+        <p class="eyebrow" style="margin-bottom:8px">s66a · NativeSelect</p>
+        <div class="box" style="width:300px;max-width:100%">
+          <div class="nsel"><select class="input" aria-label="Expires in (spec)"><option>7 days</option></select><svg class="i chev"><use href="#chev"/></svg></div>
+          <span class="dim top" style="right:0;width:12px;top:16px"></span><span class="dim-l" style="right:0;top:2px">12</span>
+          <span class="dim" style="right:0;width:36px;top:69px"></span><span class="dim-l" style="right:0;top:80px">pr-9 · 36</span>
+          <span class="dim-l" style="left:0;top:100px;white-space:normal">h 40 · radius 2 · 1px --line-strong (3.09:1)</span>
+        </div>
+      </div>
+    </div>
+    <ul class="notes">
+      <li><code class="ic">appearance:none</code> removes the browser chevron. A 16px <code class="ic">ChevronDown</code> sits <code class="ic">right-3</code>, vertically centred, with <code class="ic">pointer-events:none</code>.</li>
+      <li>It is still a native <code class="ic">&lt;select&gt;</code>: phones get the OS picker, and <code class="ic">getByLabelText("Expires in")</code> and <code class="ic">selectOptions</code> keep working (ADR 050). The open list is drawn by the OS and cannot be styled.</li>
+    </ul>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="sec" aria-labelledby="s3">
+    <div class="sec-h">
+      <h2 id="s3" class="ptitle">3 · Primitives</h2>
+      <span class="eyebrow">src/components/ui · s66a spec</span>
+    </div>
+    <div class="sheetgrid">
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Button</h3><span class="spec">radius 2 · no shadow</span></div><div class="card-c">
+        <div class="row"><button class="btn btn-default">Create link</button><button class="btn btn-outline">Cancel</button><button class="btn btn-secondary">Secondary</button></div>
+        <div class="row"><button class="btn btn-ghost">Ghost</button><button class="btn btn-destructive">Delete site</button><button class="btn btn-link">Installation guide</button></div>
+        <div class="row"><button class="btn btn-default btn-sm">sm 32</button><button class="btn btn-default">default 40</button><button class="btn btn-default btn-lg">lg 48</button></div>
+        <div class="row"><button class="btn btn-default btn-xl">xl 56</button><button class="btn btn-outline btn-icon" aria-label="Add"><svg class="i"><use href="#plus"/></svg></button><button class="btn btn-outline btn-icon-sm" aria-label="Copy"><svg class="i"><use href="#copy"/></svg></button></div>
+        <div class="row"><button class="btn btn-default" disabled>Disabled</button><button class="btn btn-default" aria-busy="true"><svg class="i spin"><use href="#load"/></svg><span style="opacity:.7">Registering…</span></button><button class="btn btn-outline is-focus">Focused</button></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Input · Textarea</h3><span class="spec">h 40 · border-input</span></div><div class="card-c">
+        <div class="field"><label class="label">Rest</label><input class="input" placeholder="collaborator@example.com"></div>
+        <div class="field"><label class="label">Hover</label><input class="input is-hover" value="example.com"></div>
+        <div class="field"><label class="label">Focus (square ring, 2px offset)</label><input class="input is-focus" value="example.com"></div>
+        <div class="field"><label class="label">Error</label><input class="input is-error" value="not a url"><p class="help err">Please enter a valid domain (e.g., example.com or https://example.com)</p></div>
+        <div class="field"><label class="label">Disabled</label><input class="input" disabled value="Registering…"></div>
+        <div class="field"><label class="label">Textarea</label><textarea class="input" placeholder="Notes for the reviewer"></textarea></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Select · menus</h3><span class="spec">bg-popover · opaque · shadow-md</span></div><div class="card-c stack">
+        <div><span class="label">NativeSelect</span><div class="nsel"><select class="input"><option>All statuses</option><option>Live</option><option>Awaiting install</option><option>Stale</option></select><svg class="i chev"><use href="#chev"/></svg></div></div>
+        <div><span class="label">Select (Radix) — closed, then open</span>
+          <button class="input trigger"><span>Every 5 minutes</span><svg class="i" style="color:var(--muted)"><use href="#chev"/></svg></button>
+          <div style="position:relative;height:150px;margin-top:4px">
+            <p style="color:var(--muted);font-size:12px;line-height:18px">Page text under the menu. Today, an undefined popover token leaves menus transparent, so this text would show through them.</p>
+            <div class="menu" style="position:absolute;top:0;left:0;right:40px" role="listbox">
+              <div class="menu-i"><span class="ck"></span>Every minute</div>
+              <div class="menu-i hl"><span class="ck"><svg class="i"><use href="#check"/></svg></span>Every 5 minutes</div>
+              <div class="menu-i"><span class="ck"></span>Hourly</div>
+            </div>
+          </div>
+        </div>
+        <div><span class="label">DropdownMenu — Sites sort</span>
+          <div class="row"><button class="btn btn-outline"><svg class="i"><use href="#sort"/></svg>Date added</button></div>
+          <div class="menu" style="margin-top:4px;max-width:240px" role="menu">
+            <div class="menu-i hl"><span class="ck"><svg class="i"><use href="#check"/></svg></span>Date added</div>
+            <div class="menu-i"><span class="ck"></span>Name</div>
+            <div class="menu-i"><span class="ck"></span>Last edited</div>
+            <div class="menu-sep"></div>
+            <div class="menu-i" style="color:var(--d-t)"><span class="ck"><svg class="i"><use href="#trash"/></svg></span>Delete site</div>
+          </div>
+        </div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Badge · StatusBadge</h3><span class="spec">radius 2 · dot stays round</span></div><div class="card-c">
+        <div class="row"><span class="badge b-default">Default</span><span class="badge b-secondary">Secondary</span><span class="badge b-outline">Outline</span><span class="badge b-destructive">Destructive</span></div>
+        <div class="row"><span class="badge b-neutral"><svg class="i i-12"><use href="#dashed"/></svg>Awaiting install</span><span class="badge b-success"><svg class="i i-12"><use href="#ok"/></svg>Live</span><span class="badge b-warning">Stale</span><span class="badge b-danger">Expired</span></div>
+        <div class="row"><span class="badge b-info">Info</span><span class="badge b-accent">Accent</span><span class="badge b-success"><span class="dot"></span>Published</span><span class="badge b-warning">Pending</span></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Tabs</h3><span class="spec">underline · h 40 · wraps</span></div><div class="card-c stack">
+        <div class="tabs js-tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Install</button><button class="tab" role="tab" aria-selected="false">People &amp; access</button><button class="tab is-focus" role="tab" aria-selected="false">Settings</button></div>
+        <div><p class="help" style="margin:0 0 6px">At 300px, five tabs wrap. None is clipped behind a hidden scrollbar (today's Settings bug).</p>
+          <div style="width:300px;max-width:100%;border:1px dashed var(--spec);padding:0 8px">
+            <div class="tabs js-tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Profile</button><button class="tab" role="tab" aria-selected="false">Notifications</button><button class="tab" role="tab" aria-selected="false">Security</button><button class="tab" role="tab" aria-selected="false">API keys</button><button class="tab" role="tab" aria-selected="false">Appearance</button></div>
+          </div></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Card</h3><span class="spec">radius 0 · flat · 1px</span></div><div class="card-c stack">
+        <div class="card"><div class="card-h"><h4 class="card-t">Panel title 16/600</h4><p class="card-d">Description, 14 muted. No shadow at rest.</p></div><div class="card-c"><p>Content sits on <code class="ic">bg-card</code>, inside a 1px <code class="ic">--line</code> border.</p></div></div>
+        <div class="card"><div class="card-toolbar"><span class="card-t">With a toolbar row</span><button class="btn btn-ghost btn-sm">Action</button></div><div class="card-c" style="padding-top:16px"><p class="help" style="margin:0">48px header row with <code class="ic">border-b</code> (s66b pages)</p></div></div>
+        <div class="card interactive"><div class="card-h"><h4 class="card-t">interactive — hover me</h4><p class="card-d">Only the border colour changes: no lift, no shadow.</p></div></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Alert</h3><span class="spec">radius 0 · tone border</span></div><div class="card-c stack">
+        <div class="alert al-info"><svg class="i"><use href="#info"/></svg><p>Registered and ready. Add the snippet and this turns itself green.</p></div>
+        <div class="alert al-success"><svg class="i"><use href="#ok"/></svg><p>Invite sent successfully!</p></div>
+        <div class="alert al-danger"><svg class="i"><use href="#alert"/></svg><p>This domain is already registered</p></div>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">CodeBlock</h3><span class="spec">new · Copy always visible</span></div><div class="card-c stack">
+        <div class="cb"><div class="cb-bar"><span class="eyebrow">HTML · wrap (default)</span><button class="btn btn-outline btn-sm js-copy"><svg class="i"><use href="#copy"/></svg><span>Copy</span></button></div>
+<pre><span class="m">&lt;script src=</span>"https://www.recopyfa.st/embed/recopyfast.js"<span class="m"> data-site-id=</span>"00000000-0000-4000-8000-000000000000"<span class="m"> data-site-token=</span>"•••"<span class="m">&gt;&lt;/script&gt;</span></pre></div>
+        <div class="cb nowrap"><div class="cb-bar"><span class="eyebrow">wrap={false} · scrolls inside</span><button class="btn btn-outline btn-sm"><svg class="i"><use href="#check"/></svg><span>Copied</span></button></div>
+<pre>curl https://www.recopyfa.st/api/published/00000000-0000-4000-8000-000000000000?page=%2F&amp;language=en&amp;variant=default</pre></div>
+        <p class="help" style="margin:0">If the copy fails, the button reads "Copy failed" and the code is selected for ⌘C / Ctrl+C. It never shows "Copied" after a failed write.</p>
+      </div></div>
+
+      <div class="card spec-card"><div class="card-h"><h3 class="card-t">Dialog anatomy</h3><span class="spec">one scroll container</span></div><div class="card-c">
+        <div class="anatomy">
+          <div><span><b>DialogHeader</b> · title 16/600 left · desc 14</span><span class="spec">px-6 pt-5 pb-4 · fixed</span></div>
+          <div class="body"><span><b>DialogBody</b> · <code class="ic">flex-1 min-h-0 overflow-y-auto</code> · children <code class="ic">min-w-0</code></span><span class="spec">the ONLY scroll</span></div>
+          <div><span><b>DialogFooter</b> · <code class="ic">border-t</code> · actions right</span><span class="spec">px-6 py-3 · fixed</span></div>
+        </div>
+        <ul class="notes" style="padding-left:18px">
+          <li><code class="ic">DialogContent</code>: flex column, <code class="ic">max-h-[90dvh]</code>, square, <code class="ic">shadow-md</code>, never scrolls. Width 448 / 512 / 640 / 768.</li>
+          <li>Below 640px it becomes a bottom sheet: full width, 16px paddings, stacked footer.</li>
+          <li>Call sites never pass <code class="ic">overflow-*</code>, <code class="ic">max-h-*</code>, <code class="ic">rounded-*</code>, padding or <code class="ic">grid</code> (source-scan test).</li>
+        </ul>
+      </div></div>
+
+    </div>
+  </section>
+
+  <!-- ===================================================================== -->
+  <section class="sec" aria-labelledby="s4">
+    <div class="sec-h">
+      <h2 id="s4" class="ptitle">4 · Tokens</h2>
+      <span class="eyebrow">globals.css · dark values</span>
+    </div>
+    <div class="tok">
+      <div class="t"><div class="chip" style="background:var(--canvas)"></div><div class="k"><b>background</b><span>--canvas · page</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--card)"></div><div class="k"><b>card / popover</b><span>--surface-card · panels, dialogs, menus</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--surface-1)"></div><div class="k"><b>surface-1</b><span>insets · code, table head</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--surface-2)"></div><div class="k"><b>surface-2 / accent</b><span>hover · selected</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--card);box-shadow:inset 0 0 0 1px var(--line)"></div><div class="k"><b>border · --line</b><span>decorative · 1.45:1</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--card);box-shadow:inset 0 0 0 1px var(--line-strong)"></div><div class="k"><b>input · --line-strong</b><span>controls · 3.09:1</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--primary)"></div><div class="k"><b>primary · ring</b><span>--accent-solid · the only hue</span></div></div>
+      <div class="t"><div class="chip" style="background:var(--card);box-shadow:var(--shadow-md);border-bottom-color:transparent"></div><div class="k"><b>shadow-md</b><span>floating only</span></div></div>
+    </div>
+    <div class="tok" style="margin-top:12px">
+      <div class="t"><div class="chip" style="display:grid;place-items:center"><i style="width:40px;height:28px;border:1px solid var(--line-strong);border-radius:0"></i></div><div class="k"><b>rounded-container · 0</b><span>card, dialog, menu, alert, code</span></div></div>
+      <div class="t"><div class="chip" style="display:grid;place-items:center"><i style="width:40px;height:28px;border:1px solid var(--line-strong);border-radius:2px"></i></div><div class="k"><b>rounded-control · 2px</b><span>button, input, select, badge, item</span></div></div>
+      <div class="t"><div class="chip" style="display:grid;place-items:center"><i style="width:28px;height:28px;border-radius:9999px;background:var(--surface-3)"></i></div><div class="k"><b>rounded-full</b><span>exceptions: avatar, dot ≤ 8px, spinner</span></div></div>
+    </div>
+    <div style="margin-top:24px">
+      <div class="typerow"><span class="k">page title · s66b</span><span style="font:600 24px/32px var(--font-sans);letter-spacing:-.015em">Sites</span></div>
+      <div class="typerow"><span class="k">panel / dialog title</span><span style="font:600 16px/24px var(--font-sans)">Site registered</span></div>
+      <div class="typerow"><span class="k">step / section 14/600</span><span style="font:600 14px/20px var(--font-sans)">Copy the snippet</span></div>
+      <div class="typerow"><span class="k">body 14/20</span><span>The widget finds your text by itself.</span></div>
+      <div class="typerow"><span class="k">meta 12/16</span><span style="font-size:12px;line-height:16px;color:var(--muted)">Expires Oct 14 · last used 3 minutes ago</span></div>
+      <div class="typerow"><span class="k">eyebrow 11/600</span><span class="eyebrow">Active links</span></div>
+      <div class="typerow"><span class="k">code 13/20 mono</span><span style="font:400 13px/20px var(--font-mono)">data-rcf-ignore</span></div>
+    </div>
+    <div class="row" style="margin-top:24px;align-items:flex-end;gap:12px">
+      <span class="spec">spacing, 4px base →</span>
+      <i style="width:4px;height:12px;background:var(--surface-3)"></i><i style="width:8px;height:12px;background:var(--surface-3)"></i><i style="width:12px;height:12px;background:var(--surface-3)"></i><i style="width:16px;height:12px;background:var(--surface-3)"></i><i style="width:20px;height:12px;background:var(--surface-3)"></i><i style="width:24px;height:12px;background:var(--surface-3)"></i><i style="width:32px;height:12px;background:var(--surface-3)"></i>
+      <span class="spec">4 8 12 16 20 24 32 · gutters 16/24/32 · content ≤ 1180 · header 56 (s66b)</span>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  // Share dialog: one template, two presentations (512 dialog, 375 sheet).
+  var tpl = document.getElementById("share-tpl");
+  document.querySelectorAll(".js-share").forEach(function (host, n) {
+    host.appendChild(tpl.content.cloneNode(true));
+    host.querySelector(".dlg-t").id = "sh-t" + n;
+    host.setAttribute("aria-labelledby", "sh-t" + n);
+  });
+
+  // Tabs.
+  document.querySelectorAll(".js-tabs").forEach(function (list) {
+    var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+    var panels = [];
+    var el = list.nextElementSibling;
+    while (el && el.getAttribute("role") === "tabpanel") { panels.push(el); el = el.nextElementSibling; }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () {
+        tabs.forEach(function (t, j) { t.setAttribute("aria-selected", String(i === j)); });
+        panels.forEach(function (p, j) { p.hidden = i !== j; });
+      });
+    });
+  });
+
+  // Permission toggles (role=checkbox, as in ShareSiteDialog).
+  document.addEventListener("click", function (e) {
+    var perm = e.target.closest && e.target.closest(".js-perm");
+    if (perm) perm.setAttribute("aria-checked", String(perm.getAttribute("aria-checked") !== "true"));
+  });
+
+  // CodeBlock copy: "Copied" only after a successful write; otherwise say so and select.
+  document.querySelectorAll(".js-copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.closest(".cb").querySelector("pre");
+      var label = btn.querySelector("span");
+      var use = btn.querySelector("use");
+      function show(text, icon) {
+        label.textContent = text; use.setAttribute("href", icon);
+        setTimeout(function () { label.textContent = "Copy"; use.setAttribute("href", "#copy"); }, 2000);
+      }
+      function failed() {
+        var range = document.createRange(); range.selectNodeContents(pre);
+        var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+        show("Copy failed", "#alert");
+      }
+      try {
+        navigator.clipboard.writeText(pre.textContent).then(function () { show("Copied", "#check"); }, failed);
+      } catch (err) { failed(); }
+    });
+  });
+})();
+</script>
+</body>
+</html>
