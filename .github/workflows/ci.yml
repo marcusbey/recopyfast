@@ -275,6 +275,11 @@ jobs:
       # plain SQL and reads it back through the real route handler and the
       # local PostgREST. Before the s65a review it was named by no step, so
       # every CI run recorded its "[gated]" placeholder instead.
+      #
+      # s68a (ADR 047): edit_sessions takes no web-principal write (a real
+      # GoTrue JWT is refused by PostgREST), the replay-only self-escalation
+      # policies are gone, and the definer-function and RLS invariants run
+      # against the Supabase CLI replay — named, not "[gated]".
       - name: Verify content tables take no direct writes through PostgREST, and the snapshot reads fresh rows
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
@@ -285,7 +290,11 @@ jobs:
           RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
             npx jest --runInBand \
               src/__tests__/db/content-write-privileges.test.ts \
-              src/__tests__/db/published-snapshot-freshness.test.ts
+              src/__tests__/db/published-snapshot-freshness.test.ts \
+              src/__tests__/db/function-grants.test.ts \
+              src/__tests__/db/rls-policies.test.ts \
+              src/__tests__/db/edit-sessions-privileges.test.ts \
+              src/__tests__/db/replay-privilege-convergence.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:
