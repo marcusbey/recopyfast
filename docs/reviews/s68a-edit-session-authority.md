@@ -75,5 +75,15 @@ AGENTS.md:173 list).
 
 Orchestrator: n1, n2 and m5 go to a short fix run before shipping (migrations are still unapplied).
 
+## Verification of fix `37ffc67` (fresh reviewer, 2026-10-08)
+
+n1, m5 and n2 confirmed; no new defect. The data step deactivates `created_at IS NULL`, future-dated
+(> now + 5 min) and over-long (`expires_at > created_at + 24 h + 5 min`) sessions; the tolerance equals
+`CREATED_AT_CLOCK_SKEW_MS`; runbook step 0 matches the data step character for character, step 4 carries the
+same date/null clauses. `run-db-invariants` 6 suites / 50 tests on a throwaway PG14; mutations (NULL clause
+deleted, tolerance 1 min, 7 min) each turn a test red. Full jest 326 suites / 4,212 tests, type-check green.
+
+Still open (minor): m1, m2, m4, m7, m9, n3.
+
 Max severity: minor
 Ship allowed: yes
