@@ -1,7 +1,11 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s66c-site-page-and-access (proposed split: s66c1-site-pages, s66c2-quick-setup)
+
+> Owner decisions (2026-10-08): plan validated with the split — s66c1-site-pages (after s66b1 merges), then
+> s66c2-quick-setup. The site action is labelled "Edit website". Quick setup is done once the site is Live;
+> step 3 (edit or add an editor) is offered until then, then hides.
 
 Branch: `feature/s66c-site-page-and-access`. On split validation, Part 1 executes as
 `feature/s66c1-site-pages` (this branch, renamed; s66a precedent), and Part 2 as
