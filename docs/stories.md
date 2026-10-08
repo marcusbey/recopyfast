@@ -2456,9 +2456,15 @@ Branch `feature/s68b-api-abuse-bounds`. Decision: ADR 048. Covers M1, M2, M3, M4
   bucket; no spelling is refused. Test: `src/__tests__/api/public-site-bucket-canonical.test.ts`.
 - [ ] M5 — `ab-tests/track` accepts what the embed sends today and refuses with 400, before any
   database call, more than 50 events, a body over 64 KB, malformed ids, unknown event types,
-  out-of-range `value`, oversized or prototype-polluting `metadata`, and oversized or
-  control-character strings; a repeated conversion, or one without a recorded view, for the same
-  (visitor, test) is not counted. Test: `src/__tests__/api/ab-tests/track-bounds.test.ts`.
+  oversized or prototype-polluting `metadata`, a `visitor_id`/`session_id` that is empty, over 64
+  characters or carries control characters, and a `geo_*` over 64 characters. The two values the
+  host page passes to the public `trackConversion(eventName, value)` are coerced, never refused
+  (plan amendment 2026-10-08): an unusable `value` is stored as 1, and the event name is
+  stringified (a non-text, non-number, non-boolean name becomes "conversion"), stripped of control
+  characters and cut to fit the 1 KB metadata bound. A repeated conversion for the same (visitor,
+  test) is not counted, nor one from a visitor with neither a bucket assignment for that test nor a
+  view of it (recorded or in the same batch) — the view and conversion beacons may arrive in either
+  order (PR #65 review D1). Test: `src/__tests__/api/ab-tests/track-bounds.test.ts`.
 - [ ] M6 — staging verification and editor-code e-mails escape the site label; `POST
   /api/staging/access` refuses a non-string label, one over 80 characters or with control
   characters (400, nothing created). Tests: `src/lib/email/__tests__/resend-codes.test.ts`,
@@ -2580,5 +2586,6 @@ at that commit, to be re-verified at research time):
   (`route.ts:104,120`) and cannot succeed in production; teams are PRD graveyard — delete or 410.
 - [ ] R10 — `request-code` never sets `siteLabel` (`route.ts:93-106`); after s68b escapes it, drop
   the dead parameter or set it deliberately.
+- [ ] D2 — A/B conversion dedupe is check-then-insert (PR #65 Devin): a partial unique index on ab_test_results (test_id, visitor_id) WHERE event_type = 'conversion' + conflict-aware insert makes it atomic; needs a migration.
 
 Embed allocation: 0 bytes.

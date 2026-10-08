@@ -958,6 +958,144 @@ describe("WebhookManager", () => {
     });
   });
 
+  /**
+   * SSRF BY REDIRECT (s68b M1).
+   *
+   * The guard above checks the first hop only. `fetch` follows redirects by
+   * default, so an endpoint that answered `302 Location: http://169.254.169.254/`
+   * had our infrastructure fetch the metadata service, and the first 1000 bytes
+   * of whatever answered were stored on the delivery row and served back to the
+   * member who configured the URL. Every outbound webhook fetch is now
+   * `redirect: "manual"`, and a 3xx is an ordinary failed attempt that stores no
+   * body.
+   */
+  describe("redirects are never followed", () => {
+    const webhook = {
+      id: "webhook-1",
+      site_id: "site-123",
+      url: "https://example.com/webhook",
+      secret: "secret-key",
+      failure_count: 0,
+      max_failures: 5,
+    };
+    const REDIRECT_MESSAGE =
+      "Endpoint redirected (302). Webhooks do not follow redirects.";
+    const redirectResponse = () => ({
+      ok: false,
+      status: 302,
+      headers: new Headers({ location: "http://169.254.169.254/latest" }),
+      text: jest.fn().mockResolvedValue("redirect body"),
+    });
+
+    it("sends deliveries with redirect: manual", async () => {
+      resultsByTable.webhooks = { data: [webhook], error: null };
+      resultsByTable.webhook_deliveries = { data: { id: "d-1" }, error: null };
+      mockFetch.mockResolvedValue(okResponse());
+
+      await webhookManager.triggerEvent({
+        siteId: "site-123",
+        eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
+        payload: {},
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://example.com/webhook",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    });
+
+    it("a 302 is a failure and stores no body", async () => {
+      resultsByTable.webhooks = { data: [webhook], error: null };
+      resultsByTable.webhook_deliveries = { data: { id: "d-1" }, error: null };
+      mockFetch.mockResolvedValue(redirectResponse());
+      const before = Date.now();
+
+      await webhookManager.triggerEvent({
+        siteId: "site-123",
+        eventType: WEBHOOK_EVENTS.CONTENT_UPDATED,
+        payload: {},
+      });
+
+      const inserted = calls.insert.mock.calls[0][0] as {
+        success: boolean;
+        status: string;
+        next_retry_at: string;
+        response_body: unknown;
+        error_message: string;
+      };
+      expect(inserted.success).toBe(false);
+      expect(inserted.response_body).toBeNull();
+      expect(inserted.error_message).toBe(REDIRECT_MESSAGE);
+      // ADR 010 unchanged: an ordinary failed first attempt, backoff armed.
+      expect(inserted.status).toBe("retrying");
+      expect(new Date(inserted.next_retry_at).getTime()).toBeGreaterThanOrEqual(
+        before + 2000,
+      );
+      expect(calls.update).toHaveBeenCalledWith(
+        expect.objectContaining({ failure_count: 1 }),
+      );
+    });
+
+    it("a 302 on a retry is a failed attempt that stores no body", async () => {
+      resultsByTable.webhook_deliveries = {
+        data: [
+          {
+            id: "delivery-1",
+            webhook_id: "webhook-1",
+            event_type: WEBHOOK_EVENTS.CONTENT_UPDATED,
+            payload: { event: "content.updated", data: {} },
+            attempt_number: 1,
+            status: "retrying",
+            next_retry_at: new Date(Date.now() - 1000).toISOString(),
+            webhooks: { ...webhook, is_active: true },
+          },
+        ],
+        error: null,
+      };
+      mockFetch.mockResolvedValue(redirectResponse());
+
+      await webhookManager.sweepDueRetries();
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://example.com/webhook",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+      expect(calls.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "retrying",
+          success: false,
+          attempt_number: 2,
+          response_body: null,
+          error_message: REDIRECT_MESSAGE,
+        }),
+      );
+    });
+
+    it("a manual test send does not follow a 302 and reports why", async () => {
+      resultsByTable.webhooks = { data: webhook, error: null };
+      resultsByTable.webhook_deliveries = { error: null };
+      mockFetch.mockResolvedValue(redirectResponse());
+
+      const result = await webhookManager.testWebhook("webhook-1");
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://example.com/webhook",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(REDIRECT_MESSAGE);
+      expect(calls.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          status: "failed",
+          error_message: REDIRECT_MESSAGE,
+        }),
+      );
+      const inserted = calls.insert.mock.calls[0][0] as Record<string, unknown>;
+      expect(inserted.response_body ?? null).toBeNull();
+    });
+  });
+
   describe("testWebhook", () => {
     it("should test webhook endpoint successfully", async () => {
       resultsByTable.webhooks = {

@@ -181,6 +181,10 @@ export async function sendStagingVerificationEmail(
   siteLabel?: string,
 ): Promise<SendResult> {
   const where = siteLabel ? ` for ${siteLabel}` : "";
+  // s68b M6: the label is admin-chosen free text mailed to an address the
+  // admin chooses. Raw in HTML it could plant a link beside a genuine code from
+  // our domain. Escaped in HTML only — the text body is plain text.
+  const htmlWhere = siteLabel ? ` for ${escapeHtml(siteLabel)}` : "";
   const subject = "Your ReCopyFast staging access code";
   const text = [
     `Your verification code${where} is: ${code}`,
@@ -190,7 +194,7 @@ export async function sendStagingVerificationEmail(
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 12px;font-size:18px">Staging access code</h2>
-      <p style="margin:0 0 16px;color:#475569">Use this code to verify your access${where}:</p>
+      <p style="margin:0 0 16px;color:#475569">Use this code to verify your access${htmlWhere}:</p>
       <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes. If you didn't request access, ignore this email.</p>
     </div>`;
@@ -211,6 +215,8 @@ export async function sendEditorAccessCode(
   siteLabel?: string,
 ): Promise<SendResult> {
   const where = siteLabel ? ` for ${siteLabel}` : "";
+  // Escaped in HTML for the reason given in sendStagingVerificationEmail.
+  const htmlWhere = siteLabel ? ` for ${escapeHtml(siteLabel)}` : "";
   const subject = "Your ReCopyFast editing code";
   const text = [
     `Your editing code${where} is: ${code}`,
@@ -221,7 +227,7 @@ export async function sendEditorAccessCode(
   const html = `
     <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#0f172a">
       <h2 style="margin:0 0 12px;font-size:18px">Your editing code</h2>
-      <p style="margin:0 0 16px;color:#475569">Enter this code to start editing${where}:</p>
+      <p style="margin:0 0 16px;color:#475569">Enter this code to start editing${htmlWhere}:</p>
       <div style="font-size:32px;font-weight:700;letter-spacing:6px;padding:16px 0;text-align:center;background:#f1f5f9;border-radius:8px">${code}</div>
       <p style="margin:16px 0 0;color:#94a3b8;font-size:13px">Expires in 10 minutes and can be used once. If you didn't ask to edit, ignore this email — nothing has changed.</p>
     </div>`;

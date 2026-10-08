@@ -173,36 +173,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/**
- * Maximum character length allowed for a user-supplied regex pattern.
- * Long patterns can still cause catastrophic backtracking; capping them
- * is a first-line defence in addition to the structural check below.
+/*
+ * TOMBSTONE — s68b M2, ADR 048. `useRegex: true` used to run
+ * `new RegExp(find, "g")` over the element's copy, behind `MAX_REGEX_LENGTH`
+ * and `isDangerousRegex` — two shape checks that could not see nesting.
+ * `((a+))+$` passed them, and against thirty `a`s and a `!` it held the
+ * function for ~16 s per operation (measured 2026-10-08). The mode had no
+ * caller. It is refused per operation now and no RegExp is built from request
+ * input in this route. Do not restore it behind a better heuristic — polynomial
+ * patterns defeat every shape check; regex replace comes back only as a story
+ * with a linear-time engine and a test that fails on `((a+))+$`.
  */
-const MAX_REGEX_LENGTH = 200;
-
-/**
- * Returns true when the pattern contains constructs that are known to
- * trigger catastrophic (exponential) backtracking, namely:
- *   - Nested quantifiers:  (a+)+  (a*)* etc.
- *   - Alternation inside a repeated group: (a|a)*
- * This is a conservative heuristic — it rejects some safe patterns — but
- * prevents the common ReDoS attack vectors without pulling in a full
- * static-analysis library.
- */
-function isDangerousRegex(pattern: string): boolean {
-  // Nested quantifiers: a group (or character class) followed by a quantifier,
-  // where the group body itself contains a quantifier.
-  // e.g.  (\w+)+   (a*b?)+   ([a-z]+)+
-  const nestedQuantifier = /\([^)]*[*+?][^)]*\)[*+?{]/;
-  if (nestedQuantifier.test(pattern)) return true;
-
-  // Alternation with overlapping branches inside a repeated group:
-  // e.g.  (a|ab)*   (a|a)+
-  const alternationInGroup = /\(([^)]+\|[^)]+)\)[*+?{]/;
-  if (alternationInGroup.test(pattern)) return true;
-
-  return false;
-}
+const REGEX_MODE_REFUSAL =
+  "Regex find/replace is not supported; use literal find/replace.";
 
 /**
  * Replace ALL occurrences of `needle` in `haystack` using a plain literal
@@ -237,14 +220,15 @@ async function processBulkUpdates(
 
   for (const operation of operations) {
     try {
-      const {
-        element_id,
-        operation: op,
-        find,
-        replace,
-        useRegex,
-        content,
-      } = operation;
+      const { element_id, operation: op, find, replace, content } = operation;
+
+      // Refused before the element read: a regex operation costs nothing and
+      // writes nothing (ADR 048, see REGEX_MODE_REFUSAL).
+      if ("useRegex" in operation && operation.useRegex) {
+        errors.push(`Element ${element_id}: ${REGEX_MODE_REFUSAL}`);
+        failed++;
+        continue;
+      }
 
       // Get current content element
       const { data: element, error: fetchError } = await supabase
@@ -273,35 +257,8 @@ async function processBulkUpdates(
             continue;
           }
 
-          if (useRegex) {
-            // --- Regex mode: validate before constructing ---
-            if (find.length > MAX_REGEX_LENGTH) {
-              errors.push(
-                `Element ${element_id}: regex pattern exceeds maximum allowed length (${MAX_REGEX_LENGTH} chars)`,
-              );
-              failed++;
-              continue;
-            }
-            if (isDangerousRegex(find)) {
-              errors.push(
-                `Element ${element_id}: regex pattern contains potentially unsafe nested quantifiers`,
-              );
-              failed++;
-              continue;
-            }
-            let safeRegex: RegExp;
-            try {
-              safeRegex = new RegExp(find, "g");
-            } catch {
-              errors.push(`Element ${element_id}: invalid regex pattern`);
-              failed++;
-              continue;
-            }
-            newContent = newContent.replace(safeRegex, replace);
-          } else {
-            // --- Default: literal string replacement — no regex involved ---
-            newContent = replaceLiteral(newContent, find, replace);
-          }
+          // Literal replace-all — the only find/replace there is (ADR 048).
+          newContent = replaceLiteral(newContent, find, replace);
           break;
 
         case "append":

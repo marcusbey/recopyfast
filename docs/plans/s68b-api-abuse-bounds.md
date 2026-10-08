@@ -17,6 +17,20 @@ Plan validated by the owner, with the recommended defaults:
 - The staging-invite email keeps the admin-chosen label, HTML-escaped and capped at 80
   characters.
 
+## Plan amendment (2026-10-08, review major 1)
+
+M5 must not refuse a conversion the public `trackConversion(eventName, value)` API can send today:
+a finite numeric string is coerced to a number; a non-numeric, non-finite, negative or > 1,000,000
+value is replaced by the default `1` instead of refusing the event (the column is never read for
+decisions, `lifecycle.ts:74`). Re-review N1: `metadata.event_name` (`trackConversion`'s `eventName`)
+is coerced the same way — a number or boolean stringified, any other non-text name stored as
+"conversion", control characters stripped, cut to fit the 1 KB metadata bound. All other M5 bounds
+stay. M3b: a request that loses the compare-and-set re-reads and retries while the code is live,
+bounded to 6 rounds (reviewer-proven: never more than 5 comparisons, a correct 5th guess consumes
+exactly once).
+
+PR #65 review (Devin): D1 — "shown the test" is proven by the visitor's `visitor_buckets` row for it (persisted by the bucket route, which the embed awaits before any beacon), a recorded view, or a view in the same batch, because the view and conversion beacons are separate `sendBeacon` calls that race; one conversion per visitor per test unchanged. D3 — `coerceText` replaces lone surrogates with U+FFFD before measuring. D4 — `readBoundedJson` refuses a `Content-Length` over the cap unread and otherwise stops reading the stream one chunk past it.
+
 ## Target story
 
 `docs/stories.md` → s68b. Outbound fetches never follow redirects (M1, M10); bulk find/replace is
@@ -27,7 +41,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
 
 ## Tasks (ordered)
 
-1. [ ] **M1 — webhooks never follow redirects.** RED in `src/__tests__/webhooks/manager.test.ts`:
+1. [x] **M1 — webhooks never follow redirects.** RED in `src/__tests__/webhooks/manager.test.ts`:
    delivery and `testWebhook` call `fetch` with `redirect: "manual"`; a `302` with a `Location`
    is a failed attempt whose stored `response_body` is null and whose `error_message` is
    "Endpoint redirected (302). Webhooks do not follow redirects."; retry state follows ADR 010
@@ -35,7 +49,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    two loopback HTTP servers, A answers `302 Location: <B>`, `assertSafeWebhookUrl` mocked to
    accept; one delivery to A → B received **zero** requests. GREEN in `manager.ts:447-455` and
    `:791-801` with a tombstone comment (SSRF by redirect: the guard checks the first hop only).
-2. [ ] **M10 — domain file verification.** RED in `src/__tests__/security/domain-verification.test.ts`:
+2. [x] **M10 — domain file verification.** RED in `src/__tests__/security/domain-verification.test.ts`:
    `verifyDomainFile` passes `redirect: "manual"`; a `301` fails with "Verification file must be
    served without a redirect." and no upstream `statusText`; the address check refuses an address
    the hand-written denylist misses (e.g. `192.0.0.8`, `198.18.0.1`) — by calling
@@ -46,7 +60,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    `src/lib/security/domain-verification.ts:296-330` and `src/app/api/domains/verify/route.ts`.
    Keep `assertNoInternalResolution` exported only if another caller exists (grep); else delete it
    with a tombstone.
-3. [ ] **M2 — literal only (ADR 048).** RED: new `src/__tests__/api/bulk/update-literal-only.test.ts`
+3. [x] **M2 — literal only (ADR 048).** RED: new `src/__tests__/api/bulk/update-literal-only.test.ts`
    (route handler, mocked clients as in `update-limiter.test.ts`): an operation with
    `useRegex: true, find: "((a+))+$"` against `"a".repeat(30) + "!"` is reported failed with
    "Regex find/replace is not supported; use literal find/replace.", the request finishes in
@@ -55,13 +69,13 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    and the regex branch (`route.ts:176-205`, `:276-300`); tombstone naming the payload and ADR 048;
    drop `useRegex` from `BulkUpdatePayload` in `src/types/index.ts:657` (or mark it `never`-typed
    and documented as refused — whichever keeps `type-check` honest).
-4. [ ] **M3a — canonical site id on editor code routes.** RED in
+4. [x] **M3a — canonical site id on editor code routes.** RED in
    `src/__tests__/api/editor/request-code/route.test.ts` and `submit-code/route.test.ts`: an
    upper-case `siteId` reaches `enforceRateLimit` as `identifier: "<email>|<lower-case id>"` and the
    code lookup with the lower-case id; a non-UUID `siteId` answers 400 `invalid_request` before any
    limiter or database call; hub mode (no `siteId`) unchanged. GREEN: `requireUuid` in both routes
    before `limitCodeRequests` / `limitCodeAttempts`.
-5. [ ] **M3b — attempts charged atomically before comparing.** RED: new
+5. [x] **M3b — attempts charged atomically before comparing.** RED: new
    `src/lib/auth/__tests__/editor-verification-attempts.test.ts` with a fake store honouring
    conditional updates: 20 concurrent wrong guesses against one code → at most `MAX_CODE_ATTEMPTS`
    hash comparisons (spy on `timingSafeEqualString`) and the code ends consumed; a guess that loses
@@ -76,7 +90,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    `.eq("attempts", k).is("consumed_at", null).select("id")`; zero rows → reject as mismatch;
    only then compare; on a match, the existing conditional consume (`:157-181`) stays the
    serialization point.
-6. [ ] **M4 — per-site buckets on the authorized id.** RED: for `content/[siteId]` POST discovery,
+6. [x] **M4 — per-site buckets on the authorized id.** RED: for `content/[siteId]` POST discovery,
    `ab-tests/bucket/[siteId]`, `ab-tests/active/[siteId]` and `ab-tests/track`, a request whose
    site id is the upper-case spelling of a real site, carrying that site's genuine token, calls
    `enforceRateLimit` with `identifier` equal to the lower-case `site.id` (extend
@@ -84,7 +98,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    suites, or one new `src/__tests__/api/public-site-bucket-canonical.test.ts` covering all four).
    GREEN: keep `authorizeSiteRequest`'s return value and use `site.id` for the limiter (and for
    the ownership query in `track`). No refusal of non-canonical spellings (non-negotiables 2, 4).
-7. [ ] **M5 — A/B telemetry bounds.** RED: new `src/__tests__/api/ab-tests/track-bounds.test.ts`.
+7. [x] **M5 — A/B telemetry bounds.** RED: new `src/__tests__/api/ab-tests/track-bounds.test.ts`.
    Accepted (embed-shaped, copied from `recopyfast.src.js:3437-3495`): a 3-event view batch, a
    click, a conversion with `value: 1` and `metadata: { event_name: "signup" }`, `rcf-<ms>-<9>`
    and UUID visitor ids, `geo_*: null`. Refused 400 with **zero** database calls: > 50 events; body
@@ -97,7 +111,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    (pending open question 2 — if the owner declines, keep only the bounds). GREEN in
    `track/route.ts` using `src/lib/api/validation.ts` helpers (extend them; no zod, ADR 003);
    redact control characters before any value is echoed (AGENTS.md "Validation").
-8. [ ] **M6 — email label.** RED: new `src/lib/email/__tests__/resend-codes.test.ts`:
+8. [x] **M6 — email label.** RED: new `src/lib/email/__tests__/resend-codes.test.ts`:
    `sendStagingVerificationEmail` and `sendEditorAccessCode` with label
    `<a href="https://evil.test">Reset password</a>` send HTML containing
    `&lt;a href=&quot;https://evil.test&quot;` and no raw `<a href="https://evil.test"`; text body
@@ -105,7 +119,7 @@ validated (M5); emails escape the admin-chosen label (M6); domain verification i
    characters, or contains control characters → 400 and `createStagingAccess` not called; a normal
    label is stored and emailed escaped. GREEN: `escapeHtml(siteLabel)` at `resend.ts:183`/`:213`
    and the label rule in `staging/access/route.ts` before `createStagingAccess`.
-9. [ ] **Gates and commit.** `npm run precommit`, `npm run prepush`,
+9. [x] **Gates and commit.** `npm run precommit`, `npm run prepush`,
    `node scripts/run-db-invariants.mjs`, `npm run build:embed -- --check` green in the worktree;
    ADR 048 final; one story commit. Tick the boxes as tasks land.
 

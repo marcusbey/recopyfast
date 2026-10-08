@@ -324,3 +324,65 @@ describe("s68c — POST /api/staging/access refuses an invite to a removed edito
     expect(sendStagingVerificationEmail).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * s68b M6 — the invite `label` is admin-chosen free text mailed, beside a real
+ * code, to an address the admin chooses. The emails now escape it; the route
+ * bounds it first, so nothing is created for a label that is not a string,
+ * runs past 80 characters, or carries control characters (header-shaped
+ * `\r\nBcc:` text included).
+ */
+describe("s68b — POST /api/staging/access label rule", () => {
+  function labelledInvite(label: unknown): NextRequest {
+    return new NextRequest("https://www.recopyfa.st/api/staging/access", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteId: SITE_ID,
+        type: "invite",
+        email: "editor@example.com",
+        permissions: ["view", "edit"],
+        label,
+      }),
+    });
+  }
+
+  beforeEach(() => {
+    mockPermissionRow.mockReturnValue({
+      data: { permission: "admin" },
+      error: null,
+    });
+    mockCheckOwnerCanEdit.mockResolvedValue({ ok: true, ownerId: "owner-1" });
+  });
+
+  it.each([
+    ["a non-string label", 42],
+    ["a label over 80 characters", "x".repeat(81)],
+    ["a label with control characters", "Launch\r\nBcc: victim@example.com"],
+  ])("refuses %s with 400 and creates nothing", async (_name, label) => {
+    const response = await POST(labelledInvite(label));
+
+    expect(response.status).toBe(400);
+    expect(createStagingAccess).not.toHaveBeenCalled();
+    expect(sendStagingVerificationEmail).not.toHaveBeenCalled();
+  });
+
+  it("stores and emails a normal label", async () => {
+    createStagingAccess.mockResolvedValue({
+      access: { token: "staging-token", label: "Spring launch" },
+      verificationCode: "482913",
+    });
+
+    const response = await POST(labelledInvite("Spring launch"));
+
+    expect(response.status).toBe(200);
+    expect(createStagingAccess).toHaveBeenCalledWith(
+      expect.objectContaining({ label: "Spring launch" }),
+    );
+    expect(sendStagingVerificationEmail).toHaveBeenCalledWith(
+      "editor@example.com",
+      "482913",
+      "Spring launch",
+    );
+  });
+});
