@@ -58,5 +58,24 @@ Owner standing rule: fix majors and cheap minors before shipping. Captures are p
 in-memory Supabase stand-in (the s66a approach); the e2e run is CI's. m1–m10 go to the fix run; m11 is the
 orchestrator's at merge time.
 
-Max severity: major
+## Verification of `ddc5d22`, `ab7cf52`, merge `4a45e2c`, `ff94968` (fresh reviewer, 2026-10-08)
+
+- Review fixes bite: m6 single delete + per-site re-arm, m4 Share dialog reset on open, m3 late rotation, m2
+  first-render guard, m1 explainer-to-button pairing (each mutation → red); m5 constant moved to
+  `src/hooks/useEditSession.ts`.
+- Edit-website errors never render inside a header's actions, a toolbar or a button row: site pages render the
+  Alert as a direct child of `[data-page-shell]` after the site nav; Sites row and ⋮ menu share one message line;
+  the checklist uses its alert slot; errors clear on the next attempt; `role="alert"`. Captures confirm the
+  header stays aligned at 375 and 1280.
+- Merge correct: Playwright 78 consistent (`--list` 78); page-shell PENDING `{}`; `radius-baseline.json` deleted
+  and the radius guard asserts zero offences app-wide (probe → red); `dashboard/page.tsx` keeps s66b2's
+  full-bleed rows with the new site links; nothing from s66b2/s67 lost.
+- R5/R6/R7 pass app-wide; VersionTimelineItem status stays legible without rings (colour + "Current Version"
+  text label).
+- The 9 site-pages + 19 app-layout e2e passed 28/28 locally against the Supabase stand-in.
+- Full jest 372 suites / 4,818 tests, type-check green.
+
+Remaining proof: this PR's CI E2E on the real stack (78).
+
+Max severity: none
 Ship allowed: yes
