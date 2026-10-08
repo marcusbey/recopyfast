@@ -4,6 +4,8 @@ import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
 import { getFoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 import { isAgencyCheckoutEnabled } from "@/lib/stripe/plans";
 import { BillingDashboard } from "@/components/billing/BillingDashboard";
+import { PageShell } from "@/components/ui/page-shell";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { LifetimeGrantStatus } from "@/components/billing/LifetimeOfferCard";
 import type { FoundingAgencyAvailability } from "@/lib/billing/founding-agency";
 
@@ -93,16 +95,21 @@ export default function BillingPage() {
     <div className="min-h-screen bg-surface-1">
       <Suspense
         fallback={
-          <div className="container mx-auto px-4 py-8">
-            <div className="animate-pulse space-y-6">
-              <div className="h-8 bg-muted rounded w-1/4"></div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[...Array(6)].map((_, i) => (
-                  <div key={i} className="h-48 bg-muted rounded-lg"></div>
-                ))}
-              </div>
+          // The same frame BillingDashboard renders in its own loading state,
+          // so the title does not jump when the client takes over (s66b1,
+          // ADR 053). The copy is repeated rather than imported: this is a
+          // server component, and a constant exported from that "use client"
+          // module would arrive here as a client reference, not a string.
+          <PageShell
+            title="Billing & subscription"
+            description="Manage your subscription, payment methods, and billing information"
+          >
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {[...Array(6)].map((_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
             </div>
-          </div>
+          </PageShell>
         }
       >
         <BillingDashboardSection />

@@ -74,7 +74,9 @@ guard's shrink-only test demands it.
 
 ## Tasks (ordered)
 
-1. [ ] **Harness first: `app pages @375/@768/@1280/@1920` (red).**
+1. [x] **Harness first: `app pages @375/@768/@1280/@1920` (red).**
+   - Execution note (2026-10-08): written and listed (60 tests), not run. Docker was down, so
+     no local Supabase could back the signed-in harness; CI's E2E job is its first run.
    - In `e2e/app-layout.spec.ts`:
      - make `capture()` take a root. s66a's describe keeps
        `docs/designs/s66a-app-design-tokens-and-panels`, and the new describe writes
@@ -100,7 +102,7 @@ guard's shrink-only test demands it.
    - Run it against a production build (see interdicts). It **must fail** today: header 64, no
      `[data-page-shell]`, no h1 on Analytics, Billing's h1 at 304. Paste the red summary into
      the PR.
-2. [ ] **`PageShell`, `PageHeader`, `.text-page-title` (AC 1).**
+2. [x] **`PageShell`, `PageHeader`, `.text-page-title` (AC 1).**
    - **Test first** (red):
      - `src/components/ui/__tests__/page-shell.test.tsx`:
        - with every slot set: exactly one `h1`, carrying `text-page-title`, inside
@@ -124,7 +126,7 @@ guard's shrink-only test demands it.
        names the Billing double-container incident.
    - Sites (s66c) still renders `PageHeader` directly until s66c adopts the shell. Its title
      simply becomes 24 px; no Sites file is edited.
-3. [ ] **The frame (AC 2).**
+3. [x] **The frame (AC 2).**
    - **Test first:** delete the `layout.tsx`, `DashboardNavigation.tsx` and `Breadcrumbs.tsx`
      entries from `radius-baseline.json`. `radius-guard.test.ts` goes red, naming 10 lines.
      The harness frame assertions from task 1 are already red.
@@ -145,7 +147,7 @@ guard's shrink-only test demands it.
        - the overlay loses `backdrop-blur-[2px]`.
      - `Breadcrumbs.tsx`: `rounded-sm` becomes `rounded-control`.
    - `DashboardNavigation.test.tsx` and `Breadcrumbs.test.tsx` pass unchanged.
-4. [ ] **Guard, then Overview, Settings and Content (AC 3, AC 4).**
+4. [x] **Guard, then Overview, Settings and Content (AC 3, AC 4).**
    - **Test first:** `src/__tests__/design/page-shell-guard.test.ts`, which reuses
      `app-surface.ts` and `stripComments`. Rules:
      - **R1 adoption.** Every `src/app/dashboard/**/page.tsx`, outside `_ab-tests`, contains
@@ -177,7 +179,7 @@ guard's shrink-only test demands it.
        - the filter bar leaves its `Card` and becomes a direct child;
        - `ContentFilterBar`'s row becomes `flex flex-wrap gap-2`, with search
          `flex-1 min-w-[12rem]`.
-5. [ ] **Analytics and Billing (AC 3, AC 4, AC 5).**
+5. [x] **Analytics and Billing (AC 3, AC 4, AC 5).**
    - **Test first:**
      - remove analytics and billing from the pending map. The guard goes red;
      - `src/__tests__/components/dashboard/AnalyticsDashboard.page-shell.test.tsx`: loading,
@@ -213,6 +215,8 @@ guard's shrink-only test demands it.
    - The existing `BillingDashboard.*.test.tsx`, `billing/__tests__/page.test.tsx` and
      `TrialStatusCard.test.tsx` pass unchanged.
 6. [ ] **Docs, green harness, gates (AC 6).**
+   - Execution note (2026-10-08): docs and gates done; s66b1 AC 1 ticked. The harness green run
+     and the AC 2–6 ticks wait for CI's E2E job (no local Supabase).
    - `docs/design-system.md`:
      - § Shell: "lands in s66b" becomes "in code (s66b1)";
      - add a `PageShell` row to "Available components" (ADR 053);

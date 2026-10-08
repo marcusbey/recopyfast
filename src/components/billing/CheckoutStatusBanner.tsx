@@ -186,7 +186,7 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "pending") {
     return (
-      <Alert variant="info" className="mb-6">
+      <Alert variant="info">
         <p>
           Confirming your payment with Stripe. This usually takes a few seconds
           — you can safely stay on this page.
@@ -197,7 +197,7 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "slow") {
     return (
-      <Alert variant="warning" className="mb-6">
+      <Alert variant="warning">
         <div className="flex items-start justify-between gap-4">
           <p>
             {state.paid
@@ -214,7 +214,7 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "success") {
     return (
-      <Alert variant="success" className="mb-6">
+      <Alert variant="success">
         <p>{state.message}</p>
       </Alert>
     );
@@ -222,7 +222,7 @@ export function CheckoutStatusBanner({
 
   if (state.kind === "cancelled") {
     return (
-      <Alert className="mb-6">
+      <Alert>
         <p className="text-muted-foreground">
           Checkout was cancelled. You have not been charged.
         </p>
@@ -231,7 +231,7 @@ export function CheckoutStatusBanner({
   }
 
   return (
-    <Alert variant="destructive" className="mb-6">
+    <Alert variant="destructive">
       <div className="flex items-start justify-between gap-4">
         <p>{state.message}</p>
         <Button size="sm" variant="outline" onClick={onReconciled}>

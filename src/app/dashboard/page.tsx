@@ -14,7 +14,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconTile } from "@/components/ui/icon-tile";
 import { Metric, type MetricState } from "@/components/ui/metric";
-import { PageHeader, SectionHeader } from "@/components/ui/page-header";
+import { SectionHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { SkeletonList } from "@/components/ui/skeleton";
 import {
   StatusBadge,
@@ -173,24 +174,22 @@ export default function DashboardPage() {
   const firstName = user?.user_metadata?.name?.split(" ")[0];
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        eyebrow="Overview"
-        title={firstName ? `Welcome back, ${firstName}` : "Welcome back"}
-        description="Every site you have connected, and what has changed on them."
-        actions={
-          <>
-            {/* Absent unless a trial is actually running, so nothing moves for
-                anyone else. Renders itself from /api/billing/entitlement. */}
-            <TrialStatusBadge />
-            <Button onClick={() => setIsModalOpen(true)}>
-              <Plus aria-hidden="true" />
-              Add site
-            </Button>
-          </>
-        }
-      />
-
+    <PageShell
+      eyebrow="Overview"
+      title={firstName ? `Welcome back, ${firstName}` : "Welcome back"}
+      description="Every site you have connected, and what has changed on them."
+      actions={
+        <>
+          {/* Absent unless a trial is actually running, so nothing moves for
+              anyone else. Renders itself from /api/billing/entitlement. */}
+          <TrialStatusBadge />
+          <Button onClick={() => setIsModalOpen(true)}>
+            <Plus aria-hidden="true" />
+            Add site
+          </Button>
+        </>
+      }
+    >
       {sitesState === "ready" && user && (
         <section aria-label="Activation checklists" className="space-y-4">
           {sites
@@ -389,6 +388,6 @@ export default function DashboardPage() {
         onClose={() => setIsModalOpen(false)}
         onSuccess={handleSiteRegistrationSuccess}
       />
-    </div>
+    </PageShell>
   );
 }

@@ -123,6 +123,23 @@ describe("globals.css", () => {
   });
 
   /*
+   * s66b1 AC 1 (ADR 053): the app's page title gets its own helper, 24/32 at
+   * 600. `.text-display` cannot be repurposed: it is also the /blog h1, and
+   * the byte-identical pin below keeps it that way.
+   */
+  it("defines .text-page-title at 24/32, 600, -0.015em", () => {
+    const pageTitle = topLevel.find(
+      (block) => block.prelude === ".text-page-title",
+    );
+    expect(pageTitle).toBeDefined();
+    const body = (pageTitle as Block).body;
+    expect(declares(body, "font-size", "1.5rem")).toBe(true);
+    expect(declares(body, "line-height", "2rem")).toBe(true);
+    expect(declares(body, "font-weight", "600")).toBe(true);
+    expect(declares(body, "letter-spacing", "-0.015em")).toBe(true);
+  });
+
+  /*
    * Marketing still uses these (ADR 050). Each literal is copied byte for
    * byte from main; a change here repaints the marketing surface.
    */

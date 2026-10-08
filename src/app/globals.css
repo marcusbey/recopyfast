@@ -290,6 +290,21 @@ body {
   color: var(--text-strong);
 }
 
+/* The one h1 of every app page (s66b1, ADR 053), rendered by `PageHeader`
+   inside `PageShell`. Deliberately not `.text-display`: that 26–32px clamp is
+   also the /blog h1, and globals-css.test.ts has pinned it byte-identical
+   since s66a, so changing it would have repainted the blog. A fixed 24/32 sits
+   on one centre line with the 40px header actions. `overflow-wrap: anywhere`
+   because a site name (s66c) can be one unbroken domain-like word at 375px. */
+.text-page-title {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
 .text-title {
   font-size: 1.0625rem;
   font-weight: 600;

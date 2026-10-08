@@ -59,7 +59,7 @@ export function Breadcrumbs() {
     >
       <Link
         href="/dashboard"
-        className="flex shrink-0 items-center gap-2 rounded-sm transition-colors duration-200 ease-out hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+        className="flex shrink-0 items-center gap-2 rounded-control transition-colors duration-200 ease-out hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
         aria-current={trail.length === 0 ? "page" : undefined}
       >
         <Home className="h-4 w-4" aria-hidden="true" />
@@ -89,7 +89,7 @@ export function Breadcrumbs() {
             ) : (
               <Link
                 href={crumb.href}
-                className="truncate rounded-sm transition-colors duration-200 ease-out hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                className="truncate rounded-control transition-colors duration-200 ease-out hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
               >
                 {crumb.label}
               </Link>

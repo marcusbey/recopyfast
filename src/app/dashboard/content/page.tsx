@@ -16,6 +16,7 @@ import {
   type ContentElement,
 } from "@/components/dashboard/ContentElementCard";
 import { ContentFilterBar } from "@/components/dashboard/ContentFilterBar";
+import { PageShell } from "@/components/ui/page-shell";
 
 interface Site {
   id: string;
@@ -52,19 +53,6 @@ interface SiteContentFailure {
 }
 
 const ITEMS_PER_PAGE = 10;
-
-function PageHeader() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold tracking-tight text-foreground">
-        Content
-      </h1>
-      <p className="mt-1 text-muted-foreground">
-        Manage all editable content across your sites
-      </p>
-    </div>
-  );
-}
 
 /**
  * The sites whose content could not be read, named and scoped to themselves.
@@ -308,11 +296,13 @@ export default function ContentPage() {
     setCurrentPage((page) => Math.min(page, Math.max(1, totalPages)));
   }, [totalPages]);
 
-  // Loading state
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <PageHeader />
+  // One frame for every state. This page used to return three times, each
+  // repeating its own 30/700 header, so a state could drift off the title the
+  // others showed (s66b1, ADR 053). The shell renders the h1 once; only the
+  // body below it switches.
+  const renderBody = () => {
+    if (loading) {
+      return (
         <div
           className="flex items-center justify-center py-12"
           role="status"
@@ -320,17 +310,14 @@ export default function ContentPage() {
         >
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  // Error state. Reserved for a failure that leaves nothing to show — a
-  // per-site content refusal is reported inline by SiteFailureNotice instead,
-  // so it can sit beside the sites that loaded.
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <PageHeader />
+    // Error state. Reserved for a failure that leaves nothing to show — a
+    // per-site content refusal is reported inline by SiteFailureNotice
+    // instead, so it can sit beside the sites that loaded.
+    if (error) {
+      return (
         <Card>
           <CardContent className="py-12">
             <div className="text-center">
@@ -348,130 +335,138 @@ export default function ContentPage() {
             </div>
           </CardContent>
         </Card>
-      </div>
+      );
+    }
+
+    return (
+      <>
+        {/* Filters: a row on the page's edge, not a card inside the page. */}
+        <ContentFilterBar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          selectedSiteId={selectedSiteId}
+          onSiteChange={setSelectedSiteId}
+          selectedStatus={selectedStatus}
+          onStatusChange={setSelectedStatus}
+          sites={sites}
+        />
+
+        {/* Sites whose content could not be read, beside the ones that could */}
+        {siteFailures.length > 0 && (
+          <SiteFailureNotice
+            failures={siteFailures}
+            onRetry={fetchAllContent}
+          />
+        )}
+
+        {/* Content List */}
+        {filteredContent.length === 0 ? (
+          <Card>
+            <CardContent className="py-12">
+              <div className="text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                  <FileText
+                    className="h-8 w-8 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold text-foreground">
+                  No content found
+                </h3>
+                <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
+                  {allContent.length > 0
+                    ? "No content matches your current filters. Try adjusting your search or filters."
+                    : siteFailures.length > 0 &&
+                        siteFailures.length === sites.length
+                      ? // Not "you have none" — we do not know that. Every site we
+                        // asked refused, and the reasons are listed above.
+                        "None of your sites' content could be read. See the reasons above."
+                      : siteFailures.length > 0
+                        ? // Some sites answered and are genuinely empty; others
+                          // refused. Claiming a total failure here would describe
+                          // an account state that is not the one they are in.
+                          "The sites we could read have no content yet. The rest are listed above with their reasons."
+                        : "Register a site and add content elements to see them here."}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="space-y-4">
+              {paginatedContent.map((element) => (
+                <ContentElementCard
+                  key={`${element.siteId}-${element.elementId}`}
+                  element={element}
+                  onView={(el) => {
+                    window.open(
+                      `https://${el.siteDomain}?rcf_highlight=${el.elementId}`,
+                      "_blank",
+                    );
+                  }}
+                  onEdit={(el) => {
+                    window.open(
+                      `https://${el.siteDomain}?rcf_staging=1&rcf_edit=${el.elementId}`,
+                      "_blank",
+                    );
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <nav
+                className="flex flex-col items-center justify-between gap-3 pt-4 sm:flex-row"
+                aria-label="Content pagination"
+              >
+                <p className="text-sm text-muted-foreground" aria-live="polite">
+                  Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}-
+                  {Math.min(
+                    currentPage * ITEMS_PER_PAGE,
+                    filteredContent.length,
+                  )}{" "}
+                  of {filteredContent.length} elements
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
+                    Prev
+                  </Button>
+                  <span className="px-2 text-sm text-muted-foreground">
+                    Page {currentPage} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setCurrentPage((p) => Math.min(totalPages, p + 1))
+                    }
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                    <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              </nav>
+            )}
+          </>
+        )}
+      </>
     );
-  }
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <PageHeader />
-
-      {/* Filters */}
-      <Card>
-        <CardContent className="p-6">
-          <ContentFilterBar
-            searchQuery={searchQuery}
-            onSearchChange={setSearchQuery}
-            selectedSiteId={selectedSiteId}
-            onSiteChange={setSelectedSiteId}
-            selectedStatus={selectedStatus}
-            onStatusChange={setSelectedStatus}
-            sites={sites}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Sites whose content could not be read, beside the ones that could */}
-      {siteFailures.length > 0 && (
-        <SiteFailureNotice failures={siteFailures} onRetry={fetchAllContent} />
-      )}
-
-      {/* Content List */}
-      {filteredContent.length === 0 ? (
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-                <FileText
-                  className="h-8 w-8 text-muted-foreground"
-                  aria-hidden="true"
-                />
-              </div>
-              <h3 className="mb-2 text-lg font-semibold text-foreground">
-                No content found
-              </h3>
-              <p className="mx-auto mb-6 max-w-sm text-muted-foreground">
-                {allContent.length > 0
-                  ? "No content matches your current filters. Try adjusting your search or filters."
-                  : siteFailures.length > 0 &&
-                      siteFailures.length === sites.length
-                    ? // Not "you have none" — we do not know that. Every site we
-                      // asked refused, and the reasons are listed above.
-                      "None of your sites' content could be read. See the reasons above."
-                    : siteFailures.length > 0
-                      ? // Some sites answered and are genuinely empty; others
-                        // refused. Claiming a total failure here would describe
-                        // an account state that is not the one they are in.
-                        "The sites we could read have no content yet. The rest are listed above with their reasons."
-                      : "Register a site and add content elements to see them here."}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <div className="space-y-4">
-            {paginatedContent.map((element) => (
-              <ContentElementCard
-                key={`${element.siteId}-${element.elementId}`}
-                element={element}
-                onView={(el) => {
-                  window.open(
-                    `https://${el.siteDomain}?rcf_highlight=${el.elementId}`,
-                    "_blank",
-                  );
-                }}
-                onEdit={(el) => {
-                  window.open(
-                    `https://${el.siteDomain}?rcf_staging=1&rcf_edit=${el.elementId}`,
-                    "_blank",
-                  );
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <nav
-              className="flex flex-col items-center justify-between gap-3 pt-4 sm:flex-row"
-              aria-label="Content pagination"
-            >
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}-
-                {Math.min(currentPage * ITEMS_PER_PAGE, filteredContent.length)}{" "}
-                of {filteredContent.length} elements
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="mr-1 h-4 w-4" aria-hidden="true" />
-                  Prev
-                </Button>
-                <span className="px-2 text-sm text-muted-foreground">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                  disabled={currentPage === totalPages}
-                >
-                  Next
-                  <ChevronRight className="ml-1 h-4 w-4" aria-hidden="true" />
-                </Button>
-              </div>
-            </nav>
-          )}
-        </>
-      )}
-    </div>
+    <PageShell
+      title="Content"
+      description="Manage all editable content across your sites"
+    >
+      {renderBody()}
+    </PageShell>
   );
 }

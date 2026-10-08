@@ -2678,7 +2678,11 @@ plus a guard and the harness at four widths. Dependencies: s66a merged (done). *
 Branch `feature/s66b1-app-shell` (this design's worktree branch,
 `feature/s66b-app-page-layout`, is renamed at Execute, as s66a did).
 
-- [ ] **AC 1 — `PageShell` and `PageHeader`.** `src/components/ui/page-shell.tsx` exports
+> Execute, 2026-10-08: AC 2–6 are implemented, and their source-guard and RTL proofs are green.
+> Their harness proof (`app pages @375/@768/@1280/@1920`) has not run yet: no local Supabase
+> was available, so CI's E2E job is its first run. Tick AC 2–6 when that job is green.
+
+- [x] **AC 1 — `PageShell` and `PageHeader`.** `src/components/ui/page-shell.tsx` exports
   `PageShell({ title, eyebrow?, meta?, description?, actions?, nav?, children })`.
   - Its root is `[data-page-shell]`, a column with gaps of 24 px (16 below 640).
   - It renders `PageHeader` (`header[data-page-header]`): exactly one h1 in the new

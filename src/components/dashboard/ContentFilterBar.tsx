@@ -36,10 +36,13 @@ export function ContentFilterBar({
   const siteId = useId();
   const statusId = useId();
 
+  // A wrapping row on the page's left edge (design system, Shell: "Filter
+  // row"). Search takes what is left and never shrinks below 12rem; the
+  // selects wrap under it rather than squeezing it.
   return (
-    <div className="flex flex-col gap-4 md:flex-row">
+    <div className="flex flex-wrap gap-2">
       {/* Search */}
-      <div className="relative flex-1">
+      <div className="relative min-w-[12rem] flex-1">
         <label htmlFor={searchId} className="sr-only">
           Search content
         </label>
