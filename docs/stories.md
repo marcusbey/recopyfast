@@ -2635,9 +2635,10 @@ Complexity: 4. Dependencies: **s66b1-app-shell merged** (`PageShell`, the page-s
   (`rounded-control`; no pill, no DOM toast, no confirmation dialog), over a `useEditSession`
   hook extracted from `ActivationChecklist`:
   - it opens the tab synchronously on click;
-  - it POSTs `/api/edit-sessions/create` with **the body each entry point sends today**: the row,
-    the menu and the header send `permissions: ["edit","admin"], durationHours: 2`; the checklist
-    sends `["edit","publish"]`;
+  - it POSTs `/api/edit-sessions/create` with `durationHours: 2` and the permissions the
+    caller's own grant allows (PR #72 review D1, ADR 052 amendment): from the row, the menu and
+    the header an admin sends `["edit","admin"]`, a publish member `["edit","publish"]`, an edit
+    member `["edit"]`, and a viewer gets no Edit website; the checklist sends `["edit","publish"]`;
   - it navigates only to an http(s) URL on the registered host.
 
   A blocked pop-up or a refused request closes the tab and shows an inline destructive Alert. The
