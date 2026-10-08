@@ -229,16 +229,27 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  closure as an arrow, applyRow's empty-copy check reordered,
  *                  writeText's walker advanced in one place, destroy clearing
  *                  the polling interval with clearTimeout
- *   45852 / 33081  measured after the re-review fix — the new ceilings
+ *   45852 / 33081  measured after the re-review fix — the ceilings until the
+ *                  verification fix
+ *   +13 / +14      verification fix (docs/reviews/s67-embed-spa-support.md,
+ *                  finding B): the Navigation API's path check runs in the
+ *                  microtask after the navigation, through the observer
+ *                  callback, then discards the embed's own writes; a destroy()
+ *                  in the same task cancels it
+ *   −22 / −22      funded in the branch, inside s67's own code, no behaviour
+ *                  change: writeText finds the element's first direct text
+ *                  node during its text-node walk instead of a sibling scan
+ *                  before it
+ *   45843 / 33073  measured after the verification fix — the new ceilings
  *
  * Gross against a funded floor (main with every deletion above and none of the
- * SPA work, measured 45037 / 32248): +815 / +833, final, review and re-review
- * fixes included. Every re-review funding line is s67 code, so the floor does
- * not move. build-size-gate.test.ts pins the same pair and quotes the same
- * gross.
+ * SPA work, measured 45037 / 32248): +806 / +825, final, review, re-review and
+ * verification fixes included. Every funding line since the review is s67
+ * code, so the floor does not move. build-size-gate.test.ts pins the same pair
+ * and quotes the same gross.
  */
-const MAX_BUNDLE_GZ = 45852;
-const MAX_WIDGET_GZ = 33081;
+const MAX_BUNDLE_GZ = 45843;
+const MAX_WIDGET_GZ = 33073;
 
 /**
  * Lets a caller TIGHTEN a ceiling for one run. It can never loosen one.

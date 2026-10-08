@@ -81,17 +81,18 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // tree measures −293/−298 in total).
 // RATCHETED 2026-09-28 (s55), DOWNWARD: 45883 → 45880, 33122 → 33120. rcf_vid
 // minted in bucketVisitor behind the active-test guard, init-time call removed.
-// RATCHETED 2026-10-08 (s67-embed-spa-support), DOWNWARD: 45880 → 45852,
-// 33120 → 33081, review and re-review fixes included. SPA support (≤ +850
-// gross, net ≤ 0, docs/stories.md) paid in the branch: CSS minified at build
-// time, the socket.io fallback loader and the `rcf-editable` class deleted
-// (−805 / −838), then the reserve (−40 / −40). Final gross of the SPA work
-// against that funded floor (45037 / 32248): +815 / +833 — the same figures
-// build-embed.mjs quotes. Itemised there, the review fix (+8 / +7) and its
-// funding (−14 / −10), the re-review fix (+22 / +21) and its funding
-// (−30 / −29) included.
-const SEEDED_MAX_BUNDLE_GZ = 45852;
-const SEEDED_MAX_WIDGET_GZ = 33081;
+// RATCHETED 2026-10-08 (s67-embed-spa-support), DOWNWARD: 45880 → 45843,
+// 33120 → 33073, review, re-review and verification fixes included. SPA
+// support (≤ +850 gross, net ≤ 0, docs/stories.md) paid in the branch: CSS
+// minified at build time, the socket.io fallback loader and the
+// `rcf-editable` class deleted (−805 / −838), then the reserve (−40 / −40).
+// Final gross of the SPA work against that funded floor (45037 / 32248):
+// +806 / +825 — the same figures build-embed.mjs quotes. Itemised there, the
+// review fix (+8 / +7) and its funding (−14 / −10), the re-review fix
+// (+22 / +21) and its funding (−30 / −29), the verification fix (+13 / +14)
+// and its funding (−22 / −22) included.
+const SEEDED_MAX_BUNDLE_GZ = 45843;
+const SEEDED_MAX_WIDGET_GZ = 33073;
 
 interface CheckRun {
   status: number;

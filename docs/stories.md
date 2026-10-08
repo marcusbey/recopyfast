@@ -2419,7 +2419,7 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
   or hash only does not refetch. Hash-route sites (`/#/route`) are out of scope (owner
   decision 3). `/docs/install` states the limitation and the workaround: switch the router to
   history mode, or give each route's elements an author-written, unique `data-rcf-id`.
-  Evidence: `embed-spa.test.ts` (AC 3 block: one GET per path, none on revisit or query/hash change, ids equal to a full load, authored restore, Navigation API, edit-click check, mid-fetch `replaceState`); e2e E1, E2; `/docs/install` SPA section (`installation-content.test.ts`).
+  Evidence: `embed-spa.test.ts` (AC 3 block: one GET per path, none on revisit or query/hash change, ids equal to a full load, authored restore, Navigation API, a node added before `pushState` in the render's task, edit-click check, mid-fetch `replaceState`); e2e E1, E2; `/docs/install` SPA section (`installation-content.test.ts`).
 - [x] AC 4, framework re-render (owner decision 2): if the host rewrites an element that has
   an edited row, whatever text it writes, published copy is applied again. The cap is 10
   writes per element per page view, where one in-app route visit counts as one page view.
@@ -2438,7 +2438,7 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
   Evidence: `embed-spa.test.ts` (AC 7 block); e2e E5.
 - [x] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
   this branch, because raising a ceiling is a defect.
-  Evidence: 45,852 / 33,081 gz after the review and re-review fixes, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +815 / +833 against the funded floor.
+  Evidence: 45,843 / 33,073 gz after the review, re-review and verification fixes, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +806 / +825 against the funded floor.
 - [x] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
   host page. The embed patches no host global: `history.pushState` and
   `history.replaceState` keep their identity. Route changes are detected by a path check on

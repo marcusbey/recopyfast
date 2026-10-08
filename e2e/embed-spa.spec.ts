@@ -28,9 +28,11 @@ import {
  *
  *   E1  framework-free SPA: late render, pushState navigation, Back, query and
  *       hash changes, a host write-back, a ticker, bounded discovery, history
- *       left unpatched, no page error (AC 1–5, 9, 11);
+ *       left unpatched, no page error (AC 1–5, 9, 11), and a navigation whose
+ *       task adds a node, calls pushState and renders (verification finding B);
  *   E2  the same SPA with the Navigation API removed (AC 3 on older browsers),
- *       and a route render that only rewrites text in place (review finding 1);
+ *       a route render that only rewrites text in place (review finding 1),
+ *       and the same one-task navigation, which must end the same way;
  *   E3  React 19 client render: the NotFoundError crash regression (AC 13);
  *   E4  React 19 server render: no crash after hydration, and stamping before
  *       hydration logs no React error (AC 6, 13);
@@ -285,6 +287,29 @@ function spaRows(learned: Record<string, LearnedPage>): Row[] {
   ];
 }
 
+/**
+ * Verification finding B: the host adds a node (a spinner, an announcer, an
+ * analytics tag), calls `pushState` and renders the new page, all in ONE task.
+ * Returns what the new page's headline shows in the first frame after that
+ * task, and whether the headline it replaced was stamped again — which is the
+ * old page scanned under the new path.
+ */
+async function addPushRender(page: Page, url: string) {
+  return page.evaluate(async (target) => {
+    const replaced = document.querySelector("#outlet h1")!;
+    document.body.appendChild(document.createElement("div"));
+    history.pushState(null, "", target);
+    (window as unknown as { render: () => void }).render();
+    const headline = document.querySelector("#outlet h1")!;
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    return {
+      id: headline.getAttribute("data-rcf-id"),
+      text: headline.textContent,
+      replacedStamped: replaced.hasAttribute("data-rcf-id"),
+    };
+  }, url);
+}
+
 test.describe("the plain snippet on single-page apps (s67)", () => {
   test.describe.configure({ mode: "serial" });
   test.setTimeout(120_000);
@@ -442,6 +467,15 @@ test.describe("the plain snippet on single-page apps (s67)", () => {
         }
       }
 
+      // Verification finding B, with Chromium's own Navigation API: the new
+      // page is mapped and published in its first frame (its rows are cached),
+      // and the page it replaced is never stamped under the new path.
+      expect(await addPushRender(page, ABOUT)).toEqual({
+        id: learned[ABOUT].headline,
+        text: ABOUT_PUBLISHED,
+        replacedStamped: false,
+      });
+
       expect(errors).toEqual([]);
       expect(log.aborted).toEqual([]);
     } finally {
@@ -491,6 +525,14 @@ test.describe("the plain snippet on single-page apps (s67)", () => {
         learned[ABOUT].headline,
       );
       await page.waitForTimeout(300);
+
+      // The one-task navigation of E1, without the Navigation API: the same
+      // outcome, from the observer alone.
+      expect(await addPushRender(page, "/spa/")).toEqual({
+        id: learned[HOME].headline,
+        text: HOME_PUBLISHED,
+        replacedStamped: false,
+      });
 
       expect(log.contentGets).toEqual([HOME, ABOUT]);
       expect(errors).toEqual([]);

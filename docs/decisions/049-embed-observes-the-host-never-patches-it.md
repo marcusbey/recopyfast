@@ -64,9 +64,10 @@ observation and in-place writes, and it enforces only what a human edited.
 - **When the rescan runs after a route change.** A detected path change drops the
   page-scoped entries and fetches the new path's rows at once, but the page is not rescanned
   at the moment of detection. The Navigation API fires `currententrychange` inside
-  `pushState`, before the router has rendered anything: a scan there would file the old
-  page's elements under the new path, and could paint the new page's copy on the old page's
-  twins. Instead:
+  `pushState`, before the router has rendered anything, and most routers render later than
+  the microtask in which the embed checks the path: a scan there would file the old page's
+  elements under the new path, and could paint the new page's copy on the old page's twins.
+  Instead:
   - the first observer batch that adds nodes after it rescans at once, in the microtask the
     render runs in, which keeps a cached route's first frame published, as measured;
   - any other batch while the page is stale — text changes only — schedules the ordinary
@@ -83,19 +84,36 @@ observation and in-place writes, and it enforces only what a human edited.
   API, inside `pushState`, they used to reach the observer as a text-only batch of their
   own, which scheduled the rescan 200 ms later. With an applied edit on the page being left,
   a router rendering more than 200 ms after `pushState` had the old page scanned under the
-  new path. The Navigation API handler now discards them with `takeRecords()`. That call
-  takes every undelivered record, the host's too, so the handler takes the host's pending
-  records first and delivers them through the observer callback, which runs the path check
-  and its restores before reading them. Only then does it discard what is left, which is
-  only what the embed wrote:
-  - a router that renders and then calls `pushState` still has its new page rescanned at
-    once;
-  - on an entry change that keeps the path, the host's records are only handled in the
-    same task instead of the next microtask.
+  new path. The Navigation API's path check now discards what it wrote with
+  `takeRecords()`. That call takes every undelivered record, the host's too, so the check
+  runs where no host record can be pending, in the microtask after the navigation (see
+  finding B, below):
+  - if the host queued a record before the navigation, the observer's own delivery is ahead
+    of that microtask and hands the callback the whole task as one batch, as it does
+    without the Navigation API; otherwise the check takes what the host did after the
+    navigation and hands it to the callback itself;
+  - the callback runs the path check and its restores before reading the batch, so a
+    router that renders, then calls `pushState`, still has its new page rescanned at once,
+    before paint;
+  - the check then discards what is left. Nothing else runs in between, so that is only
+    what the embed wrote;
+  - a `destroy()` later in the same task cancels the check.
 
   On the other two paths, the restores trail a host change that has already been handled:
   a path change seen in an observer batch, or at an edit click, which rescans at once. They
   only re-arm the same debounce, and are left alone.
+- **The records pending at `pushState` are not the new page** (verification finding B,
+  2026-10-08). Finding A's first fix delivered the host's pending records inside
+  `pushState`, through the callback, as if what the host did before the path change were
+  the new page. That holds for a router that renders and then pushes. It fails when the
+  same task first adds something else (a spinner, a live-region announcer, an analytics
+  tag) and renders after `pushState`. That batch added nodes while the page was stale, so
+  the old page was rescanned under the new path. The new page was unmapped in its first
+  frame. When its rows came back before the debounced rescan, discovery reported the old
+  page's text as the new page's authored copy, kept for good. This was reproduced in jsdom
+  and in Chromium with its own Navigation API. Checking in the microtask closes it: the
+  whole task arrives as one batch, and the render in it is the new page, with or without
+  the Navigation API.
 - **What the cap counts.** It counts every text write the embed makes to the element in the
   page view, the first apply included: at most 10 in total. A host that keeps writing wins
   from its tenth write-back onwards.
@@ -153,8 +171,11 @@ observation and in-place writes, and it enforces only what a human edited.
   - A route change that mutates no DOM, on any browser: the new page's elements are
     re-identified at the next observer batch of any kind (debounced unless it adds nodes) or
     at the next edit click (see the amendment above).
-  - A host change between the path change and the router's render. The embed cannot tell
-    such a batch from the new page, so it takes it as the new page:
+  - A host change between the path change and the router's render. That includes a change
+    made earlier in the task that changes the path, when the router renders in a later
+    task: it reaches the observer after the path change. A render in that same task is in
+    the same batch, and wins (finding B, closed). The embed cannot tell such a batch from
+    the new page, so it takes it as the new page:
     - a batch that adds nodes (a spinner, a skeleton) is rescanned at once;
     - a text-only batch (a ticker, a loading label) schedules the rescan 200 ms after the
       last such change, and never more than 1,000 ms after the first. A router that renders

@@ -743,11 +743,13 @@
    */
   function writeText(element, text) {
     if (element.textContent === text) return;
-    let first = element.firstChild;
-    while (first && first.nodeType !== 3 /* TEXT_NODE */) first = first.nextSibling;
+    // The walker visits text nodes in document order, so the first one whose
+    // parent is the element is its first direct text node.
+    let first = null;
     const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
     for (let node; (node = walker.nextNode());) {
-      if (node !== first && node.nodeValue) node.nodeValue = '';
+      if (!first && node.parentNode === element) first = node;
+      else if (node.nodeValue) node.nodeValue = '';
     }
     if (first) first.nodeValue = text;
     else element.append(text);
@@ -3669,20 +3671,22 @@
      * across pages and stay; their write counters restart with the page view.
      * An element being edited is left alone.
      *
-     * The new DOM is not scanned here: the Navigation API fires inside
-     * `pushState`, before the router has rendered anything, and scanning then
-     * would file the old page's elements under the new path. `stale` makes the
-     * next observer batch that adds nodes rescan at once, in the microtask the
-     * render runs in, so a cached route paints published copy in its first
-     * frame; a batch that only changes text (a param route reusing its
-     * components) schedules the debounced rescan; an edit click rescans too.
+     * The new DOM is not scanned here: the path change can be seen before
+     * the router has rendered anything (the Navigation API's check runs in
+     * the microtask after `pushState`, and most routers render later), and
+     * scanning then would file the old page's elements under the new path.
+     * `stale` makes the next observer batch that adds nodes rescan at once, in
+     * the microtask the render runs in, so a cached route paints published
+     * copy in its first frame; a batch that only changes text (a param route
+     * reusing its components) schedules the debounced rescan; an edit click
+     * rescans too.
      *
      * The authored-copy restores below are DOM writes, so the observer sees
      * them. Reached from an observer batch or an edit click, they trail a
      * host change that has already been handled, and only re-arm the same
-     * debounce. Reached from the Navigation API, inside `pushState`, they
-     * would be a text-only batch of their own, before the router has
-     * rendered: that handler discards them (setupMutationObserver; s67
+     * debounce. Reached from the Navigation API's check, they are discarded:
+     * when the host has done nothing yet, they would be a text-only batch of
+     * their own, before the router has rendered (setupMutationObserver; s67
      * re-review, finding A).
      *
      * The row load is not awaited, so its rejection is caught here: a throw
@@ -3950,35 +3954,44 @@
       // captured `pushState` before this script ran (Chromium 102+, Safari
       // 26.2, Firefox 2026). Older browsers rely on the batch check above.
       //
+      // The check waits for a microtask, so the task that changed the path has
+      // run to its end. A record the host queued before the navigation put the
+      // observer's own delivery ahead of this microtask; otherwise this one
+      // takes what the host did after it. Either way the whole task reaches the
+      // callback as one batch, exactly as without the Navigation API, and the
+      // callback's path check sees it. What the callback itself wrote then (the
+      // route change's authored-copy restores, a rescan's writes) is discarded
+      // with `takeRecords`: nothing else runs in between. The callback catches
+      // everything itself (non-negotiable 4). A destroy() in the same task
+      // removes `offNavigate`, and the check does not run.
       //
       // TOMBSTONE (s67 re-review, finding A). This handler used to call
-      // checkRoute and stop. The route change's authored-copy restores then
-      // reached the observer as a text-only batch of their own, and any batch
-      // while stale schedules the rescan: a router rendering more than 200 ms
-      // after `pushState` had the old page scanned under the new path first —
-      // the new page's published copy on the old page, an authored first
-      // frame, and the old page's text reported as the new page's authored
-      // copy, kept for good (the upsert ignores duplicates).
+      // checkRoute and stop. The restores then reached the observer as a
+      // text-only batch of their own, and any batch while stale schedules the
+      // rescan: a router rendering more than 200 ms after `pushState` had the
+      // old page scanned under the new path first — the new page's published
+      // copy on the old page, an authored first frame, and the old page's text
+      // reported as the new page's authored copy, kept for good (the upsert
+      // ignores duplicates).
       //
-      // So the embed's own writes are discarded with `takeRecords`. That call
-      // takes every undelivered record, the host's too, so the host's go
-      // first: taken and delivered now, as one batch, through the callback,
-      // which runs the path check (and its restores) before reading them. A
-      // router that renders, then pushes, has its whole new page there, and
-      // it is still mapped at once. What the callback wrote is then
-      // discarded. On an entry change that keeps the path (`replaceState`, a
-      // query or hash change) the check does nothing and the host's records
-      // are handled in this task instead of the next microtask: the same
-      // writes, before paint. The callback catches everything itself
-      // (non-negotiable 4).
+      // TOMBSTONE (s67 verification, finding B). It then ran the check inside
+      // `pushState`, with the records pending there, as if what the host did
+      // before the path change were the new page. It is when the router
+      // renders, then pushes. It is not when the task added something else
+      // first (a spinner, an announcer, an analytics tag) and renders after the
+      // push: that batch added nodes while stale, so the OLD page was rescanned
+      // under the new path — the new page unmapped in its first frame and,
+      // with its rows back within 200 ms, the old page's text reported as its
+      // authored copy, kept for good.
       const navigation = window.navigation;
       if (navigation && navigation.addEventListener) {
-        this.navigation = navigation;
-        this.onNavigate = () => {
+        const onNavigate = () => queueMicrotask(() => {
+          if (!this.offNavigate) return;
           onRecords(this.observer.takeRecords());
           this.observer.takeRecords();
-        };
-        navigation.addEventListener('currententrychange', this.onNavigate);
+        });
+        navigation.addEventListener('currententrychange', onNavigate);
+        this.offNavigate = () => navigation.removeEventListener('currententrychange', onNavigate);
       }
     }
 
@@ -5786,7 +5799,12 @@
       clearTimeout(this.rescanTimer);
       clearTimeout(this.reportTimer);
       clearTimeout(this.pollTimer);
-      if (this.onNavigate) this.navigation.removeEventListener('currententrychange', this.onNavigate);
+      // The Navigation API listener, and the path check it may have queued
+      // for the next microtask (setupMutationObserver).
+      if (this.offNavigate) {
+        this.offNavigate();
+        this.offNavigate = null;
+      }
       this.elements.clear();
 
       const banner = document.querySelector('#rcf-staging-banner');

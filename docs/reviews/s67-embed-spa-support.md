@@ -79,5 +79,25 @@ New findings:
 
 Orchestrator: A + minors 1–2 go to a fix run (owner's standing rule).
 
+## Verification of fix `2df68b1` (fresh reviewer, 2026-10-08)
+
+Major A closed (no rescan before a late render; /b's first frame published; no /a text under /b). Minors 1–2
+closed. The seven funding rewrites are behaviour-preserving; bytes 45,852 / 33,081 (fresh build byte-identical,
+ceilings only down). Full jest 323 suites / 4,245 tests, type-check, e2e E1–E5 green.
+
+New finding:
+
+- B (major) — `recopyfast.src.js:3977-3980` with `:3924`, ADR 049 `:91`: the Navigation API handler now hands
+  the host's pending records to the callback synchronously inside `pushState`; if they include any added node
+  (spinner, announcer, analytics tag) added before `pushState` in the same task, `added && stale` rescans the
+  OLD page under the new path; the real /b is unmapped in its first frame, and if /b's rows arrive in < 200 ms,
+  discovery files /a's text under /b (permanent). Reproduced in jsdom and in real Chromium with the native
+  Navigation API; `d9feb63` was correct here. Suggested direction: keep the discard but return the host's
+  records on the microtask they would have arrived on (`const r = takeRecords(); checkRoute(); takeRecords();
+  r.length && queueMicrotask(() => onRecords(r))`); jest case for add → push → render in one task; fund the
+  bytes. Probes: `scratchpad/probe3/` (`sametask.js`, `chromium-sametask.js`).
+
+Orchestrator: B goes to a fix run (owner's standing rule).
+
 Max severity: major
 Ship allowed: yes

@@ -292,6 +292,23 @@ function holdContentGets() {
   return () => releases.splice(0).forEach((release) => release());
 }
 
+/** Content GETs answered `ms` later (on the fake clock when it is installed). */
+function delayContentGets(ms: number) {
+  const original = (window as unknown as { fetch: jest.Mock }).fetch;
+  (window as unknown as { fetch: unknown }).fetch = jest.fn(
+    async (url: string, init?: { method?: string }) => {
+      if (
+        ms &&
+        url.includes(`/content/${SITE_ID}?`) &&
+        (init?.method || "GET") === "GET"
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      }
+      return original(url, init);
+    },
+  );
+}
+
 function useFakeTimers() {
   jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick"] });
 }
@@ -752,6 +769,71 @@ describe("AC 3 — a route change is a page load for the embed", () => {
     },
   );
 
+  // The route-change cases below boot on /a with an applied edit and render /b.
+  const shell = (page: string) =>
+    `<main id="outlet"><h1>${page} title</h1><p>${page} body text</p></main>`;
+
+  /**
+   * Boots on /a with its headline edited and published, after learning the
+   * ids a full load of /b gives its headline and paragraph. `leave` is the
+   * router's `pushState` to /b, heard through the Navigation API when the
+   * browser has it.
+   */
+  async function bootOnEditedA(withNavigationApi = true) {
+    const navigation = new EventTarget();
+    if (withNavigationApi) {
+      Object.defineProperty(window, "navigation", {
+        configurable: true,
+        value: navigation,
+      });
+    }
+    window.history.replaceState(null, "", "/b");
+    document.body.innerHTML = shell("B");
+    await boot();
+    const b = { h1: stampOf("#outlet h1"), p: stampOf("#outlet p") };
+    widget().destroy();
+    delete (window as unknown as Record<string, unknown>).ReCopyFast;
+
+    window.history.replaceState(null, "", "/a");
+    document.body.innerHTML = shell("A");
+    const recorded = await boot({
+      rows: (pagePath) =>
+        pagePath === "/a"
+          ? [
+              {
+                element_id: stampOf("#outlet h1"),
+                original_content: "A title",
+                current_content: "A title, published",
+              },
+            ]
+          : pagePath === "/b"
+            ? [
+                {
+                  element_id: b.h1,
+                  original_content: "B title",
+                  current_content: "B title, published",
+                },
+              ]
+            : [],
+    });
+    expect(document.querySelector("#outlet h1")!.textContent).toBe(
+      "A title, published",
+    );
+    const leave = () => {
+      history.pushState(null, "", "/b");
+      if (withNavigationApi) {
+        navigation.dispatchEvent(new Event("currententrychange"));
+      }
+    };
+    return { b, recorded, leave };
+  }
+
+  function reportedUnderB(recorded: Recorded[]) {
+    return discoveryBodies(recorded)
+      .flatMap((body) => Object.entries(body))
+      .filter(([, entry]) => entry.page_path === "/b");
+  }
+
   // Re-review finding A (2026-10-08, after d9feb63). With the Navigation API,
   // the route change puts back the authored copy the embed had written on the
   // page being left. Those writes are a text-only batch, and any batch while
@@ -761,64 +843,6 @@ describe("AC 3 — a route change is a page load for the embed", () => {
   // and discovery filed the old page's text under the new page's ids — for
   // good (the upsert ignores duplicates).
   describe("a router that renders after the path changed, with the Navigation API", () => {
-    const shell = (page: string) =>
-      `<main id="outlet"><h1>${page} title</h1><p>${page} body text</p></main>`;
-
-    /**
-     * Boots on /a with its headline edited and published, after learning the
-     * ids a full load of /b gives its headline and paragraph.
-     */
-    async function bootOnEditedA() {
-      const navigation = new EventTarget();
-      Object.defineProperty(window, "navigation", {
-        configurable: true,
-        value: navigation,
-      });
-      window.history.replaceState(null, "", "/b");
-      document.body.innerHTML = shell("B");
-      await boot();
-      const b = { h1: stampOf("#outlet h1"), p: stampOf("#outlet p") };
-      widget().destroy();
-      delete (window as unknown as Record<string, unknown>).ReCopyFast;
-
-      window.history.replaceState(null, "", "/a");
-      document.body.innerHTML = shell("A");
-      const recorded = await boot({
-        rows: (pagePath) =>
-          pagePath === "/a"
-            ? [
-                {
-                  element_id: stampOf("#outlet h1"),
-                  original_content: "A title",
-                  current_content: "A title, published",
-                },
-              ]
-            : pagePath === "/b"
-              ? [
-                  {
-                    element_id: b.h1,
-                    original_content: "B title",
-                    current_content: "B title, published",
-                  },
-                ]
-              : [],
-      });
-      expect(document.querySelector("#outlet h1")!.textContent).toBe(
-        "A title, published",
-      );
-      const leave = () => {
-        history.pushState(null, "", "/b");
-        navigation.dispatchEvent(new Event("currententrychange"));
-      };
-      return { b, recorded, leave };
-    }
-
-    function reportedUnderB(recorded: Recorded[]) {
-      return discoveryBodies(recorded)
-        .flatMap((body) => Object.entries(body))
-        .filter(([, entry]) => entry.page_path === "/b");
-    }
-
     afterEach(() => {
       delete (window as unknown as Record<string, unknown>).navigation;
     });
@@ -911,6 +935,93 @@ describe("AC 3 — a route change is a page load for the embed", () => {
       expect(headline.getAttribute("data-rcf-id")).toBe(b.h1);
       expect(headline.textContent).toBe("B title, published");
       expect(body.getAttribute("data-rcf-id")).toBe(b.p);
+    });
+  });
+
+  // Verification finding B (2026-10-08, after 2df68b1). The Navigation API
+  // handler handed the host's pending records to the observer callback inside
+  // `pushState`. A node the host added earlier in the same task (a spinner, a
+  // live-region announcer, an analytics tag) made that batch one that adds
+  // nodes after a route change, so the OLD page was rescanned under the new
+  // path before the router rendered: the old page's elements stamped with /b's
+  // ids, /b unmapped in its first frame, and with /b's rows back before the
+  // debounced rescan, /a's text reported as /b's authored copy — kept for
+  // good. Without the Navigation API that batch arrives in the observer's
+  // microtask, after the render, and was always right; both must agree.
+  describe("a node the host added before pushState, in the task that renders the new page", () => {
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).navigation;
+    });
+
+    it.each([
+      { api: "with the Navigation API", withNavigationApi: true, latency: 0 },
+      { api: "with the Navigation API", withNavigationApi: true, latency: 100 },
+      { api: "with the Navigation API", withNavigationApi: true, latency: 150 },
+      { api: "without it", withNavigationApi: false, latency: 0 },
+      { api: "without it", withNavigationApi: false, latency: 100 },
+      { api: "without it", withNavigationApi: false, latency: 150 },
+    ])(
+      "never stamps /a as /b, maps /b in its first frame and reports no /a text under /b ($api, /b's rows in $latency ms)",
+      async ({ withNavigationApi, latency }) => {
+        const { b, recorded, leave } = await bootOnEditedA(withNavigationApi);
+        delayContentGets(latency);
+        const oldHeadline = document.querySelector("#outlet h1")!;
+        const oldBody = document.querySelector("#outlet p")!;
+
+        useFakeTimers();
+        // One task: a spinner, the path change, the new page.
+        document.body.appendChild(document.createElement("div"));
+        leave();
+        const headline = document.createElement("h1");
+        headline.textContent = "B title";
+        const body = document.createElement("p");
+        body.textContent = "B body text";
+        document.getElementById("outlet")!.replaceChildren(headline, body);
+        await flushMicrotasks();
+
+        // Its first frame: no timer has run since the task.
+        expect(headline.getAttribute("data-rcf-id")).toBe(b.h1);
+        expect(body.getAttribute("data-rcf-id")).toBe(b.p);
+        expect(oldHeadline.hasAttribute("data-rcf-id")).toBe(false);
+        expect(oldBody.hasAttribute("data-rcf-id")).toBe(false);
+
+        // 50 ms steps: rows at 150 ms land before the 200 ms rescan.
+        await advance(1000, 50);
+        expect(headline.textContent).toBe("B title, published");
+        expect(oldHeadline.hasAttribute("data-rcf-id")).toBe(false);
+        expect(oldBody.hasAttribute("data-rcf-id")).toBe(false);
+        const reported = reportedUnderB(recorded);
+        expect(
+          reported.filter(([, entry]) => entry.content.startsWith("A ")),
+        ).toEqual([]);
+        expect(
+          reported
+            .filter(([id]) => id === b.p)
+            .map(([, entry]) => entry.content),
+        ).toEqual(["B body text"]);
+      },
+    );
+
+    // The Navigation API's path check now waits for a microtask. A destroy()
+    // later in the same task must still be the last thing the widget does:
+    // no stamp, no write, no request.
+    it("does nothing after a destroy() in that same task", async () => {
+      const { recorded, leave } = await bootOnEditedA();
+
+      useFakeTimers();
+      document.body.appendChild(document.createElement("div"));
+      leave();
+      const headline = document.createElement("h1");
+      headline.textContent = "B title";
+      document.getElementById("outlet")!.replaceChildren(headline);
+      widget().destroy();
+      const requests = recorded.length;
+      await flushMicrotasks();
+      await advance(1000);
+
+      expect(headline.hasAttribute("data-rcf-id")).toBe(false);
+      expect(headline.textContent).toBe("B title");
+      expect(recorded.length).toBe(requests);
     });
   });
 
