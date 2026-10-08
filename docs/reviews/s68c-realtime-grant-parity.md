@@ -46,5 +46,18 @@ Vercel untouched.
 
 Owner standing rule: fix majors (and cheap minors) before shipping. Major 1 + minors 2, 3, 4 go to a fix run.
 
-Max severity: major
+## Verification of fix `90f0dfa` (fresh reviewer, 2026-10-08)
+
+Major 1 closed: the `site_editors` read now refuses on error in both handshake and sweep (shared
+`resolveGrant`), matching HTTP; every auth-relevant read in `server/auth.js` (staging_access, site_editors,
+edit_sessions, site_permissions) now fails closed, plus an outer fail-closed try/catch. Minor 2 closed: a
+13-row table runs the real `validateStagingAccess` and the real `resolveGrant` on the same rows (mutations:
+lowercasing → 2 red, device check → 4 red). Minor 3 closed: `createStagingAccess` refuses a revoked editor's
+address (case/space-insensitive) with 409, no insert, no email; the admin reads `site_editors` under the
+"Site admins can view site editors" policy; a read error → generic 500. Minor 4 closed (ACs 1–5 ticked, AC 6
+open). Full jest 327 suites / 4,281 tests, type-check green.
+
+Still open: minor 5 (browser device binding not in automation; operator smoke after the Fly deploy).
+
+Max severity: minor
 Ship allowed: yes
