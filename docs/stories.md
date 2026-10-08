@@ -2501,10 +2501,59 @@ Embed allocation: 0 bytes.
 Owner decision 2026-10-08: the lows of the `659778e` security review go to the backlog. One line
 each; no research or plan until the owner schedules it.
 
-**L1–L20 of the review.** The review's own low list was not available to the s68 planner (asked
-for on 2026-10-08, not received before this commit). The owner pastes those twenty lines here,
-one each, when the review document is filed; until then this stub holds only the lows the s68
-research verified itself:
+**L1–L20 of the review** (verbatim scope from the 2026-10-08 review of `659778e`; line numbers
+at that commit, to be re-verified at research time):
+
+- [ ] L1 — Production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:247`, live);
+  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
+- [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
+  analytics export has one.
+- [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
+  and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
+- [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
+  use `timingSafeEqual` over SHA-256 digests.
+- [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
+  payment-methods has no limiter (`billing/payment-methods/route.ts:121,206`;
+  `subscription/route.ts:106,143`).
+- [ ] L6 — `edit-board/styles/apply/route.ts:141-145` loads a style by id with no site or preset
+  scope.
+- [ ] L7 — Public routes with no limiter before authorization, against AGENTS.md:
+  `ab-tests/{bucket,active,track}`, `staging/content` GET, `staging/publish`,
+  `staging/validate`, `edit-sessions/{validate,extend}`.
+- [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
+  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
+- [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
+  site-token caller can forge `login`/`content_edit` activity rows.
+- [ ] L10 — `upload/image` reachable with only the public site token (`:124-136`): image hosting
+  and quota exhaustion.
+- [ ] L11 — `v1/content` POST stores `metadata` without `optionalMetadata` (`:236,298,322`), and
+  `/api/published` then serves it.
+- [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
+  content routes pin the exact host.
+- [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
+  on `/health` (`server/index.js:78,125-136`; live).
+- [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
+  121 bare handshakes/min lock real editors out of realtime.
+- [ ] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
+  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`.
+- [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
+  Node 24.14.0.
+- [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
+  (`20260809120000:213`) is a no-op; `generate_verification_code()` uses `random()` and is
+  executable by `authenticated` (`20251230000000:172,275`); view-only members can read webhook
+  `url` and `pending_payload` (`20260818000000:981`).
+- [ ] L18 — `COMPLETE_DATABASE_SETUP_CLEAN.sql:461-478` recreates `FOR ALL` billing policies and
+  `prepare-production.js:40` tells operators to run it; TLS verification off in
+  `scripts/check-schema.mjs:78`, `scripts/check-ab-schema.mjs:139`, `setup-db-direct.js`.
+- [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
+  tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
+  `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
+- [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
+  (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
+  `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
+  shell-quote and brace-expansion.
+
+**Lows the s68 research verified itself** (R-series, overlapping L7/L17 where noted):
 
 - [ ] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
   (`staging/publish/route.ts:153`, `staging/content/[siteId]/route.ts:280`,
