@@ -38,7 +38,7 @@
   --shadow-a:hsl(200 55% 2% / .34);
   --shadow-b:hsl(200 55% 2% / .46);
   --shadow-md:0 2px 4px -1px var(--shadow-a),0 4px 10px -2px var(--shadow-b);
-  /* ADR 049: the app radius scale is two tokens */
+  /* ADR 050: the app radius scale is two tokens */
   --radius-container:0px;
   --radius-control:2px;
   --font-sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
@@ -556,7 +556,7 @@ details.ex .cb{margin-top:8px}
     </div>
     <ul class="notes">
       <li><code class="ic">appearance:none</code> removes the browser chevron. A 16px <code class="ic">ChevronDown</code> sits <code class="ic">right-3</code>, vertically centred, with <code class="ic">pointer-events:none</code>.</li>
-      <li>It is still a native <code class="ic">&lt;select&gt;</code>: phones get the OS picker, and <code class="ic">getByLabelText("Expires in")</code> and <code class="ic">selectOptions</code> keep working (ADR 050). The open list is drawn by the OS and cannot be styled.</li>
+      <li>It is still a native <code class="ic">&lt;select&gt;</code>: phones get the OS picker, and <code class="ic">getByLabelText("Expires in")</code> and <code class="ic">selectOptions</code> keep working (ADR 051). The open list is drawn by the OS and cannot be styled.</li>
     </ul>
   </section>
 

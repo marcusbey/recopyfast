@@ -1,9 +1,10 @@
-# ADR 050 — Form selects are styled native `<select>`s; Radix Select is the exception
+# ADR 051 — Form selects are styled native `<select>`s; Radix Select is the exception
 
 - Status: accepted
 - Date: 2026-10-08
 - Scope: s66a-app-design-tokens-and-panels
-- Numbering: follows ADR 049 (047 and 048 are taken on `feature/s68-security-hardening`).
+- Numbering: follows ADR 050 (047 and 048 are taken on `feature/s68-security-hardening`, 049 on
+  `feature/s67-embed-spa-support`).
   Renumber at merge if needed.
 
 ## Context

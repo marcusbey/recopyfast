@@ -14,7 +14,7 @@ Read these first; this plan does not repeat them:
 - Design: `docs/designs/s66a-app-design-tokens-and-panels.md` and its `.html` (a reference, not
   code).
 - System: `docs/design-system.md` (s66a revision).
-- Decisions: ADR 049 (radius tokens) and ADR 050 (native selects).
+- Decisions: ADR 050 (radius tokens) and ADR 051 (native selects).
 
 ## Target story
 
@@ -174,7 +174,7 @@ suite green, except where a task says a guard stays red until a named later task
      - `card.tsx`: `rounded-container`. `default` and `interactive` lose their shadows;
        `interactive` loses `hover:-translate-y-px`; `elevated` keeps `shadow-md`. `CardTitle`
        becomes `text-base font-semibold leading-6`. Rewrite the `card.tsx:7-15` comment and
-       cite ADR 049.
+       cite ADR 050.
      - `badge.tsx`: `rounded-control`; the dot stays round.
      - `alert.tsx`, `icon-tile.tsx`, `metric.tsx`, `empty-state.tsx`, `content-value.tsx`,
        `skeleton.tsx`: `rounded-container`. Radius only; Metric's `.surface-interactive` is
@@ -194,7 +194,7 @@ suite green, except where a task says a guard stays red until a named later task
        rounded-container`.
      - New `dropdown-menu.test.tsx`: content `bg-popover rounded-container shadow-md`; items
        `rounded-control`.
-   - **Implement** `ui/native-select.tsx` (ADR 050), and align `select.tsx` and
+   - **Implement** `ui/native-select.tsx` (ADR 051), and align `select.tsx` and
      `dropdown-menu.tsx`.
    - **Adopt** NativeSelect at the 8 reachable call sites: `ContentFilterBar.tsx:68,88`,
      `BulkOperations.tsx:494,608,805`, `AnalyticsDashboard.tsx:211`, `ShareSiteDialog.tsx:279`
@@ -318,7 +318,7 @@ suite green, except where a task says a guard stays red until a named later task
 ## The point everything turns on
 
 Two moves carry the story, and both are global:
-- the radius scale becomes two semantic tokens applied per primitive (ADR 049), and the border
+- the radius scale becomes two semantic tokens applied per primitive (ADR 050), and the border
   reset moves into `@layer base`;
 - `DialogContent` stops being a padded, scrolling grid and becomes a frame whose only scroll
   region is `DialogBody`.
@@ -393,5 +393,5 @@ passed; deployed. In addition:
 - **Baseline.** The radius baseline holds zero entries for `src/components/ui/**` and the three
   panel files.
 - **Untouched.** `public/embed/` is unchanged and embed allocation is 0 bytes.
-- **Decisions.** ADR 049 and ADR 050 are merged. They are numbered after 047 and 048 on
+- **Decisions.** ADR 050 and ADR 051 are merged. They are numbered after 047 and 048 on
   `feature/s68-security-hardening`; renumber at merge if another ADR lands first.

@@ -16,8 +16,8 @@
 > - the dialog and code-block rules;
 > - the shell values.
 >
-> Decisions: [ADR 049](./decisions/049-app-radius-is-two-semantic-tokens.md) (radius tokens) and
-> [ADR 050](./decisions/050-form-selects-are-native.md) (selects). Evidence:
+> Decisions: [ADR 050](./decisions/050-app-radius-is-two-semantic-tokens.md) (radius tokens) and
+> [ADR 051](./decisions/051-form-selects-are-native.md) (selects). Evidence:
 > [`research/s66-app-design-system.md`](./research/s66-app-design-system.md).
 >
 > Some values below are decided but not yet in the code. Each such value carries a **Status**
@@ -144,7 +144,7 @@ The research proposed a 13px "small" size. It is not adopted, because Tailwind's
 13px step and every meta string in the app already uses `text-xs`. The only 13px text is code,
 inside `CodeBlock`.
 
-### Radius — app surfaces (s66a, ADR 049)
+### Radius — app surfaces (s66a, ADR 050)
 
 Straight and clean, per the owner: "avoid rounded corner as much as possible and keep it
 straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabase, which keeps
@@ -287,7 +287,7 @@ created, in that story.
 | `Alert` | `default` `info` `success` `warning` `destructive` | Inline feedback, `rounded-container`. The product has no toast (gap 1) | s66a |
 | `Input` | — | Text entry, spec in "Controls". Icon-in-input: `absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground` + `pl-10` | s66a |
 | `Textarea` | — | **New.** Multi-line entry, Input's spec, `min-h-20`, `resize-y`. No reachable app consumer yet; it exists so the next form does not hand-roll one | s66a |
-| `NativeSelect` | — | **New.** Every form select ([ADR 050](./decisions/050-form-selects-are-native.md)). Native `<select>` inside a wrapper that draws the chevron 12px inside the border. Keeps OS pickers and `selectOptions`. Props pass to the `<select>`, so `<Label htmlFor>` works | s66a |
+| `NativeSelect` | — | **New.** Every form select ([ADR 051](./decisions/051-form-selects-are-native.md)). Native `<select>` inside a wrapper that draws the chevron 12px inside the border. Keeps OS pickers and `selectOptions`. Props pass to the `<select>`, so `<Label htmlFor>` works | s66a |
 | `Select` | Radix: trigger, value, content, item | Only when an option needs custom rendering. The trigger matches NativeSelect closed. Content is `bg-popover`, `rounded-container`, `shadow-md`; items are `rounded-control` | s66a |
 | `DropdownMenu` | Radix | Row actions, sort. Content is opaque `bg-popover`, `rounded-container`, 1px border, `shadow-md`; items are `rounded-control` | s66a |
 | `Tabs` | Radix | Underline style, spec in "Controls" | s66a |
@@ -555,7 +555,7 @@ Report-only. None of these gets filled freestyle inside a story.
    correctly and need no change.
    **Caveat closed by s66a.** The trigger moves to `bg-card`, `rounded-control` and Input's
    focus treatment. Both menus become opaque once `--color-popover` exists. Form selects use
-   `NativeSelect` (ADR 050).
+   `NativeSelect` (ADR 051).
 7. **No chart or timeline primitive.** `s03` (funnel), `s10` (impression timeline) and `s12`
    (progress toward sample) each compose one from tokens directly. `s10`'s inline SVG documents
    which tokens it uses so a primitive can be extracted from it rather than invented.
@@ -573,4 +573,4 @@ Report-only. None of these gets filled freestyle inside a story.
     site page (s66c).
 13. **The open state of a `NativeSelect` belongs to the OS.** It cannot be styled or
     screenshotted (CDP captures omit it). Designs show the closed control only. If an option
-    ever needs an icon or a description, that is the case for Radix `Select` (ADR 050).
+    ever needs an icon or a description, that is the case for Radix `Select` (ADR 051).

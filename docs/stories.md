@@ -2362,7 +2362,7 @@ five open questions take their defaults:
   shell lands in s66b; s66a records the values in `docs/design-system.md`.
 - The marketing files that share `src/components/ui/*` square up too (accepted side effect).
   `/try` counts as Marketing. Marketing's own `rounded-*` classes are not touched
-  ([ADR 049](./decisions/049-app-radius-is-two-semantic-tokens.md)).
+  ([ADR 050](./decisions/050-app-radius-is-two-semantic-tokens.md)).
 - Split into s66a (this story), s66c (site information architecture) and s66b (page passes),
   executed in that order.
 
@@ -2470,7 +2470,7 @@ Design: `docs/designs/s66a-app-design-tokens-and-panels.md` and its `.html` mock
   1280 and 375 of the marketing pages that import `ui/*` (the Header, `/docs/install`, a blog
   post, 404 and `/try`), so the accepted side effect is seen rather than reasoned about.
 - [ ] **AC 10 — Docs and gates.** `docs/design-system.md` describes the s66a system (tokens,
-  primitives, dialog rules), and ADR 049 records the radius-token choice. Lint, type-check,
+  primitives, dialog rules), and ADR 050 records the radius-token choice. Lint, type-check,
   format, build and the full suite pass.
 
 Not in this story:
