@@ -466,7 +466,7 @@ export function BulkOperations({ siteId }: BulkOperationsProps) {
       </CardHeader>
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList>
             <TabsTrigger value="export">Export</TabsTrigger>
             <TabsTrigger value="import">Import</TabsTrigger>
             <TabsTrigger value="batch">Batch Update</TabsTrigger>

@@ -448,6 +448,50 @@ describe("SiteRegistrationModal", () => {
       }
     });
 
+    /**
+     * PR #67 review (Devin). jsdom computes no layout, so these are the two
+     * classes that let a 300-character unbroken name wrap inside a 320 px
+     * bottom sheet instead of widening it — the treatment the domain had.
+     */
+    it("lets a long unbroken site name wrap, as the domain does", async () => {
+      await registerSite();
+      for (const text of ["Test Site", "example.com"]) {
+        expect(screen.getByText(text)).toHaveClass(
+          "min-w-0",
+          "[overflow-wrap:anywhere]",
+        );
+      }
+    });
+
+    /**
+     * PR #67 review (Devin). Step 2 said "Paste it before </body>" on every
+     * tab, while the Next.js recipe under it says to load the tag after
+     * hydration — two instructions on one screen that disagree.
+     */
+    it("titles the paste step for the selected platform: Next.js never says </body>", async () => {
+      const user = await registerSite();
+      const pasteStepTitle = () =>
+        screen
+          .getByRole("tablist", { name: "Platform" })
+          .closest("li")
+          ?.querySelector("h3") as HTMLElement;
+
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+      expect(within(pasteStepTitle()).getByText("</body>").tagName).toBe(
+        "CODE",
+      );
+
+      await user.click(screen.getByRole("tab", { name: "Next.js" }));
+      expect(pasteStepTitle().textContent).not.toContain("</body>");
+      expect(pasteStepTitle()).toHaveTextContent(/hydrat/i);
+
+      await user.click(screen.getByRole("tab", { name: "Plain HTML" }));
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+
+      await user.click(screen.getByRole("tab", { name: "WordPress" }));
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+    });
+
     it("copies exactly the embedScript the API returned", async () => {
       const user = await registerSite();
       const writeText = spyOnClipboard();

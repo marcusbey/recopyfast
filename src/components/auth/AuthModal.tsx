@@ -42,7 +42,7 @@ export function AuthModal({
 
         <DialogBody>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList>
               <TabsTrigger value="login">Sign in</TabsTrigger>
               <TabsTrigger value="signup">Sign up</TabsTrigger>
             </TabsList>

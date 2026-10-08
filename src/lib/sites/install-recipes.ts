@@ -22,11 +22,32 @@
 
 export type InstallRecipeId = "wordpress" | "nextjs" | "html";
 
+/**
+ * The short heading of the "put the snippet in" step, for one stack. `code`,
+ * when present, follows `text` and is set as inline code.
+ */
+export interface InstallStepTitle {
+  text: string;
+  code?: string;
+}
+
+/** Full-document stacks share one step title. */
+const BEFORE_BODY_CLOSE: InstallStepTitle = {
+  text: "Paste it before",
+  code: "</body>",
+};
+
 export interface InstallRecipe {
   /** Stable key. Used as the tab value and, later, as s18's page slug. */
   id: InstallRecipeId;
   /** What the stack is called, in the owner's words. */
   label: string;
+  /**
+   * The install step's heading while this stack is selected. Per recipe, not
+   * one shared line: "Paste it before </body>" above the Next.js recipe told
+   * the owner the opposite of the recipe under it (PR #67 review).
+   */
+  stepTitle: InstallStepTitle;
   /** Where and how the generated snippet should load. */
   location: string;
   /** Integration caveats that must remain visible with the recipe. */
@@ -37,6 +58,7 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "wordpress",
     label: "WordPress",
+    stepTitle: BEFORE_BODY_CLOSE,
     location:
       "Paste it into your theme's footer.php, immediately before the closing </body> tag.",
     notes:
@@ -45,6 +67,7 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "nextjs",
     label: "Next.js",
+    stepTitle: { text: "Load it after the page has hydrated" },
     location:
       'For React or Next.js, load the generated tag after the page has hydrated. In Next.js, next/script with strategy="afterInteractive" is one option; preserve every generated attribute and value.',
     notes:
@@ -53,6 +76,7 @@ export const installRecipes: readonly InstallRecipe[] = [
   {
     id: "html",
     label: "Plain HTML",
+    stepTitle: BEFORE_BODY_CLOSE,
     location:
       "Paste it before the closing </body> tag of every page you want to be editable.",
     notes:

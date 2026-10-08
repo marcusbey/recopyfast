@@ -17,7 +17,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CodeBlock } from "@/components/ui/code-block";
 import { StatusBadge, siteStatuses } from "@/components/ui/status-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { installRecipes } from "@/lib/sites/install-recipes";
+import {
+  getInstallRecipe,
+  installRecipes,
+  type InstallStepTitle,
+} from "@/lib/sites/install-recipes";
 import { Loader2, AlertCircle, ExternalLink } from "lucide-react";
 
 interface SiteRegistrationModalProps {
@@ -68,6 +72,9 @@ export function SiteRegistrationModal({
   const [registrationResult, setRegistrationResult] =
     useState<RegistrationResponse | null>(null);
   const [isExampleOpen, setIsExampleOpen] = useState(false);
+  const [recipeId, setRecipeId] = useState<string>(installRecipes[0].id);
+  // Step 2's heading follows the platform tab under it (PR #67 review).
+  const selectedRecipe = getInstallRecipe(recipeId) ?? installRecipes[0];
 
   const validateUrl = (url: string): boolean => {
     try {
@@ -150,6 +157,7 @@ export function SiteRegistrationModal({
     setErrors({});
     setRegistrationResult(null);
     setIsExampleOpen(false);
+    setRecipeId(installRecipes[0].id);
     onClose();
   };
 
@@ -292,7 +300,7 @@ export function SiteRegistrationModal({
               <DialogTitle>Site registered</DialogTitle>
               <DialogDescription asChild>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-foreground">
+                  <span className="min-w-0 text-foreground [overflow-wrap:anywhere]">
                     {registrationResult.site.name}
                   </span>
                   <span aria-hidden="true">·</span>
@@ -319,14 +327,9 @@ export function SiteRegistrationModal({
                     installation two different ways. */}
                 <InstallStep
                   number={2}
-                  title={
-                    <>
-                      Paste it before{" "}
-                      <code className="font-mono">&lt;/body&gt;</code>
-                    </>
-                  }
+                  title={<StepTitle title={selectedRecipe.stepTitle} />}
                 >
-                  <Tabs defaultValue={installRecipes[0].id}>
+                  <Tabs value={recipeId} onValueChange={setRecipeId}>
                     <TabsList aria-label="Platform">
                       {installRecipes.map((recipe) => (
                         <TabsTrigger key={recipe.id} value={recipe.id}>
@@ -472,6 +475,21 @@ const INSTALL_EXAMPLE = `<h1>Edited automatically</h1>
 <p data-rcf-ignore>Never editable</p>
 <div data-rcf-content>Opt this container in</div>
 <a href="/pricing" class="rcf-editable-link">Opt this link in</a>`;
+
+/** A recipe's step heading: its words, then its inline code if any. */
+function StepTitle({ title }: { title: InstallStepTitle }) {
+  return (
+    <>
+      {title.text}
+      {title.code && (
+        <>
+          {" "}
+          <code className="font-mono">{title.code}</code>
+        </>
+      )}
+    </>
+  );
+}
 
 interface InstallStepProps {
   number: number;
