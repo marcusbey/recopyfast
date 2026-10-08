@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageShell } from "@/components/ui/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SiteStatus } from "@/components/ui/status-badge";
+import type { SiteGrant } from "@/hooks/useEditSession";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 
 /**
@@ -60,6 +61,11 @@ export interface SiteRecord {
   last_mismatch_domain?: string | null;
   last_mismatch_at?: string | null;
   stats?: SiteStats;
+  /**
+   * The signed-in user's own grant on this site. "Edit website" asks for
+   * this and nothing above it (PR #72 review, D1); the server re-checks it.
+   */
+  permission?: SiteGrant;
   /** Present for admins only: the route's install credentials. */
   siteToken?: string;
   embedScript?: string;
@@ -145,12 +151,22 @@ interface SiteProviderProps {
   children: React.ReactNode;
 }
 
+/** One answer of `GET /api/sites`, and the number of the request it answers. */
+interface SiteList {
+  sites: SiteRecord[];
+  request: number;
+}
+
 export function SiteProvider({ siteId, children }: SiteProviderProps) {
-  const [sites, setSites] = useState<SiteRecord[] | null>(null);
+  const [list, setList] = useState<SiteList | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Only the newest request may write: the poll and a refetch after a
-  // rotation can overlap, and an older answer must not land last.
+  // rotation can overlap, and an older answer must not land last. The
+  // number also tells the scope which requests started before a rotation of
+  // ours landed (see `SiteScope`).
   const requestRef = useRef(0);
+  const latestRequest = useCallback(() => requestRef.current, []);
+  const sites = list?.sites ?? null;
 
   const refetch = useCallback(async () => {
     const request = ++requestRef.current;
@@ -160,7 +176,10 @@ export function SiteProvider({ siteId, children }: SiteProviderProps) {
       if (!response.ok) throw new Error(await readLoadError(response));
       const body: { sites?: unknown } = await response.json();
       if (request !== requestRef.current) return;
-      setSites(Array.isArray(body.sites) ? (body.sites as SiteRecord[]) : []);
+      setList({
+        sites: Array.isArray(body.sites) ? (body.sites as SiteRecord[]) : [],
+        request,
+      });
     } catch (caught) {
       if (request !== requestRef.current) return;
       console.error("Failed to load the site:", caught);
@@ -225,7 +244,12 @@ export function SiteProvider({ siteId, children }: SiteProviderProps) {
   if (!site) return <SiteNotFound />;
 
   return (
-    <SiteScope site={site} refetch={refetch}>
+    <SiteScope
+      site={site}
+      fetchedBy={list?.request ?? 0}
+      latestRequest={latestRequest}
+      refetch={refetch}
+    >
       {children}
     </SiteScope>
   );
@@ -233,8 +257,23 @@ export function SiteProvider({ siteId, children }: SiteProviderProps) {
 
 interface SiteScopeProps {
   site: SiteRecord;
+  /** The list request whose answer `site` came from. */
+  fetchedBy: number;
+  /** The newest list request started so far. */
+  latestRequest: () => number;
   refetch: () => Promise<void>;
   children: React.ReactNode;
+}
+
+/** `candidate` is a strictly later instant than `current`; unknown is never. */
+function isLaterTimestamp(candidate: string, current: string): boolean {
+  const candidateTime = Date.parse(candidate);
+  const currentTime = Date.parse(current);
+  return (
+    Number.isFinite(candidateTime) &&
+    Number.isFinite(currentTime) &&
+    candidateTime > currentTime
+  );
 }
 
 /**
@@ -243,11 +282,26 @@ interface SiteScopeProps {
  * history read one copy. Mounted only once the site exists, so its initial
  * credentials are the site's own.
  */
-function SiteScope({ site, refetch, children }: SiteScopeProps) {
+function SiteScope({
+  site,
+  fetchedBy,
+  latestRequest,
+  refetch,
+  children,
+}: SiteScopeProps) {
   const [regenerating, setRegenerating] = useState(false);
   const [regenerateError, setRegenerateError] = useState<string | null>(null);
   const [regenerated, setRegenerated] = useState(false);
   const credentialSiteId = useRef(site.id);
+  // The rule below that lets a rotation made elsewhere reach this page.
+  // `credentialsAsOf`: the `updated_at` of the site row the shown credentials
+  // are known to match. `rotatedThrough`: the last list request started
+  // before our latest rotation landed, whose answers may predate it.
+  // `isPinningAfterRotation`: the next answer after our rotation describes
+  // the row it left, and only resets `credentialsAsOf`.
+  const credentialsAsOf = useRef(site.updated_at);
+  const rotatedThrough = useRef(0);
+  const isPinningAfterRotation = useRef(false);
   const latestSelection = useRef({
     siteId: site.id,
     canInstall: Boolean(site.siteToken),
@@ -266,29 +320,73 @@ function SiteScope({ site, refetch, children }: SiteScopeProps) {
     // this scope. That key is the first guard; this is the second, kept for
     // the day the router keeps a segment mounted. A credential rotated for
     // site A must never remain visible for site B, especially when B is a
-    // viewer-only site with no install credentials. Same-site refreshes (the
-    // install poll, the refetch after a rotation) deliberately do not
-    // overwrite the local result: the list may still hold the pre-rotation
-    // payload while this rotation has already made that snippet invalid.
+    // viewer-only site with no install credentials.
     const didChangeSite = credentialSiteId.current !== site.id;
     const didLoseInstallAccess =
       !site.siteToken && (credentials.siteToken || credentials.embedScript);
 
     if (didChangeSite || didLoseInstallAccess) {
       credentialSiteId.current = site.id;
+      credentialsAsOf.current = site.updated_at;
+      rotatedThrough.current = 0;
+      isPinningAfterRotation.current = false;
       setCredentials({
         siteToken: site.siteToken,
         embedScript: site.embedScript,
       });
       setRegenerated(false);
       setRegenerateError(null);
+      return;
     }
+
+    // A same-site refresh replaces the shown credentials only when somebody
+    // else rotated them (PR #72 review, D3). Another admin's "Regenerate
+    // snippet" revokes the token at once; this page used to ignore every
+    // same-site refresh, so it kept showing, and copying, the dead snippet
+    // until a reload. Three conditions, each for a way the naive version
+    // goes wrong:
+    //
+    // 1. The row is newer than the one the credentials were taken from
+    //    (`updated_at`, which a rotation moves by writing `sites.api_key`).
+    //    Not the token: `GET /api/sites` mints a fresh one on every request
+    //    (`buildSiteToken` stamps the time), so "a different token" or "a
+    //    later issued-at" is every 5 s poll, and the snippet the owner is
+    //    copying would change under them. The issued-at is also stamped after
+    //    the route's stats reads, not when it read the key, so it cannot say
+    //    which key signed it.
+    // 2. No rotation of ours is pending: its answer is about to replace the
+    //    credentials anyway, and a row read before it commits is revoked.
+    // 3. The answer comes from a request started after our last rotation
+    //    landed (`rotatedThrough`, a request counter). An earlier request may
+    //    have read the row after another write (the embed's report, a
+    //    rename) and before our rotation: newer by (1), signed with the key
+    //    we just revoked. Requests started after it read our key or a newer
+    //    one. The first such answer only re-anchors `credentialsAsOf` (its
+    //    row is the one our rotation left), so the snippet we just showed is
+    //    not swapped for the list's own re-mint of the same key.
+    if (regenerating || !site.siteToken) return;
+    if (fetchedBy <= rotatedThrough.current) return;
+    if (isPinningAfterRotation.current) {
+      isPinningAfterRotation.current = false;
+      credentialsAsOf.current = site.updated_at;
+      return;
+    }
+    if (!isLaterTimestamp(site.updated_at, credentialsAsOf.current)) return;
+
+    credentialsAsOf.current = site.updated_at;
+    setCredentials({
+      siteToken: site.siteToken,
+      embedScript: site.embedScript,
+    });
   }, [
     credentials.embedScript,
     credentials.siteToken,
+    fetchedBy,
+    regenerating,
     site.id,
     site.siteToken,
     site.embedScript,
+    site.updated_at,
   ]);
 
   // Effects run after paint. During the first render for a newly selected
@@ -347,6 +445,12 @@ function SiteScope({ site, refetch, children }: SiteScopeProps) {
         return false;
       }
 
+      // Every list request started so far may have read the row before this
+      // rotation committed: none of their answers may replace it (rule 3 in
+      // the effect above). The refetch below is the first that may.
+      rotatedThrough.current = latestRequest();
+      isPinningAfterRotation.current = true;
+
       // These values feed every credential consumer under this provider: the
       // Install snippet and token, the Overview checklist and the version
       // history panel in the header. Keeping one state object prevents an old
@@ -358,7 +462,7 @@ function SiteScope({ site, refetch, children }: SiteScopeProps) {
       });
       setRegenerated(true);
       // Then bring the record into agreement with the server. Its answer
-      // cannot undo the rotation: same-site refreshes never overwrite it.
+      // cannot undo the rotation: it only re-anchors `credentialsAsOf`.
       void refetch();
       return true;
     } catch (error) {

@@ -11,10 +11,11 @@ import { useCallback, useState } from "react";
  * caught it), accepted any `editUrl` the response carried, and fell back to a
  * URL it built itself. Every "Edit website" control now goes through here.
  *
- * The request body is the caller's, sent as given. Two bodies exist and both
- * are deliberate: the Sites row, its menu and the site header send what an
- * owner's button always sent (`["edit","admin"]`), the checklist sends
- * `["edit","publish"]`. Neither may change here without a story saying so.
+ * The request body is the caller's, sent as given. The Sites row, its menu
+ * and the site header send the user's own grant through
+ * `editPermissionsForGrant` (an owner still sends `["edit","admin"]`); the
+ * checklist, shown to admins only, sends `["edit","publish"]`. Neither may
+ * change here without a story saying so.
  */
 
 export type EditSessionPermission = "view" | "edit" | "publish" | "admin";
@@ -30,6 +31,38 @@ export type EditSessionPermission = "view" | "edit" | "publish" | "admin";
  * two-item array (s66c1 review m5).
  */
 export const OWNER_EDIT_PERMISSIONS: ["edit", "admin"] = ["edit", "admin"];
+
+/** A member's own row in `site_permissions`, as `GET /api/sites` reports it. */
+export type SiteGrant = "view" | "edit" | "publish" | "admin";
+
+/**
+ * What a site's own "Edit website" asks for: the user's own grant, never more
+ * (PR #72 review, D1).
+ *
+ * Every site control used to send `OWNER_EDIT_PERMISSIONS` whoever clicked,
+ * and `createEditSession` refuses any permission outside the caller's live
+ * grant (ADR 047): an `edit` member saw the site, clicked, and was refused,
+ * every time. An owner still sends exactly what they always sent; a member
+ * sends their own level without `view` (the button's body never carried
+ * it); a viewer, or a record that does not say, gets `[]`, which the callers
+ * read as "do not offer Edit website". Never a guess upwards: an unknown
+ * grant asks for nothing. The server still checks the live row whatever
+ * this says, so the value only decides what is worth asking for.
+ */
+export function editPermissionsForGrant(
+  grant: SiteGrant | undefined,
+): EditSessionPermission[] {
+  switch (grant) {
+    case "admin":
+      return [...OWNER_EDIT_PERMISSIONS];
+    case "publish":
+      return ["edit", "publish"];
+    case "edit":
+      return ["edit"];
+    default:
+      return [];
+  }
+}
 
 export interface EditSessionRequest {
   siteId: string;

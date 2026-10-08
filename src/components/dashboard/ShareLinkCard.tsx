@@ -4,17 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { IconTile } from "@/components/ui/icon-tile";
-import {
-  Link2,
-  Copy,
-  CheckCircle2,
-  Trash2,
-  Eye,
-  Edit,
-  Upload,
-  Shield,
-  Mail,
-} from "lucide-react";
+import { Link2, Trash2, Eye, Edit, Upload, Shield, Mail } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 
 export interface ShareLink {
@@ -28,13 +18,21 @@ export interface ShareLink {
   isActive: boolean;
   lastUsedAt: string | null;
   createdAt: string;
-  stagingUrl?: string;
-  token?: string;
 }
 
+/**
+ * One listed preview link: who it is for, when it expires, what it grants,
+ * and Revoke.
+ *
+ * No Copy (PR #72 review, D2). A listed link has no secret token:
+ * `GET /api/staging/access` leaves it out on purpose, and the `token` and
+ * `stagingUrl` fields this type used to declare were never filled. The copy
+ * action rebuilt the URL from the row id, so every link copied from a list
+ * opened a preview that refused it. A link is copied once, from the creation
+ * response, in `ShareSiteDialog`.
+ */
 interface ShareLinkCardProps {
   link: ShareLink;
-  onCopy: (link: ShareLink) => void;
   onRevoke: (link: ShareLink) => void;
 }
 
@@ -45,15 +43,8 @@ const permissionIcons = {
   admin: Shield,
 };
 
-export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
-  const [copied, setCopied] = useState(false);
+export function ShareLinkCard({ link, onRevoke }: ShareLinkCardProps) {
   const [revoking, setRevoking] = useState(false);
-
-  const handleCopy = async () => {
-    onCopy(link);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const handleRevoke = async () => {
     setRevoking(true);
@@ -96,19 +87,6 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={handleCopy}
-            disabled={isExpired}
-            aria-label={copied ? "Share link copied" : "Copy share link"}
-          >
-            {copied ? (
-              <CheckCircle2 className="text-tone-success-text" />
-            ) : (
-              <Copy />
-            )}
-          </Button>
           <Button
             variant="ghost"
             size="icon-sm"

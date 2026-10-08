@@ -139,6 +139,7 @@ export async function routeSites(
               views: 0,
               last_activity: null,
             },
+            permission: "admin",
             siteToken: site.siteToken,
             embedScript: buildEmbedScript({
               siteId: site.id,

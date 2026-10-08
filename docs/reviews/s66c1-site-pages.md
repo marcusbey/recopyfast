@@ -79,3 +79,56 @@ Remaining proof: this PR's CI E2E on the real stack (78).
 
 Max severity: none
 Ship allowed: yes
+
+## PR #72 bot review (Devin)
+
+Three findings on PR #72, fixed test-first in one commit on `feature/s66c1-site-pages`.
+
+- **D1 (red) — an `edit` member could never open a site.** The site header (`useSitePageShell`) and the Sites
+  row with its ⋮ menu (`SiteRow`) sent `OWNER_EDIT_PERMISSIONS` (`["edit","admin"]`) for every member;
+  `createEditSession` refuses any permission outside the caller's live grant (s68a, ADR 047). Fix:
+  `GET /api/sites` now returns each site's `permission`, the caller's own `site_permissions` row (a label,
+  not a capability: the session route re-reads the row). `editPermissionsForGrant` (`src/hooks/useEditSession.ts`)
+  maps it: admin → the owner set, unchanged; publish → `["edit","publish"]`; edit → `["edit"]` (the button
+  never sends `view`); view or unknown → `[]`, and neither the header, the row nor the menu offers Edit
+  website. The activation checklist (admins only) keeps `["edit","publish"]`. This is an API change in a
+  story whose run interdicts said "no API change": the list carried no role field, and `siteToken` presence
+  only tells admin from non-admin, not edit from view.
+- **D2 (red) — every preview link copied from the list was dead.** `PreviewLinksList` built
+  `rcf_token=${link.token || link.id}`, and `GET /api/staging/access` omits the secret token by design, so it
+  always copied the row id. **Pre-existing on main**: `ShareSiteDialog.handleCopyLink` had the same fallback
+  over the same token-less list. Fix: no copy control on a listed link (`ShareLinkCard` loses Copy and the
+  never-filled `token`/`stagingUrl` fields; `PreviewLinksList` loses `previewUrl`, `handleCopy` and its
+  `domain` prop) and a one-line hint ("Copy a link when you create it: this list cannot show it again. Lost
+  one? Revoke it and share a new one."). The dialog's success state offers "Copy link", copying the creation
+  response's `stagingUrl`. No owner-side resend exists (the only resend, `POST /api/staging/verify`, is keyed
+  by the token itself); the invite email carries only the code, so "the link was sent by email" would be false.
+- **D3 (yellow) — another admin's rotation never reached an open page.** `SiteScope` ignored every same-site
+  refresh, so after an external "Regenerate snippet" the page kept the revoked token. Fix: a newer record
+  replaces the shown credentials when (1) its `updated_at` is later than the row the credentials came from,
+  (2) no regeneration of ours is pending, and (3) its list request started after our last regeneration landed
+  (a request counter); the first answer after our own regeneration only re-anchors the marker. Not the token's
+  issued-at: `GET /api/sites` mints a fresh token per request, so issued-at "newest wins" would swap the
+  snippet on every 5 s install poll, and it is stamped after the stats reads, not when the key was read. Known
+  limit: a rotation by another admin between our regeneration's commit and our refetch's read is picked up at
+  the next row change, not at once.
+
+Tests: D1 — API grant (`install-credentials-visibility.test.ts`, 3), mapping (`useEditSession.test.ts`, 5),
+row button + menu for an editor and a viewer (`SiteRow.test.tsx`, 3), header for an editor and a viewer
+(`layout.test.tsx`, 2). D2 — list offers no row-id copy and shows the hint (`PreviewLinksList.test.tsx`),
+Copy link from the creation response and none without one (`ShareSiteDialog.test.tsx`, 2). D3 — Install
+follows an external rotation on the next poll (`install/page.test.tsx`), no churn on a re-mint, own
+regeneration survives an earlier newer record and the answer after it (`SiteProvider.test.tsx`, 2). Mutations:
+each guard removed → red (updated_at check, request counter, pending guard, re-anchor, viewer gating on header,
+row and menu, menu body, dialog Copy link condition, API field).
+
+Rewritten assertions: `PreviewLinksList.test.tsx` "copies the link's preview URL" (it fed the list a `token`
+the API never sends) → the D2 test; `ShareLinkCard.test.tsx` "keeps the Copy and Revoke names" → "keeps the
+Revoke name, and offers no Copy". Fixtures gain the owner's grant (`permission: "admin"`): `buildSite`,
+`SiteRow.test.tsx`, the Sites page test, `e2e/support/site-fixtures.ts` `routeSites` ("as an admin of each").
+
+Gates: full Jest 372 suites / 4,836 passed (38 skipped), `type-check` and `type-check:build` green, lint 0
+errors, `format:check` clean, Playwright `--list` 78.
+
+Max severity: major
+Ship allowed: yes

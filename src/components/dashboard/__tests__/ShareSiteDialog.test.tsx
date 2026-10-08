@@ -266,6 +266,68 @@ describe("ShareSiteDialog (s66c1)", () => {
 });
 
 /**
+ * PR #72 review (D2). The link's secret token exists on screen exactly once:
+ * in the creation response. `GET /api/staging/access` omits it on purpose, so
+ * the list cannot copy a working link, and the one place that can is here.
+ */
+describe("ShareSiteDialog after a link is created", () => {
+  const STAGING_URL =
+    "https://example.com?rcf_staging=1&rcf_token=the-real-secret-token";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("offers Copy link, copying the URL the creation response carried", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        emailDelivered: true,
+        access: { id: "33333333-3333-4333-8333-333333333333" },
+        stagingUrl: STAGING_URL,
+        token: "the-real-secret-token",
+      }),
+    });
+    const user = userEvent.setup();
+    const clipboardWrite = jest.spyOn(navigator.clipboard, "writeText");
+    render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+    await user.click(await screen.findByRole("button", { name: "Copy link" }));
+
+    expect(clipboardWrite).toHaveBeenLastCalledWith(STAGING_URL);
+    expect(await navigator.clipboard.readText()).toBe(STAGING_URL);
+  });
+
+  it("offers no Copy link when the response carried no link", async () => {
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, emailDelivered: true }),
+    });
+    const user = userEvent.setup();
+    render(<ShareSiteDialog open onOpenChange={jest.fn()} site={mockSite} />);
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText("Invite sent successfully!"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Copy link" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/**
  * s66c1 review m4. People & access keeps this dialog mounted and only flips
  * `open`, so whatever the last opening left behind (a refusal, a success
  * banner, a half-typed address) used to be waiting in the next one. Each

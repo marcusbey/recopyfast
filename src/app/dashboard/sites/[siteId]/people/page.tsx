@@ -86,11 +86,7 @@ export default function SitePeoplePage() {
         reloadKey={editorsReload}
       />
 
-      <PreviewLinksList
-        siteId={site.id}
-        domain={site.domain}
-        reloadKey={linksReload}
-      />
+      <PreviewLinksList siteId={site.id} reloadKey={linksReload} />
 
       <AddEditorDialog
         open={isAddEditorOpen}

@@ -38,6 +38,9 @@ export function buildSite(overrides: Partial<SiteRecord> = {}): SiteRecord {
       content_elements_count: 15,
       last_activity: "2026-10-07T00:00:00Z",
     },
+    // The owner by default: their own grant, as `GET /api/sites` reports it
+    // (PR #72 review, D1), with the credentials it mints for admins only.
+    permission: "admin",
     siteToken: FIXTURE_TOKEN,
     embedScript: FIXTURE_SNIPPET,
     ...overrides,

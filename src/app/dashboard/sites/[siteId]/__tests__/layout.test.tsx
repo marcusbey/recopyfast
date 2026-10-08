@@ -6,6 +6,7 @@ import SiteInstallPage from "../install/page";
 import SitePeoplePage from "../people/page";
 import SiteSettingsPage from "../settings/page";
 import {
+  buildSite,
   buildSiteContext,
   renderWithSite,
 } from "@/components/dashboard/site/__tests__/site-context-fixture";
@@ -207,5 +208,68 @@ describe("the site frame", () => {
       permissions: ["edit", "admin"],
       durationHours: 2,
     });
+  });
+
+  /**
+   * PR #72 review (D1). The header asked every member for the owner's
+   * session, `["edit","admin"]`; `createEditSession` refuses a permission
+   * beyond the caller's live grant (ADR 047), so an `edit` member could see
+   * the site and never open it. The header now asks for the member's own
+   * grant, from the site record.
+   */
+  it("asks for an edit member's own grant from the header, and opens the site", async () => {
+    mockUsePathname.mockReturnValue(BASE);
+    const popup = { opener: {}, location: { href: "" }, close: jest.fn() };
+    jest.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ editUrl: "https://acme.example/?rcf_edit_token=t" }),
+    });
+    const user = userEvent.setup();
+    // A member who is not an admin: no install credentials either.
+    const site = buildSite({
+      permission: "edit",
+      siteToken: undefined,
+      embedScript: undefined,
+    });
+    renderWithSite(<SiteOverviewPage />, buildSiteContext({ site }));
+    const header = screen
+      .getByRole("heading", { level: 1 })
+      .closest("[data-page-header]") as HTMLElement;
+
+    await user.click(
+      within(header).getByRole("button", { name: "Edit website" }),
+    );
+
+    await waitFor(() =>
+      expect(popup.location.href).toBe(
+        "https://acme.example/?rcf_edit_token=t",
+      ),
+    );
+    const call = (global.fetch as jest.Mock).mock.calls.find(
+      ([url]) => url === "/api/edit-sessions/create",
+    );
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+      siteId: SITE_ID,
+      permissions: ["edit"],
+      durationHours: 2,
+    });
+  });
+
+  it("offers a view-only member no Edit website in the header", () => {
+    mockUsePathname.mockReturnValue(BASE);
+    const site = buildSite({
+      permission: "view",
+      siteToken: undefined,
+      embedScript: undefined,
+    });
+    renderWithSite(<SiteOverviewPage />, buildSiteContext({ site }));
+
+    expect(
+      screen.queryByRole("button", { name: /edit website/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Version history" }),
+    ).toBeInTheDocument();
   });
 });

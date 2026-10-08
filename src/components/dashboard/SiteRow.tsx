@@ -28,7 +28,11 @@ import {
   siteStatuses,
   type SiteStatus,
 } from "@/components/ui/status-badge";
-import { OWNER_EDIT_PERMISSIONS, useEditSession } from "@/hooks/useEditSession";
+import {
+  editPermissionsForGrant,
+  useEditSession,
+  type SiteGrant,
+} from "@/hooks/useEditSession";
 import EditWebsiteButton from "./EditWebsiteButton";
 import { sitePageHref } from "./site/SiteSubnav";
 
@@ -46,6 +50,9 @@ import { sitePageHref } from "./site/SiteSubnav";
  *   reports;
  * - ⋮: Open site page, Edit website, Share preview link, Delete site.
  *
+ * "Edit website", the button and the menu item alike, asks for the user's
+ * own grant on the site and is not offered to a viewer (PR #72 review, D1).
+ *
  * There is no `Table` primitive (design-system gap 8): the list is a `<ul>` of
  * ruled rows in one bordered panel. At 768 and up a row is one line; below,
  * the name and ⋮ share the first line and the rest stacks under the name.
@@ -57,6 +64,8 @@ export interface SiteRowSite {
   name: string;
   updated_at?: string;
   status?: SiteStatus;
+  /** The user's own grant, as `GET /api/sites` reports it. */
+  permission?: SiteGrant;
 }
 
 interface SiteRowProps {
@@ -83,6 +92,12 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
   const definition = resolveSiteStatus(site.status);
   const isAwaitingInstall = definition === siteStatuses["awaiting-install"];
   const sitePage = sitePageHref(site.id);
+  // Both controls sent the owner's `["edit","admin"]` for every member, and
+  // the server refuses a permission beyond the live grant (ADR 047): an
+  // `edit` member could never open a site they could see. A viewer is
+  // offered neither control: the server would refuse them too.
+  const editPermissions = editPermissionsForGrant(site.permission);
+  const canEdit = editPermissions.length > 0;
 
   const lastEdited = site.updated_at
     ? formatDistanceToNow(new Date(site.updated_at), { addSuffix: true })
@@ -94,7 +109,7 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
     setEditError(null);
     const message = await openEditSession({
       siteId: site.id,
-      permissions: OWNER_EDIT_PERMISSIONS,
+      permissions: editPermissions,
       durationHours: 2,
     });
     if (message) setEditError(message);
@@ -131,14 +146,16 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
             <Link href={sitePage}>Continue setup</Link>
           </Button>
         ) : (
-          <EditWebsiteButton
-            site={site}
-            userPermissions={OWNER_EDIT_PERMISSIONS}
-            onErrorChange={setEditError}
-            variant="outline"
-            size="sm"
-            aria-label={`Edit website: ${site.name}`}
-          />
+          canEdit && (
+            <EditWebsiteButton
+              site={site}
+              userPermissions={editPermissions}
+              onErrorChange={setEditError}
+              variant="outline"
+              size="sm"
+              aria-label={`Edit website: ${site.name}`}
+            />
+          )
         )}
       </div>
 
@@ -160,10 +177,15 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
               Open site page
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem className="gap-2" onSelect={() => void startEdit()}>
-            <PencilLine className="h-4 w-4" aria-hidden="true" />
-            Edit website
-          </DropdownMenuItem>
+          {canEdit && (
+            <DropdownMenuItem
+              className="gap-2"
+              onSelect={() => void startEdit()}
+            >
+              <PencilLine className="h-4 w-4" aria-hidden="true" />
+              Edit website
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem className="gap-2" onSelect={() => onShare(site.id)}>
             <Share2 className="h-4 w-4" aria-hidden="true" />
             Share preview link

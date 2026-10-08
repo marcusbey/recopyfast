@@ -31,8 +31,10 @@ import {
  * refusal on the floor.
  *
  * The request body is what this button has always sent: the caller's
- * permissions without `view`, for two hours. The Sites row, its menu and the
- * site header pass `["edit","admin"]`; the activation checklist passes
+ * permissions without `view`, for two hours. The Sites row and the site
+ * header pass the user's own grant (`editPermissionsForGrant`: an owner's
+ * `["edit","admin"]`, an editor's `["edit"]`), and render no button for a
+ * viewer (PR #72 review, D1); the activation checklist passes
  * `["edit","publish"]`.
  */
 

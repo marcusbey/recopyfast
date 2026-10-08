@@ -17,28 +17,32 @@ import { ShareLinkCard, type ShareLink } from "./ShareLinkCard";
 
 /**
  * A site's preview links, on People & access (s66c1 AC 6): `ShareLinkCard`
- * rows with copy and revoke over `usePreviewLinks`.
+ * rows with revoke over `usePreviewLinks`.
  *
  * They used to be listed only inside the Share dialog, under its form, so
  * seeing who could review a site meant starting to create another link.
+ *
+ * No copy here (PR #72 review, D2). `GET /api/staging/access` never sends a
+ * link's secret token, and must not: a list response is not where secrets
+ * go. The copy action this list inherited from the dialog filled the gap with
+ * the row id (`rcf_token=<id>`), so every link it copied was dead; the
+ * dialog's list on main had the same fallback. A link is copied when it is
+ * created, from the creation response (`ShareSiteDialog`), and this list
+ * says so. There is no owner-side "resend": the only resend endpoint
+ * (`POST /api/staging/verify`) is the reviewer's, keyed by the token itself.
  */
+
+const COPY_HINT =
+  "Copy a link when you create it: this list cannot show it again. Lost one? Revoke it and share a new one.";
 
 interface PreviewLinksListProps {
   siteId: string;
-  domain: string;
   /** Changes when a link was just created elsewhere: fetch the list again. */
   reloadKey?: number;
 }
 
-/** The URL a reviewer opens. Moved from the Share dialog unchanged. */
-function previewUrl(domain: string, link: ShareLink): string {
-  const siteUrl = domain.startsWith("http") ? domain : `https://${domain}`;
-  return `${siteUrl}?rcf_staging=1&rcf_token=${link.token || link.id}`;
-}
-
 export function PreviewLinksList({
   siteId,
-  domain,
   reloadKey = 0,
 }: PreviewLinksListProps) {
   const { data, loading, error, refetch, revoke } = usePreviewLinks(siteId);
@@ -51,14 +55,6 @@ export function PreviewLinksList({
     firstReload.current = reloadKey;
     void refetch();
   }, [reloadKey, refetch]);
-
-  const handleCopy = async (link: ShareLink) => {
-    try {
-      await navigator.clipboard.writeText(previewUrl(domain, link));
-    } catch (caught) {
-      console.error("Failed to copy a preview link:", caught);
-    }
-  };
 
   const handleRevoke = async (link: ShareLink) => {
     setRevokeError(null);
@@ -132,17 +128,16 @@ export function PreviewLinksList({
         )}
 
         {data && data.length > 0 && (
-          <ul className="space-y-2">
-            {data.map((link) => (
-              <li key={link.id}>
-                <ShareLinkCard
-                  link={link}
-                  onCopy={(target) => void handleCopy(target)}
-                  onRevoke={handleRevoke}
-                />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-2">
+              {data.map((link) => (
+                <li key={link.id}>
+                  <ShareLinkCard link={link} onRevoke={handleRevoke} />
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">{COPY_HINT}</p>
+          </>
         )}
       </CardContent>
     </Card>

@@ -49,6 +49,8 @@ jest.mock("@/components/dashboard/SiteRow", () => {
 global.fetch = jest.fn();
 
 describe("SitesPage", () => {
+  // The signed-in user owns each site: `permission` is their own grant, as
+  // `GET /api/sites` reports it (PR #72 review, D1).
   const mockSites = [
     {
       id: "site-1",
@@ -57,6 +59,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-01T00:00:00Z",
       updated_at: "2024-01-15T00:00:00Z",
       status: "live",
+      permission: "admin",
       stats: {
         edits_count: 10,
         views: 100,
@@ -70,6 +73,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-02T00:00:00Z",
       updated_at: "2024-01-16T00:00:00Z",
       status: "awaiting-install",
+      permission: "admin",
       stats: {
         edits_count: 5,
         views: 50,
@@ -83,6 +87,7 @@ describe("SitesPage", () => {
       created_at: "2024-01-03T00:00:00Z",
       updated_at: "2024-01-17T00:00:00Z",
       status: "stale",
+      permission: "admin",
       stats: {
         edits_count: 0,
         views: 0,

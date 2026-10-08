@@ -19,6 +19,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import {
   Check,
   CheckCircle2,
+  Copy,
   Loader2,
   Eye,
   Edit,
@@ -39,6 +40,13 @@ import { cn } from "@/lib/utils/cn";
  * by saying which one it is (the ONE-OFF REVIEW explainer), and it grants
  * View only unless the owner ticks more: a review link that could publish by
  * default was the same power as an editor under a temporary name.
+ *
+ * Its success state is the only place a link can be copied (PR #72 review,
+ * D2). The link carries the access's secret token, which only the creation
+ * response holds: `GET /api/staging/access` leaves it out on purpose, and the
+ * list's old copy action rebuilt the URL from the row id instead, a link that
+ * never opened anything. "Copy link" here copies the response's own URL, and
+ * the URL is dropped when the dialog next opens.
  */
 
 export const SHARE_PREVIEW_EXPLAINER =
@@ -91,6 +99,8 @@ export function ShareSiteDialog({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  // The created link's URL, from the creation response, for "Copy link".
+  const [createdUrl, setCreatedUrl] = useState<string | null>(null);
 
   // Form state.
   // Anonymous "Anyone with link" sharing was retired — a database trigger
@@ -116,6 +126,7 @@ export function ShareSiteDialog({
     if (open) {
       setError(null);
       setSuccess(null);
+      setCreatedUrl(null);
       setEmail("");
       setLabel("");
       setPermissions([...DEFAULT_GRANT]);
@@ -133,6 +144,7 @@ export function ShareSiteDialog({
       setCreating(true);
       setError(null);
       setSuccess(null);
+      setCreatedUrl(null);
 
       const res = await fetch("/api/staging/access", {
         method: "POST",
@@ -164,6 +176,7 @@ export function ShareSiteDialog({
             "provider configuration.",
         );
       } else if (data.stagingUrl) {
+        setCreatedUrl(data.stagingUrl);
         await navigator.clipboard.writeText(data.stagingUrl);
         setSuccess("Link created and copied to clipboard!");
       } else {
@@ -181,6 +194,18 @@ export function ShareSiteDialog({
       setError(err instanceof Error ? err.message : "Failed to create link");
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleCopyCreated = async () => {
+    if (!createdUrl) return;
+    try {
+      await navigator.clipboard.writeText(createdUrl);
+    } catch (caught) {
+      console.error("Failed to copy the new preview link:", caught);
+      setError(
+        "Could not copy the link. Allow clipboard access, then try again.",
+      );
     }
   };
 
@@ -314,6 +339,16 @@ export function ShareSiteDialog({
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               <AlertDescription className="space-y-1">
                 <p>{success}</p>
+                {createdUrl && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleCopyCreated()}
+                  >
+                    <Copy aria-hidden="true" />
+                    Copy link
+                  </Button>
+                )}
                 {manageHref && (
                   <Link
                     href={manageHref}

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import SiteInstallPage from "../page";
 import { SiteProvider } from "@/components/dashboard/site/SiteProvider";
 import {
@@ -205,6 +211,59 @@ describe("the Install page", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(newScript));
     fireEvent.click(screen.getByRole("button", { name: "Copy site token" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(newToken));
+  });
+
+  /**
+   * PR #72 review (D3). Another admin regenerates the snippet: the old token
+   * is revoked at once, and the next check of the list brings the site's
+   * record up to date, but the credentials the page shows never followed a
+   * same-site refresh, so this owner kept copying a dead snippet. A newer
+   * site record (its `updated_at` moved, as a regeneration moves it) now
+   * replaces them.
+   */
+  it("follows a regeneration made by another admin, on the next check", async () => {
+    jest.useFakeTimers();
+    try {
+      const site = buildSite({ status: "awaiting-install" });
+      const rotatedToken = "token-from-another-admins-regeneration";
+      const rotatedSnippet = `<script src="https://app.example/embed/recopyfast.js" data-site-token="${rotatedToken}"></script>`;
+      let hasRotatedElsewhere = false;
+      (global.fetch as jest.Mock).mockImplementation(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          sites: [
+            hasRotatedElsewhere
+              ? {
+                  ...site,
+                  updated_at: "2026-10-08T09:30:00Z",
+                  siteToken: rotatedToken,
+                  embedScript: rotatedSnippet,
+                }
+              : site,
+          ],
+        }),
+      }));
+
+      render(
+        <SiteProvider siteId={site.id}>
+          <SiteInstallPage />
+        </SiteProvider>,
+      );
+      expect(await screen.findByText(FIXTURE_SNIPPET)).toBeInTheDocument();
+
+      hasRotatedElsewhere = true;
+      await act(async () => {
+        jest.advanceTimersByTime(5_000);
+      });
+
+      expect(await screen.findByText(rotatedSnippet)).toBeInTheDocument();
+      expect(screen.getByText(rotatedToken)).toBeInTheDocument();
+      expect(screen.queryByText(FIXTURE_SNIPPET)).not.toBeInTheDocument();
+      expect(screen.queryByText(FIXTURE_TOKEN)).not.toBeInTheDocument();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("keeps a failed regeneration inside its dialog", async () => {

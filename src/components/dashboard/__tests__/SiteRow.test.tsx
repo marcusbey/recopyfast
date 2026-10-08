@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SiteRow, type SiteRowSite } from "../SiteRow";
 
@@ -26,6 +26,9 @@ describe("SiteRow", () => {
     name: "Example Site",
     updated_at: "2024-01-15T00:00:00Z",
     status: "live",
+    // The owner, unless a test says otherwise: their own grant, as
+    // `GET /api/sites` reports it (PR #72 review, D1).
+    permission: "admin",
   };
 
   const handlers = {
@@ -224,6 +227,107 @@ describe("SiteRow", () => {
       durationHours: 2,
     });
     open.mockRestore();
+  });
+
+  /**
+   * PR #72 review (D1). The row and its menu sent the owner's body,
+   * `["edit","admin"]`, for every member, and `createEditSession` refuses a
+   * permission beyond the caller's live grant (ADR 047): an `edit` member saw
+   * the site and could never open it. Each control now asks for the member's
+   * own grant, as `GET /api/sites` reports it.
+   */
+  describe("for a member who is not the owner", () => {
+    const popup = () => ({
+      opener: {},
+      location: { href: "" },
+      close: jest.fn(),
+    });
+
+    const respondWithEditLink = () => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          editUrl: "https://example.com/?rcf_edit_token=t",
+        }),
+      }) as unknown as typeof fetch;
+    };
+
+    const sentBody = () => {
+      const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(url).toBe("/api/edit-sessions/create");
+      return JSON.parse((init as RequestInit).body as string);
+    };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it("asks for an edit member's own grant from the row's button, and opens the site", async () => {
+      const tab = popup();
+      jest.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+      respondWithEditLink();
+      const user = userEvent.setup();
+      renderRow({ permission: "edit" });
+
+      await user.click(
+        screen.getByRole("button", { name: "Edit website: Example Site" }),
+      );
+
+      await waitFor(() =>
+        expect(tab.location.href).toBe("https://example.com/?rcf_edit_token=t"),
+      );
+      expect(sentBody()).toEqual({
+        siteId: "test-site-id",
+        permissions: ["edit"],
+        durationHours: 2,
+      });
+    });
+
+    it("asks for an edit member's own grant from the menu, and opens the site", async () => {
+      const tab = popup();
+      jest.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+      respondWithEditLink();
+      const user = userEvent.setup();
+      renderRow({ permission: "edit" });
+
+      await user.click(
+        screen.getByRole("button", { name: "Open menu for Example Site" }),
+      );
+      await user.click(
+        await screen.findByRole("menuitem", { name: "Edit website" }),
+      );
+
+      await waitFor(() =>
+        expect(tab.location.href).toBe("https://example.com/?rcf_edit_token=t"),
+      );
+      expect(sentBody()).toEqual({
+        siteId: "test-site-id",
+        permissions: ["edit"],
+        durationHours: 2,
+      });
+    });
+
+    // A viewer cannot start a session: the server would refuse one, so
+    // neither the row nor its menu offers it.
+    it("offers a view-only member no Edit website, in the row or its menu", async () => {
+      const open = jest.spyOn(window, "open");
+      global.fetch = jest.fn() as unknown as typeof fetch;
+      const user = userEvent.setup();
+      renderRow({ permission: "view" });
+
+      expect(
+        screen.queryByRole("button", { name: /edit website/i }),
+      ).not.toBeInTheDocument();
+      await user.click(
+        screen.getByRole("button", { name: "Open menu for Example Site" }),
+      );
+      const menu = await screen.findByRole("menu");
+      expect(
+        within(menu)
+          .getAllByRole("menuitem")
+          .map((item) => item.textContent),
+      ).toEqual(["Open site page", "Share preview link", "Delete site"]);
+      expect(open).not.toHaveBeenCalled();
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
   });
 
   // Pre-PR fix: the button drew its refusal inside the row's action cell,

@@ -8,7 +8,7 @@ import type { PageShellProps } from "@/components/ui/page-shell";
 import { StatusBadge, resolveSiteStatus } from "@/components/ui/status-badge";
 import EditWebsiteButton from "@/components/dashboard/EditWebsiteButton";
 import { VersionHistoryPanel } from "@/components/dashboard/VersionHistoryPanel";
-import { OWNER_EDIT_PERMISSIONS } from "@/hooks/useEditSession";
+import { editPermissionsForGrant } from "@/hooks/useEditSession";
 import { useSiteContext } from "./SiteProvider";
 import { SiteSubnav } from "./SiteSubnav";
 
@@ -27,7 +27,8 @@ function externalSiteUrl(domain: string): string {
  * - `title`: the site's name, the page's only h1;
  * - `meta`: its status;
  * - `description`: the domain, out to the live site;
- * - `actions`: "Edit website", and "Version history", which opens the
+ * - `actions`: "Edit website", asking for the user's own grant and absent
+ *   for a viewer (PR #72 review, D1), and "Version history", which opens the
  *   hand-rolled side sheet (design-system gap 12, still open). The sheet is
  *   `position: fixed` and renders nothing while closed, so it sits with the
  *   button that opens it;
@@ -52,6 +53,10 @@ export function useSitePageShell(): SitePageShell {
   const { site, credentials } = useSiteContext();
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // The user's own grant, never the owner's set for everyone: an `edit`
+  // member who asked for `admin` was refused on every click (PR #72 review,
+  // D1). A viewer gets `[]` and no button, since the server would refuse it.
+  const editPermissions = editPermissionsForGrant(site.permission);
 
   const shell: Omit<PageShellProps, "children"> = {
     title: site.name,
@@ -70,11 +75,13 @@ export function useSitePageShell(): SitePageShell {
     ),
     actions: (
       <>
-        <EditWebsiteButton
-          site={site}
-          userPermissions={OWNER_EDIT_PERMISSIONS}
-          onErrorChange={setEditError}
-        />
+        {editPermissions.length > 0 && (
+          <EditWebsiteButton
+            site={site}
+            userPermissions={editPermissions}
+            onErrorChange={setEditError}
+          />
+        )}
         <Button variant="outline" onClick={() => setIsHistoryOpen(true)}>
           <History aria-hidden="true" />
           Version history

@@ -47,7 +47,7 @@ const fetchMock = jest.fn();
 const writeText = jest.fn();
 
 function renderList() {
-  return render(<PreviewLinksList siteId={SITE_ID} domain="acme.example" />);
+  return render(<PreviewLinksList siteId={SITE_ID} />);
 }
 
 describe("PreviewLinksList", () => {
@@ -185,22 +185,42 @@ describe("PreviewLinksList", () => {
     expect(screen.getByText("Homepage review")).toBeInTheDocument();
   });
 
-  it("copies the link's preview URL", async () => {
+  /**
+   * PR #72 review (D2). `GET /api/staging/access` leaves each link's secret
+   * token out, deliberately: a list response is not where secrets go. The
+   * copy action fell back to the row id (`rcf_token=<id>`), so every link
+   * copied from this list opened a preview that refused it. The old Share
+   * dialog's list had the same fallback on main. A link is copied when it is
+   * created, from the creation response; the list says so and offers no
+   * copy of its own.
+   */
+  it("offers no copy that would build a link from a row id, and says where to copy one", async () => {
     const user = userEvent.setup();
+    const clipboardWrite = jest.spyOn(navigator.clipboard, "writeText");
     fetchMock.mockResolvedValueOnce(
-      jsonResponse({
-        success: true,
-        accessList: [{ ...pending, token: "preview-token" }],
-      }),
+      jsonResponse({ success: true, accessList: [pending, verified] }),
     );
-    // userEvent installs its own clipboard; read through it.
+
     renderList();
     await screen.findByText("Homepage review");
 
-    await user.click(screen.getByRole("button", { name: "Copy share link" }));
-
-    expect(await navigator.clipboard.readText()).toBe(
-      "https://acme.example?rcf_staging=1&rcf_token=preview-token",
-    );
+    expect(
+      screen.queryByRole("button", { name: /copy/i }),
+    ).not.toBeInTheDocument();
+    for (const button of within(screen.getByRole("list")).getAllByRole(
+      "button",
+    )) {
+      if (button.getAttribute("aria-label") === "Revoke this share") continue;
+      await user.click(button);
+    }
+    for (const [written] of clipboardWrite.mock.calls) {
+      expect(String(written)).not.toContain(pending.id);
+      expect(String(written)).not.toContain(verified.id);
+    }
+    expect(
+      screen.getByText(
+        "Copy a link when you create it: this list cannot show it again. Lost one? Revoke it and share a new one.",
+      ),
+    ).toBeInTheDocument();
   });
 });

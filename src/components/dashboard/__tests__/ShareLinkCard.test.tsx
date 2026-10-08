@@ -28,9 +28,7 @@ const link: ShareLink = {
 };
 
 function renderCard() {
-  return render(
-    <ShareLinkCard link={link} onCopy={jest.fn()} onRevoke={jest.fn()} />,
-  );
+  return render(<ShareLinkCard link={link} onRevoke={jest.fn()} />);
 }
 
 describe("ShareLinkCard", () => {
@@ -57,11 +55,13 @@ describe("ShareLinkCard", () => {
     expect(tile).toHaveClass("rounded-container");
   });
 
-  it("keeps the Copy and Revoke names", () => {
+  // PR #72 review (D2): a listed link has no secret token to copy — the
+  // list API omits it — and the old Copy rebuilt the URL from the row id.
+  it("keeps the Revoke name, and offers no Copy", () => {
     renderCard();
     expect(
-      screen.getByRole("button", { name: "Copy share link" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /copy/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Revoke this share" }),
     ).toBeInTheDocument();

@@ -491,6 +491,147 @@ describe("SiteProvider credentials", () => {
     expect(screen.queryByText(admin.siteToken!)).not.toBeInTheDocument();
   });
 
+  /**
+   * PR #72 review (D3) — the rule that lets a rotation made elsewhere reach
+   * this page, and the two things it must not do.
+   *
+   * `GET /api/sites` mints a fresh token on every request (`buildSiteToken`
+   * stamps the time), so a changed token string means nothing: every check
+   * would replace the snippet the owner is copying. What moves when somebody
+   * regenerates is the site row (`sites.api_key`, so `updated_at`). A record
+   * replaces the shown credentials only when it is newer than the one they
+   * were taken from, no regeneration of ours is pending, and the request that
+   * fetched it started after our last regeneration landed.
+   */
+  it("keeps the shown snippet when a check only re-mints the token for an unchanged site", async () => {
+    let listCalls = 0;
+    respond({
+      sites: () => {
+        listCalls += 1;
+        return listCalls === 1
+          ? [admin]
+          : [
+              {
+                ...admin,
+                siteToken: `token-1-reminted-${listCalls}`,
+                embedScript: `<script data-site-token="token-1-reminted-${listCalls}"></script>`,
+              },
+            ];
+      },
+    });
+
+    renderProbe();
+    await screen.findByText(admin.siteToken!);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh site" }));
+    });
+
+    expect(listCalls).toBe(2);
+    expect(screen.getByText(admin.siteToken!)).toBeInTheDocument();
+    expect(screen.queryByText(/token-1-reminted/)).not.toBeInTheDocument();
+  });
+
+  it("keeps our regeneration through a newer record fetched before it landed, and through the answer after it", async () => {
+    let resolveRegeneration!: (response: Response) => void;
+    const pendingRegeneration = new Promise<Response>((resolve) => {
+      resolveRegeneration = resolve;
+    });
+    let resolveRefetchAfterRotation!: () => void;
+    const refetchAfterRotation = new Promise<void>((resolve) => {
+      resolveRefetchAfterRotation = resolve;
+    });
+    // The row moved for another reason (the embed's report, a rename) while
+    // our regeneration was pending: newer than the shown credentials, and
+    // still signed with the key our regeneration revokes.
+    const preRotation = {
+      ...admin,
+      updated_at: "2024-01-15T00:00:05Z",
+      siteToken: "pre-rotation-token",
+      embedScript: '<script data-site-token="pre-rotation-token"></script>',
+    };
+    // The answer to the refetch our regeneration starts: the row as our
+    // regeneration left it, with a token the list minted itself.
+    const postRotation = {
+      ...admin,
+      updated_at: "2024-01-15T00:00:09Z",
+      siteToken: "same-key-reminted-token",
+      embedScript:
+        '<script data-site-token="same-key-reminted-token"></script>',
+    };
+    let phase: "before" | "pending" | "after" = "before";
+    (global.fetch as jest.Mock).mockImplementation(
+      async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/regenerate-snippet")) return pendingRegeneration;
+        if (phase === "after") await refetchAfterRotation;
+        const record =
+          phase === "before"
+            ? admin
+            : phase === "pending"
+              ? preRotation
+              : postRotation;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sites: [record] }),
+        } as Response;
+      },
+    );
+
+    const log: CommittedCredentials[] = [];
+    render(
+      <SiteProvider siteId={admin.id}>
+        <CommitLog log={log} />
+        <CredentialProbe />
+      </SiteProvider>,
+    );
+    await screen.findByText(admin.siteToken!);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+
+    phase = "pending";
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Refresh site" }));
+    });
+    // Nothing replaces the snippet while our regeneration is pending.
+    expect(screen.getByText(admin.siteToken!)).toBeInTheDocument();
+    expect(screen.queryByText("pre-rotation-token")).not.toBeInTheDocument();
+
+    phase = "after";
+    await act(async () => {
+      resolveRegeneration({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          siteToken: "rotated-token",
+          embedScript: '<script data-site-token="rotated-token"></script>',
+        }),
+      } as Response);
+      await pendingRegeneration;
+    });
+    expect(await screen.findByText("rotated-token")).toBeInTheDocument();
+    expect(screen.queryByText("pre-rotation-token")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveRefetchAfterRotation();
+      await refetchAfterRotation;
+    });
+    // The post-rotation record has reached the provider…
+    await waitFor(() =>
+      expect(
+        log.some((entry) => entry.recordToken === "same-key-reminted-token"),
+      ).toBe(true),
+    );
+    // …and the snippet we just showed is still the one shown.
+    expect(screen.getByText("rotated-token")).toBeInTheDocument();
+    expect(screen.queryByText("pre-rotation-token")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("same-key-reminted-token"),
+    ).not.toBeInTheDocument();
+  });
+
   // Renamed in the s66c1 review (m2): its assertions run after the effects
   // have flushed, so it cannot tell "in the same render" from "one render
   // later". The commit-level proof is "clears the credentials in the very

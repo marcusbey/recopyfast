@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { useEditSession } from "../useEditSession";
+import { editPermissionsForGrant, useEditSession } from "../useEditSession";
 
 /**
  * s66c1 AC 4 — one way to start an edit session, extracted from the activation
@@ -160,5 +160,23 @@ describe("useEditSession", () => {
     expect(message).toBe("Allow pop-ups for ReCopyFast, then try again.");
     expect(global.fetch).not.toHaveBeenCalled();
     expect(result.current.isOpening).toBe(false);
+  });
+});
+
+/**
+ * PR #72 review (D1). Every site control asked for the owner's session, so an
+ * `edit` member was refused by `createEditSession` (ADR 047) on a site they
+ * can see. A control now asks for its user's own grant, read from
+ * `GET /api/sites`, and nothing above it; the server still decides.
+ */
+describe("editPermissionsForGrant", () => {
+  it.each([
+    ["admin", ["edit", "admin"]],
+    ["publish", ["edit", "publish"]],
+    ["edit", ["edit"]],
+    ["view", []],
+    [undefined, []],
+  ] as const)("asks a member holding %s for %j", (grant, expected) => {
+    expect(editPermissionsForGrant(grant)).toEqual(expected);
   });
 });
