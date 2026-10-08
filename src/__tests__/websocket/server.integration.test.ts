@@ -23,9 +23,11 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import type { Socket } from "socket.io-client";
 
+import { hashUserAgent } from "@/lib/auth/editor-crypto";
 import { createRealtimeServer } from "../../../server/index.js";
 import {
   RecordingSupabase,
+  TEST_USER_AGENT,
   buildSiteToken,
   memoryStore,
   openSocket,
@@ -70,6 +72,20 @@ const NO_DOMAIN_SITE_ID = "44444444-4444-4444-8444-444444444444";
  * broadcast rather than as the clock skew it was.
  */
 const SITE_TOKEN = buildSiteToken(SITE_ID, API_KEY);
+
+/**
+ * What `verifyEmail` writes beside `email_verified` since the forwarded-invite
+ * fix: the verifying browser's User-Agent hash and the moment it verified. A
+ * verified row without them is refused by HTTP (`checkStagingDeviceBinding`)
+ * and, since s68c, by the socket too — so every staging fixture meant to be
+ * admitted carries the binding of the browser the harness presents.
+ */
+function boundToTestBrowser(): Row {
+  return {
+    verified_user_agent_hash: hashUserAgent(TEST_USER_AGENT),
+    verified_at: new Date().toISOString(),
+  };
+}
 
 function seedSites(): Row[] {
   return [
@@ -605,10 +621,39 @@ describe("rate limiting", () => {
       rateLimit: { maxMessagesPerSocket: 1 },
     });
 
+    // s68c: the dashboard room takes a live editor grant, so the listener
+    // connects as an editor. A plain viewer used to be enough — that was the
+    // s07a leak, closed in the "dashboard room requires a live editor grant"
+    // block below. The sender stays a plain viewer: its budget is the subject.
+    db.rows("staging_access").push({
+      id: "access-relay-listener",
+      token: "staging-token-relay-listener",
+      site_id: SITE_ID,
+      is_active: true,
+      revoked_at: null,
+      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      email_verified: true,
+      email: "relay-listener@example.com",
+      ...boundToTestBrowser(),
+      permissions: ["view"],
+    });
     const sender = connect(port);
-    const listener = connect(port);
+    const listenerSocket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: "staging-token-relay-listener",
+      },
+    });
+    open.push(listenerSocket);
+    const listener = track(listenerSocket);
     await waitFor(
-      () => roomSize(server, `site:${SITE_ID}`) === 2,
+      () =>
+        roomSize(server, `site:${SITE_ID}`) === 1 &&
+        roomSize(server, `site:${SITE_ID}:staging`) === 1,
       "both sockets to be admitted",
     );
 
@@ -682,6 +727,7 @@ describe("the socket is broadcast-only", () => {
           expires_at: futureIso(),
           email_verified: true,
           email: EDITOR_EMAIL,
+          ...boundToTestBrowser(),
           // `admin`, deliberately the most permissive grant there is: the point
           // of these cases is that the write does not happen, and a fixture
           // that fails the permission check first would assert nothing about
@@ -761,7 +807,8 @@ describe("the socket is broadcast-only", () => {
     return socket;
   }
 
-  async function connectDashboard(): Promise<Socket> {
+  /** A plain visitor: the public site token only, so the live room only. */
+  async function connectViewer(): Promise<Socket> {
     const expected = roomSize(server, `site:${SITE_ID}`) + 1;
     const socket = openSocket({
       port,
@@ -772,8 +819,20 @@ describe("the socket is broadcast-only", () => {
     track(socket);
     await waitFor(
       () => roomSize(server, `site:${SITE_ID}`) >= expected,
-      "the dashboard socket to join the site room",
+      "the viewer socket to join the site room",
     );
+    return socket;
+  }
+
+  /**
+   * s68c: the dashboard room takes a live editor grant, so a dashboard
+   * listener connects as an editor (and therefore sits in the staging room,
+   * not the live one). It used to be a plain viewer — which is exactly the
+   * s07a leak the "dashboard room requires a live editor grant" block closes.
+   * A case that needs a LIVE-room listener uses `connectViewer` instead.
+   */
+  async function connectDashboard(): Promise<Socket> {
+    const socket = await connectEditor();
     socket.emit("join-dashboard", { siteId: SITE_ID });
     await waitFor(
       () => roomSize(server, `dashboard:${SITE_ID}`) > 0,
@@ -849,11 +908,11 @@ describe("the socket is broadcast-only", () => {
   it("still fans a persisted content update out to the staging room only", async () => {
     const editor = await connectEditor();
     const listener = await connectEditor();
-    const dashboard = await connectDashboard();
+    const viewer = await connectViewer();
     const stagingReceived: unknown[] = [];
     const liveReceived: unknown[] = [];
     listener.on("content-update", (payload) => stagingReceived.push(payload));
-    dashboard.on("content-update", (payload) => liveReceived.push(payload));
+    viewer.on("content-update", (payload) => liveReceived.push(payload));
 
     editor.emit("content-update", {
       elementId: "headline",
@@ -1025,6 +1084,161 @@ describe("the socket is broadcast-only", () => {
 });
 
 /**
+ * s68c — `dashboard:{id}` carries staged copy, so joining it takes a live
+ * editor grant, not the public site token.
+ *
+ * `join-dashboard` checked only that the requested room matched the
+ * handshake's site id, and every persisted `content-update` is fanned out to
+ * that room as `content-updated` with the staged content. The site token ships
+ * as a plain attribute in the customer's page markup, so any visitor — or any
+ * script with View Source — could watch unpublished drafts. The s07a review
+ * proved it ("a plain viewer received UNPUBLISHED SECRET DRAFT",
+ * docs/reviews/s07a-realtime-service-hardening.md, MAJOR 2); this is that proof,
+ * inverted.
+ */
+describe("the dashboard room requires a live editor grant", () => {
+  const STAGING_TOKEN = "staging-token-dashboard";
+  const EDITOR_EMAIL = "dashboard-editor@example.com";
+
+  let db: RecordingSupabase;
+  let server: ReturnType<typeof createRealtimeServer>;
+  let port: number;
+  const open: Socket[] = [];
+
+  beforeEach(async () => {
+    db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "access-dashboard",
+          token: STAGING_TOKEN,
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          email_verified: true,
+          email: EDITOR_EMAIL,
+          ...boundToTestBrowser(),
+          permissions: ["edit"],
+        },
+      ],
+    });
+    server = createRealtimeServer({ port: 0, supabase: db });
+    port = await server.listen();
+  });
+
+  afterEach(async () => {
+    while (open.length > 0) {
+      open.pop()?.close();
+    }
+    await server.close();
+  });
+
+  async function connectEditor() {
+    const expected = roomSize(server, `site:${SITE_ID}:staging`) + 1;
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    const tracked = track(socket);
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) >= expected,
+      "the editor to join the staging room",
+    );
+    return tracked;
+  }
+
+  async function connectViewer() {
+    const expected = roomSize(server, `site:${SITE_ID}`) + 1;
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: { siteId: SITE_ID, token: SITE_TOKEN },
+    });
+    open.push(socket);
+    const tracked = track(socket);
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}`) >= expected,
+      "the viewer to join the live room",
+    );
+    return tracked;
+  }
+
+  function saveAcknowledged(editor: Socket, content: string) {
+    return new Promise<unknown>((resolve) => {
+      editor.emit(
+        "content-update",
+        { elementId: "headline", content, persisted: true, token: SITE_TOKEN },
+        resolve,
+      );
+    });
+  }
+
+  it("a plain viewer's join-dashboard is refused and it receives no content-updated", async () => {
+    const editor = await connectEditor();
+    const viewer = await connectViewer();
+    const leaked: unknown[] = [];
+    viewer.socket.on("content-updated", (payload) => leaked.push(payload));
+
+    viewer.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => viewer.authErrors.length === 1,
+      "the viewer's join-dashboard to be refused",
+    );
+    expect(viewer.authErrors[0].error).toMatch(/editor access/i);
+    expect(roomSize(server, `dashboard:${SITE_ID}`)).toBe(0);
+
+    expect(
+      await saveAcknowledged(editor.socket, "UNPUBLISHED SECRET DRAFT"),
+    ).toEqual({ ok: true });
+
+    // An ordering barrier on the viewer's OWN connection: the broadcast above
+    // was written before the editor's ack, so anything it sent the viewer is
+    // delivered before this second refusal.
+    viewer.socket.emit("join-dashboard", { siteId: SITE_ID });
+    await waitFor(
+      () => viewer.authErrors.length === 2,
+      "the viewer's second join-dashboard to be refused",
+    );
+
+    expect(leaked).toEqual([]);
+    // Refused, not thrown out: the viewer keeps the live room it is entitled to.
+    expect(viewer.socket.connected).toBe(true);
+  });
+
+  it("refuses an editor whose grant was revoked since the handshake", async () => {
+    // The room is gated on the grant as it stands NOW, not on the flag the
+    // handshake left on the socket — the M5 lesson applied to this handler.
+    const editor = await connectEditor();
+
+    db.rows("staging_access")[0].revoked_at = new Date().toISOString();
+    editor.socket.emit("join-dashboard", { siteId: SITE_ID });
+
+    expect(await editor.refused()).toMatch(/revoked|expired|access/i);
+    expect(roomSize(server, `dashboard:${SITE_ID}`)).toBe(0);
+  });
+
+  it("admits a live editor to the dashboard room (control)", async () => {
+    const editor = await connectEditor();
+
+    editor.socket.emit("join-dashboard", { siteId: SITE_ID });
+
+    await waitFor(
+      () => roomSize(server, `dashboard:${SITE_ID}`) === 1,
+      "the editor to join the dashboard room",
+    );
+    expect(editor.authErrors).toEqual([]);
+  });
+});
+
+/**
  * M5 — revocation has to reach a live socket.
  *
  * The grant was resolved once, at the handshake, and cached on `socket.data`;
@@ -1070,6 +1284,7 @@ describe("revocation reaches a live socket", () => {
           expires_at: futureIso(),
           email_verified: true,
           email: EDITOR_EMAIL,
+          ...boundToTestBrowser(),
           permissions: ["edit"],
         },
       ],
@@ -1081,9 +1296,15 @@ describe("revocation reaches a live socket", () => {
           user_id: "user-1",
           is_active: true,
           revoked_at: null,
+          // ADR 047: a session is dated from issue and bounded by its holder's
+          // live grant, so the fixture names both — as a real session row does.
+          created_at: new Date().toISOString(),
           expires_at: futureIso(),
           permissions: ["edit"],
         },
+      ],
+      site_permissions: [
+        { site_id: SITE_ID, user_id: "user-1", permission: "edit" },
       ],
       site_editors: [
         {
@@ -1239,6 +1460,57 @@ describe("revocation reaches a live socket", () => {
     expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
   });
 
+  /**
+   * s07a review MAJOR 1, closed in s68c. `staging_access.email` is stored as
+   * the invite form typed it; `site_editors.email` is always
+   * `trim().toLowerCase()` (editor-directory.ts `normalizeEmail`). The lookup
+   * compared them byte for byte, so removing `john@example.com` never reached
+   * a socket opened with `John@Example.com` — and this check is the only place
+   * "remove this editor" reaches a staging token on the socket.
+   */
+  function invitedAsMixedCase() {
+    db.rows("staging_access")[0].email = "John@Example.com";
+    db.rows("site_editors")[0].email = "john@example.com";
+  }
+
+  it("refuses a mixed-case invitee at the handshake once their directory row is revoked", async () => {
+    invitedAsMixedCase();
+    db.rows("site_editors")[0].revoked_at = new Date().toISOString();
+
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    const handshake = track(socket);
+
+    expect(await handshake.refused()).toMatch(/revoked/i);
+    expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
+  });
+
+  it("drops an open mixed-case invitee's socket within one sweep of their removal", async () => {
+    invitedAsMixedCase();
+    const editor = await connectEditor();
+
+    db.rows("site_editors")[0].revoked_at = new Date().toISOString();
+
+    await waitFor(
+      () => editor.socket.disconnected,
+      "the sweep to drop the removed mixed-case editor",
+    );
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
+      "the server to remove the dropped socket from the staging room",
+    );
+    expect(editor.authErrors[0]?.error).toMatch(/revoked/i);
+  });
+
   it("applies the same rule to an edit-session grant", async () => {
     const editor = await connectEditor({ editToken: EDIT_TOKEN });
 
@@ -1247,6 +1519,25 @@ describe("revocation reaches a live socket", () => {
     await waitFor(
       () => editor.socket.disconnected,
       "the sweep to drop the revoked edit session",
+    );
+  });
+
+  it("drops an edit-session socket whose holder was removed", async () => {
+    // ADR 047 on the socket (s68c). Removing a member deletes their
+    // `site_permissions` row; the session row itself is untouched here, as it
+    // was by DELETE /api/sites/[siteId]/share before s68a. The live grant is
+    // what decides, so the sweep drops the socket on the missing row alone.
+    const editor = await connectEditor({ editToken: EDIT_TOKEN });
+
+    db.tables.site_permissions = [];
+
+    await waitFor(
+      () => editor.socket.disconnected,
+      "the sweep to drop the removed holder's edit session",
+    );
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
+      "the server to remove the dropped socket from the staging room",
     );
   });
 
@@ -1270,5 +1561,131 @@ describe("revocation reaches a live socket", () => {
 
     expect(socket.connected).toBe(true);
     expect(roomSize(server, `site:${SITE_ID}`)).toBe(1);
+  });
+});
+
+/**
+ * s68c (M7) — a verified staging link is honoured only for the browser that
+ * verified it, and only for 12 h, on the socket exactly as over HTTP.
+ *
+ * `validateStagingAccess` has answered "re-verify" to a forwarded link since
+ * the forwarded-invite fix, but `resolveStagingGrant` checked only
+ * `email_verified` — a permanent flag on a row keyed by a token that travels in
+ * a URL. Pasting the link into a second browser was refused by every HTTP route
+ * and admitted to `site:{id}:staging`, where it received every editor's
+ * unpublished copy. The sweep half matters as much as the handshake half: a
+ * socket opened at hour 11 must not outlive the TTL just because it is quiet.
+ */
+describe("staging admission is device-bound", () => {
+  const STAGING_TOKEN = "staging-token-device-bound";
+  const EDITOR_EMAIL = "bound@example.com";
+  const VERIFYING_BROWSER = "Mozilla/5.0 (Macintosh) Chrome/120";
+  const OTHER_BROWSER = "Mozilla/5.0 (Windows NT 10.0) Firefox/121";
+  const HOUR_MS = 60 * 60 * 1000;
+  const SWEEP_MS = 50;
+
+  let db: RecordingSupabase;
+  let server: ReturnType<typeof createRealtimeServer>;
+  let port: number;
+  const open: Socket[] = [];
+
+  function hoursAgoIso(hours: number): string {
+    return new Date(Date.now() - hours * HOUR_MS).toISOString();
+  }
+
+  beforeEach(async () => {
+    db = new RecordingSupabase({
+      sites: seedSites(),
+      staging_access: [
+        {
+          id: "access-bound",
+          token: STAGING_TOKEN,
+          site_id: SITE_ID,
+          is_active: true,
+          revoked_at: null,
+          expires_at: new Date(Date.now() + 24 * HOUR_MS).toISOString(),
+          email_verified: true,
+          email: EDITOR_EMAIL,
+          verified_user_agent_hash: hashUserAgent(VERIFYING_BROWSER),
+          verified_at: hoursAgoIso(1),
+          permissions: ["edit"],
+        },
+      ],
+    });
+    server = createRealtimeServer({
+      port: 0,
+      supabase: db,
+      revalidationIntervalMs: SWEEP_MS,
+    });
+    port = await server.listen();
+  });
+
+  afterEach(async () => {
+    while (open.length > 0) {
+      open.pop()?.close();
+    }
+    await server.close();
+  });
+
+  function connect(userAgent: string) {
+    const socket = openSocket({
+      port,
+      origin: ORIGIN,
+      userAgent,
+      query: {
+        siteId: SITE_ID,
+        token: SITE_TOKEN,
+        stagingMode: "true",
+        stagingToken: STAGING_TOKEN,
+      },
+    });
+    open.push(socket);
+    return track(socket);
+  }
+
+  it("refuses a verified link presented by another browser", async () => {
+    const handshake = connect(OTHER_BROWSER);
+
+    expect(await handshake.refused()).toMatch(/verification required/i);
+    expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
+  });
+
+  it("admits the browser that verified (control)", async () => {
+    const editor = connect(VERIFYING_BROWSER);
+
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 1,
+      "the verifying browser to join the staging room",
+    );
+    expect(editor.authErrors).toEqual([]);
+  });
+
+  it("refuses a verification 13 h old, even from the browser that made it", async () => {
+    db.rows("staging_access")[0].verified_at = hoursAgoIso(13);
+
+    const handshake = connect(VERIFYING_BROWSER);
+
+    expect(await handshake.refused()).toMatch(/verification required/i);
+    expect(roomSize(server, `site:${SITE_ID}:staging`)).toBe(0);
+  });
+
+  it("drops an admitted silent socket within one sweep once its verification passes the TTL", async () => {
+    const editor = connect(VERIFYING_BROWSER);
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 1,
+      "the verifying browser to join the staging room",
+    );
+
+    db.rows("staging_access")[0].verified_at = hoursAgoIso(13);
+
+    await waitFor(
+      () => editor.socket.disconnected,
+      "the sweep to drop the socket whose verification went stale",
+    );
+    await waitFor(
+      () => roomSize(server, `site:${SITE_ID}:staging`) === 0,
+      "the server to remove the dropped socket from the staging room",
+    );
+    expect(editor.authErrors[0]?.error).toMatch(/verification required/i);
   });
 });

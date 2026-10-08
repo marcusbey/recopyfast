@@ -234,15 +234,29 @@ export function buildSiteToken(
   return `${payload}.${signature}`;
 }
 
+/**
+ * The User-Agent every test socket presents unless a case names another.
+ *
+ * A browser always sends one, on the WebSocket upgrade exactly as on `fetch`,
+ * and since s68c the server binds a verified staging token to it the way HTTP
+ * does (`checkStagingDeviceBinding`). A staging fixture that should be admitted
+ * records `hashUserAgent(TEST_USER_AGENT)` as its verified device; a case about
+ * the binding itself passes `userAgent` explicitly.
+ */
+export const TEST_USER_AGENT = "RecopyfastIntegration/1.0 (jest)";
+
 export interface HandshakeOptions {
   port: number;
   query: Record<string, string>;
   origin?: string | null;
   referer?: string | null;
+  userAgent?: string;
 }
 
 export function openSocket(options: HandshakeOptions): Socket {
-  const extraHeaders: Record<string, string> = {};
+  const extraHeaders: Record<string, string> = {
+    "User-Agent": options.userAgent ?? TEST_USER_AGENT,
+  };
   if (options.origin) extraHeaders.Origin = options.origin;
   if (options.referer) extraHeaders.Referer = options.referer;
 

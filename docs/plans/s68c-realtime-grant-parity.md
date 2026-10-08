@@ -19,7 +19,7 @@ a revoked `site_editors` row.
 
 ## Tasks (ordered)
 
-1. [ ] **Device binding parity (RED → GREEN).** `src/__tests__/websocket/auth-parity.test.ts`: new
+1. [x] **Device binding parity (RED → GREEN).** `src/__tests__/websocket/auth-parity.test.ts`: new
    rows feeding identical inputs to `checkStagingDeviceBinding` (`src/lib/auth/staging-device.ts`)
    and the server copy — unbound (no hash / no `verified_at`), stale (12 h + 1 s), mismatched UA,
    matching UA within TTL — and to both `hashUserAgent`s (incl. `null` UA). Integration in
@@ -31,7 +31,7 @@ a revoked `site_editors` row.
    naming the parity suite) and `resolveStagingGrant` takes `{ userAgent }`; `server/index.js`
    stores `socket.handshake.headers['user-agent']` on `socket.data` at the handshake (`:285-295`)
    and passes it from `revalidateSocket` (`:158-180`).
-2. [ ] **Dashboard room requires a live grant.** RED: "a plain viewer's `join-dashboard` is refused
+2. [x] **Dashboard room requires a live grant.** RED: "a plain viewer's `join-dashboard` is refused
    and it receives no `content-updated`" — viewer joins, an editor emits a persisted update
    containing `UNPUBLISHED SECRET DRAFT`, viewer receives nothing and gets `auth-error` (the s07a
    proof, inverted). GREEN at `server/index.js:513-532`: require `socket.data.isStaging` and a
@@ -39,18 +39,18 @@ a revoked `site_editors` row.
    Update `connectDashboard` (`server.integration.test.ts:764-781`) and the rate-limit relay test
    (`:602-640`) to connect with an editor credential — declared in the PR as a test change forced by
    the behaviour change.
-3. [ ] **Case-insensitive revocation.** RED in the `revocation reaches a live socket` block
+3. [x] **Case-insensitive revocation.** RED in the `revocation reaches a live socket` block
    (`:1045+`): staging row e-mail `John@Example.com`, `site_editors` row `john@example.com` stamped
    `revoked_at` → refused at the handshake **and** an already-open socket is dropped within one
    sweep. GREEN: `server/auth.js:195-206` compares `access.email.trim().toLowerCase()`.
-4. [ ] **Edit-session authority parity (ADR 047).** RED: parity rows for the intersection
+4. [x] **Edit-session authority parity (ADR 047).** RED: parity rows for the intersection
    (`{admin}` row + live `edit` → `[view, edit]`; no live row → refused; NULL `user_id` → refused;
    `created_at` 25 h ago → refused; `created_at` more than 5 min in the future → refused;
    `created_at` NULL → refused) against s68a's HTTP validator; integration: an edit-session
    socket whose holder's `site_permissions` row is deleted is dropped within one sweep. GREEN in
    `resolveEditSessionGrant` (`server/auth.js:219-241`): one `site_permissions` read by `site_id` +
    `user_id`, intersection with `normalizePermissions`, 24 h lifetime from `created_at`.
-5. [ ] **HTTP honours editor revocation for staging tokens.** RED: new
+5. [x] **HTTP honours editor revocation for staging tokens.** RED: new
    `src/lib/auth/__tests__/staging-access.revoked-editor.test.ts` — a verified, device-bound staging
    token whose e-mail (any case) has a `site_editors` row for the site with `revoked_at` set →
    `validateStagingAccess` returns `{ valid: false }` with the existing "Invalid or expired staging

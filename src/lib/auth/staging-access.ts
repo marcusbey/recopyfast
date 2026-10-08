@@ -221,6 +221,20 @@ export class StagingAccessManager {
         };
       }
 
+      // A removed editor's invite is dead, verified or not — see
+      // isEditorRevoked. Same message as an unknown token: the response is no
+      // oracle for "you were removed" versus "wrong token".
+      if (await this.isEditorRevoked(supabase, siteId, access.email)) {
+        return {
+          valid: false,
+          verified: false,
+          permissions: [],
+          email: null,
+          expiresAt: null,
+          error: "Invalid or expired staging token",
+        };
+      }
+
       // Check if email is verified
       if (!access.email_verified) {
         return {
@@ -366,6 +380,12 @@ export class StagingAccessManager {
         return { success: false, error: "Invalid or expired token" };
       }
 
+      // Checked before the code: a removed editor still owns the mailbox the
+      // code went to, so the right code must not bring them back.
+      if (await this.isEditorRevoked(supabase, access.site_id, access.email)) {
+        return { success: false, error: "Invalid or expired token" };
+      }
+
       // Constant-time comparison. `!==` returns as soon as two characters
       // differ, so the time it takes to reject leaks how many leading digits
       // were right — enough, over many requests, to recover a 6-digit code one
@@ -493,6 +513,11 @@ export class StagingAccessManager {
         return { success: false, error: "Invalid or expired token" };
       }
 
+      // No code is generated, stored or mailed for a removed editor.
+      if (await this.isEditorRevoked(supabase, access.site_id, access.email)) {
+        return { success: false, error: "Invalid or expired token" };
+      }
+
       if (access.email_verified) {
         return { success: false, error: "Email already verified" };
       }
@@ -615,6 +640,52 @@ export class StagingAccessManager {
       return access.permissions.length > 0; // Any permission includes view
     }
     return access.permissions.includes(permission);
+  }
+
+  /**
+   * Has the site owner removed this address from the site's editors?
+   *
+   * TOMBSTONE — s68c. `revokeSiteEditor` (editor-directory.ts) stamps
+   * `site_editors.revoked_at` and sweeps device grants, and nothing on this
+   * path ever read that row: a removed editor's verified staging token kept
+   * saving staged copy until the 12 h verification TTL, then re-verified with a
+   * code sent to the mailbox they still own, until the invite itself expired.
+   * The realtime service was the only place the removal reached a staging
+   * token (server/auth.js), and there it compared e-mail case-sensitively.
+   *
+   * `site_editors.email` is always `normalizeEmail`ed; `staging_access.email`
+   * keeps the case the invite was typed in — so the lookup normalises.
+   *
+   * Absent is not revoked: a staging invite can exist without a directory row.
+   * Only a present, stamped row refuses. A lookup that fails throws, and every
+   * caller's catch refuses: an unanswered "was this editor removed" is not "no".
+   *
+   * `normalizeEmail` is imported lazily, as editor-access.ts imports
+   * edit-sessions: editor-directory → editor-access → this module is a cycle,
+   * and a static import made editor-request read `EDITOR_GRANT_HEADER` before
+   * editor-grants had initialised it (ReferenceError at load). One rule for
+   * "the same person" matters more than the import style.
+   */
+  private static async isEditorRevoked(
+    supabase: ReturnType<typeof createServiceRoleClient>,
+    siteId: string,
+    email: string | null,
+  ): Promise<boolean> {
+    if (!email) return false;
+
+    const { normalizeEmail } = await import("@/lib/auth/editor-directory");
+    const { data: editor, error } = await supabase
+      .from("site_editors")
+      .select("revoked_at")
+      .eq("site_id", siteId)
+      .eq("email", normalizeEmail(email))
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`site_editors lookup failed: ${error.message}`);
+    }
+
+    return Boolean(editor?.revoked_at);
   }
 
   /**
