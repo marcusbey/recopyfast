@@ -59,6 +59,19 @@ observation and in-place writes, and it enforces only what a human edited.
    - Writes compare against the live DOM and skip when it already matches, so the embed's own
      writes never cause a loop.
 
+### Amended on the branch, 2026-10-08 (implementation)
+
+- **When the rescan runs after a route change.** A detected path change drops the
+  page-scoped entries and fetches the new path's rows at once, but the page is rescanned at
+  the first observer batch that adds nodes after it (or at an edit click), not at the moment
+  of detection. The Navigation API fires `currententrychange` inside `pushState`, before the
+  router has rendered anything: a scan there would file the old page's elements under the
+  new path, and could paint the new page's copy on the old page's twins. Rescanning in the
+  microtask the render runs in keeps a cached route's first frame published, as measured.
+- **What the cap counts.** It counts every text write the embed makes to the element in the
+  page view, the first apply included: at most 10 in total. A host that keeps writing wins
+  from its tenth write-back onwards.
+
 ## Considered options
 
 - **Wrap `history.pushState` / `replaceState` and listen to `popstate`.** Rejected.
@@ -106,8 +119,12 @@ observation and in-place writes, and it enforces only what a human edited.
   - An edited dynamic element is frozen to published copy, up to the cap. That is the product's
     promise, stated explicitly.
 - **To watch.**
-  - Host write-backs at the cap. The 11th write is left to the host and the edited copy loses
-    for the rest of that page view.
+  - Host write-backs at the cap. Once the embed has written an element 10 times in a page
+    view, the host's next write stands and the edited copy loses for the rest of that page
+    view.
+  - A route change that mutates no DOM, on any browser: the new page's elements are
+    re-identified at the next batch that adds nodes or at the next edit click (see the
+    amendment above).
   - The lazy-loader case, where an edited image's `src` is swapped by attribute and no
     attribute observer exists. This is a known gap.
   - `applyImageSource` still removes `<picture><source>` nodes. That is the same hazard class

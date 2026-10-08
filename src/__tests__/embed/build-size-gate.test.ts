@@ -81,8 +81,13 @@ const OVERRIDE_ENV = "RCF_EMBED_CEILING_OVERRIDE";
 // tree measures −293/−298 in total).
 // RATCHETED 2026-09-28 (s55), DOWNWARD: 45883 → 45880, 33122 → 33120. rcf_vid
 // minted in bucketVisitor behind the active-test guard, init-time call removed.
-const SEEDED_MAX_BUNDLE_GZ = 45880;
-const SEEDED_MAX_WIDGET_GZ = 33120;
+// RATCHETED 2026-10-08 (s67-embed-spa-support), DOWNWARD: 45880 → 45866,
+// 33120 → 33092. SPA support (≤ +850 gross, net ≤ 0, docs/stories.md) paid in
+// the branch: CSS minified at build time, the socket.io fallback loader and the
+// `rcf-editable` class deleted (−805 / −838), then the reserve (−40 / −40),
+// against +831 / +850 of SPA work. Itemised in scripts/build-embed.mjs.
+const SEEDED_MAX_BUNDLE_GZ = 45866;
+const SEEDED_MAX_WIDGET_GZ = 33092;
 
 interface CheckRun {
   status: number;

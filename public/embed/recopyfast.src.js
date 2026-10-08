@@ -1,83 +1,73 @@
 (function() {
   'use strict';
 
-  // `document.currentScript` is only meaningful while this script is being
-  // parsed, so capture what we need from it up front. Everything that needs the
-  // embed's own URL later (e.g. loading socket.io) reads this instead.
-  var EMBED_SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
+  // One widget per page (s67). Two snippets on one page — a theme include plus
+  // a tag-manager copy is the usual way — used to boot two instances that each
+  // took the other's stamps for author-written ids and filed them as shared
+  // rows. The first instance wins. A real instance is recognised by its
+  // element map, not by truthiness: an element with id="ReCopyFast" makes
+  // `window.ReCopyFast` truthy through named access, and must not stop the
+  // widget from booting.
+  if (window.ReCopyFast && window.ReCopyFast.elements instanceof Map) return;
 
-  // Configuration
-  // Derive API/WS URLs from data attributes on the script tag, or window globals.
-  // Warn loudly rather than silently falling back to localhost.
-  (function() {
-    var script = document.currentScript;
-    function deriveApiUrl() {
-      if (!script || !script.src) return null;
-      try {
-        var url = new URL(script.src);
-        return url.origin + '/api';
-      } catch (e) {
-        return null;
-      }
-    }
-    if (!window.RECOPYFAST_API) {
-      var apiAttr = script && script.getAttribute('data-api-url');
-      if (apiAttr) {
-        window.RECOPYFAST_API = apiAttr;
-      } else if (deriveApiUrl()) {
-        window.RECOPYFAST_API = deriveApiUrl();
-      } else {
-        console.warn('ReCopyFast: set data-api-url.');
-      }
-    }
-    if (!window.RECOPYFAST_WS) {
-      var wsAttr = script && script.getAttribute('data-ws-url');
-      if (wsAttr) {
-        window.RECOPYFAST_WS = wsAttr;
-      }
-      // Deliberately no derived fallback, and no warning.
-      //
-      // Guessing an endpoint from the script origin produced a URL that looked
-      // configured and was not, so the widget connected to nothing and retried
-      // — the absence of a real-time server presented as a flaky one. Real-time
-      // is opt-in now: set data-ws-url, or window.RECOPYFAST_WS, or it does not
-      // run. Nothing is wrong with a site that has neither; editing and
-      // publishing work entirely over HTTP.
-    }
-  })();
-  const RECOPYFAST_API = window.RECOPYFAST_API;
-  const RECOPYFAST_WS = window.RECOPYFAST_WS;
+  // Configuration: the API and realtime endpoints.
+  //
+  // TOMBSTONE — security review M8, DOM clobbering (s67-embed-spa-support).
+  // `window.RECOPYFAST_API` / `window.RECOPYFAST_WS` used to win over
+  // everything, on truthiness alone. Any markup the customer's page renders (a
+  // CMS post, a comment, a profile field) can create those globals through
+  // named access, just by giving an element that id: an
+  // `<a id="RECOPYFAST_API" href="https://evil.test/api">` stringifies to its
+  // href, and every widget request — site token in its Authorization header,
+  // editor grant beside it — went to whoever wrote the markup.
+  //
+  // A global is now honoured only when it is a STRING whose origin is the
+  // origin of this script's own `src`: whoever can serve the script can already
+  // point it anywhere. Anything else (an element, a cross-origin string, any
+  // global under a script with no `src`) is ignored, and the endpoint comes
+  // from `data-api-url` / `data-ws-url`, then, for the API only, from the
+  // script's own origin. The resolved values are still written back to
+  // `window`: realtime-additive.spec.ts reads `window.RECOPYFAST_WS`.
+  //
+  // Deliberately no derived WebSocket URL, and no warning when there is none.
+  // Guessing an endpoint from the script origin produced a URL that looked
+  // configured and was not, so the widget connected to nothing and retried —
+  // the absence of a real-time server presented as a flaky one. Real-time is
+  // opt-in: set data-ws-url, or it does not run. Nothing is wrong with a site
+  // that has neither; editing and publishing work entirely over HTTP.
+  const SCRIPT = document.currentScript;
+  let SCRIPT_ORIGIN = null;
+  try { SCRIPT_ORIGIN = new URL(SCRIPT.src).origin; } catch (e) {}
+  function configuredEndpoint(name, attribute) {
+    const value = window[name];
+    try {
+      if (typeof value === 'string' && new URL(value).origin === SCRIPT_ORIGIN) return value;
+    } catch (e) {}
+    return SCRIPT.getAttribute(attribute);
+  }
+  const RECOPYFAST_API = window.RECOPYFAST_API =
+    configuredEndpoint('RECOPYFAST_API', 'data-api-url') || (SCRIPT_ORIGIN && SCRIPT_ORIGIN + '/api');
+  const RECOPYFAST_WS = window.RECOPYFAST_WS = configuredEndpoint('RECOPYFAST_WS', 'data-ws-url');
+  if (!RECOPYFAST_API) console.warn('ReCopyFast: set data-api-url.');
 
   // socket.io must never come from a third-party CDN: customer sites (and our
   // own app) serve `script-src 'self'`, which blocks cross-origin scripts. The
   // production build inlines socket.io-client ahead of this file, so
-  // `window.__recopyfastSocketIO` is normally already there. When it isn't (raw
-  // unbuilt source), fall back to a copy served next to this script — "self"
-  // from the browser's point of view is the origin the embed was loaded from,
-  // not the customer's page origin.
-  const SOCKET_IO_FALLBACK_URL = (function() {
-    if (!EMBED_SCRIPT_SRC) return null;
-    try {
-      const url = new URL(EMBED_SCRIPT_SRC);
-      url.search = '';
-      url.hash = '';
-      url.pathname = url.pathname.replace(/[^/]*$/, 'socket.io-client.min.js');
-      return url.href;
-    } catch (e) {
-      return null;
-    }
-  })();
+  // `window.__recopyfastSocketIO` is there whenever the artifact runs.
+  //
+  // TOMBSTONE (s67-embed-spa-support). A fallback used to inject
+  // `socket.io-client.min.js` from next to this script when the bundled client
+  // was missing, and to borrow a `window.io` already on the customer's page.
+  // The artifact always prepends socket.io, so the loader only ever ran for the
+  // raw unbuilt source, and borrowing the host's `io` mixed socket.io versions
+  // silently. It was deleted, with its factory helper, to fund SPA support
+  // (−290 / −287 gz). Without the bundled client, establishConnection's read of
+  // `__recopyfastSocketIO.io` throws into its own catch, which falls back to
+  // HTTP polling (embed-startup-config.test.ts). Do not restore an injected
+  // <script>: it is also the one request a nonce- or hash-based CSP rejects.
 
-  function getSocketIOFactory() {
-    if (window.__recopyfastSocketIO && typeof window.__recopyfastSocketIO.io === 'function') {
-      return window.__recopyfastSocketIO.io;
-    }
-    // A socket.io build already on the customer's page is good enough.
-    if (typeof window.io === 'function') return window.io;
-    return null;
-  }
-  const SITE_ID = document.currentScript.getAttribute('data-site-id');
-  const SITE_TOKEN = document.currentScript.getAttribute('data-site-token');
+  const SITE_ID = SCRIPT.getAttribute('data-site-id');
+  const SITE_TOKEN = SCRIPT.getAttribute('data-site-token');
 
   // Staging mode detection from URL parameters. `let`, not `const`: on a load
   // with no credential in the URL, the edit-link restore below fills them in.
@@ -717,6 +707,52 @@
     else element.addEventListener('load', pin, { once: true });
   }
 
+  /**
+   * What the embed's MutationObserver watches, on the body and on every open
+   * shadow root it scans. Text changes (`characterData`) because React and
+   * i18n libraries update text nodes in place — 85 such records in 7.5 s on
+   * openflows.ai, every one invisible to a `childList`-only observer. Never
+   * `attributes`: 688–722 records in the same 7.5 s, for little to gain.
+   */
+  const OBSERVED = { childList: true, characterData: true, subtree: true };
+
+  /**
+   * Put `text` into an element without replacing any node the host rendered.
+   *
+   * TOMBSTONE (s67-embed-spa-support, AC 13). Every runtime write used to be
+   * `element.textContent = text`, which removes all of the element's children
+   * and inserts one new text node. React owns those text nodes. The next time
+   * it re-rendered the element structurally — a conditional text removed
+   * (`Hello{show && ' world'}`), an element inserted before the text
+   * (`{icon && <b/>}Lead`) — it called removeChild / insertBefore on a node that
+   * was no longer there, got a NotFoundError, and React 19 unmounted the whole
+   * root: a blank customer page, measured on a client-rendered page and on a
+   * server-rendered one after hydration (docs/research/s67-embed-spa-support.md
+   * R1c, R1d, R3; embed-react-writes.test.tsx; e2e embed-spa E3, E4).
+   *
+   * So the text goes into the element's first direct text node, every other
+   * text node beneath the element is blanked, and a text node is appended only
+   * when there is no direct one. No node is removed, replaced or reordered:
+   * element children (an icon's <svg>) stay, with their text blanked. A DOM
+   * that already says `text` is not touched at all, so the embed's own writes
+   * never feed its own MutationObserver a change to react to.
+   *
+   * Every runtime text write goes through here: hydrate, realtime, A/B
+   * variants, and the editor's save, cancel and AI paths. Never assign a
+   * customer's element its textContent.
+   */
+  function writeText(element, text) {
+    if (element.textContent === text) return;
+    let first = element.firstChild;
+    while (first && first.nodeType !== 3 /* TEXT_NODE */) first = first.nextSibling;
+    const walker = document.createTreeWalker(element, 4 /* NodeFilter.SHOW_TEXT */);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node !== first && node.nodeValue) node.nodeValue = '';
+    }
+    if (first) first.nodeValue = text;
+    else element.append(text);
+  }
+
   // ==========================================
   // STABLE ELEMENT IDENTITY
   // ==========================================
@@ -834,9 +870,12 @@
     return pathname.replace(/(?:\/index\.html?|\/+)$/i, '') || '/';
   }
 
-  function contentReadEndpoint(staged, token) {
+  // The page is a parameter, not read here: a route can change while a fetch
+  // is in flight, and the rows must be filed under the path they were asked
+  // for (s67).
+  function contentReadEndpoint(staged, token, path) {
     return RECOPYFAST_API + (staged ? '/staging' : '') + '/content/' + SITE_ID +
-      (staged && token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(normalizedPagePath());
+      (staged && token ? token + '&' : '?') + 'page_path=' + encodeURIComponent(path);
   }
 
   /**
@@ -886,16 +925,21 @@
       this.observer = null;
       this.isInitialized = false;
       this.selectedElement = null;
-      /** Element-id set last reported, so rescans don't re-POST an identical map. */
-      this.lastContentMapFingerprint = null;
       /**
-       * Element ids the server is already known to hold, learned from the
-       * content GET every boot performs anyway. `null` means "not known" —
-       * hydration has not run yet or could not be read — in which case
-       * reporting proceeds, because failing to discover is worse than a
-       * redundant write. See postContentMap.
+       * Element ids the server is already known to hold: the union of every
+       * page's content GET (s67: a route change fetches its own rows, and
+       * never forgets the previous page's), plus the ids this page has
+       * already reported. An id outside it is what makes discovery worth a
+       * write. See postContentMap.
        */
-      this.serverKnownElementIds = null;
+      this.serverKnownElementIds = new Set();
+      // Set by loadRows, deliberately not here (bytes, s67): `rows[path]` is
+      // the promise of the published rows of one normalized path, indexed by
+      // element id and fetched once per path; `rows` stays unset until init's
+      // first fetch, which is how checkRoute tells "before init" apart.
+      // `index` is the resolved object every rescan and re-apply reads
+      // synchronously.
+
 
       // Staging mode properties
       this.stagingMode = EDITOR_MODE;
@@ -924,6 +968,16 @@
       try {
         await this.waitForDOM();
 
+        // The observer is attached FIRST, before staging, auth, fonts and every
+        // fetch (s67, AC 1). It used to be attached at the end of this chain,
+        // after up to four network round trips and a font wait: on openflows.ai
+        // that was 864–1,230 ms after DOMContentLoaded, while React rendered at
+        // ~450 ms, so the render was never seen and the page ended with 0
+        // editable elements. Everything below keeps its order, so a static or
+        // server-rendered page loads exactly as before (AC 6).
+        this.pagePath = normalizedPagePath();
+        this.setupMutationObserver();
+
         if (this.stagingMode && (this.stagingToken || this.editSessionToken)) {
           await this.initStagingMode();
         } else {
@@ -950,7 +1004,7 @@
         // A/B pipeline so that a running test's variant copy wins over the
         // published baseline, and before the socket handshake so a visitor sees
         // current copy whether or not realtime is reachable.
-        await this.hydrateStoredContent();
+        await this.loadRows();
 
         // A/B testing pipeline (non-blocking for staging mode). The visitor id
         // is not minted here: bucketVisitor mints it, and only once a test is
@@ -975,8 +1029,6 @@
         // After establishConnection so a live socket, when there is one, is
         // already attached and gets the same map fanned out in the same pass.
         this.sendContentMap();
-
-        this.setupMutationObserver();
 
         if (this.editMode) {
           this.setupEditMode();
@@ -1855,12 +1907,11 @@
               document.body.removeChild(overlay);
               self.showStagingBanner();
 
-              if (self.editMode) {
-                self.setupEditMode();
-                self.elements.forEach(function(data) {
-                  data.element.classList.add('rcf-editable');
-                });
-              }
+              // TOMBSTONE (s67). Every mapped element used to get an
+              // `rcf-editable` class here and in scanForContent. No CSS rule
+              // and no reader ever used it; deleted to fund SPA support. Edit
+              // affordances hang off `[data-rcf-id]` and `.rcf-hovering`.
+              if (self.editMode) self.setupEditMode();
 
               resolve();
             } else {
@@ -2584,7 +2635,13 @@
 
       const all = scope.querySelectorAll('*');
       for (let i = 0; i < all.length; i++) {
-        if (all[i].shadowRoot) this.queryDeep(selector, all[i].shadowRoot, results);
+        const shadow = all[i].shadowRoot;
+        if (!shadow) continue;
+        // A body observer does not see inside a shadow root, so each one the
+        // scan enters is observed too. Observing a root again only replaces
+        // its options: one registration per root, however many rescans.
+        if (this.observer) this.observer.observe(shadow, OBSERVED);
+        this.queryDeep(selector, shadow, results);
       }
 
       return results;
@@ -2592,17 +2649,25 @@
 
     scanForContent() {
       const self = this;
+      this.stale = false;
       const path = normalizedPagePath();
       const selector = 'h1, h2, h3, h4, h5, h6, p, span, li, td, th, label, button, ' +
                        'a.rcf-editable-link, img, div[data-rcf-content]';
       const textElements = this.queryDeep(selector);
 
       textElements.forEach(function(element) {
+        // Already mapped under its own stamp: nothing to re-derive. Without
+        // this, every rescan recomputed the structural id and the selector of
+        // every element on the page — 1.3–1.4 s per rescan for 3,005
+        // candidates at 4× CPU, and a rescan every ~1.3 s on a live page pins
+        // the main thread (research, "Scan cost").
+        const mapped = self.elements.get(element.getAttribute('data-rcf-id'));
+        if (mapped && mapped.element === element) return;
         if (self.shouldSkipElement(element)) return;
 
         // An <img> is identified by its source, not by text content.
         const isImage = element.tagName === 'IMG';
-        const text = isImage ? (element.getAttribute('src') || '') : self.getElementText(element);
+        const text = self.getElementText(element);
         if (!text || text.trim().length < 2) return;
 
         // Deterministic — see computeStableElementId. The same element yields
@@ -2624,10 +2689,13 @@
         elementData.extras = isImage && element.hasAttribute('alt') ? { alt: element.getAttribute('alt') } :
           element.tagName === 'A' && element.hasAttribute('href') ? { href: element.getAttribute('href') } : null;
         self.elements.set(elementId, elementData);
+      });
 
-        if (self.editMode) {
-          element.classList.add('rcf-editable');
-        }
+      // Entries whose element left the document. A single-page app replaces
+      // whole subtrees on every render; kept, they piled up (241 entries,
+      // 212 of them detached, after one navigation on openflows.ai).
+      this.elements.forEach(function(data, id) {
+        if (!data.element.isConnected) self.dropEntry(data, id);
       });
     }
 
@@ -2657,10 +2725,12 @@
       return hasOnlyElements && !element.hasAttribute('data-rcf-content');
     }
 
+    /** What the element shows now: its value, its image source, or its text. */
     getElementText(element) {
       if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
         return element.value;
       }
+      if (element.tagName === 'IMG') return element.getAttribute('src') || '';
       return element.textContent;
     }
 
@@ -2697,25 +2767,13 @@
      * own, so the app and the widget cannot drift.
      */
 
-    /**
-     * Should we intervene to keep this element's text readable while editing,
-     * and if so what is the smallest intervention?
-     *
-     * Returns a verdict whose `scrim` is null in the common case: text that is
-     * already legible is left completely alone, because an unnecessary scrim is
-     * a visible design change.
-     */
-    assessReadability(element) {
-      return Rules.assessReadability(element);
-    }
-
-    /**
-     * Caret / selection / outline colours for the surface this element sits on.
-     * These paint around and through the text, never replacing it.
-     */
-    getEditingColors(element) {
-      return Rules.resolveAffordances(element);
-    }
+    // TOMBSTONE (s67, the byte budget's second-line reserve). Two adapters
+    // stood here: `assessReadability(element)`, which nothing called (the
+    // editor calls `Rules.assessReadability` directly), and
+    // `getEditingColors(element)`, a one-line wrapper over
+    // `Rules.resolveAffordances`. Their callers now call the shared rules
+    // directly; no rule changed. Readability verdicts still say "leave legible
+    // text alone"; affordances still paint around the text, never replacing it.
 
     // Determine element type for appropriate edit handler
     getElementEditType(element) {
@@ -2781,7 +2839,12 @@
       const path = [];
       let current = element;
 
-      while (current && current !== document.body) {
+      // Stops at a shadow root as well as at <body> (s67). The walk used to
+      // climb onto the ShadowRoot itself, which has no tagName, and threw a
+      // TypeError for every element inside a web component: on a page with
+      // any open shadow-root text, init's first scan aborted (no published
+      // copy, no discovery) and so did every rescan.
+      while (current && current.nodeType === 1 && current !== document.body) {
         let selector = current.tagName.toLowerCase();
 
         if (current.id) {
@@ -2912,6 +2975,7 @@
       }
 
       this.setEditorSaveStatus('Saved');
+      this.rememberRow(elementId, content, extra);
 
       this.emitRealtimeContentUpdate(Object.assign({
         siteId: SITE_ID,
@@ -2970,7 +3034,9 @@
       }
 
       try {
-        const io = await this.loadSocketIO();
+        // Throws when the client is not bundled (raw source): see the tombstone
+        // above SITE_ID. The catch below turns that into HTTP polling.
+        const io = window.__recopyfastSocketIO.io;
 
         this.socket = io(RECOPYFAST_WS, {
           query: {
@@ -3016,39 +3082,13 @@
       }
     }
 
-    loadSocketIO() {
-      return new Promise(function(resolve, reject) {
-        const existing = getSocketIOFactory();
-        if (existing) {
-          resolve(existing);
-          return;
-        }
-
-        if (!SOCKET_IO_FALLBACK_URL) {
-          reject(new Error('socket.io-client is unavailable and its URL could not be derived from the embed script src'));
-          return;
-        }
-
-        const script = document.createElement('script');
-        script.src = SOCKET_IO_FALLBACK_URL;
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        script.onload = function() {
-          const factory = getSocketIOFactory();
-          if (factory) {
-            resolve(factory);
-          } else {
-            reject(new Error('socket.io-client loaded but exposed no client factory'));
-          }
-        };
-        script.onerror = function() {
-          reject(new Error('Failed to load socket.io-client from ' + SOCKET_IO_FALLBACK_URL));
-        };
-        document.head.appendChild(script);
-      });
-    }
-
     sendContentMap() {
+      // Only once the current path's rows have settled (s67): until then the
+      // embed cannot know what the server already holds for this page, and a
+      // report made before an app moved itself to another path files the
+      // first path's elements as discoveries (research: openflows.ai moves `/`
+      // to `/fr` while the first fetch is in flight).
+      if (this.rowsPath !== this.pagePath) return;
       const contentMap = {};
 
       this.elements.forEach(function(data, elementId) {
@@ -3118,25 +3158,21 @@
         return;
       }
       const elementIds = Object.keys(contentMap);
-      if (elementIds.length === 0) {
-        return;
-      }
-
-      // Nothing has changed since the last report, so the request would be a
-      // no-op upsert. Rescans fire on every DOM mutation, and a page with a
-      // carousel or a live region can mutate many times a second.
-      const fingerprint = JSON.stringify(elementIds.slice().sort());
-      if (fingerprint === this.lastContentMapFingerprint) {
-        return;
-      }
 
       // Report only what the server does not already hold.
       //
       // This runs on a customer's page for every VISITOR, not just for editors,
       // so an unconditional POST turns their traffic into our write volume: one
-      // bulk upsert of every element on the page, per page view, forever. The
-      // fingerprint above only dedupes within a single page's lifetime, which
-      // never spans two visitors.
+      // bulk upsert of every element on the page, per page view, forever.
+      //
+      // TOMBSTONE (s67). A fingerprint of the last reported id set used to sit
+      // here, so rescans would not re-POST an identical map. It became
+      // redundant once the known-id set below stopped starting out `null` and
+      // stopped being reset by each page's GET: every reported id is claimed
+      // into it before the POST and given back if the POST fails, so a
+      // repeated map has nothing unknown and returns here, and a failed report
+      // is retried — exactly what the fingerprint and its restore did. It was
+      // removed to pay for SPA support.
       //
       // Discovery is a one-time event per element. `hydrateStoredContent` has
       // already fetched exactly the set the server holds, so once a site is
@@ -3144,19 +3180,31 @@
       // nothing at all; a genuinely new element still reports immediately.
       // The upsert stays `ignoreDuplicates`, so re-reporting remains harmless —
       // this is about not paying for a write that can only be a no-op.
-      if (this.serverKnownElementIds) {
-        let hasUnknownElement = false;
-        for (let i = 0; i < elementIds.length; i++) {
-          if (!this.serverKnownElementIds.has(elementIds[i])) {
-            hasUnknownElement = true;
-            break;
-          }
+      const known = this.serverKnownElementIds;
+      const claimed = elementIds.filter(function(id) { return !known.has(id); });
+      if (!claimed.length) return;
+
+      // Coalesced (s67). A page that keeps rendering — a live feed, an
+      // infinite scroll — finds new elements on every rescan, and research's
+      // prototype sent 33 reports in 10 s from ONE visitor. The per-site
+      // discovery limit is 100/min and fails closed, so a handful of visitors
+      // would have locked discovery for the whole site. The first report of a
+      // page view goes at once; later ones at most once per 10 s (one trailing
+      // report picks up everything found meanwhile) and at most 10 per page view.
+      const self = this;
+      const wait = this.lastReport + 10000 - Date.now();
+      if (this.reports > 9) return;
+      if (wait > 0) {
+        if (!this.reportTimer) {
+          this.reportTimer = setTimeout(function() {
+            self.reportTimer = 0;
+            try { self.sendContentMap(); } catch (error) {}
+          }, wait);
         }
-        if (!hasUnknownElement) {
-          this.lastContentMapFingerprint = fingerprint;
-          return;
-        }
+        return;
       }
+      this.reports = ~~this.reports + 1;
+      this.lastReport = Date.now();
 
       // Claimed before the request, and given back if the request fails.
       //
@@ -3164,25 +3212,18 @@
       // mutate the DOM many times a second — from firing a second POST while
       // the first is still in flight. But a claim that is never released is a
       // claim that outlives its reason: on a page that never reloads, one
-      // transient failure would leave the fingerprint set, every later rescan
-      // short-circuit on it, and the site sit at "no content yet" for as long
-      // as the visitor stays. A multi-page site papers over this by reloading;
-      // an SPA does not.
-      const previousFingerprint = this.lastContentMapFingerprint;
-      this.lastContentMapFingerprint = fingerprint;
-
-      const known = this.serverKnownElementIds;
-      const claimed = [];
-      if (known) {
-        for (let i = 0; i < elementIds.length; i++) {
-          if (!known.has(elementIds[i])) {
-            known.add(elementIds[i]);
-            claimed.push(elementIds[i]);
-          }
-        }
-      }
-
-      const self = this;
+      // transient failure would leave the ids claimed, every later rescan
+      // short-circuit on them, and the site sit at "no content yet" for as
+      // long as the visitor stays. A multi-page site papers over this by
+      // reloading; an SPA does not.
+      //
+      // The body carries only the claimed ids, so an id is reported once per
+      // page lifetime however many reports the page makes (s67).
+      const report = {};
+      claimed.forEach(function(id) {
+        known.add(id);
+        report[id] = contentMap[id];
+      });
 
       fetch(RECOPYFAST_API + '/content/' + encodeURIComponent(SITE_ID), {
         method: 'POST',
@@ -3196,19 +3237,14 @@
         // sites would never report their content and would sit on "no content
         // yet" forever. This runs on load rather than on unload, so there is
         // nothing for keepalive to buy.
-        body: JSON.stringify(contentMap)
+        body: JSON.stringify(report)
       }).catch(function() {
         // Offline, blocked by an extension, or the site was deleted. Nothing
         // useful to say on a customer's page — but give the claim back, so the
         // next rescan or navigation retries instead of inheriting a report that
         // never happened. Only the ids this call added are removed; ones the
         // server already held are not ours to forget.
-        self.lastContentMapFingerprint = previousFingerprint;
-        if (known) {
-          for (let i = 0; i < claimed.length; i++) {
-            known.delete(claimed[i]);
-          }
-        }
+        claimed.forEach(function(id) { known.delete(id); });
       });
     }
 
@@ -3406,7 +3442,7 @@
         if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
           elementData.element.value = variant.variant_content;
         } else {
-          elementData.element.textContent = variant.variant_content;
+          writeText(elementData.element, variant.variant_content);
         }
 
         // Add data attributes for debugging/tracking
@@ -3554,6 +3590,7 @@
 
       const elementData = this.elements.get(elementId);
       if (!elementData) return;
+      this.rememberRow(elementId, content, data);
 
       if (!this.applyContentToElement(elementData, content, data)) return;
 
@@ -3589,7 +3626,16 @@
         if (value !== null) target.setAttribute(attribute, value);
       }
 
-      if (content === elementData.originalContent) return value !== null;
+      // Compared with what the element shows NOW, not with
+      // `elementData.originalContent`. That field used to be overwritten with
+      // every applied value so it could double as "current text", which made
+      // the comparison stale the moment the host re-rendered, and made
+      // discovery and the route-change restore read published copy as if it
+      // were authored (s65a's invariant). It now stays the first-seen authored
+      // text (s67).
+      if (content == null || content === this.getElementText(target)) return value !== null;
+      elementData.writes = ~~elementData.writes + 1;
+      elementData.written = content;
 
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         target.value = content;
@@ -3598,13 +3644,162 @@
         // session cannot resize the page under the reader.
         applyImageSource(target, content);
       } else {
-        target.textContent = content;
+        writeText(target, content);
       }
-
-      // Keep the map in step with the DOM: the edit board and content map both
-      // read originalContent as what the element currently says.
-      elementData.originalContent = content;
       return true;
+    }
+
+    /**
+     * Has the page moved to another path? If so, treat it as a full page load.
+     *
+     * Route changes are detected without patching anything (ADR 049, AC 9): a
+     * path check on every observer batch, on the Navigation API's
+     * `currententrychange` where the browser has it, and at the start of an
+     * edit-mode click. No history method is wrapped — a wrapper misses every
+     * router that captured `pushState` before a late-loaded snippet ran, forms
+     * order-dependent chains with routers that wrap it themselves, cannot be
+     * removed by destroy(), and a throw in it breaks the host's navigation.
+     * Nothing polls.
+     *
+     * Full-load equivalence, because ids hash the path: a node that persists
+     * across routes kept the old page's stamp (stamps are sticky), so an edit
+     * made after an in-app navigation was saved under the wrong page. Every
+     * page-scoped entry therefore gets back the authored copy the embed put
+     * over it, loses its stamp and is dropped, and the next scan re-identifies
+     * what is on the page under the new path. Author-written ids are shared
+     * across pages and stay; their write counters restart with the page view.
+     * An element being edited is left alone.
+     *
+     * The new DOM is not scanned here: the Navigation API fires inside
+     * `pushState`, before the router has rendered anything, and scanning then
+     * would file the old page's elements under the new path. `stale` makes the
+     * next observer batch that adds nodes rescan at once, in the microtask the
+     * render runs in, so a cached route paints published copy in its first
+     * frame; an edit click rescans too.
+     */
+    checkRoute() {
+      const path = normalizedPagePath();
+      if (path === this.pagePath) return;
+      const self = this;
+      this.pagePath = path;
+      this.stale = true;
+      this.reports = this.lastReport = 0;
+      this.elements.forEach(function(data, id) {
+        if (!data.path) data.writes = 0;
+        else if (!data.element.getAttribute('data-rcf-editing')) self.dropEntry(data, id);
+      });
+      // Before init's first fetch, init fetches for the path it finds.
+      if (this.rows) this.loadRows();
+    }
+
+    /**
+     * Forget an entry. If the embed wrote it and it still shows that copy, the
+     * authored text comes back first: otherwise the old page's published copy
+     * would be discovered as the new page's authored copy (s65a's invariant).
+     */
+    dropEntry(data, id) {
+      if (data.written === this.getElementText(data.element)) {
+        this.applyContentToElement(data, data.originalContent);
+      }
+      if (data.path) data.element.removeAttribute('data-rcf-id');
+      this.elements.delete(id);
+    }
+
+    /**
+     * The rows of the current page: fetched once per normalized path, cached,
+     * then applied to every element mapped now.
+     *
+     * The path is captured when the fetch starts, and the rows are applied
+     * only if the page is still on it when they arrive: openflows.ai moves
+     * itself from `/` to `/fr` while the first fetch is in flight, and one
+     * page's rows must never land on another page's elements. A failed fetch
+     * is forgotten so the next visit to that path asks again.
+     */
+    loadRows() {
+      const self = this;
+      const path = this.pagePath;
+      const cache = this.rows || (this.rows = {});
+      if (!cache[path]) {
+        cache[path] = this.hydrateStoredContent().then(function(index) {
+          if (!index) delete cache[path];
+          return index;
+        });
+      }
+      return cache[path].then(function(index) {
+        if (path !== self.pagePath) return;
+        self.index = index;
+        self.rowsPath = path;
+        self.applyRows();
+        // Discovery waited for these rows (sendContentMap). init reports for
+        // itself, after the socket is up; a route change reports here.
+        if (self.isInitialized) self.sendContentMap();
+      });
+    }
+
+    applyRows() {
+      const self = this;
+      this.elements.forEach(function(data, id) { self.applyRow(data, id); });
+    }
+
+    /**
+     * Apply one element's published row from the cache.
+     *
+     * AC 11 (owner decision 1, 2026-10-08): only a row somebody EDITED writes
+     * page text — `current_content !== original_content`, with a missing
+     * `original_content` counting as edited (legacy rows). Discovery stores
+     * `published = original =` whatever one visitor's page happened to say,
+     * so applying every row froze dynamic text (a reordered post list, a live
+     * counter) to the first visitor's DOM; on a single-page app that is every
+     * page. Attribute rows (href, alt) apply as before.
+     *
+     * The write counter lives on the element's entry and counts every text
+     * write the embed makes to it (applyContentToElement). It resets with the
+     * page view: a route change drops page-scoped entries and zeroes the
+     * shared ones.
+     *
+     * An element carrying an A/B variant is left to the variant: the
+     * published re-apply after a rescan would otherwise overwrite it
+     * (visitor-cookie.test.ts caught exactly that in research's prototype).
+     */
+    applyRow(data, id) {
+      const row = this.index && this.index[id];
+      if (!row || data.element.hasAttribute('data-rcf-variant')) return;
+      const content = row.current_content;
+      // Blanking the page is the one outcome worth guarding against, and an
+      // empty string here means every stored column was null — a data gap,
+      // not somebody deliberately publishing nothing.
+      if (typeof content !== 'string' || content === '') return;
+      // AC 4 (owner decision 2): published copy wins over a host re-render, up
+      // to 10 text writes per element per page view. A second enforcer — machine
+      // translation, an i18n layer, another A/B tool — then converges on its
+      // copy instead of ping-ponging with ours forever.
+      const edited = content !== row.original_content && !(data.writes > 9);
+      this.applyContentToElement(data, edited ? content : null, row.metadata);
+    }
+
+    /**
+     * Keep the cached row in step with a save or a realtime update (AC 7).
+     *
+     * Every host re-render re-applies the cached row, so a row left as it was
+     * before the save would put the pre-save copy straight back over what the
+     * editor just saved. `original_content` is kept: the row stays edited.
+     * Called by persistContentUpdate (text, image and form saves) and by
+     * handleContentUpdate; the href/alt the update carries go to metadata.
+     */
+    rememberRow(id, content, attributes) {
+      const index = this.index;
+      if (!index) return;
+      const row = index[id] || (index[id] = {});
+      row.current_content = content;
+      row.metadata = Object.assign({}, row.metadata, attributes);
+    }
+
+    /** A rescan: map what is new, give it the cached rows and variants, report. */
+    rescan() {
+      this.scanForContent();
+      this.applyRows();
+      this.applyVariants();
+      this.sendContentMap();
     }
 
     /**
@@ -3627,12 +3822,21 @@
      * response is malformed, or if a row carries no content, the original
      * markup simply stays. Rows for elements that are not on this page are
      * skipped, and elements with no row keep whatever the author wrote.
+     *
+     * s67: this is now the fetch for ONE page path (`pagePath` when called),
+     * resolving to the rows indexed by element id, or undefined on failure.
+     * Applying moved to applyRows, because a single-page app shows elements
+     * after this ran and changes route without a page load: loadRows caches
+     * the result per path and applies it to whatever is on the page then, and
+     * again after every rescan. It stays immediately above
+     * setupMutationObserver: site-token-refusal.test.ts slices it out by
+     * those two method headers.
      */
     async hydrateStoredContent() {
       if (!RECOPYFAST_API) return;
 
       const staged = this.canReachStagingContent();
-      const endpoint = contentReadEndpoint(staged, this.editorTokenQuery());
+      const endpoint = contentReadEndpoint(staged, this.editorTokenQuery(), this.pagePath);
 
       let rows;
       try {
@@ -3658,55 +3862,85 @@
 
       if (!Array.isArray(rows)) return;
 
-      // Everything the server already holds for this site. Discovery is only
-      // worth a write when the page shows something absent from this set.
-      this.serverKnownElementIds = new Set();
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i] && rows[i].element_id) {
-          this.serverKnownElementIds.add(rows[i].element_id);
-        }
-      }
-
+      // Everything the server already holds for this site joins the union:
+      // discovery is only worth a write when the page shows something absent
+      // from it. The rows themselves are indexed by id for loadRows' cache.
+      const index = {};
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        if (!row || !row.element_id) continue;
-
-        const elementData = this.elements.get(row.element_id);
-        if (!elementData) continue; // stored, but not present on this page
-
-        const content = row.current_content;
-        // Blanking the page is the one outcome worth guarding against, and an
-        // empty string here means every stored column was null — a data gap,
-        // not somebody deliberately publishing nothing.
-        if (typeof content !== 'string' || content === '') continue;
-        this.applyContentToElement(elementData, content, row.metadata);
+        if (row && row.element_id) {
+          this.serverKnownElementIds.add(row.element_id);
+          index[row.element_id] = row;
+        }
       }
+      return index;
     }
 
+    /**
+     * The one trigger for everything a page does after the first scan (ADR 049).
+     *
+     * Each batch, synchronously, inside the microtask the host's own change
+     * runs in — so before the browser paints:
+     *   - every mapped element the batch touched gets its edited row back
+     *     (AC 4). A framework re-render, a translation layer or a host script
+     *     writing the authored copy back is undone before it is ever seen:
+     *     0 of 10 frames showed authored copy in research's fixture. The write
+     *     compares with the live DOM first, so the batch the embed's own write
+     *     causes writes nothing, and the count per element is capped (applyRow);
+     *   - added nodes schedule a rescan, debounced 200 ms but never later than
+     *     1,000 ms after the first change (AC 5). The old 500 ms debounce was
+     *     reset by every batch, so a 100 ms ticker postponed it forever: one
+     *     element found, ever.
+     *
+     * TOMBSTONE: the callback and the rescan timer used to run bare. An
+     * exception in either is outside init's try/catch and lands on the host
+     * page's `window` (non-negotiable 4), so both are wrapped.
+     */
     setupMutationObserver() {
       const self = this;
-      this.observer = new MutationObserver(function(mutations) {
-        let shouldRescan = false;
-
-        mutations.forEach(function(mutation) {
-          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-            shouldRescan = true;
+      this.observer = new MutationObserver(function(records) {
+        try {
+          self.checkRoute();
+          let added = false;
+          records.forEach(function(record) {
+            if (record.addedNodes.length) added = true;
+            let node = record.target;
+            if (node.nodeType !== 1) node = node.parentElement;
+            const element = node && node.closest('[data-rcf-id]');
+            const id = element && element.getAttribute('data-rcf-id');
+            const data = self.elements.get(id);
+            if (data && data.element === element) self.applyRow(data, id);
+          });
+          // The first batch that adds nodes after a route change is the new
+          // page: map it now, before it paints (see checkRoute).
+          if (added && self.stale) {
+            self.rescan();
+            return;
           }
-        });
-
-        if (shouldRescan) {
-          clearTimeout(self.rescanTimeout);
-          self.rescanTimeout = setTimeout(function() {
-            self.scanForContent();
-            self.sendContentMap();
-          }, 500);
-        }
+          // 200 ms after the last change, never more than 1,000 ms after the first.
+          if (added) {
+            clearTimeout(self.rescanTimer);
+            self.firstChange = self.firstChange || Date.now();
+            self.rescanTimer = setTimeout(function() {
+              self.firstChange = 0;
+              try { self.rescan(); } catch (error) {}
+            }, Math.min(200, self.firstChange + 1000 - Date.now()));
+          }
+        } catch (error) {}
       });
+      this.observer.observe(document.body, OBSERVED);
 
-      this.observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
+      // Every same-document navigation, by anyone, including routers that
+      // captured `pushState` before this script ran (Chromium 102+, Safari
+      // 26.2, Firefox 2026). Older browsers rely on the batch check above.
+      const navigation = window.navigation;
+      if (navigation && navigation.addEventListener) {
+        this.navigation = navigation;
+        this.onNavigate = function() {
+          try { self.checkRoute(); } catch (error) {}
+        };
+        navigation.addEventListener('currententrychange', this.onNavigate);
+      }
     }
 
     setupEditMode() {
@@ -3717,6 +3951,12 @@
 
       document.addEventListener('click', function(e) {
         if (self.isMutationLocked) return;
+        // A route change nothing else noticed (no DOM change, no Navigation
+        // API) must not let this click edit the old page's id (s67).
+        try {
+          self.checkRoute();
+          if (self.stale) self.rescan();
+        } catch (error) {}
         const element = e.target.closest('[data-rcf-id]');
         if (!element) return;
 
@@ -4599,7 +4839,7 @@
         }
 
         if (textChanged) {
-          element.textContent = newContent;
+          writeText(element, newContent);
           elementData.originalContent = newContent;
         }
         for (const f of fieldInputs) {
@@ -4620,7 +4860,7 @@
         // textContent restore is only safe when we would otherwise be leaving
         // edited text behind; if nothing changed, leave the DOM (and any author
         // markup inside it) exactly as it was.
-        if (sanitizeContent() !== originalText) element.textContent = originalText;
+        if (sanitizeContent() !== originalText) writeText(element, originalText);
         cleanup();
       };
 
@@ -4631,7 +4871,7 @@
         e.stopPropagation();
         self.showAISuggestions({
           get value() { return sanitizeContent(); },
-          set value(v) { element.textContent = v; updateCounter(); scheduleReposition(); }
+          set value(v) { writeText(element, v); updateCounter(); scheduleReposition(); }
         }, elementId);
       }, active);
 
@@ -5067,7 +5307,7 @@
       }
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       // For input/textarea, edit placeholder and value
@@ -5207,7 +5447,7 @@
       element.classList.remove('rcf-hovering');
 
       // Get adaptive colors based on background luminance
-      const editColors = this.getEditingColors(element);
+      const editColors = Rules.resolveAffordances(element);
       const isLightBg = editColors.backdropIsLight;
 
       const rect = element.getBoundingClientRect();
@@ -5452,10 +5692,10 @@
 
     startPolling() {
       const self = this;
-      setInterval(async function() {
+      this.pollTimer = setInterval(async function() {
         try {
           const staged = self.canReachStagingContent();
-          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery());
+          const endpoint = contentReadEndpoint(staged, self.editorTokenQuery(), self.pagePath);
 
           const response = await fetch(endpoint, {
             headers: Object.assign({
@@ -5484,6 +5724,12 @@
       if (this.observer) {
         this.observer.disconnect();
       }
+      // Everything the widget left running (s67): a rescan already scheduled
+      // would otherwise stamp and report a page it was told to leave alone.
+      clearTimeout(this.rescanTimer);
+      clearTimeout(this.reportTimer);
+      clearInterval(this.pollTimer);
+      if (this.onNavigate) this.navigation.removeEventListener('currententrychange', this.onNavigate);
       this.elements.clear();
 
       const banner = document.querySelector('#rcf-staging-banner');
@@ -5933,8 +6179,11 @@
 
           const cardDesc = document.createElement('div');
           cardDesc.className = 'rcf-eb-card-desc';
-          const previewText = data.originalContent.substring(0, 100);
-          cardDesc.textContent = previewText + (data.originalContent.length > 100 ? '...' : '');
+          // What the element says now. originalContent is the authored text
+          // discovery reports and no longer follows applied copy (s67); it is
+          // only the fallback for an element with no text (an image, an input).
+          const live = data.element.textContent || data.originalContent;
+          cardDesc.textContent = live.substring(0, 100) + (live.length > 100 ? '...' : '');
 
           cardContent.appendChild(cardTitle);
           cardContent.appendChild(cardDesc);

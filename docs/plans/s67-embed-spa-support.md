@@ -74,7 +74,7 @@ Every task writes its test first and watches it fail for the stated reason befor
 implementation. Jest boots the real source IIFE (`new Function(WIDGET_SOURCE)()`), following
 the existing embed suites. "e2e E1–E5" are the Playwright tests written in Task 3.
 
-1. [ ] **Fund the budget (no behaviour change).**
+1. [x] **Fund the budget (no behaviour change).**
    - **Failing tests first**:
      - `src/__tests__/embed/style-literal-comments.test.ts` gains the case "each style literal
        ships minified". For each of the 5 source literals, `esbuild.transform(css,
@@ -104,7 +104,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
        URL.
      - Add a tombstone comment saying this pre-empts part of `s06c-embed-shrink`.
    - Record the measured delta. Expected ≈ −812 / −841.
-2. [ ] **AC 12: startup config cannot be clobbered (security review M8).**
+2. [x] **AC 12: startup config cannot be clobbered (security review M8).**
    - **Failing tests first**, in `embed-startup-config.test.ts`. The script `src` is
      `https://cdn.rcf.test/embed/recopyfast.js` and there is no `data-api-url`.
      - (a) `<a id="RECOPYFAST_API" href="https://evil.test/api">` in the page before boot. If
@@ -129,7 +129,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
    - **Test touched**: `editor-grant-edit-mode.test.ts:446` sets a cross-origin string global on
      a script with no `src`, so the new rule ignores it. Move the value to `data-api-url`. This
      changes the setup only, not the assertion.
-3. [ ] **The SPA and React fixtures, written red.**
+3. [x] **The SPA and React fixtures, written red.**
    - New `e2e/embed-spa.spec.ts`. A Node `http` host server on `RECOPYFAST_SPA_PORT || 4177`
      serves three pages:
      - **`/spa/*`**: a framework-free SPA, with the same shell for every path. It renders
@@ -174,7 +174,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
    - Run E1–E5 once against the artifact as built after Task 2 and record each failure in the
      PR: 0 elements; NotFoundError and an unmounted root; no GET for the new path. This proves
      the fixture reproduces the production bugs.
-4. [ ] **AC 13: in-place text writes. This fixes the React crash hazard.**
+4. [x] **AC 13: in-place text writes. This fixes the React crash hazard.**
    - **Failing tests first**:
      - New `src/__tests__/embed/embed-react-writes.test.tsx`. It uses jsdom and
        `react-dom/client` 19.1 with `act`, and the real IIFE booted on a React-rendered page
@@ -205,7 +205,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
      - The one reader that wanted "current text", the Edit Board card preview (`:5936-5937`),
        reads the live element instead.
      - Add a tombstone comment naming the NotFoundError and root-unmount incident.
-5. [ ] **AC 2 + AC 11: per-path rows cache, edited rows only, variant precedence.**
+5. [x] **AC 2 + AC 11: per-path rows cache, edited rows only, variant precedence.**
    - **Failing tests first**, in a new `src/__tests__/embed/embed-spa.test.ts`:
      - A row with `current_content === original_content` writes nothing. One with a different
        value writes. One with no `original_content` writes. An `href`/`alt` attribute row still
@@ -230,7 +230,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
      hydrate gains a closure-level dependency or calls a new `this.` helper, add it to the
      loader's `new Function` parameters or fake widget as a pass-through. The refusal branch
      itself is not stubbed, and both assertions stay.
-6. [ ] **AC 1 + AC 4 + AC 5: an early, bounded observer (and AC 9 for the observer).**
+6. [x] **AC 1 + AC 4 + AC 5: an early, bounded observer (and AC 9 for the observer).**
    - **Failing tests first**, in `embed-spa.test.ts`:
      - Content rendered while the content GET is pending (a delayed fetch mock) gets stamped
        (AC 1).
@@ -270,7 +270,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
        instance) call `destroy()` on the previous instance before deleting it. This is a
        harness change only: earlier boots in the same jsdom window keep observing. Any other
        suite that turns red for the same reason gets the same fix, listed in the PR.
-7. [ ] **AC 3 + AC 9: route change without patching, plus discovery gating and coalescing.**
+7. [x] **AC 3 + AC 9: route change without patching, plus discovery gating and coalescing.**
    - **Failing tests first**, in `embed-spa.test.ts`:
      - **GET counts**: `pushState('/about')` makes exactly one GET with
        `page_path=%2Fabout`. Back via `popstate` makes 0 GETs. A `?q=1` or `#x` change makes 0.
@@ -310,7 +310,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
        coalescing above.
      - Do not touch `normalizedPagePath`, `computeStableElementId`, `structuralPath` or
        `hashPath`.
-8. [ ] **AC 7: edit mode across navigation.**
+8. [x] **AC 7: edit mode across navigation.**
    - **Failing tests first**, in `embed-spa.test.ts`, using the `editor-grant-edit-mode`
      harness and the demo token:
      - After in-app nav, the staging banner and `stagingAccess` are kept, and one staging GET
@@ -327,7 +327,7 @@ the existing embed suites. "e2e E1–E5" are the Playwright tests written in Tas
      - No change to grants or staging auth.
    - e2e E1–E5 green against the rebuilt artifact. Check the byte table: apply the second-line
      reserve here if net > 0.
-9. [ ] **Docs, ratchet, gates.**
+9. [x] **Docs, ratchet, gates.**
    - **Failing tests first**:
      - `src/lib/docs/__tests__/installation-content.test.ts:54-70`: the required SPA strings
        change by owner decision. The new strings: history-mode routers are supported by the

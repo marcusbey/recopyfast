@@ -118,6 +118,14 @@ describe("embed content attributes", () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     window.history.replaceState(null, "", "/pricing");
+    // Stop the previous test's widget before forgetting it (s67): jsdom keeps
+    // every booted instance alive, and its MutationObserver would take this
+    // test's DOM and URL for an in-app navigation.
+    (
+      (window as unknown as Record<string, unknown>).ReCopyFast as
+        | { destroy(): void }
+        | undefined
+    )?.destroy();
     delete (window as unknown as Record<string, unknown>).ReCopyFast;
     delete (window as unknown as Record<string, unknown>).recopyfast;
     delete (window as unknown as Record<string, unknown>).rcf;

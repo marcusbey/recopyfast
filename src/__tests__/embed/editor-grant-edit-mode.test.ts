@@ -442,8 +442,12 @@ describe("the way back to all sites", () => {
     // the page is parked one fragment away from the expected destination: the
     // URL can only change if the control navigated to exactly `<api>/edit` —
     // any other path, query or origin leaves it where it is.
+    //
+    // Set as `data-api-url`, not as `window.RECOPYFAST_API`: since s67 (M8,
+    // DOM clobbering) a global is honoured only on the origin of the script's
+    // own `src`, and this harness's script has none.
     const api = `${window.location.origin}/api`;
-    (window as unknown as { RECOPYFAST_API: string }).RECOPYFAST_API = api;
+    document.currentScript!.setAttribute("data-api-url", api);
     await bootWithGrant(["view", "edit"]);
     window.history.replaceState(null, "", "/edit#before-all-sites");
 

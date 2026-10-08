@@ -2409,53 +2409,63 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
 - [ ] AC 1, late render: content rendered at any time after the script starts is scanned. On
   openflows.ai `/` with the plain snippet, editable elements are > 0 within 2 s of render
   settling.
-- [ ] AC 2, late elements get published copy: an element found by any rescan receives its
+- [x] AC 2, late elements get published copy: an element found by any rescan receives its
   published row from the page rows already fetched, without a refetch, within one rescan
   cycle. Only edited rows write text (AC 11).
-- [ ] AC 3, route change: when the normalized page path changes (`pushState`,
+  Evidence: `embed-spa.test.ts` ("applies a late element's edited row without a second GET"); e2e `embed-spa` E1.
+- [x] AC 3, route change: when the normalized page path changes (`pushState`,
   `replaceState`, `popstate`), the embed fetches that page's rows once and applies them. New
   ids use the new path. Elements that persist across routes keep working. A change of query
   or hash only does not refetch. Hash-route sites (`/#/route`) are out of scope (owner
   decision 3). `/docs/install` states the limitation and the workaround: switch the router to
   history mode, or give each route's elements an author-written, unique `data-rcf-id`.
-- [ ] AC 4, framework re-render (owner decision 2): if the host rewrites an element that has
+  Evidence: `embed-spa.test.ts` (AC 3 block: one GET per path, none on revisit or query/hash change, ids equal to a full load, authored restore, Navigation API, edit-click check, mid-fetch `replaceState`); e2e E1, E2; `/docs/install` SPA section (`installation-content.test.ts`).
+- [x] AC 4, framework re-render (owner decision 2): if the host rewrites an element that has
   an edited row, whatever text it writes, published copy is applied again. The cap is 10
   writes per element per page view, where one in-app route visit counts as one page view.
   The embed's own writes never trigger a loop.
-- [ ] AC 5, no starvation: continuous DOM mutation cannot postpone a rescan beyond a bounded
+  Evidence: `embed-spa.test.ts` (AC 4 block: synchronous re-apply via `textContent`, `nodeValue` and unrelated text, 10-write cap, no self-loop); e2e E1 (no frame shows authored copy after the host write-back), E3.
+- [x] AC 5, no starvation: continuous DOM mutation cannot postpone a rescan beyond a bounded
   max wait.
+  Evidence: `embed-spa.test.ts` ("rescans within 1,000 ms under a 100 ms ticker").
 - [ ] AC 6, static and SSR sites unchanged: the existing embed unit and e2e suites stay green.
   Existing tests change only in the ways `docs/plans/s67-embed-spa-support.md` lists
   (harness teardown, one config setup, the install guide's SPA wording, the e2e count), and
   the PR states each change. aicompoz.com keeps server-rendered copy in first paint, with 0
   swaps.
-- [ ] AC 7, edit mode across navigation: an invited editor keeps the edit session after
+- [x] AC 7, edit mode across navigation: an invited editor keeps the edit session after
   in-app navigation, and newly rendered elements are editable.
-- [ ] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
+  Evidence: `embed-spa.test.ts` (AC 7 block); e2e E5.
+- [x] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
   this branch, because raising a ceiling is a defect.
-- [ ] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
+  Evidence: 45,866 / 33,092 gz, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +829 / +844 against the funded floor.
+- [x] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
   host page. The embed patches no host global: `history.pushState` and
   `history.replaceState` keep their identity. Route changes are detected by a path check on
   each DOM mutation batch, plus the Navigation API `currententrychange` event where the
   browser has it.
+  Evidence: `embed-spa.test.ts` (AC 9 block: history identity, own globals, throwing navigation path; throwing observer callback); `embed-startup-config.test.ts`; e2e E1 (history identity, 0 page errors).
 - [ ] AC 10, proof: a framework-free SPA fixture (renders after a delay, navigates with
   `pushState`, re-renders text) runs in CI e2e. In production on openflows.ai with the
   plain snippet, edit and publish on `/` and on a route reached by in-app navigation; both
   show published copy, on load and after navigation.
-- [ ] AC 11, edited rows only (owner decision 1): a row whose current copy equals its
+- [x] AC 11, edited rows only (owner decision 1): a row whose current copy equals its
   `original_content` never writes page text. A row with no `original_content` counts as
   edited. Attribute rows (`href`, `alt`) apply as before.
-- [ ] AC 12, startup configuration cannot be clobbered (M8):
+  Evidence: `embed-spa.test.ts` (AC 11 block); e2e E1 (the unedited ticker row is never written).
+- [x] AC 12, startup configuration cannot be clobbered (M8):
   - `window.RECOPYFAST_API` and `window.RECOPYFAST_WS` are honoured only when they are
     strings whose origin equals the origin of the embed script's own `src`.
   - Anything else is ignored, whether it is an element from DOM clobbering or a cross-origin
     string. The endpoint then comes from `data-api-url` / `data-ws-url`. For the API only, it
     is otherwise derived from `script.src`. There is still no derived WebSocket URL.
   - A unit test proves it, and it is paid within the s67 allocation.
-- [ ] AC 13, host-safe writes: writing copy never replaces or removes a node the host
+  Evidence: `embed-startup-config.test.ts` ("startup endpoints (M8)").
+- [x] AC 13, host-safe writes: writing copy never replaces or removes a node the host
   rendered. A React 19 app whose edited element later re-renders structurally (a conditional
   text removed, an element inserted before the text) keeps running: no `NotFoundError`, and
   the root does not unmount.
+  Evidence: `embed-react-writes.test.tsx` (R1c, R1d, text-node identity, `<svg>` kept, no write on a matching DOM); e2e E3, E4.
 
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.

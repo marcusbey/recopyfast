@@ -186,14 +186,14 @@ export const INSTALLATION_GUIDE: InstallationGuideContent = {
         id: "spa",
         title: "React, Next.js and other single-page applications",
         paragraphs: [
-          "These require an integration check. The current widget scans the rendered DOM and does not provide a complete lifecycle for client-side route changes.",
-          "This is why the guide does not promise a universal React copy-and-paste recipe. An agent or developer should verify the site's routing and analytics before installing.",
+          "The plain snippet follows client-side route changes made with the History API (links, Back and Forward in a history-mode router): on each in-app navigation it loads that page's published copy and makes the newly rendered elements editable, with no framework-specific code.",
+          "Hash routes (/#/route) are not supported: every hash route shares one page path, so their elements collide. The workaround is to switch the router to history mode, or to give each route's elements an author-written, unique data-rcf-id.",
+          "Each site still needs an integration check, which is why the guide does not promise a universal React copy-and-paste recipe. An agent or developer should verify the site's routing and analytics before installing.",
         ],
         bullets: [
           'Load it after the page has hydrated, preserving every generated attribute and value. For Next.js, next/script with strategy="afterInteractive" is one loading mechanism.',
-          "A root layout or a one-time script load is not proof that subsequent client-side pages will initialize, restore saved content or clean up correctly.",
-          "Verify full page loads, internal navigation, Back, reload, and returning to an edited page. Do not claim SPA support from the first page loading successfully.",
-          "Where appropriate, use full document navigation on the pages with the widget. If that would disrupt the website, pause the installation and resolve the integration rather than adding an incomplete cleanup workaround.",
+          "Verify a full page load and an in-app navigation: both should show published copy, and an invited editor should be able to edit on both. Then check Back, reload, and returning to an edited page.",
+          "Do not claim SPA support from the first page loading successfully.",
         ],
       },
     ],
@@ -245,7 +245,7 @@ export const INSTALLATION_GUIDE: InstallationGuideContent = {
       {
         symptom: "Homepage works, another page does not",
         checks:
-          "Snippet coverage on that page; client-side navigation retaining an old widget; duplicate loaders.",
+          "Snippet coverage on that page; a hash route (/#/…) rather than history mode; duplicate loaders.",
       },
       {
         symptom: "Visitors cannot see an edit",
@@ -304,7 +304,7 @@ If any input cannot be established from the user's request, the source or the cu
 3. Save a before screenshot and note the current deployment and rollback path. Establish exactly which pages the user authorized; do not substitute a QA route or extend to other pages silently.
 4. Use the existing dashboard snippet. If it is already installed, verify or move it; do not regenerate it unless rotation was explicitly requested. Never use privileged backend credentials to replace the public site token.
 5. For a full-document site, place one exact tag immediately before the closing body tag on each intended page or their shared footer. On a builder, use its supported script/footer feature and publish the result. Do not modify authored marketing copy, forms or unrelated integrations.
-6. For React/Next.js, inspect hydration and navigation first. Preserve the generated data attributes in a framework script loader after hydration. The current widget has no complete SPA teardown/reinitialization contract. Verify route transitions and return navigation; use full document navigation only when appropriate to the authorized scope. If you cannot make the lifecycle reliable without a material website change, explain the concrete blocker before expanding the work.
+6. For React/Next.js, inspect hydration and navigation first. Preserve the generated data attributes in a framework script loader after hydration. History-mode routers work with the plain snippet: it follows pushState, replaceState and Back, loads each page's published copy and makes newly rendered elements editable. Hash routes (/#/route) are not supported; switch the router to history mode or give each route's elements a unique author-written data-rcf-id. Verify a full page load and an in-app navigation, then Back and return navigation. If you cannot make it reliable without a material website change, explain the concrete blocker before expanding the work.
 7. Inspect analytics, tag managers and session replay before loading the widget. Prevent them from collecting editor-entry query credentials. Suppress collectors before execution on documents with rcf_handoff, rcf_edit_token, rcf_staging or rcf_token, or prove a safe ordering. A referrer header alone is insufficient. Do not put edit tokens in logs, screenshots, commits, reports or shared links.
 8. Account for first paint. Published content is applied after the widget starts and fetches it, so the original HTML can appear briefly. Do not claim zero-flash rendering or seamless SSR from snippet installation. For critical hero copy, report this limitation and keep the first-paint value in the site's source when zero-flash rendering matters.
 9. If CSP blocks the integration, report the exact blocked resource/directive and propose the narrow required change. Do not weaken global security policies or claim an unverified platform integration works.

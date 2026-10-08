@@ -30,7 +30,8 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("NODE_ENV=production npm run start");
   });
 
-  it("runs all 45 tests and always cleans up and uploads the redacted summary", () => {
+  // s67: 45 → 50, the five embed SPA tests (e2e/embed-spa.spec.ts, E1–E5).
+  it("runs all 50 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -38,11 +39,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":45');
-    expect(workflow).toContain("report.expected !== 45");
-    expect(workflow).toContain("report.total !== 45");
-    expect(workflow).toContain("report.passed !== 45");
-    expect(config).toContain("expected: 45");
+    expect(workflow).toContain('"expected":50');
+    expect(workflow).toContain("report.expected !== 50");
+    expect(workflow).toContain("report.total !== 50");
+    expect(workflow).toContain("report.passed !== 50");
+    expect(config).toContain("expected: 50");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
