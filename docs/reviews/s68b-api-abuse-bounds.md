@@ -70,5 +70,16 @@ s68a/s68c docs and ADR 047), 9 (PR must disclose reshaped fixture ids AND the re
 
 Orchestrator: N1, N2, N3 go to a short fix run (owner's standing preference: fix minors, then ship).
 
+## Verification of fix `fabe68a` (fresh reviewer, 2026-10-08)
+
+N1–N3 confirmed; no new defect. `coerceText` is the single implementation, applied before the metadata bound;
+truncation is by code point (no lone surrogates created); the `__proto__` refusal holds. Mutations (non-string
+coercion, strip, truncation, UTF-16 truncation, route bypass) each turn tests red; re-adding `received` turns
+the N3 test red. Remaining domain-check echoes are the customer's own DNS TXT records (not rebinding-controlled)
+and local resolver/undici error messages. Full jest 328 suites / 4,275 tests, type-check green.
+
+New minor: a lone surrogate sent by the caller in `event_name` is stored as given (a `jsonb` insert may reject
+it; untested; not a regression).
+
 Max severity: minor
 Ship allowed: yes
