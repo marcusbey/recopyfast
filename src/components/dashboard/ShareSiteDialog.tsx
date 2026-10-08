@@ -89,6 +89,30 @@ const PERMISSION_OPTIONS: ReadonlyArray<{
   { key: "admin", icon: Shield, label: "Admin" },
 ];
 
+/**
+ * The automatic copy right after a link is created. It answers whether the
+ * copy happened and never throws: the link exists by now, whatever the
+ * clipboard says.
+ *
+ * It used to be a bare `await navigator.clipboard.writeText` inside the
+ * creation's try (PR #72 review follow-up). The write runs after the POST's
+ * await, outside the click's user activation, so a browser may refuse it
+ * (permission denied; no `navigator.clipboard` at all in an insecure
+ * context). The refusal fell into the creation's catch, and a link that had
+ * been created was reported as failed: no success state, no Copy link, the
+ * list not refetched, the form still filled in, an invitation to create a
+ * second link for the same person.
+ */
+async function copyCreatedLink(url: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(url);
+    return true;
+  } catch (caught) {
+    console.error("Could not copy the new preview link automatically:", caught);
+    return false;
+  }
+}
+
 export function ShareSiteDialog({
   open,
   onOpenChange,
@@ -177,8 +201,12 @@ export function ShareSiteDialog({
         );
       } else if (data.stagingUrl) {
         setCreatedUrl(data.stagingUrl);
-        await navigator.clipboard.writeText(data.stagingUrl);
-        setSuccess("Link created and copied to clipboard!");
+        const isCopied = await copyCreatedLink(data.stagingUrl);
+        setSuccess(
+          isCopied
+            ? "Link created and copied to clipboard!"
+            : "Link created — copy it with the Copy link button.",
+        );
       } else {
         setSuccess("Invite sent successfully!");
       }

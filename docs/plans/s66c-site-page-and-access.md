@@ -390,10 +390,16 @@ take the site as a prop.
 
 ## Run interdicts
 
-- `git diff main...HEAD -- src/app/api supabase public/embed server` is empty, in both parts.
+- `git diff main...HEAD -- src/app/api supabase public/embed server` is empty, in both parts,
+  save one sanctioned addition in s66c1 (PR #72 review D1, 2026-10-08; ADR 052 Amendment):
+  `GET /api/sites` returns each site's `permission`, the caller's own grant. It only chooses what
+  "Edit website" asks for; the session route re-reads the live grant and refuses anything higher
+  (s68a, ADR 047), so the field grants nothing.
 - No request body changes:
   - the edit session sends `["edit","admin"]` (row, menu, header) and `["edit","publish"]`
-    (checklist, stepper), with 2 h;
+    (checklist, stepper), with 2 h. Since D1 that holds for an owner; a member's row, menu and
+    header ask for their own grant (publish → `["edit","publish"]`, edit → `["edit"]`, view → no
+    button);
   - editors POST/PATCH/DELETE, staging access POST/GET/DELETE, `DELETE /api/sites/[id]` and
     `POST …/regenerate-snippet` are unchanged.
 

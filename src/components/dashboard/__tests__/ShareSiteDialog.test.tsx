@@ -278,6 +278,12 @@ describe("ShareSiteDialog after a link is created", () => {
     jest.clearAllMocks();
   });
 
+  // The refusal test below replaces user-event's clipboard stub with a
+  // rejecting spy; it must not outlive that test.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("offers Copy link, copying the URL the creation response carried", async () => {
     (global.fetch as jest.Mock).mockResolvedValue({
       ok: true,
@@ -302,6 +308,65 @@ describe("ShareSiteDialog after a link is created", () => {
 
     expect(clipboardWrite).toHaveBeenLastCalledWith(STAGING_URL);
     expect(await navigator.clipboard.readText()).toBe(STAGING_URL);
+  });
+
+  /**
+   * PR #72 review follow-up. The automatic copy after creation runs after an
+   * await, outside the click's user activation, so a browser may refuse it
+   * (permission denied, insecure context). That refusal used to land in the
+   * creation's catch: the dialog showed "Write permission denied." as if the
+   * link had not been created, never listed it, kept the form filled in, and
+   * invited the owner to create a second link for the same person.
+   */
+  it("reports a created link as created when the automatic copy is refused", async () => {
+    const onCreated = jest.fn();
+    (global.fetch as jest.Mock).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        emailDelivered: true,
+        access: { id: "33333333-3333-4333-8333-333333333333" },
+        stagingUrl: STAGING_URL,
+        token: "the-real-secret-token",
+      }),
+    });
+    const user = userEvent.setup();
+    // userEvent.setup() installs its clipboard stub; the refusal goes on it.
+    const clipboardWrite = jest
+      .spyOn(navigator.clipboard, "writeText")
+      .mockRejectedValue(
+        new DOMException("Write permission denied.", "NotAllowedError"),
+      );
+    render(
+      <ShareSiteDialog
+        open
+        onOpenChange={jest.fn()}
+        site={mockSite}
+        onCreated={onCreated}
+      />,
+    );
+
+    await user.type(
+      await screen.findByLabelText("Email address"),
+      "reviewer@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Create link" }));
+
+    expect(
+      await screen.findByText(
+        "Link created — copy it with the Copy link button.",
+      ),
+    ).toBeInTheDocument();
+    expect(clipboardWrite).toHaveBeenCalledWith(STAGING_URL);
+    expect(
+      screen.getByRole("button", { name: "Copy link" }),
+    ).toBeInTheDocument();
+    for (const alert of screen.getAllByRole("alert")) {
+      expect(alert).not.toHaveTextContent(/fail|denied|could not|try again/i);
+    }
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText("Email address")).toHaveValue("");
   });
 
   it("offers no Copy link when the response carried no link", async () => {

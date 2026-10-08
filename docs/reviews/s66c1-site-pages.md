@@ -130,5 +130,7 @@ Revoke name, and offers no Copy". Fixtures gain the owner's grant (`permission: 
 Gates: full Jest 372 suites / 4,836 passed (38 skipped), `type-check` and `type-check:build` green, lint 0
 errors, `format:check` clean, Playwright `--list` 78.
 
+Follow-up: a refused automatic clipboard copy after creation no longer reports the created link as failed (`ShareSiteDialog` shows "Link created — copy it with the Copy link button.", refetches the list and keeps Copy link; red-then-green in `ShareSiteDialog.test.tsx`), and ADR 052 gains an Amendment recording D1's `permission` field as the story's one sanctioned API addition (run interdicts in `stories.md` and both plans updated to match).
+
 Max severity: major
 Ship allowed: yes

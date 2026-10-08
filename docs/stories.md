@@ -2562,7 +2562,8 @@ s66b2 merges second rebases the four shared files:
 - this file.
 
 No API, data or embed change in either: `git diff main...HEAD -- src/app/api supabase public/embed server`
-is empty. Embed allocation: 0 bytes.
+is empty. Embed allocation: 0 bytes. One sanctioned exception, in s66c1: `GET /api/sites` returns the
+caller's own `permission` (PR #72 review D1, ADR 052 Amendment).
 
 Not in s66c1 or s66c2:
 - renaming a site or changing its domain (needs `PATCH /api/sites/[siteId]`, which changes which
@@ -2770,7 +2771,12 @@ Complexity: 4. Dependencies: **s66b1-app-shell merged** (`PageShell`, the page-s
   - `e2e/site-pages.spec.ts` finds no page-level horizontal scroll and no descendant past its
     container on any subpage or the list, at 375 and 1280. The Playwright contract (`56`, in
     three places) rises by exactly its test count.
-  - `git diff main...HEAD -- src/app/api supabase public/embed server` is empty.
+  - `git diff main...HEAD -- src/app/api supabase public/embed server` is empty, save one
+    sanctioned addition (PR #72 review D1, 2026-10-08; ADR 052 Amendment): `GET /api/sites` returns
+    each site's `permission`, the caller's own grant. It only chooses what "Edit website" asks for
+    (admin → `["edit","admin"]`, publish → `["edit","publish"]`, edit → `["edit"]`, view → no
+    button); the session route re-reads the live grant and refuses anything higher (s68a,
+    ADR 047), so the field grants nothing.
 
 > Hand-off from s66b2 (2026-10-08): s66b2 left `radius-baseline.json` holding only this story's
 > 14 entries. If s66c merges last, it deletes the baseline once empty and makes

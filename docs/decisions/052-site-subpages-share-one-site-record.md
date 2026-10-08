@@ -92,3 +92,15 @@ anywhere else.
 - Watch: if the router ever keeps the provider mounted across `siteId` changes, the `key` is the
   guard. The provider test pins it by re-rendering with a different `siteId` and asserting the
   first site's token is gone in the same render.
+
+## Amendment (2026-10-08, PR #72 review D1)
+
+The story stayed UI-only save one sanctioned API addition. `GET /api/sites`
+(`src/app/api/sites/route.ts`) returns each site's `permission`: the caller's own `site_permissions`
+grant, and only theirs. It is used only to choose what the "Edit website" request asks for
+(`editPermissionsForGrant`, `src/hooks/useEditSession.ts`): admin → the owner set
+(`["edit","admin"]`, unchanged), publish → `["edit","publish"]`, edit → `["edit"]`, view (or no
+grant) → no button. The session route re-reads the live grant and refuses anything higher (s68a, ADR 047), so
+the field grants nothing. Without it, every member asked for the owner set and an `edit` member
+could never open a site; the list had no role field, and `siteToken` presence only tells admin from
+non-admin.
