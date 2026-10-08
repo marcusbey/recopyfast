@@ -119,7 +119,7 @@ take the site as a prop.
        - it renders the `Button` primitive (`rounded-control`; no `rounded-lg`, no raw
          `<button>` classes);
        - the label is "Edit website", with `Loader2` while pending;
-       - an error is an inline `role="alert"`;
+       - an error is a `role="alert"` reported to the caller and rendered outside the button row (site pages: a full-width Alert directly in the page shell after the site nav; Sites row: the row's own message line; checklist: its message slot) — s66c1 review fix `ab7cf52`;
        - `document.body` gains no injected node on success (the DOM toast is gone);
        - the row, menu and header send `permissions: ["edit","admin"], durationHours: 2`.
    - GREEN:

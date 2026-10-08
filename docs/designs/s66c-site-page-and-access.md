@@ -262,9 +262,12 @@ There is **no confirmation dialog**. The "Edit Website" dialog said one sentence
 same button again. There is **no DOM toast**: the emerald `innerHTML` toast is removed, and the
 new tab is the feedback.
 
-When the popup is blocked or the request is refused, the tab is closed and an inline
-`Alert variant="destructive"` sits under the control ("Allow pop-ups for ReCopyFast, then try
-again.", or the server's message). The spinner is `Loader2`, and the label stays "Edit website".
+When the popup is blocked or the request is refused, the tab is closed and a destructive
+`Alert` ("Allow pop-ups for ReCopyFast, then try again.", or the server's message) renders
+outside the button row: on site pages, full width, directly in the page shell after the site
+nav; on a Sites row, on the row's own message line; in the checklist, in its message slot. It
+never sits inside a header's actions or a toolbar (s66c1 review fix `ab7cf52`). The spinner is
+`Loader2`, and the label stays "Edit website".
 
 The request body stays per entry point, unchanged from today:
 
@@ -362,7 +365,7 @@ Every token is `•••` and every address ends in `example`.
 | People: editors | skeleton rows | "No editors yet" | Alert + Try again; forbidden note | Delivery notice (in the dialog), removal notice |
 | People: preview links | skeleton rows | One line, "No preview links…" | Alert + Try again; 403 note | The new link appears in the list; dialog success Alert |
 | Quick setup (s66c2) | skeleton steps | — (hidden when done or dismissed) | Alert "Could not load setup progress" + Try again | "Setup complete — … is live" |
-| Edit website | `Loader2` in the button | — | Inline destructive Alert under the control | The new tab opens |
+| Edit website | `Loader2` in the button | — | Destructive Alert outside the button row (see above) | The new tab opens |
 | Delete site | "Deleting…" in the confirm button | — | Error inside the dialog (incl. creator-only 403) | Row removed / `replace` to Sites |
 
 ## API and data gaps (flagged, not designed around)
