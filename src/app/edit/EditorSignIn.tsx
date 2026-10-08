@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { IconTile } from "@/components/ui/icon-tile";
 import { ArrowRight, Globe, Loader2, Mail, ShieldCheck } from "lucide-react";
 
 interface EditorSite {
@@ -283,15 +284,10 @@ export function EditorSignIn() {
   return (
     <div className="w-full max-w-md space-y-6">
       <header className="space-y-2 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-tone-accent-surface">
-          <ShieldCheck
-            className="h-6 w-6 text-tone-accent-text"
-            aria-hidden="true"
-          />
-        </div>
-        <h1 className="text-2xl font-semibold text-foreground">
-          Edit your site
-        </h1>
+        <IconTile tone="accent" size="lg" className="mx-auto flex">
+          <ShieldCheck aria-hidden="true" />
+        </IconTile>
+        <h1 className="text-page-title">Edit your site</h1>
         <p className="text-sm text-muted-foreground">
           Sign in with the email address the site owner added you with.
         </p>
@@ -346,7 +342,7 @@ export function EditorSignIn() {
 
       {step === "code" && (
         <form onSubmit={submitCode} className="space-y-4" noValidate>
-          <div className="rounded-lg bg-surface-1 p-4 text-center">
+          <div className="rounded-container bg-surface-1 p-4 text-center">
             <Mail
               className="mx-auto mb-2 h-6 w-6 text-muted-foreground"
               aria-hidden="true"
@@ -386,7 +382,7 @@ export function EditorSignIn() {
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
-              className="h-4 w-4 rounded border-border"
+              className="h-4 w-4 rounded-control border-border"
               checked={rememberDevice}
               onChange={(event) => setRememberDevice(event.target.checked)}
               disabled={isLoading}
@@ -433,7 +429,7 @@ export function EditorSignIn() {
           </p>
 
           {sites.length === 0 ? (
-            <div className="rounded-lg border border-border p-6 text-center">
+            <div className="rounded-container border border-border p-6 text-center">
               <Globe
                 className="mx-auto mb-3 h-8 w-8 text-muted-foreground"
                 aria-hidden="true"
@@ -458,7 +454,7 @@ export function EditorSignIn() {
                       type="button"
                       onClick={() => openSite(site)}
                       disabled={handingOffTo !== null}
-                      className="flex w-full items-center justify-between rounded-lg border border-border p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
+                      className="flex w-full items-center justify-between rounded-container border border-border p-4 text-left transition-colors hover:border-primary/40 hover:bg-accent disabled:opacity-60"
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-medium text-foreground">

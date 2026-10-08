@@ -128,17 +128,18 @@ App type scale — use the utility, not ad-hoc sizes:
 |---|---|---|---|
 | Page title | `.text-page-title`, rendered by `PageHeader` inside `PageShell`; one `h1` per page | **24/32**, 600, tracking `-0.015em`, `--text-strong` (was `.text-display`, `clamp(1.625rem, 1.35rem + 1.1vw, 2rem)`). `.text-display` is not repurposed: it stays the `/blog` h1 ([ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md)) | in code (s66b1) |
 | Panel, card and dialog title | `CardTitle`, `DialogTitle` | **16px** (`text-base`), 600, line-height 24 | s66a |
-| Section title inside a panel | `.text-title` | `1.0625rem`, 600, tracking `-0.012em`; converges on 16px | 16px in s66b |
+| Section title inside a panel | `.text-title` | `1.0625rem`, 600, tracking `-0.012em`; converges on 16px | 17px in code; 16px has no story (not in s66b: `.text-title` is pinned byte-identical) |
 | Eyebrow / meta label | `.text-eyebrow` | `0.6875rem`, 600, uppercase, tracking `+0.075em` | — |
 | Body | `text-sm text-foreground` / `text-muted-foreground` | 14/20, 400 | — |
 | Small / meta | `text-xs` | 12/16 (timestamps, badges, helper text) | — |
 | Code | `font-mono` in `CodeBlock` | 13/20 (`text-[0.8125rem] leading-5`) | s66a |
 | Inline code | `font-mono text-xs` | 12, `bg-surface-2`, `rounded-control`, `px-1.5 py-0.5` | s66a |
-| Metric | `.text-metric` + `.tabular` | 24/600; tabular numerals, so numbers do not change width as they change value | 24px in s66b |
+| Metric | `.text-metric` + `.tabular` | 24/600; tabular numerals, so numbers do not change width as they change value | in code (the lead metric stays 40px) |
 
 Display sizes get negative tracking; small labels get positive tracking. **No 700 anywhere in
-the app**: s66b removes the last 21 `font-bold` uses and extends the design guard to keep them
-out.
+the app**: rule R6 of `src/__tests__/design/page-shell-guard.test.ts` keeps `font-bold`,
+`font-extrabold` and `font-black` off the app surface (in code, s66b2). Its one pending file is
+s66c's `SiteDetailView`.
 
 The research proposed a 13px "small" size. It is not adopted, because Tailwind's scale has no
 13px step and every meta string in the app already uses `text-xs`. The only 13px text is code,
@@ -163,7 +164,9 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
   - no inline `borderRadius` / `border-radius`.
 
   `src/__tests__/design/radius-guard.test.ts` enforces this from s66a, with a shrink-only
-  baseline of today's offenders that s66b empties.
+  baseline of today's offenders. s66b emptied its share (s66b2); the entries left are s66c's
+  site components, and whichever of s66b2 and s66c merges last deletes the baseline and makes
+  the guard zero-tolerance.
 - **Nesting reads through borders and surface steps, not radius.** This replaces the
   2026-08-16 rule "container softer than its contents" on app surfaces.
 - **Not exceptions** (they become square): circles around icons (use `IconTile`), progress bars,
@@ -200,7 +203,9 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
 
 - **Flat.** Static panels cast no shadow and never move. `Card` `default`, `outline` and
   `interactive` have no shadow; `interactive` changes only its border colour on hover.
-  `.surface-interactive` (lift plus `shadow-md`) leaves the app in s66b; marketing keeps it.
+  `.surface-interactive` (lift plus `shadow-md`) has left the app (in code, s66b2); marketing
+  keeps it. Rule R5 of `page-shell-guard.test.ts` keeps hover shadows, `transition-shadow` and
+  hover lifts out, and allows a static shadow only on what floats.
 - **`shadow-md` only on what floats**: dropdown and Select menus, popovers, dialogs, sheets.
   `Card variant="elevated"` is for those surfaces only. Buttons have no shadow.
 - **Overlay**: `bg-foreground/40`, no blur. Never `bg-black/*`.
@@ -216,11 +221,11 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
 | Dialog header | `px-6 pt-5 pb-4` | s66a |
 | Dialog body | `px-6 pb-5`; sections 20 apart, divided by a 1px rule | s66a |
 | Dialog footer | `px-6 py-3`, `border-t` | s66a |
-| Panel (`Card`) padding | 24 (`px-6`, header `pt-5 pb-4`) | in code; 16 below 640 lands in s66b |
-| Panel toolbar row | 48 tall, `border-b` | s66b |
+| Panel (`Card`) padding | 24 (`px-6`, header `pt-5 pb-4`) | in code; 16 below 640 has no story yet (not in s66b) |
+| Panel toolbar row | 48 tall, `border-b` | no story yet (not in s66b) |
 | Page header to content | 24 (16 below 640): the `PageShell` gap | in code (s66b1) |
-| Section gap | 24 (16 below 640) | s66b |
-| Table header / row | 36 / 44, `px-4` | s66b (no `Table` primitive: gap 8) |
+| Section gap | 24 (16 below 640) | in code (s66b1): the `PageShell` gap |
+| Table header / row | 36 / 44, `px-4` | no story yet (no `Table` primitive: gap 8) |
 
 Marketing keeps its own rhythm: sections `py-24 sm:py-32`, container `max-w-6xl mx-auto px-6`.
 The auth column stays `max-w-md`.
@@ -307,7 +312,7 @@ created, in that story.
 | `EmptyState` | icon slot | Zero-data state. Its step numbers are square | s66a |
 | `PageShell` | `title` `eyebrow` `meta` `description` `actions` `nav` | **New.** The page inside the dashboard frame ([ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md)). Renders `PageHeader`, then `nav`, then the page's sections as direct children of `[data-page-shell]`, 24px apart (16 below 640). Never sets width or gutters: the layout owns them. Every routed dashboard page renders exactly one, itself or through a listed delegate; `page-shell-guard.test.ts` enforces it. No new slot without an ADR 053 amendment | s66b1 |
 | `PageHeader` | — | Rendered by `PageShell` only (the guard forbids it elsewhere). The page's one `h1` in `.text-page-title`, an eyebrow, `meta` inline after the title, a `description` node, and actions centred on the title row (after the description below 640). `SectionHeader` (h2) lives in the same file | s66b1 |
-| `Metric` | icon slot | A number with a label, `.text-metric .tabular`. Square from s66a; it drops `.surface-interactive` (flat) and moves to 24/600 in s66b | s66a / s66b |
+| `Metric` | icon slot | A number with a label, `.text-metric .tabular`. Square from s66a. Flat from s66b2: no `.surface-interactive`; a linked metric changes its border colour only (`hover:border-primary/40`, as Card `interactive`) | s66a / s66b2 |
 | `IconTile` | `neutral` `accent` `info` `success` `warning` `danger` × `sm` `default` `lg` | The brand's icon container, square. Use it instead of a circle around an icon. `bg-primary text-primary-foreground` for the `<>` mark | s66a |
 | `ContentValue` | — | Rendering stored content safely. Square | s66a |
 

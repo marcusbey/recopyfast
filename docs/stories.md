@@ -2589,6 +2589,13 @@ Not in this story:
 - retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (dead-code chore);
 - the page shell and titles (s66b).
 
+> Hand-off from s66b2 (2026-10-08): s66b2 left `radius-baseline.json` holding only this story's
+> 14 entries. If s66c merges last, it deletes the baseline once empty and makes
+> `radius-guard.test.ts` zero-tolerance (owner decision in the s66b plan). s66b2 also added
+> rules R5 (flat) and R6 (no 700) to `page-shell-guard.test.ts`, with this story's offenders
+> pending, shrink-only: `sites/page.tsx` [R5], `EditWebsiteButton.tsx` [R5],
+> `VersionTimelineItem.tsx` [R5], `SiteDetailView.tsx` [R6].
+
 Embed allocation: 0 bytes.
 
 ## Story s66b-app-page-layout — every app page shares one shell, one title and one left edge
@@ -2785,7 +2792,14 @@ Complexity: 3. It is many files, but mostly class-level changes, against guards 
 exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
 `feature/s66b2-app-page-passes`.
 
-- [ ] **AC 1 — Radius at zero on s66b's files.** Each of the 28 s66b2-owned baseline files
+> Execute, 2026-10-08: AC 1–6 are implemented. AC 1 and AC 3 are proved by source guards and
+> ticked. `standalone pages @375/@768/@1280/@1920` ran red, then green, against `next start`
+> (signed out, no Supabase needed). `app pages @w` (clip check and its negative control, rest
+> and hover shadows, the metric grid, the tabs) has not run: no local Supabase, so CI's E2E job
+> is its first run. Tick AC 2, 4, 5 and 6 when that job is green. The radius baseline holds
+> only s66c's 14 entries, so the guard is not flipped here (AC 1, second branch).
+
+- [x] **AC 1 — Radius at zero on s66b's files.** Each of the 28 s66b2-owned baseline files
   (listed in the plan; 63 offences) has zero radius offences, and its entry is deleted. The only
   `rounded-full` left is the rule's own exceptions: `Avatar`, status dots of 8 px or less, and
   spinners. `UserMenu` uses the `Avatar` primitive and keeps the classes
@@ -2809,7 +2823,7 @@ exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
     shrink-only);
   - the harness: no element in `main` has a `box-shadow` at rest, and a hovered Overview metric
     and site row keep `transform: none` and `box-shadow: none`.
-- [ ] **AC 3 — No 700 in the app.** No `font-bold`, `font-extrabold` or `font-black` on the app
+- [x] **AC 3 — No 700 in the app.** No `font-bold`, `font-extrabold` or `font-black` on the app
   surface: the nine in `AnalyticsDashboard` and the rest become `font-semibold`. Proved by a new
   rule in `page-shell-guard.test.ts` (pending: `SiteDetailView.tsx`, s66c, shrink-only).
 - [ ] **AC 4 — Page passes.**

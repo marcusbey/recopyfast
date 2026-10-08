@@ -319,7 +319,12 @@ Starts from `main` with Part 1 merged. Before task 1:
 
 ## Tasks (ordered)
 
-1. [ ] **New proofs first (red).**
+1. [x] **New proofs first (red).**
+   - Execution note (2026-10-08): guard red on `metric.tsx`, Overview rows, `ContentElementCard`
+     and `AnalyticsDashboard`'s 8 remaining `font-bold` (the 9th, the old h2, left in s66b1).
+     `standalone pages @w` run red against `next start` (no Supabase needed): login, signup and
+     auth error have no h1. `app pages @w` written, not run (no local Supabase); CI's E2E job is
+     its first run. The clip negative control and the shadow detector were probed in a browser.
    - `page-shell-guard.test.ts` gains three rules, each with self-tests:
      - **R5 flat.** No `surface-interactive`, `hover:shadow-*`, `group-hover:shadow-*`,
        `transition-shadow` or `hover:-translate-y-*` on the app surface. A static
@@ -345,7 +350,7 @@ Starts from `main` with Part 1 merged. Before task 1:
    - Contract +4.
    - Red today: `metric.tsx`, Overview rows, `ContentElementCard`, `AnalyticsDashboard`'s 9
      `font-bold`, the Overview grid, and the auth pages' missing h1.
-2. [ ] **Overview, and its error and loading frames (AC 1, 2, 4).**
+2. [x] **Overview, and its error and loading frames (AC 1, 2, 4).**
    - **Test first:** delete the baseline entries for `dashboard/page.tsx`, `loading.tsx`,
      `error.tsx`, `TrialStatusBadge.tsx` and `ErrorBoundary.tsx`.
    - **Then:**
@@ -360,7 +365,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - `error.tsx` uses an `IconTile` (danger), and its dev code box is `rounded-container`;
      - `ErrorBoundary`'s box is square.
    - `page.activation.test.tsx` and `TrialStatusBadge.test.tsx` pass unchanged.
-3. [ ] **Billing internals (AC 1, 4).**
+3. [x] **Billing internals (AC 1, 4).**
    - **Test first:** delete the remaining billing entries (`BillingDashboard`,
      `billing/page`, `CreditBalanceCard`, `InvoiceHistoryCard`, `LifetimeOfferCard`,
      `PaymentMethodsCard`, `PurchaseCreditsDialog`, `TrialStatusCard`, `UpgradeDialog`,
@@ -374,7 +379,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - the `TrialStatusCard` skeleton is square.
    - All `components/billing/__tests__/*` pass unchanged. `TrialStatusCard.test.tsx:246-272`
      pins button variants only.
-4. [ ] **Content, Analytics and Settings internals (AC 1, 2, 3, 4).**
+4. [x] **Content, Analytics and Settings internals (AC 1, 2, 3, 4).**
    - **Test first:** delete the entries for `content/page`, `ContentElementCard`,
      `AnalyticsDashboard`, `settings/page`, `ApiKeysPanel` and `ThemePicker`. R5 and R6 are
      already red.
@@ -390,7 +395,7 @@ Starts from `main` with Part 1 merged. Before task 1:
      - Settings: the four feedback paragraphs are `rounded-container`;
      - `ApiKeysPanel`: square;
      - `ThemePicker`: square, `border-2` becomes a 1px border, selected as the option toggle.
-5. [ ] **Standalone pages (AC 1, 5).**
+5. [x] **Standalone pages (AC 1, 5).**
    - **Test first:** delete the entries for `login/page`, `signup/page`, `auth/error/page`,
      `LoginForm`, `SignupForm`, `EditorSignIn` and `UserMenu`. The standalone harness tests are
      red from task 1.
@@ -406,6 +411,11 @@ Starts from `main` with Part 1 merged. Before task 1:
    - `LoginForm.test.tsx`, `SignupForm.test.tsx`, `EditorSignIn.test.tsx` and
      `session-management.test.tsx` pass unchanged.
 6. [ ] **Close-out (AC 1, 5, 6).**
+   - Execution note (2026-10-08): the baseline is not `{}` (s66c's 14 entries remain), so the guard
+     is unchanged and s66c's story carries the hand-off. Design-system statuses and s66b2's AC 1
+     and AC 3 done; gates green. Captures committed for the four standalone pages only (`next
+     start`, signed out). The app-page captures and the green `app pages @w` run wait for a
+     Supabase stack (CI's E2E job is the first run; it uploads no images).
    - If `radius-baseline.json` is now `{}`:
      - delete it;
      - make `radius-guard.test.ts` zero-tolerance: "finds no offence on the app surface";

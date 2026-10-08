@@ -242,8 +242,8 @@ export function AnalyticsDashboard({
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="p-6">
               <div className="animate-pulse">
-                <div className="h-4 bg-surface-3 rounded w-3/4 mb-2"></div>
-                <div className="h-8 bg-surface-3 rounded w-1/2"></div>
+                <div className="h-4 bg-surface-3 rounded-container w-3/4 mb-2"></div>
+                <div className="h-8 bg-surface-3 rounded-container w-1/2"></div>
               </div>
             </Card>
           ))}
@@ -294,7 +294,7 @@ export function AnalyticsDashboard({
         {loadError && (
           <p
             role="alert"
-            className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+            className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-container px-3 py-2"
           >
             Showing the last loaded data — refresh failed: {loadError}
           </p>
@@ -308,7 +308,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Total Sites
                 </p>
-                <p className="text-3xl font-bold text-foreground">
+                <p className="text-3xl font-semibold text-foreground">
                   {data.overview.total_sites}
                 </p>
               </div>
@@ -322,7 +322,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Active Users
                 </p>
-                <p className="text-3xl font-bold text-foreground">
+                <p className="text-3xl font-semibold text-foreground">
                   {data.overview.total_users}
                 </p>
               </div>
@@ -336,7 +336,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Page Views
                 </p>
-                <p className="text-3xl font-bold text-foreground">
+                <p className="text-3xl font-semibold text-foreground">
                   {data.overview.total_page_views.toLocaleString()}
                 </p>
               </div>
@@ -350,7 +350,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Content Edits
                 </p>
-                <p className="text-3xl font-bold text-foreground">
+                <p className="text-3xl font-semibold text-foreground">
                   {data.overview.total_edits.toLocaleString()}
                 </p>
               </div>
@@ -367,7 +367,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Avg Load Time
                 </p>
-                <p className="text-2xl font-bold text-foreground">
+                <p className="text-2xl font-semibold text-foreground">
                   {data.performance.avg_load_time}ms
                 </p>
               </div>
@@ -381,7 +381,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Avg Edit Time
                 </p>
-                <p className="text-2xl font-bold text-foreground">
+                <p className="text-2xl font-semibold text-foreground">
                   {data.performance.avg_edit_time.toFixed(0)}ms
                 </p>
               </div>
@@ -395,7 +395,7 @@ export function AnalyticsDashboard({
                 <p className="text-sm font-medium text-muted-foreground">
                   Conversion Rate
                 </p>
-                <p className="text-2xl font-bold text-foreground">
+                <p className="text-2xl font-semibold text-foreground">
                   {(data.overview.conversion_rate * 100).toFixed(1)}%
                 </p>
               </div>
@@ -456,7 +456,7 @@ export function AnalyticsDashboard({
                 {data.top_sites.map((site, index) => (
                   <div
                     key={site.site_id}
-                    className="flex items-center justify-between p-4 bg-surface-1 rounded-lg"
+                    className="flex items-center justify-between p-4 bg-surface-1 rounded-container"
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-sm font-medium text-muted-foreground">
@@ -511,7 +511,7 @@ export function AnalyticsDashboard({
                 </h3>
                 <div className="flex items-center justify-center">
                   <div className="text-center">
-                    <div className="text-4xl font-bold text-tone-success-text">
+                    <div className="text-4xl font-semibold text-tone-success-text">
                       {Math.max(
                         0,
                         Math.min(
@@ -546,7 +546,7 @@ export function AnalyticsDashboard({
       {exportError && (
         <p
           role="alert"
-          className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2"
+          className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-container px-3 py-2"
         >
           {exportError}
         </p>
@@ -591,7 +591,7 @@ function SimpleChart({
         {data.slice(-30).map((point, index) => (
           <div
             key={index}
-            className={`flex-1 rounded-t ${CHART_BAR_CLASSES[color]}`}
+            className={`flex-1 ${CHART_BAR_CLASSES[color]}`}
             style={{
               height: `${maxValue > 0 ? (point.value / maxValue) * 100 : 0}%`,
               minHeight: point.value > 0 ? "4px" : "2px",

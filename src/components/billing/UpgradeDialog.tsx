@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Check } from "lucide-react";
 import {
   Dialog,
   DialogBody,
@@ -204,7 +205,7 @@ export function UpgradeDialog({
           <div
             role="radiogroup"
             aria-label="Billing period"
-            className="inline-flex rounded-lg border p-1"
+            className="inline-flex rounded-control border p-1"
           >
             {BILLING_PERIODS.map((period) => (
               <button
@@ -214,7 +215,7 @@ export function UpgradeDialog({
                 aria-checked={billingPeriod === period.id}
                 onClick={() => setBillingPeriod(period.id)}
                 disabled={isBusy}
-                className={`rounded-md px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
+                className={`rounded-control px-4 py-1.5 text-sm transition-colors disabled:opacity-50 ${
                   billingPeriod === period.id
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:text-foreground"
@@ -242,10 +243,14 @@ export function UpgradeDialog({
                   aria-checked={isSelected}
                   onClick={() => setSelectedPlan(plan.id as PaidPlanId)}
                   disabled={isBusy}
-                  className={`p-6 border-2 rounded-lg text-left transition-colors disabled:opacity-60 ${
+                  // 1px, like every option toggle (design system, Borders):
+                  // selection is the accent border, the accent surface and
+                  // the tick on the badge, never a thicker border. These
+                  // tiles were `border-2` until s66b2.
+                  className={`p-6 border rounded-control text-left transition-colors disabled:opacity-60 ${
                     isSelected
                       ? "border-primary bg-tone-accent-surface"
-                      : "border-border hover:border-input"
+                      : "border-input hover:border-foreground/40"
                   }`}
                 >
                   <div className="flex justify-between items-start mb-4">
@@ -258,7 +263,12 @@ export function UpgradeDialog({
                     {isCurrent ? (
                       <Badge variant="secondary">Current</Badge>
                     ) : (
-                      isSelected && <Badge>Selected</Badge>
+                      isSelected && (
+                        <Badge>
+                          <Check className="mr-1 h-3 w-3" aria-hidden="true" />
+                          Selected
+                        </Badge>
+                      )
                     )}
                   </div>
 
@@ -301,7 +311,7 @@ export function UpgradeDialog({
           {visibleLifetimeOffers.map((lifetimeOffer) => (
             <div
               key={lifetimeOffer.id}
-              className="rounded-lg border border-border bg-surface-1 p-4"
+              className="rounded-container border border-border bg-surface-1 p-4"
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>

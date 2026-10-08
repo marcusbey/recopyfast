@@ -26,6 +26,14 @@
  *   outside the frame.
  * - R4: no `container` utility on the app surface. `dashboard/layout.tsx`
  *   owns width and gutters; a page container is how Billing drifted.
+ * - R5 flat (s66b2 AC 2): no `surface-interactive`, `hover:shadow-*`,
+ *   `group-hover:shadow-*`, `transition-shadow` or `hover:-translate-y-*`.
+ *   A static `shadow-{xs,sm,md,lg,xl,2xl}` only on what floats (the dialog,
+ *   menu, Select and Card primitives, the version-history sheet) and on the
+ *   layout's skip link while `focus:`.
+ * - R6 weight (s66b2 AC 3): no `font-bold`, `font-extrabold` or
+ *   `font-black`. The app's hierarchy is 400 / 500 / 600; Analytics set its
+ *   figures at 700, the last 700s a signed-in owner could see.
  *
  * Offenders that another story owns sit in PENDING, which may only shrink:
  * an entry whose file already passes its rule fails here until it is removed.
@@ -46,10 +54,26 @@ import {
   stripComments,
 } from "./app-surface";
 
-type Rule = "R1" | "R2" | "R3" | "R4";
+type Rule = "R1" | "R2" | "R3" | "R4" | "R5" | "R6";
 
 const PAGE_SHELL_FILE = "src/components/ui/page-shell.tsx";
 const PAGE_HEADER_FILE = "src/components/ui/page-header.tsx";
+
+/**
+ * R5: the only files a static shadow may sit in, because each draws a surface
+ * that floats over the page — a dialog, a menu, Select content, Card
+ * `elevated` (the variant for those surfaces), the version-history sheet.
+ */
+const FLOATING_SHADOW_FILES: readonly string[] = [
+  "src/components/ui/dialog.tsx",
+  "src/components/ui/dropdown-menu.tsx",
+  "src/components/ui/select.tsx",
+  "src/components/ui/card.tsx",
+  "src/components/dashboard/VersionHistoryPanel.tsx",
+];
+
+/** R5: the skip link's `focus:shadow-md`, drawn only while it is focused. */
+const FOCUS_SHADOW_FILE = "src/app/dashboard/layout.tsx";
 
 /** Routed pages, outside the private `_ab-tests` folder (not a route). */
 const DASHBOARD_PAGE = /^src\/app\/dashboard\/(?:(?!_)[^/]+\/)*page\.tsx$/;
@@ -81,12 +105,20 @@ const STANDALONE_H1_FILES: readonly string[] = [
 ];
 
 /**
- * Shrink-only. `sites/page.tsx` is s66c's: it owns everything under
- * `/dashboard/sites` and removes this entry when the site pages move onto
- * `PageShell`.
+ * Shrink-only, and every entry is s66c's: it owns everything under
+ * `/dashboard/sites` and the site components (ADR 053, "Collision list"), and
+ * removes a rule here when its file passes it:
+ * - `sites/page.tsx` moves onto `PageShell` (R1, R2), and its status filter
+ *   drops the `shadow-xs` on the selected segment (R5);
+ * - `EditWebsiteButton` keeps `shadow-sm` on two static boxes, and
+ *   `VersionTimelineItem` a hover shadow (R5);
+ * - `SiteDetailView` sets the site name at 700 (R6).
  */
 const PENDING: Readonly<Record<string, readonly Rule[]>> = {
-  "src/app/dashboard/sites/page.tsx": ["R1", "R2"],
+  "src/app/dashboard/sites/page.tsx": ["R1", "R2", "R5"],
+  "src/components/dashboard/EditWebsiteButton.tsx": ["R5"],
+  "src/components/dashboard/VersionTimelineItem.tsx": ["R5"],
+  "src/components/dashboard/SiteDetailView.tsx": ["R6"],
 };
 
 const CLASS_FUNCTIONS = /\b(?:cn|clsx|cx|cva|twMerge)\s*$/;
@@ -174,7 +206,78 @@ function isClassContext(blanked: string, literalStart: number): boolean {
   return false;
 }
 
-/** R2, R3 and R4 for one source file. Pure, so the rules self-test. */
+/**
+ * One class-like token: split on whitespace, quotes and the punctuation of a
+ * `${…}` expression, so `${isOn ? "shadow-lg" : ""}` yields `shadow-lg`.
+ */
+const CLASS_TOKEN = /[^\s"'`{}()$,;]+/g;
+const STATIC_SHADOW = /^shadow-(?:xs|sm|md|lg|xl|2xl)(?:\/\S+)?$/;
+const ANY_SHADOW = /^shadow(?:-.+)?$/;
+const LIFT = /^-translate-y-/;
+const HEAVY_WEIGHTS: ReadonlySet<string> = new Set([
+  "font-bold",
+  "font-extrabold",
+  "font-black",
+]);
+
+/**
+ * A class token's variants and its utility, split on the colons outside
+ * brackets: `sm:hover:shadow-md` is `[sm, hover]` and `shadow-md`.
+ */
+function splitClassToken(token: string): {
+  variants: string[];
+  utility: string;
+} {
+  const variants: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < token.length; index += 1) {
+    const char = token[index];
+    if (char === "[") depth += 1;
+    else if (char === "]") depth = Math.max(0, depth - 1);
+    else if (char === ":" && depth === 0) {
+      variants.push(token.slice(start, index));
+      start = index + 1;
+    }
+  }
+  return { variants, utility: token.slice(start).replace(/^!/, "") };
+}
+
+/**
+ * R5 for one class token, or null. Static panels cast no shadow and never
+ * move (design system, Surfaces and elevation). On the Overview,
+ * `.surface-interactive` lifted every metric and site row 1px with a
+ * `shadow-md` on hover, the one thing on the page that moved, and Content's
+ * cards grew a shadow on hover. A static shadow belongs to what floats only.
+ */
+function flatnessDetail(token: string, file: string): string | null {
+  const { variants, utility } = splitClassToken(token);
+  const isHover = variants.includes("hover");
+  const isGroupHover = variants.some((variant) =>
+    /^group-hover(?:\/|$)/.test(variant),
+  );
+
+  if (utility === "surface-interactive") {
+    return "`surface-interactive` (marketing's hover lift and shadow)";
+  }
+  if (utility === "transition-shadow") {
+    return "`transition-shadow` (a shadow that animates in)";
+  }
+  if ((isHover || isGroupHover) && ANY_SHADOW.test(utility)) {
+    return `\`${token}\` (a shadow on hover)`;
+  }
+  if (isHover && LIFT.test(utility)) {
+    return `\`${token}\` (a lift on hover)`;
+  }
+  if (STATIC_SHADOW.test(utility) && !isHover && !isGroupHover) {
+    if (FLOATING_SHADOW_FILES.includes(file)) return null;
+    if (file === FOCUS_SHADOW_FILE && variants.includes("focus")) return null;
+    return `\`${token}\` (a static shadow on something that does not float)`;
+  }
+  return null;
+}
+
+/** R2 to R6 for one source file. Pure, so the rules self-test. */
 function findOffences(file: string, source: string): Offence[] {
   const code = stripComments(source);
   const { blanked, literals } = scanLiterals(code);
@@ -213,6 +316,27 @@ function findOffences(file: string, source: string): Offence[] {
         line: lineAt(code, literal.start),
         detail: "`container` utility (the layout owns width and gutters)",
       });
+    }
+  }
+
+  // R5 and R6 read every token of every literal, not only class contexts:
+  // their utilities are not English words (unlike `container`), and a class
+  // list is as often a variable, a cva variant or a ternary inside a template
+  // literal as it is a `className=` string.
+  for (const literal of literals) {
+    for (const match of literal.content.matchAll(CLASS_TOKEN)) {
+      const token = match[0];
+      const line = lineAt(code, literal.start + 1 + (match.index ?? 0));
+      const flat = flatnessDetail(token, file);
+      if (flat) offences.push({ file, rule: "R5", line, detail: flat });
+      if (HEAVY_WEIGHTS.has(splitClassToken(token).utility)) {
+        offences.push({
+          file,
+          rule: "R6",
+          line,
+          detail: `\`${token}\` (700 or more; the app's heaviest weight is 600)`,
+        });
+      }
     }
   }
 
@@ -459,7 +583,9 @@ describe("page-shell rules (self-test)", () => {
 
   describe("R3 one h1", () => {
     it.each([
-      '<h1 className="text-3xl font-bold">Settings</h1>',
+      // s66b2: was `font-bold`, which R6 now reports as well; the composed
+      // case is pinned under R6.
+      '<h1 className="text-3xl font-semibold">Settings</h1>',
       "<h1>Content</h1>",
     ])("fires on %s", (source) => {
       expect(rulesOf(source)).toEqual(["R3"]);
@@ -513,6 +639,88 @@ describe("page-shell rules (self-test)", () => {
       '<div data-container="x" />',
     ])("stays quiet on %s", (source) => {
       expect(rulesOf(source)).toEqual([]);
+    });
+  });
+
+  describe("R5 flat", () => {
+    it.each([
+      '<Link className="surface-interactive flex items-center" />',
+      '<Card className="hover:shadow-md" />',
+      '<div className="group-hover:shadow-lg" />',
+      '<div className="group-hover/row:shadow-sm" />',
+      '<Card className="transition-shadow" />',
+      '<div className="hover:-translate-y-0.5" />',
+      '<div className="sm:hover:-translate-y-1" />',
+      '<div className="shadow-sm border bg-card" />',
+      'const tile = cn("p-4", isOn && "shadow-md");',
+      '<div className={`p-6 ${isOn ? "shadow-lg" : ""}`} />',
+      '<a className="focus:shadow-md" />',
+    ])("fires on %s", (source) => {
+      expect(rulesOf(source)).toEqual(["R5"]);
+    });
+
+    it.each([
+      '<div className="shadow-none" />',
+      '<button className="transition-[color,box-shadow] active:translate-y-px" />',
+      '<Search className="absolute left-3 top-1/2 -translate-y-1/2" />',
+      '<Card className="hover:border-primary/40 hover:bg-surface-2" />',
+      "// it used surface-interactive and hover:shadow-md",
+      "const toast = `box-shadow: 0 10px 25px rgba(0,0,0,0.1);`;",
+    ])("stays quiet on %s", (source) => {
+      expect(rulesOf(source)).toEqual([]);
+    });
+
+    it("allows a static shadow on what floats, and the skip link's focus: one", () => {
+      for (const file of FLOATING_SHADOW_FILES) {
+        expect(rulesOf('<div className="shadow-md" />', file)).toEqual([]);
+      }
+      expect(
+        rulesOf('<a className="sr-only focus:shadow-md" />', FOCUS_SHADOW_FILE),
+      ).toEqual([]);
+      expect(rulesOf('<a className="shadow-md" />', FOCUS_SHADOW_FILE)).toEqual(
+        ["R5"],
+      );
+      expect(
+        rulesOf(
+          '<div className="hover:shadow-md" />',
+          FLOATING_SHADOW_FILES[0],
+        ),
+      ).toEqual(["R5"]);
+    });
+
+    it("reports the line of the token, not of the string", () => {
+      const offences = findOffences(
+        "src/components/dashboard/X.tsx",
+        'const c = cn(\n  "p-4",\n  `border\n   shadow-md`,\n);',
+      );
+      expect(offences.map((offence) => offence.line)).toEqual([4]);
+    });
+  });
+
+  describe("R6 weight", () => {
+    it.each([
+      '<p className="text-3xl font-bold text-foreground" />',
+      '<p className="font-extrabold" />',
+      '<p className="font-black" />',
+      '<p className="md:font-bold" />',
+      '<p className={`text-4xl ${big ? "font-bold" : ""}`} />',
+    ])("fires on %s", (source) => {
+      expect(rulesOf(source)).toEqual(["R6"]);
+    });
+
+    it.each([
+      '<p className="font-semibold" />',
+      '<p className="font-medium" />',
+      "{/* font-bold was 700 */}",
+      "const WEIGHT = 700;",
+    ])("stays quiet on %s", (source) => {
+      expect(rulesOf(source)).toEqual([]);
+    });
+
+    it("reports both rules on the old Settings title (a stray h1 at 700)", () => {
+      expect(
+        rulesOf('<h1 className="text-3xl font-bold">Settings</h1>'),
+      ).toEqual(["R3", "R6"]);
     });
   });
 });
