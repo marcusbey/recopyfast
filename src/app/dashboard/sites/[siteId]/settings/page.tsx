@@ -9,6 +9,7 @@ import { BulkOperations } from "@/components/dashboard/BulkOperations";
 import { DeleteSiteDialog } from "@/components/dashboard/DeleteSiteDialog";
 import { DomainVerification } from "@/components/dashboard/DomainVerification";
 import { WebhooksPanel } from "@/components/dashboard/WebhooksPanel";
+import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
 import { useSiteContext } from "@/components/dashboard/site/SiteProvider";
 import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
 
@@ -70,6 +71,11 @@ export default function SiteSettingsPage() {
           <DomainVerification siteId={site.id} siteDomain={site.domain} />
         </CardContent>
       </Card>
+
+      {/* API keys are issued per site, so this is their home (s66c2 AC 5).
+          The panel takes this site: no site select, and no second request
+          for the site list the provider already holds. */}
+      <ApiKeysPanel siteId={site.id} />
 
       <WebhooksPanel siteId={site.id} />
 

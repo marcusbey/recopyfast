@@ -11,7 +11,9 @@ import {
   signInAsLayoutOwner,
 } from "./support/owner-session";
 import {
+  FIXTURE_TOKEN,
   LONG_LINK_LABEL,
+  fixtureEmbedScript,
   routeShareList,
   routeSites,
   routeSitesWithFixtureCredentials,
@@ -38,6 +40,9 @@ import {
  * No real token or address reaches a capture: `GET /api/sites` passes through
  * with its install credentials replaced by bullets, the preview links are a
  * `page.route` fixture at @example.com, and the seeded domain is `.invalid`.
+ *
+ * s66c2 adds the quick setup: a new site, registered, is walked to Live on
+ * its Overview, and step 2 turns over on the provider's poll with no reload.
  */
 
 const VIEWPORT_HEIGHT = 900;
@@ -47,6 +52,8 @@ const SITE_NAME = "E2E layout site";
 const EDGE_TOLERANCE = 0.5;
 /** The provider polls an awaiting-install site every 5 s; the list never. */
 const LONGER_THAN_ONE_POLL_MS = 6_000;
+/** Two of the provider's 5 s polls, so one answer in flight cannot flake it. */
+const NEXT_POLL_TIMEOUT_MS = 12_000;
 
 const CAPTURE_ROOT = path.join(
   process.cwd(),
@@ -384,6 +391,195 @@ test.describe("s66c1 site pages", () => {
     expect(layout.dialogOverflow).toBeLessThanOrEqual(0);
     expect(layout.pastRight).toBe(0);
   });
+
+  /**
+   * s66c2 AC 4, and the live status row of AC 1, in a browser.
+   *
+   * Register, the site list and activation are all fulfilled here, so the
+   * moment the snippet "reports in" is the test's to choose: `GET /api/sites`
+   * answers `awaiting-install` until then and `live` after, the way the real
+   * route does once the embed's first authorized report writes
+   * `sites.status`. Nothing pushes that to an open tab; the provider's 5 s
+   * poll is what has to bring it, with no reload and no activation refetch.
+   *
+   * Both ways a new site reaches its Overview land on step 2: the
+   * registration panel's "Open site page", and the Sites row's "Continue
+   * setup".
+   */
+  for (const width of NAV_WIDTHS) {
+    test(`quick setup walks a new site to Live @${width}`, async ({ page }) => {
+      const site = {
+        id: randomUUID(),
+        name: "Fixture new site",
+        domain: "new-site.invalid",
+      };
+      let reportedAt: string | null = null;
+      let activationRequests = 0;
+      const overview = `/dashboard/sites/${site.id}`;
+
+      await page.route("**/api/sites/register", async (route) => {
+        if (route.request().method() !== "POST") return route.continue();
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            site: {
+              id: site.id,
+              domain: site.domain,
+              name: site.name,
+              created_at: new Date().toISOString(),
+            },
+            apiKey: "•••",
+            siteToken: FIXTURE_TOKEN,
+            embedScript: fixtureEmbedScript(site.id),
+          }),
+        });
+      });
+      await page.route(
+        (url) => url.pathname === "/api/sites",
+        async (route) => {
+          if (route.request().method() !== "GET") return route.continue();
+          const createdAt = "2026-10-08T00:00:00.000Z";
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              sites: [
+                {
+                  ...site,
+                  created_at: createdAt,
+                  updated_at: reportedAt ?? createdAt,
+                  status: reportedAt ? "live" : "awaiting-install",
+                  live_at: reportedAt,
+                  last_reported_at: reportedAt,
+                  last_mismatch_domain: null,
+                  last_mismatch_at: null,
+                  stats: {
+                    content_elements_count: 0,
+                    edits_count: 0,
+                    views: 0,
+                    last_activity: null,
+                  },
+                  permission: "admin",
+                  siteToken: FIXTURE_TOKEN,
+                  embedScript: fixtureEmbedScript(site.id),
+                },
+              ],
+            }),
+          });
+        },
+      );
+      await page.route(
+        (url) => url.pathname === `/api/sites/${site.id}/activation`,
+        async (route) => {
+          if (route.request().method() !== "GET") return route.continue();
+          activationRequests += 1;
+          await route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              installed: reportedAt !== null,
+              invited: false,
+              published: false,
+              dismissed: false,
+            }),
+          });
+        },
+      );
+      await signIn(page, width);
+      await expectOn(page, "/dashboard/sites", "Sites");
+      await page.evaluate(() => {
+        (window as Window & { __rcfSameDocument?: boolean }).__rcfSameDocument =
+          true;
+      });
+
+      const quickSetup = page.getByRole("region", {
+        name: `Quick setup for ${site.name}`,
+      });
+      const currentStep = quickSetup.locator('li[aria-current="step"]');
+      const waiting = quickSetup.getByText(
+        `Waiting for the first page view on ${site.domain}. Checking every 5 seconds.`,
+      );
+      const expectStepTwo = async () => {
+        await expect(quickSetup.getByText("Step 2 of 3")).toBeVisible();
+        await expect(currentStep).toHaveCount(1);
+        await expect(
+          currentStep.getByRole("heading", { name: "Install the snippet" }),
+        ).toBeVisible();
+        await expect(
+          currentStep.getByRole("button", { name: "Copy snippet" }),
+        ).toBeVisible();
+        await expect(waiting).toBeVisible();
+      };
+      const expectNoOverflow = async (state: string) => {
+        const { pageOverflow, overflowing } = await measureContent(page);
+        expect(pageOverflow, `${state} @${width}`).toBeLessThanOrEqual(0);
+        expect(overflowing, `${state} @${width}`).toEqual([]);
+      };
+
+      // Registration → "Open site page" → the Overview, at step 2.
+      await page.getByRole("button", { name: "Add site" }).first().click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel(/Website Name/).fill(site.name);
+      await dialog.getByLabel(/Website URL/).fill(site.domain);
+      await dialog.getByRole("button", { name: "Register Site" }).click();
+      await dialog.getByRole("link", { name: "Open site page" }).click();
+      await expectOn(page, overview, site.name);
+      await expect(dialog).toBeHidden();
+      await expectStepTwo();
+
+      // The Sites row's "Continue setup" lands on the same step.
+      await page
+        .getByRole("navigation", { name: "Breadcrumb" })
+        .getByRole("link", { name: "Sites", exact: true })
+        .click();
+      await expectOn(page, "/dashboard/sites", "Sites");
+      await page.getByRole("link", { name: "Continue setup" }).click();
+      await expectOn(page, overview, site.name);
+      await expectStepTwo();
+      await page.waitForLoadState("networkidle");
+      await capture(page, `quick-setup-step-2-${width}`);
+      await expectNoOverflow("step 2");
+
+      // The snippet reports in. The next poll answers live, and step 2 turns
+      // over in place: no reload, no activation refetch.
+      const activationBeforeFlip = activationRequests;
+      reportedAt = new Date().toISOString();
+
+      await expect(
+        quickSetup
+          .getByRole("status")
+          .filter({
+            hasText: /^Installed\. ReCopyFast saw new-site\.invalid .+ ago\.$/,
+          }),
+      ).toBeVisible({ timeout: NEXT_POLL_TIMEOUT_MS });
+      await expect(waiting).toHaveCount(0);
+      await expect(
+        quickSetup.getByRole("heading", {
+          level: 2,
+          name: `Setup complete — ${site.name} is live`,
+        }),
+      ).toBeVisible();
+      await expect(
+        currentStep.getByRole("heading", { name: "Start editing" }),
+      ).toBeVisible();
+      await expect(
+        currentStep.getByRole("button", { name: `Edit website: ${site.name}` }),
+      ).toBeEnabled();
+      expect(activationRequests).toBe(activationBeforeFlip);
+      expect(new URL(page.url()).pathname).toBe(overview);
+      await capture(page, `quick-setup-live-${width}`);
+      await expectNoOverflow("live");
+
+      expect(
+        await page.evaluate(
+          () =>
+            (window as Window & { __rcfSameDocument?: boolean })
+              .__rcfSameDocument === true,
+        ),
+      ).toBe(true);
+    });
+  }
 
   /**
    * ADR 052 "Watch", in a browser: the layout keys the provider by site, so

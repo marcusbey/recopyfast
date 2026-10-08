@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SiteRegistrationModal } from "@/components/dashboard/SiteRegistrationModal";
 import { TrialStatusBadge } from "@/components/dashboard/TrialStatusBadge";
-import { ActivationChecklist } from "@/components/dashboard/ActivationChecklist";
+import { QuickSetup } from "@/components/dashboard/QuickSetup";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -201,22 +201,27 @@ export default function DashboardPage() {
         </>
       }
     >
-      {/* Only when there is a checklist to show. An empty section is still a
-          flex item of the shell, so its gap was drawn twice above the summary
-          for every account with no installable site (s66b1 review m-6). */}
+      {/* One row per admin site whose quick setup is unfinished, each
+          leading to that site's Overview, where the steps are (s66c2 AC 3).
+          This used to stack a whole checklist per admin site above the
+          summary. Each row decides for itself whether it is unfinished, so
+          the list can end up empty: it is then not drawn, because an empty
+          child of the shell is still a flex item and the shell's gap would
+          be drawn twice above the summary (s66b1 review m-6). */}
       {sitesState === "ready" && user && installableSites.length > 0 && (
-        <section aria-label="Activation checklists" className="space-y-4">
+        <ul
+          aria-label="Quick setup"
+          className="divide-y divide-border rounded-container border border-border bg-card empty:hidden"
+        >
           {installableSites.map((site) => (
-            <ActivationChecklist
+            <QuickSetup
               key={`${user.id}:${site.id}`}
-              siteId={site.id}
-              siteName={site.name}
-              domain={site.domain}
-              embedScript={site.embedScript}
+              variant="summary"
+              site={site}
               userId={user.id}
             />
           ))}
-        </section>
+        </ul>
       )}
 
       {/* Asymmetric by design. One number leads — how many sites are actually

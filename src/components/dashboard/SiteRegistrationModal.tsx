@@ -25,6 +25,7 @@ import {
 } from "@/lib/sites/install-recipes";
 import { Loader2, AlertCircle, ExternalLink } from "lucide-react";
 import { sitePageHref } from "@/components/dashboard/site/SiteSubnav";
+import { InstallStep } from "./InstallStep";
 
 interface SiteRegistrationModalProps {
   isOpen: boolean;
@@ -501,31 +502,5 @@ function StepTitle({ title }: { title: InstallStepTitle }) {
         </>
       )}
     </>
-  );
-}
-
-interface InstallStepProps {
-  number: number;
-  title: React.ReactNode;
-  children: React.ReactNode;
-}
-
-/** One numbered step: a square step number, a heading, then its content. */
-function InstallStep({ number, title, children }: InstallStepProps) {
-  return (
-    <li className="flex gap-3">
-      <span
-        aria-hidden="true"
-        className="tabular flex h-6 w-6 shrink-0 items-center justify-center rounded-container border border-border bg-surface-1 text-xs font-medium text-foreground"
-      >
-        {number}
-      </span>
-      <div className="min-w-0 flex-1 space-y-3">
-        <h3 className="text-sm font-semibold leading-6 text-foreground">
-          {title}
-        </h3>
-        {children}
-      </div>
-    </li>
   );
 }

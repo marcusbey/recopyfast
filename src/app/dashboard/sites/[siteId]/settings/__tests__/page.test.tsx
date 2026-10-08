@@ -115,6 +115,33 @@ describe("the Settings page", () => {
     });
   });
 
+  // s66c2 AC 5: API keys are issued per site, so they have a home on the
+  // site's own Settings, between Domain ownership and Webhooks. The panel
+  // takes this site: it neither offers a site select nor reloads the site
+  // list (`GET /api/sites`, which the provider already holds).
+  it("holds this site's API keys, between domain ownership and webhooks", async () => {
+    renderWithSite(<SiteSettingsPage />);
+
+    const apiKeys = await screen.findByText("API Keys");
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(`/api/api-keys?siteId=${SITE_ID}`),
+    );
+    expect(screen.queryByRole("combobox", { name: "Site" })).toBeNull();
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).not.toContain(
+      "/api/sites",
+    );
+    const domain = screen.getByText("Domain ownership");
+    const webhooks = screen.getByText("Webhooks");
+    expect(
+      domain.compareDocumentPosition(apiKeys) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      apiKeys.compareDocumentPosition(webhooks) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   // "History" meant two things: version history (the header action) and the
   // import/export log. The log is now "Operation history".
   it("names the import and export log Operation history", () => {
