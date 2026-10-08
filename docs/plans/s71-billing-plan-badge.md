@@ -26,7 +26,7 @@ Failing tests first, in `src/components/billing/__tests__/SubscriptionCard.badge
 Change: `getStatusBadge()` in `SubscriptionCard.tsx` — `isLifetime` first, then the subscription
 status, else `null`. Remove the "Free" fallback.
 
-- [ ] Task 1
+- [x] Task 1
 
 ## Task 2 — payment-methods empty state matches the plan
 
@@ -37,7 +37,7 @@ Failing tests first, in `src/components/billing/__tests__/PaymentMethodsCard.emp
 Change: `PaymentMethodsCard` takes an optional `isPlanHeldForLife?: boolean` (default false);
 `BillingDashboard` passes `isPlanHeldForLife`.
 
-- [ ] Task 2
+- [x] Task 2
 
 ## Verification
 

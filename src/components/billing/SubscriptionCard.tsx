@@ -129,8 +129,16 @@ export function SubscriptionCard({
     }
   };
 
+  // s71: this printed "Free" whenever there was no subscription row — and a
+  // lifetime grant has none, so every lifetime owner read "Free" beside the plan
+  // they paid for ("it says FRee on the right and PRO on the left", owner,
+  // 2026-10-08). "Free" names a retired plan nobody is on; never reintroduce it
+  // as a fallback. A plan held for life wins over a lower subscription still
+  // running out its period: that row bills a different plan, not this one. With
+  // neither (a trial has no row), no badge beats a wrong one.
   const getStatusBadge = () => {
-    if (!subscription) return <Badge variant="secondary">Free</Badge>;
+    if (isLifetime) return <Badge variant="default">Lifetime</Badge>;
+    if (!subscription) return null;
 
     const variant =
       subscription.status === "active"

@@ -307,6 +307,7 @@ export function BillingDashboard({
               />
               <PaymentMethodsCard
                 paymentMethods={dashboardData.paymentMethods}
+                isPlanHeldForLife={isPlanHeldForLife}
                 onUpdate={handleSubscriptionUpdate}
               />
               <InvoiceHistoryCard invoices={dashboardData.invoices} />
