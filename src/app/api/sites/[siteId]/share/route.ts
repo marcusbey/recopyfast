@@ -525,6 +525,44 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       );
     }
 
+    // Deactivate the removed member's edit sessions on this site (ADR 047,
+    // rule 3). This route used to delete the grant and leave `edit_sessions`
+    // alone, so a removed member's session lived on to its expiry (H1).
+    //
+    // NOT the security control, and deliberately not allowed to fail the
+    // request: since s68a `validateEditSessionAccess` reads the holder's LIVE
+    // grant on every use, so the row deleted above already left these sessions
+    // authorising nothing. This is what makes the dashboard's session list and
+    // the realtime sweep tell the truth now rather than at expiry — so a
+    // failure is logged and the completed removal still answers 200.
+    //
+    // Service client: it is the only writer of `edit_sessions` (migration
+    // 20261008100000). Scoped by `site_id` AND the removed row's `user_id`, so
+    // the member's sessions on their other sites survive. A team row has no
+    // `user_id` and no session can be issued on one, so it touches nothing.
+    // `is_active` keeps an earlier `revoked_at` from being rewritten.
+    if (targetPermission.user_id) {
+      try {
+        const { error: sessionError } = await serviceClient
+          .from("edit_sessions")
+          .update({ is_active: false, revoked_at: new Date().toISOString() })
+          .eq("site_id", siteId)
+          .eq("user_id", targetPermission.user_id)
+          .eq("is_active", true);
+        if (sessionError) {
+          console.error(
+            "Error deactivating a removed member's edit sessions:",
+            sessionError,
+          );
+        }
+      } catch (sessionError) {
+        console.error(
+          "Error deactivating a removed member's edit sessions:",
+          sessionError,
+        );
+      }
+    }
+
     // Create notification for the affected user(s)
     if (targetPermission.user_id) {
       await supabase.from("collaboration_notifications").insert({

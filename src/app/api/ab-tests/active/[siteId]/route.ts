@@ -33,13 +33,16 @@ export async function GET(
     const { siteId } = await params;
     const token = extractToken(request);
 
+    let authorizedSiteId: string;
     try {
-      await authorizeSiteRequest({
+      ({
+        site: { id: authorizedSiteId },
+      } = await authorizeSiteRequest({
         siteId,
         token,
         origin: request.headers.get("origin"),
         referer: request.headers.get("referer"),
-      });
+      }));
     } catch (authError) {
       return withCors(
         NextResponse.json(
@@ -73,10 +76,17 @@ export async function GET(
     // That is the degrade path it takes for any failed fetch. The GET on
     // /api/content fails OPEN instead because losing THAT un-publishes every
     // customer's copy at once — a different blast radius, hence a different call.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_KEY_DEFAULT",
       endpoint: "ab-tests/active",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "A/B test lookup rate limit exceeded for this site.",

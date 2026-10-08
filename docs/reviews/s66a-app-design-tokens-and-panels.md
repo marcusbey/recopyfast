@@ -53,5 +53,19 @@ Owner decision 2026-10-08 on m6: "Accept 16px everywhere" (card titles); the Aut
 rule (dialog titles are part of the system). M1 is resolved by the PR's E2E job. m1–m5, m7, m8 go to a short fix
 run before the PR.
 
+## Verification of fix `f3ef941` (fresh reviewer, 2026-10-08)
+
+m1–m5, m7, m8 closed; no new defect beyond one minor. Per-call-site DialogBody guard bites (swapping the
+second DialogBody in `sites/page.tsx` → red); `focus-indicator.ts` handles real Chromium box-shadow strings and
+the e2e assertion can now pass and fail; attribute rows conform to the design system's inline-code spec;
+`empty:hidden` removes the dead band (4 tests red without it); the CodeBlock live region and distinct
+`copyLabel`s are tested (5 red without `role="status"`). home-1280 captures show the scroll-revealed sections.
+Full jest 334 suites / 4,343 tests, type-check green.
+
+New minor: the Copy button's `aria-label` stays "Copy snippet" while its visible text is "Copied"/"Copy
+failed" for 2 s (WCAG 2.5.3 label-in-name; the live region carries the announcement).
+
+M1 (major) remains pending: the e2e harness's first run against real Supabase is the PR's E2E job.
+
 Max severity: major
 Ship allowed: yes

@@ -36,6 +36,7 @@ import {
   readString,
 } from "@/lib/auth/editor-request";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import { requireUuid } from "@/lib/api/validation";
 import {
   checkOwnerCanEdit,
   ownerCanEditRefusal,
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
     const body = await readJsonBody(request);
     const rawEmail = readString(body, "email");
     const code = readString(body, "code");
-    const siteId = readString(body, "siteId");
+    const rawSiteId = readString(body, "siteId");
     const rememberDevice = body?.rememberDevice === true;
 
     if (!rawEmail || !isPlausibleEmail(rawEmail.trim()) || !code) {
@@ -71,6 +72,25 @@ export async function POST(request: NextRequest) {
         ),
         request,
       );
+    }
+
+    // s68b M3. Canonicalised BEFORE the limiter: the per-address bucket used to
+    // be keyed on the raw `siteId` while the code row is found through a `uuid`
+    // cast, so each spelling of one site id was a fresh five-guess budget
+    // against the same code. Malformed → 400; absent → hub mode, unchanged.
+    let siteId: string | null = null;
+    if (rawSiteId !== null) {
+      const canonical = requireUuid(body ?? {}, "siteId");
+      if (!canonical.ok) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "invalid_request", message: "That site id isn't valid." },
+            { status: 400 },
+          ),
+          request,
+        );
+      }
+      siteId = canonical.value;
     }
 
     const email = normalizeEmail(rawEmail);

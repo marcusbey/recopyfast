@@ -66,11 +66,26 @@ jest.mock('next/server', () => ({
       this.nextUrl = new URL(url)
       this.method = init?.method || 'GET'
       this.headers = new Headers(init?.headers)
-      this.body = init?.body
+      this._bodyText = init?.body
+      // `body` is a ReadableStream on the real NextRequest, as on any Request.
+      // A route that must stop reading at a size cap can only do it through
+      // that stream (readBoundedJson, PR #65 review D4) — and this mock handing
+      // it the raw string instead would fail every such route here while the
+      // runtime accepts it. A string body is exposed as the stream of its
+      // UTF-8 bytes; json() and text() still answer from the string.
+      this.body =
+        typeof init?.body === 'string'
+          ? new (require('node:stream/web').ReadableStream)({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(init.body))
+                controller.close()
+              },
+            })
+          : init?.body
     }
-    
+
     async json() {
-      return JSON.parse(this.body || '{}')
+      return JSON.parse(this._bodyText || '{}')
     }
 
     // The real NextRequest exposes the body as text too, and a route that has
@@ -78,7 +93,7 @@ jest.mock('next/server', () => ({
     // oversized file *before* `JSON.parse` — can only be written that way. The
     // mock omitting `text()` made that route untestable rather than wrong.
     async text() {
-      return this.body || ''
+      return this._bodyText || ''
     }
   },
   // Constructible, and faithful about which statuses may carry a body.

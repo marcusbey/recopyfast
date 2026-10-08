@@ -18,17 +18,29 @@ import { StagingAccessManager } from "../staging-access";
 jest.mock("@/lib/supabase/service");
 
 const FUTURE = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+const ISSUED = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
 const tables: Record<string, Array<Record<string, unknown>>> = {
+  // s68a (ADR 047): an edit session is honoured only on its holder's live
+  // `site_permissions` row and within 24 h of issue, so the fixture names a
+  // holder, an issue time and that holder's grant. The holder is granted on
+  // site B too, so the site-B refusal below is still decided by the session
+  // lookup's `site_id` filter and not by a missing grant.
   edit_sessions: [
     {
       id: "session-a",
       token: "edit-token-a",
       site_id: "site-a",
+      user_id: "user-a",
       is_active: true,
+      created_at: ISSUED,
       expires_at: FUTURE,
       permissions: ["view", "edit"],
     },
+  ],
+  site_permissions: [
+    { site_id: "site-a", user_id: "user-a", permission: "edit" },
+    { site_id: "site-b", user_id: "user-a", permission: "edit" },
   ],
   staging_access: [
     {

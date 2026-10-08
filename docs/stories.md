@@ -2651,3 +2651,259 @@ Not in this story:
 - the marketing site.
 
 Embed allocation: 0 bytes.
+
+## s68 — security hardening (split into s68a / s68b / s68c)
+
+Product owner decision, 2026-10-08: **"s68 now: H1 + H2 + top mediums"** through the pipeline;
+lows go to the backlog (`s69-security-lows`). Runs before s66/s67 ship. Source: the security
+review of `origin/main` `659778e`, every claim re-verified in code by the s68 research
+(`docs/research/s68{a,b,c}-*.md`). Planning showed more than ten tasks across three deploy
+targets, so the story is split by blast radius: database and session authority (s68a), HTTP abuse
+bounds (s68b), realtime parity (s68c).
+
+**Precondition, owner action — not code (C1).** Live-format production credentials exist in public
+repository history (a service-role JWT, a Supabase personal access token, the Postgres password, a
+Redis URL; introduced at `1e620ac` and `216d10e`). Values are never reproduced in any document.
+Checklist the owner confirms before s68a ships, one tick each:
+- [ ] Supabase service-role key rotated; Vercel and Fly env updated; old key refused.
+- [ ] Supabase personal access token revoked.
+- [ ] Postgres password reset; pooler connection strings updated wherever stored.
+- [ ] Redis credential rotated; `REDIS_URL` updated on Vercel and Fly.
+- [ ] History rewrite / secret-scanning alert closure decided (rotation is the fix; a rewrite only
+  limits further copying).
+
+Re-verification outcome (what the review said vs the code): H1 confirmed, and reproduced on a
+fresh replay. **H2 is false as a replay risk** — `20260809120000` revokes on replay and the
+function-grant and RLS suites pass 6/6 against a fresh PG14 replay — but neither suite is ever run
+by CI. M4 confirmed for a different reason than reported: the authorizer verifies the token
+against the database's `site.id`, not the route's spelling. M9 reproduced on a replay; one of its
+policies is live in production (inert there). A new finding of the same class as the realtime
+revocation item — HTTP never consults `site_editors` for staging tokens — is folded into s68c.
+
+Order: **s68a first** (production exploit, migration); **s68b in parallel** (independent, no
+migration); **s68c after s68a merges** (reuses ADR 047 and s68a's e2e seeds).
+
+Follow-ups, not s68:
+- M8 — DOM clobbering of `window.RECOPYFAST_API` in the embed: belongs with s67, which is rewriting
+  embed startup (follow-up line only; s67's docs are not edited here).
+- All lows → `s69-security-lows` (stub below).
+- Lows found by the s68 research itself (raw-id limiters on editor routes, unbounded bulk
+  operations, `staging_access` admin direct writes, unmetered share and domain routes, …) →
+  `s69-security-lows` R1–R10.
+
+## Story s68a-edit-session-authority — an edit session never carries more than its holder's live grant
+
+Owner decision 2026-10-08 (above). Launch-blocking: the escalation is live in production.
+Complexity: 4. Dependencies: none (C1 is an owner precondition, not a code dependency). Branch
+`feature/s68a-edit-session-authority`. Decision: ADR 047.
+
+Evidence: an `edit` member inserts `edit_sessions {permissions: ['admin'], expires_at: '2099-…'}`
+with their own JWT (policy `20250817000000_complete_database_setup.sql:483-492`, live in
+production; reproduced on a replay) and publishes with it, because `validateEditSessionAccess`
+(`src/lib/auth/editor-access.ts:416-457`) trusts the row and `POST /api/staging/publish`
+(`route.ts:106-138`) gates on it. Removing the member (`share/route.ts:514-518`) leaves the session
+alive. Replay-only self-escalation policies (`20260731008000:117-123,201-210`) and a live invitee
+rewrite policy (`20260801200000:956-968`) sit beside it. The definer-function guard
+(`function-grants.test.ts`) passes on a replay but no CI step runs it against a database.
+
+- [x] An edit-session token grants at most the intersection of its row's permissions and the
+  holder's live direct `site_permissions` row for the site, read at every validation: an `edit`
+  member's `admin`-stamped session cannot publish (403), a removed member's session is refused
+  (401), a NULL-holder session is refused (401). Tests:
+  `src/lib/auth/__tests__/edit-session-authority.test.ts`,
+  `src/__tests__/api/staging/publish-edit-session-authority.test.ts`.
+- [x] A session older than 24 h from `created_at` is refused whatever its `expires_at`. Test:
+  `edit-session-authority.test.ts` ("refuses a session past the 24 h lifetime").
+- [x] Removing a member deactivates their edit sessions for that site (scoped by site and user).
+  Test: `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`.
+- [x] Edit sessions are issued only through the service role, after the caller's grant is read
+  under their own session. Test: `src/__tests__/api/edit-sessions/create-service-role.test.ts`
+  (insert on the service client, never the user client).
+- [ ] Migration `20261008100000_edit_sessions_service_role_writes.sql`: PUBLIC/`anon`/`authenticated`
+  hold no write privilege or write policy on `edit_sessions`, `anon` no SELECT; an `edit` member's
+  direct INSERT (SQL and PostgREST with a real JWT) is refused; rows the new rules would refuse are
+  deactivated, idempotently. Test: `src/__tests__/db/edit-sessions-privileges.test.ts`.
+- [x] Migration `20261008110000_converge_replay_privileges.sql`: on a replayed database a stranger
+  cannot insert themselves into a team, an invitee cannot rewrite their invitation, a collaborator
+  admin cannot UPDATE `site_permissions` (the creator row stays unstamped); team managers still
+  update invitations. Test: `src/__tests__/db/replay-privilege-convergence.test.ts`.
+- [x] The definer-function and RLS invariants run against both replays in CI with a required
+  database (`function-grants`, `rls-policies` and the two new suites, in
+  `scripts/run-db-invariants.mjs` and the e2e job's DB step), and the convergence migration's
+  postcondition aborts if any `SECURITY DEFINER` function is executable by `anon`/PUBLIC or by
+  `authenticated` outside the three allowlisted predicates. Test: negative control in
+  `replay-privilege-convergence.test.ts` ("postcondition refuses a definer function executable by
+  anon"); CI red when the database is unreachable.
+- [ ] `e2e/share-edit-publish.spec.ts` and `e2e/realtime-parity.spec.ts` seed edit sessions owned
+  by the site owner and pass; Playwright total stays 45.
+- [ ] Rollout: application first, then the two migrations; the dry run lists exactly those two
+  files; the read-only verification query in the plan returns zero rows in production, recorded in
+  the PR. Runbook `docs/operations/edit-session-authority.md`.
+- [ ] ADR 047 merged (amends ADR 042's "Watch"); `docs/quality/qa-register.md` no longer states
+  `20260809120000` is blocked without the operator's ledger evidence. Required local gates pass;
+  one story commit plus one migration commit.
+
+Embed allocation: 0 bytes.
+
+## Story s68b-api-abuse-bounds — public and member endpoints cannot be turned into probes, forgers or slow loops
+
+Owner decision 2026-10-08 (above). Complexity: 3. Dependencies: none (parallel with s68a).
+Branch `feature/s68b-api-abuse-bounds`. Decision: ADR 048. Covers M1, M2, M3, M4, M5, M6, M10.
+
+- [ ] M1 — webhook deliveries and test sends never follow redirects; a 3xx is a failed attempt
+  with a fixed message and nothing from a redirect target is stored or returned. Tests:
+  `src/__tests__/webhooks/manager.test.ts` ("a 302 is a failure and stores no body"),
+  `src/__tests__/webhooks/redirect-not-followed.test.ts` (real loopback servers: the target gets
+  zero requests).
+- [ ] M10 — domain file verification does not follow redirects, does not echo the target's status
+  text on a redirect, and checks addresses with the webhook guard's unicast allowlist;
+  `PUT /api/domains/verify` is limited per user, fail closed, before any DNS or HTTP work. Tests:
+  `src/__tests__/security/domain-verification.test.ts`, `src/__tests__/api/domains/verify-limiter.test.ts`.
+- [ ] M2 — `useRegex: true` is refused per operation and no `RegExp` is built from request input;
+  `((a+))+$` against 30 characters returns in < 100 ms; literal find/replace unchanged (ADR 048).
+  Test: `src/__tests__/api/bulk/update-literal-only.test.ts`.
+- [ ] M3 — editor code routes canonicalise `siteId` (lower-case UUID, malformed → 400) before the
+  limiters, so case spellings share one bucket. Tests: `src/__tests__/api/editor/request-code/route.test.ts`,
+  `src/__tests__/api/editor/submit-code/route.test.ts`.
+- [ ] M3 — each guess is charged atomically before comparison: 20 concurrent wrong guesses
+  against one code are compared at most 5 times and burn the code. Tests:
+  `src/lib/auth/__tests__/editor-verification-attempts.test.ts`, `src/__tests__/db/editor-code-attempts.test.ts`
+  (real Postgres, CI e2e DB step).
+- [ ] M4 — the per-site limiters of content discovery POST and `ab-tests/{bucket,active,track}` key
+  on the authorized `site.id`: an upper-case spelling with the genuine token spends the canonical
+  bucket; no spelling is refused. Test: `src/__tests__/api/public-site-bucket-canonical.test.ts`.
+- [ ] M5 — `ab-tests/track` accepts what the embed sends today and refuses with 400, before any
+  database call, more than 50 events, a body over 64 KB, malformed ids, unknown event types,
+  oversized or prototype-polluting `metadata`, a `visitor_id`/`session_id` that is empty, over 64
+  characters or carries control characters, and a `geo_*` over 64 characters. The two values the
+  host page passes to the public `trackConversion(eventName, value)` are coerced, never refused
+  (plan amendment 2026-10-08): an unusable `value` is stored as 1, and the event name is
+  stringified (a non-text, non-number, non-boolean name becomes "conversion"), stripped of control
+  characters and cut to fit the 1 KB metadata bound. A repeated conversion for the same (visitor,
+  test) is not counted, nor one from a visitor with neither a bucket assignment for that test nor a
+  view of it (recorded or in the same batch) — the view and conversion beacons may arrive in either
+  order (PR #65 review D1). Test: `src/__tests__/api/ab-tests/track-bounds.test.ts`.
+- [ ] M6 — staging verification and editor-code e-mails escape the site label; `POST
+  /api/staging/access` refuses a non-string label, one over 80 characters or with control
+  characters (400, nothing created). Tests: `src/lib/email/__tests__/resend-codes.test.ts`,
+  `src/__tests__/api/staging/access.test.ts`.
+- [ ] No migration, no new dependency, no `public/embed/` or `server/` change. Required local gates
+  pass; one story commit; post-deploy operator checks (plan "Rollout") recorded in the PR.
+
+Embed allocation: 0 bytes.
+
+## Story s68c-realtime-grant-parity — the realtime service admits exactly whom HTTP admits
+
+Owner decision 2026-10-08 (above), including the two medium items left open by the s07a review
+(`docs/reviews/s07a-realtime-service-hardening.md:40-59`). Complexity: 3. Dependencies: s68a merged
+(ADR 047, e2e seeds). Branch `feature/s68c-realtime-grant-parity`.
+
+- [ ] M7 — staging admission and every re-validation apply HTTP's device binding: a forwarded
+  verified link presented with another User-Agent, or a verification older than 12 h, is refused at
+  the handshake and dropped by the sweep. Tests: `src/__tests__/websocket/auth-parity.test.ts`
+  (binding and UA-hash rows), `src/__tests__/websocket/server.integration.test.ts`
+  ("staging admission is device-bound").
+- [ ] `join-dashboard` requires a live editor grant: a socket holding only the public site token is
+  refused and receives no `content-updated`. Test: `server.integration.test.ts` ("a plain viewer's
+  join-dashboard is refused").
+- [ ] Editor revocation matches e-mail case-insensitively: `John@Example.com` is refused at the
+  handshake and dropped within one sweep after `john@example.com` is removed. Test:
+  `server.integration.test.ts` (revocation block, mixed-case fixture).
+- [ ] Edit-session sockets follow ADR 047: the holder's live grant bounds the permissions, a removed
+  holder's socket is dropped within one sweep, a session past 24 h is refused. Tests: parity rows in
+  `auth-parity.test.ts`; integration "drops an edit-session socket whose holder was removed".
+- [ ] HTTP staging validation (and code re-send/verify) refuses a token whose e-mail has a revoked
+  `site_editors` row for the site, in any case; no directory row changes nothing. Test:
+  `src/lib/auth/__tests__/staging-access.revoked-editor.test.ts`.
+- [ ] `e2e/realtime-parity.spec.ts` passes; `server/` imports nothing from `src/`. Required local
+  gates pass; one story commit; the operator's Fly deploy and smoke recorded in the PR.
+
+Embed allocation: 0 bytes.
+
+## Story s69-security-lows — STUB (backlog, not planned)
+
+Owner decision 2026-10-08: the lows of the `659778e` security review go to the backlog. One line
+each; no research or plan until the owner schedules it.
+
+**L1–L20 of the review** (verbatim scope from the 2026-10-08 review of `659778e`; line numbers
+at that commit, to be re-verified at research time):
+
+- [ ] L1 — Production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:247`, live);
+  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
+- [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
+  analytics export has one.
+- [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
+  and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
+- [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
+  use `timingSafeEqual` over SHA-256 digests.
+- [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
+  payment-methods has no limiter (`billing/payment-methods/route.ts:121,206`;
+  `subscription/route.ts:106,143`).
+- [ ] L6 — `edit-board/styles/apply/route.ts:141-145` loads a style by id with no site or preset
+  scope.
+- [ ] L7 — Public routes with no limiter before authorization, against AGENTS.md:
+  `ab-tests/{bucket,active,track}`, `staging/content` GET, `staging/publish`,
+  `staging/validate`, `edit-sessions/{validate,extend}`.
+- [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
+  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
+- [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
+  site-token caller can forge `login`/`content_edit` activity rows.
+- [ ] L10 — `upload/image` reachable with only the public site token (`:124-136`): image hosting
+  and quota exhaustion.
+- [ ] L11 — `v1/content` POST stores `metadata` without `optionalMetadata` (`:236,298,322`), and
+  `/api/published` then serves it.
+- [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
+  content routes pin the exact host.
+- [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
+  on `/health` (`server/index.js:78,125-136`; live).
+- [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
+  121 bare handshakes/min lock real editors out of realtime.
+- [ ] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
+  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`.
+- [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
+  Node 24.14.0.
+- [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
+  (`20260809120000:213`) is a no-op; `generate_verification_code()` uses `random()` and is
+  executable by `authenticated` (`20251230000000:172,275`); view-only members can read webhook
+  `url` and `pending_payload` (`20260818000000:981`).
+- [ ] L18 — `COMPLETE_DATABASE_SETUP_CLEAN.sql:461-478` recreates `FOR ALL` billing policies and
+  `prepare-production.js:40` tells operators to run it; TLS verification off in
+  `scripts/check-schema.mjs:78`, `scripts/check-ab-schema.mjs:139`, `setup-db-direct.js`.
+- [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
+  tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
+  `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
+- [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
+  (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
+  `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
+  shell-quote and brace-expansion.
+
+**Lows the s68 research verified itself** (R-series, overlapping L7/L17 where noted):
+
+- [ ] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
+  (`staging/publish/route.ts:153`, `staging/content/[siteId]/route.ts:280`,
+  `ai/translate/route.ts:218`, five `edit-board/*` routes): spelling variants multiply buckets.
+- [ ] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
+  database cost per request once s68b removes regex mode.
+- [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
+  (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
+  validation (ADR 047 "Watch").
+- [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
+  (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
+  lists them as live.
+- [ ] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
+  covers `PUT` only.
+- [ ] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter.
+- [ ] R7 — The webhook URL guard narrows DNS rebinding but does not close it
+  (`src/lib/security/webhook-url-safety.ts:19-26`, a recorded decision); pinning the resolved IP in
+  a custom dispatcher would.
+- [ ] R8 — `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE … FROM PUBLIC`
+  (`20260809120000:213-214`) cannot remove PostgreSQL's global PUBLIC default for functions; every
+  new definer function must revoke explicitly. s68a puts the guard in CI; a migration lint would
+  catch it before review.
+- [ ] R9 — `POST /api/teams/invitations/accept` writes under the user client
+  (`route.ts:104,120`) and cannot succeed in production; teams are PRD graveyard — delete or 410.
+- [ ] R10 — `request-code` never sets `siteLabel` (`route.ts:93-106`); after s68b escapes it, drop
+  the dead parameter or set it deliberately.
+- [ ] D2 — A/B conversion dedupe is check-then-insert (PR #65 Devin): a partial unique index on ab_test_results (test_id, visitor_id) WHERE event_type = 'conversion' + conflict-aware insert makes it atomic; needs a migration.
+
+Embed allocation: 0 bytes.
