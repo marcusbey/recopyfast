@@ -3593,8 +3593,10 @@ a card to start a subscription" (`PaymentMethodsCard.tsx:205`).
 
 Acceptance criteria:
 - [ ] A plan held for life shows a "Lifetime" badge, never "Free".
-- [ ] A live subscription keeps its status badge (Active, Trialing, Past due, …), including a
-  lifetime owner still running out a lower subscription's period.
+- [ ] A live subscription keeps its status badge (Active, Trialing, Past due, …). A lifetime
+  owner still running out a lower subscription's period sees "Lifetime" — the card describes the
+  plan in force, which is the lifetime one — while that subscription's period and cancel rows stay
+  visible below (as in the validated plan, case 3).
 - [ ] No state of the card prints "Free": with no subscription and no lifetime grant the card
   shows no status badge rather than a wrong one.
 - [ ] The empty payment-methods copy does not offer "start a subscription" to an account whose
