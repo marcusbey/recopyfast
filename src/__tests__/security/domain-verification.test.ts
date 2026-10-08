@@ -16,8 +16,11 @@ import * as dns from "dns";
 jest.mock("dns", () => ({
   promises: {
     resolveTxt: jest.fn(),
-    // verifyDomainFile calls assertNoInternalResolution first, which resolves
-    // A/AAAA records to block SSRF against internal addresses.
+    // verifyDomainFile runs the webhook guard (`assertSafeWebhookUrl`) on the
+    // URL it is about to fetch, which resolves every address with `lookup`.
+    lookup: jest.fn(),
+    // The hand-written denylist this replaced (s68b M10) used resolve4/6; kept
+    // mocked so a regression back to it cannot reach a real resolver.
     resolve4: jest.fn(),
     resolve6: jest.fn(),
   },
@@ -314,26 +317,37 @@ describe("Domain Verification", () => {
   });
 
   describe("File Verification", () => {
+    /** Point both resolvers at one address, so either guard sees the same DNS. */
+    const resolvesTo = (address: string) => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([
+        { address, family: 4 },
+      ]);
+      (dns.promises.resolve4 as jest.Mock).mockResolvedValue([address]);
+    };
+
     beforeEach(() => {
-      (global.fetch as jest.Mock).mockClear();
+      (global.fetch as jest.Mock).mockReset();
       // A public address, so the SSRF guard lets the request through.
-      (dns.promises.resolve4 as jest.Mock).mockResolvedValue(["93.184.216.34"]);
+      resolvesTo("93.184.216.34");
       (dns.promises.resolve6 as jest.Mock).mockRejectedValue(
         new Error("ENODATA"),
       );
     });
 
     it("refuses to fetch when the domain resolves to a private address", async () => {
-      (dns.promises.resolve4 as jest.Mock).mockResolvedValue(["127.0.0.1"]);
+      resolvesTo("127.0.0.1");
 
       const result = await verifyDomainFile("internal.example.com", "code123");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("private/internal IP address");
+      expect(result.error).toContain("public internet address");
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
     it("refuses to fetch when the domain has no DNS records", async () => {
+      (dns.promises.lookup as jest.Mock).mockRejectedValue(
+        new Error("ENOTFOUND"),
+      );
       (dns.promises.resolve4 as jest.Mock).mockRejectedValue(
         new Error("ENOTFOUND"),
       );
@@ -341,8 +355,65 @@ describe("Domain Verification", () => {
       const result = await verifyDomainFile("nowhere.example.com", "code123");
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain("No DNS records found");
+      expect(result.error).toContain("public internet address");
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    /**
+     * s68b M10. The old guard was a hand-written denylist of the ranges its
+     * author thought of; `192.0.0.0/24` (IETF protocol assignments) and
+     * `198.18.0.0/15` (benchmarking) were not among them. The webhook guard is
+     * an `ipaddr.js` unicast allowlist, which refuses what it has not heard of.
+     */
+    it.each(["192.0.0.8", "198.18.0.1"])(
+      "refuses %s, which the hand-written denylist let through",
+      async (address) => {
+        resolvesTo(address);
+
+        const result = await verifyDomainFile("odd.example.com", "code123");
+
+        expect(result.success).toBe(false);
+        expect(global.fetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it("fetches with redirect: manual", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("Verification Code: code123"),
+      });
+
+      await verifyDomainFile("example.com", "code123");
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        "https://example.com/.well-known/recopyfast-verification-code123.txt",
+        expect.objectContaining({ redirect: "manual" }),
+      );
+    });
+
+    /**
+     * A redirect is refused with a fixed message: the guard vetted this host
+     * only, and echoing the target's status line made the check a probe of
+     * wherever the owner's domain pointed us.
+     */
+    it("refuses a 301 without echoing the upstream status text", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: false,
+        status: 301,
+        statusText: "Moved Permanently to internal-admin",
+        headers: new Headers({ location: "http://10.0.0.5/" }),
+        text: () => Promise.resolve("redirect body"),
+      });
+
+      const result = await verifyDomainFile("example.com", "code123");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe(
+        "Verification file must be served without a redirect.",
+      );
+      expect(JSON.stringify(result)).not.toContain("internal-admin");
+      expect(JSON.stringify(result)).not.toContain("10.0.0.5");
     });
 
     /**

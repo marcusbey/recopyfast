@@ -275,7 +275,12 @@ jobs:
       # plain SQL and reads it back through the real route handler and the
       # local PostgREST. Before the s65a review it was named by no step, so
       # every CI run recorded its "[gated]" placeholder instead.
-      - name: Verify content tables take no direct writes through PostgREST, and the snapshot reads fresh rows
+      #
+      # s68b (M3): the editor-code attempt charge is a compare-and-set through
+      # PostgREST; 20 concurrent wrong guesses must land exactly five charges
+      # and burn the code. Only the real PostgREST can say whether the loser of
+      # a conditional UPDATE sees zero rows, so it rides in this step too.
+      - name: Verify content tables take no direct writes through PostgREST, the snapshot reads fresh rows, and editor-code attempts are charged atomically
         env:
           RCF_TEST_DB_URL: "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
           RCF_REQUIRE_TEST_DB: "1"
@@ -285,7 +290,8 @@ jobs:
           RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
             npx jest --runInBand \
               src/__tests__/db/content-write-privileges.test.ts \
-              src/__tests__/db/published-snapshot-freshness.test.ts
+              src/__tests__/db/published-snapshot-freshness.test.ts \
+              src/__tests__/db/editor-code-attempts.test.ts
 
       - name: Test Founding Agency capacity against disposable Postgres
         env:

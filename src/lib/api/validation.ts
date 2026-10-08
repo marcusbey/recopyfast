@@ -50,6 +50,101 @@ export async function readJsonObject(
   return { ok: true, value: parsed as Record<string, unknown> };
 }
 
+/**
+ * Read a JSON body of any shape, refusing it unparsed when it is larger than
+ * `maxBytes`. Measured on the bytes actually read, never on `Content-Length`,
+ * which says whatever the client wants (same reasoning as bulk/import).
+ */
+export async function readBoundedJson(
+  request: Request,
+  maxBytes: number,
+): Promise<ValidationResult<unknown>> {
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    return fail("Request body could not be read");
+  }
+
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    return fail(`Request body exceeds ${maxBytes} bytes`);
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown };
+  } catch {
+    return fail("Request body must be valid JSON");
+  }
+}
+
+const TEXT_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * An identifier-like string stored verbatim: non-empty, bounded, and free of
+ * control characters. Not trimmed — the value is a key other rows are matched
+ * on, so it is refused rather than silently rewritten, and a control character
+ * at either end is refused rather than trimmed away.
+ */
+export function requirePlainText(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number },
+): ValidationResult<string> {
+  const raw = body[field];
+  if (typeof raw !== "string" || raw.length === 0) {
+    return fail(`Field "${field}" is required and must be a non-empty string`);
+  }
+  if (raw.length > options.maxLength) {
+    return fail(
+      `Field "${field}" must be at most ${options.maxLength} characters`,
+    );
+  }
+  if (TEXT_CONTROL_PATTERN.test(raw)) {
+    return fail(`Field "${field}" contains control characters`);
+  }
+  return { ok: true, value: raw };
+}
+
+export function optionalPlainText(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number },
+): ValidationResult<string | undefined> {
+  if (body[field] === undefined || body[field] === null) {
+    return { ok: true, value: undefined };
+  }
+  return requirePlainText(body, field, options);
+}
+
+/**
+ * An optional string bounded in length. Empty is allowed (callers store it as
+ * absent); anything that is not a string, null or absent is refused. Control
+ * characters are refused too when the caller asks — for free text that ends
+ * up in mail or markup.
+ */
+export function optionalBoundedString(
+  body: Record<string, unknown>,
+  field: string,
+  options: { maxLength: number; rejectControlCharacters?: boolean },
+): ValidationResult<string | undefined> {
+  const raw = body[field];
+  if (raw === undefined || raw === null) {
+    return { ok: true, value: undefined };
+  }
+  if (typeof raw !== "string") {
+    return fail(`Field "${field}" must be a string`);
+  }
+  if (raw.length > options.maxLength) {
+    return fail(
+      `Field "${field}" must be at most ${options.maxLength} characters`,
+    );
+  }
+  if (options.rejectControlCharacters && TEXT_CONTROL_PATTERN.test(raw)) {
+    return fail(`Field "${field}" contains control characters`);
+  }
+  return { ok: true, value: raw };
+}
+
 export function requireString(
   body: Record<string, unknown>,
   field: string,
@@ -96,7 +191,7 @@ export interface ContentAttributePatch {
 
 const URI_SCHEME_PATTERN = /^([a-z][a-z0-9+.-]*):/i;
 const ALLOWED_HREF_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
-const ATTRIBUTE_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
+const ATTRIBUTE_CONTROL_PATTERN = TEXT_CONTROL_PATTERN;
 
 /**
  * Validate the two non-text values the embed editor can stage.
@@ -237,17 +332,21 @@ export function requireFiniteNumber(
   return { ok: true, value: raw };
 }
 
-function hasForbiddenKeys(value: unknown, depth: number): boolean {
-  if (depth > MAX_METADATA_DEPTH) return true;
+function hasForbiddenKeys(
+  value: unknown,
+  depth: number,
+  maxDepth: number,
+): boolean {
+  if (depth > maxDepth) return true;
   if (value === null || typeof value !== "object") return false;
 
   if (Array.isArray(value)) {
-    return value.some((entry) => hasForbiddenKeys(entry, depth + 1));
+    return value.some((entry) => hasForbiddenKeys(entry, depth + 1, maxDepth));
   }
 
   return Object.entries(value as Record<string, unknown>).some(
     ([key, entry]) =>
-      FORBIDDEN_KEYS.has(key) || hasForbiddenKeys(entry, depth + 1),
+      FORBIDDEN_KEYS.has(key) || hasForbiddenKeys(entry, depth + 1, maxDepth),
   );
 }
 
@@ -256,11 +355,18 @@ function hasForbiddenKeys(value: unknown, depth: number): boolean {
  * serialized size and nesting depth, with no prototype-polluting keys.
  * Callers persist this verbatim into a jsonb column, so it is attacker-controlled
  * storage — the bounds are what stop it becoming an unbounded write primitive.
+ *
+ * Depth counts values, not containers: the object itself is level 1 and its
+ * values level 2, so `maxDepth: 2` admits a flat object of primitives only.
+ * A route with a tighter contract than the defaults passes its own bounds.
  */
 export function optionalMetadata(
   body: Record<string, unknown>,
   field = "metadata",
+  options: { maxBytes?: number; maxDepth?: number } = {},
 ): ValidationResult<Record<string, unknown> | undefined> {
+  const maxBytes = options.maxBytes ?? MAX_METADATA_BYTES;
+  const maxDepth = options.maxDepth ?? MAX_METADATA_DEPTH;
   const raw = body[field];
   if (raw === undefined || raw === null) {
     return { ok: true, value: undefined };
@@ -277,11 +383,11 @@ export function optionalMetadata(
     return fail(`Field "${field}" must be JSON-serializable`);
   }
 
-  if (Buffer.byteLength(serialized, "utf8") > MAX_METADATA_BYTES) {
-    return fail(`Field "${field}" exceeds ${MAX_METADATA_BYTES} bytes`);
+  if (Buffer.byteLength(serialized, "utf8") > maxBytes) {
+    return fail(`Field "${field}" exceeds ${maxBytes} bytes`);
   }
 
-  if (hasForbiddenKeys(raw, 1)) {
+  if (hasForbiddenKeys(raw, 1, maxDepth)) {
     return fail(
       `Field "${field}" contains disallowed keys or is nested too deeply`,
     );

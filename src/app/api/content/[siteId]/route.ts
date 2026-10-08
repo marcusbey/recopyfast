@@ -495,14 +495,17 @@ export async function POST(
     const referer = request.headers.get("referer");
 
     let allowedOrigin: string | null = null;
+    let authorizedSiteId = siteId;
 
     try {
-      ({ allowedOrigin } = await authorizeSiteRequest({
+      const authorized = await authorizeSiteRequest({
         siteId,
         token: token,
         origin,
         referer,
-      }));
+      });
+      allowedOrigin = authorized.allowedOrigin;
+      authorizedSiteId = authorized.site.id;
     } catch (authError) {
       console.error("Content POST authorization failed:", authError);
 
@@ -562,10 +565,17 @@ export async function POST(
     // per element (the widget reports only ids the server does not already hold),
     // so a legitimate site never approaches this, and a refused report is retried
     // by the next visitor's scan.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_CONTENT",
       endpoint: "content/discovery",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "Content discovery rate limit exceeded for this site.",

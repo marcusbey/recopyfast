@@ -552,7 +552,8 @@ export interface WebhookDelivery {
   event_type: string;
   payload: Record<string, unknown>;
   response_status?: number;
-  response_body?: string;
+  /** Null on a refused redirect: nothing from a 3xx is stored (s68b M1). */
+  response_body?: string | null;
   response_time?: number;
   attempt_number: number;
   success: boolean;
@@ -647,14 +648,13 @@ export interface BulkUpdatePayload {
   operations: Array<{
     element_id: string;
     operation: "find_replace" | "append" | "prepend" | "set";
+    /**
+     * Matched literally; `find_replace` replaces every occurrence. There is no
+     * `useRegex`: regex mode was removed (ADR 048) and an operation that still
+     * sends it is refused by `POST /api/bulk/update`.
+     */
     find?: string;
     replace?: string;
-    /**
-     * When true, `find` is treated as a regular expression pattern.
-     * Defaults to false (literal string match). Regex mode rejects patterns
-     * that exceed MAX_REGEX_LENGTH or contain dangerous nested quantifiers.
-     */
-    useRegex?: boolean;
     content?: string;
   }>;
 }

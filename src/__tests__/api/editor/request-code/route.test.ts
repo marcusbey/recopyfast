@@ -107,6 +107,12 @@ const mockEnforceRateLimit = enforceRateLimit as jest.MockedFunction<
 
 const RECOGNISED_EMAIL = "editor@example.com";
 const UNKNOWN_EMAIL = "nobody@example.com";
+/**
+ * A real site id. Fixtures used to be `"site_1"`; since s68b (M3) a `siteId`
+ * that is not a UUID is a 400 before any limiter or lookup, so the enumeration
+ * cases below run against a well-formed id like the widget sends.
+ */
+const SITE_ID = "5f0c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
 
 function requestCodeRequest(email: string, siteId?: string): NextRequest {
   return new NextRequest("http://localhost/api/editor/request-code", {
@@ -136,18 +142,18 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("returns the same status and body for a recognised and an unrecognised address", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
       const recognisedResponse = await POST(
-        requestCodeRequest(RECOGNISED_EMAIL, "site_1"),
+        requestCodeRequest(RECOGNISED_EMAIL, SITE_ID),
       );
 
       mockFindActiveSiteEditor.mockResolvedValue(null);
       const unrecognisedResponse = await POST(
-        requestCodeRequest(UNKNOWN_EMAIL, "site_1"),
+        requestCodeRequest(UNKNOWN_EMAIL, SITE_ID),
       );
 
       expect(recognisedResponse.status).toBe(unrecognisedResponse.status);
@@ -164,15 +170,15 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       // still an oracle to anyone watching the wire.
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
-      const known = await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+      const known = await POST(requestCodeRequest(RECOGNISED_EMAIL, SITE_ID));
 
       mockFindActiveSiteEditor.mockResolvedValue(null);
-      const unknown = await POST(requestCodeRequest(UNKNOWN_EMAIL, "site_1"));
+      const unknown = await POST(requestCodeRequest(UNKNOWN_EMAIL, SITE_ID));
 
       expect(JSON.stringify(await known.json())).toBe(
         JSON.stringify(await unknown.json()),
@@ -186,7 +192,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("never awaits the code mint or the mail send before responding — the response is not gated on `after`'s callback resolving", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
@@ -197,7 +203,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       mockSendCode.mockReturnValue(new Promise(() => {}));
 
       const response = await POST(
-        requestCodeRequest(RECOGNISED_EMAIL, "site_1"),
+        requestCodeRequest(RECOGNISED_EMAIL, SITE_ID),
       );
 
       expect(response.status).toBe(200);
@@ -210,13 +216,13 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("schedules the mint+send via `after()` only for a recognised address", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
 
-      await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+      await POST(requestCodeRequest(RECOGNISED_EMAIL, SITE_ID));
 
       expect(mockAfter).toHaveBeenCalledTimes(1);
     });
@@ -224,7 +230,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("does not schedule anything for an unrecognised address", async () => {
       mockFindActiveSiteEditor.mockResolvedValue(null);
 
-      await POST(requestCodeRequest(UNKNOWN_EMAIL, "site_1"));
+      await POST(requestCodeRequest(UNKNOWN_EMAIL, SITE_ID));
 
       expect(mockAfter).not.toHaveBeenCalled();
     });
@@ -232,13 +238,13 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("the deferred callback actually mints and sends the code when run", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
 
-      await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+      await POST(requestCodeRequest(RECOGNISED_EMAIL, SITE_ID));
 
       expect(mockAfter).toHaveBeenCalledTimes(1);
       const deferred = mockAfter.mock.calls[0][0] as () => Promise<void>;
@@ -248,7 +254,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
 
       expect(mockIssueCode).toHaveBeenCalledWith({
         email: RECOGNISED_EMAIL,
-        siteId: "site_1",
+        siteId: SITE_ID,
       });
       expect(mockSendCode).toHaveBeenCalledWith(
         RECOGNISED_EMAIL,
@@ -260,14 +266,14 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("logs, rather than drops, a mint failure inside the deferred callback", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
       mockIssueCode.mockResolvedValue(null);
 
-      await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+      await POST(requestCodeRequest(RECOGNISED_EMAIL, SITE_ID));
       const deferred = mockAfter.mock.calls[0][0] as () => Promise<void>;
       await deferred();
 
@@ -280,14 +286,14 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
     it("logs, rather than drops, a delivery failure inside the deferred callback", async () => {
       mockFindActiveSiteEditor.mockResolvedValue({
         id: "se_1",
-        siteId: "site_1",
+        siteId: SITE_ID,
         email: RECOGNISED_EMAIL,
         permissions: ["edit"],
         createdAt: new Date(),
       });
       mockSendCode.mockResolvedValue({ sent: false, error: "boom" });
 
-      await POST(requestCodeRequest(RECOGNISED_EMAIL, "site_1"));
+      await POST(requestCodeRequest(RECOGNISED_EMAIL, SITE_ID));
       const deferred = mockAfter.mock.calls[0][0] as () => Promise<void>;
       await deferred();
 
@@ -303,7 +309,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       mockListSitesForEditor.mockResolvedValue([
         {
           siteEditorId: "se_1",
-          siteId: "site_1",
+          siteId: SITE_ID,
           siteName: "Example",
           siteDomain: "example.com",
           permissions: ["edit"],
@@ -340,7 +346,7 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       mockIsConfigured.mockReturnValue(false);
 
       const response = await POST(
-        requestCodeRequest(RECOGNISED_EMAIL, "site_1"),
+        requestCodeRequest(RECOGNISED_EMAIL, SITE_ID),
       );
       const data = await response.json();
 
@@ -358,12 +364,86 @@ describe("POST /api/editor/request-code — enumeration defence", () => {
       mockEnforceRateLimit.mockResolvedValueOnce(limited);
 
       const response = await POST(
-        requestCodeRequest(RECOGNISED_EMAIL, "site_1"),
+        requestCodeRequest(RECOGNISED_EMAIL, SITE_ID),
       );
 
       expect(response.status).toBe(429);
       expect(mockFindActiveSiteEditor).not.toHaveBeenCalled();
       expect(mockAfter).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * s68b M3. The per-address bucket was keyed on the raw `siteId` while the
+   * lookup reaches the row through a `uuid` cast, so every spelling Postgres
+   * accepts (upper case, mixed case) opened a fresh 5-per-15-minutes budget
+   * against the same editor's inbox. The id is canonicalised before the
+   * limiter; a malformed one is a 400, which says nothing about editors.
+   */
+  describe("siteId canonicalisation", () => {
+    const UPPER_SITE_ID = SITE_ID.toUpperCase();
+
+    it("meters and looks up an upper-case siteId under its lower-case spelling", async () => {
+      mockFindActiveSiteEditor.mockResolvedValue({
+        id: "se_1",
+        siteId: SITE_ID,
+        email: RECOGNISED_EMAIL,
+        permissions: ["edit"],
+        createdAt: new Date(),
+      });
+
+      const response = await POST(
+        requestCodeRequest(RECOGNISED_EMAIL, UPPER_SITE_ID),
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          endpoint: "editor/request-code:recipient",
+          identifier: `${RECOGNISED_EMAIL}|${SITE_ID}`,
+        }),
+      );
+      expect(mockFindActiveSiteEditor).toHaveBeenCalledWith(
+        SITE_ID,
+        RECOGNISED_EMAIL,
+      );
+      const deferred = mockAfter.mock.calls[0][0] as () => Promise<void>;
+      await deferred();
+      expect(mockIssueCode).toHaveBeenCalledWith({
+        email: RECOGNISED_EMAIL,
+        siteId: SITE_ID,
+      });
+    });
+
+    it("answers 400 invalid_request for a non-UUID siteId, before any limiter or lookup", async () => {
+      const response = await POST(
+        requestCodeRequest(RECOGNISED_EMAIL, "not-a-site-id"),
+      );
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.error).toBe("invalid_request");
+      expect(mockEnforceRateLimit).not.toHaveBeenCalled();
+      expect(mockFindActiveSiteEditor).not.toHaveBeenCalled();
+      expect(mockListSitesForEditor).not.toHaveBeenCalled();
+      expect(mockAfter).not.toHaveBeenCalled();
+    });
+
+    it("leaves hub mode (no siteId) on the hub bucket", async () => {
+      mockListSitesForEditor.mockResolvedValue([]);
+
+      const response = await POST(requestCodeRequest(RECOGNISED_EMAIL));
+
+      expect(response.status).toBe(200);
+      expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          endpoint: "editor/request-code:recipient",
+          identifier: `${RECOGNISED_EMAIL}|hub`,
+        }),
+      );
+      expect(mockListSitesForEditor).toHaveBeenCalledWith(RECOGNISED_EMAIL);
     });
   });
 });

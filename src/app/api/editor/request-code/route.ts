@@ -38,6 +38,7 @@ import {
   readString,
 } from "@/lib/auth/editor-request";
 import { publicOptions, withPublicCors } from "@/lib/http/public-cors";
+import { requireUuid } from "@/lib/api/validation";
 
 /** Identical for every caller. Never varies on whether the address is known. */
 const NEUTRAL_RESPONSE = {
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await readJsonBody(request);
     const rawEmail = readString(body, "email");
-    const siteId = readString(body, "siteId");
+    const rawSiteId = readString(body, "siteId");
 
     if (!rawEmail || !isPlausibleEmail(rawEmail.trim())) {
       // A malformed address is a client bug, not an existence signal — every
@@ -61,6 +62,27 @@ export async function POST(request: NextRequest) {
         ),
         request,
       );
+    }
+
+    // s68b M3. Canonicalised BEFORE the limiter. The per-recipient bucket used
+    // to be keyed on the raw `siteId` while the editor lookup reaches the row
+    // through a `uuid` cast, so every spelling Postgres accepts (upper case,
+    // mixed case) opened a fresh budget against the same editor's inbox. A
+    // malformed id is a 400: like a malformed address, it says nothing about
+    // who is an editor. Absent means hub mode, unchanged.
+    let siteId: string | null = null;
+    if (rawSiteId !== null) {
+      const canonical = requireUuid(body ?? {}, "siteId");
+      if (!canonical.ok) {
+        return withPublicCors(
+          NextResponse.json(
+            { error: "invalid_request", message: "That site id isn't valid." },
+            { status: 400 },
+          ),
+          request,
+        );
+      }
+      siteId = canonical.value;
     }
 
     const email = normalizeEmail(rawEmail);
