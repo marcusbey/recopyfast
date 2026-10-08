@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useId } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AnalyticsDashboardData, Site } from "@/types";
 import {
@@ -208,11 +209,10 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
               <label htmlFor={siteSelectId} className="sr-only">
                 Filter by site
               </label>
-              <select
+              <NativeSelect
                 id={siteSelectId}
                 value={selectedSite}
                 onChange={(e) => setSelectedSite(e.target.value)}
-                className="px-3 py-2 border border-input rounded-md text-sm"
               >
                 <option value="all">All Sites</option>
                 {sites.map((site) => (
@@ -220,7 +220,7 @@ export function AnalyticsDashboard({ siteId, sites }: AnalyticsDashboardProps) {
                     {site.domain}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
 

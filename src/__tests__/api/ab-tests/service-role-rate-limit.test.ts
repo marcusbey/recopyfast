@@ -37,11 +37,13 @@ import { GET as getActive } from "@/app/api/ab-tests/active/[siteId]/route";
 import { GET as getBucket } from "@/app/api/ab-tests/bucket/[siteId]/route";
 import { POST as postTrack } from "@/app/api/ab-tests/track/route";
 
-const SITE_ID = "11111111-1111-1111-1111-111111111111";
+// v4-shaped ids, as gen_random_uuid() produces: since s68b (M5)
+// `ab-tests/track` refuses any id `requireUuid` rejects, before the database.
+const SITE_ID = "11111111-1111-4111-8111-111111111111";
 const API_KEY = "site-api-key";
 const ORIGIN = "https://customer.example";
-const TEST_ID = "33333333-3333-3333-3333-333333333333";
-const VARIANT_ID = "44444444-4444-4444-4444-444444444444";
+const TEST_ID = "33333333-3333-4333-8333-333333333333";
+const VARIANT_ID = "44444444-4444-4444-8444-444444444444";
 
 const checkLimit = rateLimiter.checkLimit as jest.MockedFunction<
   typeof rateLimiter.checkLimit

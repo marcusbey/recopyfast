@@ -11,6 +11,7 @@ import {
   type DomainVerification,
 } from "@/lib/security/domain-verification";
 import { validateAndSanitizeInput } from "@/lib/security/content-sanitizer";
+import { enforceRateLimit } from "@/lib/api/rate-limit";
 
 /**
  * This route wrote camelCase keys straight into Postgres — `siteId`,
@@ -300,6 +301,22 @@ export async function PUT(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    // s68b M10. Every PUT makes our infrastructure resolve a hostname the
+    // admin chose and, for the file method, fetch from it; with no limiter it
+    // was an unmetered DNS/HTTP probe. Per user (the bucket needs the user, so
+    // it sits after getUser, ADR 037's order) and before the row read, so a
+    // refused request does no database, DNS or HTTP work. Fails CLOSED: an
+    // outage of the store must not reopen the probe.
+    const limited = await enforceRateLimit(request, {
+      limit: "USER_DOMAIN_VERIFY",
+      endpoint: "domains/verify",
+      identifier: user.id,
+      identifierType: "user",
+      onStoreFailure: "deny",
+      message: "Too many verification attempts. Please try again shortly.",
+    });
+    if (limited) return limited;
 
     const body = await request.json();
     const sanitizedVerificationId = validateAndSanitizeInput(

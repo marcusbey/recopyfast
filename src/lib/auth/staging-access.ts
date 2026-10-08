@@ -11,9 +11,18 @@ import {
   type StagingDeviceFingerprint,
 } from "@/lib/auth/staging-device";
 import crypto from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type StagingPermission = "view" | "edit" | "publish" | "admin";
 export type AccessType = "invite" | "link";
+
+/**
+ * Why `createStagingAccess` refuses an invite to an address the owner removed
+ * as an editor. Read by the owner in the dashboard, and matched by
+ * `POST /api/staging/access` to answer 409.
+ */
+export const REMOVED_EDITOR_INVITE_MESSAGE =
+  "This address was removed as an editor of this site. Re-add them as an editor before sending a staging invite.";
 
 // s38 removed authenticated access to the device fingerprints stored beside a
 // staging invite. A default returning/list projection asks PostgREST for those
@@ -106,6 +115,25 @@ export class StagingAccessManager {
       // For invite type, email is required
       if (params.accessType === "invite" && !params.email) {
         throw new Error("Email is required for invite-type access");
+      }
+
+      // s68c review, minor 3. Every staging validator refuses a token whose
+      // address has a revoked directory row for the site (`isEditorRevoked`
+      // here, `resolveStagingGrant` on the socket), so an invite to a removed
+      // editor used to "succeed" — row written, code e-mailed — and then be
+      // refused everywhere with a message naming no cause. Refused at issuance
+      // instead, readably: this path is signed-in and admin-only, so it is no
+      // oracle. Read through the admin's RLS client ("Site admins can view site
+      // editors"), not the service role; a failed read throws and issues
+      // nothing.
+      if (
+        await this.isEditorRevoked(
+          supabase,
+          params.siteId,
+          params.email ?? null,
+        )
+      ) {
+        throw new Error(REMOVED_EDITOR_INVITE_MESSAGE);
       }
 
       // Generate secure token
@@ -218,6 +246,20 @@ export class StagingAccessManager {
           expiresAt: null,
           error:
             "This share link is no longer valid. Ask the site owner for access.",
+        };
+      }
+
+      // A removed editor's invite is dead, verified or not — see
+      // isEditorRevoked. Same message as an unknown token: the response is no
+      // oracle for "you were removed" versus "wrong token".
+      if (await this.isEditorRevoked(supabase, siteId, access.email)) {
+        return {
+          valid: false,
+          verified: false,
+          permissions: [],
+          email: null,
+          expiresAt: null,
+          error: "Invalid or expired staging token",
         };
       }
 
@@ -366,6 +408,12 @@ export class StagingAccessManager {
         return { success: false, error: "Invalid or expired token" };
       }
 
+      // Checked before the code: a removed editor still owns the mailbox the
+      // code went to, so the right code must not bring them back.
+      if (await this.isEditorRevoked(supabase, access.site_id, access.email)) {
+        return { success: false, error: "Invalid or expired token" };
+      }
+
       // Constant-time comparison. `!==` returns as soon as two characters
       // differ, so the time it takes to reject leaks how many leading digits
       // were right — enough, over many requests, to recover a 6-digit code one
@@ -493,6 +541,11 @@ export class StagingAccessManager {
         return { success: false, error: "Invalid or expired token" };
       }
 
+      // No code is generated, stored or mailed for a removed editor.
+      if (await this.isEditorRevoked(supabase, access.site_id, access.email)) {
+        return { success: false, error: "Invalid or expired token" };
+      }
+
       if (access.email_verified) {
         return { success: false, error: "Email already verified" };
       }
@@ -615,6 +668,55 @@ export class StagingAccessManager {
       return access.permissions.length > 0; // Any permission includes view
     }
     return access.permissions.includes(permission);
+  }
+
+  /**
+   * Has the site owner removed this address from the site's editors?
+   *
+   * TOMBSTONE — s68c. `revokeSiteEditor` (editor-directory.ts) stamps
+   * `site_editors.revoked_at` and sweeps device grants, and nothing on this
+   * path ever read that row: a removed editor's verified staging token kept
+   * saving staged copy until the 12 h verification TTL, then re-verified with a
+   * code sent to the mailbox they still own, until the invite itself expired.
+   * The realtime service was the only place the removal reached a staging
+   * token (server/auth.js), and there it compared e-mail case-sensitively.
+   *
+   * `site_editors.email` is always `normalizeEmail`ed; `staging_access.email`
+   * keeps the case the invite was typed in — so the lookup normalises.
+   *
+   * Absent is not revoked: a staging invite can exist without a directory row.
+   * Only a present, stamped row refuses. A lookup that fails throws, and every
+   * caller's catch refuses: an unanswered "was this editor removed" is not "no".
+   *
+   * Takes the client it is handed: the validators pass the service role (the
+   * caller is a token), `createStagingAccess` the signed-in admin's RLS client.
+   *
+   * `normalizeEmail` is imported lazily, as editor-access.ts imports
+   * edit-sessions: editor-directory → editor-access → this module is a cycle,
+   * and a static import made editor-request read `EDITOR_GRANT_HEADER` before
+   * editor-grants had initialised it (ReferenceError at load). One rule for
+   * "the same person" matters more than the import style.
+   */
+  private static async isEditorRevoked(
+    supabase: SupabaseClient,
+    siteId: string,
+    email: string | null,
+  ): Promise<boolean> {
+    if (!email) return false;
+
+    const { normalizeEmail } = await import("@/lib/auth/editor-directory");
+    const { data: editor, error } = await supabase
+      .from("site_editors")
+      .select("revoked_at")
+      .eq("site_id", siteId)
+      .eq("email", normalizeEmail(email))
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`site_editors lookup failed: ${error.message}`);
+    }
+
+    return Boolean(editor?.revoked_at);
   }
 
   /**

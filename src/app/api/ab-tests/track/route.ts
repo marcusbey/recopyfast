@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
+import {
+  coerceText,
+  numberOrDefault,
+  optionalBoundedString,
+  optionalMetadata,
+  optionalPlainText,
+  readBoundedJson,
+  requireEnum,
+  requirePlainText,
+  requireUuid,
+  type ValidationResult,
+} from "@/lib/api/validation";
 
 function extractToken(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -21,17 +33,303 @@ function withCors(response: NextResponse) {
   return response;
 }
 
+const EVENT_TYPES = ["view", "click", "conversion"] as const;
+
+/** An event after validation: ids canonical (lower-case), every field bounded. */
 interface TrackEvent {
   site_id: string;
   test_id: string;
   variant_id: string;
   visitor_id: string;
-  session_id?: string;
-  event_type: "view" | "click" | "conversion";
-  value?: number;
-  metadata?: Record<string, unknown>;
-  geo_country?: string;
-  geo_region?: string;
+  session_id: string | null;
+  event_type: (typeof EVENT_TYPES)[number];
+  value: number;
+  metadata: Record<string, unknown>;
+  geo_country: string | null;
+  geo_region: string | null;
+}
+
+/*
+ * s68b M5 — the bounds. This route is opened by a token published in the
+ * customer's page markup; it took any number of events, stored `value` and
+ * `metadata` as sent, and 500'd on a malformed id only after reaching the
+ * database. Everything below is refused with a 400 BEFORE any database call —
+ * the authorizer's `sites` lookup included — except the two fields the host
+ * page passes to the public `trackConversion(eventName, value)`, which are
+ * coerced rather than refused (see validateEvent):
+ *
+ * - `value`: a finite number, or a numeric string, in [0, 1,000,000] is kept;
+ *   anything else is stored as the default 1.
+ * - `metadata.event_name` (re-review N1): a string is kept, a number or a
+ *   boolean goes through String(), anything else — null, an object, an array —
+ *   becomes "conversion" (never "[object Object]"); control characters are
+ *   stripped; the result is cut on a whole character to what fits the
+ *   metadata's existing 1 KB bound beside its key. Only a name that is
+ *   present is coerced: an absent one stays absent.
+ *
+ * Metadata is still refused when, name coerced, it breaks a metadata bound —
+ * which the embed's `{ event_name }` alone can no longer do.
+ *
+ * Each bound is set against what the embed actually sends
+ * (public/embed/recopyfast.src.js:3437-3495): one event per active test, a
+ * conversion's `value || 1` and `{ event_name }`, visitor ids from
+ * `crypto.randomUUID()` or `rcf-<ms>-<9 chars>`, geo as a short code or null,
+ * delivered by `sendBeacon` (64 KB browser cap). A 400 from real embed traffic
+ * after a deploy means a bound is too tight — a bug, not an attack.
+ */
+const MAX_TRACK_BODY_BYTES = 64 * 1024;
+const MAX_EVENTS_PER_BATCH = 50;
+const MAX_EVENT_VALUE = 1_000_000;
+/** What the embed itself sends for a conversion without a value (`value || 1`). */
+const DEFAULT_EVENT_VALUE = 1;
+const MAX_EVENT_METADATA_BYTES = 1024;
+/** Flat only: the object, then primitive values (see optionalMetadata). */
+const MAX_EVENT_METADATA_DEPTH = 2;
+const EVENT_NAME_KEY = "event_name";
+/** What a conversion's name becomes when it is not text, a number or a boolean. */
+const FALLBACK_EVENT_NAME = "conversion";
+/** The name's room in the metadata bound: 1 KB minus `{"event_name":""}`. */
+const MAX_EVENT_NAME_JSON_BYTES =
+  MAX_EVENT_METADATA_BYTES - JSON.stringify({ [EVENT_NAME_KEY]: "" }).length;
+const MAX_ID_TEXT_LENGTH = 64;
+const MAX_GEO_LENGTH = 64;
+
+function refuse(error: string) {
+  return withCors(NextResponse.json({ error }, { status: 400 }));
+}
+
+/**
+ * Re-review N1: `metadata` with its `event_name` coerced (rule in the header),
+ * as a new object; anything else is returned as received, for the metadata
+ * bound to judge. Spread copies own keys as own keys — a `__proto__` key stays
+ * one, and the bound still refuses it.
+ */
+function withCoercedEventName(metadata: unknown): unknown {
+  if (
+    metadata === null ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    !Object.prototype.hasOwnProperty.call(metadata, EVENT_NAME_KEY)
+  ) {
+    return metadata;
+  }
+  const fields = metadata as Record<string, unknown>;
+  return {
+    ...fields,
+    [EVENT_NAME_KEY]: coerceText(fields[EVENT_NAME_KEY], {
+      fallback: FALLBACK_EVENT_NAME,
+      maxJsonBytes: MAX_EVENT_NAME_JSON_BYTES,
+    }),
+  };
+}
+
+/**
+ * Validate one event. Messages name the field, never the value: a refused
+ * value is attacker-chosen text and is not echoed (AGENTS.md "Validation").
+ */
+function validateEvent(raw: unknown): ValidationResult<TrackEvent> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ok: false, error: "Each event must be a JSON object" };
+  }
+  const body = raw as Record<string, unknown>;
+
+  const siteId = requireUuid(body, "site_id");
+  if (!siteId.ok) return siteId;
+  const testId = requireUuid(body, "test_id");
+  if (!testId.ok) return testId;
+  const variantId = requireUuid(body, "variant_id");
+  if (!variantId.ok) return variantId;
+  const eventType = requireEnum(body, "event_type", EVENT_TYPES);
+  if (!eventType.ok) return eventType;
+  const visitorId = requirePlainText(body, "visitor_id", {
+    maxLength: MAX_ID_TEXT_LENGTH,
+  });
+  if (!visitorId.ok) return visitorId;
+  const sessionId = optionalPlainText(body, "session_id", {
+    maxLength: MAX_ID_TEXT_LENGTH,
+  });
+  if (!sessionId.ok) return sessionId;
+
+  // Review major 1 (plan amendment 2026-10-08): `value` is the one field that
+  // is coerced, never refused. It comes from the host page through the public
+  // `window.recopyfast.trackConversion(eventName, value)` (recopyfast.src.js
+  // :6255 → :3492 `value: value || 1`), so a string, a negative or a huge
+  // number is an ordinary integrator call, not an attack — and refusing it 400'd
+  // the whole beacon (one event per active test), which `sendBeacon` ignores:
+  // every conversion in it was silently lost. Nothing decides on this column
+  // (lifecycle.ts:74), so an unusable value is stored as the default 1.
+  const value = numberOrDefault(body, "value", {
+    min: 0,
+    max: MAX_EVENT_VALUE,
+    fallback: DEFAULT_EVENT_VALUE,
+  });
+
+  // Re-review N1: `metadata.event_name` is `trackConversion`'s other argument,
+  // so it is coerced like `value` before the metadata bounds judge the rest.
+  const metadata = optionalMetadata(
+    { metadata: withCoercedEventName(body.metadata) },
+    "metadata",
+    {
+      maxBytes: MAX_EVENT_METADATA_BYTES,
+      maxDepth: MAX_EVENT_METADATA_DEPTH,
+    },
+  );
+  if (!metadata.ok) return metadata;
+  const geoCountry = optionalBoundedString(body, "geo_country", {
+    maxLength: MAX_GEO_LENGTH,
+  });
+  if (!geoCountry.ok) return geoCountry;
+  const geoRegion = optionalBoundedString(body, "geo_region", {
+    maxLength: MAX_GEO_LENGTH,
+  });
+  if (!geoRegion.ok) return geoRegion;
+
+  return {
+    ok: true,
+    value: {
+      site_id: siteId.value,
+      test_id: testId.value,
+      variant_id: variantId.value,
+      visitor_id: visitorId.value,
+      session_id: sessionId.value ?? null,
+      event_type: eventType.value,
+      value,
+      metadata: metadata.value ?? {},
+      geo_country: geoCountry.value || null,
+      geo_region: geoRegion.value || null,
+    },
+  };
+}
+
+/** Parse, bound and validate the whole batch; the first refusal wins. */
+async function readTrackEvents(
+  request: NextRequest,
+): Promise<ValidationResult<TrackEvent[]>> {
+  const parsed = await readBoundedJson(request, MAX_TRACK_BODY_BYTES);
+  if (!parsed.ok) return parsed;
+
+  const batch = Array.isArray(parsed.value) ? parsed.value : [parsed.value];
+  if (batch.length === 0) {
+    return { ok: false, error: "No events provided" };
+  }
+  if (batch.length > MAX_EVENTS_PER_BATCH) {
+    return {
+      ok: false,
+      error: `At most ${MAX_EVENTS_PER_BATCH} events per request`,
+    };
+  }
+
+  const events: TrackEvent[] = [];
+  for (const [index, raw] of batch.entries()) {
+    const event = validateEvent(raw);
+    if (!event.ok) {
+      return { ok: false, error: `Event ${index}: ${event.error}` };
+    }
+    events.push(event.value);
+  }
+  return { ok: true, value: events };
+}
+
+/** Whether a row of this type already exists for (visitor, test). */
+async function hasRecordedEvent(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  event: TrackEvent,
+  eventType: "view" | "conversion",
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("ab_test_results")
+    .select("id", { count: "exact", head: true })
+    .eq("visitor_id", event.visitor_id)
+    .eq("test_id", event.test_id)
+    .eq("event_type", eventType);
+
+  if (error)
+    throw new Error(`A/B ${eventType} lookup failed: ${error.message}`);
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Whether the bucket route assigned this visitor a variant of this test.
+ *
+ * Scoped to the AUTHORIZED site and to a test that `verifyEventsBelongToSite`
+ * has already proven is that site's (it runs before this): the service client
+ * bypasses RLS, so the filters are the tenant boundary — never a read of
+ * another site's assignments.
+ */
+async function isBucketed(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  siteId: string,
+  event: TrackEvent,
+): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("visitor_buckets")
+    .select("id", { count: "exact", head: true })
+    .eq("site_id", siteId)
+    .eq("test_id", event.test_id)
+    .eq("visitor_id", event.visitor_id);
+
+  if (error) throw new Error(`A/B bucket lookup failed: ${error.message}`);
+  return (count ?? 0) > 0;
+}
+
+/**
+ * s68b M5 (owner decision 2026-10-08): one conversion per visitor per test,
+ * counted only after that visitor was shown the test.
+ *
+ * Conversions were counted as rows (lifecycle.ts:56-64) keyed on a
+ * `visitor_id` the caller chooses, so one copied token could post conversions
+ * until a variant "won" and `promoteWinner` staged it. Now a conversion counts
+ * once per visitor, and only for a visitor with proof of exposure. Refused
+ * conversions are reported in `deduplicated`, like repeated views.
+ *
+ * PROOF OF EXPOSURE IS THE BUCKET ROW, a recorded view, or a view in this
+ * batch (PR #65 review D1). This first shipped as "a recorded view" only — and
+ * the embed sends the view and the conversion as two separate `sendBeacon`
+ * calls (`trackImpressions`, recopyfast.src.js:3454-3475; `trackConversion`,
+ * :3478-3501). Nothing orders their arrival: a conversion handled before its
+ * view committed was refused, and `sendBeacon` never sees the answer, so the
+ * conversion was lost for good. The `visitor_buckets` row is written by
+ * `GET /api/ab-tests/bucket/[siteId]` before it answers 200 (it 500s when the
+ * write fails, bucket/[siteId]/route.ts:209-229), and the embed awaits that
+ * answer before either beacon can fire (init, :958-963; bucketVisitor,
+ * :3278-3288) — both track methods skip any test the server has not assigned
+ * (:3459-3460, :3483-3484). So the row predates every conversion the embed can
+ * send. Do not narrow this back to "a recorded view".
+ *
+ * The one embed path with no row: the bucket call failing on the network
+ * (:3306-3359) falls back to client-side assignment, and such a visitor's
+ * conversion still needs its view — recorded, or in the same batch.
+ */
+async function countableConversions(
+  supabase: ReturnType<typeof createServiceRoleClient>,
+  siteId: string,
+  conversions: TrackEvent[],
+  views: TrackEvent[],
+): Promise<TrackEvent[]> {
+  const seen = new Set<string>();
+  const countable: TrackEvent[] = [];
+
+  for (const conversion of conversions) {
+    const key = `${conversion.visitor_id}:${conversion.test_id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const viewedInBatch = views.some(
+      (view) =>
+        view.visitor_id === conversion.visitor_id &&
+        view.test_id === conversion.test_id,
+    );
+    const exposed =
+      viewedInBatch ||
+      (await isBucketed(supabase, siteId, conversion)) ||
+      (await hasRecordedEvent(supabase, conversion, "view"));
+    if (!exposed) continue;
+    if (await hasRecordedEvent(supabase, conversion, "conversion")) continue;
+
+    countable.push(conversion);
+  }
+
+  return countable;
 }
 
 /** One row of the ownership query below: a test and the variants under it. */
@@ -121,35 +419,30 @@ async function verifyEventsBelongToSite(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const events: TrackEvent[] = Array.isArray(body) ? body : [body];
+    // Bounds first: nothing below — authorization included — touches the
+    // database for a request that fails them (s68b M5).
+    const parsed = await readTrackEvents(request);
+    if (!parsed.ok) return refuse(parsed.error);
+    const events = parsed.value;
 
-    if (events.length === 0) {
-      return withCors(
-        NextResponse.json({ error: "No events provided" }, { status: 400 }),
-      );
-    }
-
-    // All events must share the same site_id
+    // All events must share the same site_id (compared canonically).
     const siteId = events[0].site_id;
-    if (!siteId || events.some((e) => e.site_id !== siteId)) {
-      return withCors(
-        NextResponse.json(
-          { error: "All events must share the same site_id" },
-          { status: 400 },
-        ),
-      );
+    if (events.some((e) => e.site_id !== siteId)) {
+      return refuse("All events must share the same site_id");
     }
 
     const token = extractToken(request);
 
+    let authorizedSiteId: string;
     try {
-      await authorizeSiteRequest({
+      ({
+        site: { id: authorizedSiteId },
+      } = await authorizeSiteRequest({
         siteId,
         token,
         origin: request.headers.get("origin"),
         referer: request.headers.get("referer"),
-      });
+      }));
     } catch (authError) {
       return withCors(
         NextResponse.json(
@@ -175,10 +468,17 @@ export async function POST(request: NextRequest) {
     // 1000/min is deliberately generous: this is telemetry from ordinary page
     // views, batched by the widget, and a refused batch is data lost for good.
     // It still caps a copied token at a rate no honest visitor produces.
+    //
+    // s68b M4: keyed on the AUTHORIZED id. The authorizer finds the site through
+    // a `uuid` cast (any case) and checks the token against the database's
+    // `site.id`, so the upper-case spelling of a real id authorizes with the
+    // genuine token — and metering the raw spelling gave every spelling its own
+    // bucket. Spellings are still accepted (installed snippets are permanent);
+    // they just share the one canonical bucket.
     const limited = await enforceRateLimit(request, {
       limit: "API_KEY_DEFAULT",
       endpoint: "ab-tests/track",
-      identifier: siteId,
+      identifier: authorizedSiteId,
       identifierType: "api_key",
       onStoreFailure: "deny",
       message: "A/B event rate limit exceeded for this site.",
@@ -187,27 +487,11 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceRoleClient();
 
-    // Validate required fields
-    for (const event of events) {
-      if (
-        !event.test_id ||
-        !event.variant_id ||
-        !event.visitor_id ||
-        !event.event_type
-      ) {
-        return withCors(
-          NextResponse.json(
-            {
-              error:
-                "Each event requires: test_id, variant_id, visitor_id, event_type",
-            },
-            { status: 400 },
-          ),
-        );
-      }
-    }
-
-    const ownership = await verifyEventsBelongToSite(supabase, siteId, events);
+    const ownership = await verifyEventsBelongToSite(
+      supabase,
+      authorizedSiteId,
+      events,
+    );
     if (!ownership.ok) {
       return withCors(
         NextResponse.json(
@@ -217,10 +501,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Deduplicate view events: check existing views per (visitor_id, test_id, variant_id)
+    // Clicks are recorded as sent; conversions count once per (visitor, test)
+    // for a visitor bucketed into or shown the test (countableConversions);
+    // views are deduplicated per (visitor_id, test_id) below.
     const viewEvents = events.filter((e) => e.event_type === "view");
-    const nonViewEvents = events.filter((e) => e.event_type !== "view");
-    const eventsToInsert: TrackEvent[] = [...nonViewEvents];
+    const clickEvents = events.filter((e) => e.event_type === "click");
+    const conversionEvents = events.filter(
+      (e) => e.event_type === "conversion",
+    );
+    const eventsToInsert: TrackEvent[] = [
+      ...clickEvents,
+      ...(await countableConversions(
+        supabase,
+        authorizedSiteId,
+        conversionEvents,
+        viewEvents,
+      )),
+    ];
 
     if (viewEvents.length > 0) {
       const viewChecks = viewEvents.map((e) => ({
@@ -265,12 +562,12 @@ export async function POST(request: NextRequest) {
       test_id: e.test_id,
       variant_id: e.variant_id,
       visitor_id: e.visitor_id,
-      session_id: e.session_id || null,
+      session_id: e.session_id,
       event_type: e.event_type,
-      value: e.value ?? 1,
-      metadata: e.metadata ?? {},
-      geo_country: e.geo_country || null,
-      geo_region: e.geo_region || null,
+      value: e.value,
+      metadata: e.metadata,
+      geo_country: e.geo_country,
+      geo_region: e.geo_region,
     }));
 
     const { error } = await supabase.from("ab_test_results").insert(rows);

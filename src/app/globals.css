@@ -92,7 +92,9 @@
   --shadow-b: light-dark(hsl(200 32% 20% / 0.07), hsl(200 55% 2% / 0.46));
 
   /* --- Radius -----------------------------------------------------------
-     Tighter inside, softer on containers. */
+     The legacy scale: marketing only (ADR 050). App surfaces use the two
+     semantic tokens in @theme inline, --radius-control and
+     --radius-container, never this. */
   --radius: 0.75rem;
 
   /* --- Motion -----------------------------------------------------------
@@ -120,6 +122,11 @@
   --color-foreground: var(--text-strong);
   --color-card: var(--surface-card);
   --color-card-foreground: var(--text-strong);
+  /* Menus and Select content. Before s66a no popover token existed, so every
+     `bg-popover` resolved to nothing and every dropdown was transparent: the
+     Sites sort menu printed its items over the site cards. */
+  --color-popover: var(--surface-card);
+  --color-popover-foreground: var(--text-strong);
   --color-surface-1: var(--surface-1);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
@@ -199,6 +206,13 @@
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 10px);
 
+  /* App surfaces (ADR 050): containers square, controls 2px. Two names that
+     say what they mean, instead of remapping the scale above, because
+     `@theme inline` cannot be scoped and marketing still uses that scale.
+     `cn()` knows both names (src/lib/utils/cn.ts). */
+  --radius-control: 2px;
+  --radius-container: 0px;
+
   --shadow-2xs: 0 1px 1px var(--shadow-a);
   --shadow-xs: 0 1px 2px var(--shadow-a);
   --shadow-sm: 0 1px 2px var(--shadow-a), 0 1px 3px -1px var(--shadow-a);
@@ -212,20 +226,29 @@
    BASE
    ========================================================================= */
 
-* {
-  border-color: var(--line);
-}
+/* The border reset lives in the base layer, so an authored `border-*` colour
+   always wins.
 
-/* The reset above is unlayered, and unlayered declarations outrank everything
-   inside `@layer utilities` — so it silently wins over every Tailwind
-   border-colour utility in the app, including `border-transparent`.
-   Correcting that globally would repaint 138 call sites across 39 files, so it
-   is left alone here and opted out of only where it actually gets in the way:
-   the marketing demo, whose whole point is that three unrelated brand palettes
-   render side by side. `revert-layer` rolls this element back to the utilities
-   layer, handing control to whatever `border-*` class was authored. */
-[data-demo-surface] * {
-  border-color: revert-layer;
+   Until s66a it was an unlayered `* { border-color: var(--line) }`, and
+   unlayered declarations outrank everything inside `@layer utilities`: it beat
+   every Tailwind border-colour utility in the app. `border-input` computed to
+   `--line`, so every input, select and toggle drew its boundary at 1.45:1
+   (dark) / 1.34:1 (light) instead of the 3:1 `input.tsx` promises, and a
+   selected toggle's `border-primary` never showed (s66 research, fact 4a).
+   The marketing demo carried a `[data-demo-surface]` `revert-layer` opt-out
+   to get its own colours back; inside the layer it is not needed.
+
+   Do not move this rule out of the layer to "make it stick": that is the bug.
+   Tailwind's preflight in the same layer sets `border: 0 solid` (currentColor);
+   this rule comes after it, so a plain `border` is still `--line`. */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--line);
+  }
 }
 
 body {
@@ -363,7 +386,7 @@ body {
   );
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
-  border-radius: calc(var(--radius) - 3px);
+  border-radius: var(--radius-container);
 }
 
 /* ============================================================================

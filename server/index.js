@@ -163,6 +163,7 @@ function createRealtimeServer(options = {}) {
       siteId: socket.data.siteId,
       stagingToken: socket.data.stagingToken,
       editToken: socket.data.editToken,
+      userAgent: socket.data.userAgent,
     });
 
     if (!grant.valid) {
@@ -209,6 +210,10 @@ function createRealtimeServer(options = {}) {
   io.on('connection', async (socket) => {
     const { siteId, editMode, token, stagingMode, stagingToken, editToken } = socket.handshake.query;
     const originHeader = socket.handshake.headers.origin || socket.handshake.headers.referer;
+    // The browser sends the same User-Agent on the WebSocket upgrade as on its
+    // fetches, so this is the string HTTP hashed when the editor verified.
+    // Read once, here: the handshake headers are the only ones a socket has.
+    const userAgent = socket.handshake.headers['user-agent'];
     const isStaging = stagingMode === 'true' || stagingMode === true;
 
     if (!siteId) {
@@ -276,6 +281,7 @@ function createRealtimeServer(options = {}) {
             siteId,
             stagingToken,
             editToken,
+            userAgent,
           });
 
           if (!grant.valid) {
@@ -287,9 +293,14 @@ function createRealtimeServer(options = {}) {
           // The CREDENTIALS are what is kept on the socket, not the verdict.
           // Caching the verdict is the M5 defect: it made "is this editor still
           // allowed" a question answered once, at connect time, forever.
+          //
+          // The User-Agent travels with them: the device binding (s68c, M7)
+          // is re-checked on every re-resolution, so the sweep can drop a
+          // socket whose verification passed its 12 h TTL while it was open.
           socket.data.isStaging = true;
           socket.data.stagingToken = stagingToken;
           socket.data.editToken = editToken;
+          socket.data.userAgent = userAgent;
           socket.data.stagingEmail = grant.email || grant.userId || 'unknown';
           socket.data.stagingPermissions = normalizePermissions(grant.permissions);
           socket.data.stagingAccessId = grant.accessId || null;
@@ -510,7 +521,7 @@ function createRealtimeServer(options = {}) {
     });
 
     // Handle dashboard connections
-    onMessage('join-dashboard', (data) => {
+    onMessage('join-dashboard', async (data) => {
       const { siteId: dashboardSiteId, userId } = data || {};
 
       // Authorization: the dashboard room must match the site id that was
@@ -520,6 +531,32 @@ function createRealtimeServer(options = {}) {
         socket.emit('auth-error', {
           error: 'Unauthorized: dashboard site id does not match authenticated site'
         });
+        return;
+      }
+
+      // TOMBSTONE — s07a review MAJOR 2, closed in s68c. The site-id match
+      // above used to be the ONLY check, and every persisted `content-update`
+      // is fanned out to this room as `content-updated` carrying the staged
+      // copy. The site token that opens a socket ships as a plain attribute in
+      // the customer's page markup, so any visitor could join and read
+      // unpublished drafts: the review proved a plain viewer received
+      // "UNPUBLISHED SECRET DRAFT" (docs/reviews/s07a-realtime-service-
+      // hardening.md). No production client emits this event (s68c research),
+      // so the room is gated rather than removed; it stays available to a
+      // future dashboard client that holds an editor credential.
+      //
+      // Two conditions, both required. `isStaging` alone is a flag written at
+      // the handshake, and trusting a handshake-time verdict is the M5 defect
+      // — so the grant is re-resolved here, as it stands now. A plain viewer
+      // is refused but keeps the live room it is entitled to; an editor whose
+      // grant has gone is dropped by revalidateSocket, as everywhere else.
+      if (!socket.data.isStaging) {
+        socket.emit('auth-error', {
+          error: 'Unauthorized: the dashboard room requires editor access'
+        });
+        return;
+      }
+      if (!(await revalidateSocket(socket))) {
         return;
       }
 

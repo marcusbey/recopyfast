@@ -30,8 +30,9 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain("NODE_ENV=production npm run start");
   });
 
-  // s67: 45 → 50, the five embed SPA tests (e2e/embed-spa.spec.ts, E1–E5).
-  it("runs all 50 tests and always cleans up and uploads the redacted summary", () => {
+  // s66a: 45 -> 56, the eleven tests of e2e/app-layout.spec.ts.
+  // s67: 56 -> 61, the five embed SPA tests (e2e/embed-spa.spec.ts, E1–E5).
+  it("runs all 61 tests and always cleans up and uploads the redacted summary", () => {
     expect(workflow).toContain('RUN_RECOPYFAST_CORE_E2E: "1"');
     expect(workflow).toContain('RUN_RECOPYFAST_PARITY: "1"');
     expect(workflow).toContain("trap cleanup EXIT INT TERM");
@@ -39,11 +40,11 @@ describe("Playwright CI contract", () => {
     expect(workflow).toContain('report.contract !== "passed"');
     expect(workflow).toContain("if: ${{ always() }}");
     expect(workflow).toContain("test-results/playwright-summary.json");
-    expect(workflow).toContain('"expected":50');
-    expect(workflow).toContain("report.expected !== 50");
-    expect(workflow).toContain("report.total !== 50");
-    expect(workflow).toContain("report.passed !== 50");
-    expect(config).toContain("expected: 50");
+    expect(workflow).toContain('"expected":61');
+    expect(workflow).toContain("report.expected !== 61");
+    expect(workflow).toContain("report.total !== 61");
+    expect(workflow).toContain("report.passed !== 61");
+    expect(config).toContain("expected: 61");
     expect(workflow).toContain("if-no-files-found: error");
   });
 
@@ -96,6 +97,22 @@ describe("Playwright CI contract", () => {
     expect(startIndex).toBeGreaterThan(-1);
     expect(steps.indexOf(step as string)).toBeGreaterThan(startIndex);
     expect(steps.indexOf(step as string)).toBeLessThan(buildIndex);
+  });
+
+  it("runs the editor-code attempt proof by name, with the database and PostgREST required", () => {
+    // s68b M3: the compare-and-set charge rests on PostgREST reporting zero
+    // rows to the loser of a conditional UPDATE. `npm test` records the DB
+    // suite as "[gated]"; only a step that names it runs it.
+    const suite = "src/__tests__/db/editor-code-attempts.test.ts";
+    const steps = workflow.split(/^(?=\s+- name: )/m);
+    const step = steps.find((candidate) => candidate.includes(suite));
+
+    expect(step).toBeDefined();
+    expect(step).toContain('RCF_REQUIRE_TEST_DB: "1"');
+    expect(step).toContain('RCF_TEST_POSTGREST_URL: "http://127.0.0.1:54321"');
+    expect(step).toContain(
+      'RCF_TEST_POSTGREST_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY"',
+    );
   });
 
   it("runs the snapshot measurement tooling test beside the Stripe tooling test", () => {

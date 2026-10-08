@@ -50,7 +50,7 @@ export function SkeletonMetric({ className }: { className?: string }) {
         <Skeleton className="h-2.5 w-20" />
         <Skeleton className="h-7 w-14" />
       </div>
-      <Skeleton className="h-9 w-9 rounded-lg" />
+      <Skeleton className="h-9 w-9 rounded-container" />
     </div>
   );
 }
@@ -60,12 +60,12 @@ export function SkeletonRow({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border border-border px-4 py-3.5",
+        "flex items-center gap-3 rounded-container border border-border px-4 py-3.5",
         className,
       )}
       aria-hidden="true"
     >
-      <Skeleton className="h-9 w-9 shrink-0 rounded-lg" />
+      <Skeleton className="h-9 w-9 shrink-0 rounded-container" />
       <div className="min-w-0 flex-1 space-y-2">
         <Skeleton className="h-3.5 w-40 max-w-full" />
         <Skeleton className="h-2.5 w-24 max-w-full" />

@@ -36,7 +36,8 @@ type DueRetryRow = Pick<
 interface DeliveryOutcome {
   success: boolean;
   responseStatus?: number;
-  responseBody?: string;
+  /** Null when nothing may be stored — a refused redirect (s68b M1). */
+  responseBody?: string | null;
   responseTime?: number;
   errorMessage?: string;
 }
@@ -58,6 +59,32 @@ const DELIVERY_TIMEOUT_MS = 30_000;
 
 /** Retries handled per cron tick. Bounded so one tick cannot run unboundedly long. */
 const RETRY_SWEEP_BATCH_SIZE = 50;
+
+/**
+ * SSRF BY REDIRECT — s68b M1. Both outbound webhook fetches used `fetch`'s
+ * default `redirect: "follow"`, and `assertSafeWebhookUrl` checks the first hop
+ * only. An endpoint answering `302 Location: http://169.254.169.254/…` had our
+ * infrastructure fetch the target, and the first 1000 bytes of its answer were
+ * stored as `response_body` and served back by `GET /api/webhooks/deliveries`
+ * to the member who configured the URL: a full-read SSRF. Both fetches now pass
+ * `redirect: "manual"` (Node's undici returns the real 3xx, status included),
+ * and a 3xx is an ordinary failed attempt — retry/backoff per ADR 010 — that
+ * stores no body. An endpoint that legitimately redirects (http→https, a
+ * trailing slash) fails with this message; the fix is to configure the final
+ * URL, never to start following redirects again.
+ */
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function describeRedirectRefusal(status: number): string {
+  return `Endpoint redirected (${status}). Webhooks do not follow redirects.`;
+}
+
+/** Releases the connection without reading what the endpoint sent. */
+async function discardBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
 
 /**
  * Columns configuration responses may read.
@@ -452,7 +479,20 @@ export class WebhookManager {
         // runs on a cron tick, not in the edit's request, but the ceiling still
         // matters: without it one dead endpoint stalls the whole sweep.
         signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+        // Never follow: the guard above vetted this hop only (s68b M1).
+        redirect: "manual",
       });
+
+      if (isRedirectStatus(response.status)) {
+        await discardBody(response);
+        return {
+          success: false,
+          responseStatus: response.status,
+          responseBody: null,
+          responseTime: Date.now() - startTime,
+          errorMessage: describeRedirectRefusal(response.status),
+        };
+      }
 
       const responseBody = await response.text().catch(() => "");
 
@@ -799,9 +839,35 @@ export class WebhookManager {
         },
         body: payloadString,
         signal: AbortSignal.timeout(10000), // 10 second timeout for tests
+        // The manual test is the easiest probe of the three — never follow
+        // (s68b M1, see isRedirectStatus).
+        redirect: "manual",
       });
 
       const responseTime = Date.now() - startTime;
+
+      if (isRedirectStatus(response.status)) {
+        await discardBody(response);
+        const reason = describeRedirectRefusal(response.status);
+        await this.supabase.from("webhook_deliveries").insert({
+          webhook_id: webhookId,
+          event_type: "test",
+          payload: testPayload,
+          response_status: response.status,
+          response_time: responseTime,
+          success: false,
+          status: "failed",
+          next_retry_at: null,
+          attempt_number: 1,
+          error_message: reason,
+        });
+        return {
+          success: false,
+          statusCode: response.status,
+          responseTime,
+          error: reason,
+        };
+      }
 
       // Log test delivery. A manual test is never retried — the owner is
       // standing there and can press the button again — so it resolves

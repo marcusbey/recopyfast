@@ -199,3 +199,64 @@ describe("POST /api/editor/submit-code — hub mode and Remember", () => {
     });
   });
 });
+
+/**
+ * s68b M3. `limitCodeAttempts` keyed the per-address bucket on the raw `siteId`
+ * while `consumeVerificationCode` reaches the code row through a `uuid` cast —
+ * so each spelling of one site id (upper case, mixed case) was a fresh
+ * 5-guesses-per-15-minutes budget against the same 10^6-space code. The id is
+ * canonicalised before the limiter; a malformed one is a 400.
+ */
+describe("POST /api/editor/submit-code — siteId canonicalisation", () => {
+  const SITE_ID = "5f0c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f";
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockEnforceRateLimit.mockResolvedValue(null);
+    mockConsumeCode.mockResolvedValue({ ok: false, reason: "mismatch" });
+  });
+
+  it("meters and spends an upper-case siteId under its lower-case spelling", async () => {
+    const response = await submit({ siteId: SITE_ID.toUpperCase() });
+
+    expect(response.status).toBe(401);
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        endpoint: "editor/submit-code:address",
+        identifier: `${EMAIL}|${SITE_ID}`,
+      }),
+    );
+    expect(mockConsumeCode).toHaveBeenCalledWith({
+      email: EMAIL,
+      siteId: SITE_ID,
+      code: "123456",
+    });
+  });
+
+  it("answers 400 invalid_request for a non-UUID siteId, before any limiter or lookup", async () => {
+    const response = await submit({ siteId: "site-1" });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "invalid_request",
+    });
+    expect(mockEnforceRateLimit).not.toHaveBeenCalled();
+    expect(mockConsumeCode).not.toHaveBeenCalled();
+  });
+
+  it("leaves hub mode (no siteId) on the hub bucket", async () => {
+    await submit();
+
+    expect(mockEnforceRateLimit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        endpoint: "editor/submit-code:address",
+        identifier: `${EMAIL}|hub`,
+      }),
+    );
+    expect(mockConsumeCode).toHaveBeenCalledWith(
+      expect.objectContaining({ siteId: null }),
+    );
+  });
+});

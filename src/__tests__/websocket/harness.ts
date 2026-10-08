@@ -76,6 +76,13 @@ export class RecordingSupabase {
   readonly tables: Record<string, Row[]> = {};
   readonly writes: RecordedWrite[] = [];
   readonly reads: string[] = [];
+  /**
+   * Tables whose reads answer with a PostgREST error instead of rows — a
+   * partial database failure. A read is the one place a resolver can mistake
+   * "no answer" for "no row"; the s68c review found the socket's `site_editors`
+   * read doing exactly that (fail open) while its HTTP twin failed closed.
+   */
+  readonly failingReads = new Set<string>();
 
   constructor(seed: Record<string, Row[]> = {}) {
     for (const [table, rows] of Object.entries(seed)) {
@@ -119,6 +126,11 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     }
     return { data: null, error: null };
   };
+
+  const readFailure = async () => ({
+    data: null,
+    error: { message: "simulated read failure: connection reset" },
+  });
 
   const builder = {
     select() {
@@ -178,6 +190,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async single() {
       if (op) return settle();
+      if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       if (found.length !== 1) {
         return { data: null, error: { message: "No rows found" } };
@@ -186,6 +199,7 @@ function createQueryBuilder(db: RecordingSupabase, table: string) {
     },
     async maybeSingle() {
       if (op) return settle();
+      if (db.failingReads.has(table)) return readFailure();
       const found = builder.matching();
       return { data: found.length > 0 ? { ...found[0] } : null, error: null };
     },
@@ -234,15 +248,29 @@ export function buildSiteToken(
   return `${payload}.${signature}`;
 }
 
+/**
+ * The User-Agent every test socket presents unless a case names another.
+ *
+ * A browser always sends one, on the WebSocket upgrade exactly as on `fetch`,
+ * and since s68c the server binds a verified staging token to it the way HTTP
+ * does (`checkStagingDeviceBinding`). A staging fixture that should be admitted
+ * records `hashUserAgent(TEST_USER_AGENT)` as its verified device; a case about
+ * the binding itself passes `userAgent` explicitly.
+ */
+export const TEST_USER_AGENT = "RecopyfastIntegration/1.0 (jest)";
+
 export interface HandshakeOptions {
   port: number;
   query: Record<string, string>;
   origin?: string | null;
   referer?: string | null;
+  userAgent?: string;
 }
 
 export function openSocket(options: HandshakeOptions): Socket {
-  const extraHeaders: Record<string, string> = {};
+  const extraHeaders: Record<string, string> = {
+    "User-Agent": options.userAgent ?? TEST_USER_AGENT,
+  };
   if (options.origin) extraHeaders.Origin = options.origin;
   if (options.referer) extraHeaders.Referer = options.referer;
 

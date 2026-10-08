@@ -2352,6 +2352,324 @@ settled (both edit `src/app/api/content/[siteId]/route.ts`).
 
 Embed allocation: 0 bytes.
 
+## Story s66a-app-design-tokens-and-panels — straight, flat primitives, and the two panels the owner pointed at fit any screen
+
+Split from `s66-app-design-system` at research. `docs/research/s66-app-design-system.md` (commit
+`b534b23`) covers s66a, s66c and s66b; this entry keeps the original request and evidence. The
+branch the research was written on, `feature/s66-app-design-system`, was renamed to this story's
+branch, so this story's commits carry the s66 story and research commits too.
+
+As a site owner working in the dashboard, every shared control and container is straight-edged
+and flat: containers square, controls at 2 px, hairline borders that render the colour they were
+given, opaque menus. The site-registered panel and the Share preview link dialog are readable
+and usable at any width from 320 to 1920 px.
+
+Owner request, 2026-10-07, with a screenshot of the site-details panel: "This panel needs a serious
+redesign. and while u'r here, inspect all the application pages and improve the design. specialy
+the layout and alignement, avoid rounded corner as much as possible and keep it straight and
+clean. like 'supabase' website. make sure it's responsive." Second screenshot: the "Expires in"
+select in Share Preview Link, a rounded box with its chevron jammed against the right border.
+
+Owner decisions, 2026-10-08. The owner accepted the research recommendation as a whole, so its
+five open questions take their defaults:
+- Containers have 0 radius. Controls (inputs, selects, buttons) have 2 px. Badges are square
+  (2 px, the control radius). Borders are 1 px hairlines. Only popovers, menus and dialogs cast a
+  shadow. Surfaces are flat.
+- Shell values: 56 px header, 24/600 page titles, 40 px controls, content width about 1180 px
+  with 16/24/32 px gutters. These are the research values; refine them only with evidence. The
+  shell lands in s66b; s66a records the values in `docs/design-system.md`.
+- The marketing files that share `src/components/ui/*` square up too (accepted side effect).
+  `/try` counts as Marketing. Marketing's own `rounded-*` classes are not touched
+  ([ADR 050](./decisions/050-app-radius-is-two-semantic-tokens.md)).
+- Split into s66a (this story), s66c (site information architecture) and s66b (page passes),
+  executed in that order.
+
+Observed defects (from the owner's screenshots, measured in research):
+- **Site-registered panel.** There is a tall empty band above the content. The snippet and the
+  instruction lines overflow the panel and are clipped. There is a panel-level horizontal
+  scrollbar, and rounded boxes nest inside a rounded modal. Root cause: `DialogContent` is a grid
+  whose implicit column takes the width of the unwrapped 300-character `<pre>` (2,524 px inside a
+  588 px panel). The same mechanism affects all 12 dialog call sites (research fact 1).
+- **Share preview link at 375 px.** There is a horizontal scrollbar and the content is clipped
+  (`ShareLinkCard.tsx:69-70`). The native "Expires in" select draws the browser's chevron about
+  6 px from its border.
+- **Global CSS.** The unlayered `* { border-color: var(--line) }` (`globals.css:215-216`)
+  overrides every `border-*` colour utility. Input boundaries therefore render at 1.45:1 (dark)
+  and 1.34:1 (light) instead of at least 3:1. `bg-popover` has no token, so every dropdown and
+  Select menu is transparent.
+
+Complexity: 4. It covers cross-cutting primitives with 12 dialog call sites, a CSS-layer change
+that also repaints authored border colours on marketing pages, and a new authenticated
+Playwright harness. Dependencies: none. Branch `feature/s66a-app-design-tokens-and-panels`.
+Design: `docs/designs/s66a-app-design-tokens-and-panels.md` and its `.html` mockup. Plan:
+`docs/plans/s66a-app-design-tokens-and-panels.md`.
+
+- [ ] **AC 1 — Site-registered panel.** At 320, 375, 768, 1280 and 1920 px:
+  - the dialog's `scrollWidth` is at most its `clientWidth`, no descendant's right edge passes
+    the dialog's, and the page has no horizontal scroll;
+  - the title "Site registered" sits within the first 120 px of the panel (no empty band);
+  - the snippet wraps inside its code block and can be read in full;
+  - the block's Copy button is visible without horizontal scrolling and copies exactly the
+    `embedScript` the API returned;
+  - the dialog has exactly one scroll container (its body).
+
+  Proved by the new `e2e/app-layout.spec.ts` (layout) and `SiteRegistrationModal.test.tsx` (the
+  copied string).
+- [ ] **AC 2 — Share preview link dialog.** The same overflow and single-scroll assertions hold
+  at the same five widths, with two fixture links (one with a 60-character label and an
+  unverified email). "Expires in" is a `NativeSelect`: its chevron's right edge sits 12 px (± 1)
+  inside the control's right border, and the option text never runs under it. Proved by
+  `e2e/app-layout.spec.ts` and `src/components/ui/__tests__/native-select.test.tsx`.
+  `ShareSiteDialog.test.tsx` passes unchanged (label "Expires in", option "7 days", the
+  Permissions checkbox group).
+- [ ] **AC 3 — One radius scale for the app.** The scale is two tokens, `--radius-control: 2px`
+  and `--radius-container: 0px`, used as `rounded-control` and `rounded-container`.
+  `src/__tests__/design/radius-guard.test.ts` fails, naming file and line, when an app-surface
+  file uses:
+  - bare `rounded`;
+  - the legacy `rounded-{xs…4xl}` scale, corner and side forms included;
+  - `rounded-[n]` above 2 px;
+  - `rounded-full` outside the exception list;
+  - an inline `borderRadius` or `border-radius`.
+
+  It also fails if either token exceeds its value. A per-file baseline of today's offenders may
+  only shrink (s66b empties it). `src/components/ui/**`, `SiteRegistrationModal.tsx`,
+  `ShareSiteDialog.tsx` and `ShareLinkCard.tsx` are at zero. The plan lists the exceptions
+  (avatars, status dots up to 8 px, spinners). The guard's own fixtures prove it fails.
+- [ ] **AC 4 — The two global CSS bugs.**
+  - (a) The border reset sits in `@layer base`, so authored `border-*` colours apply. In the
+    harness, an `Input`'s computed border colour is `--line-strong` and contrasts at least 3:1
+    with the card, in dark and in light.
+  - (b) `--color-popover` and `--color-popover-foreground` exist. The harness opens the Sites
+    sort menu and finds its background opaque.
+
+  A Jest test parses `globals.css` and pins both.
+- [ ] **AC 5 — The dialog's root cause is fixed at all 12 call sites.**
+  - `DialogContent` is a flex column that never scrolls.
+  - `DialogBody` is the only scroll container, and its children can shrink (`min-width: 0`).
+  - Header text is left-aligned at every width.
+  - Below 640 px the dialog is a full-width bottom sheet.
+
+  A source-scan test fails if a reachable `<DialogContent>` call site renders no `DialogBody`,
+  or passes `overflow-*`, `max-h-*`, `rounded-*`, padding or `grid` classes to `DialogContent`.
+- [ ] **AC 6 — Primitives match `docs/design-system.md` (s66a revision).** Each has an RTL test:
+  - Button: heights 40/32/48/56 kept, 2 px radius, no shadow.
+  - Input and a new Textarea: 2 px radius, `border-input`.
+  - A new NativeSelect.
+  - Radix Select: trigger aligned with Input, menu opaque.
+  - Card: square and flat; the `interactive` variant no longer lifts.
+  - Badge: 2 px radius.
+  - Tabs: underline style; they wrap rather than clip.
+  - DropdownMenu: opaque and square.
+  - Alert: square.
+  - A new CodeBlock: a label bar with an always-visible Copy button; it wraps by default and
+    `wrap={false}` scrolls inside the block itself; the button reads "Copied" for 2 s; it copies
+    the exact string.
+
+  Every reachable native `<select>` (8 at research time) renders through NativeSelect, enforced
+  by a source-scan test.
+- [ ] **AC 7 — Contrast and focus.** In the harness, at 1280 px in dark and in light, body and
+  muted text on the dialog surface contrast at least 4.5:1. A keyboard-focused Button, Input,
+  NativeSelect and tab trigger each show a 2 px outline or ring and have a border radius of at
+  most 2 px, so the focus outline is square.
+- [ ] **AC 8 — Behaviour unchanged, except the listed copy.** The unit suite and the existing
+  e2e flows pass. The only edited existing tests are the ones the plan lists:
+  - `card.test.tsx` (radius, shadow, title size);
+  - `badge.test.tsx` (radius);
+  - `SiteRegistrationModal.test.tsx` (the success-state copy, and the removed "Go to Site
+    Dashboard" button).
+
+  The PR names each one with its reason. The Playwright contract (`playwright.config.ts` and
+  `.github/workflows/ci.yml`) rises by exactly the harness's test count.
+- [ ] **AC 9 — Evidence.** Run with `RCF_LAYOUT_SCREENSHOTS=1`, the harness writes captures of
+  both panels at 375, 768, 1280 and 1920 px to
+  `docs/designs/s66a-app-design-tokens-and-panels/after/`. They contain fixture data only: the
+  site token reads `•••` and no real email appears. The PR also shows before/after captures at
+  1280 and 375 of the marketing pages that import `ui/*` (the Header, `/docs/install`, a blog
+  post, 404 and `/try`), so the accepted side effect is seen rather than reasoned about.
+- [ ] **AC 10 — Docs and gates.** `docs/design-system.md` describes the s66a system (tokens,
+  primitives, dialog rules), and ADR 050 records the radius-token choice. Lint, type-check,
+  format, build and the full suite pass.
+
+Not in this story:
+- the page shell, page titles and per-page layout (s66b);
+- routes, labels outside the two panels, and the site information architecture (s66c);
+- `.surface-interactive`, `.text-display` and the legacy `--radius` scale, which marketing still
+  uses;
+- the default permissions of a preview link (s66c).
+
+Embed allocation: 0 bytes.
+
+## Story s66c-site-page-and-access — one page per site, and one clear way to give someone access
+
+Split from `s66-app-design-system` at research (§ Information architecture). The owner added
+this on 2026-10-07: "https://www.recopyfa.st/dashboard/sites is overwhelming. have multiple levels
+of settings. and invite a client, and editors are confusing. which one to use and when ?"
+
+As a site owner, each site has its own page with three tabs: Install, People & access and
+Settings. The People & access tab offers exactly two actions, and each says what it is for, so I
+know which one to use.
+
+What research found:
+- "View Details" swaps the Sites page for an 11-card view held in component state, with no URL.
+  It is about 4,400 px tall at 1280 and shows the install snippet three times.
+- Two access mechanisms appear under three labels, and their forms are field-for-field
+  identical:
+  - "Add editor" (`site_editors`, durable);
+  - "Invite a client" (the same `SiteEditorsCard`, in a dialog);
+  - "Share preview link" (`staging_access`, expiring).
+- The card's "Settings" button starts an edit session. Delete is only reachable through a kebab
+  menu that appears on hover, so a touch screen cannot reach it.
+
+Owner decisions, 2026-10-08:
+- One URL per site, replacing the in-place "View Details" swap, with tabs Install /
+  People & access / Settings.
+- One people section with exactly two clearly labelled actions:
+  - "Add editor": durable; the editor edits and publishes on the live site.
+  - "Share preview link": temporary; for viewing unpublished changes; view-only by default.
+- "Invite a client" is removed. The activation checklist opens the same Add editor flow under
+  the same name.
+- The card's misleading "Settings" button is renamed, and Delete is reachable without hover.
+- This story may change routes and label-pinning tests. Its ACs say which tests change and why.
+
+Complexity: 4. A new route replaces component-state navigation, the information architecture
+spans six components, and label-pinning tests change; there is no API or data change.
+Dependencies: s66a merged (underline Tabs, CodeBlock, the Dialog structure, NativeSelect, the
+radius guard, the layout harness). Ships before s66b. Branch `feature/s66c-site-page-and-access`.
+
+- [ ] **AC 1 — One URL per site.** `/dashboard/sites/[siteId]` renders the site page: an h1 with
+  the site name, the domain, its `StatusBadge`, and the header actions "Open editor" and
+  "Version history".
+  - The tab is part of the URL (`?tab=install|people|settings`). Install is the default while
+    the site awaits install; People & access is the default otherwise.
+  - "View Details" on a Sites card is a link to that URL, with no in-place swap, and browser Back
+    returns to Sites.
+  - An id the owner cannot see renders the not-found state, never another account's data. The
+    page reads the RLS-scoped `GET /api/sites`.
+
+  Proved by a new page test and by the layout harness (navigate, then Back).
+- [ ] **AC 2 — Install tab.** The install snippet appears exactly once on the page, in one
+  CodeBlock with Copy. The platform recipes, the site token (Copy, Regenerate) and domain
+  verification follow it. The setup checklist (until install completes) and the stats row sit
+  above the tabs. Proved by a test: the page renders exactly one element whose text contains
+  `data-site-token`.
+- [ ] **AC 3 — People & access tab.** It has exactly two actions, "Add editor" and "Share
+  preview link", each with a one-line explainer:
+  - Add editor: "For someone who keeps editing this site. They sign in on the editor page with a
+    code sent to their email, and can edit and publish on your live site until you remove them."
+  - Share preview link: "For a one-off review of unpublished changes. The link stops working
+    after the time you choose."
+
+  Below the actions, the editors list and the active preview links each sit under their own
+  heading. A new preview link defaults to View only; edit and publish need an explicit choice.
+  Proved by a test that the tab has exactly these two action buttons, and by
+  `ShareSiteDialog.test.tsx` asserting the default grant is `["view"]`.
+- [ ] **AC 4 — "Invite a client" is gone.** The label appears nowhere in the app. The activation
+  checklist's step is labelled "Add editor" and opens the same Add editor form as the People &
+  access tab: one component, the same endpoint. The checklist keeps today's View + Edit + Publish
+  preset as the form's starting value, because that step exists to get a client publishing (s35).
+- [ ] **AC 5 — Sites card.** Labels:
+  - The button that starts an edit session is labelled "Open editor" (the same
+    `/api/edit-sessions/create` call).
+  - The "Edit Website" dialog title and the checklist's "Open site in edit mode" become "Open
+    editor" too.
+
+  The card's ⋮ menu is visible without hover (opacity 1 at rest, keyboard reachable). It holds
+  Open site page, Open editor, Share preview link and Delete site. In the harness at 375 px, the
+  ⋮ is visible and Delete is reachable by taps alone.
+- [ ] **AC 6 — Settings tab.** It contains:
+  - the name and domain, read-only (changing them needs an API: separate story);
+  - webhooks;
+  - content import/export, with its log labelled "Import/export log" (the content timeline is
+    "Version history");
+  - a Danger zone with Delete site (the same `DELETE /api/sites/[siteId]` and the same
+    confirmation).
+- [ ] **AC 7 — Tests that change, and why.** The PR names each one:
+  - `src/app/dashboard/sites/__tests__/page.test.tsx` and `teams-moved-notice.test.tsx`: the
+    in-place `site-detail-view` and "Back to Sites" become a link to the site URL;
+  - `SiteCard.test.tsx`: "Settings" becomes "Open editor", the menu is visible without hover,
+    and "Delete Site" becomes "Delete site";
+  - `SiteDetailView.test.tsx`: sections move into tabs, and "Embed Script" / "Copy Embed Script"
+    collapse into the single Install CodeBlock (the copied string is still asserted exactly);
+  - `ActivationChecklist.test.tsx`: "Invite a client" becomes "Add editor";
+  - `ShareSiteDialog.test.tsx`: the default grant becomes View only.
+
+  No other existing test changes. The e2e flows (register, share, edit, publish) pass unchanged.
+- [ ] **AC 8 — No API, data or embed change.**
+  `git diff main...HEAD -- src/app/api supabase public/embed server` is empty. The layout
+  harness covers the site page's three tabs at 375, 768, 1280 and 1920 px with no page-level
+  horizontal scroll and no clipping, and the new files pass the radius guard with zero
+  offenders.
+
+Not in this story:
+- renaming a site or changing its domain (needs `PATCH /api/sites/[siteId]`, which changes which
+  origin `authorizeSiteRequest` accepts on a live install: separate API story);
+- retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (dead-code chore);
+- the page shell and titles (s66b).
+
+Embed allocation: 0 bytes.
+
+## Story s66b-app-page-layout — every app page shares one shell, one title and one left edge
+
+Split from `s66-app-design-system` at research. It completes the original story's AC 3 and AC 4
+on every app page, using s66a's primitives, radius guard and layout harness.
+
+As a site owner, every app page sits in the same shell: a 56 px header and content up to 1180 px
+wide with 16/24/32 px gutters. Every page opens with the same title row (a 24/600 h1, actions on
+the right) and aligns its headings, filters, panels and tables to one left edge. No page scrolls
+sideways or clips content at 375, 768, 1280 or 1920 px.
+
+Owner request, 2026-10-07 (quoted in s66a): "inspect all the application pages and improve the
+design. specialy the layout and alignement … make sure it's responsive." Owner decisions,
+2026-10-08: 56 px header; 24/600 page titles; content about 1180 px wide with 16/24/32 px
+gutters (research values; refine them only with evidence).
+
+Measured defects to close (research § Current-state audit, per page):
+- Four title styles: h1 32/600; h1 30/700; on Analytics an h2 24/700 with no h1; on site
+  detail an h3 inside a card.
+- Billing nests `container mx-auto px-4`, which puts its title 16 px to the right of every
+  other page's.
+- Analytics overflows the page by 3 px at 1280.
+- At 375, the Sites status filter clips "Stale" (395 px of content in 341 px), and Settings
+  hides 2 of its 5 tabs.
+- At 1024 px and wider, the Overview metric grid leaves its right third empty.
+- Checklists nest three boxes deep.
+
+Complexity: 4 (every app page; visual proof at four widths). Dependencies: s66a and s66c merged,
+because s66b lays out the s66c site page rather than the retired in-place detail view. Branch
+`feature/s66b-app-page-layout`.
+
+- [ ] **AC 1 — One shell.** The header in `src/app/dashboard/layout.tsx` is 56 px tall. Content
+  is `max-w-[1180px]` with gutters of 16, 24 and 32 px below 640, from 640 and from 1024 px. No
+  page nests a second container (Billing's is removed). The harness measures the h1's left x on
+  every app page at each width and finds a single value per width.
+- [ ] **AC 2 — One title.** Every app page renders exactly one h1, through `PageHeader`, at
+  24/600 (`.text-display` becomes a fixed 24 px with −0.015em tracking). Analytics, Content and
+  Settings stop titling themselves. No `font-bold` (700) remains on app surfaces; an extension
+  of the s66a design guard enforces it.
+- [ ] **AC 3 — One left edge.** On every app page, the page header, the filter row, the first
+  panel and any table share the page's left x (harness, ± 0.5 px).
+- [ ] **AC 4 — No sideways scroll, no clipping.** None of these pages scrolls horizontally or
+  clips content at 375, 768, 1280 or 1920 px: Overview, Sites, the site page (all tabs),
+  Content, Analytics, Settings, Billing, Login, Signup, Auth error and the `/edit` hub. That
+  includes Analytics at 1280, and the Sites status filter and the Settings tabs at 375: every
+  option stays inside its container's box, none hidden behind a scrollbar. Screenshots are
+  committed under `docs/designs/s66b-app-page-layout/after/`.
+- [ ] **AC 5 — Radius baseline empty, panels flat.** Every reachable app-surface file passes the
+  radius guard with zero offenders. Static panels cast no shadow and do not lift on hover:
+  app surfaces no longer use `.surface-interactive`, which marketing keeps.
+- [ ] **AC 6 — No behaviour change.** The unit suite and the e2e flows pass, and no route or
+  label changes. The PR lists any test that pins a layout class, with its reason. Text contrast
+  meets AA on every changed surface (harness).
+
+Not in this story:
+- off-palette colour: the Analytics icon hues, Billing's emoji, and the emerald DOM toast in
+  `EditWebsiteButton`, which needs design-system gap 1, a toast primitive (research § Off-system
+  colour; follow-up);
+- the marketing site.
+
+Embed allocation: 0 bytes.
+
 ## Story s67-embed-spa-support — the plain snippet works on any site, including single-page apps
 
 As a site owner whose site renders in the browser (React, Vite, Vue, Svelte, any client
@@ -2476,3 +2794,259 @@ build as is.
 
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
+
+## s68 — security hardening (split into s68a / s68b / s68c)
+
+Product owner decision, 2026-10-08: **"s68 now: H1 + H2 + top mediums"** through the pipeline;
+lows go to the backlog (`s69-security-lows`). Runs before s66/s67 ship. Source: the security
+review of `origin/main` `659778e`, every claim re-verified in code by the s68 research
+(`docs/research/s68{a,b,c}-*.md`). Planning showed more than ten tasks across three deploy
+targets, so the story is split by blast radius: database and session authority (s68a), HTTP abuse
+bounds (s68b), realtime parity (s68c).
+
+**Precondition, owner action — not code (C1).** Live-format production credentials exist in public
+repository history (a service-role JWT, a Supabase personal access token, the Postgres password, a
+Redis URL; introduced at `1e620ac` and `216d10e`). Values are never reproduced in any document.
+Checklist the owner confirms before s68a ships, one tick each:
+- [ ] Supabase service-role key rotated; Vercel and Fly env updated; old key refused.
+- [ ] Supabase personal access token revoked.
+- [ ] Postgres password reset; pooler connection strings updated wherever stored.
+- [ ] Redis credential rotated; `REDIS_URL` updated on Vercel and Fly.
+- [ ] History rewrite / secret-scanning alert closure decided (rotation is the fix; a rewrite only
+  limits further copying).
+
+Re-verification outcome (what the review said vs the code): H1 confirmed, and reproduced on a
+fresh replay. **H2 is false as a replay risk** — `20260809120000` revokes on replay and the
+function-grant and RLS suites pass 6/6 against a fresh PG14 replay — but neither suite is ever run
+by CI. M4 confirmed for a different reason than reported: the authorizer verifies the token
+against the database's `site.id`, not the route's spelling. M9 reproduced on a replay; one of its
+policies is live in production (inert there). A new finding of the same class as the realtime
+revocation item — HTTP never consults `site_editors` for staging tokens — is folded into s68c.
+
+Order: **s68a first** (production exploit, migration); **s68b in parallel** (independent, no
+migration); **s68c after s68a merges** (reuses ADR 047 and s68a's e2e seeds).
+
+Follow-ups, not s68:
+- M8 — DOM clobbering of `window.RECOPYFAST_API` in the embed: belongs with s67, which is rewriting
+  embed startup (follow-up line only; s67's docs are not edited here).
+- All lows → `s69-security-lows` (stub below).
+- Lows found by the s68 research itself (raw-id limiters on editor routes, unbounded bulk
+  operations, `staging_access` admin direct writes, unmetered share and domain routes, …) →
+  `s69-security-lows` R1–R10.
+
+## Story s68a-edit-session-authority — an edit session never carries more than its holder's live grant
+
+Owner decision 2026-10-08 (above). Launch-blocking: the escalation is live in production.
+Complexity: 4. Dependencies: none (C1 is an owner precondition, not a code dependency). Branch
+`feature/s68a-edit-session-authority`. Decision: ADR 047.
+
+Evidence: an `edit` member inserts `edit_sessions {permissions: ['admin'], expires_at: '2099-…'}`
+with their own JWT (policy `20250817000000_complete_database_setup.sql:483-492`, live in
+production; reproduced on a replay) and publishes with it, because `validateEditSessionAccess`
+(`src/lib/auth/editor-access.ts:416-457`) trusts the row and `POST /api/staging/publish`
+(`route.ts:106-138`) gates on it. Removing the member (`share/route.ts:514-518`) leaves the session
+alive. Replay-only self-escalation policies (`20260731008000:117-123,201-210`) and a live invitee
+rewrite policy (`20260801200000:956-968`) sit beside it. The definer-function guard
+(`function-grants.test.ts`) passes on a replay but no CI step runs it against a database.
+
+- [x] An edit-session token grants at most the intersection of its row's permissions and the
+  holder's live direct `site_permissions` row for the site, read at every validation: an `edit`
+  member's `admin`-stamped session cannot publish (403), a removed member's session is refused
+  (401), a NULL-holder session is refused (401). Tests:
+  `src/lib/auth/__tests__/edit-session-authority.test.ts`,
+  `src/__tests__/api/staging/publish-edit-session-authority.test.ts`.
+- [x] A session older than 24 h from `created_at` is refused whatever its `expires_at`. Test:
+  `edit-session-authority.test.ts` ("refuses a session past the 24 h lifetime").
+- [x] Removing a member deactivates their edit sessions for that site (scoped by site and user).
+  Test: `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`.
+- [x] Edit sessions are issued only through the service role, after the caller's grant is read
+  under their own session. Test: `src/__tests__/api/edit-sessions/create-service-role.test.ts`
+  (insert on the service client, never the user client).
+- [ ] Migration `20261008100000_edit_sessions_service_role_writes.sql`: PUBLIC/`anon`/`authenticated`
+  hold no write privilege or write policy on `edit_sessions`, `anon` no SELECT; an `edit` member's
+  direct INSERT (SQL and PostgREST with a real JWT) is refused; rows the new rules would refuse are
+  deactivated, idempotently. Test: `src/__tests__/db/edit-sessions-privileges.test.ts`.
+- [x] Migration `20261008110000_converge_replay_privileges.sql`: on a replayed database a stranger
+  cannot insert themselves into a team, an invitee cannot rewrite their invitation, a collaborator
+  admin cannot UPDATE `site_permissions` (the creator row stays unstamped); team managers still
+  update invitations. Test: `src/__tests__/db/replay-privilege-convergence.test.ts`.
+- [x] The definer-function and RLS invariants run against both replays in CI with a required
+  database (`function-grants`, `rls-policies` and the two new suites, in
+  `scripts/run-db-invariants.mjs` and the e2e job's DB step), and the convergence migration's
+  postcondition aborts if any `SECURITY DEFINER` function is executable by `anon`/PUBLIC or by
+  `authenticated` outside the three allowlisted predicates. Test: negative control in
+  `replay-privilege-convergence.test.ts` ("postcondition refuses a definer function executable by
+  anon"); CI red when the database is unreachable.
+- [ ] `e2e/share-edit-publish.spec.ts` and `e2e/realtime-parity.spec.ts` seed edit sessions owned
+  by the site owner and pass; Playwright total stays 45.
+- [ ] Rollout: application first, then the two migrations; the dry run lists exactly those two
+  files; the read-only verification query in the plan returns zero rows in production, recorded in
+  the PR. Runbook `docs/operations/edit-session-authority.md`.
+- [ ] ADR 047 merged (amends ADR 042's "Watch"); `docs/quality/qa-register.md` no longer states
+  `20260809120000` is blocked without the operator's ledger evidence. Required local gates pass;
+  one story commit plus one migration commit.
+
+Embed allocation: 0 bytes.
+
+## Story s68b-api-abuse-bounds — public and member endpoints cannot be turned into probes, forgers or slow loops
+
+Owner decision 2026-10-08 (above). Complexity: 3. Dependencies: none (parallel with s68a).
+Branch `feature/s68b-api-abuse-bounds`. Decision: ADR 048. Covers M1, M2, M3, M4, M5, M6, M10.
+
+- [ ] M1 — webhook deliveries and test sends never follow redirects; a 3xx is a failed attempt
+  with a fixed message and nothing from a redirect target is stored or returned. Tests:
+  `src/__tests__/webhooks/manager.test.ts` ("a 302 is a failure and stores no body"),
+  `src/__tests__/webhooks/redirect-not-followed.test.ts` (real loopback servers: the target gets
+  zero requests).
+- [ ] M10 — domain file verification does not follow redirects, does not echo the target's status
+  text on a redirect, and checks addresses with the webhook guard's unicast allowlist;
+  `PUT /api/domains/verify` is limited per user, fail closed, before any DNS or HTTP work. Tests:
+  `src/__tests__/security/domain-verification.test.ts`, `src/__tests__/api/domains/verify-limiter.test.ts`.
+- [ ] M2 — `useRegex: true` is refused per operation and no `RegExp` is built from request input;
+  `((a+))+$` against 30 characters returns in < 100 ms; literal find/replace unchanged (ADR 048).
+  Test: `src/__tests__/api/bulk/update-literal-only.test.ts`.
+- [ ] M3 — editor code routes canonicalise `siteId` (lower-case UUID, malformed → 400) before the
+  limiters, so case spellings share one bucket. Tests: `src/__tests__/api/editor/request-code/route.test.ts`,
+  `src/__tests__/api/editor/submit-code/route.test.ts`.
+- [ ] M3 — each guess is charged atomically before comparison: 20 concurrent wrong guesses
+  against one code are compared at most 5 times and burn the code. Tests:
+  `src/lib/auth/__tests__/editor-verification-attempts.test.ts`, `src/__tests__/db/editor-code-attempts.test.ts`
+  (real Postgres, CI e2e DB step).
+- [ ] M4 — the per-site limiters of content discovery POST and `ab-tests/{bucket,active,track}` key
+  on the authorized `site.id`: an upper-case spelling with the genuine token spends the canonical
+  bucket; no spelling is refused. Test: `src/__tests__/api/public-site-bucket-canonical.test.ts`.
+- [ ] M5 — `ab-tests/track` accepts what the embed sends today and refuses with 400, before any
+  database call, more than 50 events, a body over 64 KB, malformed ids, unknown event types,
+  oversized or prototype-polluting `metadata`, a `visitor_id`/`session_id` that is empty, over 64
+  characters or carries control characters, and a `geo_*` over 64 characters. The two values the
+  host page passes to the public `trackConversion(eventName, value)` are coerced, never refused
+  (plan amendment 2026-10-08): an unusable `value` is stored as 1, and the event name is
+  stringified (a non-text, non-number, non-boolean name becomes "conversion"), stripped of control
+  characters and cut to fit the 1 KB metadata bound. A repeated conversion for the same (visitor,
+  test) is not counted, nor one from a visitor with neither a bucket assignment for that test nor a
+  view of it (recorded or in the same batch) — the view and conversion beacons may arrive in either
+  order (PR #65 review D1). Test: `src/__tests__/api/ab-tests/track-bounds.test.ts`.
+- [ ] M6 — staging verification and editor-code e-mails escape the site label; `POST
+  /api/staging/access` refuses a non-string label, one over 80 characters or with control
+  characters (400, nothing created). Tests: `src/lib/email/__tests__/resend-codes.test.ts`,
+  `src/__tests__/api/staging/access.test.ts`.
+- [ ] No migration, no new dependency, no `public/embed/` or `server/` change. Required local gates
+  pass; one story commit; post-deploy operator checks (plan "Rollout") recorded in the PR.
+
+Embed allocation: 0 bytes.
+
+## Story s68c-realtime-grant-parity — the realtime service admits exactly whom HTTP admits
+
+Owner decision 2026-10-08 (above), including the two medium items left open by the s07a review
+(`docs/reviews/s07a-realtime-service-hardening.md:40-59`). Complexity: 3. Dependencies: s68a merged
+(ADR 047, e2e seeds). Branch `feature/s68c-realtime-grant-parity`.
+
+- [x] M7 — staging admission and every re-validation apply HTTP's device binding: a forwarded
+  verified link presented with another User-Agent, or a verification older than 12 h, is refused at
+  the handshake and dropped by the sweep. Tests: `src/__tests__/websocket/auth-parity.test.ts`
+  (binding and UA-hash rows), `src/__tests__/websocket/server.integration.test.ts`
+  ("staging admission is device-bound").
+- [x] `join-dashboard` requires a live editor grant: a socket holding only the public site token is
+  refused and receives no `content-updated`. Test: `server.integration.test.ts` ("a plain viewer's
+  join-dashboard is refused").
+- [x] Editor revocation matches e-mail case-insensitively: `John@Example.com` is refused at the
+  handshake and dropped within one sweep after `john@example.com` is removed. Test:
+  `server.integration.test.ts` (revocation block, mixed-case fixture).
+- [x] Edit-session sockets follow ADR 047: the holder's live grant bounds the permissions, a removed
+  holder's socket is dropped within one sweep, a session past 24 h is refused. Tests: parity rows in
+  `auth-parity.test.ts`; integration "drops an edit-session socket whose holder was removed".
+- [x] HTTP staging validation (and code re-send/verify) refuses a token whose e-mail has a revoked
+  `site_editors` row for the site, in any case; no directory row changes nothing. Test:
+  `src/lib/auth/__tests__/staging-access.revoked-editor.test.ts`.
+- [ ] `e2e/realtime-parity.spec.ts` passes; `server/` imports nothing from `src/`. Required local
+  gates pass; one story commit; the operator's Fly deploy and smoke recorded in the PR.
+
+Embed allocation: 0 bytes.
+
+## Story s69-security-lows — STUB (backlog, not planned)
+
+Owner decision 2026-10-08: the lows of the `659778e` security review go to the backlog. One line
+each; no research or plan until the owner schedules it.
+
+**L1–L20 of the review** (verbatim scope from the 2026-10-08 review of `659778e`; line numbers
+at that commit, to be re-verified at research time):
+
+- [ ] L1 — Production CSP is `script-src 'self' 'unsafe-inline'` (`src/middleware.ts:247`, live);
+  no inline-XSS protection. Move to a per-request nonce with `'strict-dynamic'`.
+- [ ] L2 — Bulk CSV export has no formula-injection guard (`src/lib/bulk/csv.ts:21-25`); the
+  analytics export has one.
+- [ ] L3 — Unauthenticated health endpoints return raw DB/storage errors, missing env var names
+  and the region (`src/app/api/health/route.ts:93,130`; `health/ready/route.ts:41,78,104,159`).
+- [ ] L4 — `CRON_SECRET` compared with `!==` (`cron/*/route.ts`, `blog/generate/route.ts:21`);
+  use `timingSafeEqual` over SHA-256 digests.
+- [ ] L5 — Raw Stripe errors returned to authenticated callers (payment-method existence oracle);
+  payment-methods has no limiter (`billing/payment-methods/route.ts:121,206`;
+  `subscription/route.ts:106,143`).
+- [ ] L6 — `edit-board/styles/apply/route.ts:141-145` loads a style by id with no site or preset
+  scope.
+- [ ] L7 — Public routes with no limiter before authorization, against AGENTS.md:
+  `ab-tests/{bucket,active,track}`, `staging/content` GET, `staging/publish`,
+  `staging/validate`, `edit-sessions/{validate,extend}`.
+- [ ] L8 — `public/embed/__fidelity__/index.html` test harness is served in production (live
+  200) and uses `?widget=<url>` as a script `src` (`:380-409`); move it out of `public/`.
+- [ ] L9 — `analytics/track` is a service-role write with `onStoreFailure:"allow"` (`:91-97`); a
+  site-token caller can forge `login`/`content_edit` activity rows.
+- [ ] L10 — `upload/image` reachable with only the public site token (`:124-136`): image hosting
+  and quota exhaustion.
+- [ ] L11 — `v1/content` POST stores `metadata` without `optionalMetadata` (`:236,298,322`), and
+  `/api/published` then serves it.
+- [ ] L12 — Grant minting accepts any subdomain (`src/lib/auth/editor-request.ts:73`) while the
+  content routes pin the exact host.
+- [ ] L13 — WS server: no helmet, `x-powered-by: Express`, `ACAO:*` and the live connection count
+  on `/health` (`server/index.js:78,125-136`; live).
+- [ ] L14 — WS per-site bucket consumed before token verification (`server/index.js:226-234`):
+  121 bare handshakes/min lock real editors out of realtime.
+- [ ] L15 — Edit Board history sets `innerHTML` from `created_by` (an email)
+  (`public/embed/recopyfast.src.js:6157`, `:6234`); use `textContent`.
+- [ ] L16 — `server/Dockerfile:9` is `node:20-alpine`: end of life and unpinned; CI audits on
+  Node 24.14.0.
+- [ ] L17 — Grant hygiene: `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
+  (`20260809120000:213`) is a no-op; `generate_verification_code()` uses `random()` and is
+  executable by `authenticated` (`20251230000000:172,275`); view-only members can read webhook
+  `url` and `pending_payload` (`20260818000000:981`).
+- [ ] L18 — `COMPLETE_DATABASE_SETUP_CLEAN.sql:461-478` recreates `FOR ALL` billing policies and
+  `prepare-production.js:40` tells operators to run it; TLS verification off in
+  `scripts/check-schema.mjs:78`, `scripts/check-ab-schema.mjs:139`, `setup-db-direct.js`.
+- [ ] L19 — CI/header hygiene: `ci.yml` has no top-level `permissions:` and actions are pinned by
+  tag, not SHA; HSTS lacks `includeSubDomains`; legacy `X-XSS-Protection` still set;
+  `docs/operations/deployment-checklist.md:24` carries a truncated live-key account prefix.
+- [ ] L20 — Dev-only dependency advisories: critical `shell-quote` via `concurrently` 9.2.0
+  (GHSA-pqg4-j6r4-53mv, fixed args only), high brace-expansion/braces/micromatch via
+  `eslint-config-next`, `@typescript-eslint`, jest, and server `nodemon`. `npm audit fix` clears
+  shell-quote and brace-expansion.
+
+**Lows the s68 research verified itself** (R-series, overlapping L7/L17 where noted):
+
+- [ ] R1 — Per-site limiters keyed on the raw site id on authenticated editor routes
+  (`staging/publish/route.ts:153`, `staging/content/[siteId]/route.ts:280`,
+  `ai/translate/route.ts:218`, five `edit-board/*` routes): spelling variants multiply buckets.
+- [ ] R2 — `bulk/update` accepts an unbounded `operations` array (`route.ts:31-38`); linear
+  database cost per request once s68b removes regex mode.
+- [ ] R3 — `staging_access` keeps admin-only INSERT/UPDATE policies for `authenticated`
+  (`20251230000000_staging_workflow.sql:120-142`); an admin can write rows that bypass route
+  validation (ADR 047 "Watch").
+- [ ] R4 — `revokeSiteEditor` sweeps device grants but not the editor's `staging_access` rows
+  (`src/lib/auth/editor-directory.ts:271-299`); s68c makes it non-load-bearing, the dashboard still
+  lists them as live.
+- [ ] R5 — `POST`/`GET`/`DELETE /api/domains/verify` have no limiter (`route.ts:132,389,451`); s68b
+  covers `PUT` only.
+- [ ] R6 — `/api/sites/[siteId]/share` (POST/GET/DELETE) has no limiter.
+- [ ] R7 — The webhook URL guard narrows DNS rebinding but does not close it
+  (`src/lib/security/webhook-url-safety.ts:19-26`, a recorded decision); pinning the resolved IP in
+  a custom dispatcher would.
+- [ ] R8 — `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE … FROM PUBLIC`
+  (`20260809120000:213-214`) cannot remove PostgreSQL's global PUBLIC default for functions; every
+  new definer function must revoke explicitly. s68a puts the guard in CI; a migration lint would
+  catch it before review.
+- [ ] R9 — `POST /api/teams/invitations/accept` writes under the user client
+  (`route.ts:104,120`) and cannot succeed in production; teams are PRD graveyard — delete or 410.
+- [ ] R10 — `request-code` never sets `siteLabel` (`route.ts:93-106`); after s68b escapes it, drop
+  the dead parameter or set it deliberately.
+- [ ] D2 — A/B conversion dedupe is check-then-insert (PR #65 Devin): a partial unique index on ab_test_results (test_id, visitor_id) WHERE event_type = 'conversion' + conflict-aware insert makes it atomic; needs a migration.
+
+Embed allocation: 0 bytes.
