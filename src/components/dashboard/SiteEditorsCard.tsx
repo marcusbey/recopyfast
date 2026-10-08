@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -553,16 +554,18 @@ export function SiteEditorsCard({
             </DialogDescription>
           </DialogHeader>
 
-          {revokeError && (
-            <p
-              role="alert"
-              className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
-            >
-              {revokeError}
-            </p>
-          )}
+          <DialogBody>
+            {revokeError && (
+              <p
+                role="alert"
+                className="rounded-md border border-tone-danger-border bg-tone-danger-surface px-3 py-2 text-sm text-tone-danger-text"
+              >
+                {revokeError}
+              </p>
+            )}
+          </DialogBody>
 
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {

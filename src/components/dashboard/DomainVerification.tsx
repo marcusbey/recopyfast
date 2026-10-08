@@ -405,7 +405,7 @@ export function DomainVerification({
                   setVerificationMethod(v as "dns" | "file")
                 }
               >
-                <TabsList className="mt-1 grid w-full grid-cols-2">
+                <TabsList className="mt-1">
                   <TabsTrigger value="dns">DNS record</TabsTrigger>
                   <TabsTrigger value="file">Hosted file</TabsTrigger>
                 </TabsList>

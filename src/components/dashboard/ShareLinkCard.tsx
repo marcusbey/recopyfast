@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { IconTile } from "@/components/ui/icon-tile";
 import {
   Link2,
   Copy,
@@ -65,83 +66,72 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
     ? "Expired"
     : `Expires ${format(new Date(link.expiresAt), "MMM d")}`;
 
+  // s66a, design § 2. At 375px this card's row could not shrink inside the
+  // dialog's grid track, which is what gave the Share dialog its horizontal
+  // scrollbar (s66 research, fact 1). Every text column is `min-w-0`, the label
+  // truncates, and the meta and permission rows wrap instead of pushing.
   return (
-    <div className="bg-surface-1 rounded-lg border border-border p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3 flex-1 min-w-0">
-          <div className="w-8 h-8 rounded-full bg-tone-info-surface flex items-center justify-center flex-shrink-0">
-            {link.type === "invite" ? (
-              <Mail className="w-4 h-4 text-tone-info-text" />
-            ) : (
-              <Link2 className="w-4 h-4 text-tone-info-text" />
+    <div className="rounded-container border border-border bg-surface-1 p-3">
+      <div className="flex items-start gap-3">
+        <IconTile tone="info" size="sm">
+          {link.type === "invite" ? <Mail /> : <Link2 />}
+        </IconTile>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {link.label || link.email || "Shareable link"}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-xs text-muted-foreground">{expiresText}</span>
+            {link.email && !link.emailVerified && (
+              <Badge variant="tone-warning" size="sm">
+                Pending
+              </Badge>
             )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-foreground truncate">
-              {link.label || link.email || "Shareable link"}
-            </p>
-            <div className="flex items-center gap-2 mt-1 flex-wrap">
-              <span className="text-xs text-muted-foreground">
-                {expiresText}
-              </span>
-              {link.email && !link.emailVerified && (
-                <Badge
-                  variant="outline"
-                  className="text-xs bg-tone-warning-surface text-tone-warning-text border-tone-warning-border"
-                >
-                  Pending
-                </Badge>
-              )}
-              {isExpired && (
-                <Badge
-                  variant="outline"
-                  className="text-xs bg-tone-danger-surface text-tone-danger-text border-tone-danger-border"
-                >
-                  Expired
-                </Badge>
-              )}
-            </div>
+            {isExpired && (
+              <Badge variant="tone-danger" size="sm">
+                Expired
+              </Badge>
+            )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             onClick={handleCopy}
             disabled={isExpired}
             aria-label={copied ? "Share link copied" : "Copy share link"}
-            className="h-8 px-2"
           >
             {copied ? (
-              <CheckCircle2 className="w-4 h-4 text-tone-success-text" />
+              <CheckCircle2 className="text-tone-success-text" />
             ) : (
-              <Copy className="w-4 h-4" />
+              <Copy />
             )}
           </Button>
           <Button
             variant="ghost"
-            size="sm"
+            size="icon-sm"
             onClick={handleRevoke}
             disabled={revoking}
             aria-label="Revoke this share"
-            className="h-8 px-2 text-tone-danger-text hover:text-tone-danger-text hover:bg-tone-danger-surface"
+            className="text-tone-danger-text hover:bg-tone-danger-surface hover:text-tone-danger-text"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 />
           </Button>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 flex flex-wrap gap-1.5">
         {link.permissions.map((perm) => {
           const Icon = permissionIcons[perm];
           return (
             <Badge
               key={perm}
               variant="outline"
-              className="text-xs bg-card border-border text-muted-foreground"
+              className="bg-card text-muted-foreground"
             >
-              <Icon className="w-3 h-3 mr-1" />
+              <Icon className="mr-1 h-3 w-3" aria-hidden="true" />
               {perm.charAt(0).toUpperCase() + perm.slice(1)}
             </Badge>
           );
@@ -149,7 +139,7 @@ export function ShareLinkCard({ link, onCopy, onRevoke }: ShareLinkCardProps) {
       </div>
 
       {link.lastUsedAt && (
-        <p className="text-xs text-muted-foreground mt-2">
+        <p className="mt-2 text-xs text-muted-foreground">
           Last used{" "}
           {formatDistanceToNow(new Date(link.lastUsedAt), { addSuffix: true })}
         </p>

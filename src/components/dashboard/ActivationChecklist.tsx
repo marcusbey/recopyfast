@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -342,15 +343,17 @@ export function ActivationChecklist({
               Add the person who will edit and publish {siteName}.
             </DialogDescription>
           </DialogHeader>
-          <SiteEditorsCard
-            siteId={siteId}
-            siteName={siteName}
-            inviteFormAutoFocus
-            inviteDefaultPermissions={["view", "edit", "publish"]}
-            onEditorChange={() => {
-              void refetch();
-            }}
-          />
+          <DialogBody>
+            <SiteEditorsCard
+              siteId={siteId}
+              siteName={siteName}
+              inviteFormAutoFocus
+              inviteDefaultPermissions={["view", "edit", "publish"]}
+              onEditorChange={() => {
+                void refetch();
+              }}
+            />
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </>

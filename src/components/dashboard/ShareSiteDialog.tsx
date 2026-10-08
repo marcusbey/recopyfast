@@ -3,18 +3,31 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle2, Loader2, Eye, Edit, Upload, Shield } from "lucide-react";
+import { NativeSelect } from "@/components/ui/native-select";
+import {
+  Check,
+  CheckCircle2,
+  Loader2,
+  Eye,
+  Edit,
+  Upload,
+  Shield,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ShareLinkCard, type ShareLink } from "./ShareLinkCard";
 import type { Site } from "@/types";
+import { cn } from "@/lib/utils/cn";
 
 interface ShareSiteDialogProps {
   open: boolean;
@@ -191,23 +204,23 @@ export function ShareSiteDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Share Preview Link</DialogTitle>
+          <DialogTitle>Share preview link</DialogTitle>
           <DialogDescription>
             Create a shareable link for others to preview and collaborate on
             your site.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-6 py-4">
+        <DialogBody className="space-y-4">
           {/* Email invite is the only access type this dialog creates.
               "Anyone with link" sharing was retired — StagingAccessManager
               .createStagingAccess throws for it and the database rejects the
               row — so the Link Type toggle that used to offer it (and always
               failed) has been removed in favor of a single invite form. */}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email Address</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email address</Label>
             <Input
               id="email"
               type="email"
@@ -227,11 +240,13 @@ export function ShareSiteDialog({
               one clears the others. A checkbox group is also the pattern that
               needs no roving tabindex: every option stays in the tab order, and
               a native <button> already answers Space and Enter, which is the
-              whole keyboard contract for role="checkbox". */}
-          <div className="space-y-3">
-            <Label id="share-permissions-label" className="text-sm font-medium">
-              Permissions
-            </Label>
+              whole keyboard contract for role="checkbox".
+
+              s66a: 1px `border-input` tiles at the control radius. They used
+              `border-2`, and their unselected border was `--line` at 1.45:1,
+              because the unlayered border reset overrode every colour. */}
+          <div className="space-y-1.5">
+            <Label id="share-permissions-label">Permissions</Label>
             <div
               role="group"
               aria-labelledby="share-permissions-label"
@@ -248,21 +263,23 @@ export function ShareSiteDialog({
                       role="checkbox"
                       aria-checked={isGranted}
                       onClick={() => togglePermission(key)}
-                      className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                      className={cn(
+                        "flex h-10 min-w-0 items-center gap-2 rounded-control border px-3 text-sm font-medium transition-colors",
+                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                         isGranted
-                          ? "border-primary bg-tone-info-surface text-tone-info-text"
-                          : "border-border text-muted-foreground hover:border-input"
-                      }`}
+                          ? "border-primary bg-tone-accent-surface text-tone-accent-text"
+                          : "border-input text-muted-foreground hover:border-foreground/40 hover:text-foreground",
+                      )}
                     >
-                      <Icon className="w-4 h-4" aria-hidden="true" />
-                      <span className="text-sm font-medium">{permLabel}</span>
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span className="truncate">{permLabel}</span>
                       {/* Carries WCAG 1.4.1 on its own: the granted option is
                           the only one wearing a tick, so the state survives
                           when the teal border and surface do not read as
                           different. */}
                       {isGranted && (
-                        <CheckCircle2
-                          className="w-4 h-4 ml-auto text-tone-info-text"
+                        <Check
+                          className="ml-auto h-4 w-4 shrink-0"
                           aria-hidden="true"
                         />
                       )}
@@ -273,25 +290,22 @@ export function ShareSiteDialog({
             </div>
           </div>
 
-          {/* Expiry */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="expiry">Expires in</Label>
-            <select
+            <NativeSelect
               id="expiry"
               value={expiresInDays}
               onChange={(e) => setExpiresInDays(Number(e.target.value))}
-              className="w-full h-10 px-3 rounded-lg border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {EXPIRY_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
 
-          {/* Label */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="label">Label (optional)</Label>
             <Input
               id="label"
@@ -301,47 +315,33 @@ export function ShareSiteDialog({
             />
           </div>
 
-          {/* Error/Success messages */}
           {error && (
-            <div className="p-3 rounded-lg bg-tone-danger-surface text-tone-danger-text text-sm">
-              {error}
-            </div>
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           )}
           {success && (
-            <div className="p-3 rounded-lg bg-tone-success-surface text-tone-success-text text-sm flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              {success}
-            </div>
+            <Alert variant="success">
+              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+              <AlertDescription>{success}</AlertDescription>
+            </Alert>
           )}
 
-          {/* Create Button */}
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleCreateLink} disabled={creating}>
-              {creating ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                "Create Link"
-              )}
-            </Button>
-          </div>
-
-          {/* Active Links Section.
+          {/* Active links.
               The loading branch used to be nested inside `activeLinks.length > 0`,
               so it could only render when the list was already populated — i.e.
               never on first open. The spinner now gates the section itself. */}
           {(loading || activeLinks.length > 0) && (
-            <div className="border-t border-border pt-6">
-              <h3 className="font-medium text-foreground mb-4">Active Links</h3>
-              <div className="space-y-3">
+            <section className="space-y-3 border-t border-border pt-5">
+              <h3 className="text-eyebrow">
+                {loading
+                  ? "Active links"
+                  : `Active links · ${activeLinks.length}`}
+              </h3>
+              <div className="space-y-2">
                 {loading ? (
                   <div className="flex items-center justify-center py-8">
-                    <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                   </div>
                 ) : (
                   activeLinks.map((link) => (
@@ -354,9 +354,27 @@ export function ShareSiteDialog({
                   ))
                 )}
               </div>
-            </div>
+            </section>
           )}
-        </div>
+        </DialogBody>
+
+        {/* The footer holds the actions so they stay put while the body
+            scrolls past the list of active links. */}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handleCreateLink} disabled={creating}>
+            {creating ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              "Create link"
+            )}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

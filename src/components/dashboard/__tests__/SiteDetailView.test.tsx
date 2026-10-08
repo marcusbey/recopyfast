@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { SiteDetailView } from "../SiteDetailView";
+import { expectNoEmptyBodyBand } from "@/__tests__/helpers/dialog-body";
 import { buildEmbedScript } from "@/lib/sites/embed-script";
 import type { Site } from "@/types";
 
@@ -283,6 +284,15 @@ describe("SiteDetailView", () => {
       expect.stringContaining("regenerate-snippet"),
       expect.anything(),
     );
+  });
+
+  it("draws no empty band under the regenerate confirmation when there is no error", async () => {
+    render(<SiteDetailView site={mockSite} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: /regenerate snippet/i }),
+    );
+
+    expectNoEmptyBodyBand(await screen.findByRole("dialog"));
   });
 
   it("replaces every displayed credential and copies the regenerated values", async () => {

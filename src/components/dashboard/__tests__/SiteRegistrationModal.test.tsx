@@ -2,9 +2,10 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SiteRegistrationModal } from "../SiteRegistrationModal";
+import { installRecipes } from "@/lib/sites/install-recipes";
 import "@testing-library/jest-dom";
 
 // Mock fetch
@@ -266,9 +267,7 @@ describe("SiteRegistrationModal", () => {
       });
       await user.click(submitButton);
 
-      expect(
-        await screen.findByText(/Site Registered Successfully!/i),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/Site registered/i)).toBeInTheDocument();
       expect(screen.getByText("Test Site")).toBeInTheDocument();
       expect(screen.getByText("example.com")).toBeInTheDocument();
       expect(screen.getByText("test-site-123")).toBeInTheDocument();
@@ -307,9 +306,7 @@ describe("SiteRegistrationModal", () => {
       expect(submitButton).toBeDisabled();
 
       await waitFor(() => {
-        expect(
-          screen.getByText(/Site Registered Successfully!/i),
-        ).toBeInTheDocument();
+        expect(screen.getByText(/Site registered/i)).toBeInTheDocument();
       });
     });
 
@@ -333,9 +330,7 @@ describe("SiteRegistrationModal", () => {
       });
       await user.click(submitButton);
 
-      expect(
-        await screen.findByText(/Site Registered Successfully!/i),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/Site registered/i)).toBeInTheDocument();
       expect(screen.getByText(/recopyfast.js/)).toBeInTheDocument();
       expect(
         screen.getByText(/data-site-id="test-site-123"/),
@@ -364,18 +359,17 @@ describe("SiteRegistrationModal", () => {
 
       await waitFor(() => {
         expect(
-          screen.getByText(/Integration Instructions/i),
+          screen.getByRole("heading", { name: "Copy the snippet" }),
         ).toBeInTheDocument();
       });
 
       expect(
-        screen.getByText(/Step 1: Copy the embed script/i),
+        screen.getByRole("heading", { name: "Paste it before </body>" }),
       ).toBeInTheDocument();
       expect(
-        screen.getByText(/Step 2: Add the script to your website/i),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(/Step 3: That's it — your text is already editable/i),
+        screen.getByRole("heading", {
+          name: "Open your site — text is editable by itself",
+        }),
       ).toBeInTheDocument();
     });
 
@@ -396,11 +390,179 @@ describe("SiteRegistrationModal", () => {
       // reads data-rcf-ignore / data-rcf-content.
       // Each attribute appears twice: once in the prose, once in the code
       // sample below it.
-      await screen.findByText(/Step 3/i);
+      await screen.findByRole("heading", {
+        name: "Open your site — text is editable by itself",
+      });
       expect(screen.getAllByText(/data-rcf-ignore/).length).toBeGreaterThan(0);
       expect(screen.getAllByText(/data-rcf-content/).length).toBeGreaterThan(0);
       expect(
         screen.queryByText(/data-recopyfast-editable/),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  /**
+   * s66a — the site-registered panel, redesigned (design § 1). The layout
+   * itself (no overflow at 320–1920, one scroll region, Copy on screen) is
+   * proved in a real browser by e2e/app-layout.spec.ts.
+   */
+  describe("Site-registered panel (s66a)", () => {
+    const registered = {
+      site: {
+        id: "test-site-123",
+        domain: "example.com",
+        name: "Test Site",
+        created_at: "2024-01-01T00:00:00Z",
+      },
+      apiKey: "test-api-key-abc123",
+      siteToken: "•".repeat(40),
+      embedScript:
+        '<script src="https://www.recopyfa.st/embed/recopyfast.js" data-site-id="test-site-123" data-site-token="•••" data-api-url="https://www.recopyfa.st/api"></script>',
+    };
+
+    async function registerSite() {
+      const user = userEvent.setup(TYPING);
+      (global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        json: async () => registered,
+      });
+      render(<SiteRegistrationModal {...defaultProps} />);
+      await user.type(screen.getByLabelText(/Website Name/i), "Test Site");
+      await user.type(screen.getByLabelText(/Website URL/i), "example.com");
+      await user.click(screen.getByRole("button", { name: /Register Site/i }));
+      await screen.findByText(/Site registered/i);
+      return user;
+    }
+
+    it("left-aligns the header: nothing in it is centred", async () => {
+      await registerSite();
+      const title = screen.getByRole("heading", { name: "Site registered" });
+      expect(title.className).not.toContain("text-center");
+      expect(title.parentElement?.className).not.toContain("text-center");
+    });
+
+    it("shows the name, the domain and the site id as their own text", async () => {
+      await registerSite();
+      for (const text of ["Test Site", "example.com", "test-site-123"]) {
+        expect(screen.getByText(text).textContent).toBe(text);
+      }
+    });
+
+    /**
+     * PR #67 review (Devin). jsdom computes no layout, so these are the two
+     * classes that let a 300-character unbroken name wrap inside a 320 px
+     * bottom sheet instead of widening it — the treatment the domain had.
+     */
+    it("lets a long unbroken site name wrap, as the domain does", async () => {
+      await registerSite();
+      for (const text of ["Test Site", "example.com"]) {
+        expect(screen.getByText(text)).toHaveClass(
+          "min-w-0",
+          "[overflow-wrap:anywhere]",
+        );
+      }
+    });
+
+    /**
+     * PR #67 review (Devin). Step 2 said "Paste it before </body>" on every
+     * tab, while the Next.js recipe under it says to load the tag after
+     * hydration — two instructions on one screen that disagree.
+     */
+    it("titles the paste step for the selected platform: Next.js never says </body>", async () => {
+      const user = await registerSite();
+      const pasteStepTitle = () =>
+        screen
+          .getByRole("tablist", { name: "Platform" })
+          .closest("li")
+          ?.querySelector("h3") as HTMLElement;
+
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+      expect(within(pasteStepTitle()).getByText("</body>").tagName).toBe(
+        "CODE",
+      );
+
+      await user.click(screen.getByRole("tab", { name: "Next.js" }));
+      expect(pasteStepTitle().textContent).not.toContain("</body>");
+      expect(pasteStepTitle()).toHaveTextContent(/hydrat/i);
+
+      await user.click(screen.getByRole("tab", { name: "Plain HTML" }));
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+
+      await user.click(screen.getByRole("tab", { name: "WordPress" }));
+      expect(pasteStepTitle()).toHaveTextContent("Paste it before </body>");
+    });
+
+    it("copies exactly the embedScript the API returned", async () => {
+      const user = await registerSite();
+      const writeText = spyOnClipboard();
+
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(registered.embedScript);
+    });
+
+    it("offers the install recipes from installRecipes, not a second wording", async () => {
+      await registerSite();
+      expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(
+        installRecipes.map((recipe) => recipe.label),
+      );
+      expect(screen.getByText(installRecipes[0].location)).toBeInTheDocument();
+    });
+
+    it("links the installation guide in a new tab", async () => {
+      await registerSite();
+      const guide = screen.getByRole("link", { name: "Installation guide" });
+      expect(guide).toHaveAttribute("href", "/docs/install");
+      expect(guide).toHaveAttribute("target", "_blank");
+      expect(guide).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("lists the attributes as ruled rows of inline code (design § 1)", async () => {
+      await registerSite();
+      const list = screen.getByText("Exclude").closest("dl") as HTMLElement;
+      expect(list).toHaveClass("border-t", "border-border");
+
+      const rows = [
+        ["Exclude", "data-rcf-ignore"],
+        ["Opt in", "data-rcf-content"],
+        ["Opt in a link", 'class="rcf-editable-link"'],
+      ];
+      for (const [term, value] of rows) {
+        // Stacked below 640px (term above value, one rule under the row);
+        // side by side from 640px, each cell ruled.
+        expect(within(list).getByText(term)).toHaveClass("sm:border-b");
+        const code = within(list).getByText(value);
+        expect(code.tagName).toBe("CODE");
+        // Inline code is 12px mono; 13px is for code inside CodeBlock only.
+        expect(code).toHaveClass(
+          "font-mono",
+          "text-xs",
+          "bg-surface-2",
+          "rounded-control",
+        );
+        expect(code.className).not.toContain("text-[13px]");
+        expect(code.closest("dd")).toHaveClass("border-b", "border-border");
+      }
+    });
+
+    it("names each Copy button for what it copies once the example is open", async () => {
+      const user = await registerSite();
+
+      await user.click(screen.getByText("Show example"));
+
+      expect(
+        await screen.findByRole("button", { name: "Copy example" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Copy snippet" }),
+      ).toBeInTheDocument();
+    });
+
+    it("has no Go to Site Dashboard button: it only ever closed the dialog", async () => {
+      await registerSite();
+      expect(
+        screen.queryByRole("button", { name: /Go to Site Dashboard/i }),
       ).not.toBeInTheDocument();
     });
   });
@@ -518,18 +680,19 @@ describe("SiteRegistrationModal", () => {
       await user.click(submitButton);
 
       await waitFor(() => {
-        expect(
-          screen.getByText(/Site Registered Successfully!/i),
-        ).toBeInTheDocument();
+        expect(screen.getByText(/Site registered/i)).toBeInTheDocument();
       });
 
       const writeText = spyOnClipboard();
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
 
       expect(writeText).toHaveBeenCalledWith(mockSuccessResponse.embedScript);
-      expect(
-        await screen.findByRole("button", { name: /^Copied!$/ }),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Copy snippet" }),
+        ).toHaveTextContent(/^Copied$/),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(/^Copied$/);
     });
 
     it('should show temporary "Copied" state', async () => {
@@ -553,26 +716,27 @@ describe("SiteRegistrationModal", () => {
       await user.click(submitButton);
 
       await waitFor(() => {
-        expect(
-          screen.getByText(/Site Registered Successfully!/i),
-        ).toBeInTheDocument();
+        expect(screen.getByText(/Site registered/i)).toBeInTheDocument();
       });
 
       spyOnClipboard();
       // Scoped by role: the page copy contains "ReCopyFast", which also matches
       // a bare /Copy/i text query.
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
 
-      expect(
-        await screen.findByRole("button", { name: /^Copied!$/ }),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Copy snippet" }),
+        ).toHaveTextContent(/^Copied$/),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(/^Copied$/);
 
       // Wait for the copied state to reset (2 seconds)
       await waitFor(
         () => {
           expect(
-            screen.getByRole("button", { name: /^Copy$/ }),
-          ).toBeInTheDocument();
+            screen.getByRole("button", { name: "Copy snippet" }),
+          ).toHaveTextContent(/^Copy$/);
         },
         { timeout: 3000 },
       );
@@ -625,59 +789,12 @@ describe("SiteRegistrationModal", () => {
       await user.click(submitButton);
 
       await waitFor(() => {
-        expect(
-          screen.getByText(/Site Registered Successfully!/i),
-        ).toBeInTheDocument();
+        expect(screen.getByText(/Site registered/i)).toBeInTheDocument();
       });
 
       const closeButton = getFooterCloseButton();
       await user.click(closeButton);
 
-      expect(mockOnClose).toHaveBeenCalled();
-    });
-
-    it("should call onSuccess when Go to Site Dashboard is clicked", async () => {
-      const user = userEvent.setup(TYPING);
-      (global.fetch as jest.Mock).mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          site: {
-            id: "test-site-123",
-            domain: "example.com",
-            name: "Test Site",
-            created_at: "2024-01-01T00:00:00Z",
-          },
-          apiKey: "test-api-key-abc123",
-          siteToken: "test-site-token-xyz789",
-          embedScript: '<script src="test.js"></script>',
-        }),
-      });
-
-      render(<SiteRegistrationModal {...defaultProps} />);
-
-      const nameInput = screen.getByLabelText(/Website Name/i);
-      const domainInput = screen.getByLabelText(/Website URL/i);
-
-      await user.type(nameInput, "Test Site");
-      await user.type(domainInput, "example.com");
-
-      const submitButton = screen.getByRole("button", {
-        name: /Register Site/i,
-      });
-      await user.click(submitButton);
-
-      await waitFor(() => {
-        expect(
-          screen.getByText(/Site Registered Successfully!/i),
-        ).toBeInTheDocument();
-      });
-
-      const dashboardButton = screen.getByRole("button", {
-        name: /Go to Site Dashboard/i,
-      });
-      await user.click(dashboardButton);
-
-      expect(mockOnSuccess).toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
 
@@ -711,9 +828,7 @@ describe("SiteRegistrationModal", () => {
       await user.type(screen.getByLabelText(/Website URL/i), "example.com");
       await user.click(screen.getByRole("button", { name: /Register Site/i }));
 
-      expect(
-        await screen.findByText(/Site Registered Successfully!/i),
-      ).toBeInTheDocument();
+      expect(await screen.findByText(/Site registered/i)).toBeInTheDocument();
 
       // Refreshed while the success screen is still open, and without the user
       // having dismissed anything.

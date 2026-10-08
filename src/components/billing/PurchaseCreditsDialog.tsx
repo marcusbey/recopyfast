@@ -3,8 +3,10 @@
 import { useState } from "react";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -61,7 +63,7 @@ export function PurchaseCreditsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <DialogBody className="space-y-4">
           {error && (
             <Alert className="border-tone-danger-border bg-tone-danger-surface">
               <p className="text-tone-danger-text">{error}</p>
@@ -108,27 +110,25 @@ export function PurchaseCreditsDialog({
             <p>• Unused credits are refunded if a feature fails</p>
             <p>• Payment is completed on Stripe&apos;s secure checkout page</p>
           </div>
+        </DialogBody>
 
-          <div className="flex gap-3 pt-4">
-            <Button
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isRedirecting}
-              className="flex-1"
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => startCheckout({ intent: "credits", quantity })}
-              disabled={isRedirecting}
-              className="flex-1"
-            >
-              {isRedirecting
-                ? "Redirecting to Stripe…"
-                : `Purchase $${totalPrice}`}
-            </Button>
-          </div>
-        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isRedirecting}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => startCheckout({ intent: "credits", quantity })}
+            disabled={isRedirecting}
+          >
+            {isRedirecting
+              ? "Redirecting to Stripe…"
+              : `Purchase $${totalPrice}`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

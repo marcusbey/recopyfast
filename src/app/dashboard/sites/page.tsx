@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -568,12 +569,14 @@ export default function SitesPage() {
               undone and will remove all associated data.
             </DialogDescription>
           </DialogHeader>
-          {deleteError && (
-            <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
-              {deleteError}
-            </p>
-          )}
-          <DialogFooter className="gap-2 sm:gap-0">
+          <DialogBody>
+            {deleteError && (
+              <p className="text-sm text-tone-danger-text bg-tone-danger-surface border border-tone-danger-border rounded-md px-3 py-2">
+                {deleteError}
+              </p>
+            )}
+          </DialogBody>
+          <DialogFooter>
             <Button
               variant="outline"
               onClick={() => {
@@ -618,20 +621,22 @@ export default function SitesPage() {
               opens your site with in-line editing enabled.
             </DialogDescription>
           </DialogHeader>
-          {editTargetSite && (
-            <div className="flex justify-end pt-2">
-              <EditWebsiteButton
-                site={{
-                  id: editTargetSite.id,
-                  domain: editTargetSite.domain,
-                  name: editTargetSite.name,
-                }}
-                userPermissions={["edit", "admin"]}
-                variant="primary"
-                size="md"
-              />
-            </div>
-          )}
+          <DialogBody>
+            {editTargetSite && (
+              <div className="flex justify-end">
+                <EditWebsiteButton
+                  site={{
+                    id: editTargetSite.id,
+                    domain: editTargetSite.domain,
+                    name: editTargetSite.name,
+                  }}
+                  userPermissions={["edit", "admin"]}
+                  variant="primary"
+                  size="md"
+                />
+              </div>
+            )}
+          </DialogBody>
         </DialogContent>
       </Dialog>
     </div>

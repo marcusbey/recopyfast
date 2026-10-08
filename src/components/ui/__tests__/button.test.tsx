@@ -323,6 +323,39 @@ describe("Button Component", () => {
     });
   });
 
+  describe("Shape (s66a, ADR 050)", () => {
+    const sizes = [
+      "default",
+      "sm",
+      "lg",
+      "xl",
+      "icon",
+      "icon-sm",
+      "icon-lg",
+    ] as const;
+    const variants = [
+      "default",
+      "destructive",
+      "outline",
+      "secondary",
+      "ghost",
+      "link",
+    ] as const;
+
+    it.each(sizes)("carries the 2px control radius at size %s", (size) => {
+      const classes = buttonVariants({ size }).split(/\s+/);
+      expect(classes).toContain("rounded-control");
+      // One radius per size: the legacy scale used to grow it to 16px at xl.
+      expect(
+        classes.filter((name) => /^rounded-(?!control$)/.test(name)),
+      ).toEqual([]);
+    });
+
+    it.each(variants)("casts no shadow in the %s variant", (variant) => {
+      expect(buttonVariants({ variant })).not.toMatch(/(^|\s|:)shadow-/);
+    });
+  });
+
   describe("Display Name", () => {
     it("should have correct display name", () => {
       expect(Button.displayName).toBe("Button");

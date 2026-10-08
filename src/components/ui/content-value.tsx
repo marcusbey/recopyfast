@@ -69,7 +69,7 @@ function ContentImage({ src, alt, className }: ContentImageProps) {
     return (
       <div
         className={cn(
-          "flex h-32 max-w-sm flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-tone-danger-border bg-tone-danger-surface px-4 text-center",
+          "flex h-32 max-w-sm flex-col items-center justify-center gap-2 rounded-container border border-dashed border-tone-danger-border bg-tone-danger-surface px-4 text-center",
           className,
         )}
       >
@@ -91,7 +91,7 @@ function ContentImage({ src, alt, className }: ContentImageProps) {
     <figure className={cn("max-w-sm space-y-1.5", className)}>
       {/* Fixed height + object-contain keeps rows a stable height whatever the
           source aspect ratio, so the list does not jump as images decode. */}
-      <div className="relative h-32 w-full overflow-hidden rounded-lg border border-border bg-surface-2">
+      <div className="relative h-32 w-full overflow-hidden rounded-container border border-border bg-surface-2">
         {!loaded && (
           <div className="skeleton absolute inset-0" aria-hidden="true" />
         )}

@@ -2334,6 +2334,324 @@ settled (both edit `src/app/api/content/[siteId]/route.ts`).
 
 Embed allocation: 0 bytes.
 
+## Story s66a-app-design-tokens-and-panels — straight, flat primitives, and the two panels the owner pointed at fit any screen
+
+Split from `s66-app-design-system` at research. `docs/research/s66-app-design-system.md` (commit
+`b534b23`) covers s66a, s66c and s66b; this entry keeps the original request and evidence. The
+branch the research was written on, `feature/s66-app-design-system`, was renamed to this story's
+branch, so this story's commits carry the s66 story and research commits too.
+
+As a site owner working in the dashboard, every shared control and container is straight-edged
+and flat: containers square, controls at 2 px, hairline borders that render the colour they were
+given, opaque menus. The site-registered panel and the Share preview link dialog are readable
+and usable at any width from 320 to 1920 px.
+
+Owner request, 2026-10-07, with a screenshot of the site-details panel: "This panel needs a serious
+redesign. and while u'r here, inspect all the application pages and improve the design. specialy
+the layout and alignement, avoid rounded corner as much as possible and keep it straight and
+clean. like 'supabase' website. make sure it's responsive." Second screenshot: the "Expires in"
+select in Share Preview Link, a rounded box with its chevron jammed against the right border.
+
+Owner decisions, 2026-10-08. The owner accepted the research recommendation as a whole, so its
+five open questions take their defaults:
+- Containers have 0 radius. Controls (inputs, selects, buttons) have 2 px. Badges are square
+  (2 px, the control radius). Borders are 1 px hairlines. Only popovers, menus and dialogs cast a
+  shadow. Surfaces are flat.
+- Shell values: 56 px header, 24/600 page titles, 40 px controls, content width about 1180 px
+  with 16/24/32 px gutters. These are the research values; refine them only with evidence. The
+  shell lands in s66b; s66a records the values in `docs/design-system.md`.
+- The marketing files that share `src/components/ui/*` square up too (accepted side effect).
+  `/try` counts as Marketing. Marketing's own `rounded-*` classes are not touched
+  ([ADR 050](./decisions/050-app-radius-is-two-semantic-tokens.md)).
+- Split into s66a (this story), s66c (site information architecture) and s66b (page passes),
+  executed in that order.
+
+Observed defects (from the owner's screenshots, measured in research):
+- **Site-registered panel.** There is a tall empty band above the content. The snippet and the
+  instruction lines overflow the panel and are clipped. There is a panel-level horizontal
+  scrollbar, and rounded boxes nest inside a rounded modal. Root cause: `DialogContent` is a grid
+  whose implicit column takes the width of the unwrapped 300-character `<pre>` (2,524 px inside a
+  588 px panel). The same mechanism affects all 12 dialog call sites (research fact 1).
+- **Share preview link at 375 px.** There is a horizontal scrollbar and the content is clipped
+  (`ShareLinkCard.tsx:69-70`). The native "Expires in" select draws the browser's chevron about
+  6 px from its border.
+- **Global CSS.** The unlayered `* { border-color: var(--line) }` (`globals.css:215-216`)
+  overrides every `border-*` colour utility. Input boundaries therefore render at 1.45:1 (dark)
+  and 1.34:1 (light) instead of at least 3:1. `bg-popover` has no token, so every dropdown and
+  Select menu is transparent.
+
+Complexity: 4. It covers cross-cutting primitives with 12 dialog call sites, a CSS-layer change
+that also repaints authored border colours on marketing pages, and a new authenticated
+Playwright harness. Dependencies: none. Branch `feature/s66a-app-design-tokens-and-panels`.
+Design: `docs/designs/s66a-app-design-tokens-and-panels.md` and its `.html` mockup. Plan:
+`docs/plans/s66a-app-design-tokens-and-panels.md`.
+
+- [ ] **AC 1 — Site-registered panel.** At 320, 375, 768, 1280 and 1920 px:
+  - the dialog's `scrollWidth` is at most its `clientWidth`, no descendant's right edge passes
+    the dialog's, and the page has no horizontal scroll;
+  - the title "Site registered" sits within the first 120 px of the panel (no empty band);
+  - the snippet wraps inside its code block and can be read in full;
+  - the block's Copy button is visible without horizontal scrolling and copies exactly the
+    `embedScript` the API returned;
+  - the dialog has exactly one scroll container (its body).
+
+  Proved by the new `e2e/app-layout.spec.ts` (layout) and `SiteRegistrationModal.test.tsx` (the
+  copied string).
+- [ ] **AC 2 — Share preview link dialog.** The same overflow and single-scroll assertions hold
+  at the same five widths, with two fixture links (one with a 60-character label and an
+  unverified email). "Expires in" is a `NativeSelect`: its chevron's right edge sits 12 px (± 1)
+  inside the control's right border, and the option text never runs under it. Proved by
+  `e2e/app-layout.spec.ts` and `src/components/ui/__tests__/native-select.test.tsx`.
+  `ShareSiteDialog.test.tsx` passes unchanged (label "Expires in", option "7 days", the
+  Permissions checkbox group).
+- [ ] **AC 3 — One radius scale for the app.** The scale is two tokens, `--radius-control: 2px`
+  and `--radius-container: 0px`, used as `rounded-control` and `rounded-container`.
+  `src/__tests__/design/radius-guard.test.ts` fails, naming file and line, when an app-surface
+  file uses:
+  - bare `rounded`;
+  - the legacy `rounded-{xs…4xl}` scale, corner and side forms included;
+  - `rounded-[n]` above 2 px;
+  - `rounded-full` outside the exception list;
+  - an inline `borderRadius` or `border-radius`.
+
+  It also fails if either token exceeds its value. A per-file baseline of today's offenders may
+  only shrink (s66b empties it). `src/components/ui/**`, `SiteRegistrationModal.tsx`,
+  `ShareSiteDialog.tsx` and `ShareLinkCard.tsx` are at zero. The plan lists the exceptions
+  (avatars, status dots up to 8 px, spinners). The guard's own fixtures prove it fails.
+- [ ] **AC 4 — The two global CSS bugs.**
+  - (a) The border reset sits in `@layer base`, so authored `border-*` colours apply. In the
+    harness, an `Input`'s computed border colour is `--line-strong` and contrasts at least 3:1
+    with the card, in dark and in light.
+  - (b) `--color-popover` and `--color-popover-foreground` exist. The harness opens the Sites
+    sort menu and finds its background opaque.
+
+  A Jest test parses `globals.css` and pins both.
+- [ ] **AC 5 — The dialog's root cause is fixed at all 12 call sites.**
+  - `DialogContent` is a flex column that never scrolls.
+  - `DialogBody` is the only scroll container, and its children can shrink (`min-width: 0`).
+  - Header text is left-aligned at every width.
+  - Below 640 px the dialog is a full-width bottom sheet.
+
+  A source-scan test fails if a reachable `<DialogContent>` call site renders no `DialogBody`,
+  or passes `overflow-*`, `max-h-*`, `rounded-*`, padding or `grid` classes to `DialogContent`.
+- [ ] **AC 6 — Primitives match `docs/design-system.md` (s66a revision).** Each has an RTL test:
+  - Button: heights 40/32/48/56 kept, 2 px radius, no shadow.
+  - Input and a new Textarea: 2 px radius, `border-input`.
+  - A new NativeSelect.
+  - Radix Select: trigger aligned with Input, menu opaque.
+  - Card: square and flat; the `interactive` variant no longer lifts.
+  - Badge: 2 px radius.
+  - Tabs: underline style; they wrap rather than clip.
+  - DropdownMenu: opaque and square.
+  - Alert: square.
+  - A new CodeBlock: a label bar with an always-visible Copy button; it wraps by default and
+    `wrap={false}` scrolls inside the block itself; the button reads "Copied" for 2 s; it copies
+    the exact string.
+
+  Every reachable native `<select>` (8 at research time) renders through NativeSelect, enforced
+  by a source-scan test.
+- [ ] **AC 7 — Contrast and focus.** In the harness, at 1280 px in dark and in light, body and
+  muted text on the dialog surface contrast at least 4.5:1. A keyboard-focused Button, Input,
+  NativeSelect and tab trigger each show a 2 px outline or ring and have a border radius of at
+  most 2 px, so the focus outline is square.
+- [ ] **AC 8 — Behaviour unchanged, except the listed copy.** The unit suite and the existing
+  e2e flows pass. The only edited existing tests are the ones the plan lists:
+  - `card.test.tsx` (radius, shadow, title size);
+  - `badge.test.tsx` (radius);
+  - `SiteRegistrationModal.test.tsx` (the success-state copy, and the removed "Go to Site
+    Dashboard" button).
+
+  The PR names each one with its reason. The Playwright contract (`playwright.config.ts` and
+  `.github/workflows/ci.yml`) rises by exactly the harness's test count.
+- [ ] **AC 9 — Evidence.** Run with `RCF_LAYOUT_SCREENSHOTS=1`, the harness writes captures of
+  both panels at 375, 768, 1280 and 1920 px to
+  `docs/designs/s66a-app-design-tokens-and-panels/after/`. They contain fixture data only: the
+  site token reads `•••` and no real email appears. The PR also shows before/after captures at
+  1280 and 375 of the marketing pages that import `ui/*` (the Header, `/docs/install`, a blog
+  post, 404 and `/try`), so the accepted side effect is seen rather than reasoned about.
+- [ ] **AC 10 — Docs and gates.** `docs/design-system.md` describes the s66a system (tokens,
+  primitives, dialog rules), and ADR 050 records the radius-token choice. Lint, type-check,
+  format, build and the full suite pass.
+
+Not in this story:
+- the page shell, page titles and per-page layout (s66b);
+- routes, labels outside the two panels, and the site information architecture (s66c);
+- `.surface-interactive`, `.text-display` and the legacy `--radius` scale, which marketing still
+  uses;
+- the default permissions of a preview link (s66c).
+
+Embed allocation: 0 bytes.
+
+## Story s66c-site-page-and-access — one page per site, and one clear way to give someone access
+
+Split from `s66-app-design-system` at research (§ Information architecture). The owner added
+this on 2026-10-07: "https://www.recopyfa.st/dashboard/sites is overwhelming. have multiple levels
+of settings. and invite a client, and editors are confusing. which one to use and when ?"
+
+As a site owner, each site has its own page with three tabs: Install, People & access and
+Settings. The People & access tab offers exactly two actions, and each says what it is for, so I
+know which one to use.
+
+What research found:
+- "View Details" swaps the Sites page for an 11-card view held in component state, with no URL.
+  It is about 4,400 px tall at 1280 and shows the install snippet three times.
+- Two access mechanisms appear under three labels, and their forms are field-for-field
+  identical:
+  - "Add editor" (`site_editors`, durable);
+  - "Invite a client" (the same `SiteEditorsCard`, in a dialog);
+  - "Share preview link" (`staging_access`, expiring).
+- The card's "Settings" button starts an edit session. Delete is only reachable through a kebab
+  menu that appears on hover, so a touch screen cannot reach it.
+
+Owner decisions, 2026-10-08:
+- One URL per site, replacing the in-place "View Details" swap, with tabs Install /
+  People & access / Settings.
+- One people section with exactly two clearly labelled actions:
+  - "Add editor": durable; the editor edits and publishes on the live site.
+  - "Share preview link": temporary; for viewing unpublished changes; view-only by default.
+- "Invite a client" is removed. The activation checklist opens the same Add editor flow under
+  the same name.
+- The card's misleading "Settings" button is renamed, and Delete is reachable without hover.
+- This story may change routes and label-pinning tests. Its ACs say which tests change and why.
+
+Complexity: 4. A new route replaces component-state navigation, the information architecture
+spans six components, and label-pinning tests change; there is no API or data change.
+Dependencies: s66a merged (underline Tabs, CodeBlock, the Dialog structure, NativeSelect, the
+radius guard, the layout harness). Ships before s66b. Branch `feature/s66c-site-page-and-access`.
+
+- [ ] **AC 1 — One URL per site.** `/dashboard/sites/[siteId]` renders the site page: an h1 with
+  the site name, the domain, its `StatusBadge`, and the header actions "Open editor" and
+  "Version history".
+  - The tab is part of the URL (`?tab=install|people|settings`). Install is the default while
+    the site awaits install; People & access is the default otherwise.
+  - "View Details" on a Sites card is a link to that URL, with no in-place swap, and browser Back
+    returns to Sites.
+  - An id the owner cannot see renders the not-found state, never another account's data. The
+    page reads the RLS-scoped `GET /api/sites`.
+
+  Proved by a new page test and by the layout harness (navigate, then Back).
+- [ ] **AC 2 — Install tab.** The install snippet appears exactly once on the page, in one
+  CodeBlock with Copy. The platform recipes, the site token (Copy, Regenerate) and domain
+  verification follow it. The setup checklist (until install completes) and the stats row sit
+  above the tabs. Proved by a test: the page renders exactly one element whose text contains
+  `data-site-token`.
+- [ ] **AC 3 — People & access tab.** It has exactly two actions, "Add editor" and "Share
+  preview link", each with a one-line explainer:
+  - Add editor: "For someone who keeps editing this site. They sign in on the editor page with a
+    code sent to their email, and can edit and publish on your live site until you remove them."
+  - Share preview link: "For a one-off review of unpublished changes. The link stops working
+    after the time you choose."
+
+  Below the actions, the editors list and the active preview links each sit under their own
+  heading. A new preview link defaults to View only; edit and publish need an explicit choice.
+  Proved by a test that the tab has exactly these two action buttons, and by
+  `ShareSiteDialog.test.tsx` asserting the default grant is `["view"]`.
+- [ ] **AC 4 — "Invite a client" is gone.** The label appears nowhere in the app. The activation
+  checklist's step is labelled "Add editor" and opens the same Add editor form as the People &
+  access tab: one component, the same endpoint. The checklist keeps today's View + Edit + Publish
+  preset as the form's starting value, because that step exists to get a client publishing (s35).
+- [ ] **AC 5 — Sites card.** Labels:
+  - The button that starts an edit session is labelled "Open editor" (the same
+    `/api/edit-sessions/create` call).
+  - The "Edit Website" dialog title and the checklist's "Open site in edit mode" become "Open
+    editor" too.
+
+  The card's ⋮ menu is visible without hover (opacity 1 at rest, keyboard reachable). It holds
+  Open site page, Open editor, Share preview link and Delete site. In the harness at 375 px, the
+  ⋮ is visible and Delete is reachable by taps alone.
+- [ ] **AC 6 — Settings tab.** It contains:
+  - the name and domain, read-only (changing them needs an API: separate story);
+  - webhooks;
+  - content import/export, with its log labelled "Import/export log" (the content timeline is
+    "Version history");
+  - a Danger zone with Delete site (the same `DELETE /api/sites/[siteId]` and the same
+    confirmation).
+- [ ] **AC 7 — Tests that change, and why.** The PR names each one:
+  - `src/app/dashboard/sites/__tests__/page.test.tsx` and `teams-moved-notice.test.tsx`: the
+    in-place `site-detail-view` and "Back to Sites" become a link to the site URL;
+  - `SiteCard.test.tsx`: "Settings" becomes "Open editor", the menu is visible without hover,
+    and "Delete Site" becomes "Delete site";
+  - `SiteDetailView.test.tsx`: sections move into tabs, and "Embed Script" / "Copy Embed Script"
+    collapse into the single Install CodeBlock (the copied string is still asserted exactly);
+  - `ActivationChecklist.test.tsx`: "Invite a client" becomes "Add editor";
+  - `ShareSiteDialog.test.tsx`: the default grant becomes View only.
+
+  No other existing test changes. The e2e flows (register, share, edit, publish) pass unchanged.
+- [ ] **AC 8 — No API, data or embed change.**
+  `git diff main...HEAD -- src/app/api supabase public/embed server` is empty. The layout
+  harness covers the site page's three tabs at 375, 768, 1280 and 1920 px with no page-level
+  horizontal scroll and no clipping, and the new files pass the radius guard with zero
+  offenders.
+
+Not in this story:
+- renaming a site or changing its domain (needs `PATCH /api/sites/[siteId]`, which changes which
+  origin `authorizeSiteRequest` accepts on a live install: separate API story);
+- retiring `/api/sites/[siteId]/share` and `components/collaboration/*` (dead-code chore);
+- the page shell and titles (s66b).
+
+Embed allocation: 0 bytes.
+
+## Story s66b-app-page-layout — every app page shares one shell, one title and one left edge
+
+Split from `s66-app-design-system` at research. It completes the original story's AC 3 and AC 4
+on every app page, using s66a's primitives, radius guard and layout harness.
+
+As a site owner, every app page sits in the same shell: a 56 px header and content up to 1180 px
+wide with 16/24/32 px gutters. Every page opens with the same title row (a 24/600 h1, actions on
+the right) and aligns its headings, filters, panels and tables to one left edge. No page scrolls
+sideways or clips content at 375, 768, 1280 or 1920 px.
+
+Owner request, 2026-10-07 (quoted in s66a): "inspect all the application pages and improve the
+design. specialy the layout and alignement … make sure it's responsive." Owner decisions,
+2026-10-08: 56 px header; 24/600 page titles; content about 1180 px wide with 16/24/32 px
+gutters (research values; refine them only with evidence).
+
+Measured defects to close (research § Current-state audit, per page):
+- Four title styles: h1 32/600; h1 30/700; on Analytics an h2 24/700 with no h1; on site
+  detail an h3 inside a card.
+- Billing nests `container mx-auto px-4`, which puts its title 16 px to the right of every
+  other page's.
+- Analytics overflows the page by 3 px at 1280.
+- At 375, the Sites status filter clips "Stale" (395 px of content in 341 px), and Settings
+  hides 2 of its 5 tabs.
+- At 1024 px and wider, the Overview metric grid leaves its right third empty.
+- Checklists nest three boxes deep.
+
+Complexity: 4 (every app page; visual proof at four widths). Dependencies: s66a and s66c merged,
+because s66b lays out the s66c site page rather than the retired in-place detail view. Branch
+`feature/s66b-app-page-layout`.
+
+- [ ] **AC 1 — One shell.** The header in `src/app/dashboard/layout.tsx` is 56 px tall. Content
+  is `max-w-[1180px]` with gutters of 16, 24 and 32 px below 640, from 640 and from 1024 px. No
+  page nests a second container (Billing's is removed). The harness measures the h1's left x on
+  every app page at each width and finds a single value per width.
+- [ ] **AC 2 — One title.** Every app page renders exactly one h1, through `PageHeader`, at
+  24/600 (`.text-display` becomes a fixed 24 px with −0.015em tracking). Analytics, Content and
+  Settings stop titling themselves. No `font-bold` (700) remains on app surfaces; an extension
+  of the s66a design guard enforces it.
+- [ ] **AC 3 — One left edge.** On every app page, the page header, the filter row, the first
+  panel and any table share the page's left x (harness, ± 0.5 px).
+- [ ] **AC 4 — No sideways scroll, no clipping.** None of these pages scrolls horizontally or
+  clips content at 375, 768, 1280 or 1920 px: Overview, Sites, the site page (all tabs),
+  Content, Analytics, Settings, Billing, Login, Signup, Auth error and the `/edit` hub. That
+  includes Analytics at 1280, and the Sites status filter and the Settings tabs at 375: every
+  option stays inside its container's box, none hidden behind a scrollbar. Screenshots are
+  committed under `docs/designs/s66b-app-page-layout/after/`.
+- [ ] **AC 5 — Radius baseline empty, panels flat.** Every reachable app-surface file passes the
+  radius guard with zero offenders. Static panels cast no shadow and do not lift on hover:
+  app surfaces no longer use `.surface-interactive`, which marketing keeps.
+- [ ] **AC 6 — No behaviour change.** The unit suite and the e2e flows pass, and no route or
+  label changes. The PR lists any test that pins a layout class, with its reason. Text contrast
+  meets AA on every changed surface (harness).
+
+Not in this story:
+- off-palette colour: the Analytics icon hues, Billing's emoji, and the emerald DOM toast in
+  `EditWebsiteButton`, which needs design-system gap 1, a toast primitive (research § Off-system
+  colour; follow-up);
+- the marketing site.
+
+Embed allocation: 0 bytes.
+
 ## s68 — security hardening (split into s68a / s68b / s68c)
 
 Product owner decision, 2026-10-08: **"s68 now: H1 + H2 + top mediums"** through the pipeline;
