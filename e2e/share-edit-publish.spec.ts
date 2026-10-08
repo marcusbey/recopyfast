@@ -428,8 +428,12 @@ test.describe("share edit publish flow", () => {
   async function seedEditSession(expiresAt: string) {
     if (!supabase) throw new Error("Core E2E Supabase client is not ready.");
 
+    // s68a (ADR 047): a session grants at most its holder's live grant, so it
+    // must name one. This seed used to write no `user_id`; the validator now
+    // refuses that row. The owner's `admin` row is seeded first, in beforeAll.
     const { error: editError } = await supabase.from("edit_sessions").insert({
       site_id: siteId,
+      user_id: ownerId,
       token: editToken,
       permissions: ["view", "edit", "publish"],
       expires_at: expiresAt,

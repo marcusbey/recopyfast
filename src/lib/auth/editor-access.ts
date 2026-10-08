@@ -413,10 +413,50 @@ async function validateStagingEditorAccess(
   };
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The edit-session principal. The session row carries NO authority of its own
+ * (ADR 047): what its bearer may do is the holder's LIVE direct
+ * `site_permissions` row for this site, read here on every validation, and the
+ * row's own `permissions` can only narrow that.
+ *
+ * TOMBSTONE — H1. This used to return `normalizePermissions(session.permissions)`
+ * and nothing else, so the row WAS the grant. The row was writable by its own
+ * holder ("Users can create edit sessions for sites they have access to",
+ * 20250817000000:483-492, constrained who inserted, never what), and on a
+ * replay on 2026-10-08 an `edit` member's own JWT inserted
+ * `{permissions: ['admin'], expires_at: '2099-01-01'}`. Sent as `editToken`
+ * with no cookie, that published to the live site through
+ * POST /api/staging/publish. Closing the INSERT (migration 20261008100000) is
+ * not enough on its own: a session legitimately issued to an admin who is then
+ * demoted or removed kept its stored `admin` until expiry, because DELETE
+ * /api/sites/[siteId]/share never touched `edit_sessions`. Reading the live
+ * grant here is what makes a downgrade or a removal take effect on the next
+ * request. Do not "optimise" it into a column cached on the row — a cache is a
+ * second copy of the grant, which is exactly the defect.
+ *
+ * The holder's grant is the DIRECT `(site_id, user_id)` row, the same one
+ * `authorizeFirstPartyEditorAccess` and `createEditSession` read. Team grants
+ * have no `user_id` and are not consulted anywhere on the editor path, so no
+ * legitimate session depends on one. `publish` is not a `site_permissions`
+ * level (CHECK view/edit/admin), so publishing through a session needs a live
+ * `admin` row — as it already does first-party. Do not widen the intersection
+ * to "fix" that.
+ *
+ * Every refusal — no holder, no live row, past the lifetime ceiling, an empty
+ * intersection — answers the one message this function always returned, so
+ * the response is no oracle for "member removed" versus "token wrong".
+ */
 async function validateEditSessionAccess(
   siteId: string,
   token: string,
 ): Promise<EditorAccessValidation> {
+  const refused: EditorAccessValidation = {
+    valid: false,
+    error: "Invalid or expired edit session",
+    status: 401,
+  };
   const supabase = createServiceRoleClient();
 
   const { data: session, error } = await supabase
@@ -429,11 +469,48 @@ async function validateEditSessionAccess(
     .single();
 
   if (error || !session) {
-    return {
-      valid: false,
-      error: "Invalid or expired edit session",
-      status: 401,
-    };
+    return refused;
+  }
+
+  // The 24 h ceiling, measured from issue, enforced where the credential is
+  // USED. It used to exist only in /api/edit-sessions/extend, so a row written
+  // with `expires_at` in 2099 was never measured against it. Imported lazily
+  // for the reason `@/lib/supabase/server` is above: `edit-sessions` imports
+  // it, and this module is reached before a session exists.
+  //
+  // Written as "not within", not "beyond": a `created_at` that does not parse
+  // (or a constant a test double left undefined) makes the comparison NaN,
+  // and NaN must refuse — a session that cannot be dated cannot be bounded.
+  const { MAX_SESSION_LIFETIME_HOURS } = await import(
+    "@/lib/auth/edit-sessions"
+  );
+  const ageMs = Date.now() - new Date(session.created_at).getTime();
+  if (!(ageMs <= MAX_SESSION_LIFETIME_HOURS * HOUR_MS)) {
+    return refused;
+  }
+
+  if (!session.user_id) {
+    return refused;
+  }
+
+  const { data: liveGrant, error: grantError } = await supabase
+    .from("site_permissions")
+    .select("permission")
+    .eq("site_id", siteId)
+    .eq("user_id", session.user_id)
+    .maybeSingle<{ permission: string }>();
+
+  if (grantError || !liveGrant) {
+    return refused;
+  }
+
+  const livePermissions = normalizePermissions([liveGrant.permission]);
+  const permissions = normalizePermissions(session.permissions).filter(
+    (permission) => livePermissions.includes(permission),
+  );
+
+  if (permissions.length === 0) {
+    return refused;
   }
 
   await supabase
@@ -447,7 +524,7 @@ async function validateEditSessionAccess(
       kind: "edit-session",
       siteId,
       token,
-      permissions: normalizePermissions(session.permissions),
+      permissions,
       userId: session.user_id,
       expiresAt: new Date(session.expires_at),
       verified: true,

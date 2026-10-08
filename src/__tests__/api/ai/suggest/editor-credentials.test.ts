@@ -187,6 +187,8 @@ function grantRow(grant: string, permissions: string[] = ["edit"]) {
 function siteHandler(options: {
   grantRow?: unknown;
   editSession?: unknown;
+  /** The edit-session holder's own `site_permissions` row (s68a). */
+  liveGrant?: { permission: string } | null;
   ownerId?: string | null;
 }) {
   return (op: Op) => {
@@ -206,6 +208,11 @@ function siteHandler(options: {
       return { data: null, error: { code: "PGRST116", message: "no rows" } };
     }
     if (op.table === "site_permissions") {
+      // s68a (ADR 047): the edit-session validator reads the HOLDER's own row,
+      // filtered by `user_id`; the owner lookup filters by level, not by user.
+      if (op.filters.some(([column]) => column === "user_id")) {
+        return { data: options.liveGrant ?? null, error: null };
+      }
       return {
         data: options.ownerId ? { user_id: options.ownerId } : null,
         error: null,
@@ -365,8 +372,11 @@ describe("POST /api/ai/suggest — editor credentials, owner pays", () => {
           id: "edit-session-1",
           user_id: COLLABORATOR_ID,
           permissions: ["edit"],
+          created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
           expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         },
+        // s68a (ADR 047): a session is honoured on its holder's live grant.
+        liveGrant: { permission: "edit" },
         ownerId: OWNER_ID,
       }),
     );

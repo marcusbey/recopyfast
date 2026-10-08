@@ -92,8 +92,16 @@ export class EditSessionManager {
       );
       const expiresAt = new Date(Date.now() + duration * 60 * 60 * 1000);
 
-      // Create session record
-      const { data: session, error } = await supabase
+      // Inserted with the SERVICE client, after the checks above ran under the
+      // caller's own RLS client (which is what proves who they are and what
+      // they hold). Only the service role writes `edit_sessions` (ADR 047,
+      // migration 20261008100000): the INSERT policy that used to let this run
+      // as the user constrained who inserted, never what, and an `edit` member
+      // used it to mint an `admin` session expiring in 2099 that published to
+      // the live site (H1). Moving this back to the user client fails on the
+      // migrated schema with 42501 — it is not a simplification.
+      const service = createServiceRoleClient();
+      const { data: session, error } = await service
         .from("edit_sessions")
         .insert({
           site_id: params.siteId,
@@ -275,29 +283,7 @@ export class EditSessionManager {
     }
   }
 
-  /**
-   * Clean up expired sessions
-   */
-  static async cleanupExpiredSessions(): Promise<number> {
-    try {
-      const supabase = await createClient();
-
-      const { count, error } = await supabase
-        .from("edit_sessions")
-        .update({ is_active: false })
-        .lt("expires_at", new Date().toISOString())
-        .eq("is_active", true);
-
-      if (error) {
-        throw new Error(`Failed to cleanup expired sessions: ${error.message}`);
-      }
-
-      return count || 0;
-    } catch (error) {
-      console.error("Error cleaning up expired sessions:", error);
-      return 0;
-    }
-  }
+  // TOMBSTONE (s68a): `cleanupExpiredSessions` had no caller and ran on the user client, where `edit_sessions` has no UPDATE policy — it silently updated nothing; expiry is enforced at validation instead.
 
   /**
    * Generate a cryptographically secure token

@@ -2388,28 +2388,28 @@ alive. Replay-only self-escalation policies (`20260731008000:117-123,201-210`) a
 rewrite policy (`20260801200000:956-968`) sit beside it. The definer-function guard
 (`function-grants.test.ts`) passes on a replay but no CI step runs it against a database.
 
-- [ ] An edit-session token grants at most the intersection of its row's permissions and the
+- [x] An edit-session token grants at most the intersection of its row's permissions and the
   holder's live direct `site_permissions` row for the site, read at every validation: an `edit`
   member's `admin`-stamped session cannot publish (403), a removed member's session is refused
   (401), a NULL-holder session is refused (401). Tests:
   `src/lib/auth/__tests__/edit-session-authority.test.ts`,
   `src/__tests__/api/staging/publish-edit-session-authority.test.ts`.
-- [ ] A session older than 24 h from `created_at` is refused whatever its `expires_at`. Test:
+- [x] A session older than 24 h from `created_at` is refused whatever its `expires_at`. Test:
   `edit-session-authority.test.ts` ("refuses a session past the 24 h lifetime").
-- [ ] Removing a member deactivates their edit sessions for that site (scoped by site and user).
+- [x] Removing a member deactivates their edit sessions for that site (scoped by site and user).
   Test: `src/__tests__/api/sites/share-revokes-edit-sessions.test.ts`.
-- [ ] Edit sessions are issued only through the service role, after the caller's grant is read
+- [x] Edit sessions are issued only through the service role, after the caller's grant is read
   under their own session. Test: `src/__tests__/api/edit-sessions/create-token-leak.test.ts`
   (insert on the service client, never the user client).
 - [ ] Migration `20261008100000_edit_sessions_service_role_writes.sql`: PUBLIC/`anon`/`authenticated`
   hold no write privilege or write policy on `edit_sessions`, `anon` no SELECT; an `edit` member's
   direct INSERT (SQL and PostgREST with a real JWT) is refused; rows the new rules would refuse are
   deactivated, idempotently. Test: `src/__tests__/db/edit-sessions-privileges.test.ts`.
-- [ ] Migration `20261008110000_converge_replay_privileges.sql`: on a replayed database a stranger
+- [x] Migration `20261008110000_converge_replay_privileges.sql`: on a replayed database a stranger
   cannot insert themselves into a team, an invitee cannot rewrite their invitation, a collaborator
   admin cannot UPDATE `site_permissions` (the creator row stays unstamped); team managers still
   update invitations. Test: `src/__tests__/db/replay-privilege-convergence.test.ts`.
-- [ ] The definer-function and RLS invariants run against both replays in CI with a required
+- [x] The definer-function and RLS invariants run against both replays in CI with a required
   database (`function-grants`, `rls-policies` and the two new suites, in
   `scripts/run-db-invariants.mjs` and the e2e job's DB step), and the convergence migration's
   postcondition aborts if any `SECURITY DEFINER` function is executable by `anon`/PUBLIC or by
