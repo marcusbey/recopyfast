@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>s66c — Site pages and access (reference mockup)</title>
+<!-- Reference mockup for docs/designs/s66c-site-page-and-access.md.
+     NOT production code: Execute builds with src/components/ui/* and s66b1's PageShell.
+     Token values are the DARK values of src/app/globals.css (base CSS lifted from the s66a mockup).
+     No real token or address anywhere: every site token is •••, every id the zero UUID,
+     every domain and email ends in .example. Generated from one content source per page,
+     so the 1280 and 375 frames cannot drift. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:dark;
+  /* globals.css, dark side of light-dark() */
+  --canvas:hsl(200 18% 7%);
+  --card:hsl(200 15% 10%);
+  --popover:var(--card);              /* --color-popover, added in s66a */
+  --surface-1:hsl(200 18% 8%);
+  --surface-2:hsl(200 14% 14%);
+  --surface-3:hsl(200 13% 18%);
+  --fg:hsl(200 22% 96%);
+  --muted:hsl(200 12% 68%);
+  --primary:hsl(174 48% 58%);
+  --on-primary:hsl(200 30% 8%);
+  --line:hsl(200 12% 21%);            /* border: decorative */
+  --line-strong:hsl(200 10% 40%);     /* input: control boundary, 3.09:1 */
+  --danger:hsl(358 62% 62%);
+  --on-danger:hsl(200 30% 8%);
+  --n-s:hsl(200 12% 17%);--n-t:hsl(200 12% 76%);--n-l:hsl(200 12% 26%);
+  --i-s:hsl(206 44% 18%);--i-t:hsl(204 78% 76%);--i-l:hsl(206 40% 30%);
+  --s-s:hsl(166 40% 15%);--s-t:hsl(162 60% 70%);--s-l:hsl(166 36% 27%);
+  --w-s:hsl(30 44% 17%);--w-t:hsl(42 84% 68%);--w-l:hsl(32 40% 29%);
+  --d-s:hsl(358 40% 19%);--d-t:hsl(4 84% 76%);--d-l:hsl(358 36% 31%);
+  --a-s:hsl(178 38% 16%);--a-t:hsl(176 52% 70%);--a-l:hsl(178 34% 28%);
+  --shadow-a:hsl(200 55% 2% / .34);
+  --shadow-b:hsl(200 55% 2% / .46);
+  --shadow-md:0 2px 4px -1px var(--shadow-a),0 4px 10px -2px var(--shadow-b);
+  /* ADR 050: the app radius scale is two tokens */
+  --radius-container:0px;
+  --radius-control:2px;
+  --font-sans:"Instrument Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  --ease-out:cubic-bezier(.22,1,.36,1);
+  /* annotation ink for this mockup only (tone-warning-text); never UI */
+  --spec:hsl(42 84% 68%);
+}
+*,*::before,*::after{box-sizing:border-box;border-color:var(--line)}
+html,body{margin:0}
+body{background:var(--canvas);color:var(--fg);font:400 14px/20px var(--font-sans);
+  font-feature-settings:"rlig" 1,"calt" 1,"ss01" 1;-webkit-font-smoothing:antialiased}
+a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+h1,h2,h3,p{margin:0}
+.i{width:16px;height:16px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.i-12{width:12px;height:12px}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* ---------- page chrome of the mockup itself ---------- */
+.page{max-width:1240px;margin:0 auto;padding:32px 32px 80px}
+@media (max-width:1023px){.page{padding:24px 24px 64px}}
+@media (max-width:639px){.page{padding:24px 16px 48px}}
+.eyebrow{font:600 11px/1.2 var(--font-sans);letter-spacing:.075em;text-transform:uppercase;color:var(--muted)}
+.ptitle{font:600 24px/32px var(--font-sans);letter-spacing:-.015em}
+.lede{color:var(--muted);max-width:72ch;margin-top:8px}
+.sec{margin-top:56px;padding-top:24px;border-top:1px solid var(--line)}
+.sec-h{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 24px;margin-bottom:20px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:16px;color:var(--muted);font-size:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border:1px solid var(--line-strong);display:inline-block}
+.frames{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}
+.scroll-x{max-width:100%;overflow-x:auto}
+.frames>.scroll-x{width:min-content}
+.cap{display:flex;gap:12px;align-items:baseline;margin-bottom:8px}
+.cap .mono{font:500 12px/16px var(--font-mono);color:var(--muted)}
+.notes{margin-top:12px;color:var(--muted);font-size:12px;line-height:18px;max-width:640px}
+.notes li{margin:2px 0}
+.spec{color:var(--spec);font:500 11px/14px var(--font-mono)}
+
+/* ---------- fake app behind the veil ---------- */
+.stage{position:relative;background:var(--canvas);border:1px solid var(--line);overflow:hidden}
+.stage .app{position:absolute;inset:0;display:grid;grid-template-columns:150px 1fr}
+.stage .app .side{border-right:1px solid var(--line);padding:16px 12px;display:grid;align-content:start;gap:10px}
+.stage .app .side i{display:block;height:10px;background:var(--surface-2)}
+.stage .app .main{display:grid;grid-template-rows:56px 1fr}
+.stage .app .hdr{border-bottom:1px solid var(--line)}
+.stage .app .grid{padding:24px;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-content:start}
+.stage .app .grid i{display:block;height:120px;border:1px solid var(--line);background:var(--card)}
+.stage .veil{position:absolute;inset:0;background:hsl(200 22% 96% / .4)} /* bg-foreground/40 */
+.stage-desk{width:720px;padding:40px}
+.stage-phone{width:375px;height:780px}
+.stage-phone .app{grid-template-columns:1fr}
+.stage-phone .app .side{display:none}
+.stage-phone .app .grid{grid-template-columns:1fr}
+
+/* ---------- Dialog (s66a) ---------- */
+.dlg{position:relative;z-index:1;display:flex;flex-direction:column;overflow:hidden;
+  background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md)}
+.dlg-640{width:640px;max-width:100%;margin:0 auto}
+.dlg-512{width:512px;max-width:100%;margin:0 auto}
+.dlg-x{position:absolute;top:16px;right:16px;width:24px;height:24px;display:grid;place-items:center;
+  background:none;border:0;color:var(--muted);border-radius:var(--radius-control);cursor:pointer}
+.dlg-x:hover{color:var(--fg)}
+.dlg-h{flex-shrink:0;padding:20px 48px 16px 24px;text-align:left}
+.dlg-t{font:600 16px/24px var(--font-sans)}
+.dlg-d{margin-top:4px;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.dlg-b{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 24px 20px}
+.dlg-b>*{min-width:0}
+.dlg-f{flex-shrink:0;border-top:1px solid var(--line);padding:12px 24px;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px}
+/* bottom sheet below 640 */
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:92%;border-width:1px 0 0}
+.sheet .dlg-h{padding:16px 48px 12px 16px}
+.sheet .dlg-b{padding:0 16px 16px}
+.sheet .dlg-f{padding:12px 16px;flex-direction:column-reverse;align-items:stretch}
+.sheet .dlg-f .btn{width:100%}
+
+/* ---------- Button ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;
+  border:1px solid transparent;border-radius:var(--radius-control);font:500 14px/1 var(--font-sans);
+  white-space:nowrap;cursor:pointer;color:var(--fg);background:transparent;
+  transition:background-color .16s var(--ease-out),border-color .16s var(--ease-out),color .16s var(--ease-out)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible,.btn.is-focus{outline:none;box-shadow:0 0 0 2px var(--canvas),0 0 0 4px var(--primary)}
+.btn-default{background:var(--primary);color:var(--on-primary)}
+.btn-default:hover{background:hsl(174 48% 58% / .9)}
+.btn-outline{border-color:var(--line-strong);background:var(--card)}
+.btn-outline:hover{background:var(--surface-2)}
+.btn-secondary{background:var(--surface-2)}
+.btn-secondary:hover{background:hsl(200 14% 14% / .8)}
+.btn-ghost:hover{background:var(--surface-2)}
+.btn-destructive{background:var(--danger);color:var(--on-danger)}
+.btn-link{color:var(--primary);height:auto;padding:0}
+.btn-link:hover{text-decoration:underline}
+.btn-sm{height:32px;padding:0 12px;font-size:12px}
+.btn-lg{height:48px;padding:0 24px;font-size:15px}
+.btn-xl{height:56px;padding:0 32px;font-size:16px}
+.btn-icon{width:40px;padding:0}
+.btn-icon-sm{width:32px;height:32px;padding:0}
+.btn[disabled]{opacity:.5;pointer-events:none}
+.btn-danger-ghost{color:var(--d-t)}
+.btn-danger-ghost:hover{background:var(--d-s)}
+.spin{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- Form controls ---------- */
+.label{display:block;font:500 14px/20px var(--font-sans);margin-bottom:6px}
+.field+.field{margin-top:16px}
+.help{margin-top:6px;font-size:12px;line-height:16px;color:var(--muted)}
+.help.err{color:var(--d-t)}
+.input{display:block;width:100%;height:40px;padding:0 12px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-control);background:var(--card);color:var(--fg);font:400 14px/20px var(--font-sans);
+  transition:border-color .2s var(--ease-out),box-shadow .2s var(--ease-out)}
+.input::placeholder{color:var(--muted)}
+.input:hover,.input.is-hover{border-color:hsl(200 22% 96% / .4)}
+.input:focus-visible,.input.is-focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 2px var(--canvas),0 0 0 4px var(--primary)}
+.input[disabled]{background:var(--surface-2);opacity:.6;cursor:not-allowed}
+.input.is-error{border-color:var(--danger)}
+textarea.input{height:auto;min-height:80px;padding:8px 12px;resize:vertical}
+.nsel{position:relative}
+.nsel select{appearance:none;-webkit-appearance:none;padding:0 36px 0 12px;cursor:pointer}
+.nsel .chev{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none}
+.trigger{display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer}
+
+/* ---------- Badge ---------- */
+.badge{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;border:1px solid transparent;
+  border-radius:var(--radius-control);font:500 12px/16px var(--font-sans);white-space:nowrap}
+.b-default{background:var(--primary);color:var(--on-primary)}
+.b-secondary{background:var(--surface-2)}
+.b-outline{border-color:var(--line)}
+.b-destructive{background:var(--danger);color:var(--on-danger)}
+.b-neutral{background:var(--n-s);color:var(--n-t);border-color:var(--n-l)}
+.b-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.b-success{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.b-warning{background:var(--w-s);color:var(--w-t);border-color:var(--w-l)}
+.b-danger{background:var(--d-s);color:var(--d-t);border-color:var(--d-l)}
+.b-accent{background:var(--a-s);color:var(--a-t);border-color:var(--a-l)}
+.dot{width:6px;height:6px;border-radius:9999px;background:currentColor} /* status dot: radius exception */
+
+/* ---------- Tabs (underline) ---------- */
+.tabs{display:flex;flex-wrap:wrap;column-gap:16px;border-bottom:1px solid var(--line)}
+.tab{height:40px;padding:0 2px;margin-bottom:-1px;border:0;border-bottom:2px solid transparent;border-radius:0;
+  background:none;color:var(--muted);font:500 14px/1 var(--font-sans);cursor:pointer;white-space:nowrap}
+.tab:hover{color:var(--fg)}
+.tab[aria-selected="true"]{color:var(--fg);border-bottom-color:var(--primary)}
+.tab:focus-visible,.tab.is-focus{outline:2px solid var(--primary);outline-offset:2px}
+.tabpanel{padding-top:12px}
+.tabpanel[hidden]{display:none}
+
+/* ---------- Card, Alert, Menu ---------- */
+.card{border:1px solid var(--line);background:var(--card);border-radius:var(--radius-container)}
+.card-h{padding:20px 24px 16px}
+.card-t{font:600 16px/24px var(--font-sans)}
+.card-d{color:var(--muted);margin-top:4px}
+.card-c{padding:0 24px 20px}
+.card-toolbar{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 8px 0 24px;border-bottom:1px solid var(--line)}
+.card.interactive{cursor:pointer;transition:border-color .2s var(--ease-out)}
+.card.interactive:hover{border-color:hsl(174 48% 58% / .4)}
+.alert{display:flex;gap:12px;padding:12px 16px;border:1px solid;border-radius:var(--radius-container)}
+.alert .i{margin-top:2px}
+.al-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l)}
+.al-success{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.al-danger{background:var(--d-s);color:var(--d-t);border-color:var(--d-l)}
+.menu{background:var(--popover);border:1px solid var(--line);border-radius:var(--radius-container);box-shadow:var(--shadow-md);padding:4px;min-width:200px}
+.menu-i{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;border-radius:var(--radius-control);font-size:14px;cursor:default}
+.menu-i:hover,.menu-i.hl{background:var(--surface-2)}
+.menu-i .ck{width:16px;display:inline-grid;place-items:center}
+.menu-sep{height:1px;background:var(--line);margin:4px -4px}
+
+/* ---------- CodeBlock (new in s66a) ---------- */
+.cb{border:1px solid var(--line);background:var(--surface-1);border-radius:var(--radius-container);min-width:0}
+.cb-bar{height:40px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 4px 0 16px;border-bottom:1px solid var(--line)}
+.cb pre{margin:0;padding:12px 16px;font:400 13px/20px var(--font-mono);color:var(--fg);
+  white-space:pre-wrap;overflow-wrap:anywhere}
+.cb.nowrap pre{white-space:pre;overflow-x:auto;overflow-wrap:normal}
+.cb .m{color:var(--muted)}
+.ic{font:400 12px/16px var(--font-mono);background:var(--surface-2);padding:2px 6px;border-radius:var(--radius-control);overflow-wrap:anywhere}
+
+/* ---------- Site-registered panel parts ---------- */
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:20px}
+.step{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px}
+.step-n{width:24px;height:24px;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface-1);
+  font:500 12px/1 var(--font-sans);font-variant-numeric:tabular-nums;color:var(--muted)}
+.step-t{font:600 14px/24px var(--font-sans);margin-bottom:8px}
+.recipe p+p{margin-top:6px}
+.recipe .note{color:var(--muted);font-size:12px;line-height:18px}
+.dl{display:grid;grid-template-columns:112px minmax(0,1fr);margin:12px 0 0;border-top:1px solid var(--line)}
+.dl dt,.dl dd{margin:0;padding:8px 0;border-bottom:1px solid var(--line)}
+.dl dt{color:var(--muted)}
+.sheet .dl{grid-template-columns:minmax(0,1fr)}
+.sheet .dl dt{border-bottom:0;padding-bottom:0}
+.sheet .dl dd{padding-top:2px}
+details.ex{margin-top:12px}
+details.ex summary{list-style:none;display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--fg);font-weight:500}
+details.ex summary::-webkit-details-marker{display:none}
+details.ex summary .i{transition:transform .16s var(--ease-out)}
+details.ex[open] summary .i{transform:rotate(90deg)}
+details.ex .cb{margin-top:8px}
+.foot-meta{margin-right:auto;display:flex;align-items:center;gap:8px;min-width:0}
+.foot-meta .id{font:400 12px/16px var(--font-mono);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
+.sheet .foot-meta{margin:0}
+.ext{display:inline-flex;align-items:center;gap:4px;font-weight:500}
+
+/* ---------- Share dialog parts ---------- */
+.perms{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.perm{height:40px;width:100%;display:flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--line-strong);
+  border-radius:var(--radius-control);background:transparent;color:var(--muted);font:500 14px/1 var(--font-sans);cursor:pointer;text-align:left}
+.perm:hover{color:var(--fg)}
+.perm[aria-checked="true"]{border-color:var(--primary);background:var(--a-s);color:var(--a-t)}
+.perm .tick{margin-left:auto;visibility:hidden}
+.perm[aria-checked="true"] .tick{visibility:visible}
+.divider{height:1px;background:var(--line);margin:20px 0}
+.links{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:12px}
+.lc{border:1px solid var(--line);background:var(--surface-1);border-radius:var(--radius-container);padding:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;min-width:0}
+.lc-top{display:flex;align-items:flex-start;gap:12px}
+.tile{width:32px;height:32px;display:grid;place-items:center;flex-shrink:0;border-radius:var(--radius-container)}
+.tile-info{background:var(--i-s);color:var(--i-t)}
+.lc-main{flex:1;min-width:0}
+.lc-title{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lc-meta,.lc-perms{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;line-height:16px;color:var(--muted)}
+.lc-meta{margin-top:2px}
+.lc-perms{padding-left:44px}
+.lc-act{display:flex;gap:4px;flex-shrink:0}
+
+/* ---------- spec callout for the select inset ---------- */
+.callout{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;margin-top:24px}
+.callout .box{position:relative;padding:28px 0 64px}
+.dim{position:absolute;height:9px;border:1px solid var(--spec);border-top:0}
+.dim.top{border-top:1px solid var(--spec);border-bottom:0}
+.dim-l{position:absolute;color:var(--spec);font:500 11px/14px var(--font-mono);white-space:nowrap}
+.before{height:40px;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 16px;background:var(--card)}
+
+/* ---------- primitives sheet ---------- */
+.sheetgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:16px}
+.spec-card>.card-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:16px 20px 12px}
+.spec-card>.card-c{padding:0 20px 20px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.row+.row{margin-top:12px}
+.stack>*+*{margin-top:12px}
+.tok{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.tok .t{border:1px solid var(--line)}
+.tok .t .chip{height:56px;border-bottom:1px solid var(--line)}
+.tok .t div.k{padding:8px 10px;font-size:12px;line-height:16px}
+.tok .t div.k b{display:block;font:500 12px/16px var(--font-mono);color:var(--fg)}
+.tok .t div.k span{color:var(--muted)}
+.typerow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:4px 16px;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line)}
+.typerow .k{font:400 12px/16px var(--font-mono);color:var(--muted)}
+.anatomy{display:grid;border:1px solid var(--line);background:var(--card)}
+.anatomy>div{padding:10px 16px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.anatomy>div+div{border-top:1px solid var(--line)}
+.anatomy .body{background:var(--surface-1);min-height:96px;align-items:flex-start}
+@media (max-width:639px){.typerow{grid-template-columns:1fr}.dl{grid-template-columns:1fr}}
+
+/* ====================== s66c additions (layout of its own screens only) ====================== */
+.fig{margin:0 0 40px}
+.device{border:1px solid var(--line);background:var(--canvas);flex-shrink:0}
+.d1280{width:1280px}.d375{width:375px}
+.muted12{font-size:12px;line-height:16px;color:var(--muted)}
+.muted14{color:var(--muted)}
+.mt8{margin-top:8px}.mt16{margin-top:16px}
+.stack16>*+*{margin-top:16px}
+.lnk{font-weight:500}
+.ic{font:400 12px/16px var(--font-mono)}
+
+/* app shell (s66b1 values: 256 sidebar, 56 header, gutters 32 / 16) */
+.app{display:flex;min-height:640px}
+.side{width:256px;flex-shrink:0;border-right:1px solid var(--line);background:var(--card);padding:16px 12px;display:flex;flex-direction:column;gap:2px}
+.logo{display:flex;align-items:center;gap:8px;font-weight:600;padding:4px 8px 16px}
+.mark{width:28px;height:28px;display:grid;place-items:center;background:var(--primary);color:var(--on-primary);font:600 12px/1 var(--font-mono)}
+.side-g{padding:16px 8px 6px}
+.side-i{display:flex;align-items:center;gap:12px;height:40px;padding:0 10px;color:var(--muted);border-left:2px solid transparent}
+.side-i.act{color:var(--primary);background:var(--a-s);border-left-color:var(--primary)}
+.plan{margin-top:auto;border:1px solid var(--line);padding:10px 12px}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+.top{height:56px;display:flex;align-items:center;gap:8px;padding:0 32px;border-bottom:1px solid var(--line);background:var(--card)}
+.w375 .top{padding:0 16px}
+.crumbs{display:flex;align-items:center;gap:8px;min-width:0;flex:1;color:var(--muted);white-space:nowrap;overflow:hidden}
+.crumb{display:inline-flex;align-items:center;gap:8px}
+.crumb.cur{color:var(--fg);font-weight:500;overflow:hidden;text-overflow:ellipsis}
+.sepc{opacity:.6}
+.avatar{width:36px;height:36px;border-radius:9999px;background:var(--surface-2);display:grid;place-items:center;font-weight:600;flex-shrink:0} /* Avatar: radius exception */
+.main{padding:32px;flex:1;min-width:0}
+.w375 .main{padding:24px 16px}
+
+/* PageShell (ADR 053 on the s66b branch): header, then sections at a 24 px gap (16 below 640) */
+.shell{display:flex;flex-direction:column;gap:24px;max-width:1180px}
+.w375 .shell{gap:16px}
+.ph{display:flex;flex-direction:column;gap:4px}
+.ph-row{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 24px;flex-wrap:wrap}
+.ph-tt{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;min-width:0}
+.ph-h1{margin:0;font:600 24px/32px var(--font-sans);letter-spacing:-.015em;overflow-wrap:anywhere}
+.ph-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ph-desc{color:var(--muted)}
+.w375 .ph-row{flex-direction:column;align-items:flex-start}
+.w375 .ph-actions{order:3;margin-top:8px}
+.w375 .ph{display:grid}
+.w375 .ph .ph-row{display:contents}
+.w375 .ph-tt{order:1}.w375 .ph-desc{order:2}.w375 .ph-actions{order:3}.w375 .snav{order:4}
+
+/* SiteSubnav: links with the underline-tab spec */
+.snav{display:flex;flex-wrap:wrap;column-gap:16px;border-bottom:1px solid var(--line);margin-top:16px}
+.snav-a{height:40px;display:inline-flex;align-items:center;padding:0 2px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted);font-weight:500;white-space:nowrap}
+.snav-a:hover{color:var(--fg);text-decoration:none}
+.snav-a.cur{color:var(--fg);border-bottom-color:var(--primary)}
+
+/* Sites list */
+.filters{display:flex;flex-wrap:wrap;gap:8px}
+.filters-r{display:flex;gap:8px;flex:1;min-width:12rem}
+.srch{position:relative;flex:1;min-width:0}.srch .i{position:absolute;left:12px;top:12px;color:var(--muted)}.srch .input{padding-left:36px}
+.seg{display:flex;flex-wrap:wrap;gap:4px;border:1px solid var(--line);background:var(--surface-1);padding:3px}
+.seg-b{height:32px;padding:0 10px;border:0;background:none;color:var(--muted);font:500 14px/1 var(--font-sans);display:inline-flex;align-items:center;gap:6px;border-radius:var(--radius-control)}
+.seg-b.on{background:var(--card);color:var(--fg)}
+.cnt{font:600 11px/1 var(--font-sans);padding:2px 6px;background:var(--surface-2);border-radius:var(--radius-control)}
+.srows{list-style:none;margin:0;padding:0;border:1px solid var(--line);background:var(--card)}
+.srow{display:grid;grid-template-columns:40px minmax(0,1.4fr) minmax(0,1fr) auto;align-items:center;gap:16px;padding:12px 16px;min-height:64px}
+.srow+.srow{border-top:1px solid var(--line)}
+.srow-id{display:flex;flex-direction:column;min-width:0}
+.srow-name{color:var(--fg);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow-dom{font:400 12px/16px var(--font-mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srow-st{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}
+.srow-act{display:flex;align-items:center;gap:4px;justify-self:end}
+.w375 .srow{grid-template-columns:40px minmax(0,1fr) 32px;grid-template-areas:"t id k" ". st st" ". ac ac";row-gap:8px;column-gap:12px}
+.w375 .srow .tile{grid-area:t}.w375 .srow-id{grid-area:id}.w375 .srow-st{grid-area:st}
+.w375 .srow-act{display:contents}
+.w375 .srow-act .kebab{grid-area:k;align-self:start}
+.w375 .srow-act .btn-sm:not(.kebab){grid-area:ac;justify-self:start}
+.tile{width:40px;height:40px;display:grid;place-items:center;flex-shrink:0;border:1px solid var(--line);background:var(--surface-1);color:var(--muted)}
+.tile-n{color:var(--muted)}
+.tile-s{background:var(--s-s);color:var(--s-t);border-color:var(--s-l)}
+.tile-a{background:var(--a-s);color:var(--a-t);border-color:var(--a-l)}
+.tile-info{background:var(--i-s);color:var(--i-t);border-color:var(--i-l);width:32px;height:32px}
+.menuwrap{position:relative;padding-bottom:190px;max-width:760px}
+.menu-pos{position:absolute;right:8px;top:56px;width:220px}
+.danger-i{color:var(--d-t)}
+.kebab.is-open{background:var(--surface-2)}
+
+/* Quick setup (s66c2) */
+.qs-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:20px 24px 16px;border-bottom:1px solid var(--line)}
+.qs-done .qs-h{background:var(--s-s);border-bottom-color:var(--s-l)}
+.qs-done .qs-h .card-t{color:var(--s-t)}
+.qs-steps{list-style:none;margin:0;padding:8px 24px 20px}
+.qs-step{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px;padding:12px 0}
+.qs-step+.qs-step{border-top:1px solid var(--line)}
+.qs-n{width:24px;height:24px;display:grid;place-items:center;border:1px solid var(--line);background:var(--surface-1);font:500 12px/1 var(--font-sans);color:var(--muted)}
+.qs-step.done .qs-n{background:var(--s-s);border-color:var(--s-l);color:var(--s-t)}
+.qs-step.cur .qs-n{border-color:var(--primary);color:var(--fg)}
+.qs-t{font-weight:600;line-height:24px}
+.qs-step.done .qs-t,.qs-step.next .qs-t{font-weight:500}
+.qs-step.next .qs-t{color:var(--muted)}
+.qs-step.cur .qs-body>*+*{margin-top:12px}
+.qs-p{color:var(--muted)}
+.live{display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid}
+.live-n{background:var(--n-s);color:var(--n-t);border-color:var(--n-l)}
+.live-s{background:var(--s-s);color:var(--s-t);border-color:var(--s-l);margin-top:6px}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px}
+.w375 .qs-h,.w375 .qs-steps{padding-left:16px;padding-right:16px}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.w375 .metrics{grid-template-columns:1fr}
+.metric{padding:16px 20px}
+.mval{font:600 24px/32px var(--font-sans);font-variant-numeric:tabular-nums;margin-top:4px}
+.idrow{display:flex;align-items:center;gap:4px;min-width:0}
+.idrow code{overflow-wrap:anywhere}
+.w375 .dl{grid-template-columns:minmax(0,1fr)}
+.w375 .dl dt{border-bottom:0;padding-bottom:0}
+.w375 .dl dd{padding-top:2px}
+
+/* cards with an action in the header row */
+.ch-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px 16px;flex-wrap:wrap}
+.ch-l{display:flex;align-items:center;gap:12px}
+.w375 .card-h{padding:16px 16px 12px}.w375 .card-c{padding:0 16px 16px}
+
+/* People & access */
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.w375 .opts{grid-template-columns:1fr}
+.opt{padding:20px 24px;display:flex;flex-direction:column;gap:12px}
+.w375 .opt{padding:16px}
+.opt-h{display:flex;align-items:center;gap:12px}
+.opt-h .tile{width:32px;height:32px}
+.opt-p{flex:1}
+.cnt2{font:500 12px/16px var(--font-sans);color:var(--muted);margin-left:6px}
+h2.card-t{margin:0}
+.lst{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.er{border:1px solid var(--line);background:var(--surface-1);padding:12px;display:grid;gap:8px;min-width:0}
+.er-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.er-act{display:flex;gap:4px;flex-wrap:wrap}
+.w375 .er-act{width:100%;padding-left:44px}
+.sub-h{margin:16px 0 8px;font-weight:500;color:var(--muted)}
+.links{list-style:none;padding:0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:0}
+
+/* Settings */
+.intro{margin-top:-8px}
+.dl.ro{margin-top:0;background:var(--surface-1);border:1px solid var(--line);padding:0 12px}
+.dl.ro dd{overflow-wrap:anywhere}
+.card.danger{border-color:var(--d-l)}
+.card.danger .card-t{color:var(--d-t)}
+.dz-row{display:flex;justify-content:space-between;align-items:center;gap:12px 24px;flex-wrap:wrap}
+.dz-t{font-weight:600}
+.w375 .dz-row .btn{width:100%}
+
+/* dialog stages */
+.stage{position:relative;padding:40px;overflow:hidden;border:1px solid var(--line);background:var(--canvas)}
+.stage .veil-bg{position:absolute;inset:0;background:repeating-linear-gradient(0deg,var(--canvas) 0 64px,var(--card) 64px 65px)}
+.stage .veil{position:absolute;inset:0;background:hsl(200 22% 96% / .4)}
+.stage-phone{padding:0;height:720px}
+.stage-phone .dlg.sheet{position:absolute}
+.frames{display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start}
+table.cc{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
+table.cc th,table.cc td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+table.cc th{color:var(--muted);font-weight:600;background:var(--surface-1)}
+.good{color:var(--s-t)}.bad{color:var(--d-t)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="chevr" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="ext" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="eye" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="edit" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/></symbol>
+  <symbol id="upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8 12 3 7 8"/><path d="M12 3v12"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></symbol>
+  <symbol id="mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+  <symbol id="dashed" viewBox="0 0 24 24"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M17.61 3.72a10 10 0 0 1 2.69 2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M20.28 17.61a10 10 0 0 1-2.7 2.69"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M3.72 6.39a10 10 0 0 1 2.7-2.69"/><path d="M6.39 20.28a10 10 0 0 1-2.69-2.7"/></symbol>
+  <symbol id="ok" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="load" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></symbol>
+  <symbol id="sort" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+
+  <symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+  <symbol id="history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="pencil" viewBox="0 0 24 24"><path d="M21.17 6.81a1 1 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/></symbol>
+  <symbol id="userplus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6"/><path d="M22 11h-6"/></symbol>
+  <symbol id="link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="rotate" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="menu" viewBox="0 0 24 24"><path d="M4 12h16"/><path d="M4 6h16"/><path d="M4 18h16"/></symbol>
+  <symbol id="home" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .71-1.53l7-6a2 2 0 0 1 2.58 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="grid" viewBox="0 0 24 24"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="chart" viewBox="0 0 24 24"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></symbol>
+  <symbol id="gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="card" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M2 10h20"/></symbol>
+  <symbol id="hook" viewBox="0 0 24 24"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></symbol>
+  <symbol id="key" viewBox="0 0 24 24"><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/></symbol>
+  <symbol id="download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="warn" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+</svg>
+<main class="page" style="max-width:1400px">
+  <p class="eyebrow">Design reference · not production code · dark theme</p>
+  <h1 class="ptitle" style="margin-top:8px">s66c — One page per site, and one clear way to give access</h1>
+  <p class="lede">Owner, 2026-10-07: “/dashboard/sites is overwelming … invite a client, and editors are confusing. which one to use and when ?”
+  Owner, 2026-10-08: “u need to have subpages to it. steps for user with advanve or quick setting.”
+  This mockup shows the light Sites list, the site's four subpages (Overview with Quick setup, Install, People &amp; access, Settings), the two access dialogs, and the click counts.
+  Each page is shown at 1280 and at 375. Values come from <code class="ic">docs/design-system.md</code> (s66a) and s66b1's <code class="ic">PageShell</code> contract (ADR 053).</p>
+  <p class="lede"><a href="#sites">Sites</a> · <a href="#overview">Overview</a> · <a href="#done">Done state</a> · <a href="#install">Install</a> · <a href="#people">People &amp; access</a> · <a href="#settings">Settings</a> · <a href="#dialogs">Dialogs</a> · <a href="#clicks">Click counts</a></p>
+  <section class="sec" id="sites"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">1 · Sites — a light list</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>Sites</b><span class="mono">1280 px</span></figcaption><div class="scroll-x"><div class="device d1280"><div class="app w1280"><aside class="side"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div><p class="eyebrow side-g">WORKSPACE</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#grid"/></svg>Overview</span><span class="side-i act"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Sites</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#file"/></svg>Content</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#chart"/></svg>Analytics</span><p class="eyebrow side-g">ACCOUNT</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#gear"/></svg>Settings</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#card"/></svg>Billing</span><div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div></aside><div class="col"><header class="top"><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb"><svg class="i " aria-hidden="true"><use href="#home"/></svg>Dashboard</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Sites</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Sites</h1></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add site</button></div></div><div class=ph-desc>Every domain you have connected to ReCopyFast.</div></header><div class="filters"><div class="seg" role="group" aria-label="Filter sites by status"><button class="seg-b on">All <span class="cnt">3</span></button><button class="seg-b">Awaiting install <span class="cnt">1</span></button><button class="seg-b">Live <span class="cnt">1</span></button><button class="seg-b">Stale <span class="cnt">1</span></button></div><div class="filters-r"><div class="srch"><svg class="i " aria-hidden="true"><use href="#search"/></svg><input class="input" placeholder="Search by name or domain" aria-label="Search sites"></div><button class="btn btn-outline" aria-label="Sort sites (currently date added)"><svg class="i " aria-hidden="true"><use href="#sort"/></svg>Date added</button></div></div><ul class="srows"><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Acme marketing site</a><span class="srow-dom">acme.example</span></div><div class="srow-st"><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span><span class="muted12">Last edited 2 hours ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Acme marketing site"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Client portal</a><span class="srow-dom">portal.example</span></div><div class="srow-st"><span class="badge b-neutral"><svg class="i i-12" aria-hidden="true"><use href="#dashed"/></svg>Awaiting install</span><span class="muted12">Added 5 minutes ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" >Continue setup</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Client portal"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Spring campaign</a><span class="srow-dom">spring.example</span></div><div class="srow-st"><span class="badge b-warning"><svg class="i i-12" aria-hidden="true"><use href="#history"/></svg>Stale</span><span class="muted12">Last edited 3 weeks ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Spring campaign"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li></ul></div></main></div></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Sites</b><span class="mono">375 px</span></figcaption><div class="scroll-x"><div class="device d375"><div class="app w375"><div class="col"><header class="top"><button class="btn btn-ghost btn-icon-sm" aria-label="Open navigation"><svg class="i " aria-hidden="true"><use href="#menu"/></svg></button><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb cur">Sites</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Sites</h1></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add site</button></div></div><div class=ph-desc>Every domain you have connected to ReCopyFast.</div></header><div class="filters"><div class="seg" role="group" aria-label="Filter sites by status"><button class="seg-b on">All <span class="cnt">3</span></button><button class="seg-b">Awaiting install <span class="cnt">1</span></button><button class="seg-b">Live <span class="cnt">1</span></button><button class="seg-b">Stale <span class="cnt">1</span></button></div><div class="filters-r"><div class="srch"><svg class="i " aria-hidden="true"><use href="#search"/></svg><input class="input" placeholder="Search by name or domain" aria-label="Search sites"></div><button class="btn btn-outline" aria-label="Sort sites (currently date added)"><svg class="i " aria-hidden="true"><use href="#sort"/></svg></button></div></div><ul class="srows"><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Acme marketing site</a><span class="srow-dom">acme.example</span></div><div class="srow-st"><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span><span class="muted12">Last edited 2 hours ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Acme marketing site"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Client portal</a><span class="srow-dom">portal.example</span></div><div class="srow-st"><span class="badge b-neutral"><svg class="i i-12" aria-hidden="true"><use href="#dashed"/></svg>Awaiting install</span><span class="muted12">Added 5 minutes ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" >Continue setup</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Client portal"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Spring campaign</a><span class="srow-dom">spring.example</span></div><div class="srow-st"><span class="badge b-warning"><svg class="i i-12" aria-hidden="true"><use href="#history"/></svg>Stale</span><span class="muted12">Last edited 3 weeks ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-ghost btn-icon-sm kebab" aria-label="Open menu for Spring campaign"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li></ul></div></main></div></div></div></div></figure></div><ul class=notes><li>One row per site: name (link to the site page), domain, status, last edited, <b>one primary action chosen by status</b> (Awaiting install → <i>Continue setup</i>; Live/Stale → <i>Edit website</i>) and ⋮, visible at rest.</li><li>Gone from the face of the card: Edits/Views/Activity metrics (on the Overview; Views is never computed), hover-only Copy domain, View Details, the mislabelled Settings, the share icon (now in ⋮).</li><li>No <code class=ic>Table</code> primitive (gap 8): a <code class=ic>&lt;ul&gt;</code> of <code class=ic>border-b</code> rows in one bordered panel. Below 768 the row stacks; ⋮ stays top-right.</li></ul></section><section class="sec" id="overview"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">2 · Site Overview — Quick setup (s66c2), step 2 active</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>Overview · awaiting install</b><span class="mono">1280 px</span></figcaption><div class="scroll-x"><div class="device d1280"><div class="app w1280"><aside class="side"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div><p class="eyebrow side-g">WORKSPACE</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#grid"/></svg>Overview</span><span class="side-i act"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Sites</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#file"/></svg>Content</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#chart"/></svg>Analytics</span><p class="eyebrow side-g">ACCOUNT</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#gear"/></svg>Settings</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#card"/></svg>Billing</span><div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div></aside><div class="col"><header class="top"><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb"><svg class="i " aria-hidden="true"><use href="#home"/></svg>Dashboard</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Sites</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Site</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Client portal</h1><span class="badge b-neutral"><svg class="i i-12" aria-hidden="true"><use href="#dashed"/></svg>Awaiting install</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">portal.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a cur" aria-current=page href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="card qs" aria-label="Quick setup"><div class="qs-h"><div><p class="card-t">Quick setup</p><p class="muted14">Step 2 of 3</p></div><button class="btn btn-ghost btn-sm" >Hide quick setup</button></div><ol class="qs-steps"><li class="qs-step done"><span class="qs-n"><svg class="i i-12" aria-hidden="true"><use href="#check"/></svg></span><div class="qs-body"><p class="qs-t">Site added</p><p class="muted14">Client portal · portal.example</p></div></li><li class="qs-step cur"><span class="qs-n">2</span><div class="qs-body"><p class="qs-t">Install the snippet</p><div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm" aria-label="Copy snippet"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>&lt;script src=&quot;https://www.recopyfa.st/embed/recopyfast.js&quot; data-site-id=&quot;00000000-0000-4000-8000-000000000000&quot; data-site-token=&quot;•••&quot; data-api-url=&quot;https://www.recopyfa.st/api&quot; data-ws-url=&quot;wss://recopyfast-ws.fly.dev&quot;&gt;&lt;/script&gt;</pre></div><p class="qs-p">Paste it just before <code class="ic">&lt;/body&gt;</code> on every page you want to edit. <a href="#">Platform instructions</a></p><div class="live live-n" role="status"><svg class="i spin" aria-hidden="true"><use href="#load"/></svg><span>Waiting for the first page view on portal.example. Checking every 5 seconds.</span></div></div></li><li class="qs-step next"><span class="qs-n">3</span><div class="qs-body"><p class="qs-t">Start editing</p><p class="muted14">Edit the copy yourself, or add the person who will.</p></div></li></ol></section><section class="metrics" aria-label="Activity"><div class="card metric"><p class="eyebrow">Edits</p><p class="mval">0</p></div><div class="card metric"><p class="eyebrow">Content elements</p><p class="mval">0</p></div><div class="card metric"><p class="eyebrow">Last activity</p><p class="mval">None</p></div></section><section class="card"><div class="card-h"><p class="card-t">Site details</p></div><div class="card-c"><dl class="dl"><dt>Created</dt><dd>5 minutes ago</dd><dt>Last updated</dt><dd>5 minutes ago</dd><dt>Site ID</dt><dd class="idrow"><code class="ic">00000000-0000-4000-8000-000000000000</code><button class="btn btn-ghost btn-icon-sm" aria-label="Copy site ID"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button></dd></dl></div></section></div></main></div></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Overview · awaiting install</b><span class="mono">375 px</span></figcaption><div class="scroll-x"><div class="device d375"><div class="app w375"><div class="col"><header class="top"><button class="btn btn-ghost btn-icon-sm" aria-label="Open navigation"><svg class="i " aria-hidden="true"><use href="#menu"/></svg></button><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb">Sites</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Site</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Client portal</h1><span class="badge b-neutral"><svg class="i i-12" aria-hidden="true"><use href="#dashed"/></svg>Awaiting install</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">portal.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a cur" aria-current=page href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="card qs" aria-label="Quick setup"><div class="qs-h"><div><p class="card-t">Quick setup</p><p class="muted14">Step 2 of 3</p></div><button class="btn btn-ghost btn-sm" >Hide quick setup</button></div><ol class="qs-steps"><li class="qs-step done"><span class="qs-n"><svg class="i i-12" aria-hidden="true"><use href="#check"/></svg></span><div class="qs-body"><p class="qs-t">Site added</p><p class="muted14">Client portal · portal.example</p></div></li><li class="qs-step cur"><span class="qs-n">2</span><div class="qs-body"><p class="qs-t">Install the snippet</p><div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm" aria-label="Copy snippet"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>&lt;script src=&quot;https://www.recopyfa.st/embed/recopyfast.js&quot; data-site-id=&quot;00000000-0000-4000-8000-000000000000&quot; data-site-token=&quot;•••&quot; data-api-url=&quot;https://www.recopyfa.st/api&quot; data-ws-url=&quot;wss://recopyfast-ws.fly.dev&quot;&gt;&lt;/script&gt;</pre></div><p class="qs-p">Paste it just before <code class="ic">&lt;/body&gt;</code> on every page you want to edit. <a href="#">Platform instructions</a></p><div class="live live-n" role="status"><svg class="i spin" aria-hidden="true"><use href="#load"/></svg><span>Waiting for the first page view on portal.example. Checking every 5 seconds.</span></div></div></li><li class="qs-step next"><span class="qs-n">3</span><div class="qs-body"><p class="qs-t">Start editing</p><p class="muted14">Edit the copy yourself, or add the person who will.</p></div></li></ol></section><section class="metrics" aria-label="Activity"><div class="card metric"><p class="eyebrow">Edits</p><p class="mval">0</p></div><div class="card metric"><p class="eyebrow">Content elements</p><p class="mval">0</p></div><div class="card metric"><p class="eyebrow">Last activity</p><p class="mval">None</p></div></section><section class="card"><div class="card-h"><p class="card-t">Site details</p></div><div class="card-c"><dl class="dl"><dt>Created</dt><dd>5 minutes ago</dd><dt>Last updated</dt><dd>5 minutes ago</dd><dt>Site ID</dt><dd class="idrow"><code class="ic">00000000-0000-4000-8000-000000000000</code><button class="btn btn-ghost btn-icon-sm" aria-label="Copy site ID"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button></dd></dl></div></section></div></main></div></div></div></div></figure></div><ul class=notes><li><code class=ic>PageShell</code>: h1 = site name, <code class=ic>meta</code> = StatusBadge, <code class=ic>description</code> = domain ↗, <code class=ic>actions</code> = Edit website · Version history, <code class=ic>nav</code> = SiteSubnav (links, <code class=ic>aria-current</code>, push history).</li><li>Quick setup replaces ActivationChecklist (same <code class=ic>useSiteActivation</code> data and dismissal). Every step's state comes from the server, so it resumes where the owner left off. The live status row flips on the provider's 5-second poll, with no reload.</li><li>s66c1 interim (not drawn): the existing checklist, relabelled to Add editor and Edit website, sits in place of this panel.</li></ul></section><section class="sec" id="done"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">2b · Quick setup — done means Live</h2></div><div class="scroll-x"><div style="width:960px"><section class="card qs qs-done" aria-label="Quick setup"><div class="qs-h"><div><p class="card-t">Setup complete — Acme marketing site is live</p><p class="muted14">One more step, whenever you are ready.</p></div><button class="btn btn-ghost btn-sm" >Hide quick setup</button></div><ol class="qs-steps"><li class="qs-step done"><span class="qs-n"><svg class="i i-12" aria-hidden="true"><use href="#check"/></svg></span><div class="qs-body"><p class="qs-t">Site added</p><p class="muted14">Acme marketing site · acme.example</p></div></li><li class="qs-step done"><span class="qs-n"><svg class="i i-12" aria-hidden="true"><use href="#check"/></svg></span><div class="qs-body"><p class="qs-t">Install the snippet</p><div class="live live-s" role="status"><svg class="i " aria-hidden="true"><use href="#ok"/></svg><span>Installed. ReCopyFast saw acme.example 2 minutes ago.</span></div></div></li><li class="qs-step cur"><span class="qs-n">3</span><div class="qs-body"><p class="qs-t">Start editing</p><p class="muted14">Edit the copy yourself, or add the person who will.</p><div class="btnrow"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#userplus"/></svg>Add editor</button></div></div></li></ol></section></div></div><ul class=notes><li>When the site goes live, the header turns success-toned. Step 3 stays offered until it is done (an editor with Publish added, or an edit published) or the owner hides it. Then the panel leaves the page.</li></ul></section><section class="sec" id="install"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">3 · Install</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>Install</b><span class="mono">1280 px</span></figcaption><div class="scroll-x"><div class="device d1280"><div class="app w1280"><aside class="side"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div><p class="eyebrow side-g">WORKSPACE</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#grid"/></svg>Overview</span><span class="side-i act"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Sites</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#file"/></svg>Content</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#chart"/></svg>Analytics</span><p class="eyebrow side-g">ACCOUNT</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#gear"/></svg>Settings</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#card"/></svg>Billing</span><div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div></aside><div class="col"><header class="top"><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb"><svg class="i " aria-hidden="true"><use href="#home"/></svg>Dashboard</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Sites</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Install</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a cur" aria-current=page href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="card"><div class="card-h ch-row"><div class="ch-l"><span class="tile tile-s"><svg class="i " aria-hidden="true"><use href="#ok"/></svg></span><p class="card-t">Installation</p></div><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="card-c stack16"><p class="muted14">ReCopyFast detected acme.example 3 days ago. Editing is on — your team can open the edit board on any page of the site.</p><p class="muted14">Last report 2 hours ago.</p><div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm" aria-label="Copy snippet"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>&lt;script src=&quot;https://www.recopyfa.st/embed/recopyfast.js&quot; data-site-id=&quot;00000000-0000-4000-8000-000000000000&quot; data-site-token=&quot;•••&quot; data-api-url=&quot;https://www.recopyfa.st/api&quot; data-ws-url=&quot;wss://recopyfast-ws.fly.dev&quot;&gt;&lt;/script&gt;</pre></div><p class="eyebrow mt16">Where to paste it</p><div class="tabs" role="tablist" aria-label="Platform"><button class="tab" role="tab" aria-selected="true">WordPress</button><button class="tab" role="tab" aria-selected="false">Next.js</button><button class="tab" role="tab" aria-selected="false">Plain HTML</button></div><div class="tabpanel recipe"><p>Paste it into your theme's footer.php, immediately before the closing &lt;/body&gt; tag.</p><p class="note">No access to theme files? A header-and-footer snippet plugin drops it in the same place, and survives theme updates.</p></div><a class="lnk" href="#">Installation guide</a></div></section><section class="card"><div class="card-h"><p class="card-t">Site token</p><p class=card-d>This token identifies your site to ReCopyFast. It is visible in your page's HTML by design. ReCopyFast checks it against the requesting page's origin and accepts browser requests only when it matches your registered domain. Regenerate snippet revokes old snippets; replace the snippet on your site afterward.</p></div><div class="card-c stack16"><div class="cb"><div class="cb-bar"><span class="eyebrow">Token</span><button class="btn btn-outline btn-sm" aria-label="Copy site token"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>••••••••••••••••••••••••••••••••••••••••••••••••</pre></div><div><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#rotate"/></svg>Regenerate snippet</button></div></div></section></div></main></div></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Install</b><span class="mono">375 px</span></figcaption><div class="scroll-x"><div class="device d375"><div class="app w375"><div class="col"><header class="top"><button class="btn btn-ghost btn-icon-sm" aria-label="Open navigation"><svg class="i " aria-hidden="true"><use href="#menu"/></svg></button><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Install</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a cur" aria-current=page href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="card"><div class="card-h ch-row"><div class="ch-l"><span class="tile tile-s"><svg class="i " aria-hidden="true"><use href="#ok"/></svg></span><p class="card-t">Installation</p></div><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="card-c stack16"><p class="muted14">ReCopyFast detected acme.example 3 days ago. Editing is on — your team can open the edit board on any page of the site.</p><p class="muted14">Last report 2 hours ago.</p><div class="cb"><div class="cb-bar"><span class="eyebrow">HTML</span><button class="btn btn-outline btn-sm" aria-label="Copy snippet"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>&lt;script src=&quot;https://www.recopyfa.st/embed/recopyfast.js&quot; data-site-id=&quot;00000000-0000-4000-8000-000000000000&quot; data-site-token=&quot;•••&quot; data-api-url=&quot;https://www.recopyfa.st/api&quot; data-ws-url=&quot;wss://recopyfast-ws.fly.dev&quot;&gt;&lt;/script&gt;</pre></div><p class="eyebrow mt16">Where to paste it</p><div class="tabs" role="tablist" aria-label="Platform"><button class="tab" role="tab" aria-selected="true">WordPress</button><button class="tab" role="tab" aria-selected="false">Next.js</button><button class="tab" role="tab" aria-selected="false">Plain HTML</button></div><div class="tabpanel recipe"><p>Paste it into your theme's footer.php, immediately before the closing &lt;/body&gt; tag.</p><p class="note">No access to theme files? A header-and-footer snippet plugin drops it in the same place, and survives theme updates.</p></div><a class="lnk" href="#">Installation guide</a></div></section><section class="card"><div class="card-h"><p class="card-t">Site token</p><p class=card-d>This token identifies your site to ReCopyFast. It is visible in your page's HTML by design. ReCopyFast checks it against the requesting page's origin and accepts browser requests only when it matches your registered domain. Regenerate snippet revokes old snippets; replace the snippet on your site afterward.</p></div><div class="card-c stack16"><div class="cb"><div class="cb-bar"><span class="eyebrow">Token</span><button class="btn btn-outline btn-sm" aria-label="Copy site token"><svg class="i " aria-hidden="true"><use href="#copy"/></svg>Copy</button></div><pre>••••••••••••••••••••••••••••••••••••••••••••••••</pre></div><div><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#rotate"/></svg>Regenerate snippet</button></div></div></section></div></main></div></div></div></div></figure></div><ul class=notes><li>The snippet appears <b>exactly once</b> on the page, in every install state: live and stale no longer hide it behind “View install snippet”. The recipe tabs carry text only.</li><li>Site token: CodeBlock + Regenerate snippet (same confirmation, same POST). A regeneration updates every subpage at once, because there is one site record (ADR 052).</li><li>Domain ownership moved to Settings: it is optional and blocks nothing.</li></ul></section><section class="sec" id="people"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">4 · People &amp; access</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>People &amp; access</b><span class="mono">1280 px</span></figcaption><div class="scroll-x"><div class="device d1280"><div class="app w1280"><aside class="side"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div><p class="eyebrow side-g">WORKSPACE</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#grid"/></svg>Overview</span><span class="side-i act"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Sites</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#file"/></svg>Content</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#chart"/></svg>Analytics</span><p class="eyebrow side-g">ACCOUNT</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#gear"/></svg>Settings</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#card"/></svg>Billing</span><div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div></aside><div class="col"><header class="top"><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb"><svg class="i " aria-hidden="true"><use href="#home"/></svg>Dashboard</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Sites</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">People &amp; access</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a cur" aria-current=page href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="opts" aria-label="Give someone access"><div class="card opt"><div class="opt-h"><span class="tile tile-a"><svg class="i " aria-hidden="true"><use href="#userplus"/></svg></span><p class="eyebrow">Ongoing access</p></div><p class="opt-p">For someone who keeps editing this site. They sign in with a code sent to their email and keep access until you remove them.</p><div><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#userplus"/></svg>Add editor</button></div></div><div class="card opt"><div class="opt-h"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#link"/></svg></span><p class="eyebrow">One-off review</p></div><p class="opt-p">For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.</p><div><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#link"/></svg>Share preview link</button></div></div></section><section class="card"><div class="card-h"><h2 class="card-t">Editors <span class="cnt2">2</span></h2></div><div class="card-c"><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">maria@client.example </p><p class="muted12">1 device signed in</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Resend invite</button><button class="btn btn-danger-ghost btn-sm" >Remove</button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span><span class="badge b-outline">Publish</span></div></li><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">jon@client.example </p><p class="muted12">No devices signed in</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Resend invite</button><button class="btn btn-danger-ghost btn-sm" >Remove</button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span></div></li></ul><p class="sub-h">Previously removed</p><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">old.contact@client.example <span class="badge b-neutral">Removed</span></p><p class="muted12">Removed 2 weeks ago</p></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span></div></li></ul></div></section><section class="card"><div class="card-h"><h2 class="card-t">Preview links <span class="cnt2">2</span></h2></div><div class="card-c"><ul class="links"><li class="lc"><div class="lc-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">Client review: homepage hero, pricing tables and footer copy</p><p class="lc-meta"><span>Expires Oct 14</span><span class="badge b-warning">Pending</span></p></div><div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button><button class="btn btn-danger-ghost btn-icon-sm" aria-label="Revoke this share"><svg class="i " aria-hidden="true"><use href="#trash"/></svg></button></div></div><div class="lc-perms"><span class="badge b-outline">View</span></div></li><li class="lc"><div class="lc-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">reviewer@agency.example</p><p class="lc-meta"><span>Expires Oct 20</span></p></div><div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button><button class="btn btn-danger-ghost btn-icon-sm" aria-label="Revoke this share"><svg class="i " aria-hidden="true"><use href="#trash"/></svg></button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span><span>Last used 3 days ago</span></div></li></ul></div></section></div></main></div></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>People &amp; access</b><span class="mono">375 px</span></figcaption><div class="scroll-x"><div class="device d375"><div class="app w375"><div class="col"><header class="top"><button class="btn btn-ghost btn-icon-sm" aria-label="Open navigation"><svg class="i " aria-hidden="true"><use href="#menu"/></svg></button><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">People &amp; access</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a cur" aria-current=page href="#">People &amp; access</a><a class="snav-a" href="#">Settings</a></nav></header><section class="opts" aria-label="Give someone access"><div class="card opt"><div class="opt-h"><span class="tile tile-a"><svg class="i " aria-hidden="true"><use href="#userplus"/></svg></span><p class="eyebrow">Ongoing access</p></div><p class="opt-p">For someone who keeps editing this site. They sign in with a code sent to their email and keep access until you remove them.</p><div><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#userplus"/></svg>Add editor</button></div></div><div class="card opt"><div class="opt-h"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#link"/></svg></span><p class="eyebrow">One-off review</p></div><p class="opt-p">For a one-off review of unpublished changes. View only unless you allow more, and the link stops working after the time you choose.</p><div><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#link"/></svg>Share preview link</button></div></div></section><section class="card"><div class="card-h"><h2 class="card-t">Editors <span class="cnt2">2</span></h2></div><div class="card-c"><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">maria@client.example </p><p class="muted12">1 device signed in</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Resend invite</button><button class="btn btn-danger-ghost btn-sm" >Remove</button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span><span class="badge b-outline">Publish</span></div></li><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">jon@client.example </p><p class="muted12">No devices signed in</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Resend invite</button><button class="btn btn-danger-ghost btn-sm" >Remove</button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span></div></li></ul><p class="sub-h">Previously removed</p><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">old.contact@client.example <span class="badge b-neutral">Removed</span></p><p class="muted12">Removed 2 weeks ago</p></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span></div></li></ul></div></section><section class="card"><div class="card-h"><h2 class="card-t">Preview links <span class="cnt2">2</span></h2></div><div class="card-c"><ul class="links"><li class="lc"><div class="lc-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">Client review: homepage hero, pricing tables and footer copy</p><p class="lc-meta"><span>Expires Oct 14</span><span class="badge b-warning">Pending</span></p></div><div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button><button class="btn btn-danger-ghost btn-icon-sm" aria-label="Revoke this share"><svg class="i " aria-hidden="true"><use href="#trash"/></svg></button></div></div><div class="lc-perms"><span class="badge b-outline">View</span></div></li><li class="lc"><div class="lc-top"><span class="tile tile-info"><svg class="i " aria-hidden="true"><use href="#mail"/></svg></span><div class="lc-main"><p class="lc-title">reviewer@agency.example</p><p class="lc-meta"><span>Expires Oct 20</span></p></div><div class="lc-act"><button class="btn btn-ghost btn-icon-sm" aria-label="Copy share link"><svg class="i " aria-hidden="true"><use href="#copy"/></svg></button><button class="btn btn-danger-ghost btn-icon-sm" aria-label="Revoke this share"><svg class="i " aria-hidden="true"><use href="#trash"/></svg></button></div></div><div class="lc-perms"><span class="badge b-outline">View</span><span class="badge b-outline">Edit</span><span>Last used 3 days ago</span></div></li></ul></div></section></div></main></div></div></div></div></figure></div><ul class=notes><li><b>Exactly two actions</b>, each with a one-line explainer that says when to use it. The Add editor copy does not promise publishing: the form defaults to View+Edit.</li><li>Below: the two lists, each under its own heading with a count. Preview links moved out of the dialog: <code class=ic>usePreviewLinks</code> + <code class=ic>ShareLinkCard</code>.</li><li>The 60-character label wraps or ellipsizes inside a <code class=ic>minmax(0,1fr)</code> track (s66a dialog rule, applied on the page).</li></ul></section><section class="sec" id="settings"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">5 · Settings (advanced)</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>Settings (advanced)</b><span class="mono">1280 px</span></figcaption><div class="scroll-x"><div class="device d1280"><div class="app w1280"><aside class="side"><div class="logo"><span class="mark">&lt;&gt;</span>ReCopyFast</div><p class="eyebrow side-g">WORKSPACE</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#grid"/></svg>Overview</span><span class="side-i act"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Sites</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#file"/></svg>Content</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#chart"/></svg>Analytics</span><p class="eyebrow side-g">ACCOUNT</p><span class="side-i"><svg class="i " aria-hidden="true"><use href="#gear"/></svg>Settings</span><span class="side-i"><svg class="i " aria-hidden="true"><use href="#card"/></svg>Billing</span><div class="plan"><p class="eyebrow">Plan</p><p>Pro</p></div></aside><div class="col"><header class="top"><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb"><svg class="i " aria-hidden="true"><use href="#home"/></svg>Dashboard</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Sites</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Settings</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a cur" aria-current=page href="#">Settings</a></nav></header><p class="muted14 intro">Advanced settings. You don't need any of these to start editing.</p><section class="card"><div class="card-h"><h2 class="card-t">General</h2></div><div class="card-c"><dl class="dl ro"><dt>Name</dt><dd>Acme marketing site</dd><dt>Domain</dt><dd>acme.example</dd></dl><p class="muted12 mt8">Renaming a site or changing its domain isn't available yet.</p></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">Domain ownership</h2><p class=card-d>Record proof that you control this domain, with a DNS TXT record or a file on the site. Your embed script does not wait on this — it is already authorised by its site token and the origin it runs on.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add domain</button></div><div class="card-c"><p class="muted14">No ownership proof on record for this site. Nothing is blocked by that — add one only if you want it on file.</p></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">API keys <span class="badge b-accent">s66c2</span></h2><p class=card-d>Keys for reading this site's published content from your own build or server.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Create key</button></div><div class="card-c"><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#key"/></svg></span><div class="lc-main"><p class="lc-title">Production build</p><p class="muted12">rcf_•••• · created Sep 2 · last used yesterday</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Disable</button><button class="btn btn-danger-ghost btn-sm" >Delete</button></div></div></li></ul></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">Webhooks</h2><p class=card-d>Call an endpoint on your build system whenever this site's content changes.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add webhook</button></div><div class="card-c"><p class="muted14">No webhook yet.</p></div></section><section class="card"><div class="card-h"><h2 class="card-t">Content import and export</h2><p class=card-d>Export this site's content as a file, and import it back. Your copy is yours — take it with you whenever you want.</p></div><div class="card-c"><div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Export</button><button class="tab" role="tab" aria-selected="false">Import</button><button class="tab" role="tab" aria-selected="false">Batch update</button><button class="tab" role="tab" aria-selected="false">Operation history</button></div><div class="tabpanel"><label class="label">Format</label><div class="nsel"><select class="input"><option>JSON</option></select><svg class="i chev" aria-hidden="true"><use href="#chev"/></svg></div><div class="mt16"><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#download"/></svg>Export content</button></div></div></div></section><section class="card danger" aria-labelledby="dz"><div class="card-h"><h2 class="card-t" id="dz">Danger zone</h2></div><div class="card-c"><div class="dz-row"><div><p class="dz-t">Delete site</p><p class="muted14">Permanently delete Acme marketing site, its content, editors and preview links. This can't be undone.</p></div><button class="btn btn-destructive" ><svg class="i " aria-hidden="true"><use href="#trash"/></svg>Delete site</button></div></div></section></div></main></div></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Settings (advanced)</b><span class="mono">375 px</span></figcaption><div class="scroll-x"><div class="device d375"><div class="app w375"><div class="col"><header class="top"><button class="btn btn-ghost btn-icon-sm" aria-label="Open navigation"><svg class="i " aria-hidden="true"><use href="#menu"/></svg></button><nav class="crumbs" aria-label="Breadcrumb"><span class="crumb">Site</span><svg class="i i-12 sepc" aria-hidden="true"><use href="#chevr"/></svg><span class="crumb cur">Settings</span></nav><span class="avatar">E</span></header><main class="main"><div class="shell" data-page-shell><header class="ph"><div class="ph-row"><div class="ph-tt"><h1 class="ph-h1">Acme marketing site</h1><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span></div><div class="ph-actions"><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#history"/></svg>Version history</button></div></div><div class=ph-desc><a class="ext" href="#">acme.example<svg class="i i-12" aria-hidden="true"><use href="#ext"/></svg></a></div><nav class="snav" aria-label="Site"><a class="snav-a" href="#">Overview</a><a class="snav-a" href="#">Install</a><a class="snav-a" href="#">People &amp; access</a><a class="snav-a cur" aria-current=page href="#">Settings</a></nav></header><p class="muted14 intro">Advanced settings. You don't need any of these to start editing.</p><section class="card"><div class="card-h"><h2 class="card-t">General</h2></div><div class="card-c"><dl class="dl ro"><dt>Name</dt><dd>Acme marketing site</dd><dt>Domain</dt><dd>acme.example</dd></dl><p class="muted12 mt8">Renaming a site or changing its domain isn't available yet.</p></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">Domain ownership</h2><p class=card-d>Record proof that you control this domain, with a DNS TXT record or a file on the site. Your embed script does not wait on this — it is already authorised by its site token and the origin it runs on.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add domain</button></div><div class="card-c"><p class="muted14">No ownership proof on record for this site. Nothing is blocked by that — add one only if you want it on file.</p></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">API keys <span class="badge b-accent">s66c2</span></h2><p class=card-d>Keys for reading this site's published content from your own build or server.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Create key</button></div><div class="card-c"><ul class="lst"><li class="er"><div class="er-top"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#key"/></svg></span><div class="lc-main"><p class="lc-title">Production build</p><p class="muted12">rcf_•••• · created Sep 2 · last used yesterday</p></div><div class="er-act"><button class="btn btn-outline btn-sm" >Disable</button><button class="btn btn-danger-ghost btn-sm" >Delete</button></div></div></li></ul></div></section><section class="card"><div class="card-h ch-row"><div><h2 class="card-t">Webhooks</h2><p class=card-d>Call an endpoint on your build system whenever this site's content changes.</p></div><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#plus"/></svg>Add webhook</button></div><div class="card-c"><p class="muted14">No webhook yet.</p></div></section><section class="card"><div class="card-h"><h2 class="card-t">Content import and export</h2><p class=card-d>Export this site's content as a file, and import it back. Your copy is yours — take it with you whenever you want.</p></div><div class="card-c"><div class="tabs" role="tablist"><button class="tab" role="tab" aria-selected="true">Export</button><button class="tab" role="tab" aria-selected="false">Import</button><button class="tab" role="tab" aria-selected="false">Batch update</button><button class="tab" role="tab" aria-selected="false">Operation history</button></div><div class="tabpanel"><label class="label">Format</label><div class="nsel"><select class="input"><option>JSON</option></select><svg class="i chev" aria-hidden="true"><use href="#chev"/></svg></div><div class="mt16"><button class="btn btn-outline" ><svg class="i " aria-hidden="true"><use href="#download"/></svg>Export content</button></div></div></div></section><section class="card danger" aria-labelledby="dz"><div class="card-h"><h2 class="card-t" id="dz">Danger zone</h2></div><div class="card-c"><div class="dz-row"><div><p class="dz-t">Delete site</p><p class="muted14">Permanently delete Acme marketing site, its content, editors and preview links. This can't be undone.</p></div><button class="btn btn-destructive" ><svg class="i " aria-hidden="true"><use href="#trash"/></svg>Delete site</button></div></div></section></div></main></div></div></div></div></figure></div><ul class=notes><li>The “advanced” path: nothing here is needed to start editing. Name and domain are read-only, because there is no rename or domain API (separate API story).</li><li>API keys arrive in s66c2 (<code class=ic>ApiKeysPanel siteId</code>). The import/export tab “History” becomes <b>Operation history</b>.</li><li>Danger zone: the same DELETE and the same confirmation. On success the app navigates to Sites with <code class=ic>replace</code>, and the creator-only 403 shows in the dialog.</li></ul></section><section class="sec" id="dialogs"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">6 · Dialogs and the row menu</h2></div><div class="frames"><figure class="fig"><figcaption class="cap"><b>Add editor</b><span class="mono">1280 · 512 px dialog</span></figcaption><div class="stage" style="width:640px;"><div class="veil-bg"></div><div class="veil"></div><div class="dlg dlg-512" role="dialog" aria-label="Add editor"><button class="dlg-x" aria-label="Close"><svg class="i " aria-hidden="true"><use href="#x"/></svg></button><div class="dlg-h"><p class="dlg-t">Add editor</p><p class="dlg-d">For someone who keeps editing this site. They sign in with a code sent to their email and keep access until you remove them.</p></div><div class="dlg-b"><div class="field"><label class="label">Editor email</label><input class="input" placeholder="marketing@clientcompany.com"></div><div class="field"><label class="label">Permissions</label><div class="perms" role="group" aria-label="Permissions"><button class="perm" role="checkbox" aria-checked="true"><svg class="i " aria-hidden="true"><use href="#eye"/></svg>View<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="true"><svg class="i " aria-hidden="true"><use href="#edit"/></svg>Edit<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#upload"/></svg>Publish<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#shield"/></svg>Admin<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button></div><p class="help">Higher permissions include the ones below them.</p></div></div><div class="dlg-f"><button class="btn btn-outline" >Cancel</button><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#userplus"/></svg>Add editor</button></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Add editor</b><span class="mono">375 · bottom sheet</span></figcaption><div class="stage stage-phone" style="width:375px;height:720px;"><div class="veil-bg"></div><div class="veil"></div><div class="dlg sheet" role="dialog" aria-label="Add editor"><button class="dlg-x" aria-label="Close"><svg class="i " aria-hidden="true"><use href="#x"/></svg></button><div class="dlg-h"><p class="dlg-t">Add editor</p><p class="dlg-d">For someone who keeps editing this site. They sign in with a code sent to their email and keep access until you remove them.</p></div><div class="dlg-b"><div class="field"><label class="label">Editor email</label><input class="input" placeholder="marketing@clientcompany.com"></div><div class="field"><label class="label">Permissions</label><div class="perms" role="group" aria-label="Permissions"><button class="perm" role="checkbox" aria-checked="true"><svg class="i " aria-hidden="true"><use href="#eye"/></svg>View<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="true"><svg class="i " aria-hidden="true"><use href="#edit"/></svg>Edit<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#upload"/></svg>Publish<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#shield"/></svg>Admin<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button></div><p class="help">Higher permissions include the ones below them.</p></div></div><div class="dlg-f"><button class="btn btn-outline" >Cancel</button><button class="btn btn-default" ><svg class="i " aria-hidden="true"><use href="#userplus"/></svg>Add editor</button></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Share preview link</b><span class="mono">1280 · create-only</span></figcaption><div class="stage" style="width:640px;"><div class="veil-bg"></div><div class="veil"></div><div class="dlg dlg-512" role="dialog" aria-label="Share preview link"><button class="dlg-x" aria-label="Close"><svg class="i " aria-hidden="true"><use href="#x"/></svg></button><div class="dlg-h"><p class="dlg-t">Share preview link</p><p class="dlg-d">For a one-off review of unpublished changes. The link stops working after the time you choose.</p></div><div class="dlg-b"><div class="field"><label class="label">Email address</label><input class="input" placeholder="reviewer@example.com"></div><div class="field"><label class="label">Permissions</label><div class="perms" role="group" aria-label="Permissions"><button class="perm" role="checkbox" aria-checked="true"><svg class="i " aria-hidden="true"><use href="#eye"/></svg>View<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#edit"/></svg>Edit<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#upload"/></svg>Publish<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button><button class="perm" role="checkbox" aria-checked="false"><svg class="i " aria-hidden="true"><use href="#shield"/></svg>Admin<svg class="i tick" aria-hidden="true"><use href="#check"/></svg></button></div><p class="help">View only by default. Edit and publish let the reviewer change unpublished copy.</p></div><div class="field"><label class="label">Expires in</label><div class="nsel"><select class="input"><option>7 days</option></select><svg class="i chev" aria-hidden="true"><use href="#chev"/></svg></div></div><div class="field"><label class="label">Label (optional)</label><input class="input" placeholder="e.g., Client review v2"></div></div><div class="dlg-f"><button class="btn btn-outline" >Cancel</button><button class="btn btn-default" >Create link</button></div></div></div></figure><figure class="fig"><figcaption class="cap"><b>Row menu, open</b><span class="mono">⋮ visible at rest</span></figcaption><div class="scroll-x"><div class="menuwrap"><ul class="srows one"><li class="srow"><span class="tile tile-n"><svg class="i " aria-hidden="true"><use href="#globe"/></svg></span><div class="srow-id"><a class="srow-name" href="#">Acme marketing site</a><span class="srow-dom">acme.example</span></div><div class="srow-st"><span class="badge b-success"><svg class="i i-12" aria-hidden="true"><use href="#ok"/></svg>Live</span><span class="muted12">Last edited 2 hours ago</span></div><div class="srow-act"><button class="btn btn-outline btn-sm" ><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</button><button class="btn btn-ghost btn-icon-sm kebab is-open" aria-label="Open menu for Acme marketing site" aria-expanded="true"><svg class="i " aria-hidden="true"><use href="#more"/></svg></button></div></li></ul><div class="menu menu-pos" role="menu"><div class="menu-i" role="menuitem"><svg class="i " aria-hidden="true"><use href="#globe"/></svg>Open site page</div><div class="menu-i hl" role="menuitem"><svg class="i " aria-hidden="true"><use href="#pencil"/></svg>Edit website</div><div class="menu-i" role="menuitem"><svg class="i " aria-hidden="true"><use href="#link"/></svg>Share preview link</div><div class="menu-sep" role="separator"></div><div class="menu-i danger-i" role="menuitem"><svg class="i " aria-hidden="true"><use href="#trash"/></svg>Delete site</div></div></div></div></figure></div><ul class=notes><li>Add editor is one component (<code class=ic>AddEditorDialog</code>) behind the People action, the checklist step and Quick setup step 3. Those last two pass the View+Edit+Publish preset. On success the body shows the delivery notice (or the editor-hub fallback), and the footer shows Done.</li><li>Share preview link is create-only now. <b>View is the only permission ticked by default</b>, and the grant resets to View after each send. The s68c 409 for a removed editor renders in its Alert.</li><li>Edit website has no dialog any more. It opens the new tab on click (popup-safe), and errors render inline as an Alert. The pill-shaped raw button and the emerald DOM toast are deleted.</li></ul></section><section class="sec" id="clicks"><div class="sec-h"><h2 class="ptitle" style="font-size:20px">7 · Click counts, before and after</h2></div>
+<div class="scroll-x"><table class="cc"><thead><tr><th>Task (from Sites, 1280)</th><th>Today</th><th>Clicks</th><th>s66c</th><th>Clicks</th></tr></thead><tbody>
+<tr><td>Copy snippet (awaiting install)</td><td>View Details → checklist Copy snippet</td><td>2</td><td>Continue setup → Copy snippet</td><td>2</td></tr>
+<tr><td>Copy snippet (live)</td><td>View Details → scroll ≈1,690 px → Copy Embed Script</td><td>2 + scroll</td><td>name → Install → Copy snippet</td><td class=good>3, no scroll</td></tr>
+<tr><td>Add editor</td><td>View Details → scroll ≈870 px → toggles → Add editor</td><td>2 + scroll</td><td>name → People &amp; access → Add editor → Add editor</td><td>4, no scroll</td></tr>
+<tr><td>Share preview link</td><td>share icon → Create link</td><td>2</td><td>⋮ → Share preview link → Create link</td><td>3</td></tr>
+<tr><td>Delete site</td><td>hover → ⋮ → Delete Site → Delete Site</td><td class=bad>3, hover only</td><td>⋮ → Delete site → Delete site</td><td class=good>3, touch works</td></tr>
+<tr><td>Edit website</td><td>Settings → Edit Website (dialog)</td><td>2</td><td>Edit website (live row)</td><td class=good>1</td></tr>
+<tr><td>Regenerate snippet</td><td>View Details → scroll → Regenerate → Regenerate now</td><td>3 + scroll</td><td>name → Install → Regenerate snippet → Regenerate now</td><td>4, no scroll</td></tr>
+<tr><td>Version history</td><td>View Details → History</td><td>2</td><td>name → Version history</td><td>2</td></tr>
+<tr><td>Webhooks / import &amp; export</td><td>View Details → scroll ≈3,000 px</td><td>1 + scroll</td><td>name → Settings</td><td>2, no scroll</td></tr>
+<tr><td>New site → first edit (s66c2)</td><td>Close → View Details → Copy snippet → … → Open site in edit mode</td><td>4, unguided</td><td>Open site page → Copy snippet → … → Edit website</td><td class=good>3, guided</td></tr>
+<tr><td>Link or bookmark any of the above</td><td>no URL</td><td class=bad>—</td><td><code class=ic>/dashboard/sites/&lt;id&gt;/&lt;page&gt;</code></td><td class=good>0</td></tr>
+</tbody></table></div>
+<p class="notes">Clicks move by about one either way. What goes is up to 3,000 px of scrolling, every hover-only action, two of the three copies of the snippet, and the choice between two identical-looking invite forms.</p></section>
+</main>
+</body>
+</html>
