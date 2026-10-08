@@ -221,11 +221,11 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
 | Dialog header | `px-6 pt-5 pb-4` | s66a |
 | Dialog body | `px-6 pb-5`; sections 20 apart, divided by a 1px rule | s66a |
 | Dialog footer | `px-6 py-3`, `border-t` | s66a |
-| Panel (`Card`) padding | 24 (`px-6`, header `pt-5 pb-4`) | in code; 16 below 640 has no story yet (not in s66b) |
-| Panel toolbar row | 48 tall, `border-b` | no story yet (not in s66b) |
+| Panel (`Card`) padding | 24 (`px-6`, header `pt-5 pb-4`) | in code; 16 below 640: backlog, `s66d-design-system-gaps` (stub) |
+| Panel toolbar row | 48 tall, `border-b` | backlog, `s66d-design-system-gaps` (stub) |
 | Page header to content | 24 (16 below 640): the `PageShell` gap | in code (s66b1) |
 | Section gap | 24 (16 below 640) | in code (s66b1): the `PageShell` gap |
-| Table header / row | 36 / 44, `px-4` | no story yet (no `Table` primitive: gap 8) |
+| Table header / row | 36 / 44, `px-4` | backlog, `s66d-design-system-gaps` (stub; no `Table` primitive: gap 8) |
 
 Marketing keeps its own rhythm: sections `py-24 sm:py-32`, container `max-w-6xl mx-auto px-6`.
 The auth column stays `max-w-md`.

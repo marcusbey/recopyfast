@@ -87,9 +87,13 @@ function MetricBody({
         </IconTile>
       )}
 
+      {/* Still, like the metric around it. The arrow slid 1px up and right
+          on the link's hover (`group-hover:-translate-y-px
+          group-hover:translate-x-px`) after s66b2 had taken the lift off the
+          card: the last thing on the Overview that moved (s66b2 review, R5). */}
       {!Icon && href && (
         <ArrowUpRight
-          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out group-hover:-translate-y-px group-hover:translate-x-px"
+          className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
       )}

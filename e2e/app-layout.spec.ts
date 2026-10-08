@@ -972,11 +972,19 @@ function rhythmViolations(
  * sRGB. The background is composited from the first opaque ancestor up,
  * which is what "the active nav item against its composited background"
  * means: a 12% tint over the sidebar card, not the tint alone.
+ *
+ * `property` picks what is measured against that background: the text
+ * (`color`), or a control's boundary (`borderTopColor`). A border paints over
+ * its own element's background (`background-clip: border-box`), so the same
+ * composite is what sits behind it.
  */
+type ForegroundProperty = "color" | "borderTopColor";
+
 async function compositedColors(
   target: Locator,
+  property: ForegroundProperty = "color",
 ): Promise<{ foreground: Rgb; background: Rgb }> {
-  const { foreground, background } = await target.evaluate((element) => {
+  const { foreground, background } = await target.evaluate((element, key) => {
     const canvas = document.createElement("canvas");
     canvas.width = 1;
     canvas.height = 1;
@@ -1002,9 +1010,9 @@ async function compositedColors(
     paint("#ffffff");
     layers.forEach(paint);
     const behind = read();
-    paint(getComputedStyle(element).color);
+    paint(getComputedStyle(element)[key]);
     return { foreground: read(), background: behind };
-  });
+  }, property);
 
   const toRgb = ([r = 0, g = 0, b = 0]: number[]): Rgb => ({ r, g, b, a: 1 });
   return { foreground: toRgb(foreground), background: toRgb(background) };
@@ -1067,17 +1075,30 @@ async function contrastViolations(
 
   const violations: string[] = [];
   for (const [label, target] of targets) {
-    if ((await target.count()) === 0) {
-      violations.push(`${at}: no ${label} to measure`);
-      continue;
-    }
-    const { foreground, background } = await compositedColors(target);
-    const ratio = contrastRatio(foreground, background);
-    if (ratio < MIN_TEXT_CONTRAST) {
-      violations.push(`${at}: ${label} contrasts ${ratio.toFixed(2)}:1`);
-    }
+    const violation = await contrastViolation(at, label, target);
+    if (violation) violations.push(violation);
   }
   return violations;
+}
+
+/**
+ * One measured pair as a readable line, or null when it clears `minimum`. A
+ * target that is not there is a violation too: a check that measures nothing
+ * passes vacuously.
+ */
+async function contrastViolation(
+  at: string,
+  label: string,
+  target: Locator,
+  minimum: number = MIN_TEXT_CONTRAST,
+  property: ForegroundProperty = "color",
+): Promise<string | null> {
+  if ((await target.count()) === 0) return `${at}: no ${label} to measure`;
+  const { foreground, background } = await compositedColors(target, property);
+  const ratio = contrastRatio(foreground, background);
+  return ratio < minimum
+    ? `${at}: ${label} contrasts ${ratio.toFixed(2)}:1 (needs ${minimum}:1)`
+    : null;
 }
 
 /* -------------------------------------------------------------------------
@@ -1366,6 +1387,89 @@ async function tabsOutsideTheirList(
   }, EDGE_TOLERANCE);
 }
 
+/** The first row of the Overview's "Your sites" panel (a link per site). */
+function firstSiteRow(page: Page): Locator {
+  return page
+    .getByRole("heading", { name: "Your sites" })
+    .locator("xpath=ancestor::*[.//li//a][1]")
+    .locator("li a")
+    .first();
+}
+
+/** WCAG 1.4.11: a control's boundary against what sits behind it. */
+const MIN_BOUNDARY_CONTRAST = 3;
+/** The page that holds the theme picker, behind its Appearance tab. */
+const THEME_PICKER_PAGE = "settings";
+
+/**
+ * s66b2 AC 6: contrast on the surfaces s66b2 repainted, which the frame's
+ * pairs above (title, description, nav, breadcrumb) never reach. Each pair
+ * is measured in the state a person meets it in:
+ * - an Overview "Your sites" row while hovered: every line of its text on
+ *   `hover:bg-surface-2`. The rows were separate cards until s66b2, and the
+ *   hover tint is new;
+ * - Settings → Appearance, pointer away: the selected theme's label on
+ *   `bg-tone-accent-surface`, and an unselected option's 1px border against
+ *   the card. That border shipped as `border-border` (`--line`, 1.45:1 on the
+ *   card): decorative strength on a control, until the s66b2 review. A control
+ *   boundary is `border-input` (design system, Borders), and needs 3:1.
+ */
+async function changedSurfaceContrastViolations(
+  page: Page,
+  appPage: AppPage,
+  theme: "dark" | "light",
+): Promise<string[]> {
+  const at = `${appPage.name} @${CONTRAST_WIDTH} ${theme}`;
+  const violations: string[] = [];
+  const record = (violation: string | null) => {
+    if (violation) violations.push(violation);
+  };
+
+  if (appPage.name === OVERVIEW_PAGE) {
+    const row = firstSiteRow(page);
+    if ((await row.count()) === 0) return [`${at}: no site row to hover`];
+    await row.hover();
+    await settleHover(page);
+    const lines = row.locator("p");
+    const count = await lines.count();
+    if (count === 0) violations.push(`${at}: no text in the hovered site row`);
+    for (let index = 0; index < count; index += 1) {
+      const line = lines.nth(index);
+      const text = (await line.textContent())?.trim() ?? "";
+      record(
+        await contrastViolation(at, `hovered site row text "${text}"`, line),
+      );
+    }
+    await page.mouse.move(1, 1);
+    await settleHover(page);
+  }
+
+  if (appPage.name === THEME_PICKER_PAGE) {
+    await page.getByRole("tab", { name: "Appearance" }).click();
+    const picker = page.getByRole("radiogroup", { name: "Theme" });
+    await page.mouse.move(1, 1);
+    await settleHover(page);
+    record(
+      await contrastViolation(
+        at,
+        "selected theme label",
+        picker.getByRole("radio", { checked: true }).locator("p").first(),
+      ),
+    );
+    record(
+      await contrastViolation(
+        at,
+        "unselected theme option's border",
+        picker.getByRole("radio", { checked: false }).first(),
+        MIN_BOUNDARY_CONTRAST,
+        "borderTopColor",
+      ),
+    );
+  }
+
+  return violations;
+}
+
 /**
  * s66b2's checks on one app page, as readable lines (AC 2, 4, 5): nothing
  * clipped, no shadow at rest in `main`; on the Overview, a hovered metric and
@@ -1405,14 +1509,9 @@ async function pagePassViolations(
       .getByRole("region", { name: "Summary" })
       .getByRole("link")
       .first();
-    const siteRow = page
-      .getByRole("heading", { name: "Your sites" })
-      .locator("xpath=ancestor::*[.//li//a][1]")
-      .locator("li a")
-      .first();
     for (const violation of [
       ...(await hoverMotionViolations(page, metric, "metric")),
-      ...(await hoverMotionViolations(page, siteRow, "site row")),
+      ...(await hoverMotionViolations(page, firstSiteRow(page), "site row")),
     ]) {
       violations.push(`${at}: ${violation}`);
     }
@@ -1490,6 +1589,8 @@ test.describe("s66b app pages", () => {
             await settleTransitions(page);
             violations.push(
               ...(await contrastViolations(page, appPage, theme)),
+              // s66b2 AC 6: the repainted surfaces, in both themes.
+              ...(await changedSurfaceContrastViolations(page, appPage, theme)),
             );
           }
         }
@@ -1533,6 +1634,29 @@ const STANDALONE_PAGES: readonly StandalonePage[] = [
   { path: "/edit", name: "edit" },
 ];
 
+/**
+ * s66b2 AC 6 on a standalone page: its h1 (now `.text-page-title`, was an h3
+ * `CardTitle`) and the description right under it, on whatever surface they
+ * sit on (the card, or the page on /edit). On all four pages the description
+ * is the h1's next sibling, a <p>.
+ */
+async function standaloneContrastViolations(
+  page: Page,
+  standalone: StandalonePage,
+  theme: "dark" | "light",
+): Promise<string[]> {
+  const at = `${standalone.name} @${CONTRAST_WIDTH} ${theme}`;
+  const violations: string[] = [];
+  for (const [label, target] of [
+    ["h1", page.locator("h1").first()],
+    ["description", page.locator("h1 + p").first()],
+  ] as const) {
+    const violation = await contrastViolation(at, label, target);
+    if (violation) violations.push(violation);
+  }
+  return violations;
+}
+
 test.describe("s66b standalone pages", () => {
   test.setTimeout(120_000);
 
@@ -1570,6 +1694,20 @@ test.describe("s66b standalone pages", () => {
         }
         for (const clipped of await clippedElements(page)) {
           violations.push(`${at}: ${clipped} hides content`);
+        }
+
+        if (width === CONTRAST_WIDTH) {
+          for (const theme of ["dark", "light"] as const) {
+            await applyTheme(page, theme);
+            await page.mouse.move(1, 1);
+            await settleTransitions(page);
+            violations.push(
+              ...(await standaloneContrastViolations(page, standalone, theme)),
+            );
+          }
+          // The emulated scheme outlives the navigation: the next page is
+          // measured and captured dark, as every other width is.
+          await page.emulateMedia({ colorScheme: "dark" });
         }
       }
 
