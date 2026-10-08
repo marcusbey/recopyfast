@@ -135,5 +135,19 @@ Minors:
 
 Orchestrator: D1–D3 go to a fix run (owner rule: fix bot findings before merge).
 
-Max severity: major
+## Fix `ecf4678` and verification (fresh reviewer, 2026-10-08)
+
+Owner decision (2026-10-08): "Ship D2+D3 now, D1 as follow-up" — D1 (nested edit composition, +89 B gz over
+the ceilings) is deferred to the backlog story `s67b-nested-edit-composition`; ADR 049 records the known gap.
+
+- D3 closed: the per-path row index is `Object.create(null)`; `__proto__`, `constructor`, `toString` and
+  `current_content` ids neither pollute nor change behaviour (reverting to `{}` → red).
+- D2 closed: `dropEntry` clears `data-rcf-variant` / `data-rcf-test`; `applyVariants` writes through
+  `applyContentToElement`, so the authored copy comes back on a route change (both mutations → red). A
+  variant write cannot starve a later published row (markers clear and counters restart per page view).
+- D1 fully reverted; the funding rewrites are behaviour-preserving.
+- Bytes 45,841 / 33,073 (bundle ceiling ratcheted down 2 B; widget at its ceiling); fresh build byte-identical.
+- Full jest 354 suites / 4,591 tests, type-check, e2e E1–E5 green.
+
+Max severity: none
 Ship allowed: yes
