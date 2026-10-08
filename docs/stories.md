@@ -3577,3 +3577,26 @@ at that commit, to be re-verified at research time):
 - [ ] D2 — A/B conversion dedupe is check-then-insert (PR #65 Devin): a partial unique index on ab_test_results (test_id, visitor_id) WHERE event_type = 'conversion' + conflict-aware insert makes it atomic; needs a migration.
 
 Embed allocation: 0 bytes.
+
+## Story s71-billing-plan-badge — the billing page never calls a paid plan "Free"
+
+Owner, 2026-10-08, with a screenshot of `/dashboard/billing`: "here is my account. it says FRee on
+the right and PRO on the left." The sidebar says **Pro**; the plan card says **Pro plan · Lifetime
+access** and, in its top-right corner, a **Free** badge.
+
+Cause (verified on `origin/main` `828970c`): `SubscriptionCard`'s status badge
+(`src/components/billing/SubscriptionCard.tsx:133`) prints "Free" whenever there is no live
+subscription row. A lifetime grant has no subscription row, so every lifetime owner sees "Free"
+next to the plan they paid for. "Free" names a retired plan nobody is on
+(`DashboardNavigation.tsx:136`). The empty payment-methods state then tells the same owner to "Add
+a card to start a subscription" (`PaymentMethodsCard.tsx:205`).
+
+Acceptance criteria:
+- [ ] A plan held for life shows a "Lifetime" badge, never "Free".
+- [ ] A live subscription keeps its status badge (Active, Trialing, Past due, …), including a
+  lifetime owner still running out a lower subscription's period.
+- [ ] No state of the card prints "Free": with no subscription and no lifetime grant the card
+  shows no status badge rather than a wrong one.
+- [ ] The empty payment-methods copy does not offer "start a subscription" to an account whose
+  plan is held for life; it says a card is for AI credits.
+- [ ] Unit tests cover all four badge states and both empty-state copies.
