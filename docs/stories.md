@@ -2808,9 +2808,10 @@ Complexity: 3. Dependencies: s66c1 merged. Branch `feature/s66c2-quick-setup`.
      `</body>`…", a link to Install, and a live status row. The row flips from "Waiting for the
      first page view…" to "Installed…" on the provider's poll, with no reload. The step is done
      when activation says `installed` or the site is no longer awaiting install.
-  3. "Start editing": "Edit website", which stays disabled until step 2 is done, or "Add editor",
-     which opens `AddEditorDialog` with View+Edit+Publish. The step is done when `invited` or
-     `published`.
+  3. "Start editing": "Edit website", or "Add editor", which opens `AddEditorDialog` with
+     View+Edit+Publish. Edit website and Add editor appear when step 3 becomes current, once
+     step 2 is done. Before that, step 3 shows only its title and one line. The step is done when
+     `invited` or `published`.
 
   The current step is expanded. The header reads "Step N of 3". Progress comes from the server
   only, so leaving and returning resumes at the first incomplete step. The step markers reuse the

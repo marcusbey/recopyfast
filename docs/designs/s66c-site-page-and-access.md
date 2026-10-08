@@ -124,9 +124,10 @@ and the same confirmation, in sentence case: "Delete site?" / Cancel / "Delete s
       - Complete when activation says `installed`, or the site's status is no longer
         `awaiting-install`.
    3. **Start editing.** "Edit the copy yourself, or add the person who will."
-      - [Edit website]: default; disabled with the hint "Available once the snippet is
-        installed" until step 2 is done.
+      - [Edit website]: default.
       - [Add editor]: outline; opens the Add editor dialog with View+Edit+Publish preset.
+      - Edit website and Add editor appear when step 3 becomes current, once step 2 is done.
+        Before that, step 3 shows only its title and one line.
       - Complete when `invited` or `published`.
 
    The current step is expanded. Done steps are collapsed to one line with ✓, and future steps to

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { Activity, Code, FileText } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +32,7 @@ export default function SiteOverviewPage() {
   const { site, credentials } = useSiteContext();
   const { user } = useAuth();
   const activityId = useId();
+  const activityHeadingRef = useRef<HTMLHeadingElement>(null);
   const detailsId = useId();
 
   const lastActivity = relative(site.stats?.last_activity);
@@ -50,11 +51,22 @@ export default function SiteOverviewPage() {
           site={site}
           embedScript={credentials.embedScript}
           userId={user.id}
+          focusFallbackRef={activityHeadingRef}
         />
       )}
 
       <section aria-labelledby={activityId} className="space-y-3">
-        <h2 id={activityId} className="text-eyebrow">
+        {/* Focusable by script only: when the Add editor invite finishes
+            setup, the panel above leaves the page while its dialog is open,
+            and this is where focus goes on Close instead of <body> (s66c2
+            review M-1). The page's h1 belongs to PageShell, which takes a
+            title string and no ref. */}
+        <h2
+          id={activityId}
+          ref={activityHeadingRef}
+          tabIndex={-1}
+          className="text-eyebrow"
+        >
           Activity
         </h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

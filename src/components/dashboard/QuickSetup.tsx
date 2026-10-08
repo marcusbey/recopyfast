@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
@@ -35,6 +35,12 @@ interface QuickSetupPanelProps {
   /** The install snippet the provider currently shows (ADR 052). */
   embedScript: string;
   userId: string;
+  /**
+   * Where focus goes when the Add editor dialog closes after the invite has
+   * finished setup and the panel has left the page. It must be drawn
+   * whatever the panel does; the Overview gives its next section's heading.
+   */
+  focusFallbackRef: RefObject<HTMLElement | null>;
 }
 
 type QuickSetupProps =
@@ -70,6 +76,10 @@ function deriveProgress(site: QuickSetupSite, data: SiteActivationProgress) {
     // This replaces s35's completion card, which waited for an invited
     // publisher and a published edit as well.
     isComplete: isInstalled,
+    // Installed is not always Live: a `stale` site has reported in before,
+    // so its setup is complete, but its badge says Stale. The header said
+    // "is live" above that badge (s66c2 review m-4).
+    isLive: site.status === "live",
     // Step 3 stays offered after Live until it is done or hidden; then the
     // panel leaves the page. Before Live it never finishes setup on its own.
     isFinished: isInstalled && hasStartedEditing,
@@ -155,6 +165,7 @@ export function QuickSetup(props: QuickSetupProps) {
       site={props.site}
       embedScript={props.embedScript}
       userId={props.userId}
+      focusFallbackRef={props.focusFallbackRef}
     />
   );
 }
@@ -186,23 +197,16 @@ function QuickSetupSummaryRow({
     );
   }
 
+  // The design system's error state, the panel's own (s66c2 review m-5): it
+  // was red text beside a button, the one quick-setup state drawn its own way.
   if (error || !data) {
     return (
-      <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
-        <p className="flex min-w-0 items-center gap-2 text-sm text-tone-danger-text">
-          <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="[overflow-wrap:anywhere]">
-            Could not load setup progress for {site.name}
-          </span>
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-label={`Try quick setup again for ${site.name}`}
-          onClick={() => void refetch()}
-        >
-          Try again
-        </Button>
+      <li className="px-4 py-3">
+        <SetupLoadError
+          siteName={site.name}
+          message={error}
+          onRetry={() => void refetch()}
+        />
       </li>
     );
   }
@@ -227,7 +231,12 @@ function QuickSetupSummaryRow({
 
 type QuickSetupProgress = ReturnType<typeof deriveProgress>;
 
-function QuickSetupPanel({ site, embedScript, userId }: QuickSetupPanelProps) {
+function QuickSetupPanel({
+  site,
+  embedScript,
+  userId,
+  focusFallbackRef,
+}: QuickSetupPanelProps) {
   const { data, loading, error, refetch, dismiss, dismissing, dismissError } =
     useSiteActivation({ siteId: site.id, userId });
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -255,7 +264,7 @@ function QuickSetupPanel({ site, embedScript, userId }: QuickSetupPanelProps) {
     if (loading && !data) return <PanelLoading siteName={site.name} />;
     if (error || !data) {
       return (
-        <PanelLoadError
+        <SetupLoadError
           siteName={site.name}
           message={error}
           onRetry={() => void refetch()}
@@ -312,11 +321,12 @@ function QuickSetupPanel({ site, embedScript, userId }: QuickSetupPanelProps) {
 
   return (
     <>
-      {/* Always mounted: focus returns here when the invite finishes a step
-          and removes the button that opened it. Empty once setup is done or
+      {/* Always mounted, and a focus target only while the panel is drawn
+          in it (see `onCloseAutoFocus` below). Empty once setup is done or
           hidden, and then not drawn at all: an empty child of the page shell
           is still a flex item, and the shell's gap would be drawn twice
-          (s66b1 review m-6). */}
+          (s66b1 review m-6). Not drawn means display:none, which nothing can
+          focus. */}
       <div
         ref={surfaceRef}
         role="region"
@@ -342,11 +352,18 @@ function QuickSetupPanel({ site, embedScript, userId }: QuickSetupPanelProps) {
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           const previous = previouslyFocusedRef.current;
-          // Finishing a step removes the Add editor button while the dialog
-          // is open. Focus then returns to the panel instead of falling
-          // through to the document body.
+          const surface = surfaceRef.current;
+          // The invite can remove the Add editor button that opened the
+          // dialog. While the panel is still drawn (the editor was revoked,
+          // or a refresh failed and the panel shows its error), focus goes
+          // to the panel's region. When the invite finished setup, the
+          // panel has left the page: the region is empty, `empty:hidden`
+          // makes it display:none, and focus() on it did nothing, so focus
+          // fell to <body> (s66c2 review M-1, reproduced in Chromium). It
+          // then goes to the page's fallback, which is always drawn.
           if (previous?.isConnected) previous.focus();
-          else surfaceRef.current?.focus();
+          else if (surface?.hasChildNodes()) surface.focus();
+          else focusFallbackRef.current?.focus();
         }}
       />
     </>
@@ -370,8 +387,11 @@ function PanelLoading({ siteName }: { siteName: string }) {
   );
 }
 
-/** Never guessed progress: the server's answer, or this and a retry. */
-function PanelLoadError({
+/**
+ * Never guessed progress: the server's answer, or this and a retry. The
+ * panel and the dashboard row both draw it.
+ */
+function SetupLoadError({
   siteName,
   message,
   onRetry,
@@ -383,7 +403,9 @@ function PanelLoadError({
   return (
     <Alert variant="destructive">
       <AlertCircle className="h-4 w-4" aria-hidden="true" />
-      <AlertTitle>Could not load setup progress for {siteName}</AlertTitle>
+      <AlertTitle className="[overflow-wrap:anywhere]">
+        Could not load setup progress for {siteName}
+      </AlertTitle>
       <AlertDescription className="space-y-3">
         <p>{message || "Could not load setup progress"}</p>
         <Button
@@ -402,7 +424,9 @@ function PanelLoadError({
 /**
  * "Quick setup · Step 2 of 3" while the site awaits install; once it is live,
  * "Setup complete — <name> is live" in the success tone, while step 3 is
- * still offered. "Hide quick setup" is the existing, server-side dismissal.
+ * still offered. Installed but not live (stale) reads "… is installed", so
+ * the header never contradicts the page's status badge. "Hide quick setup"
+ * is the existing, server-side dismissal.
  */
 function PanelHeader({
   siteName,
@@ -428,7 +452,8 @@ function PanelHeader({
         {progress.isComplete ? (
           <>
             <h2 className="text-base font-semibold leading-6 text-tone-success-text [overflow-wrap:anywhere]">
-              Setup complete — {siteName} is live
+              Setup complete — {siteName} is{" "}
+              {progress.isLive ? "live" : "installed"}
             </h2>
             <p className="text-sm text-muted-foreground">
               One more step, whenever you are ready.

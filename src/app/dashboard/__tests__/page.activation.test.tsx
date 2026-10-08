@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import DashboardPage from "../page";
 import {
   useSiteActivation,
@@ -145,6 +146,39 @@ describe("dashboard quick setup summary", () => {
     expect(
       mockUseSiteActivation.mock.calls.map(([options]) => options.siteId),
     ).not.toContain("site-7");
+  });
+
+  /*
+   * s66c2 review m-5. A row whose progress failed to load showed the failure
+   * as red text beside a button. The design system's error state is
+   * `Alert variant="destructive"` with what failed and what to do
+   * (docs/design-system.md § States), as the full quick setup already does.
+   */
+  it("reports a row whose progress could not load as an alert, with its retry", async () => {
+    const user = userEvent.setup();
+    const retry = jest.fn();
+    mockUseSiteActivation.mockReturnValue({
+      data: null,
+      loading: false,
+      error: "Could not load activation progress",
+      refetch: retry,
+      dismiss: jest.fn(),
+      dismissing: false,
+      dismissError: null,
+    });
+    respondWithSites([sites[0]]);
+
+    render(<DashboardPage />);
+
+    const list = await screen.findByRole("list", { name: "Quick setup" });
+    const alert = within(list).getByRole("alert");
+    expect(alert).toHaveTextContent("Could not load setup progress for Site 1");
+    await user.click(
+      within(alert).getByRole("button", {
+        name: "Try quick setup again for Site 1",
+      }),
+    );
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it("names step 3 for a live site that has not started editing", async () => {

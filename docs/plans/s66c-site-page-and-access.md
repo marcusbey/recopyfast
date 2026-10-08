@@ -363,7 +363,8 @@ take the site as a prop.
      - live gives the header "Setup complete — <name> is live", with step 3 current;
      - `invited` or `published` (with live) hides the panel;
      - "Hide quick setup" calls the dismissal endpoint;
-     - "Edit website" is disabled until step 2 is done.
+     - Edit website and Add editor appear when step 3 becomes current, once step 2 is done.
+       Before that, step 3 shows only its title and one line.
    - GREEN: in `QuickSetup.tsx`.
 4. [x] **Overview and the dashboard summary rows.**
    - RED:

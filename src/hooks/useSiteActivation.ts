@@ -100,9 +100,17 @@ export function useSiteActivation({
   }, [identity, refetch]);
 
   const visibleData = dataIdentityRef.current === identity ? data : null;
+  // The quick setup's finish rule (s66c2, `deriveProgress` in
+  // QuickSetup.tsx): installed, and an editor with Publish added or an edit
+  // published. It is this hook's only consumer, and once finished it draws
+  // nothing. Polling used to run until all three were true, s35's
+  // completion card, and asked every minute for progress nobody saw
+  // (s66c2 review m-2). The quick setup also counts a site whose status has
+  // left `awaiting-install` as installed; this hook sees only `/activation`,
+  // so it polls until `installed` agrees.
   const incomplete =
     visibleData !== null &&
-    !(visibleData.installed && visibleData.invited && visibleData.published);
+    !(visibleData.installed && (visibleData.invited || visibleData.published));
 
   useEffect(() => {
     if (!incomplete || visibleData?.dismissed) return;

@@ -6,6 +6,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { createRef } from "react";
 import { QuickSetup, type QuickSetupSite } from "../QuickSetup";
 import { useSiteActivation } from "@/hooks/useSiteActivation";
 import {
@@ -20,7 +21,7 @@ import {
 
 /**
  * s66c2 — the quick setup on a site's Overview. It replaces the activation
- * checklist (this file was `ActivationChecklist.test.tsx`, `git mv`'d): the
+ * checklist, and this file replaces `ActivationChecklist.test.tsx`: the
  * same `useSiteActivation` data, the same dismissal, the same loading and
  * error states, now as three steps that end Live.
  *
@@ -150,8 +151,33 @@ const LIVE_SITE = buildSite({
   last_reported_at: "2026-10-08T09:00:00Z",
 });
 
+/*
+ * The Overview's next section heading, which the panel hands focus to once it
+ * has left the page (s66c2 review M-1). Rendered beside every panel here, as
+ * the Overview does.
+ */
+const nextHeadingRef = createRef<HTMLHeadingElement>();
+
+function NextHeading() {
+  return (
+    <h2 ref={nextHeadingRef} tabIndex={-1}>
+      Activity
+    </h2>
+  );
+}
+
 function quickSetup(site: QuickSetupSite = buildSite()) {
-  return <QuickSetup site={site} embedScript={SNIPPET} userId={USER_ID} />;
+  return (
+    <>
+      <QuickSetup
+        site={site}
+        embedScript={SNIPPET}
+        userId={USER_ID}
+        focusFallbackRef={nextHeadingRef}
+      />
+      <NextHeading />
+    </>
+  );
 }
 
 function renderQuickSetup(site?: QuickSetupSite) {
@@ -416,6 +442,45 @@ describe("QuickSetup", () => {
     ).toHaveFocus();
   });
 
+  /*
+   * s66c2 review M-1. Live, no editor: adding one with Publish finishes setup
+   * and the panel leaves the page while the dialog is open. Focus used to go
+   * back to the panel's region, which is then empty and, through
+   * `empty:hidden`, display:none: in Chromium focus() on it does nothing and
+   * focus fell to <body>. jsdom applies no CSS, so the proof is structural:
+   * focus is neither on nor inside the empty region, and it is on the page's
+   * next heading, which is drawn whatever the panel does.
+   */
+  it("hands focus to the page's next heading when the invite finishes setup", async () => {
+    const user = userEvent.setup();
+    mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
+    const view = renderQuickSetup(LIVE_SITE);
+    refetch.mockImplementationOnce(async () => {
+      mockUseSiteActivation.mockReturnValue(
+        activation({ data: { ...INSTALLED, invited: true } }),
+      );
+      view.rerender(quickSetup(LIVE_SITE));
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Add editor to Client Site" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Complete invitation" }),
+    );
+    await user.click(screen.getByRole("button", { name: /close/i }));
+
+    const region = screen.getByRole("region", {
+      name: "Quick setup for Client Site",
+    });
+    expect(region).toBeEmptyDOMElement();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(region).not.toContainElement(document.activeElement as HTMLElement);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Activity" }),
+    ).toHaveFocus();
+  });
+
   it("keeps the invite dialog and fallback notice visible through a refresh error", async () => {
     const user = userEvent.setup();
     mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
@@ -453,11 +518,15 @@ describe("QuickSetup", () => {
     function FromProvider() {
       const { site, credentials } = useSiteContext();
       return (
-        <QuickSetup
-          site={site}
-          embedScript={credentials.embedScript ?? ""}
-          userId={USER_ID}
-        />
+        <>
+          <QuickSetup
+            site={site}
+            embedScript={credentials.embedScript ?? ""}
+            userId={USER_ID}
+            focusFallbackRef={nextHeadingRef}
+          />
+          <NextHeading />
+        </>
       );
     }
 
@@ -525,6 +594,28 @@ describe("QuickSetup", () => {
       ).toBeEnabled();
     });
 
+    /*
+     * s66c2 review m-4. A stale site has reported in before, so step 2 is
+     * done and setup is complete, but the page's badge says Stale: no report
+     * recently. The header said "… is live" above that badge.
+     */
+    it("says installed, not live, for a stale site, as its Stale badge does", () => {
+      mockUseSiteActivation.mockReturnValue(activation({ data: INSTALLED }));
+
+      renderQuickSetup({ ...LIVE_SITE, status: "stale" });
+
+      expect(
+        screen.getByRole("heading", {
+          level: 2,
+          name: "Setup complete — Client Site is installed",
+        }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /is live/ })).toBeNull();
+      expect(screen.getByRole("listitem", { current: "step" })).toBe(
+        stepNamed("Start editing"),
+      );
+    });
+
     it("keeps waiting while the site is not live, and says so", () => {
       renderQuickSetup();
 
@@ -569,13 +660,14 @@ describe("QuickSetup", () => {
     });
 
     /*
-     * Plan Task 3: "Edit website is disabled until step 2 is done". Only the
-     * current step is expanded and the current step is the first incomplete
-     * one, so step 3's actions never render before step 2 is done: there is
-     * no state in which a disabled Edit website would show. What the rule
-     * protects is pinned here instead: before the snippet reports in, the
-     * quick setup offers no usable Edit website (opening a site the widget
-     * is not on yet would show the owner nothing), and once it has, it does.
+     * Plan Task 3, as amended by the s66c2 review (m-1): Edit website and Add
+     * editor appear when step 3 becomes current, once step 2 is done. Before
+     * that, step 3 shows only its title and one line. The plan first said
+     * "disabled until step 2 is done", a state that cannot occur: only the
+     * current step is expanded, and the current step is the first
+     * incomplete one. This is about the quick setup's own step, not about
+     * editing being blocked: s66c1's header Edit website stays enabled while
+     * the site awaits install.
      */
     it("offers no usable Edit website until step 2 is done", () => {
       const view = renderQuickSetup();
