@@ -1,5 +1,14 @@
 import { render, screen } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import {
+  Children,
+  Suspense,
+  cloneElement,
+  isValidElement,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 
 const mockIsAgencyCheckoutEnabled = jest.fn();
 
@@ -43,6 +52,7 @@ jest.mock("@/components/billing/BillingDashboard", () => ({
 }));
 
 import BillingPage from "../page";
+import { BILLING_PAGE_COPY } from "@/components/billing/billing-page-copy";
 
 async function renderBillingDashboardSection() {
   const page = BillingPage() as ReactElement<{
@@ -55,6 +65,27 @@ async function renderBillingDashboardSection() {
   render(await Section());
 }
 
+/**
+ * What the browser paints while the grant read is pending: the page's tree
+ * with every Suspense boundary replaced by its fallback. Rendering the async
+ * section itself in jsdom would only exercise React's client-side refusal of
+ * async components, not the page.
+ */
+function firstPaint(node: ReactNode): ReactNode {
+  if (!isValidElement(node)) return node;
+  const element = node as ReactElement<{
+    children?: ReactNode;
+    fallback?: ReactNode;
+  }>;
+  if (element.type === Suspense) return element.props.fallback;
+  if (element.props.children === undefined) return element;
+  return cloneElement(
+    element,
+    undefined,
+    Children.map(element.props.children, firstPaint),
+  );
+}
+
 describe("BillingPage", () => {
   const originalAgencyCheckoutEnabled = process.env.AGENCY_CHECKOUT_ENABLED;
 
@@ -64,6 +95,53 @@ describe("BillingPage", () => {
     } else {
       process.env.AGENCY_CHECKOUT_ENABLED = originalAgencyCheckoutEnabled;
     }
+  });
+
+  /*
+   * s66b1 review M-1 (ADR 053: never wrap PageShell). The page used to keep a
+   * `min-h-screen bg-surface-1` div around its Suspense: a darker band that,
+   * once the page container went, sat flush at the content's edge and forced
+   * ~120px of empty scroll on short states. The layout owns the canvas; the
+   * page's outermost element is the frame itself.
+   */
+  it("renders the frame as its outermost element, with no band around it", () => {
+    const { container } = render(<>{firstPaint(BillingPage())}</>);
+
+    const root = container.firstElementChild;
+    expect(root).toHaveAttribute("data-page-shell");
+    expect(container.querySelector(".min-h-screen")).toBeNull();
+    expect(container.querySelector(".bg-surface-1")).toBeNull();
+  });
+
+  /*
+   * s66b1 review m-4. The fallback is what the page paints until the client
+   * takes over, and `BillingDashboard`'s loading state is what it paints
+   * next. Its title and description were typed twice, unpinned, and its body
+   * lacked the trial-status skeleton the client's loading state opens with,
+   * so the body shifted down on hand-off.
+   */
+  it("paints the client's loading frame: the shared title, description and trial skeleton", () => {
+    render(<>{firstPaint(BillingPage())}</>);
+
+    const header = document.querySelector("[data-page-header]");
+    expect(
+      screen.getByRole("heading", { level: 1, name: BILLING_PAGE_COPY.title }),
+    ).toBeInTheDocument();
+    expect(header).toHaveTextContent(BILLING_PAGE_COPY.description);
+    expect(
+      screen.getByRole("status", { name: "Loading trial status" }),
+    ).toBeInTheDocument();
+  });
+
+  // A server component imports this copy. From a "use client" module the
+  // constants would arrive as client references, not strings, and the
+  // fallback would lose its title; jsdom cannot see that, so the source can.
+  it("keeps the shared copy in a module a server component can import", () => {
+    const source = readFileSync(
+      path.join(process.cwd(), "src/components/billing/billing-page-copy.ts"),
+      "utf8",
+    );
+    expect(source).not.toMatch(/^\s*["']use client["']/m);
   });
 
   it("uses the shared Agency checkout guard for the sales surface", async () => {

@@ -72,7 +72,8 @@ export default function DashboardLayout({
   }, [user]);
 
   // A skeleton in the shape of the shell, so the page does not flash from a
-  // centred spinner into a two-column layout.
+  // centred spinner into a two-column layout. Same 56px header and brand row
+  // as the frame below, so nothing moves when auth resolves.
   if (loading) {
     return (
       <div
@@ -81,9 +82,11 @@ export default function DashboardLayout({
         aria-label="Loading dashboard"
       >
         <div className="hidden lg:block">
-          <div className="fixed left-0 top-0 h-screen w-64 border-r border-border bg-card p-4">
-            <Skeleton className="mb-8 h-8 w-32" />
-            <div className="space-y-2">
+          <div className="fixed left-0 top-0 h-screen w-64 border-r border-border bg-card">
+            <div className="flex h-14 items-center border-b border-border px-5">
+              <Skeleton className="h-7 w-32" />
+            </div>
+            <div className="space-y-2 p-3">
               {Array.from({ length: 8 }, (_, i) => (
                 <Skeleton key={i} className="h-10 w-full" />
               ))}
@@ -91,10 +94,10 @@ export default function DashboardLayout({
           </div>
         </div>
         <div className="lg:pl-64">
-          <div className="h-16 border-b border-border bg-card" />
+          <div className="h-14 border-b border-border bg-card" />
           <div className="mx-auto w-full max-w-[1180px] space-y-6 p-4 sm:p-6 lg:p-8">
             <Skeleton className="h-9 w-56" />
-            <Skeleton className="h-40 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full" />
           </div>
         </div>
       </div>
@@ -120,7 +123,7 @@ export default function DashboardLayout({
     <div className="min-h-screen bg-background">
       <a
         href="#dashboard-main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:ring-2 focus:ring-ring"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-control focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:shadow-md focus:ring-2 focus:ring-ring"
       >
         Skip to content
       </a>
@@ -130,9 +133,19 @@ export default function DashboardLayout({
       <div className="lg:pl-64">
         {/* The header carries location (breadcrumbs), not a greeting. It used
             to read "Welcome back!" on every screen, directly above each page's
-            own h1 — two competing titles saying nothing about where you are. */}
-        <header className="sticky top-0 z-30 border-b border-border bg-card/85 backdrop-blur-md">
-          <div className="mx-auto flex h-16 w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+            own h1 — two competing titles saying nothing about where you are.
+
+            56px including its rule (`h-14` on the header itself, border-box),
+            the same as the sidebar's brand row, so the two rules meet in one
+            line (s66b1). Opaque and unblurred: it was `bg-card/85` with a
+            backdrop blur, which the flat system forbids. Its row reuses the
+            main column's measure and gutters, so the breadcrumbs start on
+            every page's h1 edge. */}
+        <header
+          data-app-header
+          className="sticky top-0 z-30 h-14 border-b border-border bg-card"
+        >
+          <div className="mx-auto flex h-full w-full max-w-[1180px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
             <div className="flex min-w-0 items-center gap-3">
               <div className="w-10 shrink-0 lg:hidden" />
               <Breadcrumbs />
@@ -140,9 +153,12 @@ export default function DashboardLayout({
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
+                {/* The control is square (`rounded-control`), so its focus
+                    ring is square; only the avatar inside it is round. */}
                 <Button
                   variant="ghost"
-                  className="relative h-9 w-9 shrink-0 rounded-full p-0"
+                  size="icon"
+                  className="relative shrink-0"
                 >
                   <Avatar className="h-9 w-9">
                     <AvatarFallback className="bg-surface-2 text-sm font-semibold text-foreground">
