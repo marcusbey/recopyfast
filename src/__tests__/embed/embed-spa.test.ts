@@ -1476,3 +1476,161 @@ describe("AC 7 — edit mode across an in-app navigation", () => {
     expect(footer.textContent).toBe("Live update");
   });
 });
+
+// PR #69 bot review, D3 (2026-10-08). The row index was a plain object keyed
+// by `element_id`, which is page data: an author-written `data-rcf-id`, or any
+// row a site-token holder reported. A row keyed `__proto__` became the index's
+// prototype, so ids missing from the response read inherited values; and an
+// update for an element whose id names an inherited member (`toString`,
+// `__proto__` with no row) wrote the row's fields onto that shared object —
+// `Object.prototype` itself, for every script on the host page.
+describe("rows keyed by any element id, __proto__ and constructor included", () => {
+  const POLLUTED = ["current_content", "metadata"];
+
+  function inherited() {
+    const probe = {} as Record<string, unknown>;
+    const fn = Object.prototype.toString as unknown as Record<string, unknown>;
+    return POLLUTED.filter(
+      (key) => probe[key] !== undefined || fn[key] !== undefined,
+    );
+  }
+
+  afterEach(() => {
+    for (const key of POLLUTED) {
+      delete (Object.prototype as unknown as Record<string, unknown>)[key];
+      delete (Object.prototype.toString as unknown as Record<string, unknown>)[
+        key
+      ];
+    }
+  });
+
+  it("applies each id's own row, reads nothing inherited, and writes nothing onto a shared prototype", async () => {
+    document.body.innerHTML = `
+      <h1 data-rcf-id="hero">Hero authored</h1>
+      <h2 data-rcf-id="__proto__">Proto authored</h2>
+      <h3 data-rcf-id="constructor">Constructor authored</h3>
+      <p data-rcf-id="toString">Plain authored</p>
+      <p data-rcf-id="current_content">Field authored</p>`;
+    await boot({
+      rows: {
+        "*": [
+          {
+            element_id: "__proto__",
+            original_content: "Proto authored",
+            current_content: "Proto published",
+          },
+          {
+            element_id: "constructor",
+            original_content: "Constructor authored",
+            current_content: "Constructor published",
+          },
+          {
+            element_id: "hero",
+            original_content: "Hero authored",
+            current_content: "Hero published",
+          },
+        ],
+      },
+    });
+
+    expect(byId("hero").textContent).toBe("Hero published");
+    expect(byId("__proto__").textContent).toBe("Proto published");
+    expect(byId("constructor").textContent).toBe("Constructor published");
+    expect(byId("toString").textContent).toBe("Plain authored");
+    expect(byId("current_content").textContent).toBe("Field authored");
+
+    // A realtime update for an id with no row creates that id's own row.
+    const rcf = (
+      window as unknown as {
+        recopyfast: { update(id: string, content: string): void };
+      }
+    ).recopyfast;
+    rcf.update("toString", "Plain updated");
+    rcf.update("current_content", "Field updated");
+    expect(inherited()).toEqual([]);
+
+    // Host write-backs: each element gets back its own copy, nothing else.
+    for (const id of ["toString", "current_content", "hero", "__proto__"]) {
+      byId(id).textContent = "Host copy";
+      await flushMicrotasks();
+    }
+    expect(byId("toString").textContent).toBe("Plain updated");
+    expect(byId("current_content").textContent).toBe("Field updated");
+    expect(byId("hero").textContent).toBe("Hero published");
+    expect(byId("__proto__").textContent).toBe("Proto published");
+    expect(inherited()).toEqual([]);
+  });
+});
+
+// PR #69 bot review, D2 (2026-10-08). A route change dropped a persistent
+// element's page-scoped entry but left its A/B markers. applyRow skips every
+// element marked `data-rcf-variant`, so the next page's published copy never
+// applied to it; and the variant's copy, written outside the write record
+// dropEntry compares, stayed on the next page and was reported there as its
+// authored copy.
+describe("an A/B variant on a persistent element leaves with its route", () => {
+  /** The tagline's id under each path, as a full load of that path gives it. */
+  async function taglineIds(paths: string[]) {
+    const ids: Record<string, string> = {};
+    for (const pagePath of paths) {
+      window.history.replaceState(null, "", pagePath);
+      spaShell();
+      renderPage("Learn");
+      await boot();
+      ids[pagePath] = stampOf(".tagline");
+      widget().destroy();
+      delete (window as unknown as Record<string, unknown>).ReCopyFast;
+    }
+    return ids;
+  }
+
+  async function bootOnOffersWithVariant(rows: FetchOptions["rows"]) {
+    const ids = await taglineIds(["/offers", "/pricing"]);
+    window.history.replaceState(null, "", "/offers");
+    spaShell();
+    renderPage("Offers");
+    const recorded = await boot({ rows, variantTarget: ids["/offers"] });
+    const tagline = document.querySelector(".tagline")!;
+    expect(tagline.textContent).toBe("Variant copy");
+    expect(tagline.getAttribute("data-rcf-variant")).toBe(VARIANT_ID);
+    return { ids, recorded, tagline };
+  }
+
+  it("applies the new route's published copy, not the old route's variant", async () => {
+    let pricingId = "";
+    const { ids, tagline } = await bootOnOffersWithVariant((pagePath) =>
+      pagePath === "/pricing"
+        ? [
+            {
+              element_id: pricingId,
+              original_content: "Persistent tagline",
+              current_content: "Tagline published for pricing",
+            },
+          ]
+        : [],
+    );
+    pricingId = ids["/pricing"];
+
+    await navigate("/pricing", "Pricing");
+
+    expect(tagline.getAttribute("data-rcf-id")).toBe(pricingId);
+    expect(tagline.hasAttribute("data-rcf-variant")).toBe(false);
+    expect(tagline.hasAttribute("data-rcf-test")).toBe(false);
+    expect(tagline.textContent).toBe("Tagline published for pricing");
+  });
+
+  it("puts the authored copy back where the new route has no row, and reports that copy", async () => {
+    const { recorded, tagline } = await bootOnOffersWithVariant(() => []);
+
+    await navigate("/about", "About");
+
+    expect(tagline.textContent).toBe("Persistent tagline");
+    expect(tagline.hasAttribute("data-rcf-variant")).toBe(false);
+    const aboutId = tagline.getAttribute("data-rcf-id")!;
+    const reported = discoveryBodies(recorded)
+      .flatMap((body) => Object.entries(body))
+      .filter(([id]) => id === aboutId)
+      .map(([, entry]) => entry.content);
+    expect(reported).toEqual(["Persistent tagline"]);
+  });
+});

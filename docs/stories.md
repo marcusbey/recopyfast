@@ -2756,7 +2756,7 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
   Evidence: `embed-spa.test.ts` (AC 7 block); e2e E5.
 - [x] AC 8, budget: the embed stays within its gzip ceiling. Any added byte is paid for in
   this branch, because raising a ceiling is a defect.
-  Evidence: 45,843 / 33,073 gz after the review, re-review and verification fixes, ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +806 / +825 against the funded floor.
+  Evidence: 45,841 / 33,073 gz after the review, re-review, verification and PR #69 review fixes (D2, D3; D1 deferred to `s67b-nested-edit-composition`), ceilings ratcheted down from 45,880 / 33,120 (`scripts/build-embed.mjs`, `build-size-gate.test.ts`); gross +804 / +825 against the funded floor.
 - [x] AC 9, degrades and never breaks (owner decision 5): no uncaught exception reaches the
   host page. The embed patches no host global: `history.pushState` and
   `history.replaceState` keep their identity. Route changes are detected by a path check on
@@ -2794,6 +2794,68 @@ build as is.
 
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.
+
+## Story s67b-nested-edit-composition — STUB (backlog)
+
+Owner decision, 2026-10-08, on the PR #69 fix run's byte overrun: **"Ship D2+D3 now, D1 as
+follow-up"**. D2 (A/B markers leave with the route) and D3 (null-prototype row index) shipped
+with s67. This story is D1. There is no research or plan until the owner schedules it.
+
+**Evidence: PR #69 bot review (Devin), D1, red** (`docs/reviews/s67-embed-spa-support.md`).
+A parent and a mapped descendant both have edited rows (`<h1>Buy <span>now</span></h1>`).
+Writing the parent (`writeText`) blanks the child's text, and the child's re-apply changes the
+parent's aggregate text. The observer re-applies each in turn until both hit the 10-write cap.
+One edit ends missing or mixed, and the host wins every later write-back. The bug is new with
+s67's reapply-on-overwrite. The fix run reproduced it in the `embed-spa.test.ts` harness: 30
+writes on that `h1` during boot.
+
+**Rule designed in the fix run (implemented and tested, not shipped).**
+- An element owns every text node beneath it, except those inside a descendant whose own copy
+  the embed applied in this page view. Such a descendant is a mapped element with a recorded
+  write: an edited row, a realtime update, a variant or an editor save. A write goes into the
+  owned text nodes only. The re-apply check, discovery, the Edit Board and the editor read
+  only the owned text.
+- "Has applied copy", not "is mapped". Protecting every stamped descendant breaks rows saved
+  on main that hold the parent's whole text: `<h1>Build faster with <span>AI</span></h1>`
+  edited once would render "…AIAI".
+- Spacing. The outer element owns `"Buy "` with its trailing space, so its row must be
+  `"Shop "`. A row of `"Shop"` renders "Shoptoday". So the editor reads and saves the owned
+  text untrimmed around such a descendant.
+- The restore on a route change ignores the rule and writes over the whole element. The
+  authored copy was recorded with the child's words inside it, and restoring only the owned
+  part gave "Buy nownow". Consequence: when a persistent parent and child are both edited, the
+  parent shows its whole authored text after navigation, and the child stays blank until the
+  host re-renders it.
+- Editor: on an outer element with such a descendant, text typed inside the descendant belongs
+  to the descendant, and the outer save does not keep it.
+- Tests that went red then green: the `h1` settles on "Shop today" in at most 3 writes, a
+  rescan writes nothing, and 12 alternating host write-backs are each undone in place; the
+  route-change restore, reported under the new path; the editor saves the outer element's
+  own copy ("Sell ").
+
+**Cost.** Measured in the fix run, D1 with D2+D3 built to 45,932 / 33,162 gz: +89 / +89 over
+the ceilings in force then (45,843 / 33,073). D1's own share over D2+D3 is +87 / +84:
+- the rule's core: +63 / +63;
+- the restore over the whole element: about +11 / +5;
+- the editor: about +12 / +12;
+- the identity check: +2 / +3.
+
+Behaviour-preserving micro-funding found about −10 at most. Re-measure against the ceilings in
+force when this story is planned (45,841 / 33,073 after s67).
+
+**Funding options measured against the D1+D2+D3 build.** Each one changes shipped behaviour,
+so each is the owner's call:
+- Drop discovery coalescing entirely (the 10 s spacing, the trailing report, the
+  10-per-page-view cap): −94 / −94, which fits. It brings back the research's risk of a live
+  feed hitting the 100/min discovery limit.
+- Keep the 10 s spacing, drop the trailing report and the cap: −70 / −70.
+- Drop only the 10-per-page-view cap: −21 / −19.
+- Stop observing shadow roots: −14 / −15.
+- A different rule, "outer edit wins": an inner element yields while its parent shows applied
+  copy. It costs +36 / +38 on top of D2+D3, against D1's +87 / +84. It is untested, and it
+  renders "Shop " rather than "Shop today".
+
+**Embed allocation:** TBD.
 
 ## s68 — security hardening (split into s68a / s68b / s68c)
 

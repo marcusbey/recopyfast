@@ -121,5 +121,19 @@ Minors:
 2. `recopyfast.src.js:751`: changing `node.parentNode === element` to `true` turns no behavioural test red;
    add `<h1><span>x</span>Title</h1>` receiving the copy in its direct text node.
 
-Max severity: minor
+## PR #69 bot review (Devin, 2026-10-08)
+
+- D1 (red) — `recopyfast.src.js:755` (`writeText`) with `applyRow` `:3777-3791` and the observer `:3913-3928`:
+  when a parent and a mapped descendant both have edited rows, writing the parent blanks the child's text, the
+  child's reapplication changes the parent's aggregate text, and they alternate until the 10-write caps — one
+  edit ends missing or mixed. New with s67's reapply-on-overwrite.
+- D2 (red) — `:3720` (`dropEntry`) with `applyVariants` `:3422-3452`: a persistent element keeps
+  `data-rcf-variant` after a route change, and `applyRow` skips every variant-marked element, so the new
+  route's published copy never applies.
+- D3 (red) — `:3885`: the row index is a plain object; a content response row with `element_id: "__proto__"`
+  changes its prototype and later lookups read inherited values.
+
+Orchestrator: D1–D3 go to a fix run (owner rule: fix bot findings before merge).
+
+Max severity: major
 Ship allowed: yes

@@ -240,15 +240,25 @@ const STALE_MARKER = "// @generated-from-sha256 ";
  *                  change: writeText finds the element's first direct text
  *                  node during its text-node walk instead of a sibling scan
  *                  before it
- *   45843 / 33073  measured after the verification fix — the new ceilings
+ *   45843 / 33073  measured after the verification fix — the ceilings until
+ *                  the PR #69 review fix
+ *   +2 / +5        PR #69 review fix (docs/reviews/s67-embed-spa-support.md,
+ *                  D2, D3): a route change drops the A/B markers with the
+ *                  entry, applyVariants writes through applyContentToElement,
+ *                  the row index is Object.create(null). D1 (nested edits,
+ *                  +89 / +89 measured) is deferred to s67b
+ *   −4 / −5        funded in the branch, inside s67's own code, no behaviour
+ *                  change: dropEntry reads data.element once, loadRows' cache
+ *                  closure as an arrow
+ *   45841 / 33073  measured after the PR #69 review fix — the new ceilings
  *
  * Gross against a funded floor (main with every deletion above and none of the
- * SPA work, measured 45037 / 32248): +806 / +825, final, review, re-review and
- * verification fixes included. Every funding line since the review is s67
- * code, so the floor does not move. build-size-gate.test.ts pins the same pair
- * and quotes the same gross.
+ * SPA work, measured 45037 / 32248): +804 / +825, final, review, re-review,
+ * verification and PR #69 review fixes included. Every funding line since the
+ * review is s67 code, so the floor does not move. build-size-gate.test.ts pins
+ * the same pair and quotes the same gross.
  */
-const MAX_BUNDLE_GZ = 45843;
+const MAX_BUNDLE_GZ = 45841;
 const MAX_WIDGET_GZ = 33073;
 
 /**

@@ -118,6 +118,30 @@ observation and in-place writes, and it enforces only what a human edited.
   page view, the first apply included: at most 10 in total. A host that keeps writing wins
   from its tenth write-back onwards.
 
+### Amended on the branch, 2026-10-08 (PR #69 bot review)
+
+- **Nested edited elements: deferred to s67b (D1).** An element and a mapped element inside
+  it can both have edited rows (`<h1>Buy <span>now</span></h1>`). They still fight. The
+  outer write blanks the inner copy, and the inner re-apply changes the outer text. The two
+  alternate until both hit the cap. The fix (a composition rule) measured +89 B gz, over the
+  ceilings. Owner decision, 2026-10-08: ship D2 and D3 now, D1 as a follow-up. The rule, its
+  cost and its funding options are in `docs/stories.md`, story
+  `s67b-nested-edit-composition`.
+- **A/B markers leave with the route (D2).** `dropEntry` removes `data-rcf-variant` and
+  `data-rcf-test` with the stamp, and `applyVariants` writes through the same recorded write
+  as a row. A persistent element that carried a variant on one page now receives the next
+  page's published copy, or gets its authored copy back where that page has no row, instead
+  of keeping the variant and having it reported as the next page's authored copy. Routed
+  through that write, a variant also leaves an element being edited alone and swaps an
+  image's source instead of appending text to the `<img>`. It also counts as one of the
+  element's writes in that page view.
+- **The row index has no prototype (D3).** An `element_id` is page data. A row keyed
+  `__proto__` became the index's prototype, and an update for an id naming an inherited member
+  (`toString`, `__proto__` with no row) wrote onto that shared object, `Object.prototype`
+  included. The index is `Object.create(null)`. The rows cache is keyed by the normalized
+  path, which always starts with `/`; the A/B lookups go through the element Map or by
+  server-minted test ids.
+
 ## Considered options
 
 - **Wrap `history.pushState` / `replaceState` and listen to `popstate`.** Rejected.
@@ -196,6 +220,10 @@ observation and in-place writes, and it enforces only what a human edited.
     reuses in place keep their stamps. Until finding A's fix, with the Navigation API, the
     embed's own restores were such a batch on every page with an applied edit, with no host
     change at all. Now only the host's own changes trigger it.
+  - Nested edited elements, deferred to s67b. When an element and a mapped element inside it
+    both have edited rows, their writes alternate until both hit the 10-write cap. One edit
+    then ends missing or mixed, and the host wins every later write-back. This is a known
+    gap (PR #69 review, D1).
   - The lazy-loader case, where an edited image's `src` is swapped by attribute and no
     attribute observer exists. This is a known gap.
   - `applyImageSource` still removes `<picture><source>` nodes. That is the same hazard class

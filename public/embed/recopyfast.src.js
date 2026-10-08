@@ -3439,12 +3439,12 @@
         var elementData = self.elements.get(targetElementId);
         if (!elementData || !elementData.element) return;
 
-        // Replace content
-        if (elementData.element.tagName === 'INPUT' || elementData.element.tagName === 'TEXTAREA') {
-          elementData.element.value = variant.variant_content;
-        } else {
-          writeText(elementData.element, variant.variant_content);
-        }
+        // Replace content. Through the one writer of applied copy, so the
+        // write is recorded like a row's: dropEntry puts the authored copy
+        // back when the route changes (PR #69 review, D2). It also leaves an
+        // element being edited alone, and swaps an image's source instead of
+        // appending text to the <img>.
+        self.applyContentToElement(elementData, variant.variant_content);
 
         // Add data attributes for debugging/tracking
         elementData.element.setAttribute('data-rcf-test', test.id);
@@ -3711,12 +3711,25 @@
      * Forget an entry. If the embed wrote it and it still shows that copy, the
      * authored text comes back first: otherwise the old page's published copy
      * would be discovered as the new page's authored copy (s65a's invariant).
+     *
+     * TOMBSTONE (PR #69 review, D2). The A/B markers used to stay. applyRow
+     * leaves every element marked `data-rcf-variant` to its variant, so a
+     * persistent element (a header tagline) carrying the old page's variant
+     * never received the new page's published copy; and the variant's copy,
+     * written outside the record compared here, stayed on the new page and
+     * was reported as its authored copy. The markers now leave with the entry,
+     * and the variant's write is recorded (applyVariants): the next rescan
+     * applies a variant only where a test targets the new page's id, and
+     * otherwise the new page's own row.
      */
     dropEntry(data, id) {
-      if (data.written === this.getElementText(data.element)) {
+      const element = data.element;
+      if (data.written === this.getElementText(element)) {
         this.applyContentToElement(data, data.originalContent);
       }
-      if (data.path) data.element.removeAttribute('data-rcf-id');
+      element.removeAttribute('data-rcf-variant');
+      element.removeAttribute('data-rcf-test');
+      if (data.path) element.removeAttribute('data-rcf-id');
       this.elements.delete(id);
     }
 
@@ -3734,7 +3747,7 @@
       const path = this.pagePath;
       const cache = this.rows || (this.rows = {});
       if (!cache[path]) {
-        cache[path] = this.hydrateStoredContent().then(function(index) {
+        cache[path] = this.hydrateStoredContent().then((index) => {
           if (!index) delete cache[path];
           return index;
         });
@@ -3878,7 +3891,7 @@
       // Everything the server already holds for this site joins the union:
       // discovery is only worth a write when the page shows something absent
       // from it. The rows themselves are indexed by id for loadRows' cache.
-      const index = {};
+      const index = Object.create(null);
       for (const row of rows) {
         if (row && row.element_id) {
           this.serverKnownElementIds.add(row.element_id);
