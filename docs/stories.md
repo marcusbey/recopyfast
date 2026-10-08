@@ -2614,59 +2614,259 @@ Embed allocation: 0 bytes.
 Split from `s66-app-design-system` at research. It completes the original story's AC 3 and AC 4
 on every app page, using s66a's primitives, radius guard and layout harness.
 
-As a site owner, every app page sits in the same shell: a 56 px header and content up to 1180 px
-wide with 16/24/32 px gutters. Every page opens with the same title row (a 24/600 h1, actions on
-the right) and aligns its headings, filters, panels and tables to one left edge. No page scrolls
-sideways or clips content at 375, 768, 1280 or 1920 px.
+As a site owner, every app page sits in the same frame:
+- a 56 px header;
+- content up to 1180 px wide, with 16/24/32 px gutters;
+- the same title row on every page (a 24/600 h1, actions on the right);
+- one left edge shared by headings, filters, panels and tables.
+
+No page scrolls sideways or clips content at 375, 768, 1280 or 1920 px.
 
 Owner request, 2026-10-07 (quoted in s66a): "inspect all the application pages and improve the
 design. specialy the layout and alignement … make sure it's responsive." Owner decisions,
 2026-10-08: 56 px header; 24/600 page titles; content about 1180 px wide with 16/24/32 px
 gutters (research values; refine them only with evidence).
 
-Measured defects to close (research § Current-state audit, per page):
-- Four title styles: h1 32/600; h1 30/700; on Analytics an h2 24/700 with no h1; on site
-  detail an h3 inside a card.
-- Billing nests `container mx-auto px-4`, which puts its title 16 px to the right of every
-  other page's.
-- Analytics overflows the page by 3 px at 1280.
-- At 375, the Sites status filter clips "Stale" (395 px of content in 341 px), and Settings
-  hides 2 of its 5 tabs.
-- At 1024 px and wider, the Overview metric grid leaves its right third empty.
-- Checklists nest three boxes deep.
+**Split again at design, 2026-10-08, into s66b1 and s66b2.** That day the owner gave s66c
+everything under `/dashboard/sites`:
+- the light list;
+- the per-site subpages;
+- the quick-setup stepper and the advanced settings;
+- the Edit Website dialog;
+- the site components.
 
-Complexity: 4 (every app page; visual proof at four widths). Dependencies: s66a and s66c merged,
-because s66b lays out the s66c site page rather than the retired in-place detail view. Branch
-`feature/s66b-app-page-layout`.
+s66b now provides the page frame that s66c builds on, and applies it to every other app page,
+the sidebar and the header. The frame must land first, so:
+- **Order:** s66b1 → then s66c and s66b2 in parallel. They touch different files; whichever
+  merges second rebases the shared ones.
+- **This changes s66c's dependency:** s66c now depends on s66b1, not the reverse.
+- **Docs:** design `docs/designs/s66b-app-page-layout.md` (+ `.html`); plan
+  `docs/plans/s66b-app-page-layout.md` (Part 1 = s66b1, Part 2 = s66b2); decision
+  [ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md).
 
-- [ ] **AC 1 — One shell.** The header in `src/app/dashboard/layout.tsx` is 56 px tall. Content
-  is `max-w-[1180px]` with gutters of 16, 24 and 32 px below 640, from 640 and from 1024 px. No
-  page nests a second container (Billing's is removed). The harness measures the h1's left x on
-  every app page at each width and finds a single value per width.
-- [ ] **AC 2 — One title.** Every app page renders exactly one h1, through `PageHeader`, at
-  24/600 (`.text-display` becomes a fixed 24 px with −0.015em tracking). Analytics, Content and
-  Settings stop titling themselves. No `font-bold` (700) remains on app surfaces; an extension
-  of the s66a design guard enforces it.
-- [ ] **AC 3 — One left edge.** On every app page, the page header, the filter row, the first
-  panel and any table share the page's left x (harness, ± 0.5 px).
-- [ ] **AC 4 — No sideways scroll, no clipping.** None of these pages scrolls horizontally or
-  clips content at 375, 768, 1280 or 1920 px: Overview, Sites, the site page (all tabs),
-  Content, Analytics, Settings, Billing, Login, Signup, Auth error and the `/edit` hub. That
-  includes Analytics at 1280, and the Sites status filter and the Settings tabs at 375: every
-  option stays inside its container's box, none hidden behind a scrollbar. Screenshots are
-  committed under `docs/designs/s66b-app-page-layout/after/`.
-- [ ] **AC 5 — Radius baseline empty, panels flat.** Every reachable app-surface file passes the
-  radius guard with zero offenders. Static panels cast no shadow and do not lift on hover:
-  app surfaces no longer use `.surface-interactive`, which marketing keeps.
-- [ ] **AC 6 — No behaviour change.** The unit suite and the e2e flows pass, and no route or
-  label changes. The PR lists any test that pins a layout class, with its reason. Text contrast
-  meets AA on every changed surface (harness).
+Measured defects, re-verified in code at `d4dae46` (after s66a):
+- **Four title styles:**
+  - `.text-display` (a 26–32 px clamp, 600), on Overview and Sites through `PageHeader`, and
+    hand-rolled on Billing;
+  - 30/700 on Content and Settings;
+  - an h2 at 24/700 with no h1 on Analytics, which shows no title at all while sites load;
+  - an h3 inside a card on site detail (s66c).
+- **Billing** nests `container mx-auto px-4` in all five of its states and in its Suspense
+  fallback. Its title sits 16 px right of every other page's.
+- **Analytics** puts the title, the site select, two date inputs and two export buttons in one
+  non-wrapping row, which overflows the page by 3 px at 1280 (research measurement; code path
+  unchanged).
+- **Header and sidebar.** The header is 64 px, translucent with a backdrop blur, and the sidebar
+  brand row matches its 64 px. Sidebar items, rail, plan box and brand tile are rounded. The
+  mobile overlay blurs.
+- **Overview's metric grid** leaves its right third empty at 1024 px and wider.
+- **Standalone pages.** `/login`, `/signup` and `/auth/error` have no h1 (`CardTitle` is an h3).
+- **Flatness.** `.surface-interactive` (lift plus shadow) is on two app call sites, and
+  `hover:shadow-md` is on `ContentElementCard`.
+- **Weight.** `font-bold` appears 13 times in 5 reachable files.
+- **Radius baseline.** 45 files and 122 offences:
+  - 3 files / 10 offences are the shell's (s66b1);
+  - 28 files / 63 are s66b2's;
+  - 14 files / 49 are s66c's (the site components).
+- **Already fixed by s66a, proven here.** The Settings tabs wrap at 375. The Sites status
+  filter's clipping at 375 is s66c's now.
 
-Not in this story:
-- off-palette colour: the Analytics icon hues, Billing's emoji, and the emerald DOM toast in
-  `EditWebsiteButton`, which needs design-system gap 1, a toast primitive (research § Off-system
-  colour; follow-up);
-- the marketing site.
+`.text-display` is not repurposed: `/blog` uses it, and `globals-css.test.ts` pins it
+byte-identical. The page title gets `.text-page-title` (ADR 053).
+
+Not in s66b (either part):
+- **Everything under `/dashboard/sites` and the site components (s66c):**
+  - `SiteDetailView`, `SiteCard`, `ShareButton`, `ShareSiteDialog`, `ShareLinkCard`,
+    `SiteRegistrationModal`, `ActivationChecklist`, `EditWebsiteButton`;
+  - `SiteEditorsCard`, `SiteEditorRow`, `InviteEditorForm`, `SiteInstallationCard`,
+    `DomainVerification`, `WebhooksPanel`, `BulkOperations`;
+  - `VersionHistoryPanel`, `VersionPreviewDialog`, `VersionTimelineItem`.
+- **Off-palette colour.** The Analytics icon hues, Billing's emoji and the "PRO PLAN" copy, and
+  the emerald DOM toast in `EditWebsiteButton`. The toast needs design-system gap 1, a toast
+  primitive (research § Off-system colour; follow-up).
+- **`.text-title` from 17 to 16 px.** It is pinned byte-identical and was never in these ACs.
+- **The marketing site and `/blog`.**
+
+Embed allocation: 0 bytes.
+
+## Story s66b1-app-shell — one frame and one title on every app page
+
+Complexity: 3. It covers the shell files, a new composition primitive and five page headers,
+plus a guard and the harness at four widths. Dependencies: s66a merged (done). **Blocks s66c.**
+Branch `feature/s66b1-app-shell` (this design's worktree branch,
+`feature/s66b-app-page-layout`, is renamed at Execute, as s66a did).
+
+> Execute, 2026-10-08: AC 2–6 are implemented, and their source-guard and RTL proofs are green.
+> Their harness proof (`app pages @375/@768/@1280/@1920`) has not run yet: no local Supabase
+> was available, so CI's E2E job is its first run. Tick AC 2–6 when that job is green.
+
+- [x] **AC 1 — `PageShell` and `PageHeader`.** `src/components/ui/page-shell.tsx` exports
+  `PageShell({ title, eyebrow?, meta?, description?, actions?, nav?, children })`.
+  - Its root is `[data-page-shell]`, a column with gaps of 24 px (16 below 640).
+  - It renders `PageHeader` (`header[data-page-header]`): exactly one h1 in the new
+    `.text-page-title` (24/32, 600, −0.015em).
+  - `meta` sits inline after the h1. `actions` are on the title row at ≥640 and in their own
+    row after the description below 640. `nav` sits under the header.
+  - The children render as direct children of the root.
+  - `.text-display` stays byte-identical.
+
+  Proved by:
+  - `src/components/ui/__tests__/page-shell.test.tsx` (new): one h1; every slot renders in
+    order; the children are direct children;
+  - a new `.text-page-title` case in `src/__tests__/design/globals-css.test.ts` (the existing
+    cases are unchanged).
+- [ ] **AC 2 — The frame.** In `src/app/dashboard/layout.tsx`:
+  - The header is 56 px, opaque `bg-card`, with no blur. Its inner row uses the main column's
+    `max-w-[1180px]` and gutters (16 / 24 / 32 at <640 / ≥640 / ≥1024).
+  - The sidebar brand row is 56 px with a bottom rule level with the header's.
+  - Sidebar items, the active rail, the plan box and the brand tile are square. The tile's text
+    is weight 600.
+  - Below 1024, the menu button is centred in the header over its spacer at every gutter, and
+    the overlay does not blur.
+  - `layout.tsx`, `DashboardNavigation.tsx` and `Breadcrumbs.tsx` leave
+    `src/__tests__/design/radius-baseline.json`.
+
+  Proved by:
+  - the new harness tests `app pages @375/@768/@1280/@1920` in `e2e/app-layout.spec.ts`:
+    header height 56 ± 0.5; at ≥1024 the brand row's bottom equals the header's;
+  - `radius-guard.test.ts`, unchanged; its baseline loses 3 entries.
+- [ ] **AC 3 — One title on every non-sites app page, in every state.** Overview, Content,
+  Analytics, Settings and Billing each render exactly one `PageShell`, so exactly one h1 at
+  24/600:
+  - Content and Settings drop their local 30/700 headers.
+  - Analytics' title is the h1 "Analytics". It was the h2 "Analytics Dashboard", the
+    **one listed label change**; no test pins it. `AnalyticsDashboard` renders the frame in its
+    loading, error, empty and ready states, and `analytics/page.tsx` no longer returns a
+    titleless spinner.
+  - Billing renders one `PageShell` across its five states and its Suspense fallback. Its
+    no-plan heading becomes an h2.
+
+  Proved by:
+  - `src/__tests__/design/page-shell-guard.test.ts` (new):
+    - every routed `src/app/dashboard/**/page.tsx`, or its listed delegate, renders
+      `<PageShell`;
+    - `<PageHeader` appears only in `ui/page-shell.tsx`;
+    - no `<h1` on the app surface outside `ui/page-header.tsx` and the four standalone pages;
+    - `src/app/dashboard/teams/page.tsx` is exempt as a redirect;
+    - the pending list holds `src/app/dashboard/sites/page.tsx` only, is shrink-only, and s66c
+      empties it;
+    - self-test fixtures prove each rule fires;
+  - new RTL tests counting h1s per state:
+    - `src/__tests__/components/dashboard/AnalyticsDashboard.page-shell.test.tsx`;
+    - `src/__tests__/app/dashboard/content-page-shell.test.tsx`;
+    - `src/components/billing/__tests__/BillingDashboard.page-shell.test.tsx`;
+  - the harness (one visible h1 per page at each width).
+- [ ] **AC 4 — One left edge.** On those five pages at 375, 768, 1280 and 1920 px:
+  - the h1's left x is 16 / 24 / 288 (± 0.5) at 375 / 768 / 1280. At 1920 it is the main
+    column's left plus 32 (530 with overlay scrollbars; the 1180 column centres in whatever
+    width the scrollbar leaves). It is one value per width across the five pages;
+  - `[data-page-shell]` has at least two element children, and every visible one starts on
+    that x.
+
+  To get there:
+  - Billing's container is removed, and no `container` utility remains on the app surface (a
+    guard rule);
+  - Content's filter row leaves its card;
+  - Analytics' site select and dates become a wrapping filter row under the header, with the
+    `Input` primitive for the dates;
+  - the exports become header actions.
+
+  Proved by the harness and the guard.
+- [ ] **AC 5 — No sideways page scroll, readable chrome.** The five pages have
+  `documentElement.scrollWidth ≤ clientWidth` at 375, 768, 1280 and 1920 px (Analytics at 1280
+  included). At 1280, in dark and in light, these contrast at least 4.5:1 with their own
+  background: the h1, the description, the breadcrumb, and the inactive and active sidebar
+  items. Proved by the harness.
+- [ ] **AC 6 — Contract handed over, nothing else moves.**
+  - The unit suite and the e2e flows pass.
+  - No route changes. No label changes except AC 3's Analytics title.
+  - Existing tests are not edited. The only changes to test files are:
+    - the baseline entries in AC 2;
+    - the Playwright contract, rising by exactly 4: `playwright.config.ts` and
+      `.github/workflows/ci.yml`, on top of whatever s66c has added if it merged first;
+    - the capture root in `e2e/app-layout.spec.ts`, parameterised so s66b writes to
+      `docs/designs/s66b-app-page-layout/after/` (s66a's assertions are unchanged).
+  - `docs/design-system.md` records `PageShell`, `.text-page-title`, the 16/24 rhythm and the
+    shell values as in code. ADR 053 is merged.
+  - Lint, type-check, format, build and the full suite pass.
+
+Follow-up (review m-8): scrollbar-gutter: stable deferred — with a reserved gutter,
+react-remove-scroll-bar adds body margin-right on Radix scroll lock, shifting layout on
+classic-scrollbar systems; fix options: compensate via --removed-body-scroll-bar-size /
+data-scroll-locked margin reset, modal={false}, or reserve the gutter on the scroll container only.
+
+Embed allocation: 0 bytes.
+
+## Story s66b2-app-page-passes — flat, square, nothing clipped
+
+Complexity: 3. It is many files, but mostly class-level changes, against guards that already
+exist. Dependencies: s66b1 merged. It runs in parallel with s66c. Branch
+`feature/s66b2-app-page-passes`.
+
+- [ ] **AC 1 — Radius at zero on s66b's files.** Each of the 28 s66b2-owned baseline files
+  (listed in the plan; 63 offences) has zero radius offences, and its entry is deleted. The only
+  `rounded-full` left is the rule's own exceptions: `Avatar`, status dots of 8 px or less, and
+  spinners. `UserMenu` uses the `Avatar` primitive and keeps the classes
+  `UserMenu.test.tsx:258` pins.
+  - If the baseline is then empty (s66c merged first), the guard drops the baseline and becomes
+    zero-tolerance on the whole app surface. That change to `radius-guard.test.ts` is listed in
+    the PR.
+  - If it is not empty, only s66c entries remain, and s66c flips it.
+
+  Proved by `src/__tests__/design/radius-guard.test.ts`.
+- [ ] **AC 2 — Flat panels.**
+  - No `surface-interactive`, `hover:shadow-*`, `group-hover:shadow-*`, `transition-shadow` or
+    `hover:-translate-y-*` on the app surface. `ui/metric.tsx` and Overview's site rows drop the
+    lift, and `ContentElementCard` drops `hover:shadow-md`. Marketing keeps
+    `.surface-interactive`.
+  - A static `shadow-*` appears only on floating primitives (dialog, menu, select content, Card
+    `elevated`, the version sheet) and on the skip link's `focus:` state.
+
+  Proved by:
+  - new rules in `page-shell-guard.test.ts` (with self-tests; pending: s66c-owned files only,
+    shrink-only);
+  - the harness: no element in `main` has a `box-shadow` at rest, and a hovered Overview metric
+    and site row keep `transform: none` and `box-shadow: none`.
+- [ ] **AC 3 — No 700 in the app.** No `font-bold`, `font-extrabold` or `font-black` on the app
+  surface: the nine in `AnalyticsDashboard` and the rest become `font-semibold`. Proved by a new
+  rule in `page-shell-guard.test.ts` (pending: `SiteDetailView.tsx`, s66c, shrink-only).
+- [ ] **AC 4 — Page passes.**
+  - **Overview.** The metric grid fills its width: at ≥1024 the lead takes a third and spans
+    three rows, and the other three take two thirds. "Your sites" is one panel of divided rows.
+    `loading.tsx` matches.
+  - **Billing.** Inner insets, tiles, progress tracks and the benefits box are square.
+    `UpgradeDialog` and `ThemePicker` drop `border-2` (selected: accent border plus tick).
+  - **Settings.** The tabs at 375 keep every trigger inside the tab list's box.
+  - **Content.** The error and empty icon circles become `IconTile`s.
+  - **Error surfaces.** `dashboard/error.tsx` and `ErrorBoundary` are square.
+
+  Proved by the harness:
+  - at ≥1024, the rightmost metric's right edge equals the content's right edge (± 0.5);
+  - at 375, every tab trigger lies inside the `tablist`'s box;
+
+  and by the radius guard.
+- [ ] **AC 5 — Nothing clipped, standalone pages included.** On Overview, Content, Analytics,
+  Settings and Billing, and on new signed-out harness tests
+  `standalone pages @375/@768/@1280/@1920` for `/login`, `/signup`, `/auth/error` and `/edit`
+  (+4 tests):
+  - no page-level horizontal scroll;
+  - no visible element whose `overflow-x` is not `visible` has `scrollWidth` more than 1 px over
+    its `clientWidth`. Form controls, `text-overflow: ellipsis`, `sr-only` elements and a
+    `CodeBlock` `pre` are excepted.
+
+  Each standalone page has exactly one h1 in `.text-page-title`, a square logo tile, and
+  `IconTile`s in place of circles. With `RCF_LAYOUT_SCREENSHOTS=1`, the harness writes every
+  page at the four widths to `docs/designs/s66b-app-page-layout/after/`, with fixture data only.
+- [ ] **AC 6 — No behaviour change.**
+  - The unit suite and the e2e flows pass. No route or label changes.
+  - Existing tests change only where the PR lists them:
+    - the baseline entries;
+    - `radius-guard.test.ts`, if AC 1 flips it;
+    - the Playwright contract (+4).
+  - At 1280, in dark and in light, body and muted text contrast at least 4.5:1 on every changed
+    surface (harness).
+  - `docs/design-system.md` statuses for s66b flip to "in code".
+  - Lint, type-check, format, build and the full suite pass.
 
 Embed allocation: 0 bytes.
 

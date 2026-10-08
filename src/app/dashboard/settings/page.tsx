@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageShell } from "@/components/ui/page-shell";
 import { useAuth } from "@/contexts/AuthContext";
 import { ApiKeysPanel } from "@/components/settings/ApiKeysPanel";
 import { ThemePicker } from "@/components/settings/ThemePicker";
@@ -159,15 +160,12 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Settings</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your account and preferences
-        </p>
-      </div>
-
+    // The Tabs stay the first section rather than moving into the shell's
+    // `nav` slot: Radix Tabs must wrap both its list and its panels.
+    <PageShell
+      title="Settings"
+      description="Manage your account and preferences"
+    >
       <Tabs defaultValue="profile" className="space-y-6">
         <TabsList>
           <TabsTrigger value="profile">
@@ -391,6 +389,6 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+    </PageShell>
   );
 }

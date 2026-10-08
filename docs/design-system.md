@@ -126,7 +126,7 @@ App type scale — use the utility, not ad-hoc sizes:
 
 | Role | Class | Spec | Status |
 |---|---|---|---|
-| Page title | `.text-display` via `PageHeader`, one `h1` per page | **24px**, 600, tracking `-0.015em` (was `clamp(1.625rem, 1.35rem + 1.1vw, 2rem)`) | s66b |
+| Page title | `.text-page-title`, rendered by `PageHeader` inside `PageShell`; one `h1` per page | **24/32**, 600, tracking `-0.015em`, `--text-strong` (was `.text-display`, `clamp(1.625rem, 1.35rem + 1.1vw, 2rem)`). `.text-display` is not repurposed: it stays the `/blog` h1 ([ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md)) | in code (s66b1) |
 | Panel, card and dialog title | `CardTitle`, `DialogTitle` | **16px** (`text-base`), 600, line-height 24 | s66a |
 | Section title inside a panel | `.text-title` | `1.0625rem`, 600, tracking `-0.012em`; converges on 16px | 16px in s66b |
 | Eyebrow / meta label | `.text-eyebrow` | `0.6875rem`, 600, uppercase, tracking `+0.075em` | — |
@@ -218,21 +218,29 @@ straight and clean. like 'supabase' website" (2026-10-07). Stricter than Supabas
 | Dialog footer | `px-6 py-3`, `border-t` | s66a |
 | Panel (`Card`) padding | 24 (`px-6`, header `pt-5 pb-4`) | in code; 16 below 640 lands in s66b |
 | Panel toolbar row | 48 tall, `border-b` | s66b |
-| Page header to content | 24 | s66b |
+| Page header to content | 24 (16 below 640): the `PageShell` gap | in code (s66b1) |
 | Section gap | 24 (16 below 640) | s66b |
 | Table header / row | 36 / 44, `px-4` | s66b (no `Table` primitive: gap 8) |
 
 Marketing keeps its own rhythm: sections `py-24 sm:py-32`, container `max-w-6xl mx-auto px-6`.
 The auth column stays `max-w-md`.
 
-### Shell (owner-approved 2026-10-08; lands in s66b)
+### Shell (owner-approved 2026-10-08; in code (s66b1))
 
-- **Frame.** Sidebar 256px (unchanged). Header **56px** (from 64).
+Two owners, one concern each ([ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md)):
+`src/app/dashboard/layout.tsx` owns width and gutters, and `PageShell` owns the page inside them.
+
+- **Frame.** Sidebar 256px (unchanged). Header **56px** (from 64), opaque `bg-card`, no blur;
+  the sidebar's brand row is 56px too, so their bottom rules meet in one line.
 - **Content.** `max-w-[1180px] mx-auto`, gutters **16 / 24 / 32** at <640 / ≥640 / ≥1024. No page
   nests a second container (Billing's `container mx-auto px-4` goes).
-- **Page header.** One `PageHeader` per page: the h1 on the left; actions on the right, aligned
-  to the title's bottom and wrapping under it below 640. An optional underline tab bar sits
-  below it, with `border-b`.
+- **Page header.** One `PageShell` per page, which renders the page's one `PageHeader`: the h1 on
+  the left; actions **centred on the title row** at ≥640, and in their own row after the
+  description below 640 (DOM order stays title → description → actions). An optional `nav`
+  (underline tabs) sits below it, with `border-b`. Centred, not bottom-aligned: at 768 a
+  two-line description pushed bottom-aligned actions away from the title they act on.
+- **Sections.** The direct children of `[data-page-shell]`, 24px apart (16 below 640), each on
+  the content's left edge. Never wrap them in one extra div.
 - **Filter row.** Starts at the same left edge: `flex flex-wrap gap-2`, search
   `flex-1 min-w-[12rem]`. A filter never hides options behind a hidden scrollbar.
 - **Alignment.** Headings, filters, panels and tables share one left edge.
@@ -297,7 +305,8 @@ created, in that story.
 | `Avatar` | Radix | Circle, the radius exception | — |
 | `Skeleton` | — | Loading, shaped like the content. Square: `.skeleton` and `skeleton.tsx` | s66a |
 | `EmptyState` | icon slot | Zero-data state. Its step numbers are square | s66a |
-| `PageHeader` | — | Page top: the one `h1` at 24/600 plus actions. Every app page uses it | s66b |
+| `PageShell` | `title` `eyebrow` `meta` `description` `actions` `nav` | **New.** The page inside the dashboard frame ([ADR 053](./decisions/053-page-frame-is-layout-plus-page-shell.md)). Renders `PageHeader`, then `nav`, then the page's sections as direct children of `[data-page-shell]`, 24px apart (16 below 640). Never sets width or gutters: the layout owns them. Every routed dashboard page renders exactly one, itself or through a listed delegate; `page-shell-guard.test.ts` enforces it. No new slot without an ADR 053 amendment | s66b1 |
+| `PageHeader` | — | Rendered by `PageShell` only (the guard forbids it elsewhere). The page's one `h1` in `.text-page-title`, an eyebrow, `meta` inline after the title, a `description` node, and actions centred on the title row (after the description below 640). `SectionHeader` (h2) lives in the same file | s66b1 |
 | `Metric` | icon slot | A number with a label, `.text-metric .tabular`. Square from s66a; it drops `.surface-interactive` (flat) and moves to 24/600 in s66b | s66a / s66b |
 | `IconTile` | `neutral` `accent` `info` `success` `warning` `danger` × `sm` `default` `lg` | The brand's icon container, square. Use it instead of a circle around an icon. `bg-primary text-primary-foreground` for the `<>` mark | s66a |
 | `ContentValue` | — | Rendering stored content safely. Square | s66a |

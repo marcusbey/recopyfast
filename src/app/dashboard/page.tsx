@@ -14,7 +14,8 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconTile } from "@/components/ui/icon-tile";
 import { Metric, type MetricState } from "@/components/ui/metric";
-import { PageHeader, SectionHeader } from "@/components/ui/page-header";
+import { SectionHeader } from "@/components/ui/page-header";
+import { PageShell } from "@/components/ui/page-shell";
 import { SkeletonList } from "@/components/ui/skeleton";
 import {
   StatusBadge,
@@ -164,6 +165,17 @@ export default function DashboardPage() {
     [sites],
   );
 
+  const installableSites = useMemo(
+    () =>
+      sites.filter(
+        (site): site is DashboardSite & { embedScript: string } =>
+          typeof site.embedScript === "string" &&
+          site.embedScript.length > 0 &&
+          typeof site.siteToken === "string",
+      ),
+    [sites],
+  );
+
   // Fires when the site row exists, not when the dialog closes, so the summary
   // behind the success screen is already right. The modal closes itself.
   const handleSiteRegistrationSuccess = () => {
@@ -173,43 +185,37 @@ export default function DashboardPage() {
   const firstName = user?.user_metadata?.name?.split(" ")[0];
 
   return (
-    <div className="space-y-8">
-      <PageHeader
-        eyebrow="Overview"
-        title={firstName ? `Welcome back, ${firstName}` : "Welcome back"}
-        description="Every site you have connected, and what has changed on them."
-        actions={
-          <>
-            {/* Absent unless a trial is actually running, so nothing moves for
-                anyone else. Renders itself from /api/billing/entitlement. */}
-            <TrialStatusBadge />
-            <Button onClick={() => setIsModalOpen(true)}>
-              <Plus aria-hidden="true" />
-              Add site
-            </Button>
-          </>
-        }
-      />
-
-      {sitesState === "ready" && user && (
+    <PageShell
+      eyebrow="Overview"
+      title={firstName ? `Welcome back, ${firstName}` : "Welcome back"}
+      description="Every site you have connected, and what has changed on them."
+      actions={
+        <>
+          {/* Absent unless a trial is actually running, so nothing moves for
+              anyone else. Renders itself from /api/billing/entitlement. */}
+          <TrialStatusBadge />
+          <Button onClick={() => setIsModalOpen(true)}>
+            <Plus aria-hidden="true" />
+            Add site
+          </Button>
+        </>
+      }
+    >
+      {/* Only when there is a checklist to show. An empty section is still a
+          flex item of the shell, so its gap was drawn twice above the summary
+          for every account with no installable site (s66b1 review m-6). */}
+      {sitesState === "ready" && user && installableSites.length > 0 && (
         <section aria-label="Activation checklists" className="space-y-4">
-          {sites
-            .filter(
-              (site): site is DashboardSite & { embedScript: string } =>
-                typeof site.embedScript === "string" &&
-                site.embedScript.length > 0 &&
-                typeof site.siteToken === "string",
-            )
-            .map((site) => (
-              <ActivationChecklist
-                key={`${user.id}:${site.id}`}
-                siteId={site.id}
-                siteName={site.name}
-                domain={site.domain}
-                embedScript={site.embedScript}
-                userId={user.id}
-              />
-            ))}
+          {installableSites.map((site) => (
+            <ActivationChecklist
+              key={`${user.id}:${site.id}`}
+              siteId={site.id}
+              siteName={site.name}
+              domain={site.domain}
+              embedScript={site.embedScript}
+              userId={user.id}
+            />
+          ))}
         </section>
       )}
 
@@ -389,6 +395,6 @@ export default function DashboardPage() {
         onClose={() => setIsModalOpen(false)}
         onSuccess={handleSiteRegistrationSuccess}
       />
-    </div>
+    </PageShell>
   );
 }
