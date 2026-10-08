@@ -274,13 +274,17 @@ export async function verifyDomainFile(
     if (fileDeclaresCode(normalizedContent, verificationCode)) {
       return { success: true };
     } else {
+      // Re-review N3: `details` used to carry `received`, the first 200
+      // characters of this body, and PUT /api/domains/verify returns `details`
+      // as is. Like the status line above, the body is whatever answered at an
+      // address the host may have re-resolved to after the guard (DNS
+      // rebinding). The message and details carry only what we issued.
       return {
         success: false,
         error: `File does not declare the verification code ${verificationCode}`,
         details: {
           url,
           expected: expectedContent.trim(),
-          received: normalizedContent.substring(0, 200), // Limit to first 200 chars
         },
       };
     }

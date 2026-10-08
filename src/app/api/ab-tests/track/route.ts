@@ -3,6 +3,7 @@ import { createServiceRoleClient } from "@/lib/supabase/service";
 import { authorizeSiteRequest } from "@/lib/security/site-auth";
 import { enforceRateLimit } from "@/lib/api/rate-limit";
 import {
+  coerceText,
   numberOrDefault,
   optionalBoundedString,
   optionalMetadata,
@@ -53,8 +54,21 @@ interface TrackEvent {
  * customer's page markup; it took any number of events, stored `value` and
  * `metadata` as sent, and 500'd on a malformed id only after reaching the
  * database. Everything below is refused with a 400 BEFORE any database call —
- * the authorizer's `sites` lookup included — except `value`, which is coerced
- * to the default rather than refused (see validateEvent).
+ * the authorizer's `sites` lookup included — except the two fields the host
+ * page passes to the public `trackConversion(eventName, value)`, which are
+ * coerced rather than refused (see validateEvent):
+ *
+ * - `value`: a finite number, or a numeric string, in [0, 1,000,000] is kept;
+ *   anything else is stored as the default 1.
+ * - `metadata.event_name` (re-review N1): a string is kept, a number or a
+ *   boolean goes through String(), anything else — null, an object, an array —
+ *   becomes "conversion" (never "[object Object]"); control characters are
+ *   stripped; the result is cut on a whole character to what fits the
+ *   metadata's existing 1 KB bound beside its key. Only a name that is
+ *   present is coerced: an absent one stays absent.
+ *
+ * Metadata is still refused when, name coerced, it breaks a metadata bound —
+ * which the embed's `{ event_name }` alone can no longer do.
  *
  * Each bound is set against what the embed actually sends
  * (public/embed/recopyfast.src.js:3437-3495): one event per active test, a
@@ -71,11 +85,42 @@ const DEFAULT_EVENT_VALUE = 1;
 const MAX_EVENT_METADATA_BYTES = 1024;
 /** Flat only: the object, then primitive values (see optionalMetadata). */
 const MAX_EVENT_METADATA_DEPTH = 2;
+const EVENT_NAME_KEY = "event_name";
+/** What a conversion's name becomes when it is not text, a number or a boolean. */
+const FALLBACK_EVENT_NAME = "conversion";
+/** The name's room in the metadata bound: 1 KB minus `{"event_name":""}`. */
+const MAX_EVENT_NAME_JSON_BYTES =
+  MAX_EVENT_METADATA_BYTES - JSON.stringify({ [EVENT_NAME_KEY]: "" }).length;
 const MAX_ID_TEXT_LENGTH = 64;
 const MAX_GEO_LENGTH = 64;
 
 function refuse(error: string) {
   return withCors(NextResponse.json({ error }, { status: 400 }));
+}
+
+/**
+ * Re-review N1: `metadata` with its `event_name` coerced (rule in the header),
+ * as a new object; anything else is returned as received, for the metadata
+ * bound to judge. Spread copies own keys as own keys — a `__proto__` key stays
+ * one, and the bound still refuses it.
+ */
+function withCoercedEventName(metadata: unknown): unknown {
+  if (
+    metadata === null ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata) ||
+    !Object.prototype.hasOwnProperty.call(metadata, EVENT_NAME_KEY)
+  ) {
+    return metadata;
+  }
+  const fields = metadata as Record<string, unknown>;
+  return {
+    ...fields,
+    [EVENT_NAME_KEY]: coerceText(fields[EVENT_NAME_KEY], {
+      fallback: FALLBACK_EVENT_NAME,
+      maxJsonBytes: MAX_EVENT_NAME_JSON_BYTES,
+    }),
+  };
 }
 
 /**
@@ -119,10 +164,16 @@ function validateEvent(raw: unknown): ValidationResult<TrackEvent> {
     fallback: DEFAULT_EVENT_VALUE,
   });
 
-  const metadata = optionalMetadata(body, "metadata", {
-    maxBytes: MAX_EVENT_METADATA_BYTES,
-    maxDepth: MAX_EVENT_METADATA_DEPTH,
-  });
+  // Re-review N1: `metadata.event_name` is `trackConversion`'s other argument,
+  // so it is coerced like `value` before the metadata bounds judge the rest.
+  const metadata = optionalMetadata(
+    { metadata: withCoercedEventName(body.metadata) },
+    "metadata",
+    {
+      maxBytes: MAX_EVENT_METADATA_BYTES,
+      maxDepth: MAX_EVENT_METADATA_DEPTH,
+    },
+  );
   if (!metadata.ok) return metadata;
   const geoCountry = optionalBoundedString(body, "geo_country", {
     maxLength: MAX_GEO_LENGTH,

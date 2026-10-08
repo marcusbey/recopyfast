@@ -359,6 +359,38 @@ export function numberOrDefault(
   return parsed;
 }
 
+const TEXT_CONTROL_CHARACTERS = new RegExp(TEXT_CONTROL_PATTERN.source, "g");
+
+/**
+ * Free text the caller may send loosely, coerced to a bounded string instead
+ * of refused — the text twin of `numberOrDefault`. A string is kept; a number
+ * or a boolean goes through `String()`; anything else (null, an object, an
+ * array) becomes `fallback`, never "[object Object]". Control characters are
+ * stripped, then the text is cut on a whole character so that, written inside
+ * a JSON string, it takes at most `maxJsonBytes` UTF-8 bytes (escapes counted)
+ * — the measure a byte bound on the stored JSON applies.
+ */
+export function coerceText(
+  raw: unknown,
+  options: { fallback: string; maxJsonBytes: number },
+): string {
+  const text =
+    typeof raw === "string"
+      ? raw
+      : typeof raw === "number" || typeof raw === "boolean"
+        ? String(raw)
+        : options.fallback;
+
+  let kept = "";
+  let bytes = 0;
+  for (const character of text.replace(TEXT_CONTROL_CHARACTERS, "")) {
+    bytes += Buffer.byteLength(JSON.stringify(character), "utf8") - 2;
+    if (bytes > options.maxJsonBytes) break;
+    kept += character;
+  }
+  return kept;
+}
+
 function hasForbiddenKeys(
   value: unknown,
   depth: number,

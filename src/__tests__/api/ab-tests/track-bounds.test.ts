@@ -254,16 +254,22 @@ describe("POST /api/ab-tests/track — refuses out-of-bounds input before the da
     ["array metadata", withField("metadata", ["signup"])],
     ["string metadata", withField("metadata", "signup")],
     ["metadata deeper than 2", withField("metadata", { a: { b: { c: 1 } } })],
-    [
-      "metadata over 1 KB",
-      withField("metadata", { event_name: "x".repeat(1100) }),
-    ],
+    // Through a key the public API never sends: an over-long `event_name` is
+    // cut to fit instead (re-review N1, below).
+    ["metadata over 1 KB", withField("metadata", { note: "x".repeat(1100) })],
     [
       "a __proto__ key in metadata",
       JSON.stringify(withField("metadata", { marker: true })).replace(
         '"marker":true',
         '"__proto__":{"polluted":true}',
       ),
+    ],
+    [
+      // Coercing the name rebuilds the object: the key must survive as a key.
+      "a __proto__ key beside an event_name in metadata",
+      JSON.stringify(
+        withField("metadata", { event_name: "signup", marker: true }),
+      ).replace('"marker":true', '"__proto__":{"polluted":true}'),
     ],
     [
       "a constructor key in metadata",
@@ -330,22 +336,22 @@ describe("POST /api/ab-tests/track — refuses out-of-bounds input before the da
  * conversion in it was lost without a trace. The column is never read for a
  * decision (lifecycle.ts:74), so an odd value is stored as the default instead.
  */
-describe("POST /api/ab-tests/track — a conversion value the public API can send is stored, never refused", () => {
-  /** The beacon `trackConversion(eventName, value)` sends: one event per active test. */
-  function trackConversionBeacon(eventName: string, value: unknown) {
-    return TESTS.map(({ test, variant }) => ({
-      site_id: SITE_ID,
-      test_id: test,
-      variant_id: variant,
-      visitor_id: UUID_VISITOR,
-      event_type: "conversion",
-      value: value || 1,
-      metadata: { event_name: eventName },
-      geo_country: null,
-      geo_region: null,
-    }));
-  }
+/** The beacon `trackConversion(eventName, value)` sends: one event per active test. */
+function trackConversionBeacon(eventName: unknown, value: unknown) {
+  return TESTS.map(({ test, variant }) => ({
+    site_id: SITE_ID,
+    test_id: test,
+    variant_id: variant,
+    visitor_id: UUID_VISITOR,
+    event_type: "conversion",
+    value: value || 1,
+    metadata: { event_name: eventName },
+    geo_country: null,
+    geo_region: null,
+  }));
+}
 
+describe("POST /api/ab-tests/track — a conversion value the public API can send is stored, never refused", () => {
   const cases: Array<[string, unknown, number]> = [
     [
       "a finite numeric string is coerced",
@@ -408,6 +414,77 @@ describe("POST /api/ab-tests/track — a conversion value the public API can sen
             metadata: { event_name: "purchase" },
           }),
         );
+      }
+    },
+  );
+});
+
+/**
+ * Re-review N1 (plan amendment 2026-10-08). `eventName` is the other argument
+ * of the public `trackConversion(eventName, value)`: it lands, untouched, as
+ * `metadata: { event_name: eventName }` (recopyfast.src.js:3493), in the same
+ * one-event-per-active-test beacon. A non-string name nested too deep for the
+ * metadata bound, and a name over its 1 KB, refused that whole beacon — and
+ * `sendBeacon` ignores the 400. The name is coerced instead: text is kept, a
+ * number or boolean is stringified, anything else becomes "conversion";
+ * control characters are stripped; the result is cut to what fits the
+ * metadata's existing 1 KB bound.
+ */
+describe("POST /api/ab-tests/track — an event name the public API can send is coerced, never refused", () => {
+  /** Bytes of `{"event_name":""}`: the 1 KB metadata bound, minus this, is the name's room. */
+  const NAME_ROOM_BYTES = 1024 - JSON.stringify({ event_name: "" }).length;
+
+  const cases: Array<[string, unknown, string]> = [
+    ["an object name becomes 'conversion'", { name: "p" }, "conversion"],
+    ["an array name becomes 'conversion'", ["a"], "conversion"],
+    ["a null name becomes 'conversion'", null, "conversion"],
+    ["a number name is stringified", 42, "42"],
+    [
+      "a 2,000-byte name is cut to the metadata's 1 KB",
+      "n".repeat(2000),
+      "n".repeat(NAME_ROOM_BYTES),
+    ],
+    [
+      "a 2,000-byte multi-byte name is cut on a whole character",
+      "\u{1F600}".repeat(500),
+      "\u{1F600}".repeat(Math.floor(NAME_ROOM_BYTES / 4)),
+    ],
+    [
+      "a name with control characters has them stripped",
+      "sign\u0000up\u0007\n\u009f",
+      "signup",
+    ],
+  ];
+
+  it.each(cases)(
+    "%s, and the beacon answers 2xx",
+    async (_name, eventName, storedName) => {
+      for (const { test } of TESTS) {
+        recordedViews.add(`${UUID_VISITOR}:${test}`);
+      }
+
+      const response = await POST(
+        trackRequest(trackConversionBeacon(eventName, 1)),
+      );
+
+      expect(response.status).toBeGreaterThanOrEqual(200);
+      expect(response.status).toBeLessThan(300);
+      await expect(response.json()).resolves.toEqual({
+        recorded: TESTS.length,
+        deduplicated: 0,
+      });
+      const rows = insertedRows();
+      expect(rows).toHaveLength(TESTS.length);
+      for (const row of rows) {
+        expect(row).toEqual(
+          expect.objectContaining({
+            event_type: "conversion",
+            metadata: { event_name: storedName },
+          }),
+        );
+        expect(
+          Buffer.byteLength(JSON.stringify(row.metadata), "utf8"),
+        ).toBeLessThanOrEqual(1024);
       }
     },
   );

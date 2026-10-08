@@ -48,5 +48,27 @@ Redis/Upstash limiter behaviour.
 Owner standing rule: fix majors before shipping. Major 1 + minors 2, 4, 5 go back to the implementer
 (plan amended 2026-10-08), then a focused re-review updates this verdict.
 
-Max severity: major
+## Re-review after fix `d5613ce` (fresh reviewer, 2026-10-08)
+
+Major 1 fixed: a probe replicating the embed's `trackConversion` + `sendTrackEvent` serialization sent 27
+`value` shapes through the real route — every one answered 200 and was recorded. Every M5 bound and the new
+coercion branches bite under mutation. Minors 2, 4 and 5 closed. Full jest 328 suites / 4,266 tests,
+type-check, type-check:build green.
+
+New minors:
+
+- N1 — `track/route.ts:71,73,122-126`: a non-string or > ~1,000-byte `eventName` from the public
+  `trackConversion` still gets the whole beacon refused (same class as major 1).
+- N2 — `docs/stories.md:2459`: the M5 AC still says out-of-range `value` is refused with 400.
+- N3 — `domain-verification.ts:283`: on a 2xx with wrong content, the first 200 chars of the upstream body go
+  back as `details.received` (pre-existing; rebinding concern like minor 4).
+
+Still open from the first review: 3 (no IP guard before `getUser` on `PUT /api/domains/verify`), 6
+(best-effort dedupe — say so in the PR), 7 (`readBoundedJson` reads the body before the cap), 8 (branch carries
+s68a/s68c docs and ADR 047), 9 (PR must disclose reshaped fixture ids AND the rewritten assertions in
+`domain-verification.test.ts`).
+
+Orchestrator: N1, N2, N3 go to a short fix run (owner's standing preference: fix minors, then ship).
+
+Max severity: minor
 Ship allowed: yes

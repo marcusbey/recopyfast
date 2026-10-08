@@ -558,6 +558,32 @@ describe("Domain Verification", () => {
     });
 
     /**
+     * Re-review N3: a 2xx with the wrong content sent the first 200 characters
+     * of the upstream body back as `details.received`, which PUT
+     * /api/domains/verify returns as is. Like the status line (minor 4), that
+     * body is whatever answered at an address the admin's domain chose between
+     * the guard and the fetch (DNS rebinding). Nothing of it is echoed.
+     */
+    it("refuses wrong content without echoing any of the upstream body", async () => {
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () =>
+          Promise.resolve("internal-admin console: db password hunter2"),
+      });
+
+      const result = await verifyDomainFile("example.com", "code123");
+
+      expect(result.success).toBe(false);
+      const echoed = JSON.stringify({
+        error: result.error,
+        details: result.details,
+      });
+      expect(echoed).not.toContain("internal-admin");
+      expect(echoed).not.toContain("hunter2");
+    });
+
+    /**
      * Review minor 4: a non-3xx failure echoed `HTTP <status>: <statusText>`.
      * Between the address check and the fetch, a domain the admin controls can
      * re-resolve elsewhere (DNS rebinding), so that status line told them what
