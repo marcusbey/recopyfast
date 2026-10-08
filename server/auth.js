@@ -8,7 +8,8 @@
  * perfectly on a developer's machine and `MODULE_NOT_FOUND` inside the image.
  * The duplication is the price of that boundary; the parity suite in
  * `src/__tests__/websocket/auth-parity.test.ts` is what stops the two copies
- * drifting silently.
+ * drifting silently. Since s68c that includes the staging device binding
+ * (`src/lib/auth/staging-device.ts`, `src/lib/auth/editor-crypto.ts`).
  */
 
 const crypto = require('crypto');
@@ -123,6 +124,78 @@ function normalizePermissions(rawPermissions) {
 }
 
 /**
+ * How long a successful staging verification vouches for a browser.
+ * Duplicates STAGING_VERIFICATION_TTL_MS in src/lib/auth/staging-device.ts;
+ * the parity suite (auth-parity.test.ts) feeds both copies the same rows.
+ */
+const STAGING_VERIFICATION_TTL_MS = 12 * 60 * 60 * 1000;
+
+function sha256Hex(value) {
+  return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+/**
+ * Fingerprint of the browser: the whole User-Agent string, unkeyed.
+ * Duplicates `hashUserAgent` in src/lib/auth/editor-crypto.ts byte for byte —
+ * it has to, because the value compared against is the one HTTP's
+ * `verifyEmail` wrote into `staging_access.verified_user_agent_hash`. A
+ * missing User-Agent hashes as an empty one, on both sides (parity rows).
+ */
+function hashUserAgent(userAgent) {
+  return sha256Hex(`ua\u0000${userAgent ?? ''}`).slice(0, 32);
+}
+
+/**
+ * Constant-time string comparison over fixed-length digests, as
+ * `timingSafeEqualString` does in src/lib/auth/editor-crypto.ts:
+ * `timingSafeEqual` throws on unequal lengths, which would itself leak length.
+ */
+function timingSafeEqualString(a, b) {
+  const aDigest = crypto.createHash('sha256').update(a, 'utf8').digest();
+  const bDigest = crypto.createHash('sha256').update(b, 'utf8').digest();
+  return crypto.timingSafeEqual(aDigest, bDigest);
+}
+
+/**
+ * Does this socket come from the browser that passed verification, recently
+ * enough to still be trusted? The server copy of `checkStagingDeviceBinding`
+ * (src/lib/auth/staging-device.ts) — same arguments, same verdicts, pinned by
+ * the "staging device binding parity" rows in auth-parity.test.ts.
+ *
+ * TOMBSTONE — M7 (s68c). `resolveStagingGrant` used to stop at
+ * `email_verified`, a permanent flag on a row keyed by a token that travels in
+ * a URL. HTTP has refused a forwarded link since the forwarded-invite fix; the
+ * socket admitted it to `site:{id}:staging`, where it received every editor's
+ * unpublished copy. Fails CLOSED on a row with no binding, like HTTP: a row
+ * verified before the binding existed is exactly the forwarded case.
+ *
+ * Same honest limitation as HTTP (staging-device.ts module header): a
+ * User-Agent is attacker-supplied, so this stops a forwarded URL opened in
+ * someone else's browser, not a client that replays the victim's headers. The
+ * 12 h bound is what limits that case.
+ */
+function checkStagingDeviceBinding(recorded, presented, now = Date.now()) {
+  if (!recorded.userAgentHash || !recorded.verifiedAt) {
+    return { ok: false, reason: 'unbound' };
+  }
+
+  const verifiedAtMs = new Date(recorded.verifiedAt).getTime();
+  if (!Number.isFinite(verifiedAtMs)) {
+    return { ok: false, reason: 'unbound' };
+  }
+
+  if (now - verifiedAtMs > STAGING_VERIFICATION_TTL_MS) {
+    return { ok: false, reason: 'stale' };
+  }
+
+  if (!timingSafeEqualString(recorded.userAgentHash, presented.userAgentHash)) {
+    return { ok: false, reason: 'device_mismatch' };
+  }
+
+  return { ok: true };
+}
+
+/**
  * Resolve an editor grant from the database. Every time. No caching.
  *
  * M5: the grant used to be resolved once, at the handshake, and cached on
@@ -151,7 +224,7 @@ function normalizePermissions(rawPermissions) {
  *     "remove this editor" action reaches a live socket only through this check.
  */
 async function resolveGrant(options) {
-  const { supabase, siteId, stagingToken, editToken } = options;
+  const { supabase, siteId, stagingToken, editToken, userAgent } = options;
 
   if (!supabase) {
     return { valid: false, error: 'Editor access unavailable' };
@@ -159,7 +232,7 @@ async function resolveGrant(options) {
 
   try {
     if (stagingToken) {
-      return await resolveStagingGrant(supabase, siteId, stagingToken);
+      return await resolveStagingGrant(supabase, siteId, stagingToken, { userAgent });
     }
     if (editToken) {
       return await resolveEditSessionGrant(supabase, siteId, editToken);
@@ -173,7 +246,7 @@ async function resolveGrant(options) {
   }
 }
 
-async function resolveStagingGrant(supabase, siteId, stagingToken) {
+async function resolveStagingGrant(supabase, siteId, stagingToken, { userAgent } = {}) {
   const { data: access, error } = await supabase
     .from('staging_access')
     .select('*')
@@ -192,13 +265,46 @@ async function resolveStagingGrant(supabase, siteId, stagingToken) {
     return { valid: false, error: 'Email verification required' };
   }
 
+  // The flag alone is not enough — see checkStagingDeviceBinding. A refusal
+  // reads like an unverified row, because that is what HTTP answers it with
+  // (`requiresVerification`): the remedy is the same, enter a code again.
+  const binding = checkStagingDeviceBinding(
+    {
+      userAgentHash: access.verified_user_agent_hash ?? null,
+      verifiedAt: access.verified_at ?? null,
+    },
+    { userAgentHash: hashUserAgent(userAgent) },
+  );
+  if (!binding.ok) {
+    return { valid: false, error: 'Email verification required' };
+  }
+
   if (access.email) {
-    const { data: editor } = await supabase
+    // Lower-cased, because `site_editors.email` always is (`normalizeEmail`,
+    // src/lib/auth/editor-directory.ts) while `staging_access.email` keeps the
+    // case the invite form was given. TOMBSTONE — s07a review MAJOR 1, closed
+    // in s68c: this compared `access.email` verbatim, so removing
+    // `john@example.com` never reached a socket opened as `John@Example.com`.
+    const { data: editor, error: editorError } = await supabase
       .from('site_editors')
       .select('revoked_at')
       .eq('site_id', siteId)
-      .eq('email', access.email)
+      .eq('email', access.email.trim().toLowerCase())
       .maybeSingle();
+
+    // Fail CLOSED, as HTTP's twin does (`isEditorRevoked`,
+    // src/lib/auth/staging-access.ts). TOMBSTONE — s68c review MAJOR 1: this
+    // destructured `data` alone, so a lookup that FAILED read as "no directory
+    // row" — and absent is not revoked. On a partial database failure a removed
+    // editor verified from the same browser was admitted to the staging room,
+    // or survived the sweep, while every HTTP route refused them. A read that
+    // did not answer "was this editor removed" has not answered "no". Pinned by
+    // the "both real validators" parity table and the integration cases
+    // "…when the directory cannot be read".
+    if (editorError) {
+      console.error('[auth] site_editors lookup failed:', editorError.message);
+      return { valid: false, error: 'Editor access could not be verified' };
+    }
 
     // Absent is not revoked: a staging link can exist without a directory row.
     // Present-and-stamped is.
@@ -216,7 +322,38 @@ async function resolveStagingGrant(supabase, siteId, stagingToken) {
   };
 }
 
+/**
+ * An edit session's lifetime ceiling, measured from `created_at`, and how far
+ * ahead of this clock a `created_at` may sit and still be believed. Duplicates
+ * MAX_SESSION_LIFETIME_HOURS (src/lib/auth/edit-sessions.ts) and
+ * CREATED_AT_CLOCK_SKEW_MS (src/lib/auth/editor-access.ts); the
+ * "edit-session authority parity" rows in auth-parity.test.ts hold them equal.
+ */
+const MAX_SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const CREATED_AT_CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+/**
+ * The edit-session principal, under ADR 047: the session row carries NO
+ * authority of its own. What it grants is its `permissions` intersected with
+ * the holder's LIVE direct `site_permissions` row for this site, read on every
+ * resolution (handshake, every `content-update`, every sweep).
+ *
+ * TOMBSTONE — s68c. This returned `normalizePermissions(session.permissions)`
+ * and nothing else, the realtime twin of H1 (s68a fixed the HTTP validator,
+ * `validateEditSessionAccess` in editor-access.ts). The socket is
+ * broadcast-only, so the cost was disclosure rather than writes: a member who
+ * was demoted or removed kept an open socket in `site:{id}:staging`, receiving
+ * every editor's unpublished copy, until the session row expired — 2099 for a
+ * row written directly. Do not cache the live grant on the socket; a cache is
+ * a second copy of the grant, which is the defect.
+ *
+ * Every refusal — no holder, no live row, past the ceiling, dated in the
+ * future, undatable, an empty intersection — answers the same message, so the
+ * socket is no oracle for "member removed" versus "token wrong".
+ */
 async function resolveEditSessionGrant(supabase, siteId, editToken) {
+  const refused = { valid: false, error: 'Editor access revoked or expired' };
+
   const { data: session, error } = await supabase
     .from('edit_sessions')
     .select('*')
@@ -228,19 +365,55 @@ async function resolveEditSessionGrant(supabase, siteId, editToken) {
     .single();
 
   if (error || !session) {
-    return { valid: false, error: 'Editor access revoked or expired' };
+    return refused;
+  }
+
+  // Written as "not within", not "beyond", as on HTTP: a `created_at` that is
+  // NULL dates to 1970 and one that does not parse makes the age NaN — both
+  // must refuse, because a session that cannot be dated cannot be bounded.
+  const ageMs = Date.now() - new Date(session.created_at).getTime();
+  if (!(ageMs >= -CREATED_AT_CLOCK_SKEW_MS && ageMs <= MAX_SESSION_LIFETIME_MS)) {
+    return refused;
+  }
+
+  // Checked before the read: `.eq('user_id', null)` is not "no holder", and a
+  // team grant (no `user_id`) must never stand in for one.
+  if (!session.user_id) {
+    return refused;
+  }
+
+  const { data: liveGrant, error: grantError } = await supabase
+    .from('site_permissions')
+    .select('permission')
+    .eq('site_id', siteId)
+    .eq('user_id', session.user_id)
+    .maybeSingle();
+
+  if (grantError || !liveGrant) {
+    return refused;
+  }
+
+  const livePermissions = normalizePermissions([liveGrant.permission]);
+  const permissions = normalizePermissions(session.permissions).filter(
+    (permission) => livePermissions.includes(permission)
+  );
+
+  if (permissions.length === 0) {
+    return refused;
   }
 
   return {
     valid: true,
     verified: true,
     userId: session.user_id,
-    permissions: normalizePermissions(session.permissions),
+    permissions,
     sessionId: session.id,
   };
 }
 
 module.exports = {
+  checkStagingDeviceBinding,
+  hashUserAgent,
   isOriginAllowed,
   normalizeDomain,
   normalizePermissions,

@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
+  REMOVED_EDITOR_INVITE_MESSAGE,
   StagingAccessManager,
   StagingPermission,
   AccessType,
@@ -177,6 +178,11 @@ export async function POST(request: NextRequest) {
       }
       if (message === "Email is required for invite-type access") {
         return NextResponse.json({ error: message }, { status: 400 });
+      }
+      // The address's directory row for this site is revoked: the request is
+      // well-formed but conflicts with the site's current editors (s68c review).
+      if (message === REMOVED_EDITOR_INVITE_MESSAGE) {
+        return NextResponse.json({ error: message }, { status: 409 });
       }
 
       // Anything else — e.g. a raw database error — is logged server-side only.

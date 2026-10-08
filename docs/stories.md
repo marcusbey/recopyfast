@@ -2480,21 +2480,21 @@ Owner decision 2026-10-08 (above), including the two medium items left open by t
 (`docs/reviews/s07a-realtime-service-hardening.md:40-59`). Complexity: 3. Dependencies: s68a merged
 (ADR 047, e2e seeds). Branch `feature/s68c-realtime-grant-parity`.
 
-- [ ] M7 — staging admission and every re-validation apply HTTP's device binding: a forwarded
+- [x] M7 — staging admission and every re-validation apply HTTP's device binding: a forwarded
   verified link presented with another User-Agent, or a verification older than 12 h, is refused at
   the handshake and dropped by the sweep. Tests: `src/__tests__/websocket/auth-parity.test.ts`
   (binding and UA-hash rows), `src/__tests__/websocket/server.integration.test.ts`
   ("staging admission is device-bound").
-- [ ] `join-dashboard` requires a live editor grant: a socket holding only the public site token is
+- [x] `join-dashboard` requires a live editor grant: a socket holding only the public site token is
   refused and receives no `content-updated`. Test: `server.integration.test.ts` ("a plain viewer's
   join-dashboard is refused").
-- [ ] Editor revocation matches e-mail case-insensitively: `John@Example.com` is refused at the
+- [x] Editor revocation matches e-mail case-insensitively: `John@Example.com` is refused at the
   handshake and dropped within one sweep after `john@example.com` is removed. Test:
   `server.integration.test.ts` (revocation block, mixed-case fixture).
-- [ ] Edit-session sockets follow ADR 047: the holder's live grant bounds the permissions, a removed
+- [x] Edit-session sockets follow ADR 047: the holder's live grant bounds the permissions, a removed
   holder's socket is dropped within one sweep, a session past 24 h is refused. Tests: parity rows in
   `auth-parity.test.ts`; integration "drops an edit-session socket whose holder was removed".
-- [ ] HTTP staging validation (and code re-send/verify) refuses a token whose e-mail has a revoked
+- [x] HTTP staging validation (and code re-send/verify) refuses a token whose e-mail has a revoked
   `site_editors` row for the site, in any case; no directory row changes nothing. Test:
   `src/lib/auth/__tests__/staging-access.revoked-editor.test.ts`.
 - [ ] `e2e/realtime-parity.spec.ts` passes; `server/` imports nothing from `src/`. Required local
