@@ -6,9 +6,9 @@
 - Supersedes, for app surfaces only: the `docs/design-system.md` rule "Radius
   `--radius: 0.75rem` … container softer than its contents", and the comment that states it at
   `src/components/ui/card.tsx:7-15`. Marketing keeps both the rule and the scale.
-- Numbering: 047 and 048 are taken on the unmerged `feature/s68-security-hardening` branch and
-  049 on `feature/s67-embed-spa-support`. 050 is the next number free on every branch, following ADR 046's precedent. Renumber at merge
-  if another ADR lands first.
+- Numbering: 047 and 048 are on `main` (merged with s68a); 049 is on the unmerged
+  `feature/s67-embed-spa-support` branch. 050 is the next number free on every branch,
+  following ADR 046's precedent. Renumber at merge if another ADR lands first.
 
 ## Context
 

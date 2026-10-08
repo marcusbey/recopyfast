@@ -8,6 +8,10 @@
  * two different wrapping strategies. This is the one: it wraps by default,
  * and Copy lives in a label bar, visible without hover, because touch has
  * no hover.
+ *
+ * Review m5: the button's accessible name says what it copies (two blocks
+ * in one panel were both "Copy"), and the outcome is announced through a
+ * polite live region, since a changed button label alone is not announced.
  */
 
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -25,7 +29,7 @@ function mockClipboard(writeText: jest.Mock) {
 
 async function clickCopy() {
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
   });
 }
 
@@ -59,7 +63,7 @@ describe("CodeBlock", () => {
 
   it("keeps Copy in the label bar, always visible", () => {
     const { container } = render(<CodeBlock value={SNIPPET} label="HTML" />);
-    const button = screen.getByRole("button", { name: "Copy" });
+    const button = screen.getByRole("button", { name: "Copy code" });
     const bar = button.parentElement as HTMLElement;
 
     expect(bar).toHaveTextContent("HTML");
@@ -85,17 +89,19 @@ describe("CodeBlock", () => {
     render(<CodeBlock value={SNIPPET} label="HTML" />);
 
     await clickCopy();
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Copy code" });
+    expect(button).toHaveTextContent(/^Copied$/);
 
     act(() => {
       jest.advanceTimersByTime(1_999);
     });
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(button).toHaveTextContent(/^Copied$/);
 
     act(() => {
       jest.advanceTimersByTime(1);
     });
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(button).toHaveTextContent(/^Copy$/);
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
   it('says "Copy failed", never "Copied", and selects the code when the write is refused', async () => {
@@ -104,11 +110,46 @@ describe("CodeBlock", () => {
 
     await clickCopy();
 
-    expect(
-      screen.getByRole("button", { name: "Copy failed" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
+    const button = screen.getByRole("button", { name: "Copy code" });
+    expect(button).toHaveTextContent(/^Copy failed$/);
+    expect(screen.getByRole("status")).toHaveTextContent(/^Copy failed$/);
+    expect(screen.queryByText("Copied")).toBeNull();
     // Selected, so Cmd/Ctrl+C still works.
     expect(window.getSelection()?.toString()).toBe(SNIPPET);
+  });
+
+  it("names the Copy button for what it copies", () => {
+    render(
+      <>
+        <CodeBlock value={SNIPPET} label="HTML" copyLabel="Copy snippet" />
+        <CodeBlock value="<p>Hello</p>" label="HTML" copyLabel="Copy example" />
+      </>,
+    );
+    expect(
+      screen.getByRole("button", { name: "Copy snippet" }),
+    ).toHaveTextContent(/^Copy$/);
+    expect(
+      screen.getByRole("button", { name: "Copy example" }),
+    ).toHaveTextContent(/^Copy$/);
+  });
+
+  it('defaults the button name to "Copy code"', () => {
+    render(<CodeBlock value={SNIPPET} label="HTML" />);
+    expect(
+      screen.getByRole("button", { name: "Copy code" }),
+    ).toBeInTheDocument();
+  });
+
+  it("announces a successful copy through a polite live region", async () => {
+    mockClipboard(jest.fn().mockResolvedValue(undefined));
+    render(<CodeBlock value={SNIPPET} label="HTML" />);
+    // Present and empty before the click: a live region added at the moment
+    // of the change is not announced.
+    const status = screen.getByRole("status");
+    expect(status).toBeEmptyDOMElement();
+
+    await clickCopy();
+
+    expect(status).toHaveTextContent(/^Copied$/);
   });
 });

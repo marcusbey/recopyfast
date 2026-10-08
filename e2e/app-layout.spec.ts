@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { buildEmbedScript } from "../src/lib/sites/embed-script";
+import { focusIndicatorWidth } from "./support/focus-indicator";
 import { createLocalServiceRoleClient } from "./support/local-supabase";
 import {
   createLayoutOwnerFixture,
@@ -43,8 +44,9 @@ const FIXTURE_EMBED_SCRIPT = buildEmbedScript({
   wsUrl: "wss://recopyfast-ws.fly.dev",
 });
 
+/** Exactly 60 characters, as AC 2 specifies. */
 const LONG_LINK_LABEL =
-  "Client review: homepage hero, pricing table and footer copy";
+  "Client review: homepage hero, pricing tables and footer copy";
 
 const CAPTURE_ROOT = path.join(
   process.cwd(),
@@ -359,28 +361,34 @@ interface FocusGeometry {
   maxRadius: number;
 }
 
+/**
+ * The outline or the ring, whichever is wider, read from the computed style
+ * strings by `focusIndicatorWidth` (unit-tested: the first version of this
+ * check took the smallest shadow spread, which Tailwind's unused `0px` layers
+ * always made 0, so the ring never counted — s66a review m2).
+ */
 async function measureFocus(target: Locator): Promise<FocusGeometry> {
-  return target.evaluate((element) => {
+  const { focus, radii } = await target.evaluate((element) => {
     const style = getComputedStyle(element);
-    const outline =
-      style.outlineStyle !== "none" ? parseFloat(style.outlineWidth) : 0;
-    // A Tailwind `ring-2` is a 2px box-shadow spread: `… 0px 0px 0px 2px`
-    // (with the offset ring underneath it at a larger spread).
-    const spreads = Array.from(
-      style.boxShadow.matchAll(/0px 0px 0px (\d+(?:\.\d+)?)px/g),
-    ).map((match) => Number(match[1]));
-    const ring = spreads.length > 0 ? Math.min(...spreads) : 0;
-    const radii = [
-      style.borderTopLeftRadius,
-      style.borderTopRightRadius,
-      style.borderBottomRightRadius,
-      style.borderBottomLeftRadius,
-    ].map((radius) => parseFloat(radius) || 0);
     return {
-      indicatorWidth: Math.max(outline, ring),
-      maxRadius: Math.max(...radii),
+      focus: {
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        outlineColor: style.outlineColor,
+        boxShadow: style.boxShadow,
+      },
+      radii: [
+        style.borderTopLeftRadius,
+        style.borderTopRightRadius,
+        style.borderBottomRightRadius,
+        style.borderBottomLeftRadius,
+      ].map((radius) => parseFloat(radius) || 0),
     };
   });
+  return {
+    indicatorWidth: focusIndicatorWidth(focus),
+    maxRadius: Math.max(...radii),
+  };
 }
 
 async function expectSquareFocus(page: Page, target: Locator): Promise<void> {

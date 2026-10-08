@@ -123,6 +123,26 @@ describe("Dialog anatomy (s66a)", () => {
     expect(screen.getByTestId("footer")).toHaveClass("border-t");
   });
 
+  it("collapses a body with nothing to show, so a confirm draws no empty band", () => {
+    render(
+      <Dialog open>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Site</DialogTitle>
+            <DialogDescription>This cannot be undone.</DialogDescription>
+          </DialogHeader>
+          <DialogBody data-testid="empty-body">{false}</DialogBody>
+          <DialogFooter>
+            <button type="button">Cancel</button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>,
+    );
+    const body = screen.getByTestId("empty-body");
+    expect(body).toBeEmptyDOMElement();
+    expect(body).toHaveClass("empty:hidden");
+  });
+
   it("draws the corner close button at the control radius", () => {
     renderAnatomy();
     expect(screen.getByRole("button", { name: "Close" })).toHaveClass(

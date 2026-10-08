@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SiteEditorsCard } from "../SiteEditorsCard";
+import { expectNoEmptyBodyBand } from "@/__tests__/helpers/dialog-body";
 
 /**
  * These tests drive the card the way a site owner does, because the defect this
@@ -674,6 +675,19 @@ describe("SiteEditorsCard", () => {
     expect(
       screen.getByRole("button", { name: `Remove ${ada.email}` }),
     ).toBeInTheDocument();
+  });
+
+  it("draws no empty band under the removal confirmation when there is no error", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, editors: [ada] }));
+
+    renderCard();
+    await screen.findByText(ada.email);
+    await user.click(
+      screen.getByRole("button", { name: `Remove ${ada.email}` }),
+    );
+
+    expectNoEmptyBodyBand(await screen.findByRole("dialog"));
   });
 
   it("reports a failed removal inside the confirmation and keeps the editor", async () => {

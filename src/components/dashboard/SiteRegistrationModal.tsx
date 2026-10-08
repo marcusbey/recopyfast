@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   Dialog,
   DialogBody,
@@ -310,6 +310,7 @@ export function SiteRegistrationModal({
                   <CodeBlock
                     value={registrationResult.embedScript}
                     label="HTML"
+                    copyLabel="Copy snippet"
                   />
                 </InstallStep>
 
@@ -366,25 +367,22 @@ export function SiteRegistrationModal({
                     cells, labels, buttons and images by itself — no markup
                     changes.
                   </p>
-                  <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)]">
-                    <dt className="text-muted-foreground">Exclude</dt>
-                    <dd className="mb-2 min-w-0 sm:mb-0">
-                      <code className="font-mono text-[13px]">
-                        data-rcf-ignore
-                      </code>
-                    </dd>
-                    <dt className="text-muted-foreground">Opt in</dt>
-                    <dd className="mb-2 min-w-0 sm:mb-0">
-                      <code className="font-mono text-[13px]">
-                        data-rcf-content
-                      </code>
-                    </dd>
-                    <dt className="text-muted-foreground">Opt in a link</dt>
-                    <dd className="min-w-0">
-                      <code className="font-mono text-[13px]">
-                        class=&quot;rcf-editable-link&quot;
-                      </code>
-                    </dd>
+                  {/* Ruled rows, per the design: a hairline above the list
+                      and under every row. Below 640px the term stacks
+                      above its value, with one rule under the pair. */}
+                  <dl className="grid grid-cols-1 border-t border-border text-sm sm:grid-cols-[7rem_minmax(0,1fr)]">
+                    {ATTRIBUTE_ROWS.map(({ term, value }) => (
+                      <Fragment key={term}>
+                        <dt className="pt-2 text-muted-foreground sm:border-b sm:border-border sm:pb-2">
+                          {term}
+                        </dt>
+                        <dd className="min-w-0 border-b border-border pb-2 pt-0.5 sm:pt-2">
+                          <code className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground [overflow-wrap:anywhere]">
+                            {value}
+                          </code>
+                        </dd>
+                      </Fragment>
+                    ))}
                   </dl>
                   {/*
                     Links are the one common element the widget deliberately
@@ -415,6 +413,7 @@ export function SiteRegistrationModal({
                         label="HTML"
                         wrap={false}
                         value={INSTALL_EXAMPLE}
+                        copyLabel="Copy example"
                       />
                     )}
                   </details>
@@ -457,6 +456,17 @@ export function SiteRegistrationModal({
     </Dialog>
   );
 }
+
+/**
+ * The attributes the widget honours (step 3), as the site-registered panel
+ * lists them. Inline code, so 12px mono: 13px is for code inside CodeBlock
+ * (design system, Typography).
+ */
+const ATTRIBUTE_ROWS = [
+  { term: "Exclude", value: "data-rcf-ignore" },
+  { term: "Opt in", value: "data-rcf-content" },
+  { term: "Opt in a link", value: 'class="rcf-editable-link"' },
+] as const;
 
 const INSTALL_EXAMPLE = `<h1>Edited automatically</h1>
 <p data-rcf-ignore>Never editable</p>

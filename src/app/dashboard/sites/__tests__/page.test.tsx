@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SitesPage from "../page";
+import { expectNoEmptyBodyBand } from "@/__tests__/helpers/dialog-body";
 
 // Mock the auth context
 // The returned object must be stable: the page refetches on `[user]`, so a new
@@ -452,5 +453,13 @@ describe("SitesPage", () => {
       expect(screen.getByTestId("site-card-site-2")).toBeInTheDocument();
       expect(screen.getByTestId("site-card-site-3")).toBeInTheDocument();
     });
+  });
+
+  it("draws no empty band under the delete confirmation when there is no error", async () => {
+    render(<SitesPage />);
+    const card = await screen.findByTestId("site-card-site-1");
+    fireEvent.click(within(card).getByRole("button", { name: "Delete" }));
+
+    expectNoEmptyBodyBand(await screen.findByRole("dialog"));
   });
 });

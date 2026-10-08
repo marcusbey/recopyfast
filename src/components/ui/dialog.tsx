@@ -108,6 +108,12 @@ DialogHeader.displayName = "DialogHeader";
  * A `<form>` that spans body and footer must itself be the flex region
  * (`flex min-h-0 flex-1 flex-col`), or this stops being a direct flex child
  * and the form overflows the frame (design system, Dialogs and sheets).
+ *
+ * `empty:hidden`: a confirm dialog keeps its body for an error it may never
+ * show (`{error && …}`). Rendered empty, the body's bottom padding drew a
+ * blank band between the description and the footer (s66a review m4), so an
+ * empty body takes no space. It only works if nothing at all is rendered into
+ * it: an always-present wrapper brings the band back.
  */
 const DialogBody = ({
   className,
@@ -115,7 +121,7 @@ const DialogBody = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 pb-5 sm:px-6 [&>*]:min-w-0",
+      "min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 pb-5 sm:px-6 empty:hidden [&>*]:min-w-0",
       className,
     )}
     {...props}

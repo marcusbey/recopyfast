@@ -12,7 +12,7 @@ import { render, screen } from "@testing-library/react";
 import { ShareLinkCard, type ShareLink } from "../ShareLinkCard";
 
 const LONG_LABEL =
-  "Client review: homepage hero, pricing table and footer copy";
+  "Client review: homepage hero, pricing tables and footer copy";
 
 const link: ShareLink = {
   id: "11111111-1111-4111-8111-111111111111",

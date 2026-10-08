@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SiteRegistrationModal } from "../SiteRegistrationModal";
 import { installRecipes } from "@/lib/sites/install-recipes";
@@ -452,7 +452,7 @@ describe("SiteRegistrationModal", () => {
       const user = await registerSite();
       const writeText = spyOnClipboard();
 
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
 
       expect(writeText).toHaveBeenCalledTimes(1);
       expect(writeText).toHaveBeenCalledWith(registered.embedScript);
@@ -472,6 +472,47 @@ describe("SiteRegistrationModal", () => {
       expect(guide).toHaveAttribute("href", "/docs/install");
       expect(guide).toHaveAttribute("target", "_blank");
       expect(guide).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("lists the attributes as ruled rows of inline code (design § 1)", async () => {
+      await registerSite();
+      const list = screen.getByText("Exclude").closest("dl") as HTMLElement;
+      expect(list).toHaveClass("border-t", "border-border");
+
+      const rows = [
+        ["Exclude", "data-rcf-ignore"],
+        ["Opt in", "data-rcf-content"],
+        ["Opt in a link", 'class="rcf-editable-link"'],
+      ];
+      for (const [term, value] of rows) {
+        // Stacked below 640px (term above value, one rule under the row);
+        // side by side from 640px, each cell ruled.
+        expect(within(list).getByText(term)).toHaveClass("sm:border-b");
+        const code = within(list).getByText(value);
+        expect(code.tagName).toBe("CODE");
+        // Inline code is 12px mono; 13px is for code inside CodeBlock only.
+        expect(code).toHaveClass(
+          "font-mono",
+          "text-xs",
+          "bg-surface-2",
+          "rounded-control",
+        );
+        expect(code.className).not.toContain("text-[13px]");
+        expect(code.closest("dd")).toHaveClass("border-b", "border-border");
+      }
+    });
+
+    it("names each Copy button for what it copies once the example is open", async () => {
+      const user = await registerSite();
+
+      await user.click(screen.getByText("Show example"));
+
+      expect(
+        await screen.findByRole("button", { name: "Copy example" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Copy snippet" }),
+      ).toBeInTheDocument();
     });
 
     it("has no Go to Site Dashboard button: it only ever closed the dialog", async () => {
@@ -599,12 +640,15 @@ describe("SiteRegistrationModal", () => {
       });
 
       const writeText = spyOnClipboard();
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
 
       expect(writeText).toHaveBeenCalledWith(mockSuccessResponse.embedScript);
-      expect(
-        await screen.findByRole("button", { name: /^Copied$/ }),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Copy snippet" }),
+        ).toHaveTextContent(/^Copied$/),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(/^Copied$/);
     });
 
     it('should show temporary "Copied" state', async () => {
@@ -634,18 +678,21 @@ describe("SiteRegistrationModal", () => {
       spyOnClipboard();
       // Scoped by role: the page copy contains "ReCopyFast", which also matches
       // a bare /Copy/i text query.
-      await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+      await user.click(screen.getByRole("button", { name: "Copy snippet" }));
 
-      expect(
-        await screen.findByRole("button", { name: /^Copied$/ }),
-      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Copy snippet" }),
+        ).toHaveTextContent(/^Copied$/),
+      );
+      expect(screen.getByRole("status")).toHaveTextContent(/^Copied$/);
 
       // Wait for the copied state to reset (2 seconds)
       await waitFor(
         () => {
           expect(
-            screen.getByRole("button", { name: /^Copy$/ }),
-          ).toBeInTheDocument();
+            screen.getByRole("button", { name: "Copy snippet" }),
+          ).toHaveTextContent(/^Copy$/);
         },
         { timeout: 3000 },
       );

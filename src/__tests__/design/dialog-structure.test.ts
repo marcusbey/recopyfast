@@ -11,10 +11,13 @@
  * brings back a second scroll region, `grid`/`gap-*` brings back the grid,
  * padding fights the header/body/footer insets.
  *
- * So, for every app-surface file that renders `<DialogContent`:
- * - it also renders `<DialogBody`, the one scroll region;
- * - the `className` it passes to `DialogContent` carries width only
- *   (`max-w-*` / `w-*`, any breakpoint prefix).
+ * So, for every `<DialogContent` call site on an app surface:
+ * - its own children include a `<DialogBody`, the one scroll region. Per call
+ *   site, not per file: a file with two dialogs and one body passed the old
+ *   per-file check. A body with nothing to show collapses by itself
+ *   (`empty:hidden` in the primitive), so confirm dialogs keep it too;
+ * - the `className` it passes carries width only (`max-w-*` / `w-*`, any
+ *   breakpoint prefix).
  *
  * A source scan cannot see a `<form>` that wraps body and footer without
  * `flex min-h-0 flex-1 flex-col`; the Playwright harness's single-scroll
@@ -31,12 +34,17 @@ import {
 interface OpeningTag {
   line: number;
   text: string;
+  /** Index just past the tag's closing `>`. */
+  end: number;
 }
+
+const DIALOG_CONTENT_OPEN = /<DialogContent(?=[\s>/])/g;
+const DIALOG_CONTENT_CLOSE = "</DialogContent>";
 
 /** Each `<DialogContent …>` opening tag, read to its closing `>`. */
 function dialogContentTags(code: string): OpeningTag[] {
   const tags: OpeningTag[] = [];
-  for (const match of code.matchAll(/<DialogContent(?=[\s>/])/g)) {
+  for (const match of code.matchAll(DIALOG_CONTENT_OPEN)) {
     const start = match.index ?? 0;
     let depth = 0;
     let quote: string | null = null;
@@ -58,9 +66,47 @@ function dialogContentTags(code: string): OpeningTag[] {
     tags.push({
       line: code.slice(0, start).split("\n").length,
       text: code.slice(start, end + 1),
+      end: end + 1,
     });
   }
   return tags;
+}
+
+interface DialogContentElement {
+  line: number;
+  /** The source between the opening tag and its own `</DialogContent>`. */
+  children: string;
+}
+
+/**
+ * Each `<DialogContent>` call site with its own children, so the body check
+ * is per dialog: a file with two dialogs and one `DialogBody` is not enough
+ * (s66a review m1). Nested `DialogContent`s are depth-counted.
+ */
+function dialogContentElements(code: string): DialogContentElement[] {
+  return dialogContentTags(code).map((tag) => {
+    if (tag.text.endsWith("/>")) return { line: tag.line, children: "" };
+    let depth = 1;
+    let cursor = tag.end;
+    while (depth > 0) {
+      const close = code.indexOf(DIALOG_CONTENT_CLOSE, cursor);
+      if (close === -1)
+        return { line: tag.line, children: code.slice(tag.end) };
+      const opens = Array.from(
+        code.slice(cursor, close).matchAll(DIALOG_CONTENT_OPEN),
+      ).length;
+      depth += opens - 1;
+      if (depth === 0) {
+        return { line: tag.line, children: code.slice(tag.end, close) };
+      }
+      cursor = close + DIALOG_CONTENT_CLOSE.length;
+    }
+    return { line: tag.line, children: "" };
+  });
+}
+
+function hasDialogBody(children: string): boolean {
+  return /<DialogBody(?=[\s>/])/.test(children);
 }
 
 /** The class tokens a tag passes through `className`, from every literal in it. */
@@ -108,10 +154,12 @@ describe("dialog structure (design system, Dialogs and sheets)", () => {
     expect(dialogFiles.length).toBeGreaterThanOrEqual(11);
   });
 
-  it("renders a DialogBody wherever it renders a DialogContent", () => {
-    const missing = dialogFiles
-      .filter(({ code }) => !/<DialogBody(?=[\s>/])/.test(code))
-      .map(({ file }) => file);
+  it("renders a DialogBody inside every DialogContent call site", () => {
+    const missing = dialogFiles.flatMap(({ file, code }) =>
+      dialogContentElements(code)
+        .filter((element) => !hasDialogBody(element.children))
+        .map((element) => `${file}:${element.line}`),
+    );
     expect(missing).toEqual([]);
   });
 
@@ -149,6 +197,34 @@ describe("dialog structure (design system, Dialogs and sheets)", () => {
         '<DialogContent onInteractOutside={(e) => e.preventDefault()} className="p-4">',
       );
       expect(layoutViolations(tag.text)).toEqual(["p-4"]);
+    });
+
+    it("checks each DialogContent on its own, not the file", () => {
+      const source = [
+        "<Dialog>",
+        '  <DialogContent className="sm:max-w-md">',
+        "    <DialogHeader />",
+        "    <DialogBody>first</DialogBody>",
+        "  </DialogContent>",
+        "</Dialog>",
+        "<Dialog>",
+        '  <DialogContent className="sm:max-w-md">',
+        "    <DialogHeader />",
+        "    <div>second</div>",
+        "  </DialogContent>",
+        "</Dialog>",
+      ].join("\n");
+      const missing = dialogContentElements(source)
+        .filter((element) => !hasDialogBody(element.children))
+        .map((element) => element.line);
+      expect(missing).toEqual([8]);
+    });
+
+    it("reads a self-closing DialogContent as having no body", () => {
+      const [element] = dialogContentElements(
+        '<DialogContent className="sm:max-w-md" />',
+      );
+      expect(hasDialogBody(element.children)).toBe(false);
     });
   });
 });

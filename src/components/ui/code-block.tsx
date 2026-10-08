@@ -21,7 +21,13 @@ import { cn } from "@/lib/utils/cn";
  * - what is copied is exactly `value`; display differs only by wrapping;
  * - a refused clipboard write says so ("Copy failed") and selects the text,
  *   so Cmd/Ctrl+C still works. It never claims "Copied" for a write that did
- *   not happen.
+ *   not happen;
+ * - the button's accessible name says what it copies (`copyLabel`): two
+ *   blocks in one panel used to be two buttons both named "Copy" (s66a
+ *   review m5). The name keeps the visible word "Copy" in it;
+ * - the outcome is announced through a polite live region (`role="status"`),
+ *   present and empty from the first render: a changed button label alone is
+ *   not announced, and a region inserted with its text is not either.
  */
 export interface CodeBlockProps {
   value: string;
@@ -29,6 +35,8 @@ export interface CodeBlockProps {
   label?: string;
   /** Wrap long lines (default). `false` scrolls horizontally inside the block. */
   wrap?: boolean;
+  /** Accessible name of the Copy button: what it copies, e.g. "Copy snippet". */
+  copyLabel?: string;
   className?: string;
 }
 
@@ -41,6 +49,15 @@ const BUTTON_LABEL: Record<CopyState, string> = {
   copied: "Copied",
   failed: "Copy failed",
 };
+
+/** What the live region says; nothing while idle. */
+const ANNOUNCEMENT: Record<CopyState, string> = {
+  idle: "",
+  copied: "Copied",
+  failed: "Copy failed",
+};
+
+const DEFAULT_COPY_LABEL = "Copy code";
 
 function selectContents(element: HTMLElement | null): void {
   const selection = window.getSelection();
@@ -55,6 +72,7 @@ export function CodeBlock({
   value,
   label,
   wrap = true,
+  copyLabel = DEFAULT_COPY_LABEL,
   className,
 }: CodeBlockProps) {
   const [copyState, setCopyState] = React.useState<CopyState>("idle");
@@ -95,9 +113,18 @@ export function CodeBlock({
     >
       <div className="flex h-10 items-center justify-between gap-2 border-b border-border pl-4 pr-1">
         <span className="text-eyebrow">{label}</span>
-        <Button type="button" size="sm" variant="outline" onClick={handleCopy}>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-label={copyLabel}
+          onClick={handleCopy}
+        >
           {BUTTON_LABEL[copyState]}
         </Button>
+        <span role="status" className="sr-only">
+          {ANNOUNCEMENT[copyState]}
+        </span>
       </div>
       <pre
         ref={preRef}
