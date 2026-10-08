@@ -53,5 +53,17 @@ light-theme contrast of `bg-tone-accent-surface`.
 Owner standing rule: fix majors and cheap minors before shipping. Findings 1–8 and 11 go to a fix run; 9 is
 CI's (no captures uploaded) — recorded as a known gap; 10 is noted.
 
-Max severity: major
+## Verification of fix `567b77b` (fresh reviewer, 2026-10-08)
+
+Both majors closed. Contrast checks on the changed surfaces read correctly against the code (hovered Overview
+row text over the composited `hover:bg-surface-2`, selected theme label ≥ 4.5, unselected option border ≥ 3 —
+computed 3.09 dark / 3.27 light — and standalone h1/description in both themes); they run inside the existing
+1280 blocks (count stays 64 before the s67 merge, 69 after). ThemePicker `border-input` pinned (revert → 2 red).
+R5 widening and R7 bite (Card `interactive` shadow, Metric arrow hover, `border-2` probes all red); no false
+positives. Minors 5–8, 11 done. Full jest 362 suites / 4,732 tests, type-check green; `--list` 69.
+
+New minors: R7 ignores every single-side border (`border-b-2`, `border-l-2`, …) anywhere, broader than the docs'
+"tab underline and quote stripe"; the hover contrast measures the row's `p` lines, not its status badge.
+
+Max severity: minor
 Ship allowed: yes
