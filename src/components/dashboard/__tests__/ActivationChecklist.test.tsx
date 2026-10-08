@@ -471,6 +471,31 @@ describe("ActivationChecklist", () => {
     expect(popup.close).toHaveBeenCalled();
   });
 
+  // Pre-PR fix: the refusal rendered inside the step's row, beside "Not yet"
+  // and the button. It now reads with the checklist's other messages, above
+  // the steps.
+  it("announces a refused Edit website above the steps, not inside its step", async () => {
+    const user = userEvent.setup();
+    (window.open as jest.Mock).mockReturnValue(null);
+    renderChecklist();
+    const button = screen.getByRole("button", {
+      name: "Edit website: Client Site",
+    });
+
+    await user.click(button);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Allow pop-ups for ReCopyFast, then try again.",
+    );
+    expect(button.closest("li")).not.toContainElement(alert);
+    expect(
+      alert.compareDocumentPosition(screen.getByRole("list")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(button).toBeEnabled();
+  });
+
   it("surfaces popup blocking and does not claim the step is complete", async () => {
     const user = userEvent.setup();
     global.fetch = jest.fn().mockResolvedValue({

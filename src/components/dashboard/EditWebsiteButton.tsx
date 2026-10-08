@@ -1,10 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { AlertCircle, PencilLine } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { PencilLine } from "lucide-react";
 import { Button, type ButtonProps } from "@/components/ui/button";
-import { cn } from "@/lib/utils/cn";
 import {
   useEditSession,
   type EditSessionPermission,
@@ -19,7 +16,19 @@ import {
  * and offered the same button again; it opened the tab after `await`, so
  * pop-up blockers caught it; and it announced success by injecting an emerald
  * `innerHTML` toast into <body>. The dialog and the toast are gone: the new
- * tab is the feedback, and a failure is an inline Alert under the control.
+ * tab is the feedback.
+ *
+ * A failure is handed to the caller through `onErrorChange`, never drawn
+ * here. The button used to render its own Alert under itself, and every
+ * caller puts it in a row of controls: in the site header that put the
+ * message inside the actions row (at 1280 it pushed the site's name down and
+ * knocked "Version history" out of line, at 375 it sat between the two
+ * buttons), on a Sites row inside the action cell, in the checklist inside
+ * the step. Each caller now shows it where a message belongs: the site pages
+ * as their first section, the Sites row on its own message line, the
+ * checklist above its steps (s66c1 pre-PR fix). The pending state stays on
+ * the button. `onErrorChange` is required so that no caller can drop a
+ * refusal on the floor.
  *
  * The request body is what this button has always sent: the caller's
  * permissions without `view`, for two hours. The Sites row, its menu and the
@@ -34,6 +43,11 @@ interface EditWebsiteButtonProps {
   userPermissions: EditSessionPermission[];
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
+  /**
+   * `null` as an attempt starts, then the message if it fails. Where the
+   * message renders is the caller's decision, and never beside the button.
+   */
+  onErrorChange: (message: string | null) => void;
   /** Overrides the accessible name where several sites share a screen. */
   "aria-label"?: string;
   className?: string;
@@ -42,13 +56,13 @@ interface EditWebsiteButtonProps {
 export default function EditWebsiteButton({
   site,
   userPermissions,
+  onErrorChange,
   variant = "default",
   size = "default",
   "aria-label": ariaLabel,
   className,
 }: EditWebsiteButtonProps) {
   const { openEditSession, isOpening } = useEditSession(site.domain);
-  const [error, setError] = useState<string | null>(null);
 
   // A member without edit or admin cannot start a session; the server would
   // refuse it, so the control does not offer it.
@@ -56,7 +70,7 @@ export default function EditWebsiteButton({
     userPermissions.includes("edit") || userPermissions.includes("admin");
 
   const handleClick = async () => {
-    setError(null);
+    onErrorChange(null);
     const message = await openEditSession({
       siteId: site.id,
       permissions: userPermissions.filter(
@@ -64,28 +78,21 @@ export default function EditWebsiteButton({
       ),
       durationHours: SESSION_HOURS,
     });
-    if (message) setError(message);
+    if (message) onErrorChange(message);
   };
 
   return (
-    <div className={cn("flex min-w-0 flex-col items-start gap-2", className)}>
-      <Button
-        variant={variant}
-        size={size}
-        loading={isOpening}
-        disabled={!canEdit}
-        aria-label={ariaLabel}
-        leftIcon={<PencilLine aria-hidden="true" />}
-        onClick={() => void handleClick()}
-      >
-        Edit website
-      </Button>
-      {error && (
-        <Alert variant="destructive" className="max-w-sm">
-          <AlertCircle className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
-    </div>
+    <Button
+      variant={variant}
+      size={size}
+      loading={isOpening}
+      disabled={!canEdit}
+      aria-label={ariaLabel}
+      leftIcon={<PencilLine aria-hidden="true" />}
+      className={className}
+      onClick={() => void handleClick()}
+    >
+      Edit website
+    </Button>
   );
 }

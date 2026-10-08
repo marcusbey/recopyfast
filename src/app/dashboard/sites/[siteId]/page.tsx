@@ -28,7 +28,7 @@ function relative(value?: string | null): string | null {
  * if it were a measurement.
  */
 export default function SiteOverviewPage() {
-  const shell = useSitePageShell();
+  const { shell, editWebsiteAlert } = useSitePageShell();
   const { site, credentials } = useSiteContext();
   const { user } = useAuth();
   const activityId = useId();
@@ -38,6 +38,7 @@ export default function SiteOverviewPage() {
 
   return (
     <PageShell {...shell}>
+      {editWebsiteAlert}
       {/* Admins only: the checklist's first step copies the install snippet,
           which `GET /api/sites` mints for admins alone. It reads the
           provider's credentials, so a rotation reaches it at once. */}

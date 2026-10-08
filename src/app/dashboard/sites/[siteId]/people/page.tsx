@@ -30,7 +30,7 @@ import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
  * The explainers are the owner's approved copy (AC 6), verbatim.
  */
 export default function SitePeoplePage() {
-  const shell = useSitePageShell();
+  const { shell, editWebsiteAlert } = useSitePageShell();
   const { site, isAdmin } = useSiteContext();
   const [isAddEditorOpen, setIsAddEditorOpen] = useState(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -39,6 +39,7 @@ export default function SitePeoplePage() {
 
   return (
     <PageShell {...shell}>
+      {editWebsiteAlert}
       <section aria-label="Give someone access" className="space-y-3">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <AccessOption

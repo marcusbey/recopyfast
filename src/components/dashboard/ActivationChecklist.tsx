@@ -108,7 +108,10 @@ export function ActivationChecklist({
           ),
         },
         // The one "Edit website" control, with the checklist's own body: it
-        // asks for publish, because the step it completes is a publish.
+        // asks for publish, because the step it completes is a publish. A
+        // refusal reads with the checklist's other messages, above the steps:
+        // drawn by the button, it sat inside the step's row beside "Not yet"
+        // (s66c1 pre-PR fix).
         {
           label: "An edit published",
           complete: data.published,
@@ -116,6 +119,7 @@ export function ActivationChecklist({
             <EditWebsiteButton
               site={{ id: siteId, domain, name: siteName }}
               userPermissions={["edit", "publish"]}
+              onErrorChange={setActionError}
               size="sm"
               aria-label={`Edit website: ${siteName}`}
             />

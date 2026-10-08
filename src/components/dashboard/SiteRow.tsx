@@ -134,6 +134,7 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
           <EditWebsiteButton
             site={site}
             userPermissions={OWNER_EDIT_PERMISSIONS}
+            onErrorChange={setEditError}
             variant="outline"
             size="sm"
             aria-label={`Edit website: ${site.name}`}
@@ -178,6 +179,9 @@ export function SiteRow({ site, onDelete, onShare }: SiteRowProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {/* The row's one message line, under its content, for the button and
+          the menu alike. The button used to draw its refusal in the action
+          cell, between the status and the ⋮ (s66c1 pre-PR fix). */}
       {editError && (
         <Alert variant="destructive" className="[grid-area:error]">
           <AlertCircle className="h-4 w-4" aria-hidden="true" />

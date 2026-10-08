@@ -20,6 +20,21 @@ const site = {
   name: "Acme marketing site",
 };
 
+const onErrorChange = jest.fn();
+
+function renderButton(
+  props: Partial<React.ComponentProps<typeof EditWebsiteButton>> = {},
+) {
+  return render(
+    <EditWebsiteButton
+      site={site}
+      userPermissions={["edit", "admin"]}
+      onErrorChange={onErrorChange}
+      {...props}
+    />,
+  );
+}
+
 const popup = {
   opener: {} as Window | null,
   location: { href: "" },
@@ -31,6 +46,7 @@ describe("EditWebsiteButton", () => {
     popup.opener = {} as Window;
     popup.location.href = "";
     popup.close.mockReset();
+    onErrorChange.mockReset();
     jest.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -41,9 +57,7 @@ describe("EditWebsiteButton", () => {
   afterEach(() => jest.restoreAllMocks());
 
   it("is the Button primitive, square, labelled Edit website", () => {
-    render(
-      <EditWebsiteButton site={site} userPermissions={["edit", "admin"]} />,
-    );
+    renderButton();
 
     const button = screen.getByRole("button", { name: "Edit website" });
     expect(button).toHaveClass("rounded-control");
@@ -60,9 +74,7 @@ describe("EditWebsiteButton", () => {
       }),
     ) as jest.MockedFunction<typeof fetch>;
     const user = userEvent.setup();
-    render(
-      <EditWebsiteButton site={site} userPermissions={["edit", "admin"]} />,
-    );
+    renderButton();
 
     await user.click(screen.getByRole("button", { name: "Edit website" }));
 
@@ -83,9 +95,7 @@ describe("EditWebsiteButton", () => {
 
   it("starts an owner session: edit and admin, for two hours", async () => {
     const user = userEvent.setup();
-    render(
-      <EditWebsiteButton site={site} userPermissions={["edit", "admin"]} />,
-    );
+    renderButton();
 
     await user.click(screen.getByRole("button", { name: "Edit website" }));
 
@@ -105,9 +115,7 @@ describe("EditWebsiteButton", () => {
 
   it("injects nothing into the page on success: the new tab is the feedback", async () => {
     const user = userEvent.setup();
-    render(
-      <EditWebsiteButton site={site} userPermissions={["edit", "admin"]} />,
-    );
+    renderButton();
     const bodyChildren = document.body.childElementCount;
 
     await user.click(screen.getByRole("button", { name: "Edit website" }));
@@ -122,22 +130,52 @@ describe("EditWebsiteButton", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("reports a failure inline, as an alert under the control", async () => {
+  // Pre-PR fix (s66c1): the button drew its own Alert under itself. In the
+  // site header that put the message inside the actions row: at 1280 it
+  // pushed the site's name down and knocked "Version history" out of line,
+  // at 375 it landed between the two buttons. The button now only reports a
+  // failure; each caller puts it where a message belongs, never in a row of
+  // controls. Its pending state stays on the button.
+  it("hands a failure to its caller and draws nothing beside itself", async () => {
     (window.open as jest.Mock).mockReturnValue(null);
     const user = userEvent.setup();
-    render(
-      <EditWebsiteButton site={site} userPermissions={["edit", "admin"]} />,
-    );
+    renderButton();
 
     await user.click(screen.getByRole("button", { name: "Edit website" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Allow pop-ups for ReCopyFast, then try again.",
+    await waitFor(() =>
+      expect(onErrorChange).toHaveBeenLastCalledWith(
+        "Allow pop-ups for ReCopyFast, then try again.",
+      ),
     );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/allow pop-ups/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit website" })).toBeEnabled();
+  });
+
+  it("clears the last failure as the next attempt starts", async () => {
+    (window.open as jest.Mock).mockReturnValueOnce(null);
+    const user = userEvent.setup();
+    renderButton();
+
+    await user.click(screen.getByRole("button", { name: "Edit website" }));
+    await waitFor(() => expect(onErrorChange).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole("button", { name: "Edit website" }));
+
+    await waitFor(() =>
+      expect(popup.location.href).toBe(
+        "https://acme.example/?rcf_edit_token=t",
+      ),
+    );
+    expect(onErrorChange.mock.calls).toEqual([
+      [null],
+      ["Allow pop-ups for ReCopyFast, then try again."],
+      [null],
+    ]);
   });
 
   it("offers nothing to a view-only member", () => {
-    render(<EditWebsiteButton site={site} userPermissions={["view"]} />);
+    renderButton({ userPermissions: ["view"] });
 
     expect(screen.getByRole("button", { name: "Edit website" })).toBeDisabled();
   });

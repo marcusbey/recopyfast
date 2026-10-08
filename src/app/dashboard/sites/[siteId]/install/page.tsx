@@ -35,7 +35,7 @@ import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
  * next fetch, and the old token is already revoked (ADR 052).
  */
 export default function SiteInstallPage() {
-  const shell = useSitePageShell();
+  const { shell, editWebsiteAlert } = useSitePageShell();
   const {
     site,
     credentials,
@@ -56,6 +56,7 @@ export default function SiteInstallPage() {
 
   return (
     <PageShell {...shell}>
+      {editWebsiteAlert}
       {regeneration.hasSucceeded && (
         <Alert variant="success">
           <AlertTitle>Snippet regenerated</AlertTitle>

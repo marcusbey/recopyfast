@@ -108,6 +108,37 @@ describe("the site frame", () => {
       ).toBeInTheDocument();
     });
 
+    // Pre-PR fix: the refusal rendered inside the header's actions row. At
+    // 1280 it pushed the site's name down and knocked "Version history" out
+    // of line; at 375 it landed between the two buttons. It is now the
+    // page's first section: a direct child of the shell (ADR 053), right
+    // under the header and its Site navigation.
+    it("announces a refused Edit website under the header, never in its actions", async () => {
+      jest.spyOn(window, "open").mockReturnValue(null);
+      const user = userEvent.setup();
+      renderWithSite(<Page />);
+      const header = screen
+        .getByRole("heading", { level: 1 })
+        .closest("[data-page-header]") as HTMLElement;
+
+      await user.click(
+        within(header).getByRole("button", { name: "Edit website" }),
+      );
+
+      const alert = (
+        await screen.findByText("Allow pop-ups for ReCopyFast, then try again.")
+      ).closest('[role="alert"]') as HTMLElement;
+      expect(alert).not.toBeNull();
+      expect(header).not.toContainElement(alert);
+      expect(alert.parentElement).toHaveAttribute("data-page-shell");
+      expect(alert.previousElementSibling).toBe(
+        screen.getByRole("navigation", { name: "Site" }),
+      );
+      expect(
+        within(header).getByRole("button", { name: "Edit website" }),
+      ).toBeEnabled();
+    });
+
     it("navigates the four subpages by link, marking only this one current", () => {
       renderWithSite(<Page />);
 

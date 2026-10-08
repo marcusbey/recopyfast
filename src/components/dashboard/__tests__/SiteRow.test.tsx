@@ -226,6 +226,57 @@ describe("SiteRow", () => {
     open.mockRestore();
   });
 
+  // Pre-PR fix: the button drew its refusal inside the row's action cell,
+  // between the status and the ⋮, so the message sat in the row of controls
+  // and stretched it. The row now has one message line, under its content,
+  // shared by the button and the menu.
+  describe("a refused Edit website", () => {
+    const POPUP_BLOCKED = "Allow pop-ups for ReCopyFast, then try again.";
+
+    beforeEach(() => {
+      jest.spyOn(window, "open").mockReturnValue(null);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it("from the row's button, reads on the row's own line, not in its action cell", async () => {
+      const user = userEvent.setup();
+      renderRow();
+      const button = screen.getByRole("button", {
+        name: "Edit website: Example Site",
+      });
+
+      await user.click(button);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent(POPUP_BLOCKED);
+      expect(button.parentElement).not.toContainElement(alert);
+      expect(alert.parentElement).toBe(screen.getByRole("listitem"));
+      expect(button).toBeEnabled();
+    });
+
+    it("from the menu, reads on the same line, once", async () => {
+      const user = userEvent.setup();
+      renderRow();
+
+      await user.click(
+        screen.getByRole("button", { name: "Edit website: Example Site" }),
+      );
+      await screen.findByRole("alert");
+      await user.click(
+        screen.getByRole("button", { name: "Open menu for Example Site" }),
+      );
+      await user.click(
+        await screen.findByRole("menuitem", { name: "Edit website" }),
+      );
+
+      const alerts = await screen.findAllByRole("alert");
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveTextContent(POPUP_BLOCKED);
+      expect(alerts[0].parentElement).toBe(screen.getByRole("listitem"));
+    });
+  });
+
   // The hover-only "Copy domain" is gone (s66c1 design, "Removed from the
   // face of the card"), and so are the Edits / Views / Activity figures:
   // views were never computed.

@@ -18,7 +18,7 @@ import { useSitePageShell } from "@/components/dashboard/site/useSitePageShell";
  * down one page, under the install snippet.
  */
 export default function SiteSettingsPage() {
-  const shell = useSitePageShell();
+  const { shell, editWebsiteAlert } = useSitePageShell();
   const { site } = useSiteContext();
   const router = useRouter();
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
@@ -27,6 +27,7 @@ export default function SiteSettingsPage() {
 
   return (
     <PageShell {...shell}>
+      {editWebsiteAlert}
       <p className="text-sm text-muted-foreground">
         Advanced settings. You don&apos;t need any of these to start editing.
       </p>
