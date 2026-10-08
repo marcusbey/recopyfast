@@ -181,6 +181,11 @@ a signed-in `edit`/`admin` member's content write is a route that runs a fail-cl
 client, scoped by the ids those checks established. See
 [ADR 042](./docs/decisions/042-content-writes-are-service-role-only.md).
 
+An edit session never exceeds its holder's live grant: only the service role writes
+`edit_sessions`, and every validation intersects the session's permissions with the holder's
+current `site_permissions` row. See
+[ADR 047](./docs/decisions/047-edit-session-authority-is-the-live-grant.md).
+
 Site ownership is an `admin` row in `site_permissions`, **never** a column on `sites`. Counting
 via `sites.user_id` returns 0 and passes every quota check — that bug already shipped.
 
