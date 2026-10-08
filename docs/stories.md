@@ -2465,7 +2465,14 @@ decided at that rebase. Branch `feature/s67-embed-spa-support`.
   rendered. A React 19 app whose edited element later re-renders structurally (a conditional
   text removed, an element inserted before the text) keeps running: no `NotFoundError`, and
   the root does not unmount.
-  Evidence: `embed-react-writes.test.tsx` (R1c, R1d, text-node identity, `<svg>` kept, no write on a matching DOM); e2e E3, E4.
+  Evidence: `embed-react-writes.test.tsx` (R1c, R1d, text-node identity, copy in the direct text node beside a `<span>`, `<svg>` kept, no write on a matching DOM); e2e E3, E4.
+
+Follow-ups, not this story: the comment above the Navigation API handler in
+`public/embed/recopyfast.src.js` (about :3962-3964) says the callback's own writes are
+"discarded" with `takeRecords`; when the observer's own delivery runs first, they are passed to
+the callback instead (harmless, verification minor 1). Correct it with the next embed change: a
+comment edit changes the artifact's `@generated-from-sha256` line, so s67 ships the verified
+build as is.
 
 Embed allocation: ≤ +850 gz gross on each measurement (bundle and widget), net ≤ 0, paid in
 this branch. See § Byte budget and `docs/plans/s67-embed-spa-support.md`.

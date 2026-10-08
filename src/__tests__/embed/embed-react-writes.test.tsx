@@ -51,6 +51,10 @@ function App({ show = true, icon = false, title = "Draft title" }: AppProps) {
         Buy
       </button>
       <h2 data-rcf-id="r-title">{title}</h2>
+      <h1 data-rcf-id="r-kicker">
+        <span>x</span>
+        Title
+      </h1>
     </main>
   );
 }
@@ -71,6 +75,11 @@ const ROWS = [
     element_id: "r-title",
     original_content: "Draft title",
     current_content: "Published title",
+  },
+  {
+    element_id: "r-kicker",
+    original_content: "xTitle",
+    current_content: "Published kicker",
   },
 ];
 
@@ -233,6 +242,36 @@ describe("published copy written into a React 19 tree", () => {
     expect(byId("r-hero").firstChild).toBe(reactTextNode);
     expect(reactTextNode?.nodeValue).toBe("Published hero");
     expect(byId("r-hero").textContent).toBe("Published hero");
+  });
+
+  it("puts the copy in the element's own text node, not a child element's: <h1><span>x</span>Title</h1>", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<App />));
+    const heading = byId("r-kicker");
+    const span = heading.firstChild as HTMLElement;
+    const directText = heading.lastChild;
+    expect(span.nodeName).toBe("SPAN");
+    expect(directText?.nodeType).toBe(Node.TEXT_NODE);
+
+    installFetch(false);
+    new Function(WIDGET_SOURCE)();
+    await settle();
+    harness = {
+      root,
+      reactErrors: [],
+      hostErrors: [],
+      resolveContent: () => {},
+    };
+
+    // The span stays where React put it, its text blanked; the heading's own
+    // text node carries the copy.
+    expect(heading.firstChild).toBe(span);
+    expect(heading.lastChild).toBe(directText);
+    expect(directText?.nodeValue).toBe("Published kicker");
+    expect(span.textContent).toBe("");
+    expect(heading.textContent).toBe("Published kicker");
   });
 
   it("keeps an element child: <button><svg/>Buy</button> keeps its svg", async () => {

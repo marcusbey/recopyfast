@@ -99,5 +99,27 @@ New finding:
 
 Orchestrator: B goes to a fix run (owner's standing rule).
 
-Max severity: major
+## Verification of fix `be5b841` (fresh reviewer, 2026-10-08)
+
+Finding B closed: all five scenarios hold in jest and in real Chromium with the native Navigation API
+(`probe3/chromium-sametask.js`, `probe4/chromium-all.js`, 12 rows). A 10-scenario regression hunt (double
+navigation in one task, replaceState + write-back, hash + write-back, pushState/render in microtasks, destroy in
+the same task, Back with popstate render, A/B variant on a persistent element, push-and-back in one task), each
+with and without the Navigation API, found no regression — every difference from `2df68b1` is an improvement.
+The `writeText` funding rewrite is equivalent (20,000-tree fuzz: 0 differences; a deliberately broken variant: 5,063).
+Bytes 45,843 / 33,073, fresh build byte-identical, ceilings only down. Mutations bite. Full jest 323 suites /
+4,252 tests, type-check, e2e E1–E5 green (E1 red on `2df68b1`'s artifact at the new step).
+
+Minors:
+
+1. ADR 049:176-177 says a render in the same task wins; that holds only for a SYNCHRONOUS render. React 19
+   `createRoot` defers its render to a microtask, so spinner → pushState → microtask render still files the old
+   text under the new path (same on `2df68b1` and without the Navigation API — the class ADR 049 already accepts
+   under "To watch"; not a regression). The source comment at `recopyfast.src.js:3962-3964` also says the
+   callback's own writes are "discarded" where they are passed to the callback when the observer's own delivery
+   runs first (harmless).
+2. `recopyfast.src.js:751`: changing `node.parentNode === element` to `true` turns no behavioural test red;
+   add `<h1><span>x</span>Title</h1>` receiving the copy in its direct text node.
+
+Max severity: minor
 Ship allowed: yes

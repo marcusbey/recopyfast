@@ -173,8 +173,12 @@ observation and in-place writes, and it enforces only what a human edited.
     at the next edit click (see the amendment above).
   - A host change between the path change and the router's render. That includes a change
     made earlier in the task that changes the path, when the router renders in a later
-    task: it reaches the observer after the path change. A render in that same task is in
-    the same batch, and wins (finding B, closed). The embed cannot tell such a batch from
+    task: it reaches the observer after the path change. A render in that same task wins
+    only when it renders synchronously in that task: it is then in the same batch (finding
+    B, closed). A render deferred to a microtask stays in this class. React 19's
+    `createRoot` defers its render that way, so a spinner shown, then `pushState`, then
+    React's microtask render files the old page's text under the new path, with or without
+    the Navigation API. The embed cannot tell such a batch from
     the new page, so it takes it as the new page:
     - a batch that adds nodes (a spinner, a skeleton) is rescanned at once;
     - a text-only batch (a ticker, a loading label) schedules the rescan 200 ms after the
