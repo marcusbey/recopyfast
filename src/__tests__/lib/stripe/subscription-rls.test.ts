@@ -589,3 +589,100 @@ describe("s82: a plan change keeps a subscription scheduled to cancel", () => {
     expect(params).not.toHaveProperty("cancel_at");
   });
 });
+
+describe("s82 review m-5: a plan change never undoes a chargeback's cancellation", () => {
+  const PERIOD_END = 1788163200; // 2026-09-01T00:00:00Z
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    stored = { ...seedRow(), cancel_at: "2026-09-01T00:00:00.000Z" };
+    effects = [];
+    allWritesBlocked = false;
+    rowMissing = false;
+    readFails = false;
+    armStripeDefaults();
+  });
+
+  function inStripe(fields: Record<string, unknown>) {
+    mockStripeRetrieve.mockResolvedValue({
+      id: STRIPE_SUBSCRIPTION_ID,
+      items: { data: [{ id: "si_1", price: { id: CURRENT_PRICE_ID } }] },
+      ...fields,
+    });
+  }
+
+  it("refuses, in words, to switch a subscription set to end after a lost chargeback", async () => {
+    inStripe({
+      cancel_at_period_end: true,
+      cancel_at: PERIOD_END,
+      metadata: {
+        user_id: "user-1",
+        cancelled_reason: "chargeback",
+        disputeId: "dp_1",
+      },
+    });
+
+    const error = await updateSubscription("user-1", {
+      planId: "starter",
+    }).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(BillingRefusal);
+    expect((error as BillingRefusal).status).toBe(409);
+    expect((error as BillingRefusal).message).toBe(
+      "This subscription is ending after a disputed payment, so its plan can't be changed. Contact support if you'd like to keep it.",
+    );
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(stored.cancel_at).toBe("2026-09-01T00:00:00.000Z");
+  });
+
+  it("drops the stale reason when it clears a lifetime purchase's cancellation", async () => {
+    inStripe({
+      cancel_at_period_end: true,
+      cancel_at: PERIOD_END,
+      metadata: {
+        user_id: "user-1",
+        cancelled_reason: "lifetime_purchase",
+        paymentIntentId: "pi_lifetime",
+      },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params).toEqual(
+      expect.objectContaining({ cancel_at_period_end: false }),
+    );
+    // "" is how Stripe unsets a metadata key.
+    expect(params.metadata).toEqual(
+      expect.objectContaining({ cancelled_reason: "", plan_id: "starter" }),
+    );
+  });
+
+  it("leaves the metadata's reasons alone on a subscription that renews", async () => {
+    inStripe({
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { user_id: "user-1" },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    const [, params] = mockStripeUpdate.mock.calls[0];
+    expect(params.metadata).not.toHaveProperty("cancelled_reason");
+  });
+
+  it("allows the change once support has undone the chargeback's cancellation", async () => {
+    inStripe({
+      cancel_at_period_end: false,
+      cancel_at: null,
+      metadata: { user_id: "user-1", cancelled_reason: "chargeback" },
+    });
+
+    await updateSubscription("user-1", { planId: "starter" });
+
+    expect(mockStripeUpdate).toHaveBeenCalledTimes(1);
+  });
+});

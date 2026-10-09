@@ -12,6 +12,10 @@ import { getEffectivePlan } from "@/lib/billing/entitlements";
 import { BillingRefusal } from "@/lib/billing/billing-refusal";
 import { readGrantedPlanIds } from "@/lib/billing/effective-plan";
 import { isPlanCoveredByGrants } from "./plan-types";
+import {
+  CANCELLED_REASON,
+  isTerminalSubscriptionStatus,
+} from "./subscription-status";
 import type { Subscription } from "@/types/billing";
 
 /**
@@ -24,10 +28,6 @@ const RECOVERABLE_CHECKOUT_STATUSES = [
   "past_due",
   "unpaid",
   "paused",
-] as const;
-const TERMINAL_SUBSCRIPTION_STATUSES = [
-  "canceled",
-  "incomplete_expired",
 ] as const;
 
 /**
@@ -183,11 +183,7 @@ export async function getRecoverableSubscriptionCheckout(
       return { kind: "already_subscribed" };
     }
 
-    if (
-      TERMINAL_SUBSCRIPTION_STATUSES.includes(
-        providerSubscription.status as (typeof TERMINAL_SUBSCRIPTION_STATUSES)[number],
-      )
-    ) {
+    if (isTerminalSubscriptionStatus(providerSubscription.status)) {
       // The webhook can lag or be missed. Persisting an already-terminal
       // provider state is safe; checkout never asks Stripe to cancel anything.
       const { data: updated, error: writeError } =
@@ -337,6 +333,28 @@ function keepScheduledToCancel(
   return {};
 }
 
+/**
+ * s82 review (m-5): a subscription the Stripe webhook set to end because a
+ * dispute was lost against us (`stopBillingForChargeback`) — and still set to
+ * end. Clearing that cancellation is not the customer's call: a plan change
+ * would restore recurring billing on the very card that charged us back.
+ */
+function isEndingAfterChargeback(
+  subscription: Pick<
+    Stripe.Subscription,
+    "metadata" | "cancel_at_period_end" | "cancel_at"
+  >,
+): boolean {
+  return (
+    subscription.metadata?.cancelled_reason === CANCELLED_REASON.chargeback &&
+    Boolean(subscription.cancel_at_period_end || subscription.cancel_at)
+  );
+}
+
+/** s82 review (m-5): said when a chargeback's cancellation blocks a switch. */
+const CHARGEBACK_PLAN_CHANGE_REFUSAL =
+  "This subscription is ending after a disputed payment, so its plan can't be changed. Contact support if you'd like to keep it.";
+
 /** s82: said when a permanent grant already includes the plan switched to. */
 const LIFETIME_PLAN_CHANGE_REFUSAL =
   "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it.";
@@ -411,6 +429,9 @@ export async function updateSubscription(
   const existingSubscription = await stripe.subscriptions.retrieve(
     currentSubscription.stripe_subscription_id,
   );
+  if (isEndingAfterChargeback(existingSubscription)) {
+    throw new BillingRefusal(CHARGEBACK_PLAN_CHANGE_REFUSAL, 409);
+  }
   const currentItem = existingSubscription.items.data[0];
 
   if (!currentItem) {
@@ -421,15 +442,24 @@ export async function updateSubscription(
     throw new BillingRefusal("You are already on this plan", 409);
   }
 
+  const keep = keepScheduledToCancel(existingSubscription);
+  const clearsCancellation = Object.keys(keep).length > 0;
   const stripeSubscription = await stripe.subscriptions.update(
     currentSubscription.stripe_subscription_id,
     {
       items: [{ id: currentItem.id, price: priceId }],
-      ...keepScheduledToCancel(existingSubscription),
+      ...keep,
       proration_behavior: "always_invoice",
       // Keep metadata in sync so webhook-driven writes record the new plan.
       metadata: {
         ...existingSubscription.metadata,
+        // s82 review (m-5): the cancellation this clears took its reason with
+        // it; a renewing subscription must not still say why it was ending
+        // ("" is how Stripe unsets a metadata key).
+        ...(clearsCancellation &&
+        existingSubscription.metadata?.cancelled_reason
+          ? { cancelled_reason: "" }
+          : {}),
         user_id: userId,
         plan_id: updates.planId,
         billing_period: billingPeriod,

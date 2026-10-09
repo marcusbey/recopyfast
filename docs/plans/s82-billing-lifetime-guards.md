@@ -554,6 +554,222 @@ Failing tests first:
 - One pin beyond the brief: the one-off session in the expiry case names a plan, because mutation
   M15 (session mode ignored) survived when it did not.
 
+## Review fix pass (verification of 6cac2ea)
+
+The fresh review of `6cac2ea` (Devin fix pass) found two majors and seven minors: the branch did
+not merge onto `main`, and eight of its 29 mutations survived — among them the guard against
+refunding a subscription already ended for another reason and the refund idempotency key. Rebased
+onto `origin/main` `122ad2e` (s74 + s75) first: `docs/stories.md` append conflict, s74, s75 and
+s82 kept in id order.
+
+> CTO decision under the owner's 2026-10-09 directive.
+
+### CTO decisions (review fix pass)
+
+20. **One rule for both orderings (m-1).** A subscription a lifetime grant covers is refused —
+    cancelled now, refunded — only when Stripe created it at or after the covering lifetime was
+    paid: `wasBoughtWithPlanAlreadyOwned(created, paidAt)` (`created >= paidAt`), the one
+    function both orderings call. Paid-at is the grant's payment intent's `created` (what
+    `stopBillingForLifetimeOwner` already read), or for a grant with no payment (a support comp)
+    its `granted_at`; with several covering grants, the earliest. An older subscription whose own
+    event is processed after the grant (a Stripe retry, a dashboard resend) gets the period-end
+    cancellation `stopBillingForLifetimeOwner` gives it in the other ordering — the same call
+    (`endAtPeriodEndForLifetime`, same metadata) — and is recorded as Stripe then holds it. A
+    failure there throws (retryable) and alerts. The grants are read by `readLifetimeGrants`
+    (`effective-plan.ts`), the same filtered query as `readGrantedPlans` (one private builder for
+    both), undated rows only.
+21. **A refused subscription's late payment is refunded when it settles (m-2).**
+    `invoice.payment_succeeded` for a subscription whose row is over (`canceled`,
+    `incomplete_expired`) re-reads it from Stripe; if it carries the `covered_by_lifetime`
+    comment, every paid payment of that invoice goes through the same idempotent refund (same
+    metadata lookup, same key), so a payment the refusal already refunded is found, never refunded
+    twice. Gated on the row being over, so a live subscription's renewal costs no Stripe call.
+    Success is logged at info (stdout); a failure alerts and answers 500 so Stripe redelivers. The
+    refusal report's pending sentence now says such payments are refunded when they settle, and to
+    refund by hand only if no refund follows.
+22. **Cancelled but not refunded is its own failure (m-3).** `refuseSubscriptionCoveredByLifetime`
+    throws `CoveredRefundFailed` (carrying the stopped subscription) when the refund fails after
+    the subscription is stopped. `stopBillingForLifetimeOwner` then alerts "…was cancelled, but its
+    payment could not be refunded — refund it by hand." and skips the period-end fallback; the
+    subscription webhook's retry alert says "refund it by hand" instead of "cancel and refund it".
+    A subscription Stripe already ended for another reason but still live in our table is skipped
+    by `stopBillingForLifetimeOwner`: nothing bills, an update would fail with a false "could not
+    be cancelled" alert, and it must not be refunded — the rule M21's guard keeps in the other
+    ordering.
+23. **Alerts in words (m-4).** Every alert of this backstop that asks a person to act goes through
+    `alertOps` (new `src/lib/monitoring/ops-alert.ts`): `logger.error(sentence, undefined, context,
+    { ...metadata, cause })`, so the logger sends `Sentry.captureMessage(sentence, "error")` and the
+    error rides in the event's `log_metadata` context. The logger is unchanged: `logger.error(msg,
+    err)` keeps `captureException` for every other caller.
+24. **A chargeback's cancellation is not the customer's to undo (m-5).** `updateSubscription`
+    refuses — `BillingRefusal` 409, "This subscription is ending after a disputed payment, so its
+    plan can't be changed. Contact support if you'd like to keep it." — a subscription whose
+    metadata says `cancelled_reason: chargeback` while it is still set to end, before any Stripe
+    write. When a plan change clears any other cancellation it also unsets `cancelled_reason`
+    (`""`, Stripe's unset).
+25. **A refusal is reported once (m-6).** The delivery whose cancellation succeeded reports it
+    (Sentry). A delivery that finds the subscription already cancelled by the refusal — the
+    comment on the subscription it read, or on a re-read after its own cancel failed because a
+    concurrent delivery cancelled first — finishes the refund if one is missing and logs at info.
+    A failed cancel the re-read does not explain still throws and alerts. Residual, stated: what
+    Stripe answers to cancelling an already cancelled subscription is not verified here (no Stripe
+    access); if it answered success rather than an error, two deliveries racing inside the
+    milliseconds between their read and their cancel could each report once.
+26. **One terminal-status list (m-7).** New `src/lib/stripe/subscription-status.ts` exports
+    `TERMINAL_SUBSCRIPTION_STATUSES`, `isTerminalSubscriptionStatus` and `CANCELLED_REASON` (the
+    webhook's `metadata.cancelled_reason` values, now also read by the plan change); the webhook,
+    the backstop and checkout recovery import it.
+27. **Concurrent refusals refund once (M01).** The refund key stays
+    `covered_by_lifetime-refund-<subscription>-<payment intent or charge>`: two deliveries that
+    both miss the metadata lookup send the same key with the same parameters, and Stripe answers
+    the second with the first refund. Pinned by a test that holds both deliveries past the lookup.
+    There is no lock, so both may call `refunds.create`; the guarantee is one refund, not one call.
+
+### Task 23 — the branch merges onto main (M-1)
+
+Rebase onto `122ad2e`. `unauthenticated.test.ts` (s75) called `paymentMethodsRoute.GET()` with no
+request; the branch's GET reads the request for its per-IP limiter, so two cases failed. The test
+now passes a request to GET and mocks the limiter (`enforceRateLimit` → `null`) for the whole file.
+
+- [x] Task 23
+
+### Task 24 — every money guard pinned (M-2)
+
+`stripe-webhook-lifetime-covered.test.ts`, each red under the review's surviving mutation:
+M21 a subscription already cancelled for another reason is recorded as is, never refunded; M01
+the exact refund key, and two deliveries (`checkout.session.completed` and
+`customer.subscription.created`) held past the lookup together → one refund under that key; M17
+an earlier failed refund is refunded again under `…-after-<failed id>`; M13/M14 an `open` payment
+is reported as pending and a `canceled` one ignored, only the `paid` one refunded; M03/M08 a
+Starter subscription beside Lifetime Pro is refused in both orderings; M06 a subscription created
+in the same second as the lifetime payment is refused in both orderings.
+
+- [x] Task 24
+
+### Task 25 — one rule for both orderings (m-1)
+
+Failing tests first: recorded after the grant, a subscription created before the lifetime was
+paid is set to cancel at period end (metadata `lifetime_purchase` + the grant's payment intent),
+never cancelled or refunded; a support comp dates from its `granted_at`; a failed period-end update
+answers 500 and alerts.
+
+- [x] Task 25
+
+### Task 26 — a late payment is refunded when it settles (m-2)
+
+Failing tests first: a refusal with an `open` payment reports it as refunded when it settles; its
+`invoice.payment_succeeded` then refunds it in full under the same key; an over subscription not
+refused by us is not refunded; a live subscription's invoice reads nothing from Stripe.
+
+- [x] Task 26
+
+### Task 27 — cancelled but not refunded (m-3)
+
+Failing tests first: subscription-first, cancel succeeds and the refund fails → no period-end
+update, one alert "refund it by hand", never "could not be cancelled"; a subscription Stripe
+already cancelled for another reason → no update, no refund, no alert.
+
+- [x] Task 27
+
+### Task 28 — alerts in words (m-4)
+
+Failing tests first: new `src/__tests__/lib/monitoring/ops-alert.test.ts` (the real logger, Sentry
+mocked, production env): the sentence is the captured message at level `error`, no
+`captureException`, the error in `log_metadata.cause`. The webhook's failure alerts pass no `Error`
+and carry `cause`.
+
+- [x] Task 28
+
+### Task 29 — a chargeback's cancellation is kept (m-5)
+
+Failing tests first, `subscription-rls.test.ts`: a subscription set to end after a chargeback →
+`BillingRefusal` 409 with the sentence, Stripe never updated; clearing a lifetime-purchase
+cancellation unsets `cancelled_reason`; a renewing subscription's metadata gains no
+`cancelled_reason`.
+
+- [x] Task 29
+
+### Task 30 — a refusal is reported once (m-6)
+
+Failing tests first: a second event for a refused subscription reports nothing more to Sentry;
+the two concurrent deliveries of Task 24 report once and raise no "could not be cancelled".
+
+- [x] Task 30
+
+### Task 31 — one terminal-status list (m-7)
+
+Refactor under the existing tests (chargeback, checkout recovery, refusal); a mutation of the
+shared list turns them red.
+
+- [x] Task 31
+
+### Review fix pass — existing tests changed (declared)
+
+- `unauthenticated.test.ts` (from `main`, s75): GET receives a request, and `@/lib/api/rate-limit`
+  is mocked to let every call through (Task 23). The 401 and "reaches billing work" assertions are
+  unchanged.
+- `stripe-webhook-lifetime-covered.test.ts`: the Stripe fake now behaves like Stripe in two places
+  — `refunds.create` answers a reused idempotency key with the refund it first made (and errors on
+  the same key with other parameters), and `subscriptions.cancel` / `subscriptions.update` refuse a
+  subscription already cancelled; the fake database gains `billing_invoices`. No existing case
+  depended on the old behaviour: before any code change, under the new fake, the only red cases
+  were the 10 new ones and the two assertions changed below. Two
+  existing assertions changed because the alert now carries the error as metadata (m-4): "keeps the
+  grant and reports it when the refusal fails" and "keeps the grant and reports it when a session
+  cannot be expired" expected `expect.any(Error)` as the logger's second argument; they now expect
+  `undefined` there and the error's message in `cause` (stricter: the sentence is also asserted).
+
+### Review fix pass — execution notes (deviations, declared)
+
+- M01: the brief asked for "exactly one refund call with the same key". There is no lock, so two
+  deliveries that both miss the lookup both call `refunds.create`; the test asserts what the key
+  guarantees — one refund at Stripe, both calls under the exact key (decision 27).
+- m-3 goes one step beyond the brief: `stopBillingForLifetimeOwner` also skips a covered
+  subscription Stripe already ended for another reason (decision 22), the other way the period-end
+  fallback ran against a cancelled subscription.
+- m-4 is a helper (`alertOps`), not a logger change, and covers every actionable alert of the
+  backstop: the refusal failures, the period-end failures, the Checkout-expiry failures and the
+  subscription-lookup failure. The refusal report itself already had no `Error` attached.
+- m-2: a late refund that succeeds is logged at info, not Sentry, so the first invoice's own
+  `invoice.payment_succeeded` (which finds the refusal's refund) never raises a second report;
+  failures alert. The refusal report's pending sentence changed accordingly.
+- m-1 adds an alert of its own: a predating subscription that cannot be set to end answers 500 and
+  says "set it to cancel at period end by hand".
+- m-5 has no UI change: the dialog still offers a switch on a subscription ending after a
+  chargeback, and shows the server's refusal sentence as its error (`UpgradeDialog` prints the
+  response's `error`). m-5 unsets `cancelled_reason` only, as briefed; the companion keys the webhook writes beside it
+  (`paymentIntentId`, `disputeId`) stay as history.
+- `readLifetimePlanIds` is gone: its one caller now reads `readLifetimeCover`, which keeps the same
+  rule (undated, non-trial, non-revoked, not expired, rank rule) and adds when it was paid.
+- M03 now lives in `readLifetimeCover`'s filter (the rank rule moved there with m-1).
+
+Mutations (each neutralised, its test red, restored with `git checkout --`):
+
+| # | Neutralised | Red |
+|---|---|---|
+| M01 | refund idempotency key made random | 4 |
+| M03 | grant-first rank rule → exact plan match | 1 |
+| M06 | `>=` → `>` on paid-at (one rule, both orderings) | 2 |
+| M08 | subscription-first rank rule → exact plan match | 1 |
+| M13 | non-paid payments refunded too | 1 |
+| M14 | `open` payment branch dropped | 2 |
+| M17 | an earlier failed refund treated as done | 1 |
+| M21 | "already ended, not by us" guard dropped (grant-first) | 1 |
+| N01 | m-1 grant-first timing rule dropped | 3 |
+| N02 | m-1 comp dated "always" (granted_at ignored) | 1 |
+| N03 | m-2 late-payment refund not run | 2 |
+| N04 | m-2 refusal marker check dropped on the invoice path | 1 |
+| N05 | m-2 live-row gate dropped (Stripe read on every invoice) | 1 |
+| N06 | m-3 cancelled-only branch dropped (subscription-first) | 1 |
+| N07 | m-3 terminal skip dropped (subscription-first) | 1 |
+| N08 | m-3 grant-first alert ignores cancelled-only | 1 |
+| N09 | m-4 alert sends the `Error` (captureException) | 7 |
+| N10 | m-5 chargeback refusal dropped | 1 |
+| N11 | m-5 stale `cancelled_reason` kept | 1 |
+| N12 | m-6 re-read after a failed cancel dropped | 1 |
+| N13 | m-6 report regardless of who cancelled | 2 |
+| N14 | m-7 shared terminal list loses `canceled` | 8 |
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
@@ -569,6 +785,14 @@ Failing tests first:
   Stripe access from this environment.
 - ~~A plan held through a *dated* grant is still shown as held for life where it is the plan in
   force~~ — done in the Devin fix pass (decision 19; queued as s96, folded into s82).
+- Reactivation (`reactivateSubscription`) clears a cancellation the same way a plan change did
+  before m-5, so it can undo a chargeback's cancellation too (pre-existing, outside this review's
+  findings). Same rule to apply: refuse while `cancelled_reason` is `chargeback`.
+- `stopBillingForLifetimeOwner` destructures `{ data }` off its subscription read and drops the
+  error, so a failed read reads as "no subscriptions" (pre-existing).
+- Stripe test mode (no access here): what `subscriptions.cancel` answers for a subscription already
+  cancelled (decision 25's residual), and whether a canceled subscription's metadata can be read
+  with `cancellation_details.comment` intact on retrieve.
 
 ## Execution notes (deviations, declared)
 

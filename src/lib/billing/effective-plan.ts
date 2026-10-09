@@ -285,14 +285,10 @@ export async function readGrantedPlans(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<GrantedPlan[]> {
-  const { data, error } = await supabase
-    .from("plan_entitlements")
-    .select("plan_id, expires_at")
-    .eq("user_id", userId)
-    .is("revoked_at", null)
-    .neq("source", TRIAL_SOURCE)
-    .or(spendableFilter())
-    .returns<Array<{ plan_id: string; expires_at: string | null }>>();
+  const { data, error } = await selectHeldGrants<{
+    plan_id: string;
+    expires_at: string | null;
+  }>(supabase, userId, "plan_id, expires_at");
 
   if (error) {
     throw new Error(`Failed to read plan entitlements: ${error.message}`);
@@ -313,6 +309,74 @@ export async function readGrantedPlans(
     planId,
     expiresAt,
   }));
+}
+
+/**
+ * The grants `readGrantedPlanIds` holds — not revoked, not a trial, not
+ * expired — one query for every reader of "held", whatever columns it needs.
+ */
+function selectHeldGrants<Row>(
+  supabase: SupabaseClient,
+  userId: string,
+  columns: string,
+) {
+  return supabase
+    .from("plan_entitlements")
+    .select(columns)
+    .eq("user_id", userId)
+    .is("revoked_at", null)
+    .neq("source", TRIAL_SOURCE)
+    .or(spendableFilter())
+    .returns<Row[]>();
+}
+
+/** A held grant with no end date, and what paid for it. */
+export interface LifetimeGrant {
+  readonly planId: string;
+  /** The purchase's payment intent; null for a grant nobody paid for (a comp). */
+  readonly paymentIntentId: string | null;
+  /** When the grant was written. */
+  readonly grantedAt: string | null;
+}
+
+/**
+ * The account's held grants with no end date — one entry per grant, with its
+ * payment — read by the same query as `readGrantedPlans`.
+ *
+ * s82 review (m-1): the Stripe webhook refuses a subscription a lifetime grant
+ * covers only when it was bought after that lifetime was paid for, in both
+ * event orderings, so it needs the grant's payment and not only its plan.
+ * Dated grants are left out: a dated grant ends, and the subscription is what
+ * keeps the plan after it (plan decision 17).
+ */
+export async function readLifetimeGrants(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<LifetimeGrant[]> {
+  const { data, error } = await selectHeldGrants<{
+    plan_id: string;
+    expires_at: string | null;
+    stripe_payment_intent_id: string | null;
+    granted_at: string | null;
+  }>(
+    supabase,
+    userId,
+    "plan_id, expires_at, stripe_payment_intent_id, granted_at",
+  );
+
+  if (error) {
+    throw new Error(`Failed to read plan entitlements: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .filter(
+      (row) => !isRetired(row.plan_id) && (row.expires_at ?? null) === null,
+    )
+    .map((row) => ({
+      planId: row.plan_id,
+      paymentIntentId: row.stripe_payment_intent_id ?? null,
+      grantedAt: row.granted_at ?? null,
+    }));
 }
 
 /** The later of two grant ends; no end (null) outlasts every date. */

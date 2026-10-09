@@ -341,6 +341,14 @@ function stripeSubscription(
 /** Refunds Stripe holds, as `refunds.list` answers them. */
 let stripeRefunds: Row[] = [];
 
+/**
+ * What Stripe remembers per idempotency key: the request's parameters and the
+ * refund it answered. A reused key with the same parameters gets the first
+ * refund back, as Stripe does; with other parameters it is an error.
+ */
+let refundsByIdempotencyKey: Record<string, { params: string; refund: Row }> =
+  {};
+
 function armStripe() {
   mockSubscriptionRetrieve.mockImplementation(async (id: string) => {
     const found = stripeSubscriptions[id];
@@ -348,6 +356,13 @@ function armStripe() {
     return { ...found };
   });
   mockSubscriptionUpdate.mockImplementation(async (id: string, params: Row) => {
+    // Nor update one: a cancelled subscription is over for good.
+    if (stripeSubscriptions[id]?.status === "canceled") {
+      throw Object.assign(
+        new Error(`Subscription ${id} is canceled and cannot be updated`),
+        { type: "StripeInvalidRequestError" },
+      );
+    }
     stripeSubscriptions[id] = {
       ...stripeSubscriptions[id],
       ...params,
@@ -359,6 +374,13 @@ function armStripe() {
     return { ...stripeSubscriptions[id] };
   });
   mockSubscriptionCancel.mockImplementation(async (id: string, params: Row) => {
+    // Stripe will not cancel a subscription that is already over.
+    if (stripeSubscriptions[id]?.status === "canceled") {
+      throw Object.assign(
+        new Error(`Subscription ${id} has already been canceled`),
+        { type: "StripeInvalidRequestError" },
+      );
+    }
     stripeSubscriptions[id] = {
       ...stripeSubscriptions[id],
       status: "canceled",
@@ -392,16 +414,34 @@ function armStripe() {
     ),
     has_more: false,
   }));
-  mockRefundsCreate.mockImplementation(async (params: Row) => {
-    const refund = {
-      id: `re_${stripeRefunds.length + 1}`,
-      status: "succeeded",
-      payment_intent: params.payment_intent,
-      metadata: params.metadata,
-    };
-    stripeRefunds = [...stripeRefunds, refund];
-    return refund;
-  });
+  mockRefundsCreate.mockImplementation(
+    async (params: Row, options?: { idempotencyKey?: string }) => {
+      const key = options?.idempotencyKey;
+      const remembered = key ? refundsByIdempotencyKey[key] : undefined;
+      if (remembered) {
+        if (remembered.params !== JSON.stringify(params)) {
+          throw new Error(
+            `Keys for idempotent requests (${key}) can only be used with the same parameters`,
+          );
+        }
+        return { ...remembered.refund };
+      }
+      const refund = {
+        id: `re_${stripeRefunds.length + 1}`,
+        status: "succeeded",
+        payment_intent: params.payment_intent,
+        metadata: params.metadata,
+      };
+      stripeRefunds = [...stripeRefunds, refund];
+      if (key) {
+        refundsByIdempotencyKey[key] = {
+          params: JSON.stringify(params),
+          refund,
+        };
+      }
+      return { ...refund };
+    },
+  );
   mockPaymentIntentsRetrieve.mockImplementation(async (id: string) => ({
     id,
     created: LIFETIME_PAID_AT,
@@ -461,6 +501,7 @@ beforeEach(() => {
   grantReadFails = false;
   stripeSubscriptions = {};
   stripeRefunds = [];
+  refundsByIdempotencyKey = {};
   db = {
     billing_customers: [
       { id: "bc_1", user_id: USER_ID, stripe_customer_id: STRIPE_CUSTOMER_ID },
@@ -469,6 +510,7 @@ beforeEach(() => {
     billing_subscriptions: [],
     plan_entitlements: [],
     checkout_pending_intents: [],
+    billing_invoices: [],
   };
   armStripe();
 });
@@ -869,11 +911,15 @@ describe("a subscription recorded before the grant's own event lands", () => {
     // goes to ops instead of back to Stripe.
     expect(response.status).toBe(200);
     expect(db.plan_entitlements).toHaveLength(1);
+    // s82 review m-4: the actionable sentence is the alert; the error rides
+    // in its metadata (`cause`), so Sentry titles the event with the sentence.
     expect(mockLoggerError).toHaveBeenCalledWith(
       expect.stringContaining(SUBSCRIPTION_ID),
-      expect.any(Error),
+      undefined,
       expect.objectContaining({ userId: USER_ID }),
-      expect.anything(),
+      expect.objectContaining({
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
     );
   });
 });
@@ -982,11 +1028,14 @@ describe("a lifetime grant closes the subscription Checkouts it covers", () => {
 
     expect(response.status).toBe(200);
     expect(db.plan_entitlements).toHaveLength(1);
+    // s82 review m-4: the sentence is the alert, the error its `cause`.
     expect(mockLoggerError).toHaveBeenCalledWith(
       expect.stringContaining("cs_pro"),
-      expect.any(Error),
+      undefined,
       expect.objectContaining({ userId: USER_ID }),
-      expect.anything(),
+      expect.objectContaining({
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
     );
   });
 
@@ -1000,5 +1049,649 @@ describe("a lifetime grant closes the subscription Checkouts it covers", () => {
     await deliver(lifetimePaid("evt_lifetime_again"));
 
     expect(mockSessionsExpire).toHaveBeenCalledTimes(1);
+  });
+});
+
+/*
+ * s82 review of 6cac2ea (M-2 and m-1 … m-6): every guard that moves money is
+ * pinned by a case that goes red when the guard is neutralised.
+ */
+
+/** The refund key the refusal sends for the subscription's first payment. */
+const REFUND_KEY = `covered_by_lifetime-refund-${SUBSCRIPTION_ID}-${SUBSCRIPTION_PAYMENT_INTENT}`;
+
+/** Sentry reports of a refusal (one per refused subscription). */
+function refusalReports() {
+  return mockLoggerError.mock.calls.filter(([message]) =>
+    String(message).includes("was bought while a lifetime grant"),
+  );
+}
+
+/** Alerts whose sentence contains `text`. */
+function alertsSaying(text: string) {
+  return mockLoggerError.mock.calls.filter(([message]) =>
+    String(message).includes(text),
+  );
+}
+
+function subscriptionCheckoutCompleted(eventId: string) {
+  return {
+    id: eventId,
+    type: "checkout.session.completed",
+    data: {
+      object: {
+        id: "cs_pro",
+        mode: "subscription",
+        customer: STRIPE_CUSTOMER_ID,
+        client_reference_id: USER_ID,
+        subscription: SUBSCRIPTION_ID,
+        payment_status: "paid",
+        url: null,
+        metadata: {
+          user_id: USER_ID,
+          plan_id: "pro",
+          checkout_intent_id: "intent_1",
+        },
+      },
+    },
+  };
+}
+
+function invoicePaid(eventId: string) {
+  return {
+    id: eventId,
+    type: "invoice.payment_succeeded",
+    data: {
+      object: {
+        id: INVOICE_ID,
+        object: "invoice",
+        customer: STRIPE_CUSTOMER_ID,
+        subscription: SUBSCRIPTION_ID,
+        amount_paid: 1900,
+        amount_due: 1900,
+        currency: "usd",
+        status: "paid",
+        hosted_invoice_url: null,
+        invoice_pdf: null,
+      },
+    },
+  };
+}
+
+function invoicePayment(
+  id: string,
+  status: string,
+  paymentIntent: string,
+): Row {
+  return {
+    id,
+    invoice: INVOICE_ID,
+    status,
+    payment: { type: "payment_intent", payment_intent: paymentIntent },
+  };
+}
+
+/** Deliver several events at once, each to its own request. */
+async function deliverTogether(
+  ...events: unknown[]
+): Promise<WebhookResponse[]> {
+  mockConstructEvent.mockImplementation((body: string) => JSON.parse(body));
+  return Promise.all(
+    events.map(
+      (event) =>
+        POST({
+          text: async () => JSON.stringify(event),
+        } as never) as unknown as Promise<WebhookResponse>,
+    ),
+  );
+}
+
+/**
+ * Hold the first `count` calls until all of them have arrived, then let them
+ * through together: two deliveries racing past the same check. A call whose
+ * partner never arrives (its delivery failed earlier) is released after a
+ * moment, so a broken race fails its assertions instead of hanging.
+ */
+function heldTogether<A extends unknown[], R>(
+  count: number,
+  next: (...args: A) => Promise<R>,
+): (...args: A) => Promise<R> {
+  const waiting: Array<() => void> = [];
+  let arrived = 0;
+  return async (...args: A) => {
+    if (arrived < count) {
+      arrived += 1;
+      await new Promise<void>((release) => {
+        waiting.push(release);
+        if (waiting.length === count) {
+          waiting.forEach((go) => go());
+        } else {
+          setTimeout(release, 250);
+        }
+      });
+    }
+    return next(...args);
+  };
+}
+
+describe("M-2: the refusal's money guards, recorded after the grant", () => {
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+    );
+  });
+
+  it("M21: records a subscription already cancelled for another reason as it is, and never refunds it", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        status: "canceled",
+        canceled_at: PERIOD_START + 30,
+        cancellation_details: {
+          comment: null,
+          feedback: null,
+          reason: "cancellation_requested",
+        },
+      },
+    );
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockRefundsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+  });
+
+  it("M01: refunds under a key derived from the subscription and the payment", async () => {
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][1]).toEqual({
+      idempotencyKey: REFUND_KEY,
+    });
+  });
+
+  it("M01/m-6: two deliveries refusing the same subscription at once refund once, report once, and raise no false alarm", async () => {
+    db.checkout_pending_intents = [
+      { id: "intent_1", user_id: USER_ID, status: "pending" },
+    ];
+    // Both deliveries read the subscription live, and both look for an
+    // earlier refund before either has made one.
+    const retrieve = mockSubscriptionRetrieve.getMockImplementation();
+    const listRefunds = mockRefundsList.getMockImplementation();
+    if (!retrieve || !listRefunds) throw new Error("Stripe fake not armed");
+    mockSubscriptionRetrieve.mockImplementation(heldTogether(2, retrieve));
+    mockRefundsList.mockImplementation(heldTogether(2, listRefunds));
+
+    const responses = await deliverTogether(
+      subscriptionCheckoutCompleted("evt_checkout_completed"),
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    // The race was real: both missed the metadata lookup.
+    expect(mockRefundsList).toHaveBeenCalledTimes(2);
+    // One refund, because both asked under the same key.
+    expect(stripeRefunds).toHaveLength(1);
+    expect(
+      mockRefundsCreate.mock.calls.map(
+        ([, options]) => options?.idempotencyKey,
+      ),
+    ).toEqual([REFUND_KEY, REFUND_KEY]);
+    expect(refusalReports()).toHaveLength(1);
+    expect(alertsSaying("could not be")).toEqual([]);
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+  });
+
+  it("M17: refunds again after an earlier refund of the same payment failed", async () => {
+    stripeRefunds = [
+      {
+        id: "re_failed",
+        status: "failed",
+        payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
+        metadata: {
+          reason_code: "covered_by_lifetime",
+          subscription_id: SUBSCRIPTION_ID,
+        },
+      },
+    ];
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][1]).toEqual({
+      idempotencyKey: `${REFUND_KEY}-after-re_failed`,
+    });
+    expect(
+      stripeRefunds.filter((refund) => refund.status === "succeeded"),
+    ).toHaveLength(1);
+  });
+
+  it("M13/M14: refunds only the paid payment, reports the one in flight, ignores the cancelled one", async () => {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [
+        invoicePayment("inpay_paid", "paid", SUBSCRIPTION_PAYMENT_INTENT),
+        invoicePayment("inpay_open", "open", "pi_debit_pending"),
+        invoicePayment("inpay_canceled", "canceled", "pi_declined"),
+      ],
+      has_more: false,
+    });
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate.mock.calls[0][0]).toMatchObject({
+      payment_intent: SUBSCRIPTION_PAYMENT_INTENT,
+    });
+    expect(mockRefundsList).not.toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: "pi_debit_pending" }),
+    );
+    expect(mockRefundsList).not.toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: "pi_declined" }),
+    );
+    const [report] = refusalReports();
+    expect(report[0]).toContain(
+      "1 payment(s) on its invoice are still processing",
+    );
+    expect(report[3]).toEqual(
+      expect.objectContaining({
+        refundIds: ["re_1"],
+        pendingPaymentIds: ["inpay_open"],
+      }),
+    );
+  });
+
+  it("M03: refuses a lower plan — Starter beside Lifetime Pro", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "starter",
+    );
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("canceled");
+  });
+
+  it("M06: refuses a subscription created in the same second the lifetime was paid", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT },
+    );
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("m-3: alerts 'refund it by hand' when the cancellation went through and the refund did not", async () => {
+    mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(500);
+    const [alert] = alertsSaying("could not be refunded");
+    expect(alert[0]).toContain("was cancelled");
+    expect(alert[0]).toContain("refund it by hand");
+    expect(alertsSaying("could not be cancelled")).toEqual([]);
+    // m-4: the sentence is the event; the error rides in the metadata.
+    expect(alert[1]).toBeUndefined();
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        subscriptionId: SUBSCRIPTION_ID,
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
+    );
+  });
+
+  it("m-6: reports the refusal once when a second event records the same subscription", async () => {
+    await deliver(subscriptionCreated("evt_first", SUBSCRIPTION_ID));
+    await deliver(subscriptionCreated("evt_second", SUBSCRIPTION_ID));
+
+    expect(refusalReports()).toHaveLength(1);
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("m-1: recorded after the grant, one rule with the other ordering", () => {
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+  });
+
+  it("sets a subscription bought before the lifetime was paid to end at period end, never cancelled now or refunded", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 },
+    );
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created_late", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).toHaveBeenCalledWith(SUBSCRIPTION_ID, {
+      cancel_at_period_end: true,
+      metadata: {
+        cancelled_reason: "lifetime_purchase",
+        paymentIntentId: "pi_existing_pro",
+      },
+    });
+    // It runs out the period it paid for.
+    expect(storedSubscription(SUBSCRIPTION_ID)?.status).toBe("active");
+  });
+
+  it("dates a support comp from when it was granted", async () => {
+    db.plan_entitlements = [
+      grantRow("pro", {
+        source: "comp",
+        stripe_payment_intent_id: null,
+        granted_at: new Date(LIFETIME_PAID_AT * 1000).toISOString(),
+      }),
+    ];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 60 },
+    );
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockPaymentIntentsRetrieve).not.toHaveBeenCalled();
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).toHaveBeenCalledWith(SUBSCRIPTION_ID, {
+      cancel_at_period_end: true,
+      metadata: { cancelled_reason: "lifetime_purchase" },
+    });
+  });
+
+  it("refuses a subscription bought after a support comp was granted", async () => {
+    db.plan_entitlements = [
+      grantRow("pro", {
+        source: "comp",
+        stripe_payment_intent_id: null,
+        granted_at: new Date(LIFETIME_PAID_AT * 1000).toISOString(),
+      }),
+    ];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT + 60 },
+    );
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks Stripe to retry, and alerts in words, when the period-end cancellation fails", async () => {
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT - 86400 },
+    );
+    mockSubscriptionUpdate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+    const response = await deliver(
+      subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID),
+    );
+
+    expect(response.status).toBe(500);
+    const [alert] = alertsSaying("set it to cancel at period end by hand");
+    expect(alert[1]).toBeUndefined();
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
+    );
+  });
+});
+
+describe("M-2 and m-3: recorded before the grant's own event", () => {
+  function liveRow(plan: string) {
+    db.billing_subscriptions = [
+      {
+        user_id: USER_ID,
+        customer_id: "bc_1",
+        stripe_subscription_id: SUBSCRIPTION_ID,
+        plan,
+        status: "active",
+      },
+    ];
+  }
+
+  it("M08: refuses a lower plan bought after the lifetime — Starter beside Lifetime Pro", async () => {
+    liveRow("starter");
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "starter",
+      { created: LIFETIME_PAID_AT + 120 },
+    );
+
+    await deliver(lifetimePaid("evt_lifetime"));
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledWith(
+      SUBSCRIPTION_ID,
+      expect.objectContaining({ prorate: false }),
+    );
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("M06: refuses a subscription created in the same second the lifetime was paid", async () => {
+    liveRow("pro");
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT },
+    );
+
+    await deliver(lifetimePaid("evt_lifetime"));
+
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("m-3: cancelled but not refunded → 'refund it by hand', and no period-end update of a cancelled subscription", async () => {
+    liveRow("pro");
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      { created: LIFETIME_PAID_AT + 120 },
+    );
+    mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+    const response = await deliver(lifetimePaid("evt_lifetime"));
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionCancel).toHaveBeenCalledTimes(1);
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    const [alert] = alertsSaying("refund it by hand");
+    expect(alert[0]).toContain(
+      "was cancelled, but its payment could not be refunded",
+    );
+    expect(alertsSaying("could not be cancelled")).toEqual([]);
+    expect(alertsSaying("Cancel it by hand")).toEqual([]);
+    // m-4: the sentence is the event; the error rides in the metadata.
+    expect(alert[1]).toBeUndefined();
+    expect(alert[3]).toEqual(
+      expect.objectContaining({
+        subscriptionId: SUBSCRIPTION_ID,
+        cause: expect.objectContaining({ message: "Stripe is down" }),
+      }),
+    );
+  });
+
+  it("m-3: leaves alone a subscription Stripe already ended for another reason", async () => {
+    liveRow("pro");
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        created: LIFETIME_PAID_AT + 120,
+        status: "canceled",
+        canceled_at: LIFETIME_PAID_AT + 300,
+        cancellation_details: {
+          comment: null,
+          feedback: null,
+          reason: "cancellation_requested",
+        },
+      },
+    );
+
+    const response = await deliver(lifetimePaid("evt_lifetime"));
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionCancel).not.toHaveBeenCalled();
+    expect(mockSubscriptionUpdate).not.toHaveBeenCalled();
+    expect(mockRefundsList).not.toHaveBeenCalled();
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+});
+
+describe("m-2: a refused subscription's payment that settles later", () => {
+  beforeEach(() => {
+    db.plan_entitlements = [grantRow("pro")];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+    );
+  });
+
+  it("is reported as refunded when it settles, then refunded in full when its invoice is paid", async () => {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "open", "pi_debit")],
+      has_more: false,
+    });
+
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    const [report] = refusalReports();
+    expect(report[0]).toContain("refunded when it settles");
+
+    // The bank debit settles days later.
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "paid", "pi_debit")],
+      has_more: false,
+    });
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    const [params, options] = mockRefundsCreate.mock.calls[0];
+    expect(params).toEqual({
+      payment_intent: "pi_debit",
+      metadata: {
+        reason_code: "covered_by_lifetime",
+        subscription_id: SUBSCRIPTION_ID,
+      },
+    });
+    expect(options).toEqual({
+      idempotencyKey: `covered_by_lifetime-refund-${SUBSCRIPTION_ID}-pi_debit`,
+    });
+    // The invoice is still recorded.
+    expect(db.billing_invoices).toEqual([
+      expect.objectContaining({ stripe_invoice_id: INVOICE_ID }),
+    ]);
+  });
+
+  it("refunds nothing twice: a payment the refusal already refunded is found", async () => {
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(mockRefundsCreate).toHaveBeenCalledTimes(1);
+    expect(stripeRefunds).toHaveLength(1);
+  });
+
+  it("asks Stripe to retry, and alerts in words, when the late refund fails", async () => {
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "open", "pi_debit")],
+      has_more: false,
+    });
+    await deliver(subscriptionCreated("evt_sub_created", SUBSCRIPTION_ID));
+    mockInvoicePaymentsList.mockResolvedValue({
+      data: [invoicePayment("inpay_debit", "paid", "pi_debit")],
+      has_more: false,
+    });
+    mockRefundsCreate.mockRejectedValueOnce(new Error("Stripe is down"));
+
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(500);
+    const [alert] = alertsSaying("could not be refunded");
+    expect(alert[0]).toContain(INVOICE_ID);
+    expect(alert[0]).toContain("refund it by hand");
+    expect(alert[1]).toBeUndefined();
+  });
+
+  it("never refunds an invoice of a subscription that ended for another reason", async () => {
+    db.billing_subscriptions = [
+      {
+        id: "row_1",
+        user_id: USER_ID,
+        customer_id: "bc_1",
+        stripe_subscription_id: SUBSCRIPTION_ID,
+        plan: "pro",
+        status: "canceled",
+      },
+    ];
+    stripeSubscriptions[SUBSCRIPTION_ID] = stripeSubscription(
+      SUBSCRIPTION_ID,
+      "pro",
+      {
+        status: "canceled",
+        cancellation_details: {
+          comment: null,
+          feedback: null,
+          reason: "cancellation_requested",
+        },
+      },
+    );
+
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockRefundsList).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("reads nothing from Stripe for a live subscription's invoice", async () => {
+    db.billing_subscriptions = [
+      {
+        id: "row_1",
+        user_id: USER_ID,
+        customer_id: "bc_1",
+        stripe_subscription_id: SUBSCRIPTION_ID,
+        plan: "pro",
+        status: "active",
+      },
+    ];
+
+    const response = await deliver(invoicePaid("evt_invoice_paid"));
+
+    expect(response.status).toBe(200);
+    expect(mockSubscriptionRetrieve).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
   });
 });
