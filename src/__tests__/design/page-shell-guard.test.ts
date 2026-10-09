@@ -93,8 +93,12 @@ const FLOATING_SHADOW_VARIANTS: Readonly<Record<string, string>> = {
   [CARD_FILE]: "elevated",
 };
 
-/** R5: the skip link's `focus:shadow-md`, drawn only while it is focused. */
-const FOCUS_SHADOW_FILE = "src/app/dashboard/layout.tsx";
+/**
+ * R5: the skip link's `focus:shadow-md`, drawn only while it is focused. It
+ * sits in the layout's client frame: s88's review made `layout.tsx` a server
+ * component (it exports the segment's `robots`) that renders this file.
+ */
+const FOCUS_SHADOW_FILE = "src/app/dashboard/DashboardFrame.tsx";
 
 /** Routed pages, outside the private `_ab-tests` folder (not a route). */
 const DASHBOARD_PAGE = /^src\/app\/dashboard\/(?:(?!_)[^/]+\/)*page\.tsx$/;

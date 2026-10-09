@@ -1,6 +1,13 @@
+import type { Metadata } from "next";
 import { Header } from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { FileText, Shield, Scale, Mail, Lock } from "lucide-react";
+
+// Until s88 this page inherited the root layout's canonical, which named the
+// homepage. Every indexable page names itself.
+export const metadata: Metadata = {
+  alternates: { canonical: "/terms" },
+};
 
 /**
  * s54 — every sentence on this page is backed by code or infrastructure, or is

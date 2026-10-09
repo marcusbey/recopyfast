@@ -157,13 +157,14 @@ any rejected value into a response or a log line.
 
 ### Data access
 
-Three Supabase clients, and picking the wrong one is a security bug:
+Four Supabase clients, and picking the wrong one is a security bug:
 
 | Client | Use | RLS |
 |---|---|---|
 | `supabase/client.ts` `createClient()` | Browser, inside effects/handlers only | enforced |
 | `supabase/server.ts` `createClient()` | Route handlers acting **as the signed-in user** | enforced |
 | `supabase/service.ts` `createServiceRoleClient()` | Widget-facing paths where the caller is a site token, not a user | **bypassed** |
+| `supabase/anon.ts` `createAnonClient()` | Server code with **no user** reading rows RLS makes public to `anon` — the sitemap and `/blog`. No cookies, no session, read-only, never user data ([ADR 058](./decisions/058-cookie-less-anon-client-for-public-reads.md)) | enforced |
 
 28 of 77 routes use the service-role client. Every one of them owes an explicit authorization
 call before it touches data. See [ADR 002](./decisions/002-rls-tenant-boundary.md).

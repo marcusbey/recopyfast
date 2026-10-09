@@ -65,7 +65,8 @@ async function isUnentitled(
  * rather than a file list, so the next asset type added there does not have to
  * be rediscovered in production. robots.txt and sitemap.xml are the same trade
  * at lower volume: no session is possible, and indexability should not depend
- * on auth uptime. `/try` is the public cold-start path used in outbound demos,
+ * on auth uptime; `/llms.txt` (s88), the site map AI search reads, is the same
+ * kind of caller. `/try` is the public cold-start path used in outbound demos,
  * and its exact cross-origin runtime path has the same no-session property as
  * the production embed. Keeping both exact avoids turning sibling `/try/*`
  * routes into an accidental auth bypass.
@@ -110,6 +111,7 @@ function isSessionlessPath(pathname: string): boolean {
     pathname === "/try/rcf-try.js" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
+    pathname === "/llms.txt" ||
     pathname === SENTRY_TUNNEL_ROUTE
   );
 }
@@ -323,7 +325,8 @@ export const config = {
      * (X-Content-Type-Options, X-Frame-Options, etc.).
      *
      * `embed/`, `/docs/install`, `/try`, its exact runtime asset, robots.txt,
-     * sitemap.xml and the Sentry tunnel are deliberately NOT excluded here.
+     * sitemap.xml, llms.txt and the Sentry tunnel are deliberately NOT excluded
+     * here.
      * They must not pay for a session — but the matcher is all-or-nothing, and
      * excluding them would drop the security headers too. The widget script is
      * executable JavaScript loaded cross-origin onto every customer site, so
