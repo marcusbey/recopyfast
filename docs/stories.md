@@ -3869,4 +3869,57 @@ Complexity: 3. Dependencies: none (PR #77, s70b, adds a view gated on `server_ve
 — with a 17 replay it is created; nothing to do here beyond not breaking it). Branch
 `feature/s75-ci-release-gates`.
 
+## Story s88-seo-canonicals-sitemap — every public page names its own URL to search engines
+
+CTO decision under the owner's 2026-10-09 directive ("implement everything that is left … get the
+product ready for production"). Marketing/SEO perimeter (`docs/prd.md` § Technical SEO). No new
+screen, no embed change, no migration. Research: `docs/research/s88-seo-canonicals-sitemap.md`.
+Plan: `docs/plans/s88-seo-canonicals-sitemap.md`. Delivers s17's `llms.txt` criterion and the
+homepage half of its `SoftwareApplication` criterion (ADR 032 §5); s17 keeps the comparison-page
+schema, the dynamic route and the Lighthouse gate.
+
+Cause (verified on `c0c40bf`):
+- `src/app/layout.tsx:68-70` sets `alternates.canonical: "/"` and `:73` `openGraph.url: "/"` in the
+  root metadata. Next merges metadata per top-level key (`resolve-metadata.js:167` clones the
+  parent, `:177-185` replace `alternates`/`openGraph` only when the child sets them), so every page
+  that does not set its own — `/blog`, `/blog/<slug>`, `/privacy`, `/terms`, `/demo`, `/login`,
+  `/signup`, `/edit`, `/auth/error`, the dashboard — tells search engines it is a duplicate of the
+  homepage. Reproduced with Next's own resolver: `/privacy` resolves `canonical: https://recopyfa.st`.
+  `/edit` sends `noindex` and a canonical to the homepage at once.
+- `src/app/sitemap.ts:51` reads blog posts through the cookie client, which makes the route dynamic
+  (`ƒ /sitemap.xml` in `next build`): a database round trip on every crawler fetch, a read that runs
+  as whoever's cookies arrive, and `catch { return [] }` (`:64`) that drops every post without a log
+  line. `:75` stamps every static URL `lastModified: now`; `/docs/install` is missing; `/login` and
+  `/signup` (thin auth forms) are listed.
+- `src/app/robots.ts:14` disallows `/dashboard/`, which does not cover `/dashboard` itself.
+- No `SoftwareApplication` JSON-LD anywhere; no `/llms.txt` (PRD § Technical SEO; s17 AC).
+
+Acceptance criteria:
+- [ ] The root layout declares no canonical and no `og:url`. Through Next's own metadata resolver,
+  `/`, `/demo`, `/try`, `/compare`, every `/compare/<slug>`, `/blog`, `/blog/<slug>`, `/privacy`,
+  `/terms` and `/docs/install` each resolve a canonical equal to their own URL, and no page other
+  than `/` resolves the homepage as canonical or `og:url`.
+- [ ] `/login`, `/signup`, `/edit` and `/auth/error` resolve `noindex` with no canonical; every
+  `/dashboard` response carries `X-Robots-Tag: noindex, nofollow` (the segment is client-rendered
+  and cannot export metadata).
+- [ ] The sitemap reads published posts with a cookie-less anon client (RLS on, the policy
+  `/blog/<slug>` already relies on) — never the cookie client, never the service role — and is
+  regenerated hourly instead of per request. It lists every indexable page including
+  `/docs/install`, no noindex page and nothing under `/dashboard`, `/api` or `/auth`. A post's
+  `lastModified` is `updated_at ?? published_at` and is omitted when both are null; static pages
+  carry none. A database failure is logged and degrades to the static entries.
+- [ ] `robots.txt` disallows `/api/`, `/dashboard` (bare and nested) and `/auth/`, blocks no URL the
+  sitemap lists and no noindex page (so the noindex can be read), and names the sitemap.
+- [ ] The homepage carries one `SoftwareApplication` JSON-LD whose offers are exactly the
+  catalogue's sellable monthly subscription plans (`plans`, the same rule as `/api/pricing`: not
+  `free`, Agency only while its checkout switch is on), in USD, with no rating or review; offers
+  are omitted when the catalogue cannot be read. No visible change to the homepage.
+- [ ] `/llms.txt` is served as text, without a session lookup, and lists the product summary (only
+  claims the homepage-truth tests allow), the install guide and its Markdown brief, the comparison
+  hub and every comparison page (from the same data the routes use), the demo, the try page and
+  the legal pages, all as absolute URLs on the configured origin.
+- [ ] Tests for each criterion; required gates pass; one story commit (after this docs commit).
+
+Complexity: 3. Dependencies: none (s37 comparison pages and s59 install guide are on `main`).
+
 Embed allocation: 0 bytes (ceilings only go down).
