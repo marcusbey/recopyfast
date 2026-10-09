@@ -428,7 +428,7 @@ assert the following. None of it is true, and each was checked:
 | Cloudflare Workers serve the embed at the edge | No Workers. Vercel static + Next middleware |
 | Socket.io with Redis pub/sub, running | Running since `s07b` — but on **one** machine and with **no** Redis pub/sub. A single process keeps rooms coherent without an adapter; adding a second machine is what would make one mandatory |
 | Script size < 30KB gz | 46,781 gz today |
-| Test coverage ≥ 80% | Jest floor is 22% lines, ratcheted from measured reality |
+| Test coverage ≥ 80% | Jest floor is 69% lines (68 / 61 / 65 / 69 statements / branches / functions / lines, measured 2026-10-09), enforced in CI and ratcheted from measured reality |
 
 Fixing the first three in `CLAUDE.md` and keeping this table honest is cheaper than the
 alternative: an agent reads the stale claim, writes a Zustand store, and now the assertion is
