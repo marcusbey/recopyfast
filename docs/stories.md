@@ -3808,3 +3808,62 @@ Acceptance criteria:
 Complexity: 2. Dependencies: none. Branch `feature/s74-deflake-landing-pricing`.
 
 Embed allocation: 0 bytes (nothing under `public/embed/` changes).
+
+## Story s75-ci-release-gates — CI proves what production runs
+
+Orchestrator triage, 2026-10-09, under the owner's directive ("get the product ready for
+production"). No UI, no migration, no embed change. Research: `docs/research/s75-ci-release-gates.md`.
+Closes the Node half of s69 L16 and the CI half of s69 L19.
+
+Cause (verified on `origin/main` `72f4cff`):
+- **The migration replay runs on the wrong PostgreSQL.** Production is PostgreSQL 17.4
+  (`docs/research/s56-rls-content-writes-need-plan.md:7`). CI replays every migration on
+  `postgres:14` (`.github/workflows/ci.yml:22`, step `:145`), the runner refuses anything else
+  (`scripts/run-db-invariants.mjs:142-146`), and the Supabase CLI stack the e2e job starts is
+  PostgreSQL 15 (`supabase/config.toml:28`).
+- **Seven database suites never run against a database in CI.** `content-attributes-lifecycle`,
+  `content-version-concurrency`, `content-version-i18n`, `editor-activation-concurrency`,
+  `restore-reports-rows`, `site-delete-cascade` and `sites-install-status` (all in
+  `src/__tests__/db/`) are named neither by the runner (`run-db-invariants.mjs:193-201`) nor by any
+  e2e step (`ci.yml:256-356`). Plain `npm test` records each as a passing `[gated]` line or a
+  `describe.skip`.
+- **The coverage ratchet is local-only.** The thresholds (`jest.config.js:51-58`, 34/39/41/41) are
+  read only by `npm run test:coverage`, which only the local `prepush` script runs
+  (`package.json:21,25`). CI runs `npm test` without `--coverage` (`ci.yml:139`). Measured today:
+  statements 68.62, branches 61.56, functions 65.72, lines 69.23 — the floors trail by ~27 points.
+- **`format:check` is in the Definition of Done (`AGENTS.md:239`) and in no CI step.**
+- **`ci.yml` has no `permissions:`** and every action is pinned by a moving tag
+  (`ci.yml:84,87,209,219,225,422,446,449`; `server-security.yml:21,24`) — s69 L19.
+- **Node 20 is past end of life** (2026-04-30) and Vercel discontinued `20.x` on 2026-10-01, yet CI
+  tests on `"20"` (`ci.yml:89,221,451`) and the realtime image is `node:20-alpine`
+  (`server/Dockerfile:9`, s69 L16). Local gates and the server audit already run Node 24.14.0
+  (`server-security.yml:26`); `package.json` declares no `engines`, so Vercel's runtime is whatever
+  the dashboard says.
+- **`e2e-billing-tests.spec.ts` sits at the repo root**, outside Playwright's `testDir: "./e2e"`
+  (`playwright.config.ts:4`), so it has never run.
+- `AGENTS.md:108` (embed "breached at 46,781"; measured 45,828) and `:228` ("22% lines") are stale.
+
+Acceptance criteria:
+- [ ] CI replays every migration on PostgreSQL 17 (`postgres:17`), the runner refuses any other
+  major and says how to point it at a 17 install, and the Supabase CLI stack is
+  `major_version = 17`. No applied migration is edited; every one replays cleanly on 17.
+- [ ] Every `src/__tests__/db/*.test.ts` suite is named by a CI database step, with a real
+  database required; the seven run in the replay step (none needs PostgREST or GoTrue). A suite
+  that registers only `[gated]` placeholders, only skipped tests, or nothing at all fails the
+  replay step by name. `test.failing` pins stay (they assert known defects A-15, A-16, A-23).
+- [ ] The CI Jest run collects coverage, so the `jest.config.js` thresholds fail CI when coverage
+  drops; the thresholds are ratcheted up to the measurement, rounded down, and never lowered.
+- [ ] CI runs `npm run format:check`.
+- [ ] Every workflow declares least-privilege `permissions:` (`contents: read`), and every action
+  is pinned by full commit SHA with its version in a comment.
+- [ ] One Node major everywhere: CI, the realtime image and Vercel (`engines`) run Node 24 LTS.
+- [ ] No Playwright spec lives outside `e2e/`; the root billing spec is removed with its
+  justification recorded, and the strict e2e count stays 80.
+- [ ] A contract test pins each of the above, and goes red when any one is undone.
+- [ ] `AGENTS.md`'s embed and coverage figures and its CI sentence state today's facts.
+
+Complexity: 3. Dependencies: none (PR #77, s70b, adds a view gated on `server_version_num >= 150000`
+— with a 17 replay it is created; nothing to do here beyond not breaking it). Branch
+`feature/s75-ci-release-gates`.
+
+Embed allocation: 0 bytes (ceilings only go down).
