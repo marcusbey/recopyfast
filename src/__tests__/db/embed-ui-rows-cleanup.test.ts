@@ -25,6 +25,12 @@
  * holding only an attribute draft (`staging_attributes`), and customer copy
  * in the popover's and the AI modal footer's selector shapes (the popover's
  * text list, the footer's `= 'Close'`).
+ *
+ * Three more kept rows came from Devin's review of PR #75: the predicate first
+ * deleted every `#rcf-…` selector, and a customer page may use an id starting
+ * with `rcf-` (`#rcf-hero`), or one an embed id is a prefix of
+ * (`#rcf-editor-banner-x`, `#rcf-savings`). The predicate now names every id
+ * the embed has assigned, each matched as the whole leading id.
  */
 
 import { readFileSync } from "node:fs";
@@ -122,6 +128,14 @@ const KEPT: SeedRow[] = [
     selector: "div:nth-child(5) > div > div:nth-child(5) > button",
     original: "Contact sales",
   },
+  // A customer's own id that starts with `rcf-` (Devin, PR #75):
+  // generateSelector stops at any id, so `<h1 id="rcf-hero">` is recorded as
+  // `#rcf-hero`. Only a whole id the embed assigned deletes, never a prefix:
+  // `rcf-editor-banner-x` is not `rcf-editor-banner`, `rcf-savings` is not
+  // `rcf-save`.
+  { selector: "#rcf-hero", original: "Welcome" },
+  { selector: "#rcf-editor-banner-x > p", original: "Hello" },
+  { selector: "#rcf-savings > span", original: "Save 20% yearly" },
   // Review tier: an AI suggestion's text is arbitrary, so it is listed for the
   // owner by the read-only count, not deleted by pattern.
   {

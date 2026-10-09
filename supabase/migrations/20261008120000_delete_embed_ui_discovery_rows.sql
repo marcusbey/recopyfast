@@ -18,8 +18,18 @@
 --
 -- WHAT IS DELETED. Rows whose selector is the shape of an embed root and,
 -- where the selector alone is ambiguous, whose text is the embed's own label:
---   - `#rcf-…`: the Edit Board, the editor bar, the staging bar. No customer
---     element carries an `rcf-` id; generateSelector stops at the first id;
+--   - `#rcf-…`: the Edit Board, the editor bar, the staging bar, the sign-in
+--     and AI modals. generateSelector stops at the first id it meets, so a
+--     row under any of them starts with an id the embed assigned. The
+--     predicate names every such id the embed has ever assigned (`git log -p`
+--     of public/embed/; the `*-styles` <style> ids are never scanned, and the
+--     per-edit `rcf-edit-<time>` ids sit only on an <input> or <textarea>,
+--     which discovery never selects) and matches it only as the whole leading
+--     id, followed by a space or the end. Not `LIKE '#rcf-%'` (Devin, PR #75):
+--     a customer page may use an id starting with `rcf-` (`<h1 id="rcf-hero">`
+--     is recorded as `#rcf-hero`), and a prefix test would also take
+--     `#rcf-savings` for `rcf-save` or `#rcf-editor-banner-x` for
+--     `rcf-editor-banner`;
 --   - `div… > div > …` with one of the AI modal's fixed strings, its footer
 --     "Close", and the popover's five labels at their exact positions. "Close",
 --     "Save", "Cancel" and "Placeholder" are real copy on many sites, so they
@@ -63,7 +73,8 @@ WITH c AS (
       AND ce.published_at IS NULL
       AND NOT (COALESCE(ce.metadata, '{}'::jsonb) ? 'staging_attributes') AS untouched,
     (
-      ce.selector LIKE '#rcf-%'                       -- Edit Board, editor bar, staging bar
+      -- every id the embed ever assigned, matched as the whole leading id
+      ce.selector ~ '^#rcf-(ai-cancel|ai-close|ai-suggest|ai-suggestions|cancel|code-error|code-input|eb-content|edit-board-btn|edit-board-panel|editor-banner|editor-code|editor-email|editor-remember|editor-textarea|email-error|email-input|email-submit|generate-suggestions|preview-live|publish-btn|publish-status|save|staging-banner|suggestion-goal|suggestions-list)(\s|$)'
       OR (ce.selector ~ '^div(:nth-child\(\d+\))? > div > '
           AND ce.original_content IN ('🪄', 'Generate Suggestions', 'AI Content Suggestions',
             'Optimization Goal', 'Failed to generate suggestions. Please try again.',

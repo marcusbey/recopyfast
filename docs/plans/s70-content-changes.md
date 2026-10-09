@@ -131,7 +131,8 @@ WITH c AS (
       AND ce.published_at IS NULL
       AND NOT (COALESCE(ce.metadata, '{}'::jsonb) ? 'staging_attributes') AS untouched,
     (
-      ce.selector LIKE '#rcf-%'                       -- Edit Board, editor bar, staging bar
+      -- every id the embed ever assigned, matched as the whole leading id
+      ce.selector ~ '^#rcf-(ai-cancel|ai-close|ai-suggest|ai-suggestions|cancel|code-error|code-input|eb-content|edit-board-btn|edit-board-panel|editor-banner|editor-code|editor-email|editor-remember|editor-textarea|email-error|email-input|email-submit|generate-suggestions|preview-live|publish-btn|publish-status|save|staging-banner|suggestion-goal|suggestions-list)(\s|$)'
       OR (ce.selector ~ '^div(:nth-child\(\d+\))? > div > '
           AND ce.original_content IN ('🪄', 'Generate Suggestions', 'AI Content Suggestions',
             'Optimization Goal', 'Failed to generate suggestions. Please try again.',

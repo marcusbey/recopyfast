@@ -97,6 +97,9 @@ Acceptance criteria (proposed; the owner validates them with this plan):
      address); 0 embed-UI rows anyone edited; 0 review-tier rows; openflows.ai and localhost: 0.
      A separate check found no "by <email>" row outside the predicate. **Owner approved** the delete
      migration for production at s70a ship (applied after merge, verified by re-count).
+     **Predicate narrowed after this count** (Devin, PR #75): `LIKE '#rcf-%'` became an allowlist
+     of the embed's own ids, so a customer's `rcf-` id is never deleted; the orchestrator re-runs
+     the read-only count with the new predicate before applying.
    - RED, new `src/__tests__/db/embed-ui-rows-cleanup.test.ts` (`describeDb`, the harness pattern of
      `site-delete-cascade.test.ts`), in a transaction rolled back at the end: seed one site and
      - deleted: `#rcf-edit-board-panel > div:nth-child(2) > button:nth-child(1)` "Elements";
@@ -135,7 +138,8 @@ WITH c AS (
       AND ce.published_at IS NULL
       AND NOT (COALESCE(ce.metadata, '{}'::jsonb) ? 'staging_attributes') AS untouched,
     (
-      ce.selector LIKE '#rcf-%'                       -- Edit Board, editor bar, staging bar
+      -- every id the embed ever assigned, matched as the whole leading id
+      ce.selector ~ '^#rcf-(ai-cancel|ai-close|ai-suggest|ai-suggestions|cancel|code-error|code-input|eb-content|edit-board-btn|edit-board-panel|editor-banner|editor-code|editor-email|editor-remember|editor-textarea|email-error|email-input|email-submit|generate-suggestions|preview-live|publish-btn|publish-status|save|staging-banner|suggestion-goal|suggestions-list)(\s|$)'
       OR (ce.selector ~ '^div(:nth-child\(\d+\))? > div > '
           AND ce.original_content IN ('🪄', 'Generate Suggestions', 'AI Content Suggestions',
             'Optimization Goal', 'Failed to generate suggestions. Please try again.',
