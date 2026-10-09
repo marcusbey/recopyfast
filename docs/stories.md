@@ -3719,3 +3719,44 @@ deploy. Absorbs s69 R3. Alternative to weigh first: retire staging invites, sinc
 is the access model (s66c1).
 
 Complexity: 3 (estimate). Embed allocation: 0 bytes.
+
+## Story s73-button-as-child — a link styled as a button looks like a button
+
+Owner directive, 2026-10-09: **"don't ask me questions; take CTO-level decisions; implement
+everything left; test everything."** Source: the s70b review (`docs/reviews/s70b-changes-page.md`,
+`bb798c0`): "Pre-existing, not counted: `<Button asChild>` drops every class
+(`button.tsx:106-117`) at 10 call sites — follow-up story." No new screen, so no Design step.
+
+Cause (verified on `origin/main` `72f4cff`): with `asChild`, `Button`
+(`src/components/ui/button.tsx:95-118`) renders Radix `<Slot>` whose only child is the Fragment
+that wraps `leftIcon`/`children`/`rightIcon` (or the loading spinner and dimmed label). `Slot`
+clones its single child — that Fragment — so the variant, size and call-site classes, the ref and
+every other prop land on `React.Fragment` and are dropped. React logs "Invalid prop `className`
+supplied to `React.Fragment`". Every `<Button asChild><Link/></Button>` ships as a bare,
+undecorated `<a>` in the surrounding text colour, its lucide icon at the default 24px. The suite
+pins the defect with two `it.failing` tests (`src/components/ui/__tests__/button.test.tsx:149,250`).
+Ten call sites are affected: the install guide's "Sites" and "Download Markdown", the dashboard's
+"Manage"/"All N", the sidebar's "Choose plan"/"Upgrade", "Continue setup" on a site row and in quick
+setup, "Open site page" after registration, "View plans" in Add editor, "Back to Sites" on a
+missing site, and the install card's "Installation guide" link.
+
+Acceptance criteria:
+- [ ] `<Button asChild>` gives its one child element the button's classes (base, variant, size and
+  `className`), merged with the child's own `className`; the child keeps its own props (`href`)
+  and receives the forwarded ref. Holds for a `next/link` child as well as a plain `<a>`.
+- [ ] `leftIcon` and `rightIcon` with `asChild` render inside the child, around its content, in
+  that order.
+- [ ] `loading` with `asChild` marks the child `aria-busy="true"` and shows the spinner in place of
+  the icons; the child's content is not wrapped (the dimmed label stays a `<button>`-only detail).
+- [ ] Rendering `asChild` logs nothing: no "Invalid prop `className` supplied to `React.Fragment`".
+- [ ] Without `asChild` the rendered markup is unchanged (plain, with icons, loading).
+- [ ] The ten call sites render the variant and size they ask for; each look change is listed in
+  the plan (nine pass an explicit variant; "Open site page" takes the default — the primary it
+  was meant to be); none meant to look like a bare link. With asChild, `disabled` is not
+  forwarded and development warns, as it does for a child that is not one element (review
+  minor 1).
+- [ ] The two `it.failing` tests become plain `it` (a declared test change, AGENTS.md § Tests).
+- [ ] No API, data, embed or migration change; embed bytes untouched. Required gates pass; one
+  story commit.
+
+Complexity: 2. Branch `feature/s73-button-as-child`. Embed allocation: 0 bytes.
