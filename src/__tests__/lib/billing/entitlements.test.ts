@@ -144,8 +144,10 @@ import {
   hasAnyEntitlement,
   UNENTITLED,
 } from "@/lib/billing/entitlements";
+import { readGrantedPlans } from "@/lib/billing/effective-plan";
 import { findPlanById } from "@/lib/stripe/plans";
 import type { SubscriptionPlan } from "@/lib/stripe/plan-types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const asMock = (fn: unknown) => fn as jest.Mock;
 
@@ -555,6 +557,77 @@ describe("getGrantedPlanIds with a dated non-trial grant", () => {
 
     await expect(getEffectivePlanId(USER)).resolves.toBeNull();
     await expect(getGrantedPlanIds(USER)).resolves.toEqual([]);
+  });
+});
+
+/**
+ * s82 review (second pass), m3: the plan dialog called every included plan
+ * "Included for life" — including one held only through a dated grant (the QA
+ * recovery grant, `qa_recovery_20260919`), which ends. The billing page's one
+ * grant read now also says until when each plan is held, so the dialog can
+ * tell the two apart without a second query.
+ */
+describe("readGrantedPlans: each plan held, and until when", () => {
+  const read = () =>
+    readGrantedPlans(mockSupabase as unknown as SupabaseClient, USER);
+
+  it("holds an undated grant for life (no end)", async () => {
+    setTable("plan_entitlements", [grant()]);
+
+    await expect(read()).resolves.toEqual([{ planId: "pro", expiresAt: null }]);
+  });
+
+  it("holds a dated grant until its expires_at", async () => {
+    const endsAt = daysFromNow(30);
+    setTable("plan_entitlements", [
+      grant({ source: "qa_recovery_20260919", expires_at: endsAt }),
+    ]);
+
+    await expect(read()).resolves.toEqual([
+      { planId: "pro", expiresAt: endsAt },
+    ]);
+    // The stub returns whole rows whatever is selected; production returns
+    // only the columns asked for, so the end has to be asked for.
+    const query = asMock(mockSupabase.from).mock.results.at(-1)?.value;
+    expect(query.select).toHaveBeenCalledWith(
+      expect.stringMatching(/\bexpires_at\b/),
+    );
+  });
+
+  it("holds a plan for life when an undated grant sits beside a dated one", async () => {
+    setTable("plan_entitlements", [
+      grant({ source: "qa_recovery_20260919", expires_at: daysFromNow(30) }),
+      grant(),
+    ]);
+
+    await expect(read()).resolves.toEqual([{ planId: "pro", expiresAt: null }]);
+  });
+
+  it("holds a plan until the later end when two dated grants carry it", async () => {
+    const later = daysFromNow(60);
+    setTable("plan_entitlements", [
+      grant({ source: "support", expires_at: later }),
+      grant({ source: "qa_recovery_20260919", expires_at: daysFromNow(30) }),
+    ]);
+
+    await expect(read()).resolves.toEqual([
+      { planId: "pro", expiresAt: later },
+    ]);
+  });
+
+  it("reads through the same rule as getGrantedPlanIds: no trial, revoked or expired grant", async () => {
+    const endsAt = daysFromNow(30);
+    setTable("plan_entitlements", [
+      trial(1),
+      grant({ plan_id: "starter", revoked_at: daysFromNow(-2) }),
+      grant({ plan_id: "pro", source: "support", expires_at: daysFromNow(-1) }),
+      grant({ plan_id: "agency", source: "support", expires_at: endsAt }),
+    ]);
+
+    await expect(read()).resolves.toEqual([
+      { planId: "agency", expiresAt: endsAt },
+    ]);
+    await expect(getGrantedPlanIds(USER)).resolves.toEqual(["agency"]);
   });
 });
 

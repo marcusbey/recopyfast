@@ -256,26 +256,69 @@ export async function readGrantedPlanIds(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<string[]> {
+  return (await readGrantedPlans(supabase, userId)).map(
+    (granted) => granted.planId,
+  );
+}
+
+/** A plan held through live non-trial grants, and until when. */
+export interface GrantedPlan {
+  readonly planId: string;
+  /**
+   * Null when some live grant of the plan has no end date: held for life.
+   * Otherwise the latest `expires_at` among its grants — a dated grant, such
+   * as the QA recovery grant (`qa_recovery_20260919`), is held until then and
+   * is not a lifetime one.
+   */
+  readonly expiresAt: string | null;
+}
+
+/**
+ * The read behind `readGrantedPlanIds` — same rows, same filters (see above) —
+ * with when each plan's holding ends, one entry per plan in first-seen order.
+ *
+ * s82 review (second pass), m3: the plan dialog said "Included for life" for a
+ * plan held only through a dated grant. The billing page reads this instead of
+ * the bare ids, so it can tell the two apart without a second query.
+ */
+export async function readGrantedPlans(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<GrantedPlan[]> {
   const { data, error } = await supabase
     .from("plan_entitlements")
-    .select("plan_id")
+    .select("plan_id, expires_at")
     .eq("user_id", userId)
     .is("revoked_at", null)
     .neq("source", TRIAL_SOURCE)
     .or(spendableFilter())
-    .returns<Array<{ plan_id: string }>>();
+    .returns<Array<{ plan_id: string; expires_at: string | null }>>();
 
   if (error) {
     throw new Error(`Failed to read plan entitlements: ${error.message}`);
   }
 
-  return Array.from(
-    new Set(
-      (data ?? [])
-        .map((row) => row.plan_id)
-        .filter((planId) => !isRetired(planId)),
-    ),
-  );
+  const heldUntil = new Map<string, string | null>();
+  for (const row of data ?? []) {
+    if (isRetired(row.plan_id)) continue;
+    const expiresAt = row.expires_at ?? null;
+    heldUntil.set(
+      row.plan_id,
+      heldUntil.has(row.plan_id)
+        ? laterGrantEnd(heldUntil.get(row.plan_id) ?? null, expiresAt)
+        : expiresAt,
+    );
+  }
+  return Array.from(heldUntil, ([planId, expiresAt]) => ({
+    planId,
+    expiresAt,
+  }));
+}
+
+/** The later of two grant ends; no end (null) outlasts every date. */
+function laterGrantEnd(a: string | null, b: string | null): string | null {
+  if (a === null || b === null) return null;
+  return Date.parse(b) > Date.parse(a) ? b : a;
 }
 
 export async function readEffectivePlanId(

@@ -305,14 +305,111 @@ the limiter's message.
   existing assertion changed.
 - `payment-methods.test.ts`: the limiter expectation also pins `message` (stricter, not looser).
 
+## Fix pass 2 — second review (2026-10-09)
+
+The second review of `84d7b0c` found three minors. Rebased onto `origin/main` `fc5968b` first
+(`docs/stories.md` append conflict with s73, both entries kept in id order).
+
+### CTO decisions (fix pass 2)
+
+14. **Checkout's catch answers through `billingErrorResponse`.** Every sentence Checkout writes for
+    the customer is returned before the catch; what reaches it (grant, subscription or reservation
+    read failures, Stripe, configuration) is logged under the same context as before and answered
+    "Failed to start checkout. Please try again." This closes the follow-up recorded in the first
+    pass.
+15. **A grant's end reaches the dialog through the page's existing read.** `readGrantedPlans`
+    (`effective-plan.ts`) is the query `readGrantedPlanIds` sent, now also selecting `expires_at`,
+    one entry per plan: null when any live grant of the plan is undated, otherwise the latest end.
+    `readGrantedPlanIds` is its ids, so every caller keeps one rule and one query. The billing page
+    reads it instead of the bare ids and passes `lifetimeGrant.endsAt` (dated plans only); the
+    dashboard passes it to the dialog as `grantEndsAt`. No new fetch.
+16. **"For life" only for an undated grant.** The dialog decides per plan from the grants that
+    include it: if any of them is undated, the plan is included for life and the submit names the
+    highest *undated* one ("Included in your lifetime Pro"); if every one is dated, the price slot
+    reads "Included until November 19, 2026" and the submit "Included in your plan until November
+    19, 2026" (the latest end, in the card's long US date). The refusal itself is unchanged: the
+    same plans are refused, by the same rank rule.
+
+### Task 16 — Checkout errors stay generic (m1)
+
+`checkout-lifetime-covered.test.ts`: a grant read failure answers 500 "Failed to start checkout.
+Please try again.", never "connection reset", and the detail is logged under "Error creating
+checkout session:". Red on `84d7b0c` (the body carried "Failed to read plan entitlements:
+connection reset").
+
+- [x] Task 16
+
+### Task 17 — the included label names the highest grant (m2)
+
+`UpgradeDialog.agency.test.tsx`: Lifetime Pro + Founding Agency, grants in database order
+(`["agency", "pro"]`), Starter selected → "Included in your lifetime Agency". A pin of behaviour
+already in place: green on `84d7b0c`, red under the review's surviving mutation (`.at(-1)` →
+`.at(0)`).
+
+- [x] Task 17
+
+### Task 18 — a dated grant is never called lifetime (m3)
+
+Failing tests first:
+- `entitlements.test.ts`, `readGrantedPlans` over the filtering fake: an undated grant → no end; a
+  dated one → its `expires_at`; undated beside dated → no end; two dated → the later; trial,
+  revoked and expired rows excluded exactly as `getGrantedPlanIds` excludes them; the query asks
+  for `expires_at` (the fake returns whole rows whatever is selected).
+- `UpgradeDialog.agency.test.tsx`: a plan included only by a dated grant reads "Included until
+  November 19, 2026", its submit "Included in your plan until November 19, 2026", disabled, no
+  "for life"; several dated grants → the latest end; an undated Lifetime Pro beside a dated Agency
+  grant → Starter and Pro "Included for life", submit "Included in your lifetime Pro".
+- `BillingDashboard.plan-card.test.tsx`: Lifetime Pro paying for Agency, Pro grant dated → the
+  dialog's Pro tile and submit say until when.
+- `page.test.tsx`: the page hands the dashboard every granted plan and the end of the dated ones;
+  no grant → `{ kind: "none" }`.
+
+Change: `readGrantedPlans` + `GrantedPlan` in `effective-plan.ts` (`readGrantedPlanIds` delegates);
+`LifetimeGrantStatus` gains optional `endsAt`; `page.tsx` reads `readGrantedPlans`;
+`BillingDashboard` passes `grantEndsAt`; `UpgradeDialog` gains `grantEndsAt` and `grantInclusion`.
+
+- [x] Task 18
+
+### Fix pass 2 — existing tests changed (declared)
+
+- `page.test.tsx`: the `@/lib/billing/effective-plan` mock factory gains `readGrantedPlans` (the
+  page calls it now) with a `beforeEach` default of no grants, and the `BillingDashboard` stub also
+  prints the `lifetimeGrant` it receives. No existing assertion changed.
+- `UpgradeDialog.agency.test.tsx`: `renderFor` accepts an optional `grantEndsAt`. No existing
+  assertion changed.
+
+### Fix pass 2 — execution notes (deviations, declared)
+
+- The orchestrator gave the submit's sentence for a dated grant ("Included in your plan until
+  <date>"); the price slot's "Included until <date>" is its parallel to "Included for life"
+  (decision 16, design table).
+- The submit now names the highest *undated* grant, not the highest grant: with a dated Agency
+  grant beside Lifetime Pro, naming Agency would call the grant that ends lifetime. Identical to
+  before whenever every grant is undated (m2's pin holds).
+- `isSelectedIncluded` is now derived from `grantInclusion`, which applies `isPlanCoveredByGrants`
+  per granted plan — the same plans are refused as before.
+- `readGrantedPlanIds`' query selects `plan_id, expires_at` instead of `plan_id` for every caller;
+  its result is unchanged.
+- Two pins beyond the brief (latest end across dated grants; the query asks for `expires_at`),
+  added because mutations M6 and M10 would otherwise have survived.
+
 ## Follow-ups (not this story)
 
 - Translate and A/B generate refunds report failures to `console.error` only (decision 5).
 - `reactivateSubscription` reads the newest row whatever its status (research, Traps).
-- Checkout's catch still answers `error.message` (pre-existing): a grant or subscription read
-  failure reaches the client as PostgREST's text. Same hygiene as decision 3, not done here.
+- ~~Checkout's catch still answers `error.message`~~ — done in fix pass 2 (decision 14).
 - `useCheckout` shows checkout's 429 as `error` ("Rate limit exceeded") plus the time; checkout's
   own limiter sentence is never shown either (decision 13 keeps its output unchanged).
+- **Owner (Stripe dashboard or live API access):** verify the billing-portal configuration in use
+  has subscription updates disabled — `STRIPE_BILLING_PORTAL_CONFIGURATION_ID` when set, otherwise
+  the account's default configuration (`src/lib/stripe/subscription.ts`, the paused-subscription
+  recovery portal). If the portal lets a customer switch plans, a lifetime owner could switch down
+  into a plan their grant covers there, past every guard of this story. Not checked here: no
+  Stripe access from this environment.
+- A plan held through a *dated* grant is still shown as held for life where it is the plan in
+  force: the card's "Lifetime" badge and "Lifetime access" (`SubscriptionCard`, `isLifetime`) and
+  the dialog's held tile ("Lifetime", "Lifetime access", "You hold <plan> for life"). The end date
+  now reaches `BillingDashboard` (`lifetimeGrant.endsAt`); m3 covered the included tiles only.
 
 ## Execution notes (deviations, declared)
 

@@ -285,6 +285,30 @@ describe("checkout refuses a subscription a lifetime grant includes", () => {
     expect(mockGetRecoverable).not.toHaveBeenCalled();
     expect(mockCreateCheckoutSession).not.toHaveBeenCalled();
   });
+
+  // s82 review (second pass), m1: the catch answered `error.message`, so the
+  // browser read "Failed to read plan entitlements: connection reset" — the
+  // database's own text. Same hygiene as the subscription routes
+  // (`billingErrorResponse`): a generic sentence, the detail in the log.
+  it("answers a read failure with a generic message and logs the detail", async () => {
+    grantReadFails = true;
+    const consoleError = jest.spyOn(console, "error");
+
+    const response = await subscribe("pro");
+    const data = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(data).toEqual({
+      error: "Failed to start checkout. Please try again.",
+    });
+    expect(JSON.stringify(data)).not.toContain("connection reset");
+    expect(consoleError).toHaveBeenCalledWith(
+      "Error creating checkout session:",
+      expect.objectContaining({
+        message: "Failed to read plan entitlements: connection reset",
+      }),
+    );
+  });
 });
 
 describe("checkout still sells what no grant includes (unchanged)", () => {

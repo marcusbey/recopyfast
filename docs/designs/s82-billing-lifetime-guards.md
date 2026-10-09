@@ -12,7 +12,8 @@ mockup, as for s71: nothing moves on either surface, so the state matrices below
 - No new component, no new token. `Badge variant="secondary"` (the dialog's existing "Current"
   badge variant) carries "Lifetime" in the dialog — and, since the fix pass, "Included" on a plan
   a lifetime grant includes; the card's header badge is unchanged from s71. "Included for life"
-  takes the price slot at the same `text-xl font-semibold` as "Lifetime access".
+  — or "Included until <date>" for a plan included only by dated grants (fix pass 2) — takes the
+  price slot at the same `text-xl font-semibold` as "Lifetime access".
 - The dialog's price slot for a plan held for life prints "Lifetime access" at `text-xl
   font-semibold` — a phrase, not a number, so not `.tabular`, and one step below the tile's
   `text-3xl` number so it fits a third-width tile at `md` without wrapping.
@@ -58,7 +59,8 @@ catalogue's wording stays.
 | Tile's plan | Badge | Price slot | Bullets | Submit when selected |
 |---|---|---|---|---|
 | Held for life (grant covers the plan in force) | **Lifetime** | **Lifetime access** (no "/month", no annual line) | allowance restated to the account's own | disabled, labelled "You hold Agency for life" (added at build: the default label "Continue to payment — $49" would have put the removed price back on the button) |
-| Included by a lifetime grant (same plan or lower, not the one held for life — fix pass, review finding 1) | **Included** | **Included for life** (no "/month", no annual line) | catalogue (unchanged) | disabled, labelled "Included in your lifetime Pro" (the highest plan held for life) |
+| Included by a lifetime grant (same plan or lower, not the one held for life — fix pass, review finding 1) | **Included** | **Included for life** (no "/month", no annual line) | catalogue (unchanged) | disabled, labelled "Included in your lifetime Pro" (the highest undated grant that includes it) |
+| Included only by dated grants (e.g. `qa_recovery_20260919` — fix pass 2, m3) | **Included** | **Included until November 19, 2026** (the latest end; no "/month", no annual line) | catalogue (unchanged) | disabled, labelled "Included in your plan until November 19, 2026" — never "for life" or "lifetime" |
 | The plan in force, billed monthly | Current (unchanged) | $49/month (unchanged) | catalogue (unchanged) | disabled (unchanged) |
 | Any other | Selected when selected (unchanged) | $price/month, annual line (unchanged) | catalogue (unchanged) | enabled (unchanged) |
 
@@ -68,6 +70,7 @@ catalogue's wording stays.
 |---|---|---|
 | Reactivate a subscription a lifetime grant covers | 409 | "Your lifetime plan already includes this one, so this subscription can't be restarted." |
 | Start (Checkout) a subscription a lifetime grant covers (fix pass) | 409 | "Your lifetime plan already includes this one. There is nothing further to buy." |
+| Anything Checkout did not write for the customer — a grant or subscription read failure, Stripe, configuration (fix pass 2, m1) | 500 | "Failed to start checkout. Please try again." (was the exception's own text, e.g. "Failed to read plan entitlements: connection reset") |
 | Switch a subscription to a plan a lifetime grant covers (fix pass) | 409 | "Your lifetime plan already includes this one. Cancel your subscription instead of switching to it." |
 | The subscription or grant read fails in plan change / cancel / reactivate (fix pass) | 500 | the route's generic message below (no longer "No active subscription found") |
 | No active subscription to change or cancel | 404 | "No active subscription found" (text unchanged; was 500) |
