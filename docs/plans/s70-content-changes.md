@@ -1,7 +1,14 @@
 ---
-validated: no
+validated: yes
 ---
 # Plan — Story s70-content-changes
+
+> Owner decisions (2026-10-08): plan and split validated; **s70a first** (it closes the public
+> editor-email leak), then s70b, then s70c, each its own branch, review and PR. Cleanup: the
+> read-only count is run first and shown to the owner, who approves the delete migration
+> separately before it reaches production. Statuses: **Pending + Published** ("Edited" dropped).
+> Revert: both "Save as draft" (anyone who can edit) and "Revert and publish" (publishers only).
+> URL: `/dashboard/changes`, `/dashboard/content` redirects.
 
 Branch: `feature/s70-content-changes` (docs only). Each part, once validated, gets its own branch
 from `main` and its own PR: `feature/s70a-embed-ui-not-content`, `feature/s70b-changes-page`,

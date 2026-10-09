@@ -3614,6 +3614,20 @@ merged). Branch `feature/s70-content-changes`.
 Embed allocation: TBD at plan (the self-discovery fix may need embed bytes; ceilings only go
 down).
 
+Split at plan (owner-validated 2026-10-08, `docs/plans/s70-content-changes.md`), shipped in this
+order:
+
+- **s70a-embed-ui-not-content** (complexity 2) — the embed never maps or reports a node under a
+  root it injected (Edit Board panel, AI suggestions modal, form-field popover, …); ceilings
+  ratchet down to the measured bytes; one forward migration deletes the untouched rows it already
+  recorded, after the owner approves the read-only count. Closes the leak of an editor's email
+  ("by <email>") into public snapshot rows.
+- **s70b-changes-page** (complexity 4) — `/dashboard/changes` (308 from `/dashboard/content`):
+  Pending + Published by default, site → page groups, readable locations, compare, history,
+  revert (Save as draft · Revert and publish for publishers), 50 rows a page from a
+  security-invoker view (ADR 054); two read-only routes; never calls `GET /api/sites`.
+- **s70c-site-content-tab** (complexity 2) — the same view for one site under its site page.
+
 ## Story s71-billing-plan-badge — the billing page never calls a paid plan "Free"
 
 Owner, 2026-10-08, with a screenshot of `/dashboard/billing`: "here is my account. it says FRee on
