@@ -90,6 +90,11 @@ Acceptance criteria (proposed; the owner validates them with this plan):
    - Owner precondition, before merge (not run by the implementer unless the owner says so): the
      read-only count below, run through the `read-prod-database` skill (`agents_readonly`), its
      output pasted in the PR.
+     **Done 2026-10-08** (read-only `SELECT`, production, through the Supabase connector): 25 rows
+     to delete — 13 on www.aicompoz.com, 12 on the cross-device QA site (one of them holds an email
+     address); 0 embed-UI rows anyone edited; 0 review-tier rows; openflows.ai and localhost: 0.
+     A separate check found no "by <email>" row outside the predicate. **Owner approved** the delete
+     migration for production at s70a ship (applied after merge, verified by re-count).
    - RED, new `src/__tests__/db/embed-ui-rows-cleanup.test.ts` (`describeDb`, the harness pattern of
      `site-delete-cascade.test.ts`), in a transaction rolled back at the end: seed one site and
      - deleted: `#rcf-edit-board-panel > div:nth-child(2) > button:nth-child(1)` "Elements";
