@@ -47,5 +47,13 @@ the sky gate forced open: red on both ("expected 0, received 1"). minor 3 — re
 "demand" vs "always"; both mutations red). minor 4 — comments corrected. Jest 383 suites / 4,964; type-check (both) 0;
 lint 0 errors; format:check clean; build:embed 45828 / 33062; Playwright `--list` 81. Reviewed by the orchestrator.
 
+## Devin Review on PR #80 — fixed
+
+🔴 **Direct SwiftShader rendering bypasses the sky gate** (valid): Chromium launched with `--use-angle=swiftshader`
+grants even the caveat-free WebGL2 context, so `failIfMajorPerformanceCaveat` alone answered "hardware". The probe now also
+reads the renderer name (`WEBGL_debug_renderer_info`, else `RENDERER`) and treats SwiftShader / llvmpipe / softpipe /
+"Basic Render" / "software" as software, releasing the context either way. Test (red first): a fake browser that grants the
+caveat-free context but reports a SwiftShader renderer → no shader sky. Sky suites 11/11. Reviewed by the orchestrator.
+
 Max severity: minor
 Ship allowed: yes

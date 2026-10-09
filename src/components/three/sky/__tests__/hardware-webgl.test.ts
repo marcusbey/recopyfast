@@ -12,6 +12,15 @@ describe("hasHardwareWebGL", () => {
     expect(hasHardwareWebGL()).toBe(false);
   });
 
+  // Devin review, PR #80: Chromium with `--use-angle=swiftshader` grants even
+  // the caveat-free context; only the renderer name says it is software.
+  it("says no to a software renderer that grants the caveat-free context", () => {
+    const { loseContext } = installBrowser("software-unflagged");
+
+    expect(hasHardwareWebGL()).toBe(false);
+    expect(loseContext).toHaveBeenCalledTimes(1);
+  });
+
   it("says yes to a GPU, and releases the context it probed with", () => {
     const { loseContext } = installBrowser("gpu");
 

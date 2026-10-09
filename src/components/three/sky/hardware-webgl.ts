@@ -17,8 +17,11 @@
  *
  * `failIfMajorPerformanceCaveat` is the WebGL spec's own signal for exactly
  * this: the browser refuses the context when it would perform dramatically
- * worse than a native GPU application. Prefer it to matching renderer names —
- * the browser maintains its list; a regex here would go stale.
+ * worse than a native GPU application. It is the primary check, because the
+ * browser maintains its list. It is not sufficient on its own: Chromium
+ * launched with `--use-angle=swiftshader` grants even the caveat-free context
+ * (Devin review, PR #80), so the renderer's name is checked as a second fence
+ * — the software rasterisers that ship in browsers, nothing broader.
  *
  * `webgl2`, not `webgl`: three dropped WebGL 1 in r163, so a browser offering
  * only WebGL 1 cannot draw the sky either. The probe gets its own canvas (one
@@ -26,6 +29,19 @@
  * browsers cap how many live WebGL contexts a page may hold. Any failure means
  * "no": the static sky is always a correct answer, a stalled page never is.
  */
+/** Software rasterisers browsers ship: SwiftShader (Chromium), llvmpipe and
+ * softpipe (Mesa), WARP / "Microsoft Basic Render Driver" (Windows). */
+const SOFTWARE_RENDERER =
+  /swiftshader|llvmpipe|softpipe|basic render|software/i;
+
+function rendererName(context: WebGL2RenderingContext): string {
+  const info = context.getExtension("WEBGL_debug_renderer_info");
+  const name: unknown = context.getParameter(
+    info ? info.UNMASKED_RENDERER_WEBGL : context.RENDERER,
+  );
+  return typeof name === "string" ? name : "";
+}
+
 export function hasHardwareWebGL(): boolean {
   try {
     const context = document
@@ -34,8 +50,9 @@ export function hasHardwareWebGL(): boolean {
     if (!context) {
       return false;
     }
+    const isSoftware = SOFTWARE_RENDERER.test(rendererName(context));
     context.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
+    return !isSoftware;
   } catch {
     return false;
   }
