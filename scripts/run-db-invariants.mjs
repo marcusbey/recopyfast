@@ -1,13 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-} from "node:fs";
+import { mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -17,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import {
   REQUIRED_PG_MAJOR,
   assertServerMajor,
-  findSuitesThatDidNotRun,
+  verifyReplayReport,
 } from "./db/replay-checks.mjs";
 
 const REPO_ROOT = path.resolve(
@@ -42,8 +36,9 @@ const CONVERGENCE_MIGRATION = "20261008110000_converge_replay_privileges.sql";
 const isPreFixProof = process.argv.includes("--pre-fix-proof");
 
 // Every suite the replay step runs. Each must produce at least one passing test
-// against this database: findSuitesThatDidNotRun refuses a suite that matched
-// no file, registered only its "[gated]" placeholder, or skipped everything.
+// against this database: verifyReplayReport refuses a suite that matched no
+// file, registered a placeholder other than the PostgREST one, or skipped
+// everything.
 const REPLAY_SUITES = [
   "src/__tests__/db/column-privileges.test.ts",
   "src/__tests__/db/public-content-revision.test.ts",
@@ -250,26 +245,13 @@ try {
       },
     );
 
-    // Jest exits 0 on a "[gated]" placeholder, a describe.skip and a path that
-    // matched nothing. A green replay must mean every named suite ran here.
-    // This replay is bare PostgreSQL: no PostgREST. The suites' PostgREST
-    // halves register "[gated] no PostgREST target configured" here by design
-    // and run for real in the e2e job's Supabase steps. Any other placeholder
-    // — above all "no ReCopyFast database reachable" — fails the replay.
-    const problems = findSuitesThatDidNotRun(
-      JSON.parse(readFileSync(reportFile, "utf8")),
-      REPLAY_SUITES,
-      realpathSync(REPO_ROOT),
-      [/^\[gated\] no PostgREST target configured/],
-    );
-    if (problems.length > 0) {
-      throw new Error(
-        `Database replay: ${problems.length} named suite(s) did not run against the database:\n` +
-          problems.map((problem) => `  - ${problem}`).join("\n"),
-      );
-    }
+    // Jest exits 0 on a placeholder, a describe.skip and a path that matched
+    // nothing. A green replay must mean every named suite ran here, and that
+    // verdict is verifyReplayReport's alone (tested by `node --test`; s75
+    // review). It throws, naming each suite that did not run; nothing here
+    // catches it, so the run ends red.
     console.log(
-      `Database replay: all ${REPLAY_SUITES.length} named suites ran against PostgreSQL ${REQUIRED_PG_MAJOR}.`,
+      verifyReplayReport(reportFile, REPLAY_SUITES, realpathSync(REPO_ROOT)),
     );
   } finally {
     rmSync(reportDir, { recursive: true, force: true });

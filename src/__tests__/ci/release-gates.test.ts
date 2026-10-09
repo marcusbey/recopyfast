@@ -106,6 +106,39 @@ describe("every database suite runs against a database in CI", () => {
   });
 });
 
+describe("the replay's verdict comes from its tested check, not from the runner", () => {
+  // s75 review (major): the runner decided inline whether every suite ran,
+  // untested — dropping that decision or widening its tolerated placeholder
+  // left every test green while the replay printed "all 13 named suites
+  // ran". The verdict is verifyReplayReport (scripts/db/replay-checks.mjs,
+  // `node --test`); these pin that the runner feeds it and obeys it.
+  const code = withoutComments(runner, "//");
+
+  it("asks Jest for the JSON report the check reads", () => {
+    expect(code).toMatch(/"--json",\s*`--outputFile=\$\{reportFile\}`,/);
+  });
+
+  it("hands that report and every named suite to verifyReplayReport, and prints only its verdict", () => {
+    expect(code).toMatch(
+      /^import {[^}]*\bverifyReplayReport\b[^}]*} from "\.\/db\/replay-checks\.mjs";$/m,
+    );
+    expect(
+      code.match(
+        /console\.log\(\s*verifyReplayReport\(\s*reportFile,\s*REPLAY_SUITES,\s*realpathSync\(REPO_ROOT\),?\s*\),?\s*\);/g,
+      ),
+    ).toHaveLength(1);
+    expect(code).not.toContain("named suites ran");
+  });
+
+  it("decides nothing itself and cannot swallow the check's refusal", () => {
+    // No second opinion beside the tested one, and no catch around it: a
+    // throw from verifyReplayReport must end the run red.
+    expect(code).not.toContain("findSuitesThatDidNotRun");
+    expect(code).not.toContain("[gated]");
+    expect(code).not.toMatch(/\bcatch\b/);
+  });
+});
+
 /**
  * The coverage floor measured on the s75 tree, each metric rounded down
  * (docs/research/s75-ci-release-gates.md). The thresholds in jest.config.js may

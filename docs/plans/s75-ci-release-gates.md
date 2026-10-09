@@ -26,7 +26,9 @@ No Design step: no UI. No migration. No embed byte moves (allocation 0).
    is a pure function, `findSuitesThatDidNotRun`, in `scripts/db/replay-checks.mjs` (the module
    task 1 creates for the version check), tested with `node --test` and named in CI like the
    other script tests. Reason: two of the seven gate on their own variables and one skips
-   silently; a renamed variable or a misspelled path must be loud.
+   silently; a renamed variable or a misspelled path must be loud. *Review fix pass:* the whole
+   verdict — reading the report, the tolerated list, the refusal — is now `verifyReplayReport`
+   in the same module, and the runner only calls it (tasks 10–11).
 4. **Coverage rides the existing Jest step** (`--coverage --coverageReporters=text-summary`)
    rather than a second full run: one run, and Jest names the threshold it missed. Thresholds
    ratchet to the final tree's measurement, rounded down. A contract test holds the floors, the
@@ -50,8 +52,9 @@ No Design step: no UI. No migration. No embed byte moves (allocation 0).
    already does). No job needs more: caches and artifacts use the runtime token, not
    `GITHUB_TOKEN`.
 9. **CTO decision: delete `e2e-billing-tests.spec.ts`.** Superseded and partly invalid (research
-   fact 10). The strict e2e count stays 80. The 401s it alone claimed (`payment-methods`,
-   `subscription` POST/PUT/DELETE, `reactivate`) go to the follow-ups.
+   fact 10). The strict e2e count stays 80. The 401s it alone claimed (`payment-methods`
+   GET/POST/DELETE, `subscription` PUT/DELETE — the route has no POST — and `reactivate` POST)
+   were a follow-up; the review fix pass pins them (task 12).
 10. **AGENTS.md: three factual edits only** (embed figure, coverage floor, the CI sentence of the
     Definition of Done), as the triage asked. No rule changes. `docs/architecture.md:431` is not
     touched (follow-up).
@@ -106,6 +109,53 @@ its assertions, watches them fail for the right reason, then makes them pass.
   suite's `afterAll`: a pool `error` listener that tolerates only 57P01 and rethrows anything
   else. After: 6 of 6 fresh-cluster runs green. No assertion changed.
 
+## Review fix pass (2026-10-09)
+
+The review found one major: the runner held the tolerated-placeholder pattern and the "did every
+suite run?" decision inline, untested — neutralising the `problems` check (review M8) or widening
+the pattern (M9) left every test green while the replay printed "all 13 named suites ran". It
+also surfaced a pre-existing gap (the six billing 401s) and a doc error ("subscription POST").
+
+- [x] **10. One tested verdict.** `scripts/__tests__/replay-checks.test.mjs`: against real report
+  files, a skipped suite fails naming it; an untolerated placeholder (db-harness's "no ReCopyFast
+  database reachable", content-attributes-lifecycle's "RCF_TEST_DB_URL was not provided") fails
+  naming suite and title; one beside the tolerated one still fails; every failing suite is named;
+  the one PostgREST placeholder passes; a missing or unreadable report fails. Red (export
+  missing, then each guard test red against an always-green stub), then `verifyReplayReport` in
+  `scripts/db/replay-checks.mjs`. **CTO decision:** the tolerated list
+  (`/^\[gated\] no PostgREST target configured/`) is a module constant, not a parameter, so no
+  call site can widen it; widening it is an edit where the node test goes red.
+- [x] **11. The runner obeys it.** `release-gates.test.ts`: the runner passes `--json` and
+  `--outputFile=${reportFile}`, imports `verifyReplayReport`, calls it exactly once as
+  `console.log(verifyReplayReport(reportFile, REPLAY_SUITES, realpathSync(REPO_ROOT)))`, prints
+  no success line of its own, and holds no `findSuitesThatDidNotRun`, no `[gated]` and no `catch`
+  outside comments. Red (no import, inline decision), then the runner.
+- [x] **12. Billing 401 pins.** New `src/__tests__/api/billing/unauthenticated.test.ts`: an
+  anonymous caller gets `401 {"error":"Unauthorized"}` and no billing call (Stripe, customer,
+  subscription helpers) from `payment-methods` GET/POST/DELETE, `subscription` PUT/DELETE and
+  `subscription/reactivate` POST; each case's signed-in sibling reaches its billing call with the
+  user's id, so the 401 is the session check and not a broken mock. Only tests are added; the
+  route files are untouched (s82 changes them on another branch).
+- [x] **13. Docs.** "subscription POST" → PUT/DELETE here and in the research (fact 10); the 401
+  follow-up marked done; `src/__tests__/db/README.md` names `verifyReplayReport` and the one
+  tolerated placeholder; the `jest.config.js` comment carries the re-measurement.
+
+Mutations (each restored with `git checkout -- <file>`):
+
+| # | Mutation | Red test |
+|---|---|---|
+| M8a | runner prints the success line without calling the check | `release-gates` (call pinned) |
+| M8b | runner wraps the call in `try … catch` | `release-gates` (no `catch`) |
+| M8c | `verifyReplayReport` ignores `problems` | 4 node tests |
+| M9 | tolerated list widened to `/^\[gated\]/` | 2 node tests |
+| M9b | runner passes a wider list as a 4th argument | `release-gates` (call shape); the check ignores it anyway |
+| M10 | runner drops `--json` | `release-gates` (`--json` pinned); a real run would also fail: no report |
+| M11 | a missing report reads as clean | 2 node tests |
+| M12 | runner hands the check a subset of `REPLAY_SUITES` | `release-gates` |
+| M13 | each of the six billing guards → `if (false)` | its own 401 case (6 × 1 red) |
+| M14 | `reactivate` refuses everyone (`if (true)`) | its signed-in sibling |
+| real | runner without `RCF_S29_DB_URL`, PostgreSQL 17.11 | exit 1: `editor-activation-concurrency … no passing test (2 registered)` |
+
 ## Execution evidence (local, 2026-10-09)
 
 - Runner on a fresh PostgreSQL 17.11 cluster (`RCF_POSTGRES_BIN=/opt/homebrew/opt/postgresql@17/bin`):
@@ -116,6 +166,13 @@ its assertions, watches them fail for the right reason, then makes them pass.
   69.23 — identical to the baseline; floors 68/61/65/69 hold.
 - Both workflows parse (`js-yaml`) and pass `@action-validator/cli`.
 - `playwright test --list` (CI mode): 80, unchanged.
+- Review fix pass, rebased on `origin/main` `fc5968b` (s73 #78, deps #63; one conflict, the
+  `docs/stories.md` tail — both stories kept, id order), `npm ci`:
+  - runner on PostgreSQL 17.11: 13 suites, 90 passed / 1 skipped, exit 0, "all 13 named suites
+    ran against PostgreSQL 17"; with the runner's `RCF_S29_DB_URL` removed: exit 1, naming
+    `src/__tests__/db/editor-activation-concurrency.test.ts`;
+  - the exact CI Jest command: statements 68.92, branches 61.87, functions 65.88, lines 69.54
+    (383 suites, 4985 passed / 38 skipped). Rounded down: 68/61/65/69 — the floors stand.
 
 ## Gates
 
@@ -126,7 +183,8 @@ commit.
 
 ## Follow-ups (not this story)
 
-- 401 pins for `payment-methods`, `subscription` POST/PUT/DELETE and `subscription/reactivate`.
+- ~~401 pins for `payment-methods`, `subscription` PUT/DELETE and `subscription/reactivate`.~~
+  Done in the review fix pass (task 12); the route has no POST.
 - The B-3 oracles in `share-rls.test.ts` / `share-owner-lockout.test.ts`: fold into `db-harness`
   or delete; the A-9 one is stale against the current schema.
 - Dependabot (or Renovate) for `github-actions`, so SHA pins do not rot; then a deliberate bump to

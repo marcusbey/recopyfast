@@ -93,10 +93,14 @@ Docker was not running on the author machine, so nothing that needs `supabase st
     `/api/billing/subscription` 401 by `e2e/dashboard.spec.ts:46` and
     `src/__tests__/security/auth-guards.test.ts:85`, `/api/billing/dashboard` 401 by
     `dashboard-unentitled.test.ts:227`. Not separately pinned anywhere: 401 on
-    `payment-methods`, `subscription` POST/PUT/DELETE and `subscription/reactivate` (each route
-    returns 401 before any work: `payment-methods/route.ts:31,71,141`,
-    `subscription/route.ts:28,70,128`, `reactivate/route.ts:19`). Reviving the spec would mean
-    rewriting it; deleting it loses no running check.
+    `payment-methods` GET/POST/DELETE, `subscription` PUT/DELETE (the route exports GET, PUT and
+    DELETE; it has no POST — the spec's POST call was already invalid) and
+    `subscription/reactivate` POST (each route returns 401 before any work:
+    `payment-methods/route.ts:31,71,141`, `subscription/route.ts:28,70,128`,
+    `reactivate/route.ts:19`). Reviving the spec would mean rewriting it; deleting it loses no
+    running check. *Review fix pass:* those six 401s are now pinned by
+    `src/__tests__/api/billing/unauthenticated.test.ts`, each with a signed-in sibling proving the
+    401 is the session check.
 
 ## Traps
 

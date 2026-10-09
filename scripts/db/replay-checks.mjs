@@ -2,6 +2,7 @@
 // can exercise them without a PostgreSQL install
 // (scripts/__tests__/replay-checks.test.mjs).
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -110,4 +111,60 @@ export function findSuitesThatDidNotRun(
     }
     return [];
   });
+}
+
+/**
+ * The only placeholders the migration replay accepts. The replay is bare
+ * PostgreSQL with no PostgREST, so a suite's PostgREST half registers
+ * "[gated] no PostgREST target configured" there by design and runs for real
+ * in the e2e job's Supabase steps (edit-sessions-privileges). Any other
+ * placeholder — above all db-harness's "no ReCopyFast database reachable" —
+ * means a suite did not run. Not a parameter of verifyReplayReport on purpose:
+ * widening it takes an edit here, where scripts/__tests__/replay-checks.test.mjs
+ * goes red.
+ */
+const REPLAY_TOLERATED_PLACEHOLDERS = Object.freeze([
+  /^\[gated\] no PostgREST target configured/,
+]);
+
+/**
+ * The replay's verdict on the Jest `--json` report it asked for: returns the
+ * line to print when every named suite ran against the database, throws
+ * naming every suite that did not.
+ *
+ * s75 review (major): this decision used to sit inline in
+ * scripts/run-db-invariants.mjs, untested — dropping it or widening the
+ * tolerated pattern left every test green while the replay printed "all 13
+ * named suites ran". The runner now only calls this.
+ *
+ * @param {string} reportFile the file Jest wrote with --json --outputFile
+ * @param {string[]} expectedSuites repo-relative suite paths the replay named
+ * @param {string} repoRoot absolute repository root the report's paths start with
+ * @returns {string}
+ */
+export function verifyReplayReport(reportFile, expectedSuites, repoRoot) {
+  let report;
+  try {
+    report = JSON.parse(readFileSync(reportFile, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Database replay: no readable Jest report at ${reportFile} ` +
+        `(${error instanceof Error ? error.message : String(error)}); ` +
+        "refusing to call the replay clean.",
+    );
+  }
+
+  const problems = findSuitesThatDidNotRun(
+    report,
+    expectedSuites,
+    repoRoot,
+    REPLAY_TOLERATED_PLACEHOLDERS,
+  );
+  if (problems.length > 0) {
+    throw new Error(
+      `Database replay: ${problems.length} named suite(s) did not run against the database:\n` +
+        problems.map((problem) => `  - ${problem}`).join("\n"),
+    );
+  }
+  return `Database replay: all ${expectedSuites.length} named suites ran against PostgreSQL ${REQUIRED_PG_MAJOR}.`;
 }
