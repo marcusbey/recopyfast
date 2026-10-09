@@ -39,6 +39,7 @@ jest.mock("@/components/layout/Header", () => ({
 
 import BlogIndex, { revalidate } from "@/app/blog/page";
 import { revalidate as sitemapRevalidate } from "@/app/sitemap";
+import { PUBLISHED_POSTS_LIMIT } from "@/lib/blog/published-posts";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { createClient as createCookieClient } from "@/lib/supabase/server";
 import { createServiceRoleClient } from "@/lib/supabase/service";
@@ -162,6 +163,28 @@ describe("/blog with published posts", () => {
     for (const title of FAKE_2024_TITLES) {
       expect(screen.queryByText(title)).not.toBeInTheDocument();
     }
+  });
+
+  // s88 verification (minor 2): the index is bounded, so a growing blog never
+  // turns it into an unbounded read. Newest first, so the bound drops the oldest.
+  it("lists at most the newest PUBLISHED_POSTS_LIMIT posts", async () => {
+    const many = Array.from({ length: PUBLISHED_POSTS_LIMIT + 1 }, (_, i) =>
+      post({
+        id: `post-${i}`,
+        title: `Post ${i}`,
+        slug: `post-${i}`,
+        status: "published",
+        published_at: new Date(Date.UTC(2026, 0, 1) + i * 864e5).toISOString(),
+      }),
+    );
+    serve(many);
+
+    await renderIndex();
+
+    const links = postLinks();
+    expect(links).toHaveLength(PUBLISHED_POSTS_LIMIT);
+    expect(links[0]).toBe(`/blog/post-${PUBLISHED_POSTS_LIMIT}`);
+    expect(links).not.toContain("/blog/post-0");
   });
 
   it("reads as anon, never through the cookie client or the service role", async () => {

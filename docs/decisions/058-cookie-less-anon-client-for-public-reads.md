@@ -13,11 +13,11 @@
 
 Until s88 there were three Supabase clients, and picking the wrong one is a security bug:
 
-| Client | Acts as | RLS |
-|---|---|---|
-| `supabase/client.ts` | the browser's signed-in user | on |
-| `supabase/server.ts` | whoever's cookies arrived with the request | on |
-| `supabase/service.ts` | the service role | **off** |
+| Client                | Acts as                                    | RLS     |
+| --------------------- | ------------------------------------------ | ------- |
+| `supabase/client.ts`  | the browser's signed-in user               | on      |
+| `supabase/server.ts`  | whoever's cookies arrived with the request | on      |
+| `supabase/service.ts` | the service role                           | **off** |
 
 Some server code has no user at all and reads only rows every stranger may read: the sitemap
 (and, from s88's review, the `/blog` index) lists published blog posts, which the
@@ -67,7 +67,9 @@ pointed at a broader role.
 ## Consequences
 
 - The sitemap and `/blog` are static with hourly revalidation (`revalidate = 3600`) instead of
-  rendering per request; a newly published post appears within the hour.
+  rendering per request; a newly published post appears within the hour. The same cache holds a
+  failure: a read that fails during `next build` or a revalidation leaves the logged error state
+  (never "empty") cached until the next successful revalidation, up to an hour.
 - An `anon` read that RLS denies returns **zero rows, not an error**. A table whose policy does not
   grant `anon` will look empty through this client, so a new caller pins its expected rows in a
   test, and a failed read is logged and rendered as a failure, never as "empty".

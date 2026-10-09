@@ -35,6 +35,14 @@ type PublishedPostRow = {
 
 const LOG_PREFIX = "[blog] could not read published posts:";
 
+/**
+ * The index shows the newest posts only, so a growing blog never makes it an
+ * unbounded read (s88 verification, minor 2). The cron drafts at most one post
+ * a day and an admin publishes, so 100 is months of posts; older ones stay
+ * reachable from the sitemap and their own URLs.
+ */
+export const PUBLISHED_POSTS_LIMIT = 100;
+
 function toSummary(row: PublishedPostRow): PublishedPostSummary {
   return {
     id: row.id,
@@ -61,7 +69,8 @@ export async function listPublishedPosts(): Promise<PublishedPostsResult> {
       .from("blog_posts")
       .select("id, title, slug, excerpt, category, published_at")
       .eq("status", "published")
-      .order("published_at", { ascending: false });
+      .order("published_at", { ascending: false })
+      .limit(PUBLISHED_POSTS_LIMIT);
 
     if (error) {
       console.error(LOG_PREFIX, error.message);
